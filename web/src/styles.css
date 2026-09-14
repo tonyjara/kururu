@@ -1,246 +1,1240 @@
-/*
- * Kururu is a dark-only app on purpose: it sits next to a terminal on the
- * desktop and gets looked at in bed on a phone, and both want the same thing.
+/**
+ * Kururu, on the desktop: a chrome that gets out of the way of the terminals.
+ *
+ * Everything here is in service of one thing — the pane grid is the interface,
+ * and every pixel spent on the frame around it is a pixel not spent on what an
+ * agent is saying. Hence the narrow sidebar, the one-line pane bars, and the
+ * absence of anything with a shadow on it.
+ *
+ * Dark only, and not as a preference: these panes sit against xterm's own
+ * canvas, whose colours are set in Terminal.tsx rather than here, and a light
+ * chrome around a dark grid looks like a bug. The two palettes are kept in step
+ * by hand — that is the price of a renderer CSS cannot reach.
  */
+
 :root {
   --bg: #0d0f0e;
-  --panel: #141817;
-  --raised: #1b201e;
-  --line: #262c2a;
-  --fg: #e6ebe8;
-  --dim: #8b968f;
-  --faint: #5d6863;
-  --accent: #5fd68a;      /* kururu: a frog */
-  --working: #6fb4ff;
-  --blocked: #ffb454;
-  --done: #5fd68a;
-  --idle: #5d6863;
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  --sans: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", sans-serif;
-  color-scheme: dark;
+  --chrome: #141817;
+  --chrome-high: #1b201e;
+  --line: #242b28;
+  --text: #d7dbd8;
+  --dim: #7c857f;
+  --dimmer: #565e59;
+  --accent: #7fd6a2;
+
+  --idle: #6b736e;
+  /* Orange, and not the accent green it used to be: "working" was the same
+     colour as every focus ring and unread mark in here, which made the one
+     state worth spotting the least distinguishable thing on the row. Warm
+     enough to be told apart from `--blocked` above it at a glance. */
+  --working: #ff9f43;
+  --blocked: #e3c46a;
+  --done: #7aa6da;
+  --exited: #4a524d;
+
+  --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --mono: "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace;
 }
 
-* { box-sizing: border-box; }
-[hidden] { display: none !important; }
+* {
+  box-sizing: border-box;
+}
 
-html, body, #root { height: 100%; }
-body {
+html,
+body,
+#root {
+  height: 100%;
   margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-  font: 14px/1.5 var(--sans);
-  -webkit-font-smoothing: antialiased;
-  overscroll-behavior: none;
 }
 
-button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
-code { font-family: var(--mono); font-size: 0.92em; background: var(--raised); padding: 1px 5px; border-radius: 4px; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 var(--ui);
+  /* The window is the app; nothing about it scrolls as a page. */
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
 
-/* ---------------------------------------------------------------- layout */
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
 
 .app {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  grid-template-areas: "top" "main" "agent";
-  height: 100dvh;
-  overflow: hidden;
-}
-
-.topbar {
-  grid-area: top;
   display: flex;
+  height: 100%;
+}
+
+.muted {
+  color: var(--dim);
+}
+
+/* --------------------------------------------------------------------------
+   Frame
+   -------------------------------------------------------------------------- */
+
+.app-booting {
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  padding-top: max(8px, env(safe-area-inset-top));
-  border-bottom: 1px solid var(--line);
-  background: var(--panel);
+  justify-content: center;
 }
 
-.main { grid-area: main; position: relative; overflow: hidden; }
-.slot { position: absolute; inset: 0; overflow: auto; -webkit-overflow-scrolling: touch; }
-
-/* ---------------------------------------------------------------- topbar */
-
-.icon-btn {
-  display: grid; place-items: center;
-  width: 32px; height: 32px;
-  border-radius: 8px; color: var(--dim);
+/* Zen: the focused pane takes the window. Nothing else is drawn at all. */
+.app-zen .stage {
+  padding: 0;
 }
-.icon-btn:hover { background: var(--raised); color: var(--fg); }
 
-.topbar-title { flex: 1; display: flex; align-items: center; gap: 7px; min-width: 0; }
-.session { font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-.dot-on { background: var(--accent); box-shadow: 0 0 7px color-mix(in srgb, var(--accent) 60%, transparent); }
-.dot-off { background: var(--faint); }
-
-.segmented { display: flex; background: var(--raised); border-radius: 9px; padding: 2px; flex: none; }
-.seg { padding: 5px 11px; border-radius: 7px; color: var(--dim); font-size: 13px; font-weight: 500; }
-.seg-on { background: var(--bg); color: var(--fg); box-shadow: 0 1px 2px rgb(0 0 0 / 0.3); }
-
-/* --------------------------------------------------------------- preview */
-
-.preview-frame { width: 100%; height: 100%; border: 0; background: #fff; display: block; }
-
-.empty { padding: 32px 22px; max-width: 34em; color: var(--dim); }
-.empty h2 { font-size: 15px; color: var(--fg); margin: 0 0 8px; font-weight: 600; }
-.empty p { margin: 0; }
-
-/* ------------------------------------------------------------------ code */
-
-.code { font-family: var(--mono); font-size: 12.5px; }
-.code-path {
-  position: sticky; top: 0; z-index: 1;
-  padding: 7px 12px;
-  background: var(--panel); border-bottom: 1px solid var(--line);
-  color: var(--dim); font-size: 12px;
-}
-.code-body { margin: 0; padding: 8px 0 40px; }
-.code-line { display: flex; }
-.code-gutter {
-  flex: none; width: 46px; padding-right: 12px;
-  text-align: right; color: var(--faint);
-  user-select: none;
-}
-.code-text { white-space: pre; padding-right: 16px; }
-
-/* ---------------------------------------------------------- agent panel */
-
-.agent-panel {
-  grid-area: agent;
+.stage {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  background: var(--panel);
+}
+
+kbd {
+  font-family: var(--mono);
+  font-size: 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 3px;
+  color: var(--dim);
+}
+
+.mini {
+  color: var(--dimmer);
+  font-size: 11px;
+  padding: 0 5px;
+  line-height: 1;
+}
+.mini:hover {
+  color: var(--text);
+}
+.mini-danger:hover {
+  color: #ff8a80;
+}
+
+/* --------------------------------------------------------------------------
+   Sidebar
+   -------------------------------------------------------------------------- */
+
+.sidebar {
+  width: 224px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--chrome);
+  border-right: 1px solid var(--line);
+  min-height: 0;
+}
+
+/**
+ * The window has `titleBarStyle: "hiddenInset"`, so the traffic lights float
+ * over this corner and there is no title bar to drag. The header is both: it
+ * leaves room for them and it is the drag handle.
+ */
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 8px 78px;
+  -webkit-app-region: drag;
+}
+
+.profile-btn {
+  -webkit-app-region: no-drag;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  padding: 2px 6px;
+  border-radius: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.profile-btn:hover {
+  background: var(--chrome-high);
+}
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.dot-on {
+  background: var(--accent);
+}
+.dot-off {
+  background: var(--blocked);
+}
+
+.side-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.side-agents {
+  flex: 1;
+}
+
+.side-section h2 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 6px 0 2px;
+  padding: 0 12px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dimmer);
+}
+
+.ws-list,
+.agent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 6px;
+  overflow-y: auto;
+}
+.agent-list {
+  flex: 1;
+  min-height: 0;
+}
+
+.ws-list li,
+.agent-list li {
+  display: flex;
+  align-items: center;
+  border-radius: 6px;
+}
+.ws-list li:hover,
+.agent-list li:hover {
+  background: var(--chrome-high);
+}
+
+.ws-list li {
+  position: relative;
+}
+
+.ws-row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* Bottom padding is the swatch's room. It is reserved whether or not this
+     workspace has a colour, so tagging one does not push the list around. */
+  padding: 5px 8px 11px;
+  border-radius: 6px;
+  text-align: left;
+  color: var(--dim);
+}
+
+/* Under the number, the width of the number: a tag, not a button that looks
+   like one. Untagged it is an outline — present enough to be found, quiet
+   enough that a list of untagged workspaces does not read as a list of empty
+   fields. */
+.ws-swatch {
+  position: absolute;
+  left: 8px;
+  bottom: 4px;
+  width: 10px;
+  height: 3px;
+  padding: 0;
+  border: none;
+  border-radius: 2px;
+  background: var(--dimmer);
+  opacity: 0.5;
+  cursor: pointer;
+}
+.ws-swatch:hover,
+.ws-swatch:focus-visible {
+  opacity: 1;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--chrome-high);
+}
+.ws-swatch-off {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--dimmer);
+}
+.ws-swatch-off:hover,
+.ws-swatch-off:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--dim), 0 0 0 2px var(--chrome-high);
+}
+.ws-row-on {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+.ws-row-on .ws-index {
+  color: var(--accent);
+}
+
+/* The number is the shortcut. A key you cannot see is a key you do not press. */
+.ws-index {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dimmer);
+  width: 10px;
+  flex: none;
+}
+.ws-name {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ws-count {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--dimmer);
+}
+
+/* Renaming in place: the field stands where the row does, so the name does not
+   move under the cursor between reading it and typing over it. */
+.ws-edit {
+  flex: 1;
+  min-width: 0;
+  margin: 1px 0;
+  padding: 4px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+
+.sidebar-empty {
+  padding: 8px 6px;
+  font-size: 12px;
+}
+
+/* Two pixels of the workspace's colour, always reserved. `--tag` is set per row
+   from the workspace it lives in; unset it falls back to transparent, so an
+   untagged agent lines up with a tagged one instead of sitting two pixels left
+   of it. */
+/* Qualified by the list, and not for tidiness: the shared `.agent-list li` rule
+   above is an element plus a class and would otherwise out-specify a bare
+   `.agent-item`, quietly keeping its own border-radius. */
+.agent-list .agent-item {
+  position: relative;
+  border-left: 2px solid var(--tag, transparent);
+  border-radius: 0 6px 6px 0;
+}
+
+/* Where the keyboard is. Deliberately not the same treatment as :hover — the
+   pointer being somewhere is a question, focus is an answer, and the two must
+   not look alike. Hence the ring as well as the ground. */
+.agent-list .agent-item-on {
+  background: var(--chrome-high);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+.agent-item-on .agent-name {
+  color: var(--text);
+}
+
+.agent-row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 8px 6px;
+  border-radius: 0 6px 6px 0;
+  text-align: left;
+}
+
+/* The stable line. `min-width: 0` on both so the flexible child is allowed to
+   shrink and ellipsize instead of pushing the row wider than the sidebar. */
+.agent-top,
+.agent-bottom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agent-row-exited .agent-name {
+  color: var(--dimmer);
+  text-decoration: line-through;
+}
+
+.agent-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Which workspace it is in, pushed right and kept clear of the ✕ above it. */
+.agent-ws {
+  margin-left: auto;
+  padding-right: 16px;
+  font-size: 10px;
+  color: var(--dimmer);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90px;
+}
+
+/* The changing line. It gets whatever the row has left after the percentage,
+   and it ellipsizes rather than wraps: a sidebar row that grows when an agent
+   is handed a long prompt would reflow the list on every turn. */
+.agent-activity {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--dimmer);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Aligned with the top line rather than the row, because that is where the eye
+   is when it goes looking for a way to close something. */
+.agent-kill {
+  position: absolute;
+  top: 3px;
+  right: 2px;
+  opacity: 0;
+  padding: 2px 6px;
+  color: var(--dim);
+  font-size: 11px;
+}
+.agent-list li:hover .agent-kill,
+.agent-item-on .agent-kill {
+  opacity: 1;
+}
+.agent-kill:hover {
+  color: #ff8a80;
+}
+
+/* The status mark. Whatever is inside it, the box is the same size: a sidebar
+   row and a tab both have a name immediately to the right of this, and a mark
+   that changed size when an agent started working would slide the whole row
+   sideways every turn. A replacement mascot with 32px frames is scaled into the
+   box rather than being allowed to set the height of a tab strip. The colour is
+   set here and read as `currentColor` by the dot, so a state has one colour
+   rather than one per shape. */
+.status {
+  --status-size: 16px;
+  position: relative;
+  width: var(--status-size);
+  height: var(--status-size);
+  flex: none;
+  overflow: hidden;
+  color: var(--idle);
+}
+
+/* Centred with `inset` and auto margins rather than by making the parent a flex
+   box, so the dot and the mascot can share the box without either one laying the
+   other out. */
+.status-dot {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status-idle {
+  color: var(--idle);
+}
+.status-working {
+  color: var(--working);
+}
+.status-blocked {
+  color: var(--blocked);
+}
+.status-done {
+  color: var(--done);
+}
+.status-exited {
+  color: var(--exited);
+}
+
+/* An outline rather than a fill, because exited is the one state that is an
+   absence — the pty is gone and only its screen is left. */
+.status-exited .status-dot {
+  background: transparent;
+  border: 1px solid currentColor;
+}
+
+/* The mascot strip, dragged past the box above one frame at a time. Its width
+   and its `steps()` are set per element in Status.tsx, because both come from
+   the sprite the user is actually running and this file has never seen it.
+
+   The element is exactly as wide as the strip needs to be — one box per frame —
+   so `100% 100%` scales the sprite to put one frame in the box, whatever size
+   its frames were drawn at. `pixelated` because the built-in mascot is pixel art
+   and the browser's default smoothing turns a 21px frog into a smudge. */
+.mascot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  image-rendering: pixelated;
+  animation-name: hop;
+  animation-iteration-count: infinite;
+}
+
+/* Translating the strip by its own width lands each step exactly one frame on,
+   whatever the frame count — which is the reason this is a transform rather
+   than a background-position: the arithmetic stays true without this file
+   knowing how many frames there are. */
+@keyframes hop {
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+/* Held on the first frame rather than hidden: the mascot is still what says
+   "working", and it says it standing still. */
+@media (prefers-reduced-motion: reduce) {
+  .mascot {
+    animation: none;
+  }
+}
+
+.unread {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+
+/* Ring and number read as one thing, so they travel as one. */
+.ctx {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.ring {
+  color: var(--dim);
+  flex: none;
+}
+
+/* Tabular figures so the column does not shuffle sideways as the number grows. */
+.ctx-pct {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+
+.sidebar-foot {
   border-top: 1px solid var(--line);
-  padding-bottom: env(safe-area-inset-bottom);
-  min-height: 46px;
+  padding: 8px;
+}
+
+.sidebar-start {
+  display: flex;
+  gap: 6px;
+}
+
+.button {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #06100b;
+  font-size: 12px;
+  font-weight: 600;
+}
+.button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.button-quiet {
+  background: var(--chrome-high);
+  color: var(--text);
+  border: 1px solid var(--line);
+  font-weight: 500;
+}
+.button-danger {
+  background: #b3453c;
+  color: #fff;
+}
+
+/* --------------------------------------------------------------------------
+   Panes
+   -------------------------------------------------------------------------- */
+
+.panes {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  /* 3px here and 3px on each pane box makes every gutter 6px, edges included. */
+  padding: 3px;
+}
+.app-zen .panes {
+  padding: 0;
+}
+
+/**
+ * Panes are positioned, not nested — see Panes.tsx for why. The upshot here is
+ * that every pane is a box over one surface, so a rearrangement animates four
+ * percentages instead of restructuring the document.
+ *
+ * The transition is not decoration. A pane that teleports across the window
+ * leaves you working out where it went; a pane that slides there tells you.
+ */
+.stagearea {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pane-box {
+  position: absolute;
+  padding: 3px;
+  transition:
+    left 110ms ease,
+    top 110ms ease,
+    width 110ms ease,
+    height 110ms ease;
+}
+
+/* Dragging a divider must track the pointer exactly, so it does not animate. */
+.stagearea-resizing .pane-box {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pane-box {
+    transition: none;
+  }
+}
+
+.dividerbar {
+  position: absolute;
+  z-index: 3;
+}
+.dividerbar-row {
+  width: 10px;
+  margin-left: -5px;
+  cursor: col-resize;
+}
+.dividerbar-col {
+  height: 10px;
+  margin-top: -5px;
+  cursor: row-resize;
+}
+.dividerbar::after {
+  content: "";
+  position: absolute;
+  inset: 4px 3px;
+  border-radius: 2px;
+}
+.dividerbar-col::after {
+  inset: 3px 4px;
+}
+.dividerbar:hover::after {
+  background: var(--line);
+}
+
+.pane {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.app-zen .pane {
+  border: 0;
+  border-radius: 0;
+}
+
+/* The focused pane is the one the keyboard is going to. Worth being obvious. */
+.pane-on {
+  border-color: #33413a;
+}
+.pane-on .tabstrip {
+  background: var(--chrome-high);
+}
+
+/* --------------------------------------------------------------------------
+   Tab strip
+   -------------------------------------------------------------------------- */
+
+.tabstrip {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  padding: 3px 4px;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--line);
+  flex: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabstrip::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  border-radius: 5px;
+  font-size: 11px;
+  color: var(--dim);
+  white-space: nowrap;
+  max-width: 180px;
+}
+.tab:hover {
+  background: var(--chrome-high);
+  color: var(--text);
+}
+.tab-on {
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.tab-exited .tab-label {
+  color: var(--dimmer);
+  text-decoration: line-through;
+}
+
+.tab-label {
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-close {
+  opacity: 0;
+  font-size: 9px;
+  color: var(--dimmer);
+}
+.tab:hover .tab-close {
+  opacity: 1;
+}
+.tab-close:hover {
+  color: #ff8a80;
+}
+
+.tab-new {
+  color: var(--dimmer);
+  padding: 3px 8px;
+}
+
+.tab-spacer {
+  flex: 1;
+  min-width: 8px;
+}
+
+.pane-btn {
+  color: var(--dimmer);
+  padding: 0 4px;
+  line-height: 1;
+  font-size: 12px;
+  flex: none;
+}
+.pane-btn:hover {
+  color: var(--text);
+}
+
+/**
+ * The body is a positioning context and nothing else, so the drop zones can be
+ * laid over whatever is in it — a terminal, or an empty pane's buttons — without
+ * either of them knowing that dragging exists.
+ */
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  position: relative;
+}
+
+/* --------------------------------------------------------------------------
+   Dropping
+   -------------------------------------------------------------------------- */
+
+/**
+ * Only rendered while a drag is in flight, which is what keeps a grid of
+ * invisible targets off a terminal you are trying to click. The zones are also
+ * the highlight: one set of boundaries, so what lights up and what happens
+ * cannot disagree.
+ */
+.dropzones {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+}
+
+.dz {
+  position: absolute;
+  transition: background 90ms ease;
+}
+.dz-on {
+  background: rgba(127, 214, 162, 0.22);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* A pane in flight lands somewhere structural, so its highlight is the colder
+   one — enough to tell you at a glance that this drop rearranges the window
+   rather than moving one terminal. */
+.dropzones-pane .dz-on {
+  background: rgba(122, 166, 218, 0.24);
+  box-shadow: inset 0 0 0 1px var(--done);
+}
+
+.dz-left {
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 25%;
+}
+.dz-right {
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 25%;
+}
+.dz-top {
+  left: 25%;
+  right: 25%;
+  top: 0;
+  height: 25%;
+}
+.dz-bottom {
+  left: 25%;
+  right: 25%;
+  bottom: 0;
+  height: 25%;
+}
+.dz-center {
+  left: 25%;
+  right: 25%;
+  top: 25%;
+  bottom: 25%;
+}
+
+/* Where the tab would land. A line between tabs says it better than a glow. */
+.tab-insert {
+  flex: none;
+  width: 2px;
+  margin: 2px 1px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+/* A workspace row that would take the drop. */
+.ws-over {
+  box-shadow: inset 0 0 0 1px var(--accent);
+  background: var(--chrome-high);
+}
+
+/**
+ * The terminal itself. `min-height: 0` matters more than it looks: without it a
+ * flex child refuses to shrink below its content, and xterm's content is however
+ * many rows it last drew — so the pane would grow and never shrink back.
+ */
+.term {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  padding: 4px 6px;
   overflow: hidden;
 }
 
-.grip { padding: 5px 0 3px; display: grid; place-items: center; cursor: row-resize; touch-action: none; flex: none; }
-.grip-bar { width: 34px; height: 3px; border-radius: 2px; background: var(--line); }
-.grip:hover .grip-bar { background: var(--faint); }
-
-.tabs { display: flex; gap: 5px; overflow-x: auto; padding: 0 8px 6px; flex: none; scrollbar-width: none; }
-.tabs::-webkit-scrollbar { display: none; }
-.tabs-empty { color: var(--faint); font-size: 12.5px; padding: 4px 4px; }
-
-.tab {
-  display: flex; align-items: center; gap: 6px;
-  padding: 5px 10px; border-radius: 8px;
-  background: var(--raised); color: var(--dim);
-  font-size: 12.5px; white-space: nowrap; flex: none;
-  max-width: 180px;
-}
-.tab-on { background: var(--bg); color: var(--fg); outline: 1px solid var(--line); }
-.tab-label { overflow: hidden; text-overflow: ellipsis; }
-.status { width: 6px; height: 6px; border-radius: 50%; flex: none; }
-.status-idle { background: var(--idle); }
-.status-working { background: var(--working); }
-.status-blocked { background: var(--blocked); }
-.status-done { background: var(--done); }
-.unread { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex: none; }
-.ring { flex: none; color: var(--dim); }
-
-.agent-screen {
-  flex: 1; min-height: 0; margin: 0;
-  padding: 10px 12px;
-  overflow: auto; -webkit-overflow-scrolling: touch;
-  font-family: var(--mono); font-size: 12px; line-height: 1.45;
-  color: var(--dim); white-space: pre-wrap; word-break: break-word;
-  border-top: 1px solid var(--line);
+.tab[draggable="true"]:active {
+  cursor: grabbing;
 }
 
-.agent-input { display: flex; gap: 7px; padding: 8px; border-top: 1px solid var(--line); flex: none; }
-.agent-input input {
-  flex: 1; min-width: 0;
-  padding: 9px 11px; border-radius: 9px;
-  background: var(--raised); border: 1px solid var(--line); color: var(--fg);
+/**
+ * The strip is the pane's title bar as well as its tab row, so it is the handle
+ * for both. `grab` on the strip and not on the tabs would be a lie in the other
+ * direction — they are both draggable, at different scales.
+ */
+.tabstrip {
+  cursor: grab;
+}
+.tabstrip:active {
+  cursor: grabbing;
+}
+.tab,
+.tab-new,
+.pane-btn {
+  cursor: pointer;
+}
+
+/* The pane you have picked up. Dimmed rather than hidden: you are aiming at
+   something else with it, and a hole where it was would move everything else. */
+.pane-lifted {
+  opacity: 0.45;
+}
+.tabstrip-lifted {
+  background: var(--chrome-high);
+}
+.term .xterm {
+  height: 100%;
+}
+.xterm .xterm-viewport {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+/* The whole pane is the button: there is one thing an empty pane can do, so it
+   is the surface rather than something drawn on it. Quiet until pointed at,
+   because most of the time it is a gap you are on your way past. */
+.pane-empty {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  border: 0;
+  background: none;
   font: inherit;
-  /* 16px stops iOS zooming the viewport when the field takes focus. */
-  font-size: 16px;
+  color: var(--dimmer);
+  cursor: pointer;
 }
-.agent-input input:focus { outline: none; border-color: var(--faint); }
-.agent-input button {
-  padding: 0 15px; border-radius: 9px;
-  background: var(--accent); color: #06110b; font-weight: 600; font-size: 13px;
+.pane-empty:hover,
+.pane-empty:focus-visible {
+  color: var(--dim);
+  background: var(--chrome);
 }
-.agent-input button:disabled { background: var(--raised); color: var(--faint); cursor: default; }
 
-/* --------------------------------------------------------------- sidebar */
+.pane-empty-hint {
+  font-size: 12px;
+}
+.pane-empty-hint::before {
+  content: "+ ";
+}
+
+.pane-empty-keys {
+  font-size: 11px;
+}
+
+/* --------------------------------------------------------------------------
+   Status bar
+   -------------------------------------------------------------------------- */
+
+.statusbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  background: var(--chrome);
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--dim);
+}
+.app-zen .statusbar {
+  display: none;
+}
+
+.sb-sep {
+  color: var(--dimmer);
+}
+.sb-workspace {
+  color: var(--text);
+}
+.sb-spacer {
+  flex: 1;
+}
+
+.sb-badge {
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+/* The prefix is a mode, and an unlabelled mode is what makes modes distrusted. */
+.sb-prefix {
+  background: var(--blocked);
+  color: #101019;
+}
+.sb-resize {
+  background: var(--done);
+  color: #08111b;
+}
+.sb-off {
+  background: transparent;
+  color: var(--blocked);
+  font-weight: 500;
+}
+
+.sb-help {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dimmer);
+}
+.sb-help:hover {
+  color: var(--text);
+}
+
+/* --------------------------------------------------------------------------
+   Dialogs
+   -------------------------------------------------------------------------- */
 
 .scrim {
-  position: fixed; inset: 0; z-index: 9;
-  background: rgb(0 0 0 / 0.5);
-  opacity: 0; pointer-events: none; transition: opacity 160ms ease;
-}
-.scrim-on { opacity: 1; pointer-events: auto; }
-
-.sidebar {
-  position: fixed; z-index: 10;
-  top: 0; bottom: 0; left: 0;
-  width: min(300px, 84vw);
-  background: var(--panel); border-right: 1px solid var(--line);
-  padding: max(14px, env(safe-area-inset-top)) 0 20px;
-  overflow-y: auto; -webkit-overflow-scrolling: touch;
-  transform: translateX(-100%); transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-.sidebar-on { transform: none; }
-
-.side-section { padding: 10px 14px; border-bottom: 1px solid var(--line); }
-.side-section:last-child { border-bottom: 0; }
-.side-section h3 {
-  margin: 0 0 9px; font-size: 11px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.07em; color: var(--faint);
-}
-.muted { color: var(--faint); margin: 0; font-size: 12.5px; }
-
-.chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { padding: 4px 10px; border-radius: 7px; background: var(--raised); color: var(--dim); font-size: 12.5px; }
-.chip-on { background: var(--accent); color: #06110b; font-weight: 600; }
-
-.row { display: block; width: 100%; text-align: left; padding: 7px 9px; border-radius: 8px; }
-.row:hover { background: var(--raised); }
-.row-on { background: var(--raised); outline: 1px solid var(--line); }
-.row-main { font-family: var(--mono); font-size: 13px; color: var(--accent); }
-.row-sub { margin-left: 7px; font-size: 12.5px; color: var(--dim); }
-.row-dim { display: block; font-size: 11.5px; color: var(--faint); margin-top: 1px; }
-
-.select {
-  width: 100%; margin-bottom: 8px; padding: 6px 8px;
-  background: var(--raised); color: var(--fg);
-  border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: 12.5px;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14vh;
+  z-index: 10;
 }
 
-.tree { list-style: none; margin: 0; padding: 0; }
-.tree-row { display: flex; align-items: center; gap: 5px; width: 100%; text-align: left; padding: 3px 4px; border-radius: 6px; }
-.tree-row:hover { background: var(--raised); }
-.tree-icon { width: 11px; color: var(--faint); font-size: 10px; flex: none; }
-.tree-dir { color: var(--fg); }
-.tree-file { color: var(--dim); }
-.tree-dir, .tree-file { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tree-nest { padding-left: 13px; border-left: 1px solid var(--line); margin-left: 9px; }
+.dialog,
+.help {
+  width: min(440px, 90vw);
+  background: var(--chrome);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+.help {
+  width: min(520px, 92vw);
+}
 
-/* ------------------------------------------------ desktop: sidebar is a column */
+.dialog-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
 
-@media (min-width: 900px) {
-  .app {
-    grid-template-columns: 264px 1fr;
-    grid-template-rows: auto 1fr auto;
-    grid-template-areas: "side top" "side main" "side agent";
-  }
-  .sidebar {
-    position: static; grid-area: side;
-    transform: none; width: auto;
-    border-right: 1px solid var(--line);
-    padding-top: 14px;
-  }
-  .scrim { display: none; }
-  /* The hamburger still collapses it — a preview is worth the whole window. */
-  .app-nosidebar {
-    grid-template-columns: 1fr;
-    grid-template-areas: "top" "main" "agent";
-  }
-  .app-nosidebar .sidebar { display: none; }
+.dialog-hint {
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.dialog-input {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 9px;
+  font: 12px var(--mono);
+  outline: none;
+}
+.dialog-input:focus {
+  border-color: #33413a;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.dialog-actions .button {
+  flex: none;
+  padding: 6px 14px;
+}
+
+.dialog-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.dialog-row {
+  display: flex;
+  align-items: center;
+  border-radius: 6px;
+}
+.dialog-row-on,
+.dialog-row:hover {
+  background: var(--chrome-high);
+}
+
+.dialog-pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 8px;
+  text-align: left;
+}
+.dialog-label {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.dialog-rowhint {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--dimmer);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dialog-empty {
+  padding: 8px;
+  font-size: 12px;
+}
+
+/* The create row is part of the list but not one of the things in it, so it is
+   dimmer until it is the row you are on. */
+.dialog-new .dialog-label {
+  color: var(--dim);
+}
+.dialog-row-on .dialog-new .dialog-label,
+.dialog-new:hover .dialog-label {
+  color: var(--text);
+}
+
+/* --------------------------------------------------------------------------
+   Context menu
+   -------------------------------------------------------------------------- */
+
+/* Invisible, but it is what catches the click that closes the menu — and what
+   stops that click reaching the terminal underneath. */
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+}
+
+.menu {
+  position: fixed;
+  min-width: 156px;
+  padding: 4px;
+  background: var(--chrome);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+}
+
+/* The picker borrows the menu's box so the two read as the same kind of thing
+   popping out of the same kind of row. Only the contents differ. */
+.picker {
+  position: fixed;
+  padding: 6px;
+  background: var(--chrome);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+.picker-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 18px);
+  gap: 6px;
+}
+
+.chip {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.chip:hover,
+.chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--chrome), 0 0 0 3px var(--dim);
+}
+/* Ringed rather than ticked: a tick would have to sit on the colour it names. */
+.chip-on {
+  box-shadow: 0 0 0 2px var(--chrome), 0 0 0 3px var(--text);
+}
+.chip-on:hover,
+.chip-on:focus-visible {
+  box-shadow: 0 0 0 2px var(--chrome), 0 0 0 3px var(--text);
+}
+
+.picker-none {
+  width: 100%;
+  margin-top: 6px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  font-size: 11px;
+  color: var(--dim);
+  text-align: left;
+}
+.picker-none:hover {
+  background: var(--chrome-high);
+  color: var(--text);
+}
+.picker-none-on {
+  color: var(--text);
+}
+
+.menu-item {
+  padding: 5px 8px;
+  border-radius: 5px;
+  text-align: left;
+  font-size: 12px;
+  color: var(--dim);
+}
+.menu-item:hover:not(:disabled) {
+  background: var(--chrome-high);
+  color: var(--text);
+}
+.menu-item:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.menu-danger:hover:not(:disabled) {
+  color: #ff8a80;
+}
+/* A rule above, not below: it separates what follows from what came before. */
+.menu-sep {
+  margin-top: 5px;
+  border-top: 1px solid var(--line);
+  padding-top: 7px;
+}
+
+.help-list {
+  margin: 8px 0 12px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0;
+  font-size: 11px;
+}
+.help-list > div {
+  display: contents;
+}
+.help-list dt {
+  font-family: var(--mono);
+  color: var(--accent);
+  padding: 2px 14px 2px 0;
+  white-space: nowrap;
+}
+.help-list dd {
+  margin: 0;
+  padding: 2px 0;
+  color: var(--dim);
 }

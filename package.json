@@ -2,20 +2,28 @@
   "name": "kururu",
   "version": "0.1.0",
   "private": true,
-  "description": "A GUI for the agents ghosttown is running — on the desktop and on your phone.",
+  "description": "A GUI for the agents it runs — on the desktop and on your phone.",
   "type": "module",
-  "workspaces": ["server", "web", "desktop"],
+  "workspaces": [
+    "server",
+    "web",
+    "desktop"
+  ],
   "scripts": {
-    "dev": "KURURU_DEV=1 bun run --cwd server src/index.ts",
+    "dev": "bun run build:server && node desktop/dist/server.mjs",
     "dev:web": "bun run --cwd web dev",
-    "dev:desktop": "KURURU_DEV=1 bun run --cwd desktop start",
-    "build": "bun run --cwd web build",
-    "start": "bun run --cwd server src/index.ts",
+    "dev:desktop": "bun run build:server && KURURU_DEV=1 bun run --cwd desktop start",
+    "start": "bun run build && node desktop/dist/server.mjs",
+    "build": "bun run build:web && bun run build:server",
+    "build:web": "bun run --cwd web build",
+    "build:server": "node desktop/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json && bun run --cwd web typecheck",
     "test": "bun test",
-    "typecheck": "tsc --noEmit -p tsconfig.json && bun run --cwd web typecheck"
+    "postinstall": "node desktop/brand.mjs"
   },
   "devDependencies": {
-    "typescript": "^5.8.0",
-    "@types/bun": "^1.2.0"
+    "@types/bun": "^1.2.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.8.0"
   }
 }
