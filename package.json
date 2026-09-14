@@ -1,0 +1,21 @@
+{
+  "name": "kururu",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A GUI for the agents ghosttown is running — on the desktop and on your phone.",
+  "type": "module",
+  "workspaces": ["server", "web", "desktop"],
+  "scripts": {
+    "dev": "KURURU_DEV=1 bun run --cwd server src/index.ts",
+    "dev:web": "bun run --cwd web dev",
+    "dev:desktop": "KURURU_DEV=1 bun run --cwd desktop start",
+    "build": "bun run --cwd web build",
+    "start": "bun run --cwd server src/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json && bun run --cwd web typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "@types/bun": "^1.2.0"
+  }
+}
