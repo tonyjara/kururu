@@ -1,0 +1,13 @@
+{
+  "name": "@kururu/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^44.3.0"
+  }
+}
