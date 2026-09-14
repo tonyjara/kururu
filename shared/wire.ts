@@ -32,6 +32,7 @@
  * would explain, so it alone carries an `id` and is answered with `reply`.
  */
 import type { Direction } from "./layout";
+import type { Action } from "./keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
 
 /** A dev server kururu found listening on this machine. */
@@ -187,6 +188,13 @@ export type ClientMessage =
    * attribute and the client it came from may be a phone on the tailnet.
    */
   | { type: "set-workspace-color"; workspaceId: string; color: string | null }
+  /**
+   * Give a workspace its own mascot, or `null` to hand it back to the default.
+   * An id rather than a config, so changing a mascot changes it everywhere it is
+   * used rather than in one copy of it — and an id naming nothing reads as the
+   * default, which is what makes deleting a mascot need no cleanup.
+   */
+  | { type: "set-workspace-mascot"; workspaceId: string; mascotId: string | null }
   /** Deletes it and ends everything in it. The last workspace cannot go. */
   | { type: "delete-workspace"; workspaceId: string }
   /** Dragged up or down the sidebar list. An absolute position, not a step. */
@@ -209,14 +217,43 @@ export type ClientMessage =
   /** Open a proxy for this dev server so a phone can reach it. */
   | { type: "open-preview"; port: number }
 
+  // --- the mascot ----------------------------------------------------------
   /**
-   * Change what the working badge animates. A verb like everything else here:
-   * Settings does not hold a config and post it back, it says *this is the
-   * selection now* and reads the snapshot that follows. Which is what lets a
-   * second window — or a phone — see the change without being told separately,
-   * and what makes the file on disk worth writing.
+   * Change one saved mascot. A verb like everything else here: Settings does not
+   * hold a config and post it back, it says *this is the selection now* and reads
+   * the snapshot that follows. Which is what lets a second window — or a phone —
+   * see the change without being told separately, and what makes the file on
+   * disk worth writing.
+   *
+   * It names the one it is editing rather than meaning "the current one",
+   * because two windows can be open and the other one may have switched between
+   * you picking a cell and the message arriving.
    */
-  | { type: "set-mascot"; mascot: MascotConfig };
+  | { type: "set-mascot"; id: string; mascot: MascotConfig }
+  /** Keep another. A copy of `from` when there is one, so a variation starts from the thing it varies. */
+  | { type: "add-mascot"; from?: string }
+  /** Forget one. The last one cannot go: a working row must always have something in it. */
+  | { type: "remove-mascot"; id: string }
+  | { type: "rename-mascot"; id: string; name: string }
+  /**
+   * Which one a workspace gets when it has not picked. The frog is what kururu
+   * ships with, not what you are stuck with.
+   */
+  | { type: "set-default-mascot"; id: string }
+
+  // --- the keyboard --------------------------------------------------------
+  /**
+   * Rebind one key, or unbind it with `null`. One key rather than a whole map,
+   * for the same reason a split is a verb: the gesture is "this key does that
+   * now", and a client that posted an entire keymap would be holding one.
+   *
+   * What gets stored is the difference from the defaults, which is what stops a
+   * saved keyboard from freezing kururu's keys at the version you first opened
+   * Settings in. See `shared/keys.ts`.
+   */
+  | { type: "bind-key"; key: string; action: Action | null }
+  /** Back to ghosttown's table, exactly. Deletes the overrides rather than writing them out. */
+  | { type: "reset-keys" };
 
 /**
  * How often the status heuristic is asked to notice that work has stopped.

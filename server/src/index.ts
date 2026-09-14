@@ -31,8 +31,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
-import { adoptMascot, countsAsAgent } from "../../shared/model";
-import type { AgentSnapshot, Profile, PtyKind, SessionSnapshot } from "../../shared/model";
+import { adoptMascot, countsAsAgent, defaultMascot } from "../../shared/model";
+import { bindKey } from "../../shared/keys";
+import type { AgentSnapshot, MascotSet, Profile, PtyKind, SessionSnapshot } from "../../shared/model";
 import type { ClientMessage, DevServer, ServerMessage } from "../../shared/wire";
 import { DEV_SCAN_MS, SAVE_DEBOUNCE_MS } from "../../shared/wire";
 import { parseReport } from "./agents/report";
@@ -40,8 +41,21 @@ import { dump as dumpRecording, forget as forgetRecording, recordBacklog, record
 import { processCwd } from "./cwd";
 import { scanDevServers } from "./devservers";
 import { allowedRoots, allowRoot, listDir, readFile } from "./files";
-import { customSheetPath, hasCustomSheet, readConfig, sheetImage, sheets, writeConfig } from "./mascot";
+import {
+  adoptLegacySheet,
+  builtinSheets,
+  freshMascotId,
+  importSheet,
+  importedSheets,
+  readMascots,
+  removeSheet,
+  sheetImage,
+  sheetsDir,
+  writeMascots,
+} from "./mascot";
+import { readKeys, writeKeys } from "./keys";
 import { HostLink, type Port } from "./hostlink";
+import { MouseEncoding } from "./mouseencoding";
 import { readSnapshot, writeSnapshot } from "./persist";
 import { closeAllPreviews, closePreview, openPreview, openPreviews } from "./proxy";
 import { Workspaces } from "./workspaces";
@@ -155,14 +169,30 @@ function pushSnapshot(): void {
  * that switching is not closing.
  */
 /**
- * The mascot selection, read once at start and kept here.
+ * The two things a person chose: their mascots, and their keyboard.
  *
  * Held rather than re-read per snapshot because a snapshot goes out on every
- * status change and this is a file: the read happens when it changes, which is
- * when `set-mascot` arrives. A server restart re-reads it, which is also how a
- * config edited by hand takes effect.
+ * status change and these are files: the read happens when they change, which is
+ * when the verb arrives. A server restart re-reads both, which is also how a
+ * config edited by hand takes effect — and restarting the server costs a
+ * reconnect and nothing else, which is what makes that a reasonable thing to
+ * tell somebody to do.
  */
-let mascot = readConfig();
+adoptLegacySheet();
+let mascots = readMascots();
+let keys = readKeys();
+
+/**
+ * Every mascot change goes through here, because all five of them are the same
+ * two steps — write it down, then tell every client — and a verb that forgot the
+ * second would leave the window that sent it drawing the badge it had before.
+ * The snapshot is the answer to these messages, the way it is to a split.
+ */
+function saveMascots(next: MascotSet): void {
+  mascots = next;
+  writeMascots(next);
+  pushSnapshot();
+}
 
 function snapshot(): SessionSnapshot {
   // Every snapshot is also the moment we learn what is running where, because it
@@ -178,7 +208,8 @@ function snapshot(): SessionSnapshot {
     // below, and the fields themselves in `shared/model.ts`, for why they live
     // on this side of the link at all.
     agents: host.agents.filter((agent) => mine.has(agent.id)).map(overlay),
-    mascot,
+    mascots,
+    keys,
   };
 }
 
@@ -219,6 +250,19 @@ const MAX_ACTIVITY = 200;
 
 /** Agent id → the agent program last seen in it. See AgentSnapshot.lastAgent. */
 const lastAgent = new Map<string, string>();
+
+/**
+ * How each terminal writes its mouse reports, so the backlog can say it too.
+ * See `mouseencoding.ts` — the serializer restores the mouse being *on* and
+ * loses how it speaks, and the two halves disagreeing types into the program.
+ */
+const mouseEncodings = new Map<string, MouseEncoding>();
+
+function mouseEncodingOf(agentId: string): MouseEncoding {
+  let encoding = mouseEncodings.get(agentId);
+  if (!encoding) mouseEncodings.set(agentId, (encoding = new MouseEncoding()));
+  return encoding;
+}
 
 /**
  * What the pty host cannot say about an agent, added on the way out.
@@ -373,6 +417,7 @@ function killAll(agentIds: string[]): void {
     activity.delete(agentId);
     lastAgent.delete(agentId);
     forgetRecording(agentId);
+    mouseEncodings.delete(agentId);
   }
 }
 
@@ -397,6 +442,7 @@ function syncWatched(): void {
  */
 function onOutput(agentId: string, data: string): void {
   recordOutput(agentId, data);
+  mouseEncodingOf(agentId).read(data);
   for (const [ws, st] of clients) {
     if (!st.watching.has(agentId)) continue;
     const pending = st.awaiting.get(agentId);
@@ -445,7 +491,13 @@ async function sendBacklog(
   epoch: number,
 ): Promise<void> {
   host.resize(agentId, cols, rows);
-  const data = await host.backlog(agentId).catch(() => "");
+  /**
+   * The serialized screen, plus the one thing it cannot carry. Appended here
+   * rather than in `screen.ts` so this fix costs a reconnect and not every agent
+   * the user is running; see `mouseencoding.ts` for what is being restored.
+   */
+  const serialized = await host.backlog(agentId).catch(() => "");
+  const data = serialized + mouseEncodingOf(agentId).suffix();
   const st = clients.get(ws);
   const pending = st?.awaiting.get(agentId);
   if (!st || !pending) return;
@@ -692,15 +744,105 @@ function handleMessage(ws: WebSocket, raw: string): void {
       workspaces.setWorkspaceColor(msg.workspaceId, msg.color);
       return;
 
+    case "set-workspace-mascot":
+      workspaces.setWorkspaceMascot(msg.workspaceId, msg.mascotId);
+      return;
+
+    // --- the mascot --------------------------------------------------------
     /**
      * The selection is adopted rather than trusted: it arrives from a client,
      * and `adoptMascot` is what turns "a number somebody dragged too far" into
      * the nearest legal one. A sheet that does not exist is refused there and
      * falls back, so what gets written is always something that can be drawn.
+     *
+     * A message naming a mascot that is not there is dropped rather than
+     * creating one. Settings only ever edits something it is looking at, so this
+     * is a message from a window whose list is a moment out of date, and
+     * resurrecting a deleted mascot is a worse answer than losing one drag.
      */
     case "set-mascot": {
-      mascot = adoptMascot(msg.mascot);
-      writeConfig(mascot);
+      const one = mascots.list.find((m) => m.id === msg.id);
+      if (!one) return;
+      saveMascots({
+        ...mascots,
+        // Id and name first, so the file stays readable to the person it says
+        // can edit it by hand.
+        list: mascots.list.map((m) =>
+          m.id === msg.id ? { id: m.id, name: m.name, ...adoptMascot(msg.mascot) } : m,
+        ),
+      });
+      return;
+    }
+
+    /**
+     * A copy of the one you are looking at, not a fresh default: you press this
+     * when the thing in front of you is nearly right, and starting from the
+     * default frog would throw away the sheet and the cell size you had just
+     * found. It becomes the active one, because adding something you then have
+     * to go and click is a step that decided nothing.
+     */
+    case "add-mascot": {
+      const from = mascots.list.find((m) => m.id === (msg.from ?? mascots.default)) ?? mascots.list[0]!;
+      const id = freshMascotId(mascots.list);
+      saveMascots({
+        ...mascots,
+        // Capped here rather than left for the adopter, or a name copied enough
+        // times would come back forty characters shorter than it went in.
+        list: [...mascots.list, { ...from, id, name: `${from.name} copy`.slice(0, 40) }],
+      });
+      return;
+    }
+
+    /**
+     * The last one cannot go. An empty list would mean a working agent with
+     * nothing in its row, which is the one thing the mascot exists to prevent —
+     * so the button is hidden rather than the message refused, and this is the
+     * backstop for the window that had two of them a second ago.
+     */
+    case "remove-mascot": {
+      if (mascots.list.length < 2) return;
+      const list = mascots.list.filter((m) => m.id !== msg.id);
+      if (list.length === mascots.list.length) return;
+      saveMascots({
+        default: list.some((m) => m.id === mascots.default) ? mascots.default : list[0]!.id,
+        list,
+      });
+      return;
+    }
+
+    case "rename-mascot": {
+      const name = msg.name.trim().slice(0, 40);
+      if (!name) return;
+      saveMascots({ ...mascots, list: mascots.list.map((m) => (m.id === msg.id ? { ...m, name } : m)) });
+      return;
+    }
+
+    case "set-default-mascot": {
+      if (!mascots.list.some((m) => m.id === msg.id)) return;
+      saveMascots({ ...mascots, default: msg.id });
+      return;
+    }
+
+    // --- the keyboard ------------------------------------------------------
+    /**
+     * `bindKey` is where the checking is, and it is shared with the client for
+     * the usual reason: the action has to be one of the ones that exist and the
+     * key has to be one a person can press, and two spellings of that would
+     * disagree about exactly the case that matters. It returns the overrides
+     * unchanged when it refuses, so a bad message is a no-op rather than an
+     * error nobody is listening for.
+     */
+    case "bind-key": {
+      keys = bindKey(keys, msg.key, msg.action);
+      writeKeys(keys);
+      pushSnapshot();
+      return;
+    }
+
+    case "reset-keys": {
+      keys = {};
+      writeKeys(keys);
+      pushSnapshot();
       return;
     }
 
@@ -785,6 +927,31 @@ function text(res: ServerResponse, body: string, status = 200): void {
 }
 
 /** Read a JSON request body, with a cap — this endpoint is tailnet-reachable. */
+/**
+ * A little over the sheet cap, so a file that is too big is refused by the thing
+ * that can say *why* rather than by the socket closing mid-upload.
+ */
+const IMPORT_LIMIT = 2 * 1024 * 1024;
+
+/** The body, as bytes. What `readJsonBody` is built on, minus the parse. */
+function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > limit) {
+        reject(new Error("that file is far too big"));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
 function readJsonBody(req: IncomingMessage, limit = 64 * 1024): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -905,14 +1072,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    * draw its picker — and without one you get whichever is currently selected,
    * which is all a row drawing a badge ever needs to know.
    *
-   * An endpoint rather than a static file because `custom` is a file outside the
-   * app entirely, and because the name has to be checked against the list rather
-   * than pasted into a path: this is reachable from the tailnet. `no-cache` so a
+   * An endpoint rather than a static file because most sheets live outside the
+   * app entirely, in the user's config directory, and because the name has to be
+   * checked against the list rather than pasted into a path: this is reachable
+   * from the tailnet. `no-cache` so a
    * user who overwrites their own sheet sees it after a reload rather than after
    * a restart; the sheets that ship never change, and they are fifteen kilobytes.
    */
   if (url.pathname === "/api/mascot.png") {
-    const body = sheetImage(url.searchParams.get("sheet") ?? mascot.sheet);
+    const body = sheetImage(url.searchParams.get("sheet") ?? defaultMascot(mascots).sheet);
     if (!body) {
       text(res, "no such sheet\n", 404);
       return;
@@ -930,9 +1098,57 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    * What Settings may offer. Not in the snapshot: it is a catalogue, wanted once
    * by one dialog, and putting it on every status change would be paying for it
    * continuously to save one request nobody makes twice.
+   *
+   * The two lists are kept apart because they are not the same kind of thing to
+   * the UI: one of them has a remove button. `dir` is there so the dialog can
+   * tell you where they went without spelling the path a second time.
+   *
+   * DELETE removes one of yours. It is the same shape as the import below — a
+   * name, checked against the list of imported sheets and nothing else.
    */
   if (url.pathname === "/api/mascot/sheets") {
-    json(res, { sheets: sheets(), custom: hasCustomSheet(), customPath: customSheetPath() });
+    if (req.method === "DELETE") {
+      const name = url.searchParams.get("name") ?? "";
+      if (!removeSheet(name)) {
+        json(res, { error: "no such imported sheet" }, 404);
+        return;
+      }
+      json(res, { ok: true, builtin: builtinSheets(), imported: importedSheets(), dir: sheetsDir() });
+      return;
+    }
+    json(res, { builtin: builtinSheets(), imported: importedSheets(), dir: sheetsDir() });
+    return;
+  }
+
+  /**
+   * A sheet somebody picked in a file dialog, on its way to `~/.config/kururu/sheets`.
+   *
+   * The body is the file, not JSON and not a form: it is one PNG going to one
+   * place, and multipart would be a parser to maintain for a boundary nobody
+   * needs. The name travels in the query so the bytes can stay the bytes.
+   *
+   * Every check is in `importSheet` rather than here, because this is the one
+   * endpoint that writes a file to the user's config directory on behalf of a
+   * client, and the checks belong beside the write rather than beside the route.
+   */
+  if (url.pathname === "/api/mascot/import") {
+    if (req.method !== "POST") {
+      text(res, "POST only", 405);
+      return;
+    }
+    let bytes: Buffer;
+    try {
+      bytes = await readBody(req, IMPORT_LIMIT);
+    } catch (err) {
+      json(res, { error: err instanceof Error ? err.message : "could not read that file" }, 413);
+      return;
+    }
+    const result = importSheet(url.searchParams.get("name") ?? "", bytes);
+    if (!result.ok) {
+      json(res, { error: result.error }, 400);
+      return;
+    }
+    json(res, { name: result.name, builtin: builtinSheets(), imported: importedSheets(), dir: sheetsDir() });
     return;
   }
 

@@ -23,6 +23,7 @@
  */
 import { useSyncExternalStore } from "react";
 import type { Direction } from "../../shared/layout";
+import type { Action } from "../../shared/keys";
 import type { MascotConfig, PtyKind, SessionSnapshot, WorkspaceColor } from "../../shared/model";
 import type { ClientMessage, DevServer, ServerMessage } from "../../shared/wire";
 
@@ -436,12 +437,43 @@ export function openPreview(port: number): void {
 }
 
 /**
- * Change what the working badge animates. Fire-and-forget like every other verb:
- * the snapshot that comes back is the answer, so Settings never holds a config
- * of its own and a second window sees the change without being told.
+ * The mascots, and the keyboard. Fire-and-forget like every other verb: the
+ * snapshot that comes back is the answer, so Settings never holds a config of
+ * its own and a second window sees the change without being told.
  */
-export function setMascot(mascot: MascotConfig): void {
-  send({ type: "set-mascot", mascot });
+export function setMascot(id: string, mascot: MascotConfig): void {
+  send({ type: "set-mascot", id, mascot });
+}
+
+export function addMascot(from?: string): void {
+  send({ type: "add-mascot", from });
+}
+
+export function removeMascot(id: string): void {
+  send({ type: "remove-mascot", id });
+}
+
+export function renameMascot(id: string, name: string): void {
+  send({ type: "rename-mascot", id, name });
+}
+
+/** Which mascot a workspace gets when it has not picked one of its own. */
+export function setDefaultMascot(id: string): void {
+  send({ type: "set-default-mascot", id });
+}
+
+/** Give a workspace its own, or `null` to hand it back to the default. */
+export function setWorkspaceMascot(workspaceId: string, mascotId: string | null): void {
+  send({ type: "set-workspace-mascot", workspaceId, mascotId });
+}
+
+/** Rebind one key, or unbind it with `null`. */
+export function bindKey(key: string, action: Action | null): void {
+  send({ type: "bind-key", key, action });
+}
+
+export function resetKeys(): void {
+  send({ type: "reset-keys" });
 }
 
 // ---------------------------------------------------------------------------

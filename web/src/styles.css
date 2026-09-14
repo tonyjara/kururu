@@ -544,7 +544,6 @@ kbd {
   border-top: 1px solid var(--line);
   padding: 6px 8px;
   display: flex;
-  justify-content: flex-end;
 }
 
 /* The one icon in the app, and deliberately quiet: settings is a place you go
@@ -1259,19 +1258,63 @@ kbd {
    Settings
    -------------------------------------------------------------------------- */
 
-/* Wider than a prompt because the sheet picker is a picture at integer zoom and
-   a sheet is 256px across before it is doubled — shrinking it to fit a 440px
+/* Wider than a prompt because the mascot page is three columns of picture: the
+   ones you have kept, the sheet at integer zoom, and the badge itself. The sheet
+   alone is 512px before anything else, and shrinking it to fit a prompt-sized
    dialog would put the pixels at a fractional scale, which is exactly what the
-   picker exists to avoid. It scrolls rather than growing past the window: a
-   custom sheet can be any size at all. */
+   picker exists to avoid.
+
+   A column rather than a scrolling block, so the tabs and the way out stay
+   where they are while the page under them moves — a Done button that scrolls
+   off is a dialog people close with the scrim and hope. */
 .dialog-wide {
-  width: min(680px, 94vw);
-  max-height: 72vh;
-  overflow-y: auto;
+  width: min(880px, 96vw);
+  max-height: 78vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-.set-section {
-  margin-top: 10px;
+.set-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+/* Two jobs, one of which you are doing. Underlined rather than boxed: these sit
+   directly on the dialog and a boxed tab needs a surface to sit on that this
+   does not have. */
+.set-tabs {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.set-tab {
+  padding: 6px 10px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  color: var(--dim);
+  font-size: 12px;
+  font-weight: 600;
+}
+.set-tab:hover {
+  color: var(--text);
+}
+.set-tab-on {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+/* The note travels with the tab rather than heading the page under it, so the
+   page itself starts with the thing you came to change. */
+.set-tabs-note {
+  margin-left: auto;
+  padding-bottom: 6px;
 }
 
 .set-head {
@@ -1303,6 +1346,10 @@ kbd {
   font-size: 11px;
   color: var(--dim);
   min-width: 44px;
+}
+
+.set-reset {
+  margin-left: auto;
 }
 
 .set-select,
@@ -1343,6 +1390,19 @@ kbd {
   color: var(--text);
   border-color: var(--accent);
 }
+/* The second press of a two-step button. Warm rather than accent, because the
+   accent means "selected" everywhere else in here and this one destroys a file. */
+.set-choice-warn {
+  color: var(--working);
+  border-color: var(--working);
+}
+
+/* The file input is never seen — the button beside it is what you click, because
+   a browser's own file control cannot be styled into this chrome and says
+   "No file chosen" forever afterwards. */
+.set-file {
+  display: none;
+}
 
 .set-hint {
   margin: 6px 0;
@@ -1355,6 +1415,191 @@ kbd {
   color: var(--text);
 }
 
+/* --- the mascot page ---------------------------------------------------- */
+
+/* The kept list down one side and the picker filling the rest, stacking rather
+   than shrinking once there is no room: on a phone you get the list above the
+   sheet, which is legible, instead of a 90px column of squeezed frogs. */
+.set-split {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.mascot-list {
+  flex: 0 0 172px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.set-main {
+  flex: 1 1 340px;
+  min-width: 0;
+}
+
+.mascot-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.mascot-row:hover {
+  background: var(--chrome-high);
+}
+.mascot-row-on {
+  background: var(--chrome-high);
+  border-color: var(--accent);
+}
+
+/* Bigger than a sidebar badge and still animating, because four numbers are not
+   a thing anybody recognises their own selection by and a frog mid-jump is. */
+.mascot-chip {
+  --status-size: 22px;
+  flex: 0 0 auto;
+}
+
+.mascot-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Drawn on every row, not only the default one — the same argument the workspace
+   colour swatch makes: a control that appears once it has been used is one
+   nobody finds. Hollow until it is the one. */
+.mascot-star {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: none;
+  color: var(--dimmer);
+  font-size: 12px;
+  line-height: 1;
+}
+.mascot-star:hover {
+  color: var(--accent);
+}
+.mascot-star-on {
+  color: var(--accent);
+}
+
+.mascot-drop {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--dimmer);
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0;
+}
+.mascot-row:hover .mascot-drop,
+.mascot-drop:focus-visible {
+  opacity: 1;
+}
+.mascot-drop:hover {
+  color: var(--text);
+  background: var(--line);
+}
+
+.mascot-add {
+  margin-top: 6px;
+  padding: 5px 8px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  background: none;
+  color: var(--dim);
+  font-size: 11px;
+  text-align: left;
+}
+.mascot-add:hover {
+  color: var(--text);
+  border-color: var(--dimmer);
+}
+
+.mascot-listhint {
+  margin-top: 2px;
+}
+
+/* The picker and the preview side by side, and stacked once there is no room:
+   a phone gets the sheet above the frog rather than half of each. */
+.set-stage {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+
+.set-preview {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+/* The same component the rows draw, told only that it is bigger. Nothing else
+   about it changes, which is what stops a preview and a badge from ever
+   disagreeing about what you picked. */
+.preview-big {
+  --status-size: 64px;
+}
+
+/* Both animations at the size they will really be, side by side: the question
+   the pair answers is "can I tell these two apart at 16px", which is the only
+   question that matters and the one a 64px preview cannot answer. */
+.preview-pair {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Idle with no animation: the page still has to say what it does instead, and
+   the place to say it is where the grid would have been. */
+.set-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 16px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+}
+
+/* The two animations, kept a little apart from the sheet controls above them. */
+.set-clips {
+  margin-top: 12px;
+}
+
+/* The sheet and the line describing what is selected, as one column. Named for
+   the sheet rather than "picker", which the sidebar's colour popup already owns
+   — and owns as `position: fixed`, so the collision took this column out of the
+   flow and painted it over the dialog it belongs in.
+
+   `flex: 1 1 0` with a floor rather than `flex: 1`, because the preview beside
+   it must not be pushed onto its own line by two pixels of overflow — which is
+   what a content-sized basis did. */
+.sheet-col {
+  flex: 1 1 0;
+  min-width: 200px;
+}
+
 /* The sheet scrolls inside its own box rather than stretching the dialog: it is
    drawn at whatever size the image is, times an integer, and a user's own sheet
    has no size limit at all. */
@@ -1364,13 +1609,13 @@ kbd {
   border-radius: 8px;
   background: var(--bg);
   padding: 8px;
-  max-height: 46vh;
+  max-height: 40vh;
 }
 
 /* The grid is two repeating-linear-gradients over the sheet rather than a cell
    per div — a 16x16 sheet is 256 elements that exist only to be looked through.
-   `--cell` is set per element in Settings.tsx, because the cell size is the
-   thing being chosen. */
+   `--cell` is set per element in SettingsMascot.tsx, because the cell size is
+   the thing being chosen. */
 .sheet {
   position: relative;
   image-rendering: pixelated;
@@ -1395,4 +1640,241 @@ kbd {
   border: 1px solid var(--accent);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
   pointer-events: none;
+}
+
+/* Where the mascot's other animation is taken from. Dashed and dim: it is not
+   what you are editing, but picking the idle frames on top of the working ones
+   is a mistake you can only avoid if you can see where they already are. */
+.sheet-sel-other {
+  border-style: dashed;
+  border-color: var(--dimmer);
+  box-shadow: none;
+}
+
+/* --- the workspace's mascot ---------------------------------------------- */
+
+/* Wider than the colour grid, because these are rows with names on them rather
+   than swatches — you are picking between pictures, but the names are how you
+   remember which is which. */
+.picker-mascots {
+  min-width: 170px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mascot-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+.mascot-option:hover {
+  background: var(--chrome-high);
+}
+.mascot-option-on {
+  background: var(--chrome-high);
+  border-color: var(--accent);
+}
+
+/* --- the keyboard page --------------------------------------------------- */
+
+.key-group {
+  margin: 14px 0 4px;
+}
+
+/* The action on the left and its keys on the right, with the keys in a column
+   of their own so thirty rows of them line up — a list where every chip starts
+   at a different x is a list you cannot scan for the one you are looking for. */
+.key-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 4px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+}
+.key-row:hover {
+  background: var(--chrome-high);
+}
+
+.key-what {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text);
+}
+
+/* Marked rather than listed separately, so "what have I changed" is answerable
+   without leaving the page you would change it back on. */
+.key-row-moved {
+  border-left-color: var(--accent);
+}
+
+.key-keys {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 132px;
+  justify-content: flex-end;
+}
+
+/* Drawn as a key rather than as text: the whole row is about which physical
+   thing you press, and `%` in prose is punctuation. Clicking one unbinds it, so
+   the hover is the warm one the working badge uses rather than the accent —
+   an accent hover on a thing that removes something reads as "select". */
+.key-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 22px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--chrome-high);
+  color: var(--text);
+  font: 11px var(--mono);
+}
+.key-chip:hover {
+  border-color: var(--working);
+  color: var(--working);
+}
+.key-x {
+  opacity: 0;
+  font-size: 10px;
+}
+.key-chip:hover .key-x {
+  opacity: 1;
+}
+
+.key-none {
+  font-size: 11px;
+  color: var(--dimmer);
+  font-style: italic;
+}
+
+.key-add {
+  padding: 2px 7px;
+  border: 1px dashed var(--line);
+  border-radius: 5px;
+  background: none;
+  color: var(--dim);
+  font-size: 11px;
+}
+.key-add:hover {
+  color: var(--text);
+  border-color: var(--dimmer);
+}
+/* While it is waiting for a key it is the only thing on the page that can
+   happen, so it says so in words rather than staying a `+` with a highlight. */
+.key-add-armed {
+  border-style: solid;
+  border-color: var(--accent);
+  color: var(--text);
+  animation: key-wait 1.2s ease-in-out infinite;
+}
+@keyframes key-wait {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.key-note {
+  color: var(--text);
+}
+
+.key-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.key-foot .button-quiet:disabled {
+  opacity: 0.4;
+}
+
+/* The platform's scrollbars are fine on a terminal, which draws its own, and
+   wrong inside a dark dialog — the default light track reads as a hole punched
+   in the chrome. Only the two surfaces that scroll get this. */
+.sheet-wrap::-webkit-scrollbar,
+.set-body::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.sheet-wrap::-webkit-scrollbar-track,
+.set-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sheet-wrap::-webkit-scrollbar-thumb,
+.set-body::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 5px;
+}
+.sheet-wrap::-webkit-scrollbar-thumb:hover,
+.set-body::-webkit-scrollbar-thumb:hover {
+  background: var(--dimmer);
+}
+.sheet-wrap::-webkit-scrollbar-corner,
+.set-body::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* --------------------------------------------------------------------------
+   The crash screen
+
+   Deliberately the plainest thing in the stylesheet. It is read once, in the
+   worst minute of using kururu, and what it has to do is be legible and be
+   copyable — so the error keeps the mono face and wraps rather than scrolling
+   sideways, because a stack trace you have to drag to read is one nobody reads.
+   -------------------------------------------------------------------------- */
+
+.crash {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  height: 100%;
+  padding: 48px;
+  overflow: auto;
+}
+.crash h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.crash p {
+  max-width: 62ch;
+  margin: 0;
+}
+.crash-error,
+.crash-where {
+  max-width: 100%;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--chrome);
+  font: 11px/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.crash-where {
+  color: var(--dim);
+}
+.crash .button {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  padding: 7px 14px;
 }

@@ -20,7 +20,6 @@
  */
 import { spawn, type IPty } from "node-pty";
 import { homedir } from "node:os";
-import { basename } from "node:path";
 import { countsAsAgent } from "../../../shared/model";
 import type { AgentReport, AgentSnapshot, PtyKind } from "../../../shared/model";
 import { DEFAULT_AGENT_COMMANDS, findAgents, readProcTable } from "./procs";
@@ -98,6 +97,13 @@ interface Agent {
   exitCode: number | null;
   /** A name the user typed for this tab. Never overwritten by what is detected. */
   titleOverride: string | null;
+  /**
+   * What the program in the pty last called itself, kept across its exit: that
+   * title is the last thing the terminal said about what it was doing, and a
+   * dead tab relabelling itself back to "claude" would throw the one fact that
+   * distinguished it from the other three.
+   */
+  title: string | null;
 }
 
 export class AgentHost {
@@ -152,11 +158,12 @@ export class AgentHost {
       } as Record<string, string>,
     });
 
+    const screen = new Screen();
     const agent: Agent = {
       id,
       kind,
       pty,
-      screen: new Screen(),
+      screen,
       status: new StatusTracker(() => this.onChange()),
       cwd,
       command,
@@ -166,6 +173,19 @@ export class AgentHost {
       exited: false,
       exitCode: null,
       titleOverride: null,
+      title: null,
+    };
+
+    /**
+     * The emulator has already decided this is worth saying — it only calls back
+     * when the cleaned title differs from the last one — so there is nothing to
+     * throttle here. An empty title is a program handing the name back rather
+     * than naming the terminal "", so it becomes null and the label falls
+     * through to whatever we would have called it.
+     */
+    screen.onTitle = (title) => {
+      agent.title = title || null;
+      this.onChange();
     };
 
     pty.onData((data) => {
@@ -382,7 +402,7 @@ export class AgentHost {
     return {
       id: agent.id,
       kind: agent.kind,
-      title: basename(agent.cwd) || agent.cwd,
+      title: agent.title,
       status: agent.status.status,
       agent: agent.status.agent,
       unread: agent.unread,

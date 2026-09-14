@@ -98,6 +98,65 @@ describe("backlog", () => {
   });
 });
 
+/**
+ * The title an agent sets, and the two things the emulator has to do with it.
+ *
+ * Reading it at all is the feature — a tab strip of four claudes is unreadable
+ * until each one is called after the work it is doing. The filtering is what
+ * makes it affordable: claude leads its title with a status glyph and spins a
+ * braille frame there while it works, so the raw sequence arrives many times a
+ * second saying the same words, and every one of those would otherwise be a
+ * snapshot on every open socket.
+ */
+describe("a title a program sets", () => {
+  /** OSC 2, the sequence a shell or an agent names its window with. */
+  const osc2 = (title: string) => `\x1b]2;${title}\x07`;
+
+  /** Screen parses on its own schedule; backlog() is what waits for the queue. */
+  const settle = (screen: Screen) => screen.backlog();
+
+  it("arrives with the agent's own status glyph taken off", async () => {
+    const screen = new Screen();
+    screen.write(osc2("✳ Merge twonary_mercado changes"));
+    await settle(screen);
+    expect(screen.title).toBe("Merge twonary_mercado changes");
+  });
+
+  it("says nothing when only the spinner frame moved", async () => {
+    const screen = new Screen();
+    const seen: string[] = [];
+    screen.onTitle = (title) => seen.push(title);
+
+    screen.write(osc2("✳ Test OOS cancel sequence"));
+    for (const frame of ["⠋", "⠙", "⠹", "⠸"]) {
+      screen.write(osc2(`${frame} Test OOS cancel sequence`));
+    }
+    await settle(screen);
+
+    expect(seen).toEqual(["Test OOS cancel sequence"]);
+  });
+
+  it("reports the new words when the work actually changes", async () => {
+    const screen = new Screen();
+    const seen: string[] = [];
+    screen.onTitle = (title) => seen.push(title);
+
+    screen.write(osc2("✳ First turn"));
+    screen.write(osc2("⠋ First turn"));
+    screen.write(osc2("✳ Second turn"));
+    await settle(screen);
+
+    expect(seen).toEqual(["First turn", "Second turn"]);
+  });
+
+  it("keeps a shell's plain title, which has no glyph to lose", async () => {
+    const screen = new Screen();
+    screen.write(osc2("~/Desktop/Nyto/kururu"));
+    await settle(screen);
+    expect(screen.title).toBe("~/Desktop/Nyto/kururu");
+  });
+});
+
 /** The emulator inside a Screen, for comparing a rebuild against the original. */
 function screenTerminal(screen: Screen): Terminal {
   return (screen as unknown as { term: Terminal }).term;

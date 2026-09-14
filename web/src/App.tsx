@@ -23,6 +23,8 @@ import {
   type Direction,
   type LayoutNode,
 } from "../../shared/layout";
+import { keymapFrom } from "../../shared/keys";
+import { mascotFor } from "../../shared/model";
 import { Dialog, type DialogState } from "./components/Dialog";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Panes } from "./components/Panes";
@@ -40,6 +42,7 @@ import {
   type Action,
 } from "./keys";
 import { isFileDrag } from "./drop";
+import { tabLabel } from "./labels";
 import * as api from "./session";
 import { useKururu } from "./session";
 
@@ -76,6 +79,22 @@ export function App() {
     [profile],
   );
   const agents = useMemo(() => snapshot?.agents ?? [], [snapshot]);
+  /**
+   * The keys this window is using: ghosttown's table as the user has amended it.
+   * Derived from the snapshot rather than held, like everything else the server
+   * owns — which is what makes a rebinding reach a second window and survive a
+   * reload.
+   */
+  const keymap = useMemo(() => keymapFrom(snapshot?.keys ?? {}), [snapshot?.keys]);
+  /**
+   * The badge the panes draw. Everything in them is in the workspace you are
+   * looking at, so it resolves once here — the sidebar cannot do that, because
+   * its list spans every workspace in the profile and resolves per row.
+   */
+  const mascot = useMemo(
+    () => (snapshot && workspace ? mascotFor(snapshot.mascots, workspace.mascotId) : null),
+    [snapshot, workspace],
+  );
 
   /**
    * Tell the server what is on screen: the active tab of every pane, and only of
@@ -180,6 +199,8 @@ export function App() {
         }
         case "toggle-sidebar":
           return setSidebarOpen((open) => !open);
+        case "settings":
+          return setSettings(true);
         case "zen-mode":
           return setZen((on) => !on);
         case "resize-mode":
@@ -221,7 +242,10 @@ export function App() {
             title: "Agents",
             items: agents.map((agent) => ({
               id: agent.id,
-              label: agent.titleOverride ?? agent.agent ?? agent.command,
+              // `tabLabel`, not a fourth spelling of it: a finder that calls a
+              // terminal something the tab strip does not is a finder you
+              // cannot search with.
+              label: tabLabel(agent),
               hint: agent.cwd,
             })),
             onPick: (id) => {
@@ -319,8 +343,10 @@ export function App() {
 
       // A dialog is modal over everything, including the prefix: while one is
       // open every key is text or an answer, and the component owns them. A name
-      // being typed in the sidebar is the same case at a smaller scale.
-      if (dialog || editing || settings) return;
+      // being typed in the sidebar — or in Settings, or a key being captured
+      // there — is the same case at a smaller scale, and `editing` is how the
+      // chrome says so.
+      if (dialog || editing) return;
 
       /**
        * Settings is modal over the keyboard for the same reason a dialog is —
@@ -388,7 +414,7 @@ export function App() {
         return;
       }
 
-      const action = actionFor(event);
+      const action = actionFor(event, keymap);
       if (action) return run(action);
 
       const digit = workspaceDigit(event);
@@ -397,7 +423,7 @@ export function App() {
 
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [prefixArmed, resizeMode, dialog, editing, help, settings, workspace, run, arm, disarm]);
+  }, [prefixArmed, resizeMode, dialog, editing, help, settings, workspace, keymap, run, arm, disarm]);
 
   /**
    * A file dropped anywhere that is not a terminal does nothing.
@@ -458,7 +484,7 @@ export function App() {
 
   // -------------------------------------------------------------------------
 
-  if (!snapshot || !profile || !workspace) {
+  if (!snapshot || !profile || !workspace || !mascot) {
     return (
       <div className="app app-booting">
         <p className="muted">{connected ? "Starting…" : "Connecting to the kururu server…"}</p>
@@ -473,7 +499,7 @@ export function App() {
           profile={profile}
           agents={agents}
           connected={connected}
-          mascot={snapshot.mascot}
+          mascots={snapshot.mascots}
           /* The terminal the keyboard is pointed at. The sidebar marks it,
              because a list of six agents does not otherwise say which of them
              the next keystroke belongs to. */
@@ -491,7 +517,7 @@ export function App() {
             node={workspace.layout}
             focusedPaneId={workspace.focusedPaneId}
             agents={agents}
-            mascot={snapshot.mascot}
+            mascot={mascot}
             zen={zen}
           />
         </main>
@@ -505,8 +531,15 @@ export function App() {
         />
       </div>
 
-      {help && <HelpOverlay onClose={() => setHelp(false)} />}
-      {settings && <Settings mascot={snapshot.mascot} onClose={() => setSettings(false)} />}
+      {help && <HelpOverlay keymap={keymap} onClose={() => setHelp(false)} />}
+      {settings && (
+        <Settings
+          mascots={snapshot.mascots}
+          keys={snapshot.keys}
+          onClose={() => setSettings(false)}
+          onEditing={setEditing}
+        />
+      )}
       {dialog && <Dialog state={dialog} onClose={() => setDialog(null)} />}
     </div>
   );

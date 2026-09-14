@@ -89,6 +89,11 @@ function adopt(profile: Profile): Profile {
     workspaces: profile.workspaces.map((workspace) => ({
       ...workspace,
       color: isWorkspaceColor(workspace.color) ? workspace.color : null,
+      // A field this version has and the one that wrote the blob did not. An
+      // `undefined` where the type promises `null` is invisible until something
+      // compares against null and gets a different answer than it did a restart
+      // ago — which is the whole reason this function exists.
+      mascotId: typeof workspace.mascotId === "string" ? workspace.mascotId : null,
     })),
   };
 }
@@ -515,6 +520,21 @@ export class Workspaces {
     this.mutate(this.activeId, workspaceId, (w) => ({ ...w, color }));
   }
 
+  /**
+   * Point a workspace at one of the saved mascots, or at nothing, which means
+   * the default.
+   *
+   * Nothing checks that the id names a mascot, and that is deliberate rather
+   * than lax: this module knows about layouts, not about sprite sheets, and an
+   * id that names nothing already draws the default — so a check here would buy
+   * a refusal where the fallback is the same answer, and would need this file to
+   * learn about a second subject to do it.
+   */
+  setWorkspaceMascot(workspaceId: string, mascotId: string | null): void {
+    const id = typeof mascotId === "string" && mascotId ? mascotId : null;
+    this.mutate(this.activeId, workspaceId, (w) => ({ ...w, mascotId: id }));
+  }
+
   /** Deletes it and says what was inside. The last workspace cannot be deleted. */
   deleteWorkspace(workspaceId: string): string[] {
     const profile = this.active;
@@ -591,7 +611,7 @@ export class Workspaces {
 
   private blankWorkspace(name: string): Workspace {
     const pane = makePane(id("n"));
-    return { id: id("w"), name, layout: pane, focusedPaneId: pane.pane.id, color: null };
+    return { id: id("w"), name, layout: pane, focusedPaneId: pane.pane.id, color: null, mascotId: null };
   }
 
   private blankProfile(name: string): Profile {

@@ -26,25 +26,25 @@ import { panes } from "../../../shared/layout";
 import type {
   AgentSnapshot,
   ContextUsage,
-  MascotConfig,
+  MascotSet,
   Profile,
   WorkspaceColor,
 } from "../../../shared/model";
-import { WORKSPACE_COLORS } from "../../../shared/model";
+import { defaultMascot, mascotFor, WORKSPACE_COLORS } from "../../../shared/model";
 import { COLOR_VALUES, colorValue } from "../colors";
 import { AGENT_MIME, WORKSPACE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
 import type { Action } from "../keys";
-import { agentLabel, shortenPath } from "../labels";
+import { agentLabel, agentSummary, shortenPath } from "../labels";
 import * as api from "../session";
 import { Menu, Popover } from "./Menu";
-import { Status } from "./Status";
+import { Mascot, Status } from "./Status";
 
 interface Props {
   profile: Profile;
   agents: AgentSnapshot[];
   connected: boolean;
   /** What the working badge animates; drawn here, owned by the server. */
-  mascot: MascotConfig;
+  mascots: MascotSet;
   /**
    * The terminal the keyboard is pointed at, or null when the focused pane is
    * empty. Marked rather than merely listed: a sidebar of six agents otherwise
@@ -73,7 +73,7 @@ export function Sidebar({
   profile,
   agents,
   connected,
-  mascot,
+  mascots,
   focusedAgentId,
   onRun,
   onDeleteWorkspace,
@@ -89,6 +89,11 @@ export function Sidebar({
   const [menu, setMenu] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
   /** Where the colour picker is open, and whose colour it is setting. */
   const [picker, setPicker] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
+  /** The same, for the mascot. Two states rather than one with a mode in it,
+      because only one of them can be open and neither cares about the other. */
+  const [mascotPicker, setMascotPicker] = useState<{ workspaceId: string; x: number; y: number } | null>(
+    null,
+  );
   /**
    * Escape cancels a rename by blurring the field, which is also how enter and
    * clicking away commit one — so the commit lives in `blur` and this is what
@@ -104,7 +109,10 @@ export function Sidebar({
   }, [renaming, onEditing]);
 
   /** Where each agent lives, so a row can say which workspace to look in. */
-  const where = new Map<string, { workspaceId: string; workspace: string; paneId: string; index: number }>();
+  const where = new Map<
+    string,
+    { workspaceId: string; workspace: string; paneId: string; index: number; mascotId: string | null }
+  >();
   for (const workspace of profile.workspaces) {
     for (const pane of panes(workspace.layout)) {
       pane.agentIds.forEach((agentId, index) => {
@@ -113,6 +121,10 @@ export function Sidebar({
           workspace: workspace.name,
           paneId: pane.id,
           index,
+          // Carried here rather than looked up at the row, because the row
+          // already has this entry and a second search per agent per render to
+          // find a workspace we have just walked past would be silly.
+          mascotId: workspace.mascotId,
         });
       });
     }
@@ -301,7 +313,9 @@ export function Sidebar({
                 <button
                   className={`agent-row ${agent.exited ? "agent-row-exited" : ""}`}
                   onClick={() => show(agent.id)}
-                  title={[agent.activity, agent.command, agent.cwd].filter(Boolean).join("\n")}
+                  title={[agentLabel(agent), agentSummary(agent), agent.command, agent.cwd]
+                    .filter(Boolean)
+                    .join("\n")}
                   draggable
                   onDragStart={(event) => beginDrag(event, "agent", agent.id)}
                   onDragEnd={endDrag}
@@ -309,7 +323,10 @@ export function Sidebar({
                   {/* What it is and where it lives. The two things you need to
                       find it again, and nothing that changes while you read. */}
                   <span className="agent-top">
-                    <Status agent={agent} mascot={mascot} />
+                    {/* The agent's own workspace, not the one you are looking
+                        at: this list spans the whole profile, so two rows of it
+                        can legitimately be wearing different mascots. */}
+                    <Status agent={agent} mascot={mascotFor(mascots, at?.mascotId ?? null)} />
                     <span className="agent-name">{agentLabel(agent)}</span>
                     {agent.unread && <span className="unread" aria-label="new output" />}
                     <span className="agent-ws">{at ? at.workspace : "—"}</span>
@@ -319,13 +336,14 @@ export function Sidebar({
                       own line: a row whose top half is stable is a row you can
                       find something in without re-reading it.
 
-                      The cwd stands in until the agent has reported — an
-                      unreported agent would otherwise have a blank line under it
-                      saying nothing, and where it is working is the next most
-                      useful thing we know for certain. */}
+                      The cwd stands in only when nothing has said anything at
+                      all — no hook has reported and the program has not named
+                      its own window. An unreported agent would otherwise have a
+                      blank line under it saying nothing, and where it is working
+                      is the next most useful thing we know for certain. */}
                   <span className="agent-bottom">
                     <span className="agent-activity">
-                      {agent.activity || shortenPath(agent.cwd)}
+                      {agentSummary(agent) || shortenPath(agent.cwd)}
                     </span>
                     {agent.contextUsage && <ContextRing usage={agent.contextUsage} />}
                   </span>
@@ -365,6 +383,10 @@ export function Sidebar({
               run: () => setPicker({ workspaceId: menuWorkspace.id, x: menu.x, y: menu.y }),
             },
             {
+              label: "Mascot…",
+              run: () => setMascotPicker({ workspaceId: menuWorkspace.id, x: menu.x, y: menu.y }),
+            },
+            {
               label: "Move up",
               disabled: menuAt === 0,
               run: () => api.moveWorkspace(menuWorkspace.id, menuAt - 1),
@@ -384,6 +406,21 @@ export function Sidebar({
               run: () => onDeleteWorkspace(menuWorkspace.id),
             },
           ]}
+        />
+      )}
+
+      {mascotPicker && (
+        <MascotPicker
+          at={mascotPicker}
+          mascots={mascots}
+          current={
+            profile.workspaces.find((w) => w.id === mascotPicker.workspaceId)?.mascotId ?? null
+          }
+          onPick={(mascotId) => {
+            api.setWorkspaceMascot(mascotPicker.workspaceId, mascotId);
+            setMascotPicker(null);
+          }}
+          onClose={() => setMascotPicker(null)}
         />
       )}
 
@@ -450,6 +487,65 @@ function ColorPicker({
       >
         No colour
       </button>
+    </Popover>
+  );
+}
+
+/**
+ * Which mascot this workspace's agents wear.
+ *
+ * Each one is drawn animating rather than named, for the same reason the colour
+ * picker is swatches: you are choosing between pictures, and "Michi" means
+ * nothing until you have seen it hop. The working clip is the one shown, since
+ * that is the state you are actually looking for in a sidebar.
+ *
+ * "Default" is an option in the list rather than a way of dismissing it, the way
+ * "No colour" is — following the default is a choice with consequences, namely
+ * that changing the default later changes this workspace too, and a control that
+ * only said how to *stop* following would hide that.
+ */
+function MascotPicker({
+  at,
+  mascots,
+  current,
+  onPick,
+  onClose,
+}: {
+  at: { x: number; y: number };
+  mascots: MascotSet;
+  current: string | null;
+  onPick: (mascotId: string | null) => void;
+  onClose: () => void;
+}) {
+  const fallback = defaultMascot(mascots);
+  return (
+    <Popover at={at} onClose={onClose} className="picker picker-mascots" role="listbox">
+      <button
+        role="option"
+        aria-selected={current === null}
+        className={`mascot-option ${current === null ? "mascot-option-on" : ""}`}
+        onClick={() => onPick(null)}
+      >
+        <span className="status status-working mascot-chip" role="img" aria-hidden>
+          <Mascot config={fallback} clip={fallback.working} />
+        </span>
+        <span className="mascot-name">Default</span>
+        <span className="set-note">{fallback.name}</span>
+      </button>
+      {mascots.list.map((one) => (
+        <button
+          key={one.id}
+          role="option"
+          aria-selected={current === one.id}
+          className={`mascot-option ${current === one.id ? "mascot-option-on" : ""}`}
+          onClick={() => onPick(one.id)}
+        >
+          <span className="status status-working mascot-chip" role="img" aria-hidden>
+            <Mascot config={one} clip={one.working} />
+          </span>
+          <span className="mascot-name">{one.name}</span>
+        </button>
+      ))}
     </Popover>
   );
 }

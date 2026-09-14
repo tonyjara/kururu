@@ -44,6 +44,8 @@ interface StoredWorkspace {
   layout: StoredNode;
   /** Optional because sessions written before colours existed do not have one. */
   color?: string | null;
+  /** Likewise: a session written before a workspace could pick a mascot. */
+  mascotId?: string | null;
 }
 interface StoredProfile {
   name: string;
@@ -92,6 +94,7 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
       workspaces: profile.workspaces.map((workspace) => ({
         name: workspace.name,
         color: workspace.color,
+        mascotId: workspace.mascotId,
         layout: strip(workspace.layout),
       })),
     })),
@@ -164,7 +167,11 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
       // Read as defensively as everything else here: a colour the palette has
       // since dropped comes back as untagged rather than as a dead style.
       const color = isWorkspaceColor(w.color) ? w.color : null;
-      workspaces.push({ id: nextId("w"), name: w.name, layout, focusedPaneId: first, color });
+      // The mascot is a plain id and is not checked against anything here: one
+      // that names nothing draws the default, so a file naming a mascot since
+      // deleted needs no repair.
+      const mascotId = typeof w.mascotId === "string" ? w.mascotId : null;
+      workspaces.push({ id: nextId("w"), name: w.name, layout, focusedPaneId: first, color, mascotId });
     }
     if (workspaces.length === 0) continue;
     const at = Math.min(Math.max(0, stored.activeWorkspace ?? 0), workspaces.length - 1);
