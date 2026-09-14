@@ -104,7 +104,7 @@ server/      Node (not Bun — it loads inside Electron). Two processes, not one
                  Also the import: the one endpoint that writes a file for a client
   keys.ts        The keymap a user has amended. Persistence only; the table is shared
   config.ts      ~/.config/kururu, and how the two settings files are written
-  devservers.ts  lsof + ps discovery of running dev servers
+  devservers.ts  lsof + ps discovery of dev servers, from both ends; stopping one
   proxy.ts       Per-dev-server reverse proxy (HTTP + WS) for phone access
   files.ts       Traversal-safe file listing/reading
   index.ts       The half that restarts freely: HTTP, WS, static, one timer
@@ -217,6 +217,36 @@ server, allocated on demand).
   taken and vite falls back to 3002. Also: the process holding the port is often
   *not* the one that names the server (`bun run dev` → `bun run serve.ts`), so
   `resolveDevCommand` walks **up** the process tree.
+- **The same file also looks the other way, and the two answers differ.** From a
+  listening socket *up* the tree comes the port and the process holding it
+  (`node …/vite/bin/vite.js`); from a pty *down* (`findDevUnder`) comes the line
+  somebody typed (`npm run dev`) and the process to interrupt. The preview wants
+  the first. The workspace row's ▸/↻ wants the second — re-typing the first
+  skips the build a launcher does before it execs, and interrupting it leaves
+  the npm above it sitting there. The row is deliberately not derived from the
+  port scan at all: a dev server that is still compiling holds no port, and the
+  button would sit on ▸ for the ten seconds it takes to come up.
+- **The dev buttons never type into a terminal with an agent in it.** A tab in
+  two roles is a tab you act on twice by accident, and here the accident is
+  expensive: `npm run dev` arriving at a waiting Claude Code is a *prompt*. So a
+  terminal `procs.ts` reports an agent in is held out of the scan, and the
+  remembered tab is passed over in favour of opening a new one. Everything else
+  about the pair is ghosttown's, including the shape — which button you see *is*
+  the status, and a workspace that has never had a dev server draws none.
+- **`Workspace.dev` is written by watching, and only ever replaced.** The scan
+  sees a server inside one of a workspace's terminals, so the workspace notes
+  the line that started it — nothing is configured, and a server you started by
+  hand an hour ago works the same as one kururu opened a tab for. Never cleared,
+  because a *stopped* server is exactly when the memory is worth something. It
+  goes to disk with the layout (`persist.ts`) minus the agent id, which is a
+  process and therefore not the file's business: a restored profile comes back
+  with empty panes, and ▸ is then the only thing left that can serve again.
+- **Stopping a dev server signals its process *tree*, not its process group.**
+  The one place in kururu that does not signal the group, and the exception
+  proves the rule: the group here is the pty's and its leader is the shell, so
+  signalling it would close the tab the restart is about to type into. A restart
+  is exactly the `^C` and the re-typed line a person would do, which is why it
+  needs no memory of how the tab was set up.
 - **`proxy.ts`: a port per preview, never a path prefix.** Dev servers emit
   absolute URLs (`/@vite/client`, `/src/main.tsx`), so `/preview/<id>/` breaks
   on the first asset. The extra hop also rewrites `Host` to the upstream's own
@@ -275,15 +305,33 @@ server, allocated on demand).
   takes the canvas out of the DOM and the addon exposes no handle on it.
   Measured: four live panes and eighteen rebuilds blacked out all four; with the
   release, a hundred rebuilds cost nothing.
-- **A black window is a symptom with four causes, so it has to say which.**
-  Flat `--bg` with nothing on it is what you get from a lost GL context, a React
-  root that unmounted, a server that never answered, and a sleeping display —
-  same picture, different fixes, and guessing between them is what makes this
-  class of bug expensive. `Crash` in `web/src/components/Crash.tsx` wraps the
-  root so the second of those prints the error and the component stack instead
-  of drawing nothing. It deliberately does not retry: a component that throws
-  every render would spin, and the only offered way out is a reload, which costs
-  a repaint because the agents are a process away.
+- **A black window is a symptom with several causes, so each one has to say
+  which it is.** Flat `--bg` with nothing on it is what you get from a lost GL
+  context, a React root that unmounted, a renderer the OS killed, a server that
+  never answered, and a sleeping display — same picture, different fixes, and
+  guessing between them is what makes this class of bug expensive. Two of them
+  now name themselves. `Crash` in `web/src/components/Crash.tsx` wraps the root
+  so a render that throws prints the error and the component stack instead of
+  drawing nothing; it deliberately does not retry, because a component that
+  throws every render would spin, and the only way out offered is a reload.
+  `render-process-gone` in `desktop/main.js` covers the case where there is no
+  page left to report anything — the main process survives being a few megabytes
+  and is then the only thing that can put words on screen. It asks before
+  reloading rather than reloading itself: a fresh renderer allocated while the
+  machine is still out of memory is killed too, and an automatic retry under real
+  pressure is a loop.
+- **When the whole machine misbehaves, kururu is usually the thing that shows
+  it, not the thing doing it.** A renderer killed by macOS looks identical from
+  inside the app to a bug in the app, and the tell is that it takes other
+  programs with it — browser tabs going at the same moment means jetsam, not
+  kururu. `/Library/Logs/DiagnosticReports/JetsamEvent-*.ips` names every process
+  and its footprint at the moment of the kill, and `sysctl vm.swapusage` next to
+  it says whether the machine is still in that state. Check those before
+  debugging the window. Observed once already: three `../ghosttown` daemons had
+  grown to 11 GB, 11 GB and 3.5 GB (roughly 200–300 MB per hour of uptime,
+  swapped out, so `ps` showed them at under 100 MB of RSS and hid it) and
+  saturated swap. **That is ghosttown's to fix, not kururu's — see rule 1 — and
+  it has been raised with the user rather than edited across.**
 - **The pty is told about a resize only once the box stops moving** (60ms in
   `Terminal.tsx`). The emulator follows immediately; the pty does not, because
   every resize is a SIGWINCH and every agent TUI repaints completely on one.
@@ -623,8 +671,12 @@ pane on itself does nothing, and nothing being dragged is ever ended.
 
 The desktop UI is a multiplexer: profiles → workspaces → tiled panes → tabs, all
 of it server-owned and written to `~/.local/state/kururu/session.json`, driven by
-a ctrl+a prefix. The preview and the file tree are still out of the window —
-`proxy.ts`, `devservers.ts` and `files.ts` run server-side with nothing pointing
+a ctrl+a prefix. A workspace row carries ghosttown's dev-server pair: ▸ to run
+what it last had serving, ↻ to restart it, verified end to end against a real
+`npm run dev` — detected, remembered with its directory, restarted in the same
+tab, and brought back in a fresh one after the tab was closed and after a cold
+start with nothing running at all. The preview and the file tree are still out
+of the window — `proxy.ts` and `files.ts` run server-side with nothing pointing
 at them, which is where PLAN.md's next item starts.
 
 Next, in order — details in `PLAN.md`:
@@ -637,6 +689,7 @@ Next, in order — details in `PLAN.md`:
 6. The element picker injected by the proxy — long-press an element, send the
    selector and source location to the agent
 
-Now genuinely possible and not yet built: attributing dev servers to the agent
-that started them. Kururu holds the pty pids itself, and `procs.ts` already
-builds the child index that would answer it.
+Attributing dev servers to the terminal running them is done — `findDevServers`
+walks down from the pty pids kururu holds — but only one way round: the
+machine-wide port scan still says nothing about who owns a listener, so a
+preview cannot yet name the workspace it belongs to.

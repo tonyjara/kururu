@@ -28,6 +28,7 @@ import { mascotFor } from "../../shared/model";
 import { Dialog, type DialogState } from "./components/Dialog";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Panes } from "./components/Panes";
+import { Reach } from "./components/Reach";
 import { Settings } from "./components/Settings";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
@@ -66,6 +67,13 @@ export function App() {
    * desktop opened one.
    */
   const [settings, setSettings] = useState(false);
+  /**
+   * The phone dialog: which addresses this server answers at, as QR codes. A
+   * view state for the same reason Settings is — and more so, since it is about
+   * how *this* window was reached, and the phone that scanned the code has no
+   * use at all for a dialog telling it its own address.
+   */
+  const [reach, setReach] = useState(false);
   /**
    * Something in the chrome is taking typing — renaming a workspace in the
    * sidebar. Modal over the keyboard for the same reason a dialog is: ctrl+a is
@@ -362,6 +370,17 @@ export function App() {
         return;
       }
 
+      // The phone dialog has nothing to type in, but it is still modal — a key
+      // that reached a pty from behind a scrim would be typed somewhere the
+      // user cannot see. Escape is the way out the pointer already has twice.
+      if (reach) {
+        if (keyName(event) === "escape") {
+          take();
+          setReach(false);
+        }
+        return;
+      }
+
       if (help) {
         if (isPrefix(event) || keyName(event) === "escape" || keyName(event) === "?") {
           take();
@@ -423,7 +442,7 @@ export function App() {
 
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [prefixArmed, resizeMode, dialog, editing, help, settings, workspace, keymap, run, arm, disarm]);
+  }, [prefixArmed, resizeMode, dialog, editing, help, settings, reach, workspace, keymap, run, arm, disarm]);
 
   /**
    * A file dropped anywhere that is not a terminal does nothing.
@@ -508,6 +527,7 @@ export function App() {
           onDeleteWorkspace={confirmDeleteWorkspace}
           onEditing={setEditing}
           onSettings={() => setSettings(true)}
+          onReach={() => setReach(true)}
         />
       )}
 
@@ -540,6 +560,7 @@ export function App() {
           onEditing={setEditing}
         />
       )}
+      {reach && <Reach onClose={() => setReach(false)} />}
       {dialog && <Dialog state={dialog} onClose={() => setDialog(null)} />}
     </div>
   );

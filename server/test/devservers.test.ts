@@ -4,7 +4,13 @@
  * an lsof, or a machine in any particular state.
  */
 import { describe, expect, it } from "bun:test";
-import { matchDevCommand, parseListeners, parseProcTable, resolveDevCommand } from "../src/devservers";
+import {
+  findDevServers,
+  matchDevCommand,
+  parseListeners,
+  parseProcTable,
+  resolveDevCommand,
+} from "../src/devservers";
 
 describe("matchDevCommand", () => {
   it("matches a dev server by its own name", () => {
@@ -59,5 +65,44 @@ describe("resolveDevCommand", () => {
 
   it("stops rather than claiming the shell is a dev server", () => {
     expect(resolveDevCommand(34994, table)).toBeNull();
+  });
+});
+
+/**
+ * The other direction. `resolveDevCommand` starts at a socket and looks up;
+ * this starts at a terminal and looks down, and the point of having both is that
+ * they disagree about what the server is *called* — which is the string a ↻ has
+ * to type again.
+ */
+describe("findDevServers", () => {
+  // Two ptys: 100 is running `npm run dev` (vite underneath it), 200 is a shell
+  // somebody is reading a config file in.
+  const table = parseProcTable(
+    [
+      "100     1 -zsh",
+      "101   100 npm run dev",
+      "102   101 sh -c vite",
+      "103   102 node /x/node_modules/vite/bin/vite.js",
+      "200     1 -zsh",
+      "201   200 vim vite.config.ts",
+    ].join("\n"),
+  );
+
+  it("names the server by what was typed, not by what holds the port", () => {
+    const found = findDevServers([["a1", 100]], table);
+    expect(found.get("a1")).toEqual({ program: "npm dev", pid: 101, command: "npm run dev", depth: 1 });
+  });
+
+  it("finds nothing in a terminal that is not serving", () => {
+    expect(findDevServers([["a2", 200]], table).has("a2")).toBe(false);
+  });
+
+  it("finds nothing under a pid the table does not have", () => {
+    expect(findDevServers([["a3", 999]], table).size).toBe(0);
+  });
+
+  it("takes a command run directly in the pty, with no shell above it", () => {
+    const direct = parseProcTable(["300 1 next dev", "301 300 next-server"].join("\n"));
+    expect(findDevServers([["a4", 300]], direct).get("a4")?.depth).toBe(0);
   });
 });

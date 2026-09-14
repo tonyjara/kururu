@@ -35,6 +35,31 @@ import type { Direction } from "./layout";
 import type { Action } from "./keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
 
+/**
+ * How to reach this server from a device that is not this machine — the answer
+ * to `GET /api/reach`, and the only part of the protocol that is not about
+ * agents.
+ *
+ * It is a fetch rather than a field of the snapshot, and that is the one
+ * decision in it. The snapshot is pushed because everything in it changes while
+ * you are looking at it; this changes when somebody joins a different Wi-Fi or
+ * brings tailscale up, which is not something the server has any way to be told
+ * about — it would be a poll, running forever, to keep a value nothing displays
+ * except a dialog that is almost never open. So the dialog asks, and goes on
+ * asking while it is open. See `server/src/reach.ts`.
+ */
+export interface Reach {
+  /** The port the kururu server itself is listening on. */
+  port: number;
+  /** Private addresses on this machine's own networks, likeliest first. */
+  lan: string[];
+  /** The tailnet address, or null when tailscale is not up. */
+  tailscale: string | null;
+}
+
+/** How often the dialog re-asks, so tailscale coming up shows without a reload. */
+export const REACH_POLL_MS = 3000;
+
 /** A dev server kururu found listening on this machine. */
 export interface DevServer {
   /** Listening port on localhost — the thing the preview points at. */
@@ -195,6 +220,21 @@ export type ClientMessage =
    * default, which is what makes deleting a mascot need no cleanup.
    */
   | { type: "set-workspace-mascot"; workspaceId: string; mascotId: string | null }
+  /**
+   * The ▸ / ↻ on a workspace row: get this workspace's dev server serving fresh.
+   *
+   * One verb rather than a start and a restart, because it is one intention and
+   * the client is the wrong side to decide between them — the button's face
+   * comes from a scan that is up to three seconds old, and a server that came up
+   * in the meantime should be restarted rather than started twice. So the client
+   * says what it wants and the server looks: something serving is interrupted
+   * and re-run, nothing serving is started from what the workspace remembers,
+   * and a workspace that has never had one does nothing (and draws no button).
+   *
+   * It deliberately does not switch workspace. Starting your app somewhere else
+   * is not a reason to be taken there.
+   */
+  | { type: "run-dev"; workspaceId: string }
   /** Deletes it and ends everything in it. The last workspace cannot go. */
   | { type: "delete-workspace"; workspaceId: string }
   /** Dragged up or down the sidebar list. An absolute position, not a step. */

@@ -11,12 +11,18 @@
  * pid → listening ports, ps for pid → argv. Cross-referencing them is what
  * turns "something is on :5173" into "vite, in ~/Desktop/Nyto/kururu".
  *
- * The scan is machine-wide rather than per-agent, which is both a limitation and
- * a feature: a dev server you started in a plain terminal shows up here, and so
- * does one an agent started. Attributing them to the agent that owns them is now
- * possible for the first time — kururu holds the pty pids itself, and `procs.ts`
- * already builds the child index that would answer it — but a dev server's
- * usefulness does not depend on knowing who started it, so that stays unbuilt.
+ * The port scan is machine-wide rather than per-agent, which is both a
+ * limitation and a feature: a dev server you started in a plain terminal shows
+ * up there, and so does one an agent started.
+ *
+ * Beside it, and answering a different question, is a walk *down* from the pids
+ * kururu's own ptys are running on: which of this session's terminals has a dev
+ * server in it, what was typed to start it, and which process to interrupt to
+ * stop it. That is what puts a ▸ and a ↻ on a workspace row, and it is
+ * deliberately not derived from the port scan. A server that is still compiling
+ * is listening on nothing and would blink the button back to ▸ for the ten
+ * seconds it takes to come up; the process is there the whole time. The two
+ * halves share one `ps`, and nothing else.
  */
 import { execFile } from "node:child_process";
 import type { DevServer } from "../../shared/wire";
@@ -178,6 +184,179 @@ export function resolveDevCommand(
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Which of kururu's own terminals is serving
+// ---------------------------------------------------------------------------
+
+/** A dev server running inside a terminal kururu owns. */
+export interface DevProc {
+  /** The name that matched, for a label: "vite", "npm run dev". */
+  program: string;
+  /**
+   * The process to interrupt. The shallowest match under the pty, not the one
+   * holding the port — stopping `npm run dev` takes the `next-server` beneath it
+   * with it, and stopping the `next-server` alone leaves npm sitting there.
+   */
+  pid: number;
+  /** The line that started it, which is the line a restart types again. */
+  command: string;
+  /** Hops from the pty's own process. 1 is the usual answer: the shell's child. */
+  depth: number;
+}
+
+/** Depth cap on the descendant walk; a dev server is a hop or two from the shell. */
+const MAX_DEPTH = 6;
+/** Backstop so a fork bomb in a pty cannot make the poll expensive. */
+const MAX_VISITED = 4000;
+
+/** ppid → children, built once per scan and shared by every terminal's walk. */
+export function childIndex(table: Map<number, ProcInfo>): Map<number, ProcInfo[]> {
+  const index = new Map<number, ProcInfo[]>();
+  for (const proc of table.values()) {
+    const siblings = index.get(proc.ppid);
+    if (siblings) siblings.push(proc);
+    else index.set(proc.ppid, [proc]);
+  }
+  return index;
+}
+
+/**
+ * The dev server running under a pty, found by walking down rather than up.
+ *
+ * Breadth-first, and the shallowest match wins, which is the whole reason this
+ * exists beside `resolveDevCommand`. Both find the same server; they disagree
+ * about what to call it. Starting from the listening socket, the first thing
+ * that matches on the way up is usually the process holding the port —
+ * `node .../vite/bin/vite.js` — and re-typing that is neither what the user ran
+ * nor, for a launcher that compiles first, the same thing at all. Starting from
+ * the terminal, the first match is the child of the shell: `npm run dev`, which
+ * is what was typed and what to type again.
+ */
+export function findDevUnder(
+  rootPid: number,
+  table: Map<number, ProcInfo>,
+  children: Map<number, ProcInfo[]>,
+): DevProc | null {
+  const root = table.get(rootPid);
+  if (!root) return null;
+  let visited = 0;
+  let frontier: ProcInfo[] = [root];
+  for (let depth = 0; depth <= MAX_DEPTH && frontier.length > 0; depth++) {
+    const next: ProcInfo[] = [];
+    for (const proc of frontier) {
+      if (++visited > MAX_VISITED) return null;
+      const program = matchDevCommand(proc.args);
+      // The pty's own shell cannot be the server (depth 0 is `zsh -l`), but a
+      // tab opened with a command runs it directly, so depth is not filtered.
+      if (program) return { program, pid: proc.pid, command: proc.args.slice(0, 200), depth };
+      const kids = children.get(proc.pid);
+      if (kids) next.push(...kids);
+    }
+    frontier = next;
+  }
+  return null;
+}
+
+/**
+ * One pass over every terminal: `roots` maps agent id → the pid its pty is
+ * running. Terminals with nothing serving in them are absent.
+ */
+export function findDevServers(
+  roots: Iterable<[string, number]>,
+  table: Map<number, ProcInfo>,
+): Map<string, DevProc> {
+  const out = new Map<string, DevProc>();
+  if (table.size === 0) return out;
+  const children = childIndex(table);
+  for (const [agentId, pid] of roots) {
+    const dev = findDevUnder(pid, table, children);
+    if (dev) out.set(agentId, dev);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Stopping one
+// ---------------------------------------------------------------------------
+
+/** How long to wait for an interrupt to be honoured before escalating. */
+const STOP_LADDER: ReadonlyArray<{ after: number; signal: "SIGTERM" | "SIGKILL" }> = [
+  { after: 3000, signal: "SIGTERM" },
+  { after: 6000, signal: "SIGKILL" },
+];
+/** After this the server has won and we stop waiting for it to die. */
+const STOP_TIMEOUT_MS = 8000;
+/** How often the pid is checked in between. */
+const STOP_CHECK_MS = 100;
+
+/** Still there? `signal 0` asks the kernel without sending anything. */
+function alive(pid: number): boolean {
+  if (pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The targeted form of ^C: the dev server and everything it spawned, and
+ * nothing above it.
+ *
+ * Deliberately *not* the process group, which is the one thing teardown
+ * elsewhere in kururu always signals. The group here is the pty's, and the pty's
+ * leader is the shell — killing the group would close the tab the restart is
+ * about to type into. So the tree is collected from the same `ps` the scan runs
+ * on and each member is signalled by pid.
+ */
+async function signalTree(pid: number, signal: "SIGINT" | "SIGTERM" | "SIGKILL"): Promise<void> {
+  const table = parseProcTable(await run(["ps", "-eo", "pid=,ppid=,args="]));
+  const children = childIndex(table);
+  const tree: number[] = [];
+  const walk = (at: number, depth: number): void => {
+    if (depth > MAX_DEPTH || tree.length > MAX_VISITED) return;
+    tree.push(at);
+    for (const kid of children.get(at) ?? []) walk(kid.pid, depth + 1);
+  };
+  if (table.has(pid)) walk(pid, 0);
+  else tree.push(pid);
+  for (const target of tree) {
+    try {
+      process.kill(target, signal);
+    } catch {
+      // Gone between the ps and here, or never ours to signal.
+    }
+  }
+}
+
+/**
+ * Stop a dev server, and resolve once it is really gone.
+ *
+ * The wait is the point: a restart that re-typed its command the instant it sent
+ * SIGINT would be typing at a program that is still shutting down, and the line
+ * would land in whatever the old server printed on its way out. Escalating is
+ * for the ones that trap the interrupt and take their time about it; after
+ * `STOP_TIMEOUT_MS` it has won and the caller is told anyway, because a button
+ * that never comes back is worse than one that gives up.
+ */
+export async function stopDev(pid: number): Promise<void> {
+  if (!alive(pid)) return;
+  void signalTree(pid, "SIGINT");
+  const started = Date.now();
+  let escalated = 0;
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, STOP_CHECK_MS));
+    if (!alive(pid)) return;
+    const waited = Date.now() - started;
+    if (waited >= STOP_TIMEOUT_MS) return;
+    while (escalated < STOP_LADDER.length && waited >= STOP_LADDER[escalated]!.after) {
+      void signalTree(pid, STOP_LADDER[escalated]!.signal);
+      escalated++;
+    }
+  }
+}
+
 /**
  * `ps -eo args` over a busy machine runs to a few hundred KB and lsof is no
  * smaller, so the default 1 MB ceiling is not the headroom it looks like:
@@ -197,17 +376,28 @@ function run(cmd: string[]): Promise<string> {
   });
 }
 
+/** The two answers one scan produces. See the note at the top of the file. */
+export interface DevScan {
+  /** Everything listening on this machine, whoever started it. For previews. */
+  servers: DevServer[];
+  /** The ones inside a terminal kururu owns, by agent id. For the workspace row. */
+  running: Map<string, DevProc>;
+}
+
 /**
- * Every dev server listening right now, lowest port first. Ports are what the
- * user recognises ("the one on 5173"), so that is the sort.
+ * Every dev server listening right now, lowest port first — ports are what the
+ * user recognises ("the one on 5173"), so that is the sort — and, from the same
+ * `ps`, the ones running inside the terminals named by `roots` (agent id → the
+ * pid its pty is on).
  */
-export async function scanDevServers(): Promise<DevServer[]> {
+export async function scanDevServers(roots: Iterable<[string, number]> = []): Promise<DevScan> {
   const [lsofOut, psOut] = await Promise.all([
     run(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pn"]),
     run(["ps", "-eo", "pid=,ppid=,args="]),
   ]);
   const listeners = parseListeners(lsofOut);
   const table = parseProcTable(psOut);
+  const running = findDevServers(roots, table);
 
   const found: DevServer[] = [];
   for (const [pid, ports] of listeners) {
@@ -227,5 +417,5 @@ export async function scanDevServers(): Promise<DevServer[]> {
     }),
   );
 
-  return found.sort((a, b) => a.port - b.port);
+  return { servers: found.sort((a, b) => a.port - b.port), running };
 }
