@@ -231,25 +231,36 @@ server, allocated on demand).
   it with a ring buffer of raw bytes: trimming those to a budget cuts a sequence
   in half, and a cut sequence swallows everything after it until something
   resynchronises.
-- **Every emulator asks for its own history when it is built.** `subscribeOutput`
-  sends `request-backlog`, and that is *not* the same question `watch` answers.
-  Watching is about which terminals are on screen; a rebuilt emulator is a
-  different event, and a terminal can be on screen the whole time and still be
-  drawn by something that has just been created empty. Dragging a tab into
-  another pane is the case that survives even now that panes do not rebuild.
+- **A backlog is asked for at a size, and only an emulator can ask.** This is the
+  one that took the longest to see. A backlog is the server's screen *serialized*,
+  and a serialized screen is laid out at a width: reconstruct it into a grid of
+  any other one and every row longer than the target wraps, the rows below slide
+  down, and the top scrolls away. The client and the server then disagree about
+  where everything is — permanently, because an agent redraws differentially and
+  will never resend a row it believes is already correct. It was the borked text
+  on a workspace switch and the cwd sitting inside an agent's input box, and
+  those were the same bug.
+  So the grid travels **on** `request-backlog`, `index.ts` resizes the screen
+  before serializing, and the answer names the shape it used so the emulator can
+  become it before writing. `watch` deliberately produces no backlog at all: it
+  is a set of ids, it cannot carry a size, and answering it meant sending a
+  reconstruction before the emulator that would receive it had even been laid
+  out. Watching is the tap; rebuilding is the emulator's own question, and only a
+  fresh pane, a tab switch or a reconnect asks it. `server/test/screen.test.ts`
+  holds the invariant: serialize, rebuild, compare the buffers.
 - **The pty is told about a resize only once the box stops moving** (60ms in
   `Terminal.tsx`). The emulator follows immediately; the pty does not, because
   every resize is a SIGWINCH and every agent TUI repaints completely on one.
   Without the debounce, dragging a divider or sliding a pane repaints the program
   on every frame of it.
-- **A mounting pane asks twice, and the second ask must not discard the first.**
-  It sends `watch` (the set on screen changed) *and* `request-backlog` (its
-  emulator was built empty) — two different questions that both open the output
-  queue. Replacing that queue on the second one silently drops whatever the pty
-  said in between, and those bytes never arrive: the client's emulator is then
-  permanently missing a piece the server's copy has, which shows up as rows that
-  stay wrong until something forces a full repaint. `openQueue` in `index.ts` is
-  the guard, and it is one line because that is all it takes to get wrong.
+- **Two rebuilds can overlap, and the first to finish must not release the
+  second's hold.** Flick between two tabs fast enough and the second emulator
+  asks before the first one's answer has been serialized. `awaiting` in
+  `index.ts` therefore counts rebuilds rather than flagging them: letting the
+  earlier one lift the hold sends live output ahead of the later screen, which
+  wipes it on arrival, and those bytes never come again — the client's emulator
+  is then permanently missing a piece the server's copy has. The hold lifts when
+  the last rebuild is done.
 - **A backlog has to be *painted* again, not just written.** xterm repaints the
   rows it knows changed, and after a `reset` plus a reconstruction its idea of
   what changed does not cover cells the renderer is still holding. The buffer is
@@ -260,12 +271,14 @@ server, allocated on demand).
   once the data has actually been parsed. Symptom when this is missing: content
   from before the agent started, sitting inside its UI, until a window resize
   forces a full repaint.
-- **A backlog is never dropped for want of an emulator.** The server sends one
-  because a terminal came on screen; the component that draws it subscribes a
-  frame or two later, once its box has a size. Those are two different clocks and
-  the gap is real, so `session.ts` holds a backlog that arrives early and hands
-  it to the next sink rather than discarding it — discarding leaves the emulator
-  with nothing but the agent's next partial redraw, which is a screen with holes.
+- **A backlog goes to the emulator that asked for it, and to no other.** It used
+  to arrive unbidden and could land before any emulator had subscribed, so
+  `session.ts` held one for whatever sink appeared next. Nothing sends one
+  unasked now, so the asker is always already there — and the `epoch` on the
+  request comes back on the answer, because "the one that asked" has to be a fact
+  rather than a hope. An emulator rebuilt while its predecessor's answer was
+  still in flight must not be reset by that answer: it is a screen laid out for a
+  box that no longer exists.
 - **Backlog then output, in that order, per client.** A client that has just
   opened a pane clears its emulator and writes the history, so live output that
   overtakes the backlog is wiped. `index.ts` holds that terminal's output in the
@@ -327,8 +340,13 @@ server, allocated on demand).
   distinguishes "waiting for you" from "thinking". It arrives only via
   `POST /api/report`, and one report disables the heuristic for that agent
   permanently — a process that knows its own state beats a guess forever after.
-- **An exited agent stays listed.** Its screen is the only record of what it
-  said, including whatever it printed on the way out. `kill-agent` is what
+- **An exited agent stays listed, and its screen still reflows.** That screen is
+  the only record of what it said, including whatever it printed on the way out —
+  and the record is handed out by being serialized at the emulator's current
+  width, so a dead terminal that refused to resize would give every pane that
+  opened it a screen laid out for the box it died in. `host.resize` therefore
+  skips only the pty half once `exited` is set. The buffer is frozen, not
+  immutable; there is simply no SIGWINCH to send about it. `kill-agent` is what
   removes it; that is the dismiss gesture. Closing a *pane* never kills anything
   — the two gestures are not undoable to the same degree, so they are not the
   same button.

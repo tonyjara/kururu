@@ -267,15 +267,34 @@ export class AgentHost {
    * a terminal can be on screen in more than one pane, so this is last-writer-
    * wins; the alternative is picking a winner, and the pane that just changed
    * size is the one the user is looking at.
+   *
+   * An exited agent still resizes, and only the pty half is skipped. Its screen
+   * is the sole record of what it said, and that record is handed out by being
+   * serialized at the emulator's current width — so a dead terminal that refused
+   * to reflow would hand every pane that opened it a screen laid out for the box
+   * it died in. The buffer is frozen, not immutable: reflowing it is exactly
+   * what a live one does when its pane changes shape, and there is no SIGWINCH
+   * to send about it.
    */
   resize(id: string, cols: number, rows: number): void {
     const agent = this.agents.get(id);
-    if (!agent || agent.exited) return;
+    if (!agent) return;
+    /**
+     * Integers first, and the order matters more than it looks. Every comparison
+     * against a non-number is false, so `undefined` walks straight through the
+     * bounds check below — and lands in the emulator, whose public `resize`
+     * throws on anything that is not an integer. That throw comes out of a
+     * message handler in the process that owns every pty, and this process
+     * dying is the most expensive failure kururu has. A size that is not a size
+     * is therefore not a resize: the pane that sent it will send another one.
+     */
+    if (!Number.isInteger(cols) || !Number.isInteger(rows)) return;
     // A zero here is a pane that has not been laid out yet, and SIGWINCH with a
     // zero column count makes a curses app draw nothing at all.
     if (cols < 2 || rows < 2) return;
     if (cols === agent.screen.cols && rows === agent.screen.rows) return;
     agent.screen.resize(cols, rows);
+    if (agent.exited) return;
     try {
       agent.pty.resize(cols, rows);
     } catch {

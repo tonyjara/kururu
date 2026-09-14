@@ -470,41 +470,44 @@ kbd {
   border: 1px solid currentColor;
 }
 
-/* The mascot strip, dragged past the box above one frame at a time. Its width
-   and its `steps()` are set per element in Status.tsx, because both come from
-   the sprite the user is actually running and this file has never seen it.
-
-   The element is exactly as wide as the strip needs to be — one box per frame —
-   so `100% 100%` scales the sprite to put one frame in the box, whatever size
-   its frames were drawn at. `pixelated` because the built-in mascot is pixel art
-   and the browser's default smoothing turns a 21px frog into a smudge. */
+/* The mascot: a row of sheet cells, slid past the box above one cell per step.
+   Where those cells are and how big they are is set per element in Status.tsx,
+   because all of it comes from the selection the user made and this file has
+   never seen it. `pixelated` because the sheets are pixel art and the browser's
+   default smoothing turns a 21px frog into a smudge. */
 .mascot {
   position: absolute;
   top: 0;
   left: 0;
-  height: 100%;
   background-repeat: no-repeat;
-  background-size: 100% 100%;
   image-rendering: pixelated;
   animation-name: hop;
   animation-iteration-count: infinite;
 }
 
-/* Translating the strip by its own width lands each step exactly one frame on,
-   whatever the frame count — which is the reason this is a transform rather
-   than a background-position: the arithmetic stays true without this file
-   knowing how many frames there are. */
+/* Sliding the strip by its own width lands each step exactly one cell on,
+   whatever the count — which is why this is a transform and not a stepped
+   background-position: the arithmetic stays true without the stylesheet knowing
+   how many frames there are or where in the sheet they start. */
 @keyframes hop {
   to {
     transform: translateX(-100%);
   }
 }
 
-/* Held on the first frame rather than hidden: the mascot is still what says
-   "working", and it says it standing still. */
+/* Motion is a setting, not a media query, and `always` is the default — see
+   `MascotConfig.motion`. A 16px status indicator is in the class of a spinner
+   rather than the sliding parallax `prefers-reduced-motion` exists to stop, and
+   frozen on one frame it says exactly as much as the dot it replaced: nothing.
+   So the preference is offered in Settings rather than obeyed silently, which is
+   also the only way a machine with Reduce Motion switched on system-wide can
+   have this feature at all. */
+.mascot-never {
+  animation-name: none;
+}
 @media (prefers-reduced-motion: reduce) {
-  .mascot {
-    animation: none;
+  .mascot-system {
+    animation-name: none;
   }
 }
 
@@ -539,12 +542,25 @@ kbd {
 
 .sidebar-foot {
   border-top: 1px solid var(--line);
-  padding: 8px;
+  padding: 6px 8px;
+  display: flex;
+  justify-content: flex-end;
 }
 
-.sidebar-start {
+/* The one icon in the app, and deliberately quiet: settings is a place you go
+   once and then forget, so it sits at the dim end until you look for it. */
+.cog {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  color: var(--dimmer);
+}
+.cog:hover {
+  color: var(--text);
+  background: var(--chrome-high);
 }
 
 .button {
@@ -1237,4 +1253,146 @@ kbd {
   margin: 0;
   padding: 2px 0;
   color: var(--dim);
+}
+
+/* --------------------------------------------------------------------------
+   Settings
+   -------------------------------------------------------------------------- */
+
+/* Wider than a prompt because the sheet picker is a picture at integer zoom and
+   a sheet is 256px across before it is doubled — shrinking it to fit a 440px
+   dialog would put the pixels at a fractional scale, which is exactly what the
+   picker exists to avoid. It scrolls rather than growing past the window: a
+   custom sheet can be any size at all. */
+.dialog-wide {
+  width: min(680px, 94vw);
+  max-height: 72vh;
+  overflow-y: auto;
+}
+
+.set-section {
+  margin-top: 10px;
+}
+
+.set-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.set-note {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dim);
+}
+
+/* A row of controls that reads left to right, wrapping rather than overflowing
+   so the dialog survives a phone. */
+.set-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.set-label {
+  font-size: 11px;
+  color: var(--dim);
+  min-width: 44px;
+}
+
+.set-select,
+.set-num {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 7px;
+  font: 12px var(--mono);
+  outline: none;
+}
+.set-select:focus,
+.set-num:focus {
+  border-color: #33413a;
+}
+.set-num {
+  width: 68px;
+}
+
+.set-range {
+  flex: 1;
+  min-width: 140px;
+  accent-color: var(--accent);
+}
+
+/* Three buttons where a radio group would be, because the choice is small and
+   always visible, and a select would hide two thirds of it behind a click. */
+.set-choice {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--chrome-high);
+  color: var(--dim);
+  font-size: 11px;
+}
+.set-choice-on {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.set-hint {
+  margin: 6px 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+.set-hint code {
+  font-family: var(--mono);
+  color: var(--text);
+}
+
+/* The sheet scrolls inside its own box rather than stretching the dialog: it is
+   drawn at whatever size the image is, times an integer, and a user's own sheet
+   has no size limit at all. */
+.sheet-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  padding: 8px;
+  max-height: 46vh;
+}
+
+/* The grid is two repeating-linear-gradients over the sheet rather than a cell
+   per div — a 16x16 sheet is 256 elements that exist only to be looked through.
+   `--cell` is set per element in Settings.tsx, because the cell size is the
+   thing being chosen. */
+.sheet {
+  position: relative;
+  image-rendering: pixelated;
+  background-repeat: no-repeat;
+  touch-action: none;
+  cursor: crosshair;
+}
+.sheet::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(to right, rgba(127, 214, 162, 0.22) 0 1px, transparent 1px var(--cell)),
+    repeating-linear-gradient(to bottom, rgba(127, 214, 162, 0.22) 0 1px, transparent 1px var(--cell));
+  pointer-events: none;
+}
+
+/* Outlined rather than tinted: a wash over pixel art hides the frame you are
+   trying to read, and reading it is the entire point of the picker. */
+.sheet-sel {
+  position: absolute;
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
 }

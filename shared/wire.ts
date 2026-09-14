@@ -17,7 +17,9 @@
  *    once and all of them want their bytes.
  *  - A terminal that has just been opened needs the history it missed, which is
  *    `backlog` — reconstructed by the emulator the server keeps beside each pty,
- *    not a replay of raw bytes that may have been cut mid-sequence.
+ *    not a replay of raw bytes that may have been cut mid-sequence. A
+ *    reconstruction is laid out at a width, so asking for one and saying how
+ *    wide you are is a single message and the answer names the grid it used.
  *  - `input` carries no id and gets no reply. It is a keystroke; a round trip
  *    per keypress to learn what the snapshot already says is not worth having.
  *
@@ -30,7 +32,7 @@
  * would explain, so it alone carries an `id` and is answered with `reply`.
  */
 import type { Direction } from "./layout";
-import type { PtyKind, SessionSnapshot } from "./model";
+import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
 
 /** A dev server kururu found listening on this machine. */
 export interface DevServer {
@@ -60,10 +62,23 @@ export type ServerMessage =
   | { type: "output"; agentId: string; data: string }
   /**
    * Everything that terminal has said so far, as the escape sequences that
-   * rebuild it. Sent once when a client starts watching; the client clears its
-   * emulator and writes this before it writes any live output.
+   * rebuild it — and the grid it was serialized at, which is the point of
+   * sending it rather than leaving the client to assume.
+   *
+   * A serialized screen is laid out at a particular width. Written into a grid
+   * of a different one, every row longer than the target wraps, everything below
+   * shifts down, and the top of the screen scrolls away. What is left is a
+   * client whose buffer disagrees with the server's — and an agent redraws
+   * differentially, so it will never resend a row it believes is already right
+   * and the disagreement is permanent. `cols`/`rows` are therefore not advice:
+   * the client sizes its emulator to them before writing `data`, which is what
+   * makes the two grids identical by construction rather than by luck.
+   *
+   * `epoch` is the `request-backlog` this answers, so an emulator thrown away
+   * between the asking and the answering cannot have its replacement reset by a
+   * screen meant for its predecessor.
    */
-  | { type: "backlog"; agentId: string; data: string }
+  | { type: "backlog"; agentId: string; data: string; cols: number; rows: number; epoch: number }
   /** Answer to any client message carrying an `id`. */
   | { type: "reply"; id: number; ok: true; result: unknown }
   | { type: "reply"; id: number; ok: false; error: string };
@@ -116,16 +131,25 @@ export type ClientMessage =
    */
   | { type: "watch"; agentIds: string[] }
   /**
-   * Send this terminal's history again, please.
+   * Rebuild this terminal at this size. The only thing that produces a `backlog`.
    *
-   * `watch` already does that for a terminal that has *appeared*, and that is
-   * not the same question. A terminal can be on screen continuously and still
-   * need its history back, because the emulator drawing it was thrown away and
-   * rebuilt — dragging a tab into another pane does it, and so did dragging a
-   * pane until panes stopped being rebuilt on every rearrangement. The set of
-   * visible terminals never changed, so nothing else would have noticed.
+   * It carries the grid because a history and the shape it is laid out in are
+   * one question rather than two. They were two: the emulator asked for its
+   * history the instant it mounted and mentioned its size sixty milliseconds
+   * later on the resize debounce, so the server answered at whatever size the
+   * pane that last drew this terminal happened to be. Switching workspace is
+   * where that was reliably wrong, a different workspace being a different pane
+   * geometry, and the reconstruction arrived wrapped for a width nobody was
+   * drawing at.
+   *
+   * `watch` deliberately no longer does this. It says which terminals are on
+   * screen, and a set of ids cannot carry a size — asking there is how a
+   * wrong-sized screen got painted before the emulator that would receive it
+   * even existed. Watching is about streaming; this is about rebuilding, and
+   * only an emulator that has just been built knows it needs it. A fresh pane, a
+   * tab switch and a reconnect are the three ways that happens.
    */
-  | { type: "request-backlog"; agentId: string }
+  | { type: "request-backlog"; agentId: string; cols: number; rows: number; epoch: number }
 
   // --- panes ---------------------------------------------------------------
   | { type: "split"; dir: "row" | "col"; paneId?: string }
@@ -183,7 +207,16 @@ export type ClientMessage =
   | { type: "restart-server" }
 
   /** Open a proxy for this dev server so a phone can reach it. */
-  | { type: "open-preview"; port: number };
+  | { type: "open-preview"; port: number }
+
+  /**
+   * Change what the working badge animates. A verb like everything else here:
+   * Settings does not hold a config and post it back, it says *this is the
+   * selection now* and reads the snapshot that follows. Which is what lets a
+   * second window — or a phone — see the change without being told separately,
+   * and what makes the file on disk worth writing.
+   */
+  | { type: "set-mascot"; mascot: MascotConfig };
 
 /**
  * How often the status heuristic is asked to notice that work has stopped.

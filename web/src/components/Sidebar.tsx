@@ -23,7 +23,13 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { panes } from "../../../shared/layout";
-import type { AgentSnapshot, ContextUsage, Profile, WorkspaceColor } from "../../../shared/model";
+import type {
+  AgentSnapshot,
+  ContextUsage,
+  MascotConfig,
+  Profile,
+  WorkspaceColor,
+} from "../../../shared/model";
 import { WORKSPACE_COLORS } from "../../../shared/model";
 import { COLOR_VALUES, colorValue } from "../colors";
 import { AGENT_MIME, WORKSPACE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
@@ -37,6 +43,8 @@ interface Props {
   profile: Profile;
   agents: AgentSnapshot[];
   connected: boolean;
+  /** What the working badge animates; drawn here, owned by the server. */
+  mascot: MascotConfig;
   /**
    * The terminal the keyboard is pointed at, or null when the focused pane is
    * empty. Marked rather than merely listed: a sidebar of six agents otherwise
@@ -57,16 +65,20 @@ interface Props {
    * swallow the next letter as a command.
    */
   onEditing: (editing: boolean) => void;
+  /** Opens the settings dialog. The corner is the only way in. */
+  onSettings: () => void;
 }
 
 export function Sidebar({
   profile,
   agents,
   connected,
+  mascot,
   focusedAgentId,
   onRun,
   onDeleteWorkspace,
   onEditing,
+  onSettings,
 }: Props) {
   const dragging = useDragging();
   /** The workspace row a drop would land on, while something is over it. */
@@ -297,7 +309,7 @@ export function Sidebar({
                   {/* What it is and where it lives. The two things you need to
                       find it again, and nothing that changes while you read. */}
                   <span className="agent-top">
-                    <Status agent={agent} />
+                    <Status agent={agent} mascot={mascot} />
                     <span className="agent-name">{agentLabel(agent)}</span>
                     {agent.unread && <span className="unread" aria-label="new output" />}
                     <span className="agent-ws">{at ? at.workspace : "—"}</span>
@@ -332,15 +344,14 @@ export function Sidebar({
         </ul>
       </section>
 
+      {/* A new terminal used to be a button down here and is not one any more:
+          the tab strip's `+` is in the place you are already looking when you
+          want another tab, and C-a T and ⌘T are how it actually gets opened.
+          What the corner is for instead is the thing with no other door. */}
       <div className="sidebar-foot">
-        <div className="sidebar-start">
-          {/* One button, because there is one thing to open. Starting an agent
-              used to be its own button; it is a terminal with `claude` typed
-              into it, and the tab says so either way. */}
-          <button className="button" onClick={() => onRun("new-tab")} disabled={!connected}>
-            New terminal
-          </button>
-        </div>
+        <button className="cog" onClick={onSettings} title="Settings" aria-label="Settings">
+          <CogIcon />
+        </button>
       </div>
 
       {menu && menuWorkspace && (
@@ -486,4 +497,18 @@ function ContextRing({ usage }: { usage: ContextUsage }) {
 /** `189377` → `189k`. A token count is a magnitude, never an exact figure. */
 function format(tokens: number): string {
   return tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : String(tokens);
+}
+
+/**
+ * A cog, drawn rather than imported: it is the only icon in the whole app, and a
+ * dependency for one of them would be a dependency for one of them.
+ */
+function CogIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
 }

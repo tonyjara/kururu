@@ -129,6 +129,123 @@ export interface AgentSnapshot {
 }
 
 /**
+ * Which part of which sprite sheet the mascot is, and how fast it goes.
+ *
+ * The mascot started as a pre-cut strip, on the theory that "a horizontal strip
+ * of square frames" is a contract that needs no manifest because a strip states
+ * its own frame count. That was true and still is — a strip is just a sheet with
+ * one row in it — but it put the interesting decision outside the app: picking
+ * an animation meant running a script over a sheet and dropping the result in a
+ * directory. The sheets themselves already hold six animations across eight
+ * facings, so the thing worth choosing was never the file, it was the *part*.
+ *
+ * So the config is a rectangle of cells: a sheet, a grid size, and where in it
+ * to start and how far to run. Settings is the authoring tool, which is also why
+ * the cutting script it replaced is gone.
+ */
+export interface MascotConfig {
+  /**
+   * A sheet in `assets/spritesheets`, by name, or `custom` for whatever the user
+   * left at `~/.config/kururu/mascot.png`. Never a path: this arrives from a
+   * client, and kururu is reachable from the tailnet.
+   */
+  sheet: string;
+  /** The sheet's grid. One cell is this many pixels, square. */
+  frame: number;
+  /** The row, and the run of cells along it, that make up the animation. */
+  row: number;
+  col: number;
+  count: number;
+  /** One full loop, in milliseconds — not a frame rate; see `CYCLE` below. */
+  cycle: number;
+  /**
+   * The square inside a cell actually worth drawing, in sheet pixels.
+   *
+   * It has to be one box for every frame rather than each frame's own bounding
+   * box, because where the sprite sits *in* its cell is how a sheet draws a
+   * jump: trimming each frame to its own content would land every one of them on
+   * the floor and throw the animation away. Square, so the badge is square and
+   * the frame count stays the only thing that varies.
+   */
+  trim: { x: number; y: number; size: number };
+  /**
+   * Whether it moves. `system` follows `prefers-reduced-motion`, which is the
+   * polite default everywhere else and the wrong one here: this is a 16px
+   * functional indicator in the class of a spinner, not the kind of sliding
+   * parallax that preference exists to stop, and frozen on one frame it says
+   * exactly as much as the dot it replaced. So `always` is the default and the
+   * preference is offered rather than obeyed.
+   */
+  motion: MascotMotion;
+}
+
+export type MascotMotion = "always" | "system" | "never";
+
+export const MASCOT_MOTIONS: readonly MascotMotion[] = ["always", "system", "never"];
+
+/** The frog, mid-jump, three-quarter facing: row 1, columns 7-10 of the sheets. */
+export const DEFAULT_MASCOT: MascotConfig = {
+  sheet: "green",
+  frame: 32,
+  row: 1,
+  col: 7,
+  count: 4,
+  cycle: 720,
+  trim: { x: 5, y: 11, size: 21 },
+  motion: "always",
+};
+
+/** A sheet name is a name, never a path — same rule as a workspace colour. */
+export function isSheetName(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9-]{0,63}$/.test(value);
+}
+
+/**
+ * Read a mascot config out of whatever arrived — a client message, or a JSON
+ * file written by a version of kururu that did not have half these fields.
+ *
+ * Every number is clamped rather than refused, because a selection that runs one
+ * cell off the edge of a sheet is a slider gone too far, not an attack, and the
+ * sensible answer is the nearest legal selection. `sheet` is the exception and is
+ * refused outright, falling back to the default: it names a file, and a name
+ * that is not a name has no nearest legal value. Whether the sheet actually
+ * *exists* is not decided here — that is the server's, since only it can look.
+ */
+export function adoptMascot(value: unknown): MascotConfig {
+  const raw = (value ?? {}) as Partial<Record<keyof MascotConfig, unknown>>;
+  const frame = clamp(raw.frame, 1, 512, DEFAULT_MASCOT.frame);
+  const trim = (raw.trim ?? {}) as Record<string, unknown>;
+  const size = clamp(trim.size, 1, frame, Math.min(frame, DEFAULT_MASCOT.trim.size));
+  return {
+    sheet: isSheetName(raw.sheet) ? raw.sheet : DEFAULT_MASCOT.sheet,
+    frame,
+    row: clamp(raw.row, 0, 4096, DEFAULT_MASCOT.row),
+    col: clamp(raw.col, 0, 4096, DEFAULT_MASCOT.col),
+    count: clamp(raw.count, 1, 64, DEFAULT_MASCOT.count),
+    cycle: clamp(raw.cycle, 80, 10000, DEFAULT_MASCOT.cycle),
+    trim: {
+      // The default's own box is the fallback, not zero: a config written before
+      // the trim existed is the frog, and the top-left corner of its cell is
+      // empty sky. `clamp` bounds the fallback too, so a smaller cell than the
+      // default's still lands somewhere inside itself.
+      x: clamp(trim.x, 0, frame - size, DEFAULT_MASCOT.trim.x),
+      y: clamp(trim.y, 0, frame - size, DEFAULT_MASCOT.trim.y),
+      size,
+    },
+    motion: isMascotMotion(raw.motion) ? raw.motion : DEFAULT_MASCOT.motion,
+  };
+}
+
+function isMascotMotion(value: unknown): value is MascotMotion {
+  return typeof value === "string" && (MASCOT_MOTIONS as readonly string[]).includes(value);
+}
+
+function clamp(value: unknown, low: number, high: number, fallback: number): number {
+  const n = typeof value === "number" && Number.isFinite(value) ? Math.round(value) : fallback;
+  return Math.max(low, Math.min(high, n));
+}
+
+/**
  * The colours a workspace can be tagged with.
  *
  * Names rather than CSS values, and the server only ever accepts one of these.
@@ -211,6 +328,13 @@ export interface SessionSnapshot {
   profiles: ProfileSummary[];
   /** Every agent in the active profile, in creation order. */
   agents: AgentSnapshot[];
+  /**
+   * What the working badge is animating. In the snapshot rather than behind its
+   * own fetch because it is a thing the client cannot draw a row without, it
+   * changes while the window is open (Settings is a second client writing it),
+   * and it is forty bytes beside a list of agents.
+   */
+  mascot: MascotConfig;
 }
 
 /** What an agent (or a Claude Code hook) may tell kururu about itself. */

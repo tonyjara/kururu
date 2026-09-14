@@ -26,6 +26,7 @@ import {
 import { Dialog, type DialogState } from "./components/Dialog";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Panes } from "./components/Panes";
+import { Settings } from "./components/Settings";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import {
@@ -55,6 +56,13 @@ export function App() {
   const [resizeMode, setResizeMode] = useState(false);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [help, setHelp] = useState(false);
+  /**
+   * Settings. A view state like the help overlay rather than anything the server
+   * knows about — what it *edits* is the server's, but whether it is open is
+   * this window's, and a phone should not be dragged into a picker because the
+   * desktop opened one.
+   */
+  const [settings, setSettings] = useState(false);
   /**
    * Something in the chrome is taking typing — renaming a workspace in the
    * sidebar. Modal over the keyboard for the same reason a dialog is: ctrl+a is
@@ -312,7 +320,21 @@ export function App() {
       // A dialog is modal over everything, including the prefix: while one is
       // open every key is text or an answer, and the component owns them. A name
       // being typed in the sidebar is the same case at a smaller scale.
-      if (dialog || editing) return;
+      if (dialog || editing || settings) return;
+
+      /**
+       * Settings is modal over the keyboard for the same reason a dialog is —
+       * it is full of fields, and ctrl+a in one of them is select-all. Escape is
+       * taken because the scrim and the Done button are pointer gestures and a
+       * keyboard needs a way out too.
+       */
+      if (settings) {
+        if (keyName(event) === "escape") {
+          take();
+          setSettings(false);
+        }
+        return;
+      }
 
       if (help) {
         if (isPrefix(event) || keyName(event) === "escape" || keyName(event) === "?") {
@@ -375,7 +397,7 @@ export function App() {
 
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [prefixArmed, resizeMode, dialog, editing, help, workspace, run, arm, disarm]);
+  }, [prefixArmed, resizeMode, dialog, editing, help, settings, workspace, run, arm, disarm]);
 
   /**
    * A file dropped anywhere that is not a terminal does nothing.
@@ -451,6 +473,7 @@ export function App() {
           profile={profile}
           agents={agents}
           connected={connected}
+          mascot={snapshot.mascot}
           /* The terminal the keyboard is pointed at. The sidebar marks it,
              because a list of six agents does not otherwise say which of them
              the next keystroke belongs to. */
@@ -458,6 +481,7 @@ export function App() {
           onRun={run}
           onDeleteWorkspace={confirmDeleteWorkspace}
           onEditing={setEditing}
+          onSettings={() => setSettings(true)}
         />
       )}
 
@@ -467,6 +491,7 @@ export function App() {
             node={workspace.layout}
             focusedPaneId={workspace.focusedPaneId}
             agents={agents}
+            mascot={snapshot.mascot}
             zen={zen}
           />
         </main>
@@ -481,6 +506,7 @@ export function App() {
       </div>
 
       {help && <HelpOverlay onClose={() => setHelp(false)} />}
+      {settings && <Settings mascot={snapshot.mascot} onClose={() => setSettings(false)} />}
       {dialog && <Dialog state={dialog} onClose={() => setDialog(null)} />}
     </div>
   );

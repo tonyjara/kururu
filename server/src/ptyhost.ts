@@ -217,9 +217,29 @@ export function createPtyHost(): PtyHost {
   return {
     attach(incoming: Port) {
       port = incoming;
-      incoming.on("message", (event) =>
-        handle((event && event.data !== undefined ? event.data : event) as ToHost),
-      );
+      /**
+       * Nothing arriving on this port may end the process.
+       *
+       * Everything carrying an `id` is already answered through `reply`, which
+       * turns a throw into a refusal the caller can see. The fire-and-forget
+       * verbs had no such floor, and they are messages from a process that is
+       * *meant* to be restarted freely — so a field that went missing across a
+       * protocol change, or an argument the emulator will not accept, arrived
+       * here as an uncaught exception and took every agent in this process with
+       * it. That is a disproportion nothing justifies: the server can be forked
+       * again in a second and a pty cannot be handed to anybody.
+       *
+       * Logged rather than swallowed, because the alternative failure — a verb
+       * that quietly does nothing — is the kind that is debugged by staring at
+       * a terminal wondering why it will not resize.
+       */
+      incoming.on("message", (event) => {
+        try {
+          handle((event && event.data !== undefined ? event.data : event) as ToHost);
+        } catch (err) {
+          console.error("kururu pty host: a message threw and was dropped", err);
+        }
+      });
       incoming.start?.();
     },
     liveCount: () => host.liveCount(),

@@ -31,7 +31,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
-import { countsAsAgent } from "../../shared/model";
+import { adoptMascot, countsAsAgent } from "../../shared/model";
 import type { AgentSnapshot, Profile, PtyKind, SessionSnapshot } from "../../shared/model";
 import type { ClientMessage, DevServer, ServerMessage } from "../../shared/wire";
 import { DEV_SCAN_MS, SAVE_DEBOUNCE_MS } from "../../shared/wire";
@@ -40,7 +40,7 @@ import { dump as dumpRecording, forget as forgetRecording, recordBacklog, record
 import { processCwd } from "./cwd";
 import { scanDevServers } from "./devservers";
 import { allowedRoots, allowRoot, listDir, readFile } from "./files";
-import { mascot } from "./mascot";
+import { customSheetPath, hasCustomSheet, readConfig, sheetImage, sheets, writeConfig } from "./mascot";
 import { HostLink, type Port } from "./hostlink";
 import { readSnapshot, writeSnapshot } from "./persist";
 import { closeAllPreviews, closePreview, openPreview, openPreviews } from "./proxy";
@@ -77,11 +77,19 @@ interface ClientState {
    * Opening a pane is two messages — the history, then everything after it — and
    * they must arrive in that order, because the client clears its emulator
    * before writing the history. Serializing the backlog takes a moment (the
-   * emulator's write queue has to drain first), and a flush can happen inside
-   * that moment. So output for a terminal in here queues rather than races, and
-   * is released the instant its backlog has gone out.
+   * emulator's write queue has to drain first, and the screen is resized to the
+   * asking pane before that), and a flush can happen inside that moment. So
+   * output for a terminal in here queues rather than races.
+   *
+   * `inflight` is a count rather than a flag because two rebuilds can overlap —
+   * flick between two tabs fast enough and the second emulator asks before the
+   * first one's answer has been serialized. Releasing the queue when the *first*
+   * finishes would let live output reach the client ahead of the second screen,
+   * which then wipes it on arrival: bytes the server has and the client never
+   * sees again. The hold therefore lifts when the last rebuild is done, not the
+   * first.
    */
-  awaiting: Map<string, string[]>;
+  awaiting: Map<string, { inflight: number; queued: string[] }>;
 }
 
 /**
@@ -146,6 +154,16 @@ function pushSnapshot(): void {
  * is on the profile's row in the switcher, which is the whole point of saying
  * that switching is not closing.
  */
+/**
+ * The mascot selection, read once at start and kept here.
+ *
+ * Held rather than re-read per snapshot because a snapshot goes out on every
+ * status change and this is a file: the read happens when it changes, which is
+ * when `set-mascot` arrives. A server restart re-reads it, which is also how a
+ * config edited by hand takes effect.
+ */
+let mascot = readConfig();
+
 function snapshot(): SessionSnapshot {
   // Every snapshot is also the moment we learn what is running where, because it
   // is the one function that is called whenever anything about an agent changes.
@@ -160,6 +178,7 @@ function snapshot(): SessionSnapshot {
     // below, and the fields themselves in `shared/model.ts`, for why they live
     // on this side of the link at all.
     agents: host.agents.filter((agent) => mine.has(agent.id)).map(overlay),
+    mascot,
   };
 }
 
@@ -380,8 +399,8 @@ function onOutput(agentId: string, data: string): void {
   recordOutput(agentId, data);
   for (const [ws, st] of clients) {
     if (!st.watching.has(agentId)) continue;
-    const queued = st.awaiting.get(agentId);
-    if (queued) queued.push(data);
+    const pending = st.awaiting.get(agentId);
+    if (pending) pending.queued.push(data);
     else send(ws, { type: "output", agentId, data });
   }
 }
@@ -389,44 +408,60 @@ function onOutput(agentId: string, data: string): void {
 /**
  * Start holding a terminal's live output, ready for its backlog to go out first.
  *
- * The guard is the whole function. A pane that has just appeared sends **two**
- * things — `watch`, because the set of terminals on screen changed, and
- * `request-backlog`, because its emulator was built empty — and they are
- * different questions that both end up here. Replacing the queue on the second
- * one throws away whatever the pty said between them, and those bytes are gone
- * for good: the client never receives them, so its emulator is missing a piece
- * that the server's copy has.
- *
- * Which is exactly the shape of a screen that is subtly, permanently wrong. The
- * rows the agent redraws come back correct and the rows it considers already
- * drawn keep whatever they had, until something forces a full repaint. It needs
- * output to land in that window to happen at all, which is why it is
- * intermittent, and why an idle agent never shows it.
+ * One rebuild, one hold; the count is what makes overlapping rebuilds safe. See
+ * `ClientState.awaiting` for why releasing on the first of them loses bytes.
  */
 function openQueue(st: ClientState, agentId: string): void {
-  if (!st.awaiting.has(agentId)) st.awaiting.set(agentId, []);
+  const pending = st.awaiting.get(agentId);
+  if (pending) pending.inflight++;
+  else st.awaiting.set(agentId, { inflight: 1, queued: [] });
 }
 
 /**
- * Hand a client the history of a terminal it has just opened, then let its live
- * output through. Everything after the `await` re-checks: a pane can be closed,
- * or the whole socket can go away, in the time it takes to serialize.
+ * Size the terminal to the pane that asked, then hand that pane the history.
+ *
+ * The resize comes first and that ordering is the whole fix. A backlog is the
+ * server's emulator *serialized*, and a serialized screen is laid out at a
+ * particular width: reconstructed into a grid of a different one it wraps, the
+ * rows below shift, and the top scrolls away. The client's buffer then disagrees
+ * with the server's about where everything is — permanently, because an agent
+ * redraws differentially and never resends a row it believes is already right.
+ * That was the borked text on a workspace switch and the cwd sitting inside an
+ * agent's input box, and both are the same disagreement.
+ *
+ * So the pane's grid arrives on the same message as the request, the screen is
+ * put into that shape before it is serialized, and the answer names the shape it
+ * used. The resize is not debounced here the way a live one is: this is not the
+ * box moving, it is a pane arriving, and it happens once.
+ *
+ * Everything after the `await` re-checks. A pane can close, or the whole socket
+ * go away, in the time it takes to drain the write queue and serialize.
  */
-async function sendBacklog(ws: WebSocket, agentId: string): Promise<void> {
+async function sendBacklog(
+  ws: WebSocket,
+  agentId: string,
+  cols: number,
+  rows: number,
+  epoch: number,
+): Promise<void> {
+  host.resize(agentId, cols, rows);
   const data = await host.backlog(agentId).catch(() => "");
   const st = clients.get(ws);
-  if (!st || !st.awaiting.has(agentId)) return;
-  if (st.watching.has(agentId)) {
+  const pending = st?.awaiting.get(agentId);
+  if (!st || !pending) return;
+  const watching = st.watching.has(agentId);
+  if (watching) {
     // The bytes, not just the size: a screen rebuilt wrongly can only be
     // explained by replaying exactly what rebuilt it.
-    recordNote(agentId, "backlog", `${data.length} bytes replayed into a rebuilt emulator`);
+    recordNote(agentId, "backlog", `${data.length} bytes rebuilt at ${cols}x${rows}`);
     recordBacklog(agentId, data);
-    send(ws, { type: "backlog", agentId, data });
-    for (const queued of st.awaiting.get(agentId) ?? []) {
-      send(ws, { type: "output", agentId, data: queued });
-    }
+    send(ws, { type: "backlog", agentId, data, cols, rows, epoch });
   }
+  // A later rebuild is still being prepared, so the hold stays on for it.
+  if (--pending.inflight > 0) return;
   st.awaiting.delete(agentId);
+  if (!watching) return;
+  for (const queued of pending.queued) send(ws, { type: "output", agentId, data: queued });
 }
 
 let lastDevJson = "";
@@ -554,21 +589,25 @@ function handleMessage(ws: WebSocket, raw: string): void {
       // A pane that closed while its backlog was in flight should not receive it.
       for (const id of [...st.awaiting.keys()]) if (!next.has(id)) st.awaiting.delete(id);
       syncWatched();
-      for (const id of opened) {
-        recordNote(id, "watch", "a client opened this terminal");
-        openQueue(st, id);
-        void sendBacklog(ws, id);
-      }
+      /**
+       * Streaming starts here and history does not. Watching says which
+       * terminals are on screen; it is a set of ids and it cannot say how wide
+       * any of them is, so answering it with a reconstruction meant serializing
+       * a screen at whatever width the pane that last drew this terminal
+       * happened to be. The emulator that is about to draw it asks for itself,
+       * and says what shape it is while asking.
+       */
+      for (const id of opened) recordNote(id, "watch", "a client opened this terminal");
       return;
     }
 
     case "request-backlog":
-      // Queue this terminal's live output behind the history, exactly as a
-      // fresh `watch` would: the client is about to clear its emulator. And by
-      // way of `openQueue`, never at the cost of a queue `watch` already
-      // started — a mounting pane sends both of these.
+      // Queue this terminal's live output behind the history: the client is
+      // about to clear its emulator, and anything that overtakes the answer
+      // would be wiped by it. `openQueue` counts rather than sets, so two
+      // rebuilds in flight at once do not release each other's hold.
       openQueue(st, msg.agentId);
-      void sendBacklog(ws, msg.agentId);
+      void sendBacklog(ws, msg.agentId, msg.cols, msg.rows, msg.epoch);
       return;
 
     // --- panes -------------------------------------------------------------
@@ -652,6 +691,18 @@ function handleMessage(ws: WebSocket, raw: string): void {
     case "set-workspace-color":
       workspaces.setWorkspaceColor(msg.workspaceId, msg.color);
       return;
+
+    /**
+     * The selection is adopted rather than trusted: it arrives from a client,
+     * and `adoptMascot` is what turns "a number somebody dragged too far" into
+     * the nearest legal one. A sheet that does not exist is refused there and
+     * falls back, so what gets written is always something that can be drawn.
+     */
+    case "set-mascot": {
+      mascot = adoptMascot(msg.mascot);
+      writeConfig(mascot);
+      return;
+    }
 
     case "delete-workspace":
       killAll(workspaces.deleteWorkspace(msg.workspaceId));
@@ -850,20 +901,38 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   }
 
   /**
-   * The mascot strip. One endpoint rather than a static file, because the point
-   * of it is that the user can replace it — `mascot.ts` looks for theirs and
-   * falls back to the built-in frog, and re-reads on every request so swapping
-   * the sprite costs a reload rather than a restart. `no-cache` for the same
-   * reason: it is a kilobyte, and a stale one would make the swap look ignored.
+   * One sprite sheet. `?sheet=` names it — Settings asks for each in turn to
+   * draw its picker — and without one you get whichever is currently selected,
+   * which is all a row drawing a badge ever needs to know.
+   *
+   * An endpoint rather than a static file because `custom` is a file outside the
+   * app entirely, and because the name has to be checked against the list rather
+   * than pasted into a path: this is reachable from the tailnet. `no-cache` so a
+   * user who overwrites their own sheet sees it after a reload rather than after
+   * a restart; the sheets that ship never change, and they are fifteen kilobytes.
    */
   if (url.pathname === "/api/mascot.png") {
-    const { body } = mascot();
+    const body = sheetImage(url.searchParams.get("sheet") ?? mascot.sheet);
+    if (!body) {
+      text(res, "no such sheet\n", 404);
+      return;
+    }
     res.writeHead(200, {
       "content-type": CONTENT_TYPES[".png"]!,
       "content-length": body.length,
       "cache-control": "no-cache",
     });
     res.end(body);
+    return;
+  }
+
+  /**
+   * What Settings may offer. Not in the snapshot: it is a catalogue, wanted once
+   * by one dialog, and putting it on every status change would be paying for it
+   * continuously to save one request nobody makes twice.
+   */
+  if (url.pathname === "/api/mascot/sheets") {
+    json(res, { sheets: sheets(), custom: hasCustomSheet(), customPath: customSheetPath() });
     return;
   }
 

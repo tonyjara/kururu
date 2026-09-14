@@ -11,35 +11,19 @@
  * So the working state is the mascot, and it hops. Movement across a shape is
  * read before colour and long before a tooltip — a row with something alive in
  * it is findable out of the corner of an eye, which is the actual job. What the
- * mascot *is* belongs to the user: `mascot.ts` here and `server/src/mascot.ts`
- * on the other side are the two halves of that, and neither this file nor the
- * stylesheet knows it is a frog.
+ * mascot *is* belongs to the user and lives in the snapshot; nothing in here or
+ * in the stylesheet knows it is a frog.
  *
  * This lives in a component rather than in two `<span>`s because the sprite is
  * structure now, not a class name, and the sidebar and the tab strip must not be
  * able to disagree about it — the same reason `labels.ts` exists for the words.
- * The box is a fixed size whatever is inside it, so a row does not shift
- * sideways when an agent starts working, and a mascot of any frame size is
- * scaled into that box rather than being allowed to set the height of a tab.
  */
 import type { CSSProperties } from "react";
-import type { AgentSnapshot } from "../../../shared/model";
+import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
 import { statusLabel } from "../labels";
-import { useMascot } from "../mascot";
+import { sheetUrl, useSheet } from "../mascot";
 
-/**
- * How long one full cycle of the mascot takes, however many frames it has.
- *
- * A fixed cycle rather than a fixed frame rate, so a replacement sprite keeps
- * the cadence the window was designed around instead of running at whatever
- * speed its frame count implies — a twelve-frame mascot at the frog's frame rate
- * would take two seconds to get round, which stops reading as "busy" and starts
- * reading as "stuck".
- */
-const CYCLE_MS = 720;
-
-export function Status({ agent }: { agent: AgentSnapshot }) {
-  const mascot = useMascot();
+export function Status({ agent, mascot }: { agent: AgentSnapshot; mascot: MascotConfig }) {
   /**
    * Exited is not an `AgentStatus` — it is a fact about the pty that outranks
    * whatever the heuristic last thought. Resolved here so both callers cannot
@@ -47,39 +31,60 @@ export function Status({ agent }: { agent: AgentSnapshot }) {
    */
   const state = agent.exited ? "exited" : agent.status;
   const label = statusLabel(agent);
-
-  /**
-   * The dot is the fallback as well as the mark for the other three states: a
-   * mascot that has not loaded, or cannot, leaves the row with something in it
-   * rather than a hole exactly where the state worth seeing would have been.
-   */
-  const showMascot = state === "working" && mascot !== null;
-
   return (
     <span className={`status status-${state}`} title={label} aria-label={label} role="img">
-      {showMascot ? (
-        <span
-          className="mascot"
-          style={
-            {
-              /**
-               * The strip is laid out at one box-width per frame and walked
-               * past the box by `@keyframes hop`, which translates it by its own
-               * width. `steps()` wants the frame count, and the count came from
-               * the image, so the animation is written here rather than in the
-               * stylesheet — it is the one part of this that a replacement
-               * sprite changes.
-               */
-              backgroundImage: `url(${mascot.src})`,
-              width: `calc(var(--status-size) * ${mascot.frames})`,
-              animationDuration: `${CYCLE_MS}ms`,
-              animationTimingFunction: `steps(${mascot.frames})`,
-            } as CSSProperties
-          }
-        />
-      ) : (
-        <span className="status-dot" />
-      )}
+      {state === "working" ? <Mascot config={mascot} /> : <span className="status-dot" />}
     </span>
+  );
+}
+
+/**
+ * One window onto a sprite sheet, walked sideways a cell at a time.
+ *
+ * The arithmetic is all ratios and no pixels, and that is deliberate: the badge
+ * is `--status-size` in the stylesheet, and a second copy of that number in here
+ * would be a thing to keep in step for no gain. Everything below is "how many
+ * badge-widths", multiplied back out by `calc` — so the whole geometry follows
+ * the box, and changing the box is one edit in one file.
+ *
+ * The element is a whole row of cells, `count` of them, each a full cell wide
+ * rather than a trimmed one — that is what makes a single translate land exactly
+ * on the next frame, since the gap between two frames in the sheet is a cell and
+ * not a crop. The box clips it to the trim; `@keyframes hop` slides it by its own
+ * width, so `steps(count)` puts each frame in the window in turn, whatever the
+ * count is. The alternative — stepping `background-position` — has to know where
+ * the strip started, and gets that wrong the moment a selection is not at the
+ * left edge of the sheet.
+ */
+export function Mascot({ config }: { config: MascotConfig }) {
+  const src = sheetUrl(config.sheet);
+  const sheet = useSheet(src);
+  /**
+   * The dot stands in until the sheet is known, and for good if it never is: a
+   * mascot that cannot be drawn must still leave the row with something in it,
+   * and a hole exactly where the state worth seeing would have been is the worst
+   * of the available outcomes.
+   */
+  if (!sheet) return <span className="status-dot" />;
+
+  const { frame, row, col, count, trim } = config;
+  /** One badge-width is one trim-width, so every ratio below is over that. */
+  const per = (n: number) => `calc(var(--status-size) * ${n / trim.size})`;
+
+  return (
+    <span
+      className={`mascot mascot-${config.motion}`}
+      style={
+        {
+          backgroundImage: `url(${src})`,
+          backgroundSize: `${per(sheet.width)} ${per(sheet.height)}`,
+          backgroundPosition: `${per(-(col * frame + trim.x))} ${per(-(row * frame + trim.y))}`,
+          width: per(count * frame),
+          height: per(frame),
+          animationDuration: `${config.cycle}ms`,
+          animationTimingFunction: `steps(${count})`,
+        } as CSSProperties
+      }
+    />
   );
 }
