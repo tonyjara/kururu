@@ -22,6 +22,7 @@
  */
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { Terminal } from "@xterm/headless";
+import { cleanTitle } from "../../../shared/model";
 
 /**
  * The grid a pty is born with, before any client has said how big its pane is.
@@ -55,6 +56,23 @@ export class Screen {
   private pending = 0;
   private drained: (() => void)[] = [];
 
+  /**
+   * What the program in this pty last called itself, cleaned. Kept here rather
+   * than in the host because the title arrives the same way everything else
+   * does — as an escape sequence in the stream — and this is the only thing in
+   * kururu that parses one. The host would otherwise have to sniff for OSC 2
+   * beside an emulator that is already doing it properly.
+   */
+  private titleText = "";
+
+  /**
+   * Called when that answer *changes*. Not on every OSC 2: an agent repaints its
+   * title constantly and almost all of those repeats are the spinner frame that
+   * `cleanTitle` takes off, so comparing here is what keeps a working agent from
+   * putting a snapshot on every socket ten times a second.
+   */
+  onTitle: (title: string) => void = () => {};
+
   constructor() {
     this.term = new Terminal({
       cols: COLS,
@@ -64,6 +82,17 @@ export class Screen {
     });
     this.serializer = new SerializeAddon();
     this.term.loadAddon(this.serializer);
+    this.term.onTitleChange((raw) => {
+      const title = cleanTitle(raw);
+      if (title === this.titleText) return;
+      this.titleText = title;
+      this.onTitle(title);
+    });
+  }
+
+  /** The program's own name for itself, or "" if it has never said. */
+  get title(): string {
+    return this.titleText;
   }
 
   write(data: string): void {

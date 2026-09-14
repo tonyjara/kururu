@@ -57,6 +57,44 @@ const THEME = {
 /** How long a pane has to stop changing size before the pty is told about it. */
 const RESIZE_SETTLE_MS = 60;
 
+/**
+ * Hand the GL context back, out loud, before the emulator that held it goes.
+ *
+ * This is the one that turned the whole window black. Disposing an xterm does
+ * not release the WebGL context behind it: neither the addon nor the core ever
+ * calls `loseContext`, so the context stays live until Chromium happens to
+ * garbage-collect the canvas, which can be minutes or never. A page gets about
+ * sixteen — and kururu builds a *fresh* emulator every time a tab is switched, a
+ * workspace is changed, a profile is swapped or a pane is rebuilt, which is
+ * dozens of times in an afternoon. The dead ones pile up holding contexts they
+ * will never draw with again.
+ *
+ * Past sixteen Chromium does not refuse the new one, it kills the **oldest** to
+ * make room, and the oldest is not one of the corpses — it is the pane you have
+ * had open longest. So the terminals that go dark are exactly the ones you were
+ * watching, all of them, within a few tab switches of each other: every visible
+ * pane blanks at once, stays blank for the three seconds the addon waits for a
+ * restore that is not coming, and then comes back on the DOM renderer slower
+ * than it left. That is the "screen went completely black" — not a crash, not
+ * the server, not the agents, which are a process away and never noticed.
+ *
+ * `WEBGL_lose_context` is the only way to say "done with this" rather than
+ * waiting to be collected. It has to run *before* `terminal.dispose()`, because
+ * that is what takes the canvas out of the DOM and the addon exposes no handle
+ * on the one it drew into — the host element is the only way back to it.
+ *
+ * Asking a canvas for a context it does not already have would create one, which
+ * is the opposite of the point; every canvas in here already has its own, and a
+ * 2D one (the texture atlas keeps those) answers `null` to a WebGL request
+ * rather than being converted. So this only ever finds contexts that exist.
+ */
+function releaseWebglContexts(element: HTMLElement): void {
+  for (const canvas of element.querySelectorAll("canvas")) {
+    const gl = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
+    gl?.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+}
+
 interface Props {
   agentId: string;
   /** Focused panes get the keyboard. Only one does. */
@@ -145,7 +183,21 @@ export function TerminalView({ agentId, focused }: Props) {
     let webgl: WebglAddon | null = null;
     try {
       webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl?.dispose());
+      /**
+       * Losing the context is survivable: disposing the addon is what hands the
+       * terminal back to the DOM renderer, which draws the same screen out of
+       * the same buffer, and the only cost is speed.
+       *
+       * The variable goes back to null with it, because what it means everywhere
+       * else in here — including the `catch` below — is "the live addon, or
+       * nothing". An addon whose renderer has been torn down is not the first of
+       * those, and leaving it sitting in there is how the next person to reach
+       * for it calls into a dead renderer.
+       */
+      webgl.onContextLoss(() => {
+        webgl?.dispose();
+        webgl = null;
+      });
       terminal.loadAddon(webgl);
     } catch {
       // DOM renderer it is.
@@ -234,7 +286,12 @@ export function TerminalView({ agentId, focused }: Props) {
             }
             terminal.reset();
             terminal.write(data, () => {
-              webgl?.clearTextureAtlas();
+              /**
+               * Through the terminal rather than the addon: it clears whichever
+               * renderer is actually drawing, and after a context loss that is
+               * no longer the one this pane started with.
+               */
+              terminal.clearTextureAtlas();
               terminal.refresh(0, terminal.rows - 1);
               /**
                * And back to the box, in the case where that was not already the
@@ -265,6 +322,8 @@ export function TerminalView({ agentId, focused }: Props) {
       typed.dispose();
       binary.dispose();
       observer.disconnect();
+      // Before the dispose, which is what removes the canvas this needs to find.
+      releaseWebglContexts(element);
       terminal.dispose();
       term.current = null;
     };

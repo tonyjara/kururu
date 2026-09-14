@@ -49,7 +49,7 @@ import {
 } from "../../../shared/layout";
 import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
 import { AGENT_MIME, PANE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
-import { agentLabel, shortenPath } from "../labels";
+import { shortenPath, tabLabel } from "../labels";
 import * as api from "../session";
 import { Status } from "./Status";
 import { TerminalView } from "./Terminal";
@@ -268,7 +268,10 @@ function Pane({
               <button
                 className={`tab ${index === pane.activeIdx ? "tab-on" : ""} ${agent.exited ? "tab-exited" : ""}`}
                 onClick={() => api.selectTab(pane.id, index)}
-                title={`${agent.command}\n${agent.cwd}`}
+                /* The label leads, because a tab is 180px wide and a summary an
+                   agent wrote is usually longer than that — the tooltip is the
+                   only place the whole sentence fits. */
+                title={[tabLabel(agent), agent.command, agent.cwd].join("\n")}
                 draggable
                 onDragStart={(event) => beginDrag(event, "agent", agentId)}
                 onDragEnd={() => {
@@ -279,7 +282,7 @@ function Pane({
                 onDrop={dropOnStrip}
               >
                 <Status agent={agent} mascot={mascot} />
-                <span className="tab-label">{agentLabel(agent)}</span>
+                <span className="tab-label">{tabLabel(agent)}</span>
                 {agent.unread && <span className="unread" aria-label="new output" />}
                 <span
                   className="tab-close"

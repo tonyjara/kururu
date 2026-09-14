@@ -121,8 +121,13 @@ Press `C-a` twice to send it to the terminal.
 | `s` `S` | switch / new profile |
 | `r` | resize mode — then `hjkl`, `esc` to leave |
 | `m` `b` | zen mode / toggle sidebar |
+| `g` | settings |
 | `R` `B` | reload the window / restart the server (agents keep running) |
 | `?` | these keys |
+
+These are the **defaults** — ghosttown's, key for key. Every one of them can be
+rebound under the cog (see [Settings](#settings)), and `C-a ?` prints the keymap
+you are actually using rather than this table.
 
 The ⌘ shortcuts still work as a second door: `⌘D` `⇧⌘D` split, `⌘T` new terminal,
 `⇧⌘W` close pane, `⌘[` `⌘]` move focus.
@@ -225,46 +230,139 @@ than none.
 It is safe to install globally. Outside kururu `KURURU_AGENT_ID` is simply
 absent, and it exits silently without touching the network.
 
-### Replacing the mascot
+### Settings
 
-The frog is a file, and it is yours to change. Drop a PNG at
-`~/.config/kururu/mascot.png` and that is the mascot; delete it and the frog is
-back. `KURURU_MASCOT` names one outright if you would rather not move anything.
+The cog in the bottom-left corner of the sidebar opens Settings — or `C-a g`.
+Two pages: the **mascot**, and the **keys**.
 
-The whole contract is **a horizontal strip of square frames**:
+Both are the server's rather than the browser's, so a change reaches a second
+window and the phone without being told, and survives a restart. They live in
+`~/.config/kururu` — the config directory, not the state one the session
+arrangement is written to, because these are decisions kururu would never invent
+and must not lose.
 
-```
-┌────┬────┬────┬────┐
-│ 1  │ 2  │ 3  │ 4  │   84 × 21  →  four 21px frames
-└────┴────┴────┴────┘
-```
+#### The mascot
 
-There is no manifest and no frame size to declare, because a strip already says
-both — the number of frames is its width over its height, and the browser reads
-that off the image it has loaded anyway. Frames are scaled into a 16px box, so a
-sprite drawn at 32 is welcome and will not make the tab strip taller. One loop
-takes the same length of time however many frames are in it, so a replacement
-keeps the cadence rather than running at whatever speed its frame count implies.
+**Which part of which sprite sheet the mascot is** — and you can keep several.
 
-Nothing validates your file beyond refusing to serve something over a megabyte.
-If it is not a PNG, or not a strip, the row falls back to the dot rather than
-kururu quietly putting the frog back — a substitution would read as the feature
-being broken instead of as the file being wrong.
+The list down the left is the ones you have kept, each hopping so you can tell
+them apart; click one to edit it, **+ Add** copies the one you are looking at,
+double-click a name to rename it. The **★** marks the default — what a workspace
+gets when it has not picked one of its own. It starts on the frog and is yours to
+move.
 
-`assets/mascots/` has the frog in six palettes, already cut:
+Each mascot has **two animations**: `Working` while the agent is going, `Idle`
+while it is stopped. Switch between them above the picker and drag out a run of
+cells for each; the sheet marks the other one faintly so you do not pick the same
+frames twice. Idle starts as a dot on any mascot you made before it existed —
+**Animate idle** gives it frames, **Use the dot** takes them away.
 
-```sh
-cp assets/mascots/frog-purple.png ~/.config/kururu/mascot.png   # then reload
-```
+`blocked` and `done` keep their dots on purpose. Those are the two states that
+*want you*, and in a sidebar where everything else is moving a still dot is the
+thing that stands out — which is the right way round.
 
-They were cut out of the sheets in `assets/spritesheets/` by
-`tools/cut-mascot.py`, which is there for when you want a different animation or
-a different facing — the sheets hold idle, croak, jump, hop and shock across
-eight directions, and `guide.png` labels which columns are which.
+Drag along a row of the sheet to take a run of cells — that is an animation. The
+sheets that ship hold idle, croak, jump, hop and shock across eight facings, and
+`assets/spritesheets/guide.png` is the labelled key to which columns are which.
+The frog hops beside the picker while you choose, at the size it will actually be
+in a row and once more big enough to see.
 
-```sh
-python3 tools/cut-mascot.py --anim hop --row 2    # needs Pillow
-```
+Three things you can set, and one you cannot:
+
+| | |
+|---|---|
+| **Sheet** | the frog that ships, or anything you imported |
+| **Cell** | the sheet's grid, in pixels. 32 for the ones that ship |
+| **Speed** | one loop, end to end. Per animation — idle wants to be slower |
+| **Motion** | always, follow the system, or never |
+| *trim* | **computed.** The part of a cell the sprite is in, measured off the pixels |
+
+The trim is not offered because it is not a preference — you want "the part of
+the cell the sprite is actually in", and a canvas answers that off the pixels
+better than anybody types it. One box for every frame of *both* animations,
+though, never each frame's own. Within an animation: where a sprite sits in its
+cell is how a sheet draws a jump, so trimming frame by frame would land them all
+on the floor and throw the jump away. Across the two: a sitting frog is smaller
+than a jumping one, so a box each would scale them to the same badge and the frog
+would visibly change size the moment its agent stopped.
+
+Setting **Motion** to *never* (or to *follow the system* on a machine with Reduce
+Motion on) puts idle back to a dot. An idle animation that cannot animate is the
+same picture as a frozen working one, so it would cost you the one distinction
+the badge is for; a still working frog is still not a dot, so that one stays.
+
+**Motion is a setting rather than a media query, and “always” is the default.**
+A 16px status indicator is in the class of a spinner, not the sliding parallax
+`prefers-reduced-motion` exists to stop, and frozen on one frame it says exactly
+as much as the dot it replaced: nothing. So the preference is offered instead of
+obeyed — which is also the only way a machine with Reduce Motion switched on
+system-wide gets to have this feature at all. Pick **Follow system** if you would
+rather it went the other way.
+
+#### Your own sprites
+
+**Import…** beside the sheet dropdown takes a PNG and puts it in
+`~/.config/kururu/sheets`, then selects it. Dropping a PNG in that directory
+yourself does exactly the same thing — the directory is the mechanism and the
+button is a door onto it. **Remove** appears for sheets you brought, never for
+the one that ships.
+
+Any grid of frames will do: set **Cell** to your frame size and drag out the run
+you want. A plain horizontal strip is a sheet one row tall, so that works too.
+
+**PNG, and only PNG.** The trim is measured off the alpha channel, so the format
+has to have one. Aseprite's own files are not supported and are not worth
+supporting — *File → Export Sprite Sheet* gives you a PNG laid out as exactly the
+grid this picker wants, which is one step and the thing you would export anyway.
+
+An import is checked on the way in — a real PNG, under a megabyte, under a name
+that is a name — because it is a client asking the server to write a file into
+your config directory, and kururu is reachable from the tailnet. A file you put
+in the directory *yourself* is served exactly as you left it: if it turns out not
+to be a PNG it fails in the browser and the row falls back to the dot, because
+quietly substituting the frog would read as the feature being broken rather than
+as the file being wrong.
+
+A sheet left at the old `~/.config/kururu/mascot.png` is moved into the directory
+on the next start rather than being stranded beside it.
+
+They are written to `~/.config/kururu/mascot.json`. A file from the version of
+kururu that could only hold one mascot becomes the first entry in the list rather
+than being thrown away.
+
+#### A mascot per workspace
+
+Right-click a workspace in the sidebar → **Mascot…**, the same place its colour
+lives. Each option is drawn animating, because "Michi" means nothing until you
+have seen it hop.
+
+**Default** is an option in that list rather than a way of dismissing it: it is a
+choice with a consequence, namely that moving the ★ in Settings later moves this
+workspace too. Picking a specific one opts out of that.
+
+Deleting a mascot a workspace was using needs no clean-up — an id that names
+nothing draws the default, which is the same answer as never having picked.
+
+#### The keys
+
+Every action after the prefix, with the keys that reach it. Click **+** and press
+the key you want; click a key to unbind it. Taking a key another action had is
+allowed — it says which one it came from, and the row it left is on the same
+screen — because a key means exactly one thing, while an action can have several.
+
+What is stored is the **difference** from the defaults, in
+`~/.config/kururu/keys.json`. So a key you never touched follows kururu's table
+as it changes, and an action added in a later version arrives with its key
+working rather than unbound. **Reset to defaults** deletes the differences.
+
+Two keys are not up for grabs. `1`–`9` jump to workspaces by number, and a
+binding there would take one out of reach with nothing on screen to say where it
+went. And **ctrl+a itself** stays ctrl+a, because it is what you need in order to
+fix a keyboard you have broken — as is the cog, which is a mouse away whatever
+you have done to the keys.
+
+The help overlay (`C-a ?`) prints your keymap rather than a list beside it, so it
+cannot end up documenting a key you moved.
 
 ### Selecting text out of an agent
 

@@ -7,29 +7,26 @@
  * else goes to the pty untouched. Press the chord twice to send it literally,
  * which is what makes ctrl+a still reachable inside readline.
  *
- * The table below is deliberately the same as `config.default.toml` in
- * ghosttown, key for key, because the whole value of a prefix is that your hands
- * already know it. Where kururu has no equivalent (detach, reboot, the markdown
- * reader) the key is simply unbound rather than given a different meaning — a
- * key that does something *else* in the sibling app is worse than one that does
- * nothing. `A` is unbound for the same reason from the other direction: it
- * opened an agent rather than a terminal, and there is only one kind of thing to
- * open now.
- *
- * `]` and `[` are the one deliberate addition: they split right and down beside
- * the shifted `|` and `-` they sit under on the keyboard, which is the pair of
- * splits without the reach for shift. They are safe to add precisely because
- * ghosttown leaves them unbound — this gives a key a meaning where the sibling
- * app has none, which is the opposite of the case the rule above forbids.
+ * The table itself moved to `shared/keys.ts` when the keys became rebindable —
+ * an override arrives from a client and the server has to validate it against
+ * the list of actions, so both halves need the list. What is left in here is the
+ * half that cannot move: turning a `KeyboardEvent` into something that table can
+ * be looked up by.
  *
  * The ⌘ shortcuts still work; they are a second door, not a replacement. This
  * file is only about the prefixed half.
  */
+import type { Action } from "../../shared/keys";
+
+export type { Action };
 
 /**
- * The chord, and the byte it sends when you press it twice. One constant rather
- * than a config file: kururu has no config system yet, and inventing one for a
- * single value would be the wrong first user of it.
+ * The chord, and the byte it sends when you press it twice.
+ *
+ * Not rebindable, unlike everything after it. The prefix is the one key that has
+ * to be reachable to fix a keyboard you have broken, and a chord you have bound
+ * to something unreachable is a window you can only fix by editing JSON — which
+ * is the failure mode the whole settings page exists to avoid.
  */
 export const PREFIX = { ctrl: true, key: "a" } as const;
 /** ctrl+a is 0x01 — the C0 control the terminal expects for it. */
@@ -39,111 +36,14 @@ export const PREFIX_LABEL = "C-a";
 /** How long the prefix stays armed. Ghosttown's number, for the same reason. */
 export const PREFIX_TIMEOUT_MS = 3000;
 
-export type Action =
-  | "split-right"
-  | "split-down"
-  | "new-tab"
-  | "next-tab"
-  | "prev-tab"
-  | "close-tab"
-  | "rename-tab"
-  | "close-pane"
-  | "focus-left"
-  | "focus-right"
-  | "focus-up"
-  | "focus-down"
-  | "toggle-sidebar"
-  | "zen-mode"
-  | "resize-mode"
-  | "switch-profile"
-  | "new-profile"
-  | "new-workspace"
-  | "next-workspace"
-  | "prev-workspace"
-  | "last-workspace"
-  | "rename-workspace"
-  | "delete-workspace"
-  | "find-workspace"
-  | "find-agent"
-  | "reload"
-  | "restart-server"
-  | "help";
-
-/**
- * Key → action. An uppercase letter means shift, exactly as in ghosttown's
- * config, and the destructive ones are shifted for exactly that reason.
- */
-export const KEYMAP: Record<string, Action> = {
-  "|": "split-right",
-  "\\": "split-right",
-  "%": "split-right",
-  "]": "split-right",
-  "-": "split-down",
-  '"': "split-down",
-  "[": "split-down",
-  T: "new-tab",
-  n: "next-tab",
-  p: "prev-tab",
-  D: "close-tab",
-  ",": "rename-tab",
-  x: "close-pane",
-  h: "focus-left",
-  left: "focus-left",
-  l: "focus-right",
-  right: "focus-right",
-  k: "focus-up",
-  up: "focus-up",
-  j: "focus-down",
-  down: "focus-down",
-  b: "toggle-sidebar",
-  m: "zen-mode",
-  r: "resize-mode",
-  s: "switch-profile",
-  S: "new-profile",
-  C: "new-workspace",
-  N: "next-workspace",
-  P: "prev-workspace",
-  z: "last-workspace",
-  W: "rename-workspace",
-  X: "delete-workspace",
-  w: "find-workspace",
-  a: "find-agent",
-  R: "reload",
-  B: "restart-server",
-  "?": "help",
-};
-
-/** What the help overlay prints, in the order it prints it. */
-export const HELP: Array<[string, string]> = [
-  ["| \\ % ]", "split right"],
-  ["- \" [", "split down"],
-  ["T", "new terminal"],
-  ["n p", "next / previous tab"],
-  ["D", "close tab (ends it)"],
-  [",", "rename tab"],
-  ["x", "close pane and everything in it"],
-  ["h j k l", "focus pane left / down / up / right"],
-  ["1…9", "jump to workspace"],
-  ["C", "new workspace"],
-  ["N P", "next / previous workspace"],
-  ["z", "last workspace (a toggle)"],
-  ["W X", "rename / delete workspace"],
-  ["w a", "find workspace / agent"],
-  ["s S", "switch / new profile"],
-  ["r", "resize mode — then h j k l, esc to leave"],
-  ["m", "zen mode"],
-  ["b", "toggle sidebar"],
-  ["R", "reload the window"],
-  ["B", "restart the server (agents keep running)"],
-  ["?", "this"],
-];
-
 /**
  * A browser KeyboardEvent, as one string the table can be looked up by.
  *
  * `event.key` already folds shift into the character — shift+t arrives as "T",
  * shift+\ as "|" — which is why the table can be written the way ghosttown's
- * config is and why there is no separate shift flag to get wrong.
+ * config is and why there is no separate shift flag to get wrong. It is also why
+ * a rebinding needs no encoding of its own: what Settings captures is this
+ * string, and what it stores is this string.
  */
 export function keyName(event: KeyboardEvent): string {
   const named: Record<string, string> = {
@@ -158,6 +58,12 @@ export function keyName(event: KeyboardEvent): string {
     " ": "space",
   };
   return named[event.key] ?? event.key;
+}
+
+/** How a key is printed where somebody reads it back. */
+export function keyLabel(key: string): string {
+  const arrows: Record<string, string> = { left: "←", right: "→", up: "↑", down: "↓" };
+  return arrows[key] ?? (key === "space" ? "space" : key);
 }
 
 /**
@@ -197,11 +103,22 @@ export function isPrefix(event: KeyboardEvent): boolean {
   return event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === PREFIX.key;
 }
 
-export function actionFor(event: KeyboardEvent): Action | undefined {
-  return KEYMAP[keyName(event)];
+/**
+ * What this key does, in the keymap this window is currently using. The map is
+ * passed in rather than read from a module constant because it is the user's
+ * now, and the user's things live in the snapshot.
+ */
+export function actionFor(event: KeyboardEvent, keymap: Record<string, Action>): Action | undefined {
+  return keymap[keyName(event)];
 }
 
-/** prefix+1..9. Returns a zero-based workspace index, or null. */
+/**
+ * prefix+1..9. Returns a zero-based workspace index, or null.
+ *
+ * Nine bindings to one parameterised action, which is why it is not in the table
+ * and not rebindable — and why `isBindableKey` refuses those digits, so nothing
+ * in Settings can take a workspace out of reach.
+ */
 export function workspaceDigit(event: KeyboardEvent): number | null {
   const key = keyName(event);
   return /^[1-9]$/.test(key) ? Number(key) - 1 : null;

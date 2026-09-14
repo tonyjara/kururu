@@ -25,6 +25,7 @@
  * profile here is a namespace, not a process. The visible behaviour is the same
  * — and the agents in the profile you are not looking at are still running.
  */
+import type { KeyOverrides } from "./keys";
 import type { LayoutNode } from "./layout";
 
 /**
@@ -55,8 +56,30 @@ export interface AgentSnapshot {
   id: string;
   /** What it was started as. See PtyKind: it says nothing about what is running. */
   kind: PtyKind;
-  /** What to call it in a tab: the basename of `cwd`, which is the project. */
-  title: string;
+  /**
+   * What the program in here calls itself — the title it set with OSC 0 or 2,
+   * put through `cleanTitle` on the way in. Null until something sets one,
+   * which for a bare shell is usually never.
+   *
+   * This is a sentence about the *work*, not a name for the terminal, and it is
+   * drawn where `activity` is drawn rather than where `agent` is: claude writes
+   * a summary of the turn into its window title once it has had a prompt, and
+   * it rewrites it every turn after that. A tab that renamed itself that often
+   * would be a tab you navigate by position. So it is the second line of a
+   * sidebar row, and the one line a tab has — see `agentSummary` in
+   * `web/src/labels.ts`, which is what decides between this and `activity`.
+   *
+   * The two are siblings and arrive by different roads, which is the only
+   * reason they are separate fields. `activity` needs a hook installed and is
+   * the server's; this needs nothing at all and is the host's, because the byte
+   * stream is the only place it exists and the emulator is already parsing it.
+   *
+   * It held the basename of `cwd` for a while and nothing ever drew it: the
+   * project is on the line underneath and in the tooltip already, so a field
+   * repeating it said nothing. The pty had been carrying the real answer the
+   * whole time and there was nothing listening for it.
+   */
+  title: string | null;
   status: AgentStatus;
   /**
    * The agent program actually running in there right now — "claude", "codex" —
@@ -129,6 +152,33 @@ export interface AgentSnapshot {
 }
 
 /**
+ * A title as the program meant it, with the part kururu already says better
+ * taken off the front.
+ *
+ * Agents lead their own title with a status glyph and animate it: claude sits
+ * at `✳ Merge twonary_mercado changes` and spins a braille frame in place of
+ * the ✳ while it works. Two reasons that prefix comes off, and the second is
+ * why this is a function and not a CSS rule. The dot beside the label is
+ * already saying working, in a vocabulary the rest of the window shares. And a
+ * title that changes ten times a second is a snapshot broadcast ten times a
+ * second — stripping the frame first leaves a string that holds still, so the
+ * host can compare it against the last one and stay quiet. The whole spinner
+ * lives in the prefix; the words behind it change once a turn.
+ *
+ * Shared because the host cleans and the browser draws, and a title spelled two
+ * ways is a tab and a sidebar row disagreeing about the same terminal. Capped
+ * because this arrives from a program that can put anything it likes in there,
+ * and a label is a label.
+ */
+export function cleanTitle(raw: string): string {
+  return raw
+    .replace(/^(?:[\p{So}\p{Sk}\p{Cf}\p{Mn}]+\s*)+/u, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+}
+
+/**
  * Which part of which sprite sheet the mascot is, and how fast it goes.
  *
  * The mascot started as a pre-cut strip, on the theory that "a horizontal strip
@@ -145,27 +195,26 @@ export interface AgentSnapshot {
  */
 export interface MascotConfig {
   /**
-   * A sheet in `assets/spritesheets`, by name, or `custom` for whatever the user
-   * left at `~/.config/kururu/mascot.png`. Never a path: this arrives from a
-   * client, and kururu is reachable from the tailnet.
+   * A sheet by name — the frog in `assets/spritesheets`, or anything in
+   * `~/.config/kururu/sheets`. Never a path: this arrives from a client, and
+   * kururu is reachable from the tailnet.
    */
   sheet: string;
   /** The sheet's grid. One cell is this many pixels, square. */
   frame: number;
-  /** The row, and the run of cells along it, that make up the animation. */
-  row: number;
-  col: number;
-  count: number;
-  /** One full loop, in milliseconds — not a frame rate; see `CYCLE` below. */
-  cycle: number;
   /**
    * The square inside a cell actually worth drawing, in sheet pixels.
    *
-   * It has to be one box for every frame rather than each frame's own bounding
-   * box, because where the sprite sits *in* its cell is how a sheet draws a
-   * jump: trimming each frame to its own content would land every one of them on
-   * the floor and throw the animation away. Square, so the badge is square and
-   * the frame count stays the only thing that varies.
+   * It has to be one box for every frame of every clip rather than each frame's
+   * own bounding box, and the reason is the same one twice over. Within a clip:
+   * where the sprite sits *in* its cell is how a sheet draws a jump, so trimming
+   * each frame to its own content would land them all on the floor and throw the
+   * animation away. Across clips: a sitting frog is smaller than a jumping one,
+   * so a box each would scale them differently and the frog would change size
+   * the moment its agent stopped. One box, and it stays the same frog.
+   *
+   * Square, so the badge is square and the frame count stays the only thing that
+   * varies.
    */
   trim: { x: number; y: number; size: number };
   /**
@@ -177,27 +226,92 @@ export interface MascotConfig {
    * preference is offered rather than obeyed.
    */
   motion: MascotMotion;
+  /** What it does while the agent is going. The one this started as. */
+  working: MascotClip;
+  /**
+   * What it does while the agent is stopped and nothing is wrong — or `null` for
+   * the dot it used to be.
+   *
+   * Only `idle` gets one. `blocked` and `done` are stopped too, but they are
+   * stopped *at you*: they are the two states that want a human, and leaving
+   * them as coloured dots is what makes them stand out from a sidebar where
+   * everything else is moving. `exited` keeps its dot for the same reason from
+   * the other direction — there is nothing left in there to animate.
+   *
+   * Nullable because a sheet may hold only one animation worth having, and
+   * because the dot was a perfectly good answer for two years. Adding one is a
+   * drag in Settings.
+   */
+  idle: MascotClip | null;
+}
+
+/**
+ * One animation: a run of cells along a row, and how long a loop takes.
+ *
+ * The sheet, the cell size and the trim are not in here on purpose. Those are
+ * facts about the *picture* and must be the same for every clip of one mascot —
+ * two clips at two cell sizes is not a mascot, it is two mascots.
+ */
+export interface MascotClip {
+  /** The row, and the run of cells along it, that make up the animation. */
+  row: number;
+  col: number;
+  count: number;
+  /** One full loop, in milliseconds — not a frame rate. */
+  cycle: number;
 }
 
 export type MascotMotion = "always" | "system" | "never";
 
 export const MASCOT_MOTIONS: readonly MascotMotion[] = ["always", "system", "never"];
 
-/** The frog, mid-jump, three-quarter facing: row 1, columns 7-10 of the sheets. */
+/**
+ * The frog: mid-jump while it works, breathing while it waits.
+ *
+ * Row 1 of the sheets is a three-quarter facing; `guide.png` says which columns
+ * are which animation — JUMP is 7-10, IDLE is 0-2. The trim is the union of the
+ * two, which on this sheet is the jump's own box, the idle frog being smaller
+ * and standing in the same place.
+ */
+const DEFAULT_IDLE: MascotClip = { row: 1, col: 0, count: 3, cycle: 1800 };
+
 export const DEFAULT_MASCOT: MascotConfig = {
   sheet: "green",
   frame: 32,
-  row: 1,
-  col: 7,
-  count: 4,
-  cycle: 720,
   trim: { x: 5, y: 11, size: 21 },
   motion: "always",
+  working: { row: 1, col: 7, count: 4, cycle: 720 },
+  idle: DEFAULT_IDLE,
 };
 
 /** A sheet name is a name, never a path — same rule as a workspace colour. */
 export function isSheetName(value: unknown): value is string {
   return typeof value === "string" && /^[a-z0-9][a-z0-9-]{0,63}$/.test(value);
+}
+
+/**
+ * The name a file somebody imported gets called.
+ *
+ * Here rather than in the importer because both halves need the same answer: the
+ * browser derives a name from the file it is about to send so it can avoid one
+ * already in the list, and the server derives it again from what arrived rather
+ * than trusting the first answer. A name that reaches a filesystem is exactly
+ * the kind of thing two spellings of would disagree about.
+ *
+ * Everything that is not a lowercase letter, a digit or a dash becomes a dash,
+ * which makes "Frog Jump (2).png" into "frog-jump-2". A name that survives that
+ * with nothing left is called `sheet`, since refusing a file over its own
+ * filename would be a strange place to stop somebody.
+ */
+export function slugSheetName(filename: string): string {
+  const base = filename.replace(/\.[^.]*$/, "");
+  const slug = base
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64)
+    .replace(/-+$/, "");
+  return isSheetName(slug) ? slug : "sheet";
 }
 
 /**
@@ -212,17 +326,24 @@ export function isSheetName(value: unknown): value is string {
  * *exists* is not decided here — that is the server's, since only it can look.
  */
 export function adoptMascot(value: unknown): MascotConfig {
-  const raw = (value ?? {}) as Partial<Record<keyof MascotConfig, unknown>>;
+  const raw = (value ?? {}) as Record<string, unknown>;
   const frame = clamp(raw.frame, 1, 512, DEFAULT_MASCOT.frame);
   const trim = (raw.trim ?? {}) as Record<string, unknown>;
   const size = clamp(trim.size, 1, frame, Math.min(frame, DEFAULT_MASCOT.trim.size));
+
+  /**
+   * The version before this one had a single animation, with its row, columns
+   * and speed at the top level rather than under `working`. That file is
+   * somebody's selection, so it becomes the working clip rather than being
+   * dropped — and it gets no idle animation, because it never chose one and
+   * inventing cells on a sheet we know nothing about would draw whatever
+   * happened to be at the top-left of it.
+   */
+  const flat = raw.working === undefined && typeof raw.row === "number";
+
   return {
     sheet: isSheetName(raw.sheet) ? raw.sheet : DEFAULT_MASCOT.sheet,
     frame,
-    row: clamp(raw.row, 0, 4096, DEFAULT_MASCOT.row),
-    col: clamp(raw.col, 0, 4096, DEFAULT_MASCOT.col),
-    count: clamp(raw.count, 1, 64, DEFAULT_MASCOT.count),
-    cycle: clamp(raw.cycle, 80, 10000, DEFAULT_MASCOT.cycle),
     trim: {
       // The default's own box is the fallback, not zero: a config written before
       // the trim existed is the frog, and the top-left corner of its cell is
@@ -233,6 +354,138 @@ export function adoptMascot(value: unknown): MascotConfig {
       size,
     },
     motion: isMascotMotion(raw.motion) ? raw.motion : DEFAULT_MASCOT.motion,
+    working: adoptClip(flat ? raw : raw.working, DEFAULT_MASCOT.working),
+    idle:
+      raw.idle === null
+        ? null
+        : raw.idle !== undefined
+          ? adoptClip(raw.idle, DEFAULT_IDLE)
+          : flat
+            ? null
+            : DEFAULT_MASCOT.idle,
+  };
+}
+
+/** Same rule as the rest: every number is clamped towards the nearest legal one. */
+function adoptClip(value: unknown, fallback: MascotClip): MascotClip {
+  const raw = (value ?? {}) as Record<string, unknown>;
+  return {
+    row: clamp(raw.row, 0, 4096, fallback.row),
+    col: clamp(raw.col, 0, 4096, fallback.col),
+    count: clamp(raw.count, 1, 64, fallback.count),
+    cycle: clamp(raw.cycle, 80, 10000, fallback.cycle),
+  };
+}
+
+/**
+ * A mascot somebody saved: a sheet, its clips, and a name and an id on it.
+ *
+ * The name exists because a selection is a handful of numbers and nobody
+ * recognises their own by reading them. The id exists because the name does not
+ * have to be unique — two of these are often the same frog at two speeds, and
+ * renaming one must not silently become the other.
+ */
+export interface Mascot extends MascotConfig {
+  id: string;
+  name: string;
+}
+
+/**
+ * Every mascot, and which one a workspace gets when it has not picked.
+ *
+ * It was one config, which was right while picking one was the whole feature. It
+ * is not: a sheet holds six animations across eight facings, so what people do
+ * with the picker is find three they like — and a picker with no way to keep
+ * anything makes you re-find a selection you already made. So the config is a
+ * list, choosing is switching rather than re-picking, and a workspace can point
+ * at one the way it points at a colour.
+ *
+ * Never empty. An empty list would mean a working agent with no badge, and the
+ * one thing this whole feature exists to guarantee is that a row which is doing
+ * something has something in it.
+ */
+export interface MascotSet {
+  /**
+   * The one a workspace gets when it has not picked, by id. Editable, which is
+   * the point of it being a field rather than "the first in the list": the frog
+   * is what kururu ships with, not what you are stuck with.
+   *
+   * The head of the list stands in if it names nothing.
+   */
+  default: string;
+  list: Mascot[];
+}
+
+/** The mascot to draw for a workspace, given what it picked. Never null. */
+export function mascotFor(set: MascotSet, mascotId: string | null): Mascot {
+  return set.list.find((m) => m.id === mascotId) ?? defaultMascot(set);
+}
+
+/**
+ * The fallback: for a workspace that has not chosen, and for anything drawing a
+ * badge outside one. Falls to the head of the list rather than to nothing, since
+ * the list is never empty and there is therefore always an answer.
+ */
+export function defaultMascot(set: MascotSet): Mascot {
+  return set.list.find((m) => m.id === set.default) ?? set.list[0]!;
+}
+
+export const DEFAULT_MASCOT_SET: MascotSet = {
+  default: "m1",
+  list: [{ id: "m1", name: "Frog", ...DEFAULT_MASCOT }],
+};
+
+/**
+ * Read a whole set out of whatever arrived — a client message, or the file
+ * `~/.config/kururu/mascot.json`, which for one version of kururu held a single
+ * config with no list, no id and no name in it.
+ *
+ * That version is the interesting case and it is handled rather than discarded:
+ * a file with a `sheet` and no `list` is one mascot, so it becomes one, keeping
+ * the selection somebody made. Everything else about this is `adoptMascot`'s
+ * rules applied per entry — clamp the numbers, refuse a sheet name that is not a
+ * name — plus the two the list adds: ids are made unique, and an empty result is
+ * the default frog rather than nothing to draw.
+ */
+export function adoptMascots(value: unknown): MascotSet {
+  const raw = (value ?? {}) as {
+    default?: unknown;
+    active?: unknown;
+    list?: unknown;
+    sheet?: unknown;
+  };
+  const entries = Array.isArray(raw.list)
+    ? raw.list
+    : // One mascot, written before there could be two.
+      isSheetName(raw.sheet)
+      ? [value]
+      : [];
+
+  const seen = new Set<string>();
+  const list: Mascot[] = [];
+  for (const entry of entries) {
+    const one = (entry ?? {}) as { id?: unknown; name?: unknown };
+    const id =
+      typeof one.id === "string" && one.id && !seen.has(one.id) ? one.id : `m${list.length + 1}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    list.push({
+      id,
+      name:
+        typeof one.name === "string" && one.name.trim()
+          ? one.name.trim().slice(0, 40)
+          : `Mascot ${list.length + 1}`,
+      ...adoptMascot(entry),
+    });
+  }
+  if (list.length === 0) return DEFAULT_MASCOT_SET;
+
+  // `active` is what this field was called when one mascot served the whole
+  // window, before a workspace could override it.
+  const chosen = raw.default ?? raw.active;
+  return {
+    default: typeof chosen === "string" && seen.has(chosen) ? chosen : list[0]!.id,
+    list,
   };
 }
 
@@ -287,6 +540,16 @@ export interface Workspace {
    * and the point of the mark is that you chose it.
    */
   color: WorkspaceColor | null;
+  /**
+   * Which mascot this workspace's agents animate, or null for the default.
+   *
+   * Null rather than a copy of the default, for the same reason `color` is
+   * nullable: "I have not chosen" and "I chose the thing that is currently the
+   * default" are different, and only the first follows when the default changes.
+   * An id naming a mascot that has since been deleted reads as null, which is
+   * why nothing has to be cleaned up when one goes.
+   */
+  mascotId: string | null;
 }
 
 /** A named session: a list of workspaces, and which of them you are in. */
@@ -329,12 +592,20 @@ export interface SessionSnapshot {
   /** Every agent in the active profile, in creation order. */
   agents: AgentSnapshot[];
   /**
-   * What the working badge is animating. In the snapshot rather than behind its
-   * own fetch because it is a thing the client cannot draw a row without, it
-   * changes while the window is open (Settings is a second client writing it),
-   * and it is forty bytes beside a list of agents.
+   * Every mascot the user has kept, and which one the working badge is. In the
+   * snapshot rather than behind its own fetch because it is a thing the client
+   * cannot draw a row without, it changes while the window is open (Settings is
+   * a second client writing it), and it is a few hundred bytes beside a list of
+   * agents.
    */
-  mascot: MascotConfig;
+  mascots: MascotSet;
+  /**
+   * Which keys the user has rebound, and only those — `shared/keys.ts` holds the
+   * defaults, and both halves import them. Server-owned like everything else
+   * here, so the phone and the desktop cannot end up with different keyboards
+   * and a rebinding survives a reload.
+   */
+  keys: KeyOverrides;
 }
 
 /** What an agent (or a Claude Code hook) may tell kururu about itself. */

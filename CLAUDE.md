@@ -82,6 +82,8 @@ proving that plumbing works.
 shared/      Protocol types and the tree. No runtime deps; imported by everything.
   model.ts       Agents, and the hierarchy they live in. Not a mirror of anything.
   layout.ts      The split tree and every pure operation on it. Both halves use it
+  keys.ts        Every action, ghosttown's default keys, and the overrides a user
+                 saved. Shared because the server validates a rebinding
   wire.ts        Kururu's own browser↔server protocol + timer intervals
 server/      Node (not Bun — it loads inside Electron). Two processes, not one.
   ptyhost.ts     The half that cannot be restarted: createPtyHost(), a factory
@@ -98,7 +100,10 @@ server/      Node (not Bun — it loads inside Electron). Two processes, not one
   report-cli.ts  What a Claude Code hook runs to say so. Not in agents/ on purpose
   workspaces.ts  Profiles, workspaces, focus. The arrangement lives HERE, not in web/
   persist.ts     The arrangement on disk. Structure only — never respawns anything
-  mascot.ts      The sprite strip the working badge animates. User-replaceable
+  mascot.ts      Which sheets the badge can animate, which parts, and which one.
+                 Also the import: the one endpoint that writes a file for a client
+  keys.ts        The keymap a user has amended. Persistence only; the table is shared
+  config.ts      ~/.config/kururu, and how the two settings files are written
   devservers.ts  lsof + ps discovery of running dev servers
   proxy.ts       Per-dev-server reverse proxy (HTTP + WS) for phone access
   files.ts       Traversal-safe file listing/reading
@@ -106,28 +111,32 @@ server/      Node (not Bun — it loads inside Electron). Two processes, not one
 web/         React 19 + Vite. One build; the desktop is what it is shaped for.
   session.ts     Module-level store + useSyncExternalStore; the WS client.
                  Snapshots go through React; terminal output deliberately does not
-  keys.ts        The prefix keymap — ghosttown's table, key for key
+  keys.ts        The prefix, and a KeyboardEvent as a string the table can be
+                 looked up by. The table itself is shared/keys.ts now
   colors.ts      What a workspace colour name looks like. The web's half of it
   desktop.ts     The preload bridge, typed. Null in a browser, and that's the contract
   drop.ts        A file dropped on a terminal → the path to type. Pure; tested
   labels.ts      What to call a terminal, in the two places that have to agree
-  mascot.ts      Loads the sprite strip once; the frame count is width/height
+  mascot.ts      Loads a sheet once per URL and reports how big it is
   App.tsx        Draws the server's layout; owns the prefix, zen, and dialogs
   components/
     Panes.tsx      Walks the tree into nested flex boxes; tab strips; dividers
     Terminal.tsx   One xterm per visible tab. Fits itself, then resizes the pty
     Sidebar.tsx    Workspaces (numbered) and every agent in the profile
     Status.tsx     The status mark: a dot, or the mascot while it is working
+    Settings.tsx   The cog's dialog: a tab bar, and the way out
+    SettingsMascot.tsx  The ones you kept, and a run of cells dragged out of a sheet
+    SettingsKeys.tsx    Every action, its keys, and a capture box to change them
     StatusBar.tsx  Where you are, and the PREFIX badge
     Dialog.tsx     Prompt / confirm / pick. While one is up, no key reaches a pty
     HelpOverlay.tsx  Printed from the keymap, so it cannot document a dead key
 desktop/     Electron main + preload, and the esbuild step that bundles the server.
   main.js        Forks the server as a utilityProcess, owns the quit dialog
   build.mjs      server/src → dist/server.mjs (ESM, node-pty external)
-assets/      Artwork. Not read at runtime — the default mascot is inlined instead
-  mascots/       Strips ready to be dropped at ~/.config/kururu/mascot.png
-  spritesheets/  What they were cut from; guide.png labels the animations
-tools/       Authoring, not build. cut-mascot.py cuts a sheet into a strip
+assets/      Artwork, served at runtime. Found the way web/dist is; KURURU_ASSETS
+  spritesheets/  The frog, and guide.png — which labels the animations and is
+                 skipped by the picker for exactly that reason. One sheet ships;
+                 anything else is imported to ~/.config/kururu/sheets
 ```
 
 ### What was ported from ghosttown, and why it must not drift casually
@@ -248,6 +257,33 @@ server, allocated on demand).
   out. Watching is the tap; rebuilding is the emulator's own question, and only a
   fresh pane, a tab switch or a reconnect asks it. `server/test/screen.test.ts`
   holds the invariant: serialize, rebuild, compare the buffers.
+- **A disposed emulator must hand its WebGL context back, out loud.** This is
+  the one that turned the whole window black, twice. `terminal.dispose()` does
+  *not* release the context: neither the addon nor xterm's core ever calls
+  `loseContext`, so it stays live until Chromium collects the canvas, which can
+  be never. A page gets about sixteen — and kururu builds a fresh emulator on
+  every tab switch, workspace change, profile swap and pane rebuild, so the
+  corpses accumulate in dozens over an afternoon. Past sixteen the browser does
+  not refuse the new context, it kills the **oldest**, and the oldest is not a
+  corpse: it is the pane you have had open longest. So the terminals that go
+  dark are precisely the ones you were watching, all of them within a few tab
+  switches of each other, for the three seconds the addon waits on a restore
+  that is not coming — and they come back on the DOM renderer, slower than they
+  left. Nothing is wrong with the server or the agents while this happens, which
+  is exactly why it reads as inexplicable. `releaseWebglContexts` in
+  `Terminal.tsx` runs **before** `terminal.dispose()`, because dispose is what
+  takes the canvas out of the DOM and the addon exposes no handle on it.
+  Measured: four live panes and eighteen rebuilds blacked out all four; with the
+  release, a hundred rebuilds cost nothing.
+- **A black window is a symptom with four causes, so it has to say which.**
+  Flat `--bg` with nothing on it is what you get from a lost GL context, a React
+  root that unmounted, a server that never answered, and a sleeping display —
+  same picture, different fixes, and guessing between them is what makes this
+  class of bug expensive. `Crash` in `web/src/components/Crash.tsx` wraps the
+  root so the second of those prints the error and the component stack instead
+  of drawing nothing. It deliberately does not retry: a component that throws
+  every render would spin, and the only offered way out is a reload, which costs
+  a repaint because the agents are a process away.
 - **The pty is told about a resize only once the box stops moving** (60ms in
   `Terminal.tsx`). The emulator follows immediately; the pty does not, because
   every resize is a SIGWINCH and every agent TUI repaints completely on one.
@@ -284,15 +320,81 @@ server, allocated on demand).
   overtakes the backlog is wiped. `index.ts` holds that terminal's output in the
   client's `awaiting` queue until the backlog has gone out. Serializing awaits
   the emulator's write queue, so the window is real.
-- **The mascot is a strip of square frames, and nothing else is declared.** The
-  frame count is the image's width over its height, so a replacement describes
-  itself and there is no sidecar manifest to keep in step with the picture. The
-  default is inlined as base64 in `mascot.ts` rather than read from `assets/`,
-  because `desktop/build.mjs` bundles the server into one file and a relative
-  asset path is a thing that works in the repo and fails in the packaged app.
-  A user's file is served exactly as it was left — a broken one falls back to
-  the dot in the browser rather than being quietly replaced by the frog, for the
-  same reason `set-workspace-color` refuses a bad colour instead of clearing it.
+- **A mascot has two animations and one trim.** `working` and `idle` are clips —
+  a row, a run of cells, a speed. The sheet, the cell size and the trim are not
+  in a clip, because they are facts about the *picture*: two clips at two cell
+  sizes is not a mascot, it is two mascots. The trim especially is shared and
+  measured across every frame of both, or a sitting frog and a jumping one would
+  be scaled to the same badge and the sprite would change size the moment its
+  agent stopped. `idle` is nullable and null is the dot. Only those two states
+  animate: `blocked` and `done` are the two that *want a human*, and a still dot
+  among moving neighbours is what makes them stand out.
+- **An idle animation that cannot animate becomes the dot again.** Under
+  `motion: never` — or `system` on a machine asking for less motion — a frozen
+  idle sprite and a frozen working one are the same picture, so idle would cost
+  the one distinction the badge exists to draw. The working clip keeps its frame
+  either way, since frozen it is still not a dot. This is a choice of *element*,
+  which is why it is in `Status.tsx` and not a media query in the stylesheet.
+- **A workspace wears a mascot the way it wears a colour.** `mascotId`, nullable,
+  where null means the set's `default` — so "I have not chosen" and "I chose the
+  thing that is currently the default" stay different, and only the first follows
+  when the default moves. Nothing validates the id: one naming a deleted mascot
+  already draws the default, so a check would buy a refusal where the fallback is
+  the same answer, and would make `workspaces.ts` learn about sprite sheets.
+- **A mascot is a rectangle of cells, and there is a list of them.** It was one
+  selection, which was right while picking one was the whole feature. It is not:
+  a sheet holds six animations across eight facings, so what people do with the
+  picker is find three they like — and a picker with no way to keep anything
+  makes you re-find a selection you already made. So the config is a list with a
+  chosen one, never empty, because an empty list means a working agent with
+  nothing in its row. Which one is the *default* is server state; which one
+  Settings has open for editing is not — a second window should not have its
+  picker yanked because this one clicked a row. The one migration this has is a file from the version that
+  held a single config: it has no `list`, and it becomes one entry rather than
+  being thrown away for the default frog.
+- **The keyboard is stored as the *difference* from the defaults.** A saved map
+  would freeze kururu's keys at the version you first opened Settings in — an
+  action added later would be unbound forever, for everybody who had ever touched
+  a binding. Overrides cannot rot that way. Which is why an override may be
+  `null`: "this default is off" is a thing somebody can mean, and nothing else
+  could express it. `1`–`9` are refused outright, because they jump to a
+  workspace by number, are not in the table to argue with, and a binding that won
+  the lookup would take a workspace out of reach with nothing on screen to say
+  where it went. The prefix itself is not rebindable either: it is the one chord
+  that has to stay reachable to fix a keyboard you have broken.
+- **The mascot is a rectangle of cells, and Settings is the only thing that
+  picks it.** It was a pre-cut strip once, on the theory that a strip states its
+  own frame count and so needs no manifest. True, and it put the one interesting
+  decision outside the app: the sheets hold six animations across eight facings,
+  so what is worth choosing was never the file but the *part*. The config is
+  therefore a sheet, a grid size, a row and a run — and the trim, which is
+  **computed from the pixels, never typed**, as one box across every frame in the
+  run. Where a sprite sits in its cell is how a sheet draws a jump; trimming each
+  frame to its own content lands them all on the floor.
+- **An import is checked; a file you placed yourself is not.** The asymmetry is
+  deliberate. A PNG you drop in `~/.config/kururu/sheets` is served exactly as you
+  left it, and one that is not a PNG fails in the browser and falls back to the
+  dot — substituting the frog would read as the feature being broken rather than
+  the file being wrong, the same argument `set-workspace-color` makes. An import
+  is a different act: a client asking the server to write a file into the user's
+  config directory, over a socket that is on the tailnet. So it must be a real
+  PNG by its magic bytes, under the size cap, under a name that is a name, and it
+  refuses to overwrite rather than replacing a sheet other mascots are cut from.
+- **A sheet name is a name, never a path.** It arrives from a client and picks a
+  file, so `isSheetName` refuses anything with a slash or a dot in it *and*
+  `sheetFile` checks it against the list — the two checks `files.ts` argues for,
+  for the same reason. Every number in the config is clamped instead: a run that
+  goes one cell off the edge is a drag gone too far, not an attack, and the
+  nearest legal selection is the right answer. A *name* has no nearest legal
+  value, so it is the one field that falls back rather than bends.
+- **The mascot animates by default, whatever the system says.** `.mascot` carries
+  the animation and only `motion: "system"` opts into `prefers-reduced-motion`.
+  This is deliberate and was a bug first: a blanket reduced-motion rule froze the
+  badge on frame one for anybody with Reduce Motion switched on in macOS, which
+  is a status indicator that has stopped indicating — it says exactly what the
+  dot said. A 16px sprite is in the class of a spinner, not the sliding parallax
+  that preference exists to stop, so it is offered in Settings instead of obeyed
+  silently.
 - **A workspace colour is a name, never a CSS value.** `set-workspace-color`
   takes one of `WORKSPACE_COLORS` and the server refuses everything else,
   *leaving the old value alone* rather than clearing it — a rejected write that
@@ -459,8 +561,8 @@ server, allocated on demand).
 
 ## Keys
 
-Prefix is **ctrl+a**, ghosttown's, in `web/src/keys.ts` — one constant and one
-table. The table is ghosttown's `[keybinds]` section key for key, and where
+Prefix is **ctrl+a**, ghosttown's, in `web/src/keys.ts`. The default table is
+`shared/keys.ts`, and it is ghosttown's `[keybinds]` section key for key; where
 kururu has no equivalent (detach, reboot, the markdown reader) the key is left
 *unbound* rather than reused: a key that does something different in the sibling
 app is worse than one that does nothing. Press it twice to send `\x01` through.
@@ -468,7 +570,15 @@ app is worse than one that does nothing. Press it twice to send `\x01` through.
 The ⌘ shortcuts (⌘D ⇧⌘D ⌘T ⇧⌘W ⌘[ ⌘]) are a second door onto the same action
 table in `App.tsx`, not a second implementation. ⌘W and ⌘R stay Electron's.
 `A` and ⇧⌘T were "new agent tab" and are now unbound: every terminal is the same
-thing, and the one that used to mean something else is left alone.
+thing, and the one that used to mean something else is left alone. `g` opens
+Settings — a key ghosttown leaves unbound, which is the same licence `]` and `[`
+were added under.
+
+The table is the **default**, not the keymap: `shared/keys.ts` holds it,
+`~/.config/kururu/keys.json` holds what a user changed, and the two are merged
+per window out of the snapshot. Anything that prints a key reads the merged map
+— the help overlay inverts it rather than keeping a list beside it, because a
+list beside it starts lying the first time somebody moves a key.
 
 ## Code style
 

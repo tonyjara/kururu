@@ -24,7 +24,7 @@ export interface SheetSize {
   height: number;
 }
 
-/** Where a sheet comes from. `custom` is the user's own file; the server knows. */
+/** Where a sheet comes from. The server knows whether it ships or was imported. */
 export function sheetUrl(sheet: string): string {
   return `/api/mascot.png?sheet=${encodeURIComponent(sheet)}`;
 }
@@ -46,6 +46,42 @@ function load(src: string): Promise<SheetSize | null> {
   });
   loading.set(src, pending);
   return pending;
+}
+
+/**
+ * Whether the machine is asking for less motion.
+ *
+ * A hook rather than a media query in the stylesheet because this decides *what
+ * to render* — a sprite or a dot — and CSS cannot make that choice. The two are
+ * not interchangeable: see `Status.tsx` for why a still idle frog is worse than
+ * the dot it replaced, which is the whole reason this exists.
+ */
+export function usePrefersReducedMotion(): boolean {
+  const query = "(prefers-reduced-motion: reduce)";
+  const [reduced, setReduced] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = () => setReduced(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return reduced;
+}
+
+/**
+ * Forget what we measured for a sheet.
+ *
+ * Importing and removing are the two things that can put *different pixels*
+ * behind a URL this module has already answered for — remove `frog`, import a
+ * different file under the same name, and every badge would be laid out for the
+ * picture that is gone until the window is reloaded. The server already says
+ * `no-cache`; this is the same statement made to the cache in front of it.
+ */
+export function forgetSheet(sheet: string): void {
+  const src = sheetUrl(sheet);
+  sizes.delete(src);
+  loading.delete(src);
 }
 
 /**

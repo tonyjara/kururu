@@ -1,27 +1,40 @@
 /**
  * The mark that says what an agent is doing, in the two places that draw it.
  *
- * It was a coloured dot everywhere, and for three of the four states it still
- * is — idle, blocked and done are all *stopped*, and a dot is the quietest way
- * to say which kind of stopped. The fourth is not stopped, and that is the one
- * distinction the mark exists for: "is this one still going, or is it waiting
- * for me?" A dot that pulses answers it only if you watch it for a second and a
- * half, which is longer than anybody looks at a sidebar.
+ * It was a coloured dot for all four states. Two of them still are, and the line
+ * between the two halves is not "stopped or going" — it is **whether it wants
+ * you**. `blocked` and `done` do: one is waiting on an answer, the other has
+ * finished and is holding a result. Those keep their dots, and in a sidebar
+ * where everything else is moving a still dot is now the thing that stands out,
+ * which is the right way round.
  *
- * So the working state is the mascot, and it hops. Movement across a shape is
- * read before colour and long before a tooltip — a row with something alive in
- * it is findable out of the corner of an eye, which is the actual job. What the
- * mascot *is* belongs to the user and lives in the snapshot; nothing in here or
- * in the stylesheet knows it is a frog.
+ * `working` and `idle` are the two states an agent spends its time in, and they
+ * get the mascot: hopping while it thinks, breathing while it waits. Movement
+ * across a shape is read before colour and long before a tooltip, so a glance
+ * down the sidebar separates "going" from "stopped" without reading anything —
+ * which is the actual job. A mascot with no idle clip leaves idle as the dot it
+ * always was.
+ *
+ * An idle animation that cannot animate falls back to the dot, and that rule is
+ * here rather than in the stylesheet because it is a choice of *element*. Frozen
+ * on frame one, a sitting frog and a crouching one are the same picture — so a
+ * still idle sprite says less than the dot it replaced, having lost the one
+ * distinction the badge exists to draw. The working sprite keeps its frame
+ * either way: frozen, a frog is still not a dot.
+ *
+ * What the mascot *is* belongs to the user and lives in the snapshot; nothing in
+ * here or in the stylesheet knows it is a frog. Which mascot belongs to the
+ * *workspace*, and is resolved by the caller — a sidebar row and a tab strip can
+ * be showing agents from two different ones.
  *
  * This lives in a component rather than in two `<span>`s because the sprite is
  * structure now, not a class name, and the sidebar and the tab strip must not be
  * able to disagree about it — the same reason `labels.ts` exists for the words.
  */
 import type { CSSProperties } from "react";
-import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
+import type { AgentSnapshot, MascotClip, MascotConfig } from "../../../shared/model";
 import { statusLabel } from "../labels";
-import { sheetUrl, useSheet } from "../mascot";
+import { sheetUrl, usePrefersReducedMotion, useSheet } from "../mascot";
 
 export function Status({ agent, mascot }: { agent: AgentSnapshot; mascot: MascotConfig }) {
   /**
@@ -31,9 +44,13 @@ export function Status({ agent, mascot }: { agent: AgentSnapshot; mascot: Mascot
    */
   const state = agent.exited ? "exited" : agent.status;
   const label = statusLabel(agent);
+  const reduced = usePrefersReducedMotion();
+  const still = mascot.motion === "never" || (mascot.motion === "system" && reduced);
+  const clip =
+    state === "working" ? mascot.working : state === "idle" && !still ? mascot.idle : null;
   return (
     <span className={`status status-${state}`} title={label} aria-label={label} role="img">
-      {state === "working" ? <Mascot config={mascot} /> : <span className="status-dot" />}
+      {clip ? <Mascot config={mascot} clip={clip} /> : <span className="status-dot" />}
     </span>
   );
 }
@@ -55,8 +72,11 @@ export function Status({ agent, mascot }: { agent: AgentSnapshot; mascot: Mascot
  * count is. The alternative — stepping `background-position` — has to know where
  * the strip started, and gets that wrong the moment a selection is not at the
  * left edge of the sheet.
+ *
+ * The trim comes from the mascot rather than the clip, which is what keeps a
+ * sitting frog the same size as a jumping one: see `MascotConfig.trim`.
  */
-export function Mascot({ config }: { config: MascotConfig }) {
+export function Mascot({ config, clip }: { config: MascotConfig; clip: MascotClip }) {
   const src = sheetUrl(config.sheet);
   const sheet = useSheet(src);
   /**
@@ -67,7 +87,8 @@ export function Mascot({ config }: { config: MascotConfig }) {
    */
   if (!sheet) return <span className="status-dot" />;
 
-  const { frame, row, col, count, trim } = config;
+  const { frame, trim } = config;
+  const { row, col, count } = clip;
   /** One badge-width is one trim-width, so every ratio below is over that. */
   const per = (n: number) => `calc(var(--status-size) * ${n / trim.size})`;
 
@@ -81,7 +102,7 @@ export function Mascot({ config }: { config: MascotConfig }) {
           backgroundPosition: `${per(-(col * frame + trim.x))} ${per(-(row * frame + trim.y))}`,
           width: per(count * frame),
           height: per(frame),
-          animationDuration: `${config.cycle}ms`,
+          animationDuration: `${clip.cycle}ms`,
           animationTimingFunction: `steps(${count})`,
         } as CSSProperties
       }
