@@ -37,7 +37,13 @@ const BUDGET = 128 * 1024;
 
 const ON = process.env.KURURU_RECORD !== "0";
 
-type Kind = "out" | "in" | "resize" | "watch" | "backlog" | "replayed";
+/**
+ * `dev` is kururu typing into a terminal on its own account — the workspace
+ * row's ▸ and ↻. It is a note beside the `in` that carries the bytes rather than
+ * a kind of its own for them, because a tape read after the fact cannot
+ * otherwise tell a line somebody typed from one a button did.
+ */
+type Kind = "out" | "in" | "resize" | "watch" | "backlog" | "replayed" | "dev";
 
 interface Entry {
   at: number;

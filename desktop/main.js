@@ -343,6 +343,58 @@ function createWindow() {
     return { action: "deny" };
   });
 
+  /**
+   * The renderer being killed is the third way this window goes black, and the
+   * only one that is not kururu's own doing.
+   *
+   * When macOS runs out of memory it does not slow down, it picks processes and
+   * kills them — and a Chromium renderer is a prime target, being large and, as
+   * far as the kernel is concerned, reconstructible. The process dies, nothing
+   * paints, and `backgroundColor` is all that is left: a window of flat
+   * `#0d0f0e` that looks exactly like a lost GL context or a crashed UI, with
+   * the browser's tabs dying alongside it for the same reason. There is nothing
+   * in the page that can report this, because there is no page any more.
+   *
+   * So the main process says it instead. It survives — it is a few megabytes
+   * and holds nothing worth reclaiming — and it is the only part of the app
+   * still able to put words on screen. What it mostly has to get across is that
+   * the agents are not in here: they are in the pty host, which the OS had no
+   * reason to touch, so this costs a repaint even though it looked terminal.
+   *
+   * It asks rather than reloading by itself. A reload allocates a fresh renderer
+   * immediately, and if the machine is still out of memory that one is killed
+   * too — an automatic retry under real pressure is a loop, and a loop is how a
+   * window that could have waited becomes one that never comes back.
+   */
+  let explaining = false;
+  win.webContents.on("render-process-gone", async (_event, details) => {
+    if (details.reason === "clean-exit" || win.isDestroyed()) return;
+    // One dialog at a time; a second kill while the first is still up would
+    // stack a box the user has to dismiss twice to act once.
+    if (explaining) return;
+    explaining = true;
+
+    const starved = details.reason === "oom" || details.reason === "killed";
+    console.error(`kururu: the window's renderer went away (${details.reason})`);
+    try {
+      const { response } = await dialog.showMessageBox(win, {
+        type: "warning",
+        buttons: ["Reload the window", "Leave it"],
+        defaultId: 0,
+        cancelId: 1,
+        message: starved
+          ? "The system killed kururu's window."
+          : `kururu's window stopped (${details.reason}).`,
+        detail: starved
+          ? "macOS ran out of memory and reclaimed it, which is the same thing it does to browser tabs — so anything else that disappeared went the same way, and kururu is not what it was reacting to. Your agents are untouched: they run in the pty host, a separate process, and are still going. Reloading costs a repaint.\n\nIf this keeps happening, something on this machine is holding far more memory than it should; the window is the symptom, not the cause."
+          : "The agents are in the pty host, a separate process, and are still running. Reloading the window costs a repaint and nothing else.",
+      });
+      if (response === 0 && !win.isDestroyed()) win.reload();
+    } finally {
+      explaining = false;
+    }
+  });
+
   return win;
 }
 

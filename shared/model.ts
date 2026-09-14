@@ -138,6 +138,20 @@ export interface AgentSnapshot {
    */
   lastAgent?: string | null;
   /**
+   * The dev server running in this terminal, by the name that matched — "vite",
+   * "npm run dev" — or null for the overwhelming majority of terminals, which
+   * are not serving anything.
+   *
+   * Server-side like `activity` and `lastAgent`, and for the same reason twice
+   * over. It is found by walking the process table, which the server already
+   * does for dev-server discovery, so learning it costs the pty host no edit and
+   * therefore costs nobody their agents. And it is the *live* half of a pair
+   * whose other half is `Workspace.dev`: this says a server is up right now,
+   * that says what to run to get one back. A sidebar row needs both to know
+   * whether to draw ↻ or ▸.
+   */
+  dev?: string | null;
+  /**
    * A name the user typed (rename-tab). Wins over everything else a tab could
    * be called, and unlike the detected program it is never overwritten.
    */
@@ -550,6 +564,41 @@ export interface Workspace {
    * why nothing has to be cleaned up when one goes.
    */
   mascotId: string | null;
+  /**
+   * The last dev server this workspace had serving, so it can be started again.
+   * Null until one has been seen running in here.
+   */
+  dev: WorkspaceDev | null;
+}
+
+/**
+ * What a workspace last had serving, and where.
+ *
+ * Written by *watching* rather than by being told: the process scan sees a dev
+ * server inside one of the workspace's terminals, so the workspace notes the
+ * line that started it. Nothing has to be configured, and it works the same for
+ * a server kururu opened a tab for and one you started by hand an hour ago.
+ *
+ * It is only ever replaced, never cleared, which is the whole point of keeping
+ * it. A stopped server is exactly when the memory is worth something — and a
+ * layout restored from disk comes back with fresh panes that know nothing, so
+ * this is the only thing left that can bring the server back.
+ *
+ * `command` is what a person typed (`npm run dev`), not what ended up holding
+ * the port (`node .../vite/bin/vite.js`); see `findDevUnder` for why those are
+ * different and which one is worth re-typing.
+ */
+export interface WorkspaceDev {
+  command: string;
+  /** Where it ran — what a replacement tab has to open in. */
+  cwd: string;
+  /**
+   * The terminal it last ran in, so the button re-uses that tab rather than
+   * piling up a new one every time. A live hint and nothing more: it is dropped
+   * on the way to disk along with every other process, and a tab that has since
+   * closed (or has an agent in it now) is simply not used.
+   */
+  agentId: string | null;
 }
 
 /** A named session: a list of workspaces, and which of them you are in. */

@@ -398,6 +398,15 @@ export function setWorkspaceColor(workspaceId: string, color: WorkspaceColor | n
   send({ type: "set-workspace-color", workspaceId, color });
 }
 
+/**
+ * The ▸ / ↻ on a workspace row. One verb for both faces of it: the server knows
+ * better than this window whether anything is actually serving, since what the
+ * button is drawn from is a scan up to three seconds old.
+ */
+export function runDev(workspaceId: string): void {
+  send({ type: "run-dev", workspaceId });
+}
+
 export function deleteWorkspace(workspaceId: string): void {
   send({ type: "delete-workspace", workspaceId });
 }

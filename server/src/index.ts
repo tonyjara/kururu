@@ -39,7 +39,7 @@ import { DEV_SCAN_MS, SAVE_DEBOUNCE_MS } from "../../shared/wire";
 import { parseReport } from "./agents/report";
 import { dump as dumpRecording, forget as forgetRecording, recordBacklog, recordInput, recordNote, recordOutput } from "./record";
 import { processCwd } from "./cwd";
-import { scanDevServers } from "./devservers";
+import { scanDevServers, stopDev, type DevProc } from "./devservers";
 import { allowedRoots, allowRoot, listDir, readFile } from "./files";
 import {
   adoptLegacySheet,
@@ -58,6 +58,7 @@ import { HostLink, type Port } from "./hostlink";
 import { MouseEncoding } from "./mouseencoding";
 import { readSnapshot, writeSnapshot } from "./persist";
 import { closeAllPreviews, closePreview, openPreview, openPreviews } from "./proxy";
+import { reach } from "./reach";
 import { Workspaces } from "./workspaces";
 
 const PORT = Number(process.env.KURURU_PORT ?? 7717);
@@ -275,8 +276,14 @@ function mouseEncodingOf(agentId: string): MouseEncoding {
 function overlay(agent: AgentSnapshot): AgentSnapshot {
   const said = activity.get(agent.id);
   const was = lastAgent.get(agent.id);
-  if (!said && !was) return agent;
-  return { ...agent, ...(said ? { activity: said } : {}), ...(was ? { lastAgent: was } : {}) };
+  const serving = devRunning.get(agent.id);
+  if (!said && !was && !serving) return agent;
+  return {
+    ...agent,
+    ...(said ? { activity: said } : {}),
+    ...(was ? { lastAgent: was } : {}),
+    ...(serving ? { dev: serving.program } : {}),
+  };
 }
 
 /**
@@ -518,8 +525,62 @@ async function sendBacklog(
 
 let lastDevJson = "";
 
+/**
+ * Which terminal is serving what, right now — the live half of the pair whose
+ * other half is `Workspace.dev`.
+ *
+ * Server-side for the same reason `activity` is: it is learnt from a process
+ * scan this side already runs, so the pty host never has to hear about dev
+ * servers at all and this whole feature costs nobody a running agent to change.
+ * A restart empties it and the next poll, three seconds later, fills it in.
+ */
+const devRunning = new Map<string, DevProc>();
+
+/**
+ * The pid each terminal's dev server was last seen as, so the directory it is
+ * running in is read once rather than every three seconds. `processCwd` is an
+ * `lsof` per call on macOS, and the answer cannot change without the process
+ * changing with it.
+ */
+const devPids = new Map<string, number>();
+
+/**
+ * Terminals with a run or a restart in flight.
+ *
+ * The scan must leave these alone. A restart interrupts the server and then
+ * waits before typing the command again, and a poll landing in that window
+ * would see an empty tab, drop the row's ↻ for a ▸, and — worse — forget
+ * nothing but confuse everyone looking at it. Held by agent id rather than by
+ * workspace because that is what the poll is keyed on.
+ */
+const devBusy = new Set<string>();
+
+/**
+ * Which pid to walk down from for each terminal: the pty's own process.
+ *
+ * Exited terminals are left out (there is nothing under a dead pty), and so are
+ * the ones with an agent running in them. That second one is ghosttown's rule
+ * and it is worth keeping: a tab in two roles is a tab you act on twice by
+ * accident, and the accident here is the expensive kind — the ↻ types a line
+ * into the terminal it found the server in, and typing `npm run dev` at a
+ * waiting Claude Code sends it as a prompt.
+ */
+function devRoots(): Array<[string, number]> {
+  const roots: Array<[string, number]> = [];
+  // The first scan is kicked off at module load, which is before the main
+  // process has handed us a port and `attach` has filled these in. There is
+  // nothing to attribute yet; the machine-wide half of the scan still runs.
+  if (!host) return roots;
+  for (const agent of host.agents) {
+    if (agent.exited || !agent.pid || agent.agent) continue;
+    if (devBusy.has(agent.id)) continue;
+    roots.push([agent.id, agent.pid]);
+  }
+  return roots;
+}
+
 async function pollDevServers(): Promise<void> {
-  const servers = await scanDevServers();
+  const { servers, running } = await scanDevServers(devRoots());
   for (const server of servers) allowRoot(server.cwd);
   const proxied = openPreviews();
   for (const server of servers) {
@@ -531,11 +592,187 @@ async function pollDevServers(): Promise<void> {
   for (const devPort of proxied.keys()) {
     if (!live.has(devPort)) closePreview(devPort);
   }
+  noteDevRunning(running);
   const json = JSON.stringify(servers);
   if (json === lastDevJson) return;
   lastDevJson = json;
   state.devServers = servers;
   broadcast({ type: "dev-servers", servers });
+}
+
+/**
+ * Take in what the scan found: update the live map, and note on each workspace
+ * what it is serving so the button survives the server stopping.
+ *
+ * A terminal with a run in flight keeps whatever it had. Its root was withheld
+ * from the scan, so the scan has nothing to say about it — and dropping it here
+ * would be reading "I did not ask" as "there is nothing there", which is exactly
+ * the flicker the busy set exists to prevent.
+ */
+function noteDevRunning(found: Map<string, DevProc>): void {
+  let changed = false;
+  for (const [agentId, dev] of found) {
+    const had = devRunning.get(agentId);
+    if (!had || had.pid !== dev.pid || had.command !== dev.command) changed = true;
+    devRunning.set(agentId, dev);
+  }
+  for (const agentId of [...devRunning.keys()]) {
+    if (found.has(agentId) || devBusy.has(agentId)) continue;
+    devRunning.delete(agentId);
+    devPids.delete(agentId);
+    changed = true;
+  }
+  if (changed) pushSnapshot();
+
+  // The directory is asked for only when the process is new to us; see devPids.
+  for (const [agentId, dev] of found) {
+    if (devPids.get(agentId) === dev.pid) continue;
+    devPids.set(agentId, dev.pid);
+    void rememberDev(agentId, dev);
+  }
+}
+
+/** Where this server is actually running, and then: note it on its workspace. */
+async function rememberDev(agentId: string, dev: DevProc): Promise<void> {
+  const cwd = (await processCwd(dev.pid)) ?? host.find(agentId)?.cwd ?? "";
+  workspaces.rememberDev(agentId, { command: dev.command, cwd, agentId });
+}
+
+/**
+ * How long to wait after a dev server is gone before typing its command again.
+ *
+ * The shell has to get the foreground back and print a prompt; a line typed into
+ * the gap lands inside whatever the old server wrote on its way out, which is
+ * not wrong so much as unreadable.
+ */
+const DEV_RESTART_SETTLE_MS = 400;
+
+/**
+ * The same, for a tab that has just been opened for it — longer, because a login
+ * shell has a whole rc file to get through first.
+ *
+ * It is a wait rather than a handshake, and it is worth saying why: output from
+ * an unwatched terminal never reaches this process (that is the invariant that
+ * keeps a pty nobody is looking at off the socket), so there is no prompt to see
+ * arrive. The bytes themselves are safe either way — the tty buffers what is
+ * written before the shell reads it — so this is only about the command landing
+ * somewhere a person can read it.
+ */
+const DEV_SPAWN_SETTLE_MS = 900;
+
+function settle(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Whether a line may be typed into this terminal.
+ *
+ * Live, and with no agent running in it. The second check is the one that
+ * matters: kururu's agents are real and typing at a waiting Claude Code submits
+ * a prompt, so a remembered tab that has since had `claude` started in it is
+ * passed over and a new one is opened instead.
+ */
+function canTypeInto(agentId: string | null | undefined): agentId is string {
+  if (!agentId) return false;
+  const agent = host.find(agentId);
+  return Boolean(agent && !agent.exited && !agent.agent);
+}
+
+/** Type a command and press return, the way a person would. */
+function typeCommand(agentId: string, command: string): void {
+  const line = `${command}\r`;
+  recordInput(agentId, line);
+  recordNote(agentId, "dev", `running ${command}`);
+  host.write(agentId, line);
+}
+
+/**
+ * ▸ / ↻ on a workspace row: get that workspace serving fresh.
+ *
+ * One entry point for both faces of the button, because the client is the wrong
+ * side to tell them apart — see `run-dev` in `shared/wire.ts`. What is actually
+ * up is whatever the last scan found in this workspace's terminals, and a
+ * workspace holding two servers restarts both: "restart my app" means all of it.
+ *
+ * Nothing about this switches workspace, opens a pane, or focuses anything. The
+ * app comes back up where it was.
+ */
+async function runDev(workspaceId: string): Promise<void> {
+  const workspace = workspaces.workspaceById(workspaceId);
+  if (!workspace) return;
+
+  const serving = workspaces
+    .agentsInWorkspace(workspaceId)
+    .filter((agentId) => devRunning.has(agentId) && !devBusy.has(agentId));
+
+  if (serving.length > 0) {
+    await Promise.all(serving.map((agentId) => restartDevIn(agentId)));
+    return;
+  }
+
+  const memory = workspace.dev;
+  if (!memory) return;
+
+  // The tab it last ran in, if it is still there and still a shell. Otherwise a
+  // new one, in the directory the server was running in — which is the case a
+  // restored layout is always in, its panes having come back empty on purpose.
+  if (canTypeInto(memory.agentId)) {
+    typeCommand(memory.agentId, memory.command);
+    void pollSoon();
+    return;
+  }
+
+  const agent = await host.create({ cwd: memory.cwd || undefined, kind: "shell" });
+  workspaces.addTabTo(workspaceId, agent.id, agent.cwd);
+  allowRoot(agent.cwd);
+  devBusy.add(agent.id);
+  try {
+    await settle(DEV_SPAWN_SETTLE_MS);
+    if (!host.isLive(agent.id)) return;
+    typeCommand(agent.id, memory.command);
+    workspaces.rememberDev(agent.id, { ...memory, agentId: agent.id });
+  } finally {
+    devBusy.delete(agent.id);
+  }
+  void pollSoon();
+}
+
+/**
+ * Exactly the ^C and the re-typed line you would do by hand, which is why it
+ * needs no memory of how the tab was set up and works for a server kururu never
+ * started.
+ *
+ * The terminal is held out of the scan for the duration. Without that the poll
+ * would land between the interrupt and the retype, find nothing, and report the
+ * workspace stopped — and the row would blink through ▸ on its way back to ↻ for
+ * no reason a person could act on.
+ */
+async function restartDevIn(agentId: string): Promise<void> {
+  const dev = devRunning.get(agentId);
+  if (!dev) return;
+  devBusy.add(agentId);
+  try {
+    await stopDev(dev.pid);
+    // Say so now rather than at the next poll: a button that takes three seconds
+    // to show it did anything reads as a button that missed.
+    devRunning.delete(agentId);
+    devPids.delete(agentId);
+    pushSnapshot();
+    await settle(DEV_RESTART_SETTLE_MS);
+    if (!canTypeInto(agentId)) return;
+    typeCommand(agentId, dev.command);
+  } finally {
+    devBusy.delete(agentId);
+  }
+  void pollSoon();
+}
+
+/**
+ * Put the row back without waiting for the next tick. Three seconds of ▸ after
+ * pressing ▸ is the button appearing not to have worked.
+ */
+function pollSoon(): Promise<void> {
+  return settle(DEV_RESTART_SETTLE_MS * 2).then(() => pollDevServers());
 }
 
 /**
@@ -854,6 +1091,15 @@ function handleMessage(ws: WebSocket, raw: string): void {
       workspaces.moveWorkspace(msg.workspaceId, msg.index);
       return;
 
+    case "run-dev":
+      // Nothing to reply to and nothing to wait for: a spawn or a restart takes
+      // a second or two, and what says it happened is the snapshot the scan
+      // pushes when the row changes.
+      void runDev(msg.workspaceId).catch((err) => {
+        console.error("kururu: could not run the dev server:", err instanceof Error ? err.message : err);
+      });
+      return;
+
     // --- profiles ----------------------------------------------------------
 
     case "new-profile":
@@ -1009,6 +1255,18 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       liveAgents: host.agents.filter(countsAsAgent).length,
       devServers: state.devServers.length,
     });
+    return;
+  }
+
+  /**
+   * The addresses this machine can be reached at, for the QR the phone scans.
+   * Asked for rather than pushed: it changes when somebody joins a different
+   * network or brings tailscale up, neither of which raises an event here, and
+   * a poll running forever to keep a value only one dialog ever draws would be
+   * a timer earning nothing. See `reach.ts`.
+   */
+  if (url.pathname === "/api/reach") {
+    json(res, reach(PORT));
     return;
   }
 

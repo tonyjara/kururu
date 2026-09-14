@@ -46,6 +46,13 @@ interface StoredWorkspace {
   color?: string | null;
   /** Likewise: a session written before a workspace could pick a mascot. */
   mascotId?: string | null;
+  /**
+   * The last dev command this workspace had serving, and where it ran. Two
+   * strings and no process — which is what makes it the one thing on a restored
+   * layout that can bring an app back up, and why it is safe to keep when
+   * nothing else about a running terminal is.
+   */
+  dev?: { command: string; cwd: string } | null;
 }
 interface StoredProfile {
   name: string;
@@ -95,6 +102,10 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
         name: workspace.name,
         color: workspace.color,
         mascotId: workspace.mascotId,
+        // The terminal it ran in is deliberately dropped: agent ids belong to a
+        // pty host that will not be there next launch, and a button that reused
+        // a recycled id would type a command into a stranger.
+        dev: workspace.dev ? { command: workspace.dev.command, cwd: workspace.dev.cwd } : null,
         layout: strip(workspace.layout),
       })),
     })),
@@ -171,7 +182,21 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
       // that names nothing draws the default, so a file naming a mascot since
       // deleted needs no repair.
       const mascotId = typeof w.mascotId === "string" ? w.mascotId : null;
-      workspaces.push({ id: nextId("w"), name: w.name, layout, focusedPaneId: first, color, mascotId });
+      // Read as defensively as the rest, and with no terminal attached: the
+      // panes come back empty, so the first press of ▸ opens a tab for it.
+      const dev =
+        w.dev && typeof w.dev.command === "string" && w.dev.command.trim()
+          ? { command: w.dev.command, cwd: typeof w.dev.cwd === "string" ? w.dev.cwd : "", agentId: null }
+          : null;
+      workspaces.push({
+        id: nextId("w"),
+        name: w.name,
+        layout,
+        focusedPaneId: first,
+        color,
+        mascotId,
+        dev,
+      });
     }
     if (workspaces.length === 0) continue;
     const at = Math.min(Math.max(0, stored.activeWorkspace ?? 0), workspaces.length - 1);

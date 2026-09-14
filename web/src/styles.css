@@ -288,10 +288,35 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.ws-count {
-  margin-left: auto;
-  font-size: 10px;
+/* The dev server's button: ▸ while nothing is serving, ↻ while something is.
+   Which one you see *is* the status, so there is nothing else on the row saying
+   it — and a workspace that has never had a dev server draws no button at all,
+   which is why the row's padding for it is conditional rather than reserved the
+   way the swatch's is. Quiet until the row is under the cursor: a list of these
+   at full strength would read as the sidebar's main event, and it is not. */
+.ws-run {
+  flex: none;
+  margin-right: 4px;
+  /* The row reserves its bottom edge for the swatch, so its centre is not the
+     name's. Half that reservation puts this on the name's line instead. */
+  margin-bottom: 6px;
+  padding: 2px 5px;
+  border: none;
+  border-radius: 4px;
+  background: none;
   color: var(--dimmer);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ws-list li:hover .ws-run {
+  color: var(--dim);
+}
+.ws-run:hover,
+.ws-run:focus-visible {
+  color: var(--accent);
+  background: var(--chrome-high);
+  outline: none;
 }
 
 /* Renaming in place: the field stands where the row does, so the name does not
@@ -1877,4 +1902,132 @@ kbd {
   flex: 0 0 auto;
   align-self: flex-start;
   padding: 7px 14px;
+}
+
+/* --------------------------------------------------------------------------
+   The phone dialog
+   -------------------------------------------------------------------------- */
+
+/* Wider than a prompt and narrower than Settings: two codes side by side is the
+   whole of the layout, and the code's size is the only number that matters —
+   too small and a camera cannot resolve the modules, which is the one way this
+   feature fails silently. */
+.reach-dialog {
+  width: min(520px, 94vw);
+}
+
+.reach-pair {
+  display: flex;
+  gap: 12px;
+  margin: 12px 0 4px;
+}
+
+.reach-way {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.reach-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* White, always, and not a token — this is the quiet zone, and it belongs to
+   the code rather than to the window around it. A dark-themed QR code with a
+   dark border is one a scanner cannot find the edges of. */
+.qr {
+  width: 100%;
+  max-width: 190px;
+  aspect-ratio: 1;
+  display: block;
+  border-radius: 6px;
+  background: #fff;
+}
+
+/* The address in full, monospaced, because it is a thing you check digit by
+   digit against what you already know about your own network. A link as well
+   as a label: on the desktop it is not useful, but this dialog is served to
+   the phone too, and there the other code is a tap away. */
+.reach-url {
+  font: 11px var(--mono);
+  color: var(--text);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.reach-url:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.reach-note {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--dim);
+}
+.reach-note code {
+  font: 10.5px var(--mono);
+  color: var(--text);
+}
+
+/* The same shape as a code that is there, so tailscale coming up while this is
+   open swaps a picture for a picture instead of making the dialog jump under
+   the pointer. Dashed, because an outline that is not a box says "this could
+   have something in it" where a solid one says "this is empty on purpose". */
+.reach-absent {
+  width: 100%;
+  max-width: 190px;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  color: var(--dimmer);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.reach-absent p {
+  margin: 0;
+}
+
+/* Only drawn when a machine has more than one address, and then they are a row
+   of things to try rather than a setting — which is why the current one is
+   marked and none of them is stored anywhere. */
+.reach-alts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+}
+.reach-alt {
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--chrome-high);
+  color: var(--dim);
+  font: 10px var(--mono);
+}
+.reach-alt:hover {
+  color: var(--text);
+}
+.reach-alt-on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The two codes stack on a narrow window — which is the phone, where this
+   dialog is reachable too and 190px each would put them off the edge. */
+@media (max-width: 460px) {
+  .reach-pair {
+    flex-direction: column;
+    align-items: center;
+  }
 }

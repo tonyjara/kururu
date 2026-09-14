@@ -67,6 +67,8 @@ interface Props {
   onEditing: (editing: boolean) => void;
   /** Opens the settings dialog. The corner is the only way in. */
   onSettings: () => void;
+  /** Opens the phone dialog — the addresses this server answers at, as QR codes. */
+  onReach: () => void;
 }
 
 export function Sidebar({
@@ -79,6 +81,7 @@ export function Sidebar({
   onDeleteWorkspace,
   onEditing,
   onSettings,
+  onReach,
 }: Props) {
   const dragging = useDragging();
   /** The workspace row a drop would land on, while something is over it. */
@@ -128,6 +131,21 @@ export function Sidebar({
         });
       });
     }
+  }
+
+  /**
+   * Which workspaces have something serving right now — the difference between
+   * the row's ↻ and its ▸.
+   *
+   * Derived here rather than sent as a field of its own. The snapshot already
+   * says which terminals hold a dev server and the map above already says which
+   * workspace each terminal is in; a second field stating the conclusion is a
+   * second field that can disagree with the two it was drawn from.
+   */
+  const serving = new Set<string>();
+  for (const agent of agents) {
+    const at = agent.dev ? where.get(agent.id) : undefined;
+    if (at) serving.add(at.workspaceId);
   }
 
   /**
@@ -258,7 +276,31 @@ export function Sidebar({
                 >
                   <span className="ws-index">{index < 9 ? index + 1 : "·"}</span>
                   <span className="ws-name">{workspace.name}</span>
-                  <span className="ws-count">{countTerminals(workspace)}</span>
+                </button>
+              )}
+              {/* The dev server, if this workspace has ever had one. Outside the
+                  row's button for the same reason the swatch is — a button
+                  inside a button is not a thing the platform will give you, and
+                  pressing this one must not also switch workspace. */}
+              {renaming !== workspace.id && (workspace.dev || serving.has(workspace.id)) && (
+                <button
+                  className="ws-run"
+                  onClick={() => api.runDev(workspace.id)}
+                  /* The command is not printed on the row — it is the same `npm
+                     run dev` in most workspaces and it cost the name half its
+                     width — so the tooltip is where it goes. Either condition
+                     draws the button, because the two arrive a moment apart: a
+                     server is noticed before the directory it is running in has
+                     been read, and a button that appeared a second after the ↻
+                     it belongs to would read as arriving late. */
+                  title={
+                    serving.has(workspace.id)
+                      ? `Restart ${workspace.dev?.command ?? "the dev server"}`
+                      : `Run ${workspace.dev?.command ?? "the dev server"}`
+                  }
+                  aria-label={`${serving.has(workspace.id) ? "Restart" : "Run"} the dev server`}
+                >
+                  {serving.has(workspace.id) ? "↻" : "▸"}
                 </button>
               )}
               {/* Under the number, and outside the row's own button rather than
@@ -369,6 +411,18 @@ export function Sidebar({
       <div className="sidebar-foot">
         <button className="cog" onClick={onSettings} title="Settings" aria-label="Settings">
           <CogIcon />
+        </button>
+        {/* Beside the cog rather than in it: getting kururu onto a phone is a
+            thing you do at the start of a session, not a preference you set —
+            and it is the one gesture in the app with no keyboard door, because
+            the answer to it is a picture you have to be looking at. */}
+        <button
+          className="cog"
+          onClick={onReach}
+          title="Open on your phone"
+          aria-label="Open on your phone"
+        >
+          <QrIcon />
         </button>
       </div>
 
@@ -550,10 +604,6 @@ function MascotPicker({
   );
 }
 
-function countTerminals(workspace: Profile["workspaces"][number]): number {
-  return panes(workspace.layout).reduce((n, pane) => n + pane.agentIds.length, 0);
-}
-
 /**
  * How full the window is: a ring, and the number beside it.
  *
@@ -605,6 +655,25 @@ function CogIcon() {
          strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+/**
+ * A QR code, drawn as one — three finders and a scatter of modules.
+ *
+ * Not a phone, which is the other obvious glyph for this and the wrong one: a
+ * phone icon says "there is a mobile app", and there is not. There is a code to
+ * scan, and the icon is a small picture of the thing the button produces.
+ */
+function QrIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="6" height="6" rx="1" />
+      <rect x="15" y="3" width="6" height="6" rx="1" />
+      <rect x="3" y="15" width="6" height="6" rx="1" />
+      <path d="M15 15h2M19 15h2M15 19h2M19 19h2M17 17h2" />
     </svg>
   );
 }

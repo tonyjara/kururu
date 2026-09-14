@@ -24,7 +24,7 @@
  * profile, it always has at least one workspace, that workspace always has at
  * least one pane, and the focused pane always exists.
  */
-import type { Profile, ProfileSummary, Workspace } from "../../shared/model";
+import type { Profile, ProfileSummary, Workspace, WorkspaceDev } from "../../shared/model";
 import { isWorkspaceColor } from "../../shared/model";
 import {
   addTab,
@@ -94,7 +94,23 @@ function adopt(profile: Profile): Profile {
       // compares against null and gets a different answer than it did a restart
       // ago — which is the whole reason this function exists.
       mascotId: typeof workspace.mascotId === "string" ? workspace.mascotId : null,
+      // Likewise. The agent id inside it is *not* repaired against the host's
+      // list here: index.ts already drops tabs pointing at terminals that are
+      // gone, and a stale one costs nothing — `runDev` checks the terminal is
+      // still there and still idle before it types into it.
+      dev: adoptDev(workspace.dev),
     })),
+  };
+}
+
+/** A remembered dev command out of a blob an older server wrote, or nothing. */
+function adoptDev(value: unknown): WorkspaceDev | null {
+  const raw = (value ?? {}) as Record<string, unknown>;
+  if (typeof raw.command !== "string" || !raw.command.trim()) return null;
+  return {
+    command: raw.command,
+    cwd: typeof raw.cwd === "string" ? raw.cwd : "",
+    agentId: typeof raw.agentId === "string" ? raw.agentId : null,
   };
 }
 
@@ -521,6 +537,58 @@ export class Workspaces {
   }
 
   /**
+   * A workspace of the active profile, by id. For the verbs that act on a row
+   * of the sidebar rather than on wherever the focus is.
+   */
+  workspaceById(workspaceId: string): Workspace | null {
+    return this.active.workspaces.find((w) => w.id === workspaceId) ?? null;
+  }
+
+  /** Every terminal in a named workspace of the active profile. */
+  agentsInWorkspace(workspaceId: string): string[] {
+    const workspace = this.workspaceById(workspaceId);
+    return workspace ? panes(workspace.layout).flatMap((pane) => pane.agentIds) : [];
+  }
+
+  /**
+   * Put a terminal in a named workspace, in whatever pane has focus there —
+   * `moveTabToWorkspace` without the moving, for a tab that has just been
+   * opened. It does not switch workspace: this is how a dev server comes back up
+   * somewhere you are not looking.
+   */
+  addTabTo(workspaceId: string, agentId: string, cwd: string): void {
+    const profile = this.active;
+    if (!profile.workspaces.some((w) => w.id === workspaceId)) return;
+    this.mutate(profile.id, workspaceId, (w) => ({
+      ...w,
+      layout: addTab(w.layout, w.focusedPaneId, agentId, cwd),
+    }));
+  }
+
+  /**
+   * Note what a terminal is serving, on the workspace it is in — wherever that
+   * is, including a profile nobody is looking at.
+   *
+   * Called from the dev-server scan, which runs every three seconds, so it
+   * compares before it writes: every mutation here pushes a snapshot to every
+   * client and schedules a write to disk, and re-noting the same command twenty
+   * times a minute would do both for nothing.
+   */
+  rememberDev(agentId: string, dev: WorkspaceDev): void {
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) {
+        if (!paneWithAgent(workspace.layout, agentId)) continue;
+        const had = workspace.dev;
+        if (had && had.command === dev.command && had.cwd === dev.cwd && had.agentId === dev.agentId) {
+          return;
+        }
+        this.mutate(profile.id, workspace.id, (w) => ({ ...w, dev }));
+        return;
+      }
+    }
+  }
+
+  /**
    * Point a workspace at one of the saved mascots, or at nothing, which means
    * the default.
    *
@@ -611,7 +679,15 @@ export class Workspaces {
 
   private blankWorkspace(name: string): Workspace {
     const pane = makePane(id("n"));
-    return { id: id("w"), name, layout: pane, focusedPaneId: pane.pane.id, color: null, mascotId: null };
+    return {
+      id: id("w"),
+      name,
+      layout: pane,
+      focusedPaneId: pane.pane.id,
+      color: null,
+      mascotId: null,
+      dev: null,
+    };
   }
 
   private blankProfile(name: string): Profile {
