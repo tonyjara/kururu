@@ -185,7 +185,9 @@ export function TerminalView({ agentId, focused }: Props) {
      */
     let opened = false;
     let unsubscribe = () => {};
-    const push = () => {
+    // Annotated because the backlog's callback calls it, and a function that
+    // appears in its own initializer has no inferable type.
+    const push: () => void = () => {
       const dims = fit.proposeDimensions();
       if (!dims || !Number.isFinite(dims.cols) || !Number.isFinite(dims.rows)) return;
       fit.fit();
@@ -193,6 +195,12 @@ export function TerminalView({ agentId, focused }: Props) {
         opened = true;
         unsubscribe = subscribeOutput(agentId, {
           write: (data) => terminal.write(data),
+          /**
+           * The shape this emulator is drawing at, asked for rather than
+           * remembered: the pane is resizable, and a reconnect asks again on
+           * behalf of an emulator that has been sitting here for an hour.
+           */
+          grid: () => ({ cols: terminal.cols, rows: terminal.rows }),
           /**
            * A backlog replaces the whole screen, so the whole screen has to be
            * painted again — which does not follow from writing it.
@@ -212,11 +220,29 @@ export function TerminalView({ agentId, focused }: Props) {
            * wholesale is the one moment that cache is describing a screen that
            * no longer exists.
            */
-          reset: (data) => {
+          reset: (data, cols, rows) => {
+            /**
+             * The grid before the bytes. A backlog is a screen serialized at a
+             * width, and this is the width it was serialized at — normally the
+             * one this emulator asked for, and something else only if the pane
+             * moved while the answer was being prepared. Written into any other
+             * shape, every row longer than the target wraps, everything below it
+             * slides down, and the top scrolls away.
+             */
+            if (cols >= 2 && rows >= 2 && (cols !== terminal.cols || rows !== terminal.rows)) {
+              terminal.resize(cols, rows);
+            }
             terminal.reset();
             terminal.write(data, () => {
               webgl?.clearTextureAtlas();
               terminal.refresh(0, terminal.rows - 1);
+              /**
+               * And back to the box, in the case where that was not already the
+               * shape of it. Reflowing a correct screen is what xterm does for
+               * every window resize; reflowing a wrapped one would be reflowing
+               * damage.
+               */
+              push();
             });
           },
         });

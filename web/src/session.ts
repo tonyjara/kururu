@@ -23,7 +23,7 @@
  */
 import { useSyncExternalStore } from "react";
 import type { Direction } from "../../shared/layout";
-import type { PtyKind, SessionSnapshot, WorkspaceColor } from "../../shared/model";
+import type { MascotConfig, PtyKind, SessionSnapshot, WorkspaceColor } from "../../shared/model";
 import type { ClientMessage, DevServer, ServerMessage } from "../../shared/wire";
 
 export interface KururuState {
@@ -56,17 +56,34 @@ const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Err
 export interface OutputSink {
   /** Live bytes. Append. */
   write(data: string): void;
-  /** The history of this terminal. Clear everything and start from this. */
-  reset(data: string): void;
+  /**
+   * The history of this terminal, and the grid the server laid it out at. Clear
+   * everything, become that shape, and start from this — in that order, because
+   * a screen serialized for 229 columns written into a grid of any other width
+   * wraps and stays wrapped.
+   */
+  reset(data: string, cols: number, rows: number): void;
+  /**
+   * What shape this emulator is right now, for the request that asks for a
+   * history. The sink is asked rather than told because the answer changes —
+   * the pane is resizable — and because a reconnect has to ask again on behalf
+   * of a sink that has been sitting there for an hour.
+   */
+  grid(): { cols: number; rows: number };
 }
 const sinks = new Map<string, Set<OutputSink>>();
 
 /**
- * Backlogs that arrived before any emulator had subscribed for them. One per
- * agent, because only the newest is worth keeping: each is a whole screen, and
- * an older whole screen tells you nothing a newer one does not.
+ * Which `request-backlog` each sink is waiting for.
+ *
+ * A backlog is a whole screen at a particular size, and the wrong one is worse
+ * than none: two panes showing the same terminal are two different shapes, and
+ * an emulator thrown away and rebuilt has asked twice. So a sink takes only the
+ * answer to its own question, and the ones meant for a predecessor — or for the
+ * pane next door — go past it.
  */
-const held = new Map<string, string>();
+const epochs = new WeakMap<OutputSink, number>();
+let nextEpoch = 1;
 
 function set(patch: Partial<KururuState>): void {
   state = { ...state, ...patch };
@@ -85,10 +102,19 @@ function connect(): void {
   ws.onopen = () => {
     attempt = 0;
     set({ connected: true });
-    // The server keeps no memory of a socket that went away, so every pane that
-    // is open has to say so again — and gets its history back in reply, which is
-    // how it catches up on whatever was said while we were gone.
+    /**
+     * The server keeps no memory of a socket that went away, so every pane that
+     * is open has to say so again — and then ask, separately, for the history it
+     * missed while we were gone.
+     *
+     * Separately because those are two different questions and only one of them
+     * has a size in it. `watch` is a set of ids; it cannot say how wide anything
+     * is, and a history laid out at a width nobody is drawing at is a screen
+     * that stays wrong. Every emulator that is still mounted asks for itself, at
+     * whatever shape it is now.
+     */
     if (watched.size > 0) send({ type: "watch", agentIds: [...watched] });
+    for (const [agentId, open] of sinks) for (const sink of open) askBacklog(agentId, sink);
   };
 
   ws.onmessage = (event) => {
@@ -110,22 +136,26 @@ function connect(): void {
         break;
       case "backlog": {
         /**
-         * A backlog is never thrown away for want of an emulator to write it
-         * into. The server sends one because a terminal came on screen, and the
-         * component that will draw it subscribes a frame or two later — once its
-         * box has a size, because a screen serialized for 144 columns written
-         * into the 80 xterm starts life with is a screen that comes out wrapped.
-         * Those are two different clocks, and the gap is real: dropping what
-         * lands in it leaves the emulator with nothing but the agent's next
-         * partial redraw, which is a screen with holes in it.
+         * Delivered to the emulator that asked, and to no other.
+         *
+         * A backlog used to arrive unbidden — the server sent one whenever a
+         * terminal came on screen — and could land before any emulator had
+         * subscribed to receive it, which is why one was held for the next sink
+         * to appear. It cannot now: the only thing that produces a backlog is a
+         * request an emulator made for itself, so the asker is already here, and
+         * an answer to a question nobody is waiting for any more is an answer to
+         * a pane that has closed.
+         *
+         * The epoch is what makes "the one that asked" a fact rather than a
+         * hope. Two panes on one terminal are two shapes and each asked for its
+         * own; an emulator rebuilt while its predecessor's answer was still in
+         * flight must not be reset by that answer, which is a screen laid out
+         * for a box that no longer exists.
          */
-        const set = sinks.get(msg.agentId);
-        if (!set || set.size === 0) {
-          held.set(msg.agentId, msg.data);
-          break;
+        for (const sink of sinks.get(msg.agentId) ?? []) {
+          if (epochs.get(sink) !== msg.epoch) continue;
+          sink.reset(msg.data, msg.cols, msg.rows);
         }
-        held.delete(msg.agentId);
-        for (const sink of set) sink.reset(msg.data);
         break;
       }
       case "reply": {
@@ -176,16 +206,34 @@ function request(msg: (id: number) => ClientMessage): Promise<unknown> {
 let watched = new Set<string>();
 
 /**
- * Say which terminals are on screen. Derived from the layout the server sent
- * back, and sent whole: the server answers with history for the ones it had not
- * been sending, which is what makes a pane you just opened arrive full rather
- * than empty.
+ * Say which terminals are on screen, so the server knows whose bytes are worth
+ * sending. Derived from the layout the server sent back, and sent whole.
+ *
+ * It no longer brings history with it. A set of ids cannot say how wide anything
+ * is, and history is a screen laid out at a width — so the two were separated
+ * and the asking moved to the only thing that knows the answer, which is the
+ * emulator that is about to draw it.
  */
 export function watch(agentIds: Iterable<string>): void {
   const next = new Set(agentIds);
   if (next.size === watched.size && [...next].every((id) => watched.has(id))) return;
   watched = next;
   send({ type: "watch", agentIds: [...next] });
+}
+
+/**
+ * Ask for this terminal's history, at the shape this emulator is drawing at.
+ *
+ * The size travels with the question because the answer is laid out for it, and
+ * a round trip that has to be told the size afterwards has already produced a
+ * wrong screen. The epoch travels with it so the answer can be matched back to
+ * this asking and not to another.
+ */
+function askBacklog(agentId: string, sink: OutputSink): void {
+  const { cols, rows } = sink.grid();
+  const epoch = nextEpoch++;
+  epochs.set(sink, epoch);
+  send({ type: "request-backlog", agentId, cols, rows, epoch });
 }
 
 /**
@@ -202,14 +250,7 @@ export function subscribeOutput(agentId: string, sink: OutputSink): () => void {
   let set = sinks.get(agentId);
   if (!set) sinks.set(agentId, (set = new Set()));
   set.add(sink);
-  // Anything that arrived before there was anywhere to put it. Written first,
-  // so the request below — whose answer is newer — still lands on top of it.
-  const waiting = held.get(agentId);
-  if (waiting !== undefined) {
-    held.delete(agentId);
-    sink.reset(waiting);
-  }
-  send({ type: "request-backlog", agentId });
+  askBacklog(agentId, sink);
   return () => {
     set.delete(sink);
     if (set.size === 0) sinks.delete(agentId);
@@ -392,6 +433,15 @@ export function restartServer(): void {
 /** Ask for a proxy port so this dev server is reachable from the phone. */
 export function openPreview(port: number): void {
   send({ type: "open-preview", port });
+}
+
+/**
+ * Change what the working badge animates. Fire-and-forget like every other verb:
+ * the snapshot that comes back is the answer, so Settings never holds a config
+ * of its own and a second window sees the change without being told.
+ */
+export function setMascot(mascot: MascotConfig): void {
+  send({ type: "set-mascot", mascot });
 }
 
 // ---------------------------------------------------------------------------

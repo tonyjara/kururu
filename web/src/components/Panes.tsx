@@ -47,7 +47,7 @@ import {
   type PaneState,
   type Rect,
 } from "../../../shared/layout";
-import type { AgentSnapshot } from "../../../shared/model";
+import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
 import { AGENT_MIME, PANE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
 import { agentLabel, shortenPath } from "../labels";
 import * as api from "../session";
@@ -58,6 +58,8 @@ interface Props {
   node: LayoutNode;
   focusedPaneId: string;
   agents: AgentSnapshot[];
+  /** What the working badge animates; drawn here, owned by the server. */
+  mascot: MascotConfig;
   /** Zen: the focused pane takes the window and the rest are held out of sight. */
   zen: boolean;
 }
@@ -74,7 +76,7 @@ function place(rect: Rect): React.CSSProperties {
 
 const FULL: React.CSSProperties = { left: 0, top: 0, width: "100%", height: "100%" };
 
-export function Panes({ node, focusedPaneId, agents, zen }: Props) {
+export function Panes({ node, focusedPaneId, agents, mascot, zen }: Props) {
   const area = useRef<HTMLDivElement>(null);
   const [resizing, setResizing] = useState(false);
   const boxes = rects(node);
@@ -101,7 +103,7 @@ export function Panes({ node, focusedPaneId, agents, zen }: Props) {
               : place(rect ?? { x: 0, y: 0, w: 1, h: 1 });
         return (
           <div className="pane-box" key={pane.id} style={style}>
-            <Pane pane={pane} focused={focused} agents={agents} />
+            <Pane pane={pane} focused={focused} agents={agents} mascot={mascot} />
           </div>
         );
       })}
@@ -182,7 +184,17 @@ function DividerBar({
   );
 }
 
-function Pane({ pane, focused, agents }: { pane: PaneState; focused: boolean; agents: AgentSnapshot[] }) {
+function Pane({
+  pane,
+  focused,
+  agents,
+  mascot,
+}: {
+  pane: PaneState;
+  focused: boolean;
+  agents: AgentSnapshot[];
+  mascot: MascotConfig;
+}) {
   const showing = activeAgent(pane);
   const dragging = useDragging();
   /** Where in this strip a dropped tab would land, while one is over it. */
@@ -266,7 +278,7 @@ function Pane({ pane, focused, agents }: { pane: PaneState; focused: boolean; ag
                 onDragOver={(event) => overTab(event, index)}
                 onDrop={dropOnStrip}
               >
-                <Status agent={agent} />
+                <Status agent={agent} mascot={mascot} />
                 <span className="tab-label">{agentLabel(agent)}</span>
                 {agent.unread && <span className="unread" aria-label="new output" />}
                 <span
