@@ -20,7 +20,16 @@
  *    name is about as unfamiliar as it gets; rewriting it here means no project
  *    needs `server.allowedHosts` added to its config to be previewable.
  *  - Frame-blocking headers are stripped, so the preview can live in an iframe.
+ *
+ * The upstream hop is `http.request` and a pipe, not `fetch`. That matters: a
+ * fetch decodes the body but forwards `content-encoding` untouched, so a gzipped
+ * asset arrives at the browser decompressed and still labelled gzip. Piping
+ * bytes keeps the body and the headers describing it in agreement by
+ * construction, and streams without buffering as a side effect.
  */
+import { createServer, request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { Duplex } from "node:stream";
+import { WebSocket as UpstreamSocket, WebSocketServer, type RawData } from "ws";
 
 /** First port handed out to a preview. Below the ephemeral range, above the usual dev ports. */
 const BASE_PORT = 7800;
@@ -28,14 +37,8 @@ const BASE_PORT = 7800;
 interface Preview {
   devPort: number;
   proxyPort: number;
-  server: { stop(closeActiveConnections?: boolean): void };
-}
-
-interface SocketData {
-  /** The dev server's side of this websocket, once it is open. */
-  upstream: WebSocket | null;
-  /** Frames the browser sent before upstream finished connecting. */
-  backlog: (string | Uint8Array)[];
+  server: Server;
+  sockets: WebSocketServer;
 }
 
 const previews = new Map<number, Preview>();
@@ -53,8 +56,8 @@ const HOP_BY_HOP = new Set([
  */
 const VITE_BLOCKED = "This host is not allowed";
 
-function blockedHostPage(devPort: number): Response {
-  const body = `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
+function blockedHostPage(devPort: number): string {
+  return `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>body{font:15px/1.6 -apple-system,system-ui,sans-serif;margin:0;padding:24px;background:#111;color:#eee}
 code{background:#222;padding:2px 6px;border-radius:4px;font-size:13px}
 h1{font-size:17px;margin:0 0 12px}p{color:#aaa;max-width:40em}</style>
@@ -64,43 +67,154 @@ Kururu already rewrites <code>Host</code> to <code>localhost:${devPort}</code>, 
 server that checks something else — an origin allowlist, or a proxy setting of its own.</p>
 <p>For Vite, add to <code>vite.config.ts</code>:</p>
 <p><code>server: { allowedHosts: ['.ts.net'] }</code></p>`;
-  return new Response(body, { status: 502, headers: { "content-type": "text/html; charset=utf-8" } });
 }
 
 /** Copy a request's headers, minus the ones that belong to this hop. */
-function forwardHeaders(source: Headers, hostValue: string): Headers {
-  const out = new Headers();
-  source.forEach((value, key) => {
-    if (!HOP_BY_HOP.has(key.toLowerCase())) out.set(key, value);
-  });
-  out.set("host", hostValue);
+function forwardHeaders(source: IncomingHttpHeaders, hostValue: string): IncomingHttpHeaders {
+  const out: IncomingHttpHeaders = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (value === undefined) continue;
+    if (HOP_BY_HOP.has(key.toLowerCase())) continue;
+    out[key] = value;
+  }
+  out.host = hostValue;
   return out;
 }
 
 /** Strip what would stop the response rendering inside our iframe. */
-function unframe(source: Headers): Headers {
-  const out = new Headers(source);
-  // Bun stamps its own on the way out; forwarding upstream's sends two.
-  out.delete("date");
-  out.delete("x-frame-options");
-  out.delete("content-security-policy-report-only");
-  const csp = out.get("content-security-policy");
-  if (csp) {
+function unframe(source: IncomingHttpHeaders): IncomingHttpHeaders {
+  const out: IncomingHttpHeaders = { ...source };
+  // Node stamps its own on the way out; forwarding upstream's sends two.
+  delete out.date;
+  delete out["x-frame-options"];
+  delete out["content-security-policy-report-only"];
+  const csp = out["content-security-policy"];
+  if (typeof csp === "string") {
     const kept = csp
       .split(";")
       .filter((d) => !/^\s*frame-ancestors/i.test(d))
       .join(";")
       .trim();
-    if (kept) out.set("content-security-policy", kept);
-    else out.delete("content-security-policy");
+    if (kept) out["content-security-policy"] = kept;
+    else delete out["content-security-policy"];
   }
   return out;
+}
+
+/** The subprotocols a client offered, in the order it offered them. */
+function offeredProtocols(header: string | string[] | undefined): string[] {
+  if (!header) return [];
+  const raw = Array.isArray(header) ? header.join(",") : header;
+  return raw.split(",").map((p) => p.trim()).filter(Boolean);
+}
+
+function proxyHttp(req: IncomingMessage, res: ServerResponse, devPort: number, upstreamHost: string): void {
+  const upstream = httpRequest(
+    {
+      host: "127.0.0.1",
+      port: devPort,
+      method: req.method,
+      path: req.url,
+      headers: forwardHeaders(req.headers, upstreamHost),
+    },
+    (upstreamRes) => {
+      const status = upstreamRes.statusCode ?? 502;
+      const headers = unframe(upstreamRes.headers);
+
+      // A 403 might be vite refusing the Host. It is the one status worth
+      // buffering for, and the body is a sentence.
+      if (status === 403) {
+        const chunks: Buffer[] = [];
+        upstreamRes.on("data", (chunk: Buffer) => chunks.push(chunk));
+        upstreamRes.on("end", () => {
+          const body = Buffer.concat(chunks);
+          if (body.toString("utf8").includes(VITE_BLOCKED)) {
+            const page = blockedHostPage(devPort);
+            res.writeHead(502, { "content-type": "text/html; charset=utf-8" });
+            res.end(page);
+            return;
+          }
+          res.writeHead(status, headers);
+          res.end(body);
+        });
+        return;
+      }
+
+      res.writeHead(status, headers);
+      upstreamRes.pipe(res);
+    },
+  );
+
+  upstream.on("error", (err) => {
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
+    res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
+    res.end(`kururu: dev server on :${devPort} did not answer (${err.message})`);
+  });
+
+  req.pipe(upstream);
+}
+
+function proxyWebSocket(
+  sockets: WebSocketServer,
+  req: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+  devPort: number,
+): void {
+  const protocols = offeredProtocols(req.headers["sec-websocket-protocol"]);
+
+  sockets.handleUpgrade(req, socket, head, (client) => {
+    /**
+     * The path and the query are part of the endpoint, not decoration: Vite's
+     * HMR socket happens to live at `/`, but Next.js listens on
+     * `/_next/webpack-hmr` and several dev servers put a token in the query.
+     * Dialling the bare origin works for exactly one framework by luck.
+     */
+    const upstream = new UpstreamSocket(`ws://127.0.0.1:${devPort}${req.url ?? "/"}`, protocols, {
+      headers: { host: `localhost:${devPort}` },
+    });
+
+    /** Frames the browser sent before upstream finished connecting. */
+    const backlog: { data: RawData; binary: boolean }[] = [];
+
+    upstream.on("open", () => {
+      for (const frame of backlog) upstream.send(frame.data, { binary: frame.binary });
+      backlog.length = 0;
+    });
+
+    // `isBinary` is the whole reason this is not a one-liner: a text frame and a
+    // binary frame both arrive as a Buffer, so relaying without it would turn
+    // every HMR message into binary and the dev server would ignore it.
+    upstream.on("message", (data: RawData, isBinary: boolean) => {
+      if (client.readyState === UpstreamSocket.OPEN) client.send(data, { binary: isBinary });
+    });
+    client.on("message", (data: RawData, isBinary: boolean) => {
+      if (upstream.readyState === UpstreamSocket.OPEN) upstream.send(data, { binary: isBinary });
+      else backlog.push({ data, binary: isBinary });
+    });
+
+    const closeBoth = (): void => {
+      try { client.close(); } catch { /* already gone */ }
+      try { upstream.close(); } catch { /* already gone */ }
+    };
+    upstream.on("close", closeBoth);
+    upstream.on("error", closeBoth);
+    client.on("close", closeBoth);
+    client.on("error", closeBoth);
+  });
 }
 
 /**
  * Open (or reuse) a proxy for a dev server and return the port it is on.
  * Idempotent: asking twice for the same dev server gives the same port back,
  * which is what keeps a phone's bookmark working across a reload.
+ *
+ * Returns synchronously even though `listen` is not, because callers want a port
+ * to put in a snapshot rather than a promise to await. If the bind fails the
+ * preview closes itself and the next dev scan simply stops advertising it.
  */
 export function openPreview(devPort: number): number {
   const existing = previews.get(devPort);
@@ -109,78 +223,32 @@ export function openPreview(devPort: number): number {
   const upstreamHost = `localhost:${devPort}`;
   const proxyPort = nextFreePort();
 
-  const server = Bun.serve<SocketData>({
-    port: proxyPort,
-    // The tailnet interface, not just loopback — the phone is the point.
-    hostname: "0.0.0.0",
-    idleTimeout: 0,
-
-    async fetch(req, srv) {
-      const url = new URL(req.url);
-      const target = `http://127.0.0.1:${devPort}${url.pathname}${url.search}`;
-
-      // HMR, and anything else the app opens: upgrade here, dial upstream, pipe.
-      if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
-        const protocol = req.headers.get("sec-websocket-protocol") ?? undefined;
-        const upgraded = srv.upgrade(req, {
-          data: { upstream: null, backlog: [] } satisfies SocketData,
-          headers: protocol ? { "sec-websocket-protocol": protocol.split(",")[0]!.trim() } : undefined,
-        });
-        if (upgraded) return undefined;
-        return new Response("expected a websocket upgrade", { status: 400 });
-      }
-
-      try {
-        const res = await fetch(target, {
-          method: req.method,
-          headers: forwardHeaders(req.headers, upstreamHost),
-          body: req.body,
-          redirect: "manual",
-          // Bun needs this to stream a request body through without buffering it.
-          // @ts-expect-error -- duplex is valid at runtime, not yet in the types
-          duplex: "half",
-        });
-        if (res.status === 403) {
-          const text = await res.clone().text();
-          if (text.includes(VITE_BLOCKED)) return blockedHostPage(devPort);
-        }
-        return new Response(res.body, { status: res.status, statusText: res.statusText, headers: unframe(res.headers) });
-      } catch (err) {
-        const why = err instanceof Error ? err.message : String(err);
-        return new Response(`kururu: dev server on :${devPort} did not answer (${why})`, { status: 502 });
-      }
-    },
-
-    websocket: {
-      open(ws) {
-        // The browser's frames can arrive before upstream is ready; hold them.
-        const upstream = new WebSocket(`ws://127.0.0.1:${devPort}`);
-        upstream.binaryType = "arraybuffer";
-        upstream.onopen = () => {
-          for (const frame of ws.data.backlog) upstream.send(frame);
-          ws.data.backlog = [];
-        };
-        upstream.onmessage = (event) => {
-          const data = event.data;
-          ws.send(typeof data === "string" ? data : new Uint8Array(data as ArrayBuffer));
-        };
-        upstream.onclose = () => { try { ws.close(); } catch { /* already gone */ } };
-        upstream.onerror = () => { try { ws.close(); } catch { /* already gone */ } };
-        ws.data.upstream = upstream;
-      },
-      message(ws, message) {
-        const upstream = ws.data.upstream;
-        const frame = typeof message === "string" ? message : new Uint8Array(message);
-        if (upstream && upstream.readyState === WebSocket.OPEN) upstream.send(frame);
-        else ws.data.backlog.push(frame);
-      },
-      close(ws) {
-        try { ws.data.upstream?.close(); } catch { /* already gone */ }
-      },
-    },
+  const sockets = new WebSocketServer({
+    noServer: true,
+    // Echo the first protocol the client offered, as the old Bun handshake did.
+    handleProtocols: (protocols) => protocols.values().next().value ?? false,
   });
 
-  previews.set(devPort, { devPort, proxyPort, server });
+  const server = createServer((req, res) => proxyHttp(req, res, devPort, upstreamHost));
+  server.on("upgrade", (req, socket, head) => proxyWebSocket(sockets, req, socket, head, devPort));
+
+  /**
+   * An HMR socket is idle by design — it exists to say nothing until a file
+   * changes. Node's default timeouts would hang up on it.
+   */
+  server.keepAliveTimeout = 0;
+  server.headersTimeout = 0;
+  server.requestTimeout = 0;
+
+  server.on("error", (err) => {
+    console.error(`kururu: preview proxy on :${proxyPort} failed —`, err.message);
+    closePreview(devPort);
+  });
+
+  // The tailnet interface, not just loopback — the phone is the point.
+  server.listen(proxyPort, "0.0.0.0");
+
+  previews.set(devPort, { devPort, proxyPort, server, sockets });
   return proxyPort;
 }
 
@@ -188,12 +256,27 @@ export function openPreview(devPort: number): number {
 export function closePreview(devPort: number): void {
   const preview = previews.get(devPort);
   if (!preview) return;
-  preview.server.stop(true);
   previews.delete(devPort);
+  /**
+   * Order matters and so does the second call. `close()` alone stops new
+   * connections and waits for existing ones, and an upgraded websocket never
+   * ends on its own — the listener would stay open forever, holding the port.
+   */
+  for (const client of preview.sockets.clients) {
+    try { client.terminate(); } catch { /* already gone */ }
+  }
+  preview.sockets.close();
+  preview.server.close();
+  preview.server.closeAllConnections();
 }
 
 export function openPreviews(): Map<number, number> {
   return new Map([...previews].map(([devPort, p]) => [devPort, p.proxyPort]));
+}
+
+/** Every preview, shut down. Called on the way out; see index.ts. */
+export function closeAllPreviews(): void {
+  for (const devPort of [...previews.keys()]) closePreview(devPort);
 }
 
 /** Lowest unused proxy port at or above the base. Small set; a scan is fine. */

@@ -1,25 +1,54 @@
 /**
  * The Electron shell.
  *
- * Its entire job is: make sure a kururu server is running, then show it. The
- * window loads the same URL a phone loads, so there is one build of the UI and
- * no `file://` variant to keep in step. Everything stateful — ptys, the daemon
- * link, the preview proxies — lives in the Bun server, which is why closing
- * this window does not disturb an agent and why the phone keeps working when
- * the desktop app is not running at all.
+ * Its job is: bring up everything kururu needs, then show it. One launch, one
+ * app — no server to start in another terminal, and nothing to have running
+ * first. The window loads the same URL a phone loads, so there is one build of
+ * the UI and no `file://` variant to keep in step.
  *
- * Electron's main process is Node and cannot be Bun, which is the reason the
- * server is a child process rather than a module: it gets to stay on Bun, with
- * Bun.serve and Bun.connect, and this file never imports any of it.
+ * The server does not run *in this process*. It runs in utilityProcesses, which
+ * are still this app — Electron forks them, owns them, and they die when the app
+ * does — but are not the thread that draws the window. That distinction is load
+ * bearing: the server reads files synchronously for the file browser, shells out
+ * to `lsof` and `ps` across the whole machine every three seconds, and pushes
+ * every byte of every pty through a terminal emulator. On the main process all
+ * of that would be jank in the UI, and it would look like Electron's fault.
+ *
+ * There are *two* of them, and which is which matters more than it looks. The
+ * **pty host** owns everything that cannot be recreated — the ptys, their
+ * emulators — and can only be restarted by quitting. The **server** owns the
+ * protocol, the layout and the discovery, all of which change constantly, and
+ * can be killed and re-forked in a second without an agent noticing. They are
+ * handed the two ends of a MessageChannel and talk to each other directly; this
+ * process is never in the middle of a terminal's output.
+ *
+ * What stays here is what only the main process can do: the window, forking
+ * those two, re-forking one of them on request, and asking before quitting kills
+ * somebody's agents.
  */
-const { app, BrowserWindow, ipcMain, session, shell } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  Menu,
+  MessageChannelMain,
+  dialog,
+  ipcMain,
+  session,
+  shell,
+  utilityProcess,
+} = require("electron");
 const { spawn } = require("node:child_process");
-const { existsSync } = require("node:fs");
+const { existsSync, watch } = require("node:fs");
 const path = require("node:path");
 
 const PORT = Number(process.env.KURURU_PORT || 7717);
 const DEV = process.env.KURURU_DEV === "1";
+/** In dev the UI comes from vite so that editing it is instant; otherwise from the server. */
 const URL = DEV ? "http://localhost:5173" : `http://127.0.0.1:${PORT}`;
+
+const SERVER_ENTRY = path.join(__dirname, "dist/server.mjs");
+const PTYHOST_ENTRY = path.join(__dirname, "dist/ptyhost.mjs");
+const WEB_DIST = path.join(__dirname, "../web/dist");
 
 /** Where bun lives when it is not on PATH — a GUI launch inherits almost none. */
 const BUN_CANDIDATES = [
@@ -29,43 +58,266 @@ const BUN_CANDIDATES = [
   "/usr/local/bin/bun",
 ].filter(Boolean);
 
+/** The two halves of the server, and in dev the vite that serves the UI. */
+let ptyhost = null;
 let server = null;
+let vite = null;
+/** Set while a restart is in flight, so the server's exit is not reported as a crash. */
+let replacingServer = false;
+/** Guards against re-forking a server that cannot start, forever, at full speed. */
+let lastServerStart = 0;
+let crashes = 0;
 
 function bunPath() {
   return BUN_CANDIDATES.find((candidate) => existsSync(candidate)) || "bun";
 }
 
-async function serverAlive() {
+async function reachable(url) {
   try {
-    const res = await fetch(`http://127.0.0.1:${PORT}/api/health`, {
-      signal: AbortSignal.timeout(600),
-    });
+    const res = await fetch(url, { signal: AbortSignal.timeout(600) });
     return res.ok;
   } catch {
     return false;
   }
 }
 
+async function waitFor(url, what) {
+  for (let i = 0; i < 100; i++) {
+    if (await reachable(url)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  console.error(`kururu: ${what} did not come up`);
+  return false;
+}
+
+const CHILD_ENV = {
+  ...process.env,
+  KURURU_PORT: String(PORT),
+  // The bundle does not sit where the source did, so it cannot work this out
+  // for itself.
+  KURURU_WEB_DIST: WEB_DIST,
+};
+
 /**
- * Adopt a server that is already up rather than starting a second one — the
- * usual case when the phone has been using it, or when `bun run dev` is
- * running in a terminal. Two servers would fight over the port and over the
- * preview proxies.
+ * The pty host. Forked once, for the life of the app: restarting it is the one
+ * thing that costs the user their agents, and there is no way around that — a
+ * live pty cannot be handed to a replacement process.
  */
-async function ensureServer() {
-  if (await serverAlive()) return;
-  const entry = path.join(__dirname, "../server/src/index.ts");
-  server = spawn(bunPath(), ["run", entry], {
+function startPtyHost() {
+  if (!existsSync(PTYHOST_ENTRY)) {
+    console.error(`kururu: ${PTYHOST_ENTRY} is missing — run \`bun run build:server\``);
+    return;
+  }
+  ptyhost = utilityProcess.fork(PTYHOST_ENTRY, [], { stdio: "inherit", env: CHILD_ENV });
+  ptyhost.on("exit", (code) => {
+    ptyhost = null;
+    if (!quitting) console.error(`kururu: the pty host exited (${code}) — agents are gone`);
+  });
+}
+
+/**
+ * The server, and the channel that joins it to the pty host.
+ *
+ * A fresh MessageChannel every time: the old one went with the process that held it,
+ * and the host treats a new port as a new server and hands it back everything it
+ * was keeping — the agents, and the arrangement the last server left behind.
+ */
+function startServer() {
+  if (!existsSync(SERVER_ENTRY)) {
+    console.error(`kururu: ${SERVER_ENTRY} is missing — run \`bun run build:server\``);
+    return;
+  }
+  lastServerStart = Date.now();
+  server = utilityProcess.fork(SERVER_ENTRY, [], { stdio: "inherit", env: CHILD_ENV });
+
+  const channel = new MessageChannelMain();
+  ptyhost?.postMessage({ type: "link" }, [channel.port1]);
+  server.postMessage({ type: "link" }, [channel.port2]);
+
+  server.on("message", (raw) => {
+    const msg = raw && raw.data !== undefined ? raw.data : raw;
+    // The UI asking to be put back on current source. Ghosttown's prefix+B,
+    // except that here it costs nothing: the agents are next door.
+    if (msg && msg.type === "restart") void restartServer();
+  });
+
+  server.on("exit", (code) => {
+    server = null;
+    if (quitting || replacingServer) return;
+    /**
+     * A server that dies on its own is worth bringing back — it holds no ptys,
+     * so it is cheap, and the agents next door are still waiting for one. But a
+     * server that cannot start at all (a port already taken, a bad build) would
+     * otherwise be forked forever at full speed, so give up after a few tries in
+     * quick succession and say why.
+     */
+    const now = Date.now();
+    if (now - lastServerStart < 3000) crashes++;
+    else crashes = 0;
+    if (crashes >= 3) {
+      console.error(`kururu: the server keeps exiting (${code}) — leaving it down`);
+      return;
+    }
+    console.error(`kururu: the server exited (${code}) — restarting it`);
+    startServer();
+  });
+}
+
+/**
+ * Throw the server away and fork a new one. The agents are not in it, so this
+ * costs a websocket reconnect and a repaint — the client reconnects forever by
+ * design, and the layout comes back from the host.
+ */
+async function restartServer() {
+  if (!ptyhost || replacingServer) return;
+  replacingServer = true;
+  try {
+    if (DEV) await rebuildServer();
+    const old = server;
+    server = null;
+    if (old) {
+      await new Promise((resolve) => {
+        old.once("exit", resolve);
+        old.kill();
+        setTimeout(resolve, 2000);
+      });
+    }
+    startServer();
+    await waitFor(`http://127.0.0.1:${PORT}/api/health`, "the server");
+  } finally {
+    replacingServer = false;
+  }
+}
+
+/** In dev the source is what changed, so it has to be rebuilt before re-forking. */
+function rebuildServer() {
+  return new Promise((resolve) => {
+    const build = spawn(process.execPath, [path.join(__dirname, "build.mjs")], {
+      stdio: "inherit",
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    });
+    build.on("exit", resolve);
+    build.on("error", resolve);
+  });
+}
+
+/**
+ * In dev, editing the server restarts it — the same reflex `GHOSTTOWN_DEV=1`
+ * gives the TUI, and possible for the same reason: what it restarts is not what
+ * holds the processes. The pty host is deliberately *not* watched. Its files
+ * change rarely, and picking up a change there means ending every agent, which
+ * is a thing to do on purpose rather than on save.
+ */
+function watchServerSources() {
+  const roots = [path.join(__dirname, "../server/src"), path.join(__dirname, "../shared")];
+  let timer = null;
+  for (const dir of roots) {
+    if (!existsSync(dir)) continue;
+    watch(dir, { recursive: true }, (_event, file) => {
+      if (!file || !file.endsWith(".ts")) return;
+      // The host is the part a restart cannot help with; say so rather than
+      // silently doing half of what the edit asked for.
+      if (file.includes("agents/") || file.includes("ptyhost")) {
+        console.log(`kururu: ${file} is the pty host's — restart the app to pick it up`);
+        return;
+      }
+      clearTimeout(timer);
+      timer = setTimeout(() => void restartServer(), 250);
+    });
+  }
+}
+
+/**
+ * Ask the pty host something and wait for its answer. There is exactly one
+ * question worth asking (how many agents are running), so this stays a function
+ * rather than growing into a protocol. It goes to the host rather than the
+ * server because the host is the one that knows — and the one that is still
+ * there while the server is being replaced.
+ */
+function askPtyHost(type, replyType = type, timeoutMs = 2000) {
+  return new Promise((resolve) => {
+    if (!ptyhost) return resolve(null);
+    const timer = setTimeout(() => {
+      ptyhost?.removeListener("message", onMessage);
+      // A server that does not answer must not hold the app open; the caller
+      // treats null as "assume the worst and carry on".
+      resolve(null);
+    }, timeoutMs);
+    const onMessage = (raw) => {
+      // Electron hands the parent the value; a MessagePort-shaped event would
+      // wrap it in `.data`. Accept either rather than depend on which.
+      const msg = raw && raw.data !== undefined ? raw.data : raw;
+      if (!msg || msg.type !== replyType) return;
+      clearTimeout(timer);
+      ptyhost?.removeListener("message", onMessage);
+      resolve(msg);
+    };
+    ptyhost.on("message", onMessage);
+    ptyhost.postMessage({ type });
+  });
+}
+
+/** In dev the UI is vite's, so the app starts vite too rather than asking you to. */
+function startVite() {
+  vite = spawn(bunPath(), ["run", "--cwd", path.join(__dirname, "../web"), "dev"], {
     stdio: "inherit",
     env: { ...process.env, KURURU_PORT: String(PORT) },
   });
-  server.on("error", (err) => console.error("kururu: could not start the server —", err.message));
+  vite.on("error", (err) => console.error("kururu: could not start vite —", err.message));
+}
 
-  for (let i = 0; i < 40; i++) {
-    if (await serverAlive()) return;
-    await new Promise((resolve) => setTimeout(resolve, 150));
-  }
-  console.error("kururu: server did not come up on", PORT);
+/**
+ * The menu bar, and the one thing it exists to say out loud.
+ *
+ * Kururu has two reloads and they are not variations on each other. **Reload
+ * Window** throws away the UI and draws it again from the same server — a
+ * repaint, and the only one of the two that is ever about what is on screen.
+ * **Restart Server** throws the server process away and forks a new one, which
+ * is how a change to the protocol, the layout or the discovery gets picked up
+ * without the app going down with it. The agents are in neither: they live in
+ * the pty host, one process over, and watch both of these happen without
+ * noticing. That is the whole reason the split exists, and a menu that offered
+ * only one of them made the cheaper half look like the only half.
+ *
+ * Everything else here is Electron's own roles, spelled out only because
+ * replacing the default menu replaces all of it. Edit is not decoration: a
+ * terminal without copy and paste in the menu is a terminal whose ⌘C people
+ * distrust.
+ */
+function buildMenu() {
+  const isMac = process.platform === "darwin";
+  const template = [
+    ...(isMac ? [{ role: "appMenu" }] : []),
+    { role: "fileMenu" },
+    { role: "editMenu" },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload", label: "Reload Window" },
+        {
+          label: "Restart Server",
+          accelerator: "Shift+CmdOrCtrl+R",
+          // The agents are next door, so this is cheap — say so, because the
+          // word "restart" in an app that owns processes reads as expensive.
+          toolTip: "Fork a new server. The agents keep running.",
+          click: () => void restartServer(),
+        },
+        // Kept, without a shortcut: it is Chromium's cache-busting reload, which
+        // is a browser concern rather than a kururu one, and the chord it
+        // normally answers to is worth more to the restart above.
+        { role: "forceReload", label: "Force Reload (clear cache)" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+        { role: "toggleDevTools" },
+      ],
+    },
+    { role: "windowMenu" },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
 function createWindow() {
@@ -111,7 +363,20 @@ app.whenReady().then(async () => {
     callback({ responseHeaders: headers });
   });
 
-  await ensureServer();
+  buildMenu();
+
+  startPtyHost();
+  startServer();
+  await waitFor(`http://127.0.0.1:${PORT}/api/health`, "the server");
+  if (DEV) watchServerSources();
+
+  if (DEV) {
+    startVite();
+    // Without this the window loads before vite is listening and sits there
+    // showing ERR_CONNECTION_REFUSED, because a failed loadURL is not retried.
+    await waitFor(URL, "vite");
+  }
+
   createWindow();
 
   app.on("activate", () => {
@@ -119,15 +384,82 @@ app.whenReady().then(async () => {
   });
 });
 
+/**
+ * Closing the window is not quitting, on macOS by convention and here very much
+ * on purpose: the agents are in this app now, so window-all-closed quitting
+ * would mean closing a window ends whatever they were doing. Shut instead of
+ * quit, the server keeps serving the phone and the agents keep working.
+ */
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
+// ---------------------------------------------------------------------------
+// Quitting
+// ---------------------------------------------------------------------------
+
+let quitting = false;
+
 /**
- * Only kill the server if this process started it. One that was already running
- * belongs to a terminal or to the phone, and taking it down on window close
- * would cut the phone off for no reason.
+ * Quitting kills every agent, which is the sharp edge of owning them. So it
+ * asks first — but only when there is something to lose, because a confirmation
+ * on every quit is one nobody reads.
  */
-app.on("before-quit", () => {
-  if (server) server.kill();
+async function confirmAndQuit() {
+  const answer = await askPtyHost("live-agents");
+  const live = answer?.count ?? 0;
+
+  if (live > 0) {
+    const { response } = await dialog.showMessageBox({
+      type: "warning",
+      buttons: ["Quit and stop them", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+      message: live === 1 ? "One agent is still running." : `${live} agents are still running.`,
+      detail: "They run inside kururu, so quitting stops them. Closing the window instead leaves them working, and keeps the phone connected.",
+    });
+    if (response !== 0) return;
+  }
+
+  await shutdown();
+  quitting = true;
+  app.quit();
+}
+
+/** Everything the OS will not clean up for us: ptys first, they are the ones that linger. */
+async function shutdown() {
+  // The server first, and without ceremony: it holds no ptys, and stopping it
+  // stops anybody typing at one while the host is taking them down.
+  if (server) {
+    server.kill();
+    server = null;
+  }
+  if (ptyhost) {
+    // Give it the chance to kill its ptys itself; killing the host first would
+    // orphan them, which is the exact thing this is for.
+    await askPtyHost("shutdown", "shutdown-done", 3000);
+    ptyhost.kill();
+    ptyhost = null;
+  }
+  if (vite) {
+    vite.kill();
+    vite = null;
+  }
+}
+
+app.on("before-quit", (event) => {
+  if (quitting) return;
+  event.preventDefault();
+  void confirmAndQuit();
 });
+
+// A crash or a signal still gets the ptys reaped, even with no chance to ask.
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    quitting = true;
+    if (server) server.kill();
+    if (ptyhost) ptyhost.kill();
+    if (vite) vite.kill();
+    app.quit();
+  });
+}

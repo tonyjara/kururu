@@ -11,12 +11,16 @@
  * pid → listening ports, ps for pid → argv. Cross-referencing them is what
  * turns "something is on :5173" into "vite, in ~/Desktop/Nyto/kururu".
  *
- * Ghosttown attributes dev servers to the surface running them, by walking the
- * surface's process tree. Kururu cannot: the daemon's `list` does not put dev
- * info in the snapshot yet. Scanning the machine is the version that needs no
- * change to ghosttown, and it finds servers started outside the mux too.
+ * The scan is machine-wide rather than per-agent, which is both a limitation and
+ * a feature: a dev server you started in a plain terminal shows up here, and so
+ * does one an agent started. Attributing them to the agent that owns them is now
+ * possible for the first time — kururu holds the pty pids itself, and `procs.ts`
+ * already builds the child index that would answer it — but a dev server's
+ * usefulness does not depend on knowing who started it, so that stays unbuilt.
  */
+import { execFile } from "node:child_process";
 import type { DevServer } from "../../shared/wire";
+import { processCwd } from "./cwd";
 
 /**
  * Programs whose name means a server is running. Mirrors ghosttown's
@@ -174,22 +178,23 @@ export function resolveDevCommand(
   return null;
 }
 
-async function run(cmd: string[]): Promise<string> {
-  try {
-    const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore" });
-    return await new Response(proc.stdout).text();
-  } catch {
-    return "";
-  }
-}
+/**
+ * `ps -eo args` over a busy machine runs to a few hundred KB and lsof is no
+ * smaller, so the default 1 MB ceiling is not the headroom it looks like:
+ * overflowing it kills the child and the scan silently finds nothing.
+ */
+const MAX_BUFFER = 8 * 1024 * 1024;
 
-/** Working directory of a pid, or undefined. One lsof per candidate, not per pid. */
-async function cwdOf(pid: number): Promise<string | undefined> {
-  const out = await run(["lsof", "-a", "-d", "cwd", "-p", String(pid), "-F", "n"]);
-  for (const line of out.split("\n")) {
-    if (line.startsWith("n/")) return line.slice(1);
-  }
-  return undefined;
+function run(cmd: string[]): Promise<string> {
+  const [file, ...args] = cmd;
+  if (!file) return Promise.resolve("");
+  return new Promise((resolve) => {
+    execFile(file, args, { maxBuffer: MAX_BUFFER }, (err, stdout) => {
+      // A missing lsof, a non-zero exit, a truncated read: all the same answer.
+      // Discovery is best-effort and the next scan is three seconds away.
+      resolve(err && !stdout ? "" : stdout);
+    });
+  });
 }
 
 /**
@@ -214,10 +219,11 @@ export async function scanDevServers(): Promise<DevServer[]> {
   }
 
   // cwd is the label that tells two vite servers apart, so it is worth the
-  // extra lsof — but only for the handful that matched.
+  // extra lsof — but only for the handful that matched. Same question a new tab
+  // asks about a terminal, so it is asked in one place: see `cwd.ts`.
   await Promise.all(
     found.map(async (server) => {
-      server.cwd = await cwdOf(server.pid);
+      server.cwd = await processCwd(server.pid);
     }),
   );
 
