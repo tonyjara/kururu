@@ -30,11 +30,14 @@
  * handle because they are the same idea at two scales, and `dragstart` bubbling
  * from the tab to the strip is the one trap: see the guard in `onDragStart`.
  *
- * **Only the active tab of a pane is mounted.** A hidden tab is not watched, so
- * its emulator would be frozen on stale output and reset by a backlog the moment
- * it came back — and every live terminal holds a WebGL context, of which a page
- * gets about sixteen. A tab switch is a rebuild and the backlog makes it
- * correct; a *layout* change is not a rebuild at all.
+ * **Only the active tab of a pane is mounted, and mounting is now cheap.** What
+ * a pane draws is a box that a pooled emulator is moved into (`terminals.ts`),
+ * so a hidden tab is not an emulator thrown away — it is one that keeps being
+ * fed off screen and comes back with its screen, its scrollback and its scroll
+ * position intact. This used to be a rebuild, justified by a WebGL context
+ * budget that a 2D canvas does not have and by a backlog that existed to paper
+ * over the rebuild in the first place. Neither a tab switch nor a layout change
+ * rebuilds anything now.
  */
 import { Fragment, useCallback, useRef, useState } from "react";
 import {
@@ -349,10 +352,13 @@ function Pane({
 
       <div className="pane-body">
         {showing ? (
-          /* Keyed on the terminal, so switching tabs builds a fresh emulator and
-             the server's backlog fills it; keyed on nothing else, so the layout
-             moving around cannot disturb it. */
-          <TerminalView key={showing} agentId={showing} focused={focused && keyboard} />
+          /* Deliberately unkeyed. A key here would rebuild this on every tab
+             switch, which is what it used to be for — and the emulator it would
+             have rebuilt is pooled now and outlives the pane, so the only thing
+             a key could still throw away is the empty box it lives in. The
+             agent id is a dependency of the effect that borrows, which is where
+             a tab switch belongs: one `removeChild`, one `appendChild`. */
+          <TerminalView agentId={showing} focused={focused && keyboard} />
         ) : (
           <EmptyPane pane={pane} />
         )}

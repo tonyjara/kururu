@@ -19,7 +19,7 @@
  * reopens on a backoff forever, and the UI renders `connected` rather than
  * erroring. Note what a reconnect does *not* cost — the agents are processes on
  * the other end, so they are still there when the socket comes back, and every
- * open pane asks for its history again and catches up.
+ * terminal somebody can see asks for its history again and catches up.
  */
 import { useSyncExternalStore } from "react";
 import type { Direction } from "../../shared/layout";
@@ -50,9 +50,13 @@ let nextRequestId = 1;
 const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 
 /**
- * Where output goes. One terminal can be open in more than one pane, so this is
- * a set of sinks per agent rather than one — each pane has its own emulator and
- * both want the same bytes.
+ * Where output goes.
+ *
+ * A set per agent rather than one, although `terminals.ts` pools exactly one
+ * emulator per terminal and the layout puts a terminal in exactly one tab. The
+ * set costs nothing and it is what stops a subscription arriving a frame before
+ * its predecessor has gone from silently replacing it — which is the kind of
+ * thing that shows up as one pane that has quietly stopped updating.
  */
 export interface OutputSink {
   /** Live bytes. Append. */
@@ -71,6 +75,18 @@ export interface OutputSink {
    * of a sink that has been sitting there for an hour.
    */
   grid(): { cols: number; rows: number };
+  /**
+   * The socket came back, and this sink is not on screen, so it has missed
+   * whatever arrived in the gap without being in a position to ask for it back.
+   *
+   * A rebuild is a screen *at a size*, and a pooled emulator that no pane is
+   * holding has no size worth naming: it is detached, it measures nothing, and
+   * the last shape it drew at belongs to a pane that may be gone. Worse, asking
+   * anyway would resize the pty to it — a terminal that nobody can see would
+   * reach through a reconnect and reshape itself. So the sink is told, and it
+   * asks when a pane borrows it.
+   */
+  stale(): void;
 }
 const sinks = new Map<string, Set<OutputSink>>();
 
@@ -78,10 +94,12 @@ const sinks = new Map<string, Set<OutputSink>>();
  * Which `request-backlog` each sink is waiting for.
  *
  * A backlog is a whole screen at a particular size, and the wrong one is worse
- * than none: two panes showing the same terminal are two different shapes, and
- * an emulator thrown away and rebuilt has asked twice. So a sink takes only the
- * answer to its own question, and the ones meant for a predecessor — or for the
- * pane next door — go past it.
+ * than none: an emulator that asked, was moved to a pane of another shape and
+ * asked again must not be reset by the first answer, which is a screen laid out
+ * for a box that is gone. So a sink takes only the answer to its own question
+ * and the rest go past it. Rarer than it was — nothing rebuilds an emulator
+ * during ordinary navigation any more — and kept because what it prevents is a
+ * screen the agent believes it has already drawn and will never repaint.
  */
 const epochs = new WeakMap<OutputSink, number>();
 let nextEpoch = 1;
@@ -134,13 +152,25 @@ function connect(): void {
      * missed while we were gone.
      *
      * Separately because those are two different questions and only one of them
-     * has a size in it. `watch` is a set of ids; it cannot say how wide anything
+     * has a size in it. `watch` is sets of ids; it cannot say how wide anything
      * is, and a history laid out at a width nobody is drawing at is a screen
-     * that stays wrong. Every emulator that is still mounted asks for itself, at
+     * that stays wrong. Every emulator a pane is holding asks for itself, at
      * whatever shape it is now.
      */
-    if (watched.size > 0) send({ type: "watch", agentIds: [...watched] });
-    for (const [agentId, open] of sinks) for (const sink of open) askBacklog(agentId, sink);
+    if (watched.size > 0 || warmed.size > 0) sendWatch();
+    /**
+     * And only the ones somebody can see ask for a screen. A pooled emulator
+     * that is off screen is equally out of date, but it cannot say what shape to
+     * rebuild it at without claiming a size for a pty nobody is looking at; it
+     * is told it is stale and asks when a pane picks it up. See `OutputSink`.
+     */
+    for (const [agentId, open] of sinks) {
+      const onScreen = watched.has(agentId);
+      for (const sink of open) {
+        if (onScreen) askBacklog(agentId, sink);
+        else deliver(() => sink.stale());
+      }
+    }
   };
 
   ws.onmessage = (event) => {
@@ -230,10 +260,25 @@ function request(msg: (id: number) => ClientMessage): Promise<unknown> {
 }
 
 let watched = new Set<string>();
+let warmed = new Set<string>();
+
+function same(a: Set<string>, b: Set<string>): boolean {
+  return a.size === b.size && [...a].every((id) => b.has(id));
+}
 
 /**
- * Say which terminals are on screen, so the server knows whose bytes are worth
- * sending. Derived from the layout the server sent back, and sent whole.
+ * The two sets, on one message, because the server needs both to answer two
+ * different questions with them: what to stream is their union, and what counts
+ * as unread is only ever the first.
+ */
+function sendWatch(): void {
+  send({ type: "watch", agentIds: [...watched], warm: [...warmed] });
+}
+
+/**
+ * Say which terminals are on screen, so the server knows whose bytes somebody is
+ * actually looking at. Derived from the layout the server sent back, and sent
+ * whole.
  *
  * It no longer brings history with it. A set of ids cannot say how wide anything
  * is, and history is a screen laid out at a width — so the two were separated
@@ -242,9 +287,28 @@ let watched = new Set<string>();
  */
 export function watch(agentIds: Iterable<string>): void {
   const next = new Set(agentIds);
-  if (next.size === watched.size && [...next].every((id) => watched.has(id))) return;
+  if (same(next, watched)) return;
   watched = next;
-  send({ type: "watch", agentIds: [...next] });
+  sendWatch();
+}
+
+/**
+ * Say which terminals this client is keeping an emulator for without showing
+ * them. `terminals.ts` owns the answer; see its module comment for why there is
+ * one at all.
+ *
+ * A pooled emulator has to be fed or it goes stale, and a stale one has to be
+ * reconstructed, which is the entire thing the pool exists to stop happening
+ * during ordinary navigation. So the server streams the union of this and
+ * `watch`. It is deliberately not folded into `watch`: the unread mark means
+ * "output arrived where nobody was looking", and an emulator kept warm in a
+ * workspace you are not in is nobody looking.
+ */
+export function warm(agentIds: Iterable<string>): void {
+  const next = new Set(agentIds);
+  if (same(next, warmed)) return;
+  warmed = next;
+  sendWatch();
 }
 
 /**
@@ -260,6 +324,17 @@ function askBacklog(agentId: string, sink: OutputSink): void {
   const epoch = nextEpoch++;
   epochs.set(sink, epoch);
   send({ type: "request-backlog", agentId, cols, rows, epoch });
+}
+
+/**
+ * Ask for this terminal's history again, for a sink that is already subscribed.
+ *
+ * The one caller is a pooled emulator that was told it was `stale` and has just
+ * been put in a pane, which is the only way a subscription that already exists
+ * can need a screen it does not have.
+ */
+export function rebuild(agentId: string, sink: OutputSink): void {
+  askBacklog(agentId, sink);
 }
 
 /**

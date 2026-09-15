@@ -268,9 +268,17 @@ looks like it worked.
   Vite blocked-host detection with a page that says how to fix it. Server-side
   and working; nothing in the UI points at it since the window became terminals.
 - Traversal-safe file API. Same: built, tested, currently unused by the UI.
-- **Tiled terminals.** xterm.js per pane over a raw pty byte stream, panes split
-  and resize, the pty follows the pane, and a pane opened late is handed the
-  history from the emulator the server keeps beside every pty.
+- **Tiled terminals.** A Ghostty (WASM, 2D canvas) emulator per terminal over a
+  raw pty byte stream, panes split and resize, the pty follows the pane, and a
+  pane opened late is handed the history from the emulator the server keeps
+  beside every pty.
+- **One emulator per terminal, never rebuilt** — Part 1 of the lifecycle rework
+  below. Emulators are pooled by agent id in `web/src/terminals.ts` and *moved*
+  between panes, so a tab switch, a workspace change and a drag are DOM moves
+  and ask the server for nothing. The client tells the server what is visible
+  and what it is keeping warm; the host streams the union, and the unread mark
+  moved to the restartable half because the host's watched set is no longer the
+  same question as "somebody is looking".
 - **The multiplexer hierarchy**, ghosttown's: profiles → workspaces → panes →
   tabs, owned by the server, driven by a ctrl+a prefix, and written to disk as
   structure that never respawns anything.
@@ -350,7 +358,10 @@ clients of different sizes fight forever. tmux settled this in the 1990s with
 no policy, which is fine with one window and is why a phone makes the desktop
 ragged.
 
-### Part 1 — one emulator per terminal, never rebuilt
+### Part 1 — one emulator per terminal, never rebuilt — **done**
+
+Built as described, with one correction to the unread plan: see the note at the
+end of this section.
 
 Client-side only. Nothing in `server/src/agents/`, `ptyhost*`, or `hostsock.ts`
 is touched, so this costs a repaint and never an agent.
@@ -389,6 +400,16 @@ lives there and for the same stated reason: `index.ts` sets it when output
 arrives for a terminal no client has visible, clears it when one does, and
 merges it into the snapshot over the host's now-vestigial flag.
 
+**Correction, found while building it.** The host's flag is not vestigial and
+the move cannot be total, because `index.ts` does not see the output it would
+have to count. The host streams only what it is watching, so output for a
+terminal in neither set never reaches this process at all — and a terminal in
+neither set is precisely the common case for the mark, a background workspace's
+agent nobody has pooled. So the two answers are *ored* in `overlay`: this side
+marks what it is streaming and cannot see, the host marks what it is not
+streaming and this side cannot see. Between them every terminal is covered, and
+`agents/host.ts` is still untouched.
+
 **Rendering cost to measure, not assume.** ghostty-web runs a
 `requestAnimationFrame` loop per terminal and exposes no way to pause it, so a
 dozen pooled terminals are a dozen loops drawing to detached canvases. Measure
@@ -406,6 +427,16 @@ pool that brings the rebuilds back.
 - The focused pane still takes the keyboard, including after a dialog or a
   sidebar rename closes (`paneKeyboard`, already in `App.tsx`).
 - `web/test` still passes, and the pane-tree tests are untouched by any of this.
+
+**Verified** — the server half, against an isolated instance on
+`KURURU_PORT=7817 KURURU_HOST_SOCK=/tmp/k2/ptyhost.sock KURURU_STATE_DIR=/tmp/k2`
+with two ptys running `cat`: a warm terminal streams while an unwatched one does
+not, a visible terminal is never unread, a warm-but-unseen one is, showing it
+clears the mark, a terminal dropped from both sets still gets the host's mark, a
+warm emulator's `request-backlog` is answered at the grid it asked for, live
+output still arrives behind the backlog that would have wiped it, and a `watch`
+with no `warm` field behaves exactly as before. The window half is the list
+below and wants a real window.
 
 **Verify** — against an isolated instance, never the user's agents. A second
 kururu with `KURURU_PORT=7817 KURURU_HOST_SOCK=/tmp/k2.sock

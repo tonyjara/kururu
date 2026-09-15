@@ -99,6 +99,21 @@ interface ClientState {
   /** Terminals this client has on screen. Panes are tiled, so this is a set. */
   watching: Set<string>;
   /**
+   * Terminals this client keeps an emulator for without showing them.
+   *
+   * The browser pools emulators by agent id and moves them between panes rather
+   * than rebuilding them, which only works if a pooled one goes on being fed —
+   * an emulator that stops receiving output is an emulator that has to be
+   * reconstructed, and reconstruction is the whole cost pooling removes. So
+   * output goes to the *union* of this and `watching`.
+   *
+   * It is a second set rather than more ids in the first because `watching`
+   * answers a question this cannot: what a human can actually see. The unread
+   * mark is exactly that question, and folding the two together would mean no
+   * terminal a client had pooled could ever be marked unread again.
+   */
+  warm: Set<string>;
+  /**
    * Terminals whose backlog is still being prepared, holding the live output
    * that arrived in the meantime.
    *
@@ -262,6 +277,36 @@ const activity = new Map<string, string>();
 /** One sidebar line's worth. The tooltip is where a long one goes in full. */
 const MAX_ACTIVITY = 200;
 
+/**
+ * Terminals that have said something while nobody had them on screen.
+ *
+ * This used to be the host's, and it was right there for as long as "watched"
+ * and "visible" were the same set. They are not any more: a client pools
+ * emulators and the host is told to stream the union, so the host now clears its
+ * own mark for every terminal a client is merely keeping warm — which is every
+ * terminal you might want the mark for.
+ *
+ * So the *answer* moves here, for the same reason `activity` lives here: it is
+ * learnt from something only this side knows, and losing it on a restart costs
+ * a dot that the next byte of output puts back. What stays on the host is the
+ * case this side cannot see at all — a terminal in neither set is never streamed
+ * to this process, so its output never reaches `onOutput` and only the host can
+ * notice it. `overlay` therefore *ors* the two rather than replacing one with
+ * the other: the host answers for what it is not streaming, this answers for
+ * what it is.
+ */
+const unread = new Set<string>();
+
+/**
+ * Whether this client's emulators want that terminal's bytes — on screen or
+ * merely kept. Everything that fans output out, or holds it back for a backlog,
+ * asks this rather than `watching`, because a warm emulator that stops being fed
+ * is a warm emulator that has to be rebuilt.
+ */
+function sees(st: ClientState, agentId: string): boolean {
+  return st.watching.has(agentId) || st.warm.has(agentId);
+}
+
 /** Agent id → the agent program last seen in it. See AgentSnapshot.lastAgent. */
 const lastAgent = new Map<string, string>();
 
@@ -290,12 +335,16 @@ function overlay(agent: AgentSnapshot): AgentSnapshot {
   const said = activity.get(agent.id);
   const was = lastAgent.get(agent.id);
   const serving = devRunning.get(agent.id);
-  if (!said && !was && !serving) return agent;
+  const fresh = unread.has(agent.id);
+  if (!said && !was && !serving && !fresh) return agent;
   return {
     ...agent,
     ...(said ? { activity: said } : {}),
     ...(was ? { lastAgent: was } : {}),
     ...(serving ? { dev: serving.program } : {}),
+    // Only ever set, never cleared: see `unread`. The host still answers for the
+    // terminals it is not streaming to this process.
+    ...(fresh ? { unread: true } : {}),
   };
 }
 
@@ -436,6 +485,7 @@ function killAll(agentIds: string[]): void {
     // otherwise grow for the life of the process.
     activity.delete(agentId);
     lastAgent.delete(agentId);
+    unread.delete(agentId);
     forgetRecording(agentId);
     mouseEncodings.delete(agentId);
   }
@@ -445,11 +495,20 @@ function killAll(agentIds: string[]): void {
 // The loops that remain
 // ---------------------------------------------------------------------------
 
-/** Who is watching what, recomputed whenever it might have changed. */
+/**
+ * What the host should stream, recomputed whenever it might have changed: every
+ * terminal any client has on screen, plus every one any client is keeping an
+ * emulator for. The union, because a pooled emulator that stops being fed is one
+ * that has to be reconstructed — see `ClientState.warm`.
+ *
+ * The host reads its watched set as "somebody is looking at this" and clears
+ * `unread` for all of it, which is why that mark is answered on this side now.
+ */
 function syncWatched(): void {
   const watched = new Set<string>();
   for (const st of clients.values()) {
     for (const id of st.watching) watched.add(id);
+    for (const id of st.warm) watched.add(id);
   }
   host.watch(watched);
 }
@@ -463,11 +522,20 @@ function syncWatched(): void {
 function onOutput(agentId: string, data: string): void {
   recordOutput(agentId, data);
   mouseEncodingOf(agentId).read(data);
+  let onScreen = false;
   for (const [ws, st] of clients) {
-    if (!st.watching.has(agentId)) continue;
+    if (st.watching.has(agentId)) onScreen = true;
+    if (!sees(st, agentId)) continue;
     const pending = st.awaiting.get(agentId);
     if (pending) pending.queued.push(data);
     else send(ws, { type: "output", agentId, data });
+  }
+  // Output nobody is looking at is the definition of unread — and "looking at"
+  // is the visible set, never the warm one. A pooled emulator in a workspace you
+  // are not in is being kept current, not being read.
+  if (!onScreen && !unread.has(agentId)) {
+    unread.add(agentId);
+    pushSnapshot();
   }
 }
 
@@ -521,7 +589,7 @@ async function sendBacklog(
   const st = clients.get(ws);
   const pending = st?.awaiting.get(agentId);
   if (!st || !pending) return;
-  const watching = st.watching.has(agentId);
+  const watching = sees(st, agentId);
   if (watching) {
     // The bytes, not just the size: a screen rebuilt wrongly can only be
     // explained by replaying exactly what rebuilt it.
@@ -886,10 +954,16 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "watch": {
       const next = new Set(msg.agentIds);
+      const kept = new Set(msg.warm ?? []);
       const opened = [...next].filter((id) => !st.watching.has(id));
       st.watching = next;
-      // A pane that closed while its backlog was in flight should not receive it.
-      for (const id of [...st.awaiting.keys()]) if (!next.has(id)) st.awaiting.delete(id);
+      st.warm = kept;
+      // A pane that closed while its backlog was in flight should not receive it
+      // — unless the emulator behind it is still pooled, in which case it is the
+      // same emulator and the same question, merely off screen.
+      for (const id of [...st.awaiting.keys()]) {
+        if (!next.has(id) && !kept.has(id)) st.awaiting.delete(id);
+      }
       syncWatched();
       /**
        * Streaming starts here and history does not. Watching says which
@@ -899,7 +973,15 @@ function handleMessage(ws: WebSocket, raw: string): void {
        * happened to be. The emulator that is about to draw it asks for itself,
        * and says what shape it is while asking.
        */
-      for (const id of opened) recordNote(id, "watch", "a client opened this terminal");
+      let seen = false;
+      for (const id of opened) {
+        recordNote(id, "watch", "a client opened this terminal");
+        // Somebody is looking at it now, which is the only thing that clears the
+        // mark. The host clears its own for the whole union, warm included,
+        // which is exactly why this side keeps an answer of its own.
+        if (unread.delete(id)) seen = true;
+      }
+      if (seen) pushSnapshot();
       return;
     }
 
@@ -1513,7 +1595,7 @@ server.on("upgrade", (req, socket, head) => {
     return;
   }
   wss.handleUpgrade(req, socket, head, (ws) => {
-    clients.set(ws, { watching: new Set(), awaiting: new Map() });
+    clients.set(ws, { watching: new Set(), warm: new Set(), awaiting: new Map() });
     send(ws, { type: "snapshot", snapshot: snapshot() });
     send(ws, { type: "dev-servers", servers: state.devServers });
 

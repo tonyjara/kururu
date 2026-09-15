@@ -46,6 +46,7 @@ import { isFileDrag } from "./drop";
 import { tabLabel } from "./labels";
 import * as api from "./session";
 import { useKururu } from "./session";
+import * as terminals from "./terminals";
 
 /** How far one press of a resize key moves a divider. */
 const NUDGE = 0.03;
@@ -138,6 +139,22 @@ export function App() {
   useEffect(() => {
     api.watch(visible);
   }, [visible]);
+
+  /**
+   * And let go of the emulators of terminals that no longer exist.
+   *
+   * An emulator is pooled for the life of its terminal now rather than the life
+   * of the pane drawing it, so something has to say when that life ends — and
+   * the only thing that ever does is the snapshot, by omission. A killed
+   * terminal, a closed tab and a deleted workspace all arrive here the same way:
+   * as an id that has stopped being listed. Done from the snapshot rather than
+   * from the verbs that caused it, because any of them can have been sent by the
+   * window next door.
+   */
+  useEffect(() => {
+    if (!snapshot) return;
+    terminals.retain(new Set(agents.map((agent) => agent.id)));
+  }, [snapshot, agents]);
 
   /**
    * The one prompt two doors lead to: the keybind, and the + at the bottom of
