@@ -262,8 +262,16 @@ kbd {
    Sidebar
    -------------------------------------------------------------------------- */
 
+/**
+ * The width is the app's, handed down as `--sidebar-w` — a view state kept in
+ * this browser rather than in the snapshot, because a phone and a desktop
+ * looking at one server want two different sidebars. See `App.tsx`. The fallback
+ * is the width kururu shipped at, and is here so that a stylesheet loaded
+ * without the app still draws something sensible.
+ */
 .sidebar {
-  width: 224px;
+  position: relative;
+  width: var(--sidebar-w, 224px);
   flex: none;
   display: flex;
   flex-direction: column;
@@ -273,16 +281,86 @@ kbd {
 }
 
 /**
- * The window has `titleBarStyle: "hiddenInset"`, so the traffic lights float
- * over this corner and there is no title bar to drag. The header is both: it
- * leaves room for them and it is the drag handle.
+ * The strip the traffic lights stand in, and the handle the window is dragged
+ * by — the window is `titleBarStyle: "hiddenInset"`, so macOS floats its three
+ * buttons over this corner and hands us no title bar.
+ *
+ * It is empty, and that is the fix rather than an oversight. The profile name
+ * used to live up here behind 78px of left padding to clear those buttons,
+ * which put it in the gap beside them wearing an indent that belonged to
+ * something else and lining up with nothing below it. Now the buttons get a
+ * line to themselves and the name gets one of its own, starting at the left
+ * edge every other row in the sidebar starts at.
+ *
+ * Drawn only in the Electron window. In a browser tab — which is what the phone
+ * loads — nothing is floating over this corner, and an empty strip would be
+ * thirty pixels of nothing above the fold.
  */
+.sidebar-drag {
+  display: none;
+}
+.app-window .sidebar-drag {
+  display: block;
+  height: 28px;
+  flex: none;
+  -webkit-app-region: drag;
+}
+
 .sidebar-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px 8px 78px;
+  padding: 6px 8px 8px 12px;
   -webkit-app-region: drag;
+}
+
+/**
+ * The edge, as something you can take hold of.
+ *
+ * Absolutely positioned over the border rather than laid out beside it: a
+ * handle that took a column of its own would make the sidebar two pixels wider
+ * than the width it was told to be, and that is an arithmetic error nobody goes
+ * looking for. It is wider than it looks for the same reason a divider is — a
+ * 1px target is one you miss — and it draws nothing until you are on it,
+ * because a permanent second rule down the sidebar's edge is a line the design
+ * does not have.
+ */
+.sidebar-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -4px;
+  width: 9px;
+  z-index: 4;
+  cursor: col-resize;
+  touch-action: none;
+}
+.sidebar-grip::after {
+  content: "";
+  position: absolute;
+  inset: 0 4px;
+  border-radius: var(--radius-xs);
+}
+.sidebar-grip:hover::after {
+  background: var(--accent);
+}
+
+/* The way out of a full-screen sidebar, and only of one. */
+.sidebar-close {
+  -webkit-app-region: no-drag;
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-lg);
+  color: var(--dim);
+}
+.sidebar-close:hover {
+  color: var(--text);
+  background: var(--chrome-high);
 }
 
 .profile-btn {
@@ -781,6 +859,91 @@ kbd {
   background: var(--chrome-high);
 }
 
+/* --------------------------------------------------------------------------
+   The sidebar as a screen
+
+   Under `NARROW` in `App.tsx` — which sets `data-narrow` on the root rather
+   than letting this file write a media query of its own, so the breakpoint is
+   one number in one place — the sidebar stops being a column beside the panes
+   and becomes a screen in front of them.
+
+   Full width rather than the 80%-with-a-peep-of-content that a lot of drawers
+   do, because what is behind it here is a *terminal*: a sliver of one says
+   nothing about what you would be going back to, and the twenty pixels it
+   costs are twenty pixels off a list of paths that is already truncating. The
+   way back is the scrim, the ✕ in the header, and the bars in the status bar —
+   three of them, because this is the one state of the window where being
+   unable to find the way back means being stuck.
+   -------------------------------------------------------------------------- */
+
+:root[data-narrow] .sidebar {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  z-index: 40;
+  border-right: 0;
+}
+
+/* Nothing to drag: at this width the sidebar is not an edge of anything. It is
+   hidden here as well as not rendered, because a rule is cheaper to be sure of
+   than a prop that has to stay in step. */
+:root[data-narrow] .sidebar-grip {
+  display: none;
+}
+
+/* Rows a thumb can hit. A 22px row is a mouse target; the same list on a phone
+   is a column of things you miss and then have to look at again to see whether
+   you missed. */
+:root[data-narrow] .ws-row,
+:root[data-narrow] .agent-row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+:root[data-narrow] .ws-list,
+:root[data-narrow] .agent-list {
+  padding: 0 10px;
+}
+
+/* The controls that wait for a hover have no hover to wait for.
+   The ✕ especially: it is drawn at zero opacity until the cursor is on the row,
+   which on a touch screen means an agent you cannot dismiss at all. It is worth
+   the accidental tap it costs — a kill is one confirmation away everywhere else
+   in the app, and a control nobody can reach is worth nothing at any price. */
+:root[data-narrow] .agent-kill {
+  opacity: 1;
+}
+:root[data-narrow] .ws-swatch {
+  opacity: 0.8;
+}
+:root[data-narrow] .ws-run {
+  color: var(--dim);
+}
+
+/* Behind a full-screen sidebar, to catch the taps that miss it — and to say,
+   by being there at all, that this is something covering the window rather
+   than the window itself. */
+.sidebar-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  background: var(--scrim);
+}
+
+/* The window's drag handle when there is no sidebar to hold it.
+   The traffic lights float over the top-left corner whether or not anything is
+   drawn under them, so hiding the sidebar used to leave them sitting on a
+   terminal with no way to drag the window at all. This is the same strip the
+   sidebar's header carries, in the one place it is otherwise missing. */
+.stage-drag {
+  display: none;
+}
+.app-window .stage-drag {
+  display: block;
+  height: 28px;
+  flex: none;
+  -webkit-app-region: drag;
+}
+
 .button {
   flex: 1;
   padding: 6px 10px;
@@ -1236,6 +1399,33 @@ kbd {
   display: none;
 }
 
+/* The pointer's door onto `toggle-sidebar`. Quiet, like the cog: it is a thing
+   you reach for rather than a thing you read, and the status bar is already
+   carrying the one badge in the window that is meant to shout. */
+.sb-bars {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  margin-left: -4px;
+  border-radius: var(--radius-md);
+  color: var(--dimmer);
+  flex: none;
+}
+.sb-bars:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+/* On a phone this is navigation rather than a convenience, so it is a target
+   rather than a glyph — and it is the only way back to the list once the
+   sidebar has been dismissed. */
+:root[data-narrow] .sb-bars {
+  width: 32px;
+  height: 28px;
+  color: var(--dim);
+}
+
 .sb-sep {
   color: var(--dimmer);
 }
@@ -1289,7 +1479,14 @@ kbd {
   align-items: flex-start;
   justify-content: center;
   padding-top: 14vh;
-  z-index: 10;
+  /* Above the sidebar, including the sidebar as a full-screen overlay (40).
+     It used to be 10, which was above the panes and therefore above everything
+     that existed — and stopped being true the moment the sidebar could cover
+     the window, at which point the cog in its own footer opened Settings
+     *behind* it. The stack, bottom to top, is: panes and their dividers, the
+     sidebar and the scrim that dismisses it, dialogs, menus, and the skin's
+     effect layer over the lot. */
+  z-index: 50;
 }
 
 .dialog,

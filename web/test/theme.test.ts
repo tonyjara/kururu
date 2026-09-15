@@ -59,7 +59,18 @@ function cssName(token: string): string {
  * shape rather than of colour, which is the split `shared/skin.ts` is about.
  * `--mono` stays nobody's, on the reasoning written beside it in the stylesheet.
  */
-const NOT_THEME = new Set(["--ui", "--mono", "--status-size", "--cell", "--tag", "--ring"]);
+const NOT_THEME = new Set([
+  "--ui",
+  "--mono",
+  "--status-size",
+  "--cell",
+  "--tag",
+  "--ring",
+  // How wide the sidebar has been dragged. A view state this browser holds and
+  // `App.tsx` writes onto the root element — a length, not a colour and not a
+  // shape, and nothing a theme or a skin has any business having an opinion on.
+  "--sidebar-w",
+]);
 
 /** What a skin fills in: its tokens, plus one per icon it may override. */
 const SKIN_TOKENS = new Set([

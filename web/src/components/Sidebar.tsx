@@ -88,6 +88,24 @@ interface Props {
   onSettings: () => void;
   /** Opens the phone dialog — the addresses this server answers at, as QR codes. */
   onReach: () => void;
+  /**
+   * Whether this is a column beside the panes or a screen in front of them.
+   *
+   * The second is what a narrow window gets, and it changes two things about how
+   * the list behaves rather than only how it looks — which is why it is a prop
+   * and not left entirely to the stylesheet. It draws a way out, because there
+   * is no longer a pane next to it to click on; and picking something in it puts
+   * it away, because on a phone the whole point of picking is to go and *look*
+   * at the thing, and a list still covering it would mean two gestures for one
+   * intention.
+   */
+  overlay: boolean;
+  /** Put the sidebar away. Only ever drawn while `overlay`. */
+  onClose: () => void;
+  /** A width the drag handle is proposing, in pixels. The app clamps it. */
+  onResize: (px: number) => void;
+  /** Double-clicking the handle: back to the width it shipped at. */
+  onResetWidth: () => void;
 }
 
 export function Sidebar({
@@ -103,6 +121,10 @@ export function Sidebar({
   onEditing,
   onSettings,
   onReach,
+  overlay,
+  onClose,
+  onResize,
+  onResetWidth,
 }: Props) {
   const dragging = useDragging();
   /** The workspace row a drop would land on, while something is over it. */
@@ -225,16 +247,49 @@ export function Sidebar({
   const menuAt = menu ? profile.workspaces.findIndex((w) => w.id === menu.workspaceId) : -1;
   const menuWorkspace = menuAt === -1 ? null : profile.workspaces[menuAt]!;
 
+  /**
+   * A gesture in here has gone and changed what the panes are showing.
+   *
+   * Which matters only while this is an overlay: the list is then covering the
+   * thing it just took you to, and leaving it up would make "show me that
+   * agent" a two-tap job with the second tap being housekeeping. As a column it
+   * does nothing at all — putting the sidebar away every time you switched
+   * workspace on a desktop would be the app tidying up after you.
+   */
+  const navigated = () => {
+    if (overlay) onClose();
+  };
+
   const show = (agentId: string) => {
     const at = where.get(agentId);
     if (!at) return;
     if (at.workspaceId !== profile.activeWorkspaceId) api.switchWorkspace(at.workspaceId);
     api.focusPane(at.paneId);
     api.selectTab(at.paneId, at.index);
+    navigated();
   };
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${overlay ? "sidebar-overlay" : ""}`}>
+      {/* The strip the traffic lights sit in.
+          The window is `titleBarStyle: "hiddenInset"`, so macOS floats its close,
+          minimise and zoom buttons over this corner and gives us no title bar to
+          drag the window by. This is both answers at once: it is the drag handle,
+          and it is the space the buttons are standing in.
+
+          It used to be the profile row itself, with 78px of left padding to get
+          out of their way — which put the profile name in the gap beside three
+          system buttons, in a row it did not fill, wearing an indent that
+          belonged to something else. So the strip is now empty and the profile
+          name has a line of its own underneath it, where it can start at the same
+          left edge every other row in the sidebar starts at.
+
+          Empty, and therefore drawn only in the Electron window: in a browser tab
+          — which is what the phone loads — there is nothing floating over this
+          corner and the strip would be thirty pixels of nothing at the top of the
+          screen. `app-window` on the root is what says which of the two this is. */}
+      <div className="sidebar-drag" aria-hidden="true" />
+
       <header className="sidebar-head">
         <span
           className={`dot ${connected ? "dot-on" : "dot-off"}`}
@@ -254,6 +309,15 @@ export function Sidebar({
           {profile.name}
           <Icon name="caret" className="profile-caret" />
         </button>
+        {/* The way out of a full-screen sidebar. Drawn only when it is one: as a
+            column, the panes next to it are already the way out, and a close
+            button beside a thing with a keyboard shortcut and a status-bar
+            toggle would be a third door onto a two-door room. */}
+        {overlay && (
+          <button className="sidebar-close" onClick={onClose} aria-label="Close" title="Close">
+            <Icon name="close" />
+          </button>
+        )}
       </header>
 
       <section className="side-section">
@@ -324,7 +388,10 @@ export function Sidebar({
               ) : (
                 <button
                   className={`ws-row ${workspace.id === profile.activeWorkspaceId ? "ws-row-on" : ""}`}
-                  onClick={() => api.switchWorkspace(workspace.id)}
+                  onClick={() => {
+                    api.switchWorkspace(workspace.id);
+                    navigated();
+                  }}
                   onDoubleClick={() => setRenaming(workspace.id)}
                   title={index < 9 ? `C-a ${index + 1} · double-click to rename` : "Double-click to rename"}
                   draggable
@@ -502,6 +569,13 @@ export function Sidebar({
         </button>
       </div>
 
+      {/* The edge you drag. Last in the tree and absolutely positioned, so it
+          sits over the border rather than taking a column of its own — a handle
+          that occupied layout would make the sidebar two pixels wider than the
+          width it was told to be, and the arithmetic would be wrong in exactly
+          the way nobody looks for. */}
+      {!overlay && <Resizer onResize={onResize} onReset={onResetWidth} />}
+
       {menu && menuWorkspace && (
         <Menu
           at={menu}
@@ -655,6 +729,63 @@ function ColorPicker({
         No colour
       </button>
     </Popover>
+  );
+}
+
+/**
+ * The sidebar's right-hand edge, as something you can take hold of.
+ *
+ * Deliberately the same shape as `DividerBar` in `Panes.tsx` — pointer capture
+ * on the way down, a position read off the event on the way move, nothing
+ * listening on `window` — because they are the same gesture and a second way of
+ * writing it is a second set of bugs about pointers leaving the element
+ * mid-drag. Capture is what makes the drag survive the pointer crossing into a
+ * terminal, which it does immediately and every time.
+ *
+ * What it reports is a width, not a delta, and the difference matters when the
+ * pointer runs past the clamp: a delta would keep accumulating off the end and
+ * the sidebar would sit at its minimum for two hundred pixels of dragging back
+ * before it moved. A width measured from the sidebar's own left edge has no
+ * memory to get out of step.
+ *
+ * Double-click puts it back to the width it shipped at, which is the only
+ * gesture that can — there is nothing else in the window that names a number,
+ * and a sidebar dragged somewhere silly otherwise has to be dragged back by eye.
+ */
+function Resizer({ onResize, onReset }: { onResize: (px: number) => void; onReset: () => void }) {
+  const onPointerDown = (event: React.PointerEvent) => {
+    // The default here is a text selection that runs the length of the sidebar
+    // and stays highlighted after the drop.
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const onPointerMove = (event: React.PointerEvent) => {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    const box = event.currentTarget.parentElement?.getBoundingClientRect();
+    if (!box) return;
+    onResize(event.clientX - box.left);
+  };
+
+  const release = (event: React.PointerEvent) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  return (
+    <div
+      className="sidebar-grip"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize the sidebar"
+      title="Drag to resize · double-click to reset"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={release}
+      onPointerCancel={release}
+      onDoubleClick={onReset}
+    />
   );
 }
 
