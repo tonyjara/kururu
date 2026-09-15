@@ -43,6 +43,26 @@ interface Preview {
 
 const previews = new Map<number, Preview>();
 
+/**
+ * Which proxy port a dev server has *ever* been given, kept after its preview
+ * closes.
+ *
+ * The point is a bookmark. A phone reaches a preview by typing an origin once
+ * and then never again — the tailnet address and a port, added to a home
+ * screen — so the port has to mean the same thing tomorrow that it meant today.
+ * Without this it does not survive the one gesture most likely to follow it:
+ * pressing the row's restart button drops the dev server for a second, the
+ * scan closes the preview, and with two projects open the *other* one takes the
+ * freed slot before the first comes back. The icon on the home screen then
+ * opens somebody else's app, which is worse than opening nothing.
+ *
+ * Reservations are never reclaimed, because the thing they are protecting
+ * against is exactly reuse, and two hundred of them is a map with two hundred
+ * numbers in it. They die with the process, which is the same lifetime as the
+ * ports themselves.
+ */
+const reserved = new Map<number, number>();
+
 /** Headers that describe *this* hop and must not be forwarded to the next one. */
 const HOP_BY_HOP = new Set([
   "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -221,7 +241,8 @@ export function openPreview(devPort: number): number {
   if (existing) return existing.proxyPort;
 
   const upstreamHost = `localhost:${devPort}`;
-  const proxyPort = nextFreePort();
+  const proxyPort = reserved.get(devPort) ?? nextFreePort();
+  reserved.set(devPort, proxyPort);
 
   const sockets = new WebSocketServer({
     noServer: true,
@@ -242,6 +263,16 @@ export function openPreview(devPort: number): number {
 
   server.on("error", (err) => {
     console.error(`kururu: preview proxy on :${proxyPort} failed —`, err.message);
+    /**
+     * A port this process does not believe it is using, that the kernel refuses
+     * anyway, is one something else on the machine holds — so the reservation
+     * is wrong rather than merely unlucky, and keeping it would make every
+     * subsequent scan ask for the same refusal and advertise no preview at all,
+     * with the reason only in this log. Dropping it lets the next poll allocate
+     * somewhere else. Any other failure leaves the reservation alone: the port
+     * is still this dev server's, and the bookmark is still worth keeping.
+     */
+    if ((err as NodeJS.ErrnoException).code === "EADDRINUSE") reserved.delete(devPort);
     closePreview(devPort);
   });
 
@@ -279,9 +310,15 @@ export function closeAllPreviews(): void {
   for (const devPort of [...previews.keys()]) closePreview(devPort);
 }
 
-/** Lowest unused proxy port at or above the base. Small set; a scan is fine. */
+/**
+ * Lowest unclaimed proxy port at or above the base. Small set; a scan is fine.
+ *
+ * Claimed means reserved, not merely listening: a dev server that is between
+ * restarts has no preview open and must still not have its port handed to the
+ * project in the next window along. See `reserved`.
+ */
 function nextFreePort(): number {
-  const taken = new Set([...previews.values()].map((p) => p.proxyPort));
+  const taken = new Set(reserved.values());
   for (let port = BASE_PORT; port < BASE_PORT + 200; port++) {
     if (!taken.has(port)) return port;
   }

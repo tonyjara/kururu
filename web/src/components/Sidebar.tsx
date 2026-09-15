@@ -36,7 +36,9 @@ import { colorValue, colorValues } from "../colors";
 import { AGENT_MIME, WORKSPACE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
 import type { Action } from "../keys";
 import { agentLabel, agentSummary, shortenPath } from "../labels";
+import { previewLabel, previewUrl } from "../preview";
 import * as api from "../session";
+import { useKururu } from "../session";
 import { Menu, Popover } from "./Menu";
 import { Icon } from "./Icon";
 import { Mascot, Status } from "./Status";
@@ -547,6 +549,8 @@ export function Sidebar({
         </ul>
       </section>
 
+      <DevServers />
+
       {/* A new terminal used to be a button down here and is not one any more:
           the tab strip's `+` is in the place you are already looking when you
           want another tab, and C-a T and ⌘T are how it actually gets opened.
@@ -952,5 +956,81 @@ function QrIcon() {
       <rect x="3" y="15" width="6" height="6" rx="1" />
       <path d="M15 15h2M19 15h2M15 19h2M19 19h2M17 17h2" />
     </svg>
+  );
+}
+
+/**
+ * The dev servers running on this machine, each one a link you can open.
+ *
+ * This exists because of the phone. On the desktop a dev server is already
+ * reachable — you type localhost and the port, and you knew the port — but over
+ * the tailnet neither half of that is true: the phone's own localhost is the
+ * phone, and the port that matters is the proxy's rather than the one the dev
+ * server is listening on. So the address is worked out in `preview.ts` from the
+ * host this window itself arrived on, and what is drawn is the answer rather
+ * than the ingredients.
+ *
+ * It is a real anchor and not a button with an onClick, which is the whole
+ * design of the row. A link can be long-pressed for the share sheet, opened in
+ * a background tab, copied, and — the one that changes how this feels to use —
+ * added to a home screen, after which the dev server is an icon on the phone
+ * and kururu is not in the loop at all. None of that is available to a handler
+ * that computes a URL and navigates, and mobile Safari additionally blocks
+ * `window.open` once a round trip has separated it from the tap. `server/src/
+ * index.ts` opens every proxy on the scan for exactly this reason: an href has
+ * to be right before anybody touches it.
+ *
+ * The list is machine-wide rather than this workspace's, which is the scan's
+ * shape and is the right one here — a server you started by hand in another
+ * terminal is one you still want to reach from your phone, and kururu cannot
+ * currently attribute a listening port to a workspace anyway.
+ *
+ * Its own subscription rather than a prop from `App`: this is the only thing in
+ * the window that draws dev servers, and threading a list through two
+ * components to be used in one of them is how a prop list stops describing what
+ * a component is for.
+ */
+function DevServers() {
+  const { devServers } = useKururu();
+  if (devServers.length === 0) return null;
+
+  return (
+    <section className="side-section side-dev">
+      <h2>Dev servers</h2>
+      <ul className="dev-list">
+        {devServers.map((dev) => {
+          const url = previewUrl(window.location, dev);
+          return (
+            <li key={dev.port} className="dev-item">
+              {url ? (
+                <a
+                  className="dev-row"
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  title={[previewLabel(dev), dev.command, dev.cwd, `→ ${url}`]
+                    .filter(Boolean)
+                    .join("\n")}
+                >
+                  <span className="dev-name">{previewLabel(dev)}</span>
+                  <span className="dev-port">:{dev.port}</span>
+                  <Icon name="external" />
+                </a>
+              ) : (
+                /* No proxy yet — the scan has found the server but this client
+                   is not on the machine, so there is no address that would
+                   work. Drawn as a row anyway, because "it is running and not
+                   reachable from here yet" is worth more than a gap, and the
+                   next scan is a second away. */
+                <span className="dev-row dev-row-off" title={`${dev.command}\nNo preview yet`}>
+                  <span className="dev-name">{previewLabel(dev)}</span>
+                  <span className="dev-port">:{dev.port}</span>
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

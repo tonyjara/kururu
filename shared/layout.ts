@@ -115,6 +115,25 @@ export function findPane(node: LayoutNode, paneId: string): PaneState | null {
   return panes(node).find((p) => p.id === paneId) ?? null;
 }
 
+/**
+ * The one pane a window too narrow to tile shows.
+ *
+ * The focused pane, because on a phone "the pane I am looking at" and "the pane
+ * the next keystroke belongs to" stop being two questions — there is nowhere
+ * else for a keystroke to go. Which is also what makes the choice outlast a
+ * reload and reach the window next door without anything new being stored: focus
+ * is part of the arrangement, and the arrangement is the server's.
+ *
+ * It falls back to the first pane rather than answering null, because a focus
+ * left pointing at a pane that has since closed would be a phone with nothing on
+ * screen at all — and unlike a colour name or a mascot id, "which pane" has a
+ * nearest legal answer. The tree always holds at least one.
+ */
+export function soloPane(node: LayoutNode, focusedPaneId: string): PaneState {
+  const all = panes(node);
+  return all.find((p) => p.id === focusedPaneId) ?? all[0]!;
+}
+
 /** The pane holding this terminal, whether or not its tab is the active one. */
 export function paneWithAgent(node: LayoutNode, agentId: string): PaneState | null {
   return panes(node).find((p) => p.agentIds.includes(agentId)) ?? null;

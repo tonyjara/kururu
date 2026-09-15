@@ -45,6 +45,7 @@ import {
   dividers,
   panes,
   rects,
+  soloPane,
   type Divider,
   type LayoutNode,
   type PaneState,
@@ -56,6 +57,7 @@ import { shortenPath, tabLabel } from "../labels";
 import * as api from "../session";
 import { ReaderView } from "./Reader";
 import { Icon } from "./Icon";
+import { Menu, type MenuAt, type MenuItem } from "./Menu";
 import { Status } from "./Status";
 import { TerminalView } from "./Terminal";
 
@@ -67,6 +69,12 @@ interface Props {
   mascot: MascotConfig;
   /** Zen: the focused pane takes the window and the rest are held out of sight. */
   zen: boolean;
+  /**
+   * Solo: the window is too narrow to tile, so it draws one pane and a way to
+   * reach the others. See the comment on `shown` below for what separates this
+   * from zen, which looks like the same thing and is not.
+   */
+  solo: boolean;
   /**
    * Whether the panes are the ones holding the keyboard.
    *
@@ -92,17 +100,43 @@ function place(rect: Rect): React.CSSProperties {
 
 const FULL: React.CSSProperties = { left: 0, top: 0, width: "100%", height: "100%" };
 
-export function Panes({ node, focusedPaneId, agents, mascot, zen, keyboard }: Props) {
+export function Panes({ node, focusedPaneId, agents, mascot, zen, solo, keyboard }: Props) {
   const area = useRef<HTMLDivElement>(null);
   const [resizing, setResizing] = useState(false);
+  /** Where the pane switcher hangs, or null while it is shut. */
+  const [switcher, setSwitcher] = useState<MenuAt | null>(null);
   const boxes = rects(node);
+  const all = panes(node);
+
+  /**
+   * Solo: the one pane a phone draws, and the others left out of the document.
+   *
+   * It is not zen with a narrower window, and the difference is the whole
+   * reason this is a second state rather than `zen ||= narrow`. Zen hides the
+   * other panes *where they are*, boxes and all, so their ptys keep the size
+   * they were drawing at and coming back out of it costs no reflow. Here their
+   * boxes are fractions of a 390px screen — twenty columns, thirty at best —
+   * and a laid-out box is one the `ResizeObserver` in `terminals.ts` measures
+   * and proposes. Since the policy is the *smallest* proposal over every client
+   * that can see a terminal, a phone that kept them laid out would hold every
+   * pane on the desktop next door down to a phone-sized grid, and the SIGWINCH
+   * would make each agent redraw itself into it.
+   *
+   * So they are not drawn at all. A detached pooled emulator reports no width,
+   * so `terminals.ts` refuses the measurement and proposes nothing, and
+   * `App.tsx` drops them from the *visible* half of `watch` — which is what
+   * withdraws the vote — while the pool keeps them warm and being fed. Nothing
+   * is rebuilt by any of it: an emulator outlives the pane that was showing it,
+   * the same way it already outlives a tab switch or a workspace change.
+   */
+  const shown = solo ? soloPane(node, focusedPaneId) : null;
 
   return (
     /* A pane slides to a new position, but not while you are dragging its
        divider — there it has to track the pointer exactly, and an easing curve
        reads as lag. */
     <div className={`stagearea ${resizing ? "stagearea-resizing" : ""}`} ref={area}>
-      {panes(node).map((pane) => {
+      {(shown ? [shown] : all).map((pane) => {
         const focused = pane.id === focusedPaneId;
         const rect = boxes.get(pane.id);
         /**
@@ -111,17 +145,26 @@ export function Panes({ node, focusedPaneId, agents, mascot, zen, keyboard }: Pr
          * ptys keep the size they were drawing at, so leaving zen costs no
          * reflow and no program is ever told it has zero columns.
          */
-        const style =
-          zen && !focused
-            ? { ...place(rect ?? { x: 0, y: 0, w: 1, h: 1 }), visibility: "hidden" as const }
-            : zen
+        const box = place(rect ?? { x: 0, y: 0, w: 1, h: 1 });
+        const style = shown
+          ? FULL
+          : zen
+            ? focused
               ? FULL
-              : place(rect ?? { x: 0, y: 0, w: 1, h: 1 });
+              : { ...box, visibility: "hidden" as const }
+            : box;
         return (
           <div className="pane-box" key={pane.id} style={style}>
             <Pane
               pane={pane}
+              /* Always true in solo, since the pane drawn is the focused one by
+                 construction — and it still has to be passed rather than assumed,
+                 because this is also what gives the emulator its cursor: an
+                 unfocused one draws none at all (see `setFocused`). The ring it
+                 costs is a ring round the only pane on screen, which says nothing
+                 and is cheaper than a second meaning for the flag. */
               focused={focused}
+              solo={solo ? { index: all.indexOf(pane), count: all.length, open: setSwitcher } : null}
               keyboard={keyboard}
               agents={agents}
               mascot={mascot}
@@ -130,11 +173,61 @@ export function Panes({ node, focusedPaneId, agents, mascot, zen, keyboard }: Pr
         );
       })}
 
-      {!zen && dividers(node).map((divider) => (
+      {!zen && !solo && dividers(node).map((divider) => (
         <DividerBar key={divider.id} divider={divider} area={area} onResizing={setResizing} />
       ))}
+
+      {/* The switcher. A list of places rather than a list of actions, which is
+          what `mark` is for — and the way back to a pane whose only other door,
+          on a window this narrow, is a keybind on a keyboard that is not there.
+          Selecting one *focuses* it: there is no second notion of "the pane this
+          phone is showing" to keep in step, and there could not usefully be one,
+          since the keybar and every prefix action type into the focused pane and
+          a phone showing a pane it was not typing into would be the worse bug. */}
+      {switcher && (
+        <Menu
+          at={switcher}
+          onClose={() => setSwitcher(null)}
+          items={[
+            ...all.map((pane, index): MenuItem => ({
+              label: paneLabel(pane, agents),
+              hint: `${index + 1}${pane.agentIds.length > 1 ? ` · ${pane.agentIds.length}` : ""}`,
+              mark: pane.id === shown?.id,
+              /* Every tab in there, not only the one it would open on: what the
+                 dot is for is deciding whether a pane is worth going to. */
+              unread: pane.agentIds.some((id) => agents.find((a) => a.id === id)?.unread),
+              run: () => api.focusPane(pane.id),
+            })),
+            /* Making one, since the corner this button took over is where that
+               used to live. It belongs in the same menu rather than beside it:
+               a split is how the list above grows, and on a window that shows
+               one pane at a time the two are the same subject. */
+            { label: "Split right", sep: true, run: () => api.splitPane("row", shown?.id) },
+            { label: "Split down", run: () => api.splitPane("col", shown?.id) },
+          ]}
+        />
+      )}
     </div>
   );
+}
+
+/**
+ * What the switcher calls a pane.
+ *
+ * The tab that is showing, by the name the strip would give it, because a list
+ * of panes people recognise is a list of the things they were last looking at —
+ * and a fourth spelling of a terminal's name is a switcher that disagrees with
+ * the strip you are reading it next to. A pane with nothing in it says so
+ * rather than being left blank: an unlabelled row reads as a row that failed to
+ * load.
+ */
+function paneLabel(pane: PaneState, agents: AgentSnapshot[]): string {
+  if (pane.reader) {
+    return pane.reader.path ? (pane.reader.path.split("/").pop() ?? "reader") : "reader";
+  }
+  const id = activeAgent(pane);
+  const agent = id ? agents.find((a) => a.id === id) : null;
+  return agent ? tabLabel(agent) : "empty";
 }
 
 /**
@@ -206,15 +299,32 @@ function DividerBar({
   );
 }
 
+/**
+ * What a pane in a solo window needs to know about the others: where it stands
+ * in the list, how long the list is, and where to hang the menu that shows it.
+ *
+ * Null on a window wide enough to tile, rather than a boolean beside two numbers
+ * that mean nothing when it is false — the same shape `keybarOpen` argues for in
+ * `StatusBar`: "there is no such thing here" and "here it is" should not be
+ * possible to confuse.
+ */
+interface SoloAt {
+  index: number;
+  count: number;
+  open: (at: MenuAt) => void;
+}
+
 function Pane({
   pane,
   focused,
+  solo,
   keyboard,
   agents,
   mascot,
 }: {
   pane: PaneState;
   focused: boolean;
+  solo: SoloAt | null;
   keyboard: boolean;
   agents: AgentSnapshot[];
   mascot: MascotConfig;
@@ -343,19 +453,36 @@ function Pane({
         )}
 
         <span className="tab-spacer" />
-        <button className="pane-btn" onClick={() => api.splitPane("row", pane.id)} title="Split right (C-a |)">
-          ⊟
-        </button>
-        <button className="pane-btn" onClick={() => api.splitPane("col", pane.id)} title="Split down (C-a -)">
-          ⊞
-        </button>
-        <button
-          className="pane-btn"
-          onClick={() => api.closePane(pane.id)}
-          title="Close this pane and everything in it (C-a x)"
-        >
-          <Icon name="close" />
-        </button>
+        {/* The pane's own controls, as one block, because the block is what
+            stays put: the strip scrolls sideways once the tabs outgrow it, and
+            these used to scroll away with them. On a phone that is the switcher
+            gone — two tabs is enough to lose it — and the switcher is the only
+            way to the other panes there. It is pinned in the stylesheet rather
+            than here; what this grouping does is give it something to pin. */}
+        <span className="tab-actions">
+          {/* Splitting is a two-handed gesture for a window with room to split
+              into, so on a phone the corner is spent on the one control that is
+              *only* reachable here — the other panes. The keys still do it, and
+              a split made on the desktop is a row in the switcher on the phone. */}
+          {!solo && (
+            <>
+              <button className="pane-btn" onClick={() => api.splitPane("row", pane.id)} title="Split right (C-a |)">
+                ⊟
+              </button>
+              <button className="pane-btn" onClick={() => api.splitPane("col", pane.id)} title="Split down (C-a -)">
+                ⊞
+              </button>
+            </>
+          )}
+          {solo && <PaneSwitch solo={solo} />}
+          <button
+            className="pane-btn"
+            onClick={() => api.closePane(pane.id)}
+            title="Close this pane and everything in it (C-a x)"
+          >
+            <Icon name="close" />
+          </button>
+        </span>
       </header>
 
       <div className="pane-body">
@@ -375,6 +502,62 @@ function Pane({
         {(takesTabs || takesPane) && <DropZones paneId={pane.id} />}
       </div>
     </section>
+  );
+}
+
+/**
+ * The corner button a narrow window gets instead of the split controls.
+ *
+ * It says which pane this is and how many there are — `2/3` — because a button
+ * that only opened a menu would leave a phone with nothing on screen saying the
+ * other panes exist at all, and "there is more of this window somewhere" is most
+ * of what it is for. The glyph is drawn here rather than taken from the skin's
+ * icon set, on `StatusBar`'s reasoning: the set names the glyphs a skin is
+ * expected to restyle, and a fourth entry every future skin has to answer for
+ * would buy nothing — two rectangles mean two panes in any chrome.
+ *
+ * The menu is anchored to the button's *left* edge and allowed to run off the
+ * side, because `Popover` already clamps it back inside the window — which at
+ * this width right-aligns it under a button that is itself against the right
+ * edge. Naming the corner here instead would be a second thing to keep in step
+ * with the first.
+ */
+function PaneSwitch({ solo }: { solo: SoloAt }) {
+  return (
+    <button
+      className="pane-btn pane-switch"
+      title="The other panes in this workspace"
+      aria-label={`Pane ${solo.index + 1} of ${solo.count}. Switch panes`}
+      aria-haspopup="menu"
+      onClick={(event) => {
+        const box = event.currentTarget.getBoundingClientRect();
+        solo.open({ x: box.left, y: box.bottom + 4 });
+      }}
+    >
+      <PanesIcon />
+      <span className="pane-switch-count">
+        {solo.index + 1}/{solo.count}
+      </span>
+    </button>
+  );
+}
+
+/** Two boxes side by side: the window this one is a slice of. */
+function PanesIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="4" width="7.5" height="16" rx="1.5" />
+      <rect x="13.5" y="4" width="7.5" height="16" rx="1.5" />
+    </svg>
   );
 }
 

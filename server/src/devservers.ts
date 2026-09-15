@@ -437,6 +437,27 @@ export async function scanDevServers(roots: Iterable<[string, number]> = []): Pr
 
   const found: DevServer[] = [];
   for (const [pid, ports] of listeners) {
+    /**
+     * Never kururu itself. The walk *up* the process tree is what makes this
+     * necessary: the server is a bare `node dist/server.mjs` that nothing would
+     * match, but its parent is the `bun run dev` that started it, and a script
+     * called `dev` is the scan's strongest signal. So kururu answers its own
+     * description, and every socket this process holds — :7717, and one per
+     * preview proxy — came back as a dev server you could open a preview of.
+     *
+     * That was cosmetic while previews were opened by hand and became a runaway
+     * the moment they were opened for everything found: each new proxy is
+     * another listening port on this same pid, which the next scan reports as
+     * another dev server, which is given another proxy. It ran to a hundred and
+     * twenty entries in about a minute before the port range would have stopped
+     * it. Excluding our own pid is the fix at the root, and it is the right
+     * answer independently of the loop — a preview of kururu is kururu.
+     *
+     * Only this process, never its children: the pty host is a different pid,
+     * and the dev servers running inside kururu's own terminals are the entire
+     * point of the scan.
+     */
+    if (pid === process.pid) continue;
     const match = resolveDevCommand(pid, table);
     if (!match) continue;
     for (const port of ports) {

@@ -217,8 +217,56 @@ const ready: Promise<boolean> = init().then(
 const MAX_NOTCHES = 8;
 
 /**
- * Give the program the mouse when it has asked for one, and hand it back when
- * shift is held.
+ * How far a finger may wander before the gesture stops being a tap.
+ *
+ * Generous, because a finger on a phone is not a mouse: holding still on glass
+ * costs a few pixels of drift from the finger flattening alone, and a threshold
+ * tight enough to be honest about "did not move" would turn taps into scrolls
+ * that went nowhere. Eight is about a third of a terminal row, so a gesture that
+ * crosses it was going somewhere.
+ */
+const TAP_SLOP = 8;
+
+/**
+ * Is the thing pointing at this window a finger?
+ *
+ * Asked as a media query rather than off the user agent, because the question is
+ * genuinely about the *pointer* and not about the device: an iPad with a
+ * trackpad answers no, a touchscreen laptop being used as a laptop answers no,
+ * and neither of those is something a user-agent string could have told us. It
+ * is the same shape of question `NARROW` in `App.tsx` asks about the window, and
+ * asked the same way.
+ *
+ * It exists for one decision, in `setFocused`: whether kururu may focus a
+ * terminal that nobody asked it to focus. On a desktop that is required — the
+ * keyboard has to follow the focused pane or ⌘] lands somewhere you cannot type
+ * — and it is invisible, because focus costs a mouse user nothing. On a phone
+ * it is not invisible at all, and the reason is worth writing down because the
+ * element is not the one you would guess: `Terminal.focus()` focuses ghostty's
+ * *host* element rather than the 1x1 textarea beside it, and that host element
+ * carries `contenteditable="true"` and `role="textbox"`. It is text-editable,
+ * so focusing it is asking for the on-screen keyboard just as surely as an
+ * input would — which is why every tab switch, every workspace change and every
+ * dialog closing threw half the screen away to a keyboard nobody had asked for.
+ *
+ * Evaluated per call rather than cached at module load. It costs a media-query
+ * match, and a tablet that has just had a keyboard folded onto it changes its
+ * answer without reloading the page.
+ *
+ * Exported because the touch toolbar asks the same question and has to get the
+ * same answer: a second copy of the query string in `Keybar.tsx` is a seam held
+ * together by a literal, and the half that drifts would be invisible until some
+ * device answered one of them and not the other.
+ */
+export const COARSE_POINTER = "(pointer: coarse)";
+
+export function fingerPointer(): boolean {
+  return typeof window !== "undefined" && window.matchMedia(COARSE_POINTER).matches;
+}
+
+/**
+ * Give the program the mouse when it has asked for one, hand it back when shift
+ * is held — and make a finger a way of scrolling rather than a bad mouse.
  *
  * A terminal cannot both paint a selection and report a drag, and which of them
  * gets the gesture has never been the terminal's decision — the program says, by
@@ -240,8 +288,26 @@ const MAX_NOTCHES = 8;
  * What is deliberately *not* claimed is `pointerdown`, which is how `Panes.tsx`
  * focuses the pane you clicked. It is a different event, so taking the mouse
  * ones leaves clicking into a pane working exactly as it did.
+ *
+ * ## Why touch is handled here rather than left to the browser
+ *
+ * A finger is not a slow mouse, and a browser left to itself pretends it is: it
+ * synthesises a mouse drag out of a gesture, and what arrived was ghostty-web's
+ * selection manager painting a selection across the screen while the screen
+ * itself refused to move. There is nothing for the browser to scroll — the
+ * emulator is a canvas of fixed size and its history lives in WASM — so the only
+ * thing that can answer a drag is the code that owns the scrollback.
+ *
+ * The other half is the keyboard, and it is the reason `touchend` is here at all
+ * rather than only `touchmove`. ghostty-web puts its own `touchend` on the
+ * canvas which focuses the keystroke textarea unconditionally — right for a tap,
+ * wrong for the end of a scroll, since a phone answers a focused text field by
+ * giving up half the screen to a keyboard. So a gesture that moved is claimed
+ * and never reaches it, a gesture that did not is let through untouched, and the
+ * distinction is `TAP_SLOP`. See `fingerPointer` for the other half of the same
+ * complaint: the keyboard that used to appear with no gesture at all.
  */
-function wireMouse(
+function wirePointer(
   element: HTMLElement,
   terminalOf: () => Terminal | null,
   send: (data: string) => void,
@@ -274,7 +340,7 @@ function wireMouse(
    * by. That is what makes selecting to the end of a line work in the program's
    * own selection, and it is the same choice the emulator makes for its.
    */
-  const cellOf = (event: MouseEvent): { col: number; row: number } | null => {
+  const cellOf = (event: { clientX: number; clientY: number }): { col: number; row: number } | null => {
     const em = terminalOf();
     const canvas = em?.renderer?.getCanvas();
     const width = em?.renderer?.charWidth ?? 0;
@@ -297,7 +363,10 @@ function wireMouse(
     action: "press" | "release" | "move",
     button: number,
     cell: { col: number; row: number },
-    event: MouseEvent,
+    /* Structural, so a `TouchEvent` can be reported with as readily as a
+       `MouseEvent`: all this ever wanted was the three modifiers, and a touch
+       carries them for the keyboard somebody may have attached. */
+    event: { shiftKey: boolean; altKey: boolean; ctrlKey: boolean },
   ) => {
     const data = encodeMouse(
       { action, button, col: cell.col, row: cell.row, shift: event.shiftKey, alt: event.altKey, ctrl: event.ctrlKey },
@@ -402,11 +471,125 @@ function wireMouse(
     if (modesNow()) claim(event);
   };
 
+  // -------------------------------------------------------------------------
+  // Touch
+  // -------------------------------------------------------------------------
+
+  /** Where the finger went down, so `touchend` can ask whether it ever left. */
+  let touchFrom: { x: number; y: number } | null = null;
+  /** Whether it has left. Once true it stays true until the finger comes up. */
+  let dragging = false;
+  /** Where it was last seen, and the sub-row travel not yet spent. */
+  let lastY = 0;
+  let banked = 0;
+
+  const onTouchStart = (event: TouchEvent) => {
+    // A second finger is a pinch or a stray palm, and neither is a scroll. The
+    // gesture is abandoned rather than reinterpreted: whatever it was going to
+    // be, it is not a tap either, so the keyboard stays where it is.
+    if (event.touches.length !== 1) {
+      touchFrom = null;
+      dragging = false;
+      return;
+    }
+    const touch = event.touches[0]!;
+    touchFrom = { x: touch.clientX, y: touch.clientY };
+    dragging = false;
+    lastY = touch.clientY;
+    banked = 0;
+  };
+
+  const onTouchMove = (event: TouchEvent) => {
+    if (!touchFrom || event.touches.length !== 1) return;
+    const touch = event.touches[0]!;
+    if (!dragging) {
+      const far =
+        Math.abs(touch.clientX - touchFrom.x) > TAP_SLOP ||
+        Math.abs(touch.clientY - touchFrom.y) > TAP_SLOP;
+      if (!far) return;
+      dragging = true;
+    }
+
+    /**
+     * Claimed for the whole drag and before the arithmetic decides anything,
+     * which is three things at once. It stops the browser synthesising the
+     * mouse events it would otherwise invent for this gesture — which is what
+     * was reaching ghostty-web's selection manager and painting a selection
+     * across the screen instead of scrolling it. It stops the page panning. And
+     * it keeps the event away from the `touchend` on the canvas underneath,
+     * which focuses the keystroke textarea unconditionally; that is the right
+     * answer for a tap and the wrong one for a drag, and telling the two apart
+     * is the whole of what this is for.
+     */
+    claim(event);
+
+    const em = terminalOf();
+    if (!em) return;
+    const row = em.renderer?.charHeight ?? 16;
+    banked += touch.clientY - lastY;
+    lastY = touch.clientY;
+    // Whole rows only, with the remainder kept: a slow drag that never quite
+    // covers a row would otherwise never move the screen at all.
+    const rows = Math.trunc(banked / row);
+    if (rows === 0) return;
+    banked -= rows * row;
+
+    /**
+     * Where the travel goes, and it is the same fork the wheel takes. A program
+     * that has asked for the mouse gets notches reported to it, so a drag inside
+     * `less` or an editor scrolls that program rather than a scrollback it is
+     * not using; everything else scrolls the terminal's own history, which is
+     * the case that matters here, because watching an agent *is* reading back
+     * over what it said.
+     *
+     * The sign is the one thing touch does not share with the wheel. Dragging a
+     * finger down pulls the page down with it and therefore moves *back* through
+     * history, which is the opposite of a wheel's notch and the only behaviour
+     * anybody has on a phone.
+     */
+    const modes = modesNow();
+    const cell = modes && cellOf(touch);
+    if (modes && cell) {
+      const button = rows < 0 ? WHEEL_DOWN : WHEEL_UP;
+      for (let notch = Math.min(Math.abs(rows), MAX_NOTCHES); notch > 0; notch--) {
+        report(modes, "press", button, cell, event);
+      }
+      return;
+    }
+    em.scrollLines(-rows);
+  };
+
+  /**
+   * The finger came up, and the only question left is which gesture it was.
+   *
+   * A drag is claimed, so the canvas below never hears it and the keyboard does
+   * not appear — which is the point. A tap is deliberately *not* claimed: it
+   * falls through to ghostty-web's own `touchend`, which focuses the textarea
+   * and brings the keyboard up. That is the one gesture that should, and letting
+   * the emulator do it rather than doing it here means there is still exactly
+   * one line in the world that decides where a keystroke lands.
+   */
+  const onTouchEnd = (event: TouchEvent) => {
+    const was = dragging;
+    touchFrom = null;
+    dragging = false;
+    banked = 0;
+    if (was) claim(event);
+  };
+
   element.addEventListener("mousedown", onDown, true);
   element.addEventListener("mousemove", onHover, true);
   element.addEventListener("wheel", onWheel, { capture: true, passive: false });
   element.addEventListener("contextmenu", onSuppress, true);
   element.addEventListener("dblclick", onSuppress, true);
+  // `passive: false` spelled out on both, because a listener that cannot
+  // `preventDefault` is one that cannot stop the browser scrolling the page or
+  // inventing a mouse drag, and the browser's default for these is not the same
+  // everywhere. `touchstart` never claims anything and says so by being passive.
+  element.addEventListener("touchstart", onTouchStart, { capture: true, passive: true });
+  element.addEventListener("touchmove", onTouchMove, { capture: true, passive: false });
+  element.addEventListener("touchend", onTouchEnd, { capture: true, passive: false });
+  element.addEventListener("touchcancel", onTouchEnd, { capture: true, passive: false });
 
   return () => {
     element.removeEventListener("mousedown", onDown, true);
@@ -414,6 +597,10 @@ function wireMouse(
     element.removeEventListener("wheel", onWheel, true);
     element.removeEventListener("contextmenu", onSuppress, true);
     element.removeEventListener("dblclick", onSuppress, true);
+    element.removeEventListener("touchstart", onTouchStart, true);
+    element.removeEventListener("touchmove", onTouchMove, true);
+    element.removeEventListener("touchend", onTouchEnd, true);
+    element.removeEventListener("touchcancel", onTouchEnd, true);
     document.removeEventListener("mousemove", onDrag, true);
     document.removeEventListener("mouseup", onUp, true);
   };
@@ -508,8 +695,47 @@ function create(agentId: string): Pooled {
 
   // Registered now rather than after `open()`, because being the first capture
   // listener on this node is the only thing that lets it take a gesture off the
-  // emulator's own handlers. See `wireMouse`.
-  const unwireMouse = wireMouse(element, () => terminal, (data) => input(agentId, data));
+  // emulator's own handlers. See `wirePointer`.
+  const unwirePointer = wirePointer(element, () => terminal, (data) => input(agentId, data));
+
+  /**
+   * On a touch device this element may not hold the keyboard, whoever gave it.
+   *
+   * Stated as a rule rather than done once, because there is no single moment to
+   * do it in. ghostty-web's `open()` ends by focusing itself whether or not
+   * anybody asked, and its `focus()` focuses *and* schedules a second focus on a
+   * zero timer — so a blur written after `open()` returns is quietly undone a
+   * tick later, which is exactly the kind of fix that looks right and is not.
+   *
+   * This is also the element that matters, and it is not the one you would
+   * guess. ghostty puts `contenteditable="true"` and `role="textbox"` on its
+   * container so that it can bind `keydown`, `paste` and the composition events
+   * there; the 1x1 textarea beside it is only clipboard plumbing. Editable and
+   * focused is precisely what a phone answers with a keyboard, so on a phone
+   * this container simply never holds the focus — a tap focuses the textarea
+   * instead, and `keydown` bubbles from it into the container's own listener, so
+   * typing arrives exactly as it always did.
+   *
+   * Nothing here touches the desktop. Where the pointer is a mouse the focus is
+   * required, since the keyboard has to follow the focused pane.
+   *
+   * This is not the same thing as the gate in `setFocused`, and neither is
+   * redundant: that one declines to *ask* for the focus, this one refuses it
+   * when something else asks. Leaving only this one would let every navigation
+   * focus and then blur, and a phone starts sliding its keyboard up on the
+   * focus — so the visible result of "it gets blurred immediately" is a keyboard
+   * that flickers rather than one that never appears.
+   *
+   * Note what it is *not* watching for: `document.hasFocus()` being false means
+   * no focus event is dispatched at all, and that is fine rather than a hole.
+   * An unfocused document has no on-screen keyboard either, and the event
+   * arrives the moment the window is focused again — which is exactly when it
+   * would have started to matter.
+   */
+  const onFocus = () => {
+    if (fingerPointer()) element.blur();
+  };
+  element.addEventListener("focus", onFocus);
 
   const entry: Pooled = {
     agentId,
@@ -529,7 +755,8 @@ function create(agentId: string): Pooled {
       if (disposed) return;
       disposed = true;
       if (settle) clearTimeout(settle);
-      unwireMouse();
+      unwirePointer();
+      element.removeEventListener("focus", onFocus);
       unsubscribe();
       typed?.dispose();
       observer?.disconnect();
@@ -561,7 +788,10 @@ function create(agentId: string): Pooled {
     // Has to come after `open`, which is where the renderer and its canvas are
     // built; there is nothing to point at before that.
     if (em.renderer) installBoxDrawing(em.renderer);
-    if (entry.wantsFocus) em.focus();
+    // The same gate `setFocused` applies, for the emulator that was not there
+    // yet when the pane asked. Without it, the very first terminal of a session
+    // opens the keyboard on a phone before anybody has touched anything.
+    if (entry.wantsFocus && !fingerPointer()) em.focus();
 
     /**
      * Measure the box and say so — and do nothing else, which is the change.
@@ -863,6 +1093,32 @@ export function release(agentId: string, mount: HTMLElement): void {
  * the WASM when the pane that would focus it mounts.
  */
 /**
+ * Put a key into this terminal as though somebody had typed it.
+ *
+ * The pool is the only thing that knows which DOM element an agent's emulator
+ * is, and ghostty binds its `keydown` on exactly that element — so a dispatch
+ * here is picked up by its own key encoder, with the terminal's cursor mode and
+ * its modifier tables applied, rather than by a second encoder written next to
+ * it. `web/src/keybar.ts` says at length why that is worth the indirection.
+ *
+ * Only ever the element, never `input()` alongside it: whether these bytes
+ * reach the pty at all is not this function's to decide. The event goes past
+ * `App.tsx`'s capturing listener first, and an armed prefix means the key is a
+ * command — so a toolbar `C-a` followed by `c` has to end in a new tab and not
+ * in a `c` typed at a shell.
+ *
+ * Refused for a terminal with no emulator yet, which is the honest answer: an
+ * agent nobody has opened a pane on has nothing to type into, and a key held
+ * until one existed would arrive somewhere nobody was looking.
+ */
+export function sendKey(agentId: string, event: KeyboardEvent): boolean {
+  const entry = pool.get(agentId);
+  if (!entry) return false;
+  entry.element.dispatchEvent(event);
+  return true;
+}
+
+/**
  * Which pane this terminal is in, and whether keys may reach a pty at all.
  *
  * Two arguments because the emulator wants two different answers out of them.
@@ -879,7 +1135,27 @@ export function setFocused(agentId: string, focused: boolean, keyboard: boolean)
   // exactly when a pane has to stop drawing a cursor, and it is the half that
   // nothing else would do.
   entry.applyCursor();
-  if (entry.wantsFocus) entry.focus();
+  /**
+   * And the focus itself — but only where taking it is free.
+   *
+   * On a desktop this is load-bearing and invisible: the keyboard has to follow
+   * the focused pane or ⌘] moves the cursor somewhere you cannot type into, and
+   * focus costs a mouse user nothing. Where the pointer is a finger it costs
+   * half the screen — `Terminal.focus()` focuses ghostty's host element, which
+   * is `contenteditable`, and focusing a text-editable element is how a page
+   * asks for the on-screen keyboard. Opening a tab, switching workspace,
+   * closing a dialog and putting the sidebar away are all *navigation*, and none
+   * of them is somebody saying they would like to type.
+   *
+   * So on a touch device the keyboard is only ever asked for by a tap on the
+   * terminal, which ghostty-web answers for itself — see `wirePointer`.
+   * `wantsFocus` is still recorded either way, so the cursor, the eventual tap
+   * and an emulator built later all still know where the keyboard belongs. The
+   * cost is that a tablet with a hardware keyboard wants one tap into a pane
+   * before it can type, which is the same tap every other app on that tablet
+   * asks for.
+   */
+  if (entry.wantsFocus && !fingerPointer()) entry.focus();
 }
 
 /**
