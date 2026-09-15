@@ -48,6 +48,7 @@ export type Action =
   | "delete-workspace"
   | "find-workspace"
   | "find-agent"
+  | "open-reader"
   | "settings"
   | "reload"
   | "restart-server"
@@ -99,6 +100,8 @@ export const ACTION_INFO: Record<Action, { label: string; group: ActionGroup }> 
   "switch-profile": { label: "switch profile", group: "profiles" },
   "new-profile": { label: "new profile", group: "profiles" },
 
+  "open-reader": { label: "read the markdown open next door", group: "panes" },
+
   "toggle-sidebar": { label: "toggle the sidebar", group: "window" },
   "zen-mode": { label: "zen mode", group: "window" },
   settings: { label: "settings", group: "window" },
@@ -123,6 +126,10 @@ export function isAction(value: unknown): value is Action {
  * ghosttown leaves them unbound.
  */
 export const DEFAULT_KEYMAP: Record<string, Action> = {
+  // Ghosttown's key for its markdown reader, and the first of the ones kururu
+  // left unbound to be claimed back — it was unbound because there was nothing
+  // here that it meant, not because the key was spoken for.
+  M: "open-reader",
   "|": "split-right",
   "\\": "split-right",
   "%": "split-right",

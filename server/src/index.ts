@@ -43,7 +43,10 @@ import { parseReport } from "./agents/report";
 import { dump as dumpRecording, forget as forgetRecording, recordBacklog, recordInput, recordNote, recordOutput } from "./record";
 import { processCwd } from "./cwd";
 import { scanDevServers, stopDev, type DevProc } from "./devservers";
-import { allowedRoots, allowRoot, listDir, readFile } from "./files";
+import { allowedRoots, allowRoot, listDir, readBytes, readFile } from "./files";
+import { renderMarkdown } from "./markdown";
+import { attach as attachEditor, findNvim } from "./nvim";
+import { panes } from "../../shared/layout";
 import {
   adoptLegacySheet,
   builtinSheets,
@@ -1005,12 +1008,121 @@ function pollSoon(): Promise<void> {
   return settle(DEV_RESTART_SETTLE_MS * 2).then(() => pollDevServers());
 }
 
+// ---------------------------------------------------------------------------
+// The reader, and the editor that drives it
+// ---------------------------------------------------------------------------
+
+/**
+ * How often kururu looks for an editor to attach to.
+ *
+ * An nvim starting inside a pty raises no event anything out here can hear — the
+ * same reason the dev-server scan is a timer — so this is a poll, and it is a
+ * cheap one because it only asks about terminals a reader is actually following.
+ * A pane with no reader beside it costs nothing at all.
+ */
+const NVIM_SCAN_MS = 2000;
+
+/**
+ * Sockets already hooked. Keyed by the socket path rather than the pid, because
+ * a pid is reused and a socket path carries the pid *and* the directory nvim
+ * made for that run — so a new editor in a recycled pid is a new key, which is
+ * what stops kururu from deciding it has already attached to a process that has
+ * never heard of it.
+ */
+const attached = new Set<string>();
+
+/** A path and a filetype. Anything larger is not an editor reporting a buffer. */
+const NVIM_BODY_LIMIT = 8 * 1024;
+
+/**
+ * Attach to whatever editor is in this terminal, if there is one.
+ *
+ * Failure is silent and normal: most terminals have no nvim in them, an nvim
+ * that has just started may not have its socket yet, and `--remote-expr` against
+ * an editor sitting in a modal prompt will time out. All three are answered by
+ * the next sweep.
+ */
+async function hookEditor(agentId: string): Promise<void> {
+  const agent = host.find(agentId);
+  if (!agent || agent.exited || !agent.pid) return;
+  const nvim = await findNvim(agent.pid);
+  if (!nvim || attached.has(nvim.socket)) return;
+  if (await attachEditor(nvim, agentId, PORT)) attached.add(nvim.socket);
+}
+
+/**
+ * Sweep the terminals that have a reader pointed at them.
+ *
+ * Deliberately not every terminal: attaching is a process spawn, and installing
+ * a hook in an editor nobody asked to watch would be reaching into somebody's
+ * session for no reason at all. A reader is the asking.
+ */
+async function pollEditors(): Promise<void> {
+  const following = new Set<string>();
+  for (const profile of workspaces.all()) {
+    for (const workspace of profile.workspaces) {
+      for (const pane of panes(workspace.layout)) {
+        if (pane.reader?.follow) following.add(pane.reader.follow);
+      }
+    }
+  }
+  for (const agentId of following) await hookEditor(agentId);
+  // A socket for an editor that has gone is a key that will never be asked
+  // about again; drop it so a long session does not accumulate them.
+  if (attached.size > 64) attached.clear();
+}
+
+/**
+ * The root a file belongs to, or null.
+ *
+ * The longest allowed root that contains it, which is `files.ts`'s question
+ * asked from the other end. Roots still come only from the places the server
+ * already knows — an agent's cwd, a dev server's, `KURURU_ROOTS` — so an editor
+ * that wanders outside every project kururu is holding gets no answer rather
+ * than teaching the server a new place to read from. That asymmetry is the whole
+ * point of the rule: a path arriving from outside may *select* a root, never
+ * create one.
+ */
+function rootFor(absolute: string): { root: string; rel: string } | null {
+  let best: { root: string; rel: string } | null = null;
+  for (const root of allowedRoots()) {
+    const prefix = root.endsWith("/") ? root : `${root}/`;
+    if (!absolute.startsWith(prefix)) continue;
+    if (best && best.root.length >= root.length) continue;
+    best = { root, rel: absolute.slice(prefix.length) };
+  }
+  return best;
+}
+
+/**
+ * An editor saying where it is. The one endpoint whose caller is a program
+ * kururu installed rather than a person or a client — `report-cli.ts`'s shape,
+ * for the same reason: the thing that knows is the thing that should say so.
+ */
+function nvimBuffer(body: unknown): void {
+  if (!body || typeof body !== "object") return;
+  const { agent, path, filetype } = body as { agent?: unknown; path?: unknown; filetype?: unknown };
+  if (typeof agent !== "string" || typeof path !== "string" || !path.startsWith("/")) return;
+  // A reader that draws markdown should not blank itself because you looked at
+  // a source file for a moment. Anything it cannot render leaves it as it was.
+  const markdown = filetype === "markdown" || /\.(md|markdown|mdx)$/i.test(path);
+  if (!markdown) return;
+  const located = rootFor(path);
+  if (!located) return;
+  for (const { workspaceId, paneId } of workspaces.readersFollowing(agent)) {
+    workspaces.setReaderTarget(workspaceId, paneId, located.root, located.rel);
+  }
+}
+
 /**
  * One timer left in this process. The status heuristic and the process scan went
  * with the ptys — they are questions about processes, and the host is where
  * those live now.
  */
-const timers = [setInterval(() => void pollDevServers(), DEV_SCAN_MS)];
+const timers = [
+  setInterval(() => void pollDevServers(), DEV_SCAN_MS),
+  setInterval(() => void pollEditors(), NVIM_SCAN_MS),
+];
 
 void pollDevServers();
 
@@ -1414,6 +1526,22 @@ function handleMessage(ws: WebSocket, raw: string): void {
       void pollDevServers();
       return;
     }
+
+    // --- the reader --------------------------------------------------------
+
+    case "open-reader": {
+      const paneId = msg.paneId ?? workspaces.focusedPaneId;
+      const agentId = msg.agentId ?? workspaces.activeAgentIn(paneId);
+      if (!workspaces.openReader(paneId, agentId)) return;
+      // Ahead of the sweep, because the pane is on screen now and a reader that
+      // is blank for two seconds reads as one that does not work.
+      if (agentId) void hookEditor(agentId);
+      return;
+    }
+
+    case "pin-reader":
+      workspaces.pinReader(msg.paneId, msg.follow);
+      return;
   }
 }
 
@@ -1723,6 +1851,50 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   // --- file browsing -------------------------------------------------------
   if (url.pathname === "/api/roots") {
     json(res, { roots: allowedRoots() });
+    return;
+  }
+  if (url.pathname === "/api/nvim-buffer" && req.method === "POST") {
+    void readBody(req, NVIM_BODY_LIMIT)
+      .then((body) => nvimBuffer(JSON.parse(body.toString("utf8"))))
+      .catch(() => {
+        // an editor that sent something unparseable is not worth a log line
+      });
+    json(res, { ok: true });
+    return;
+  }
+  if (url.pathname === "/api/markdown") {
+    const root = url.searchParams.get("root") ?? "";
+    const path = url.searchParams.get("path") ?? "";
+    void (async () => {
+      try {
+        const file = readFile(root, path);
+        json(res, await renderMarkdown(file.text, root, path));
+      } catch (err) {
+        json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+      }
+    })();
+    return;
+  }
+  if (url.pathname === "/api/file-raw") {
+    const root = url.searchParams.get("root") ?? "";
+    const path = url.searchParams.get("path") ?? "";
+    try {
+      const file = readBytes(root, path);
+      res.writeHead(200, {
+        "content-type": file.type,
+        "content-length": file.bytes.length,
+        // An SVG is a document, and a browser pointed straight at this URL would
+        // treat it as one. In an `<img>` — the only way the reader asks for it —
+        // none of that runs; these say so for the case somebody opens the link.
+        "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'",
+        "x-content-type-options": "nosniff",
+        "content-disposition": "inline",
+        "cache-control": "no-cache",
+      });
+      res.end(file.bytes);
+    } catch (err) {
+      json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+    }
     return;
   }
   if (url.pathname === "/api/ls" || url.pathname === "/api/file") {

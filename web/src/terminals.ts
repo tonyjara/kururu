@@ -44,6 +44,7 @@
  */
 import { FitAddon, init, Terminal } from "ghostty-web";
 import { usableGrid } from "./grid";
+import { BUTTON_NONE, encodeMouse, type MouseModes, mouseModes, WHEEL_DOWN, WHEEL_UP } from "./mouse";
 import { input, proposeSize, rebuild, subscribeOutput, warm } from "./session";
 
 /**
@@ -158,6 +159,220 @@ const ready: Promise<boolean> = init().then(
   },
 );
 
+/**
+ * How many wheel notches one gesture may report.
+ *
+ * A mouse counts in notches and a macOS trackpad counts in pixels, and a hard
+ * flick on the latter arrives as one event carrying several hundred of them.
+ * Spending all of them hands the program a scroll it is still working through
+ * long after the finger stopped, which reads as the terminal being stuck rather
+ * than as the gesture having been enthusiastic.
+ */
+const MAX_NOTCHES = 8;
+
+/**
+ * Give the program the mouse when it has asked for one, and hand it back when
+ * shift is held.
+ *
+ * A terminal cannot both paint a selection and report a drag, and which of them
+ * gets the gesture has never been the terminal's decision — the program says, by
+ * turning on the tracking modes in `mouse.ts`, and the answer every terminal
+ * since xterm has given is that tracking wins and shift is the way back. Kururu
+ * could not give that answer at all: ghostty-web has a selection manager and no
+ * mouse reporting whatsoever, so an nvim in a pane could not be clicked into and
+ * the browser painted its own selection over the top of one the editor already
+ * had.
+ *
+ * Every listener is on the pooled element in the **capture** phase and
+ * registered before `open()`, and both halves of that are load-bearing.
+ * ghostty-web puts its own capture-phase `mousedown` and `wheel` on that same
+ * node, and `stopPropagation` does nothing about another listener on the node an
+ * event has already reached — only `stopImmediatePropagation` does, and only for
+ * listeners registered after this one. If reporting ever starts fighting a
+ * painted selection, that ordering is what broke.
+ *
+ * What is deliberately *not* claimed is `pointerdown`, which is how `Panes.tsx`
+ * focuses the pane you clicked. It is a different event, so taking the mouse
+ * ones leaves clicking into a pane working exactly as it did.
+ */
+function wireMouse(
+  element: HTMLElement,
+  terminalOf: () => Terminal | null,
+  send: (data: string) => void,
+): () => void {
+  /** The button a drag is dragging, or null when nothing is held. */
+  let held: number | null = null;
+  /** The last cell reported, so crossing one cell is one report and not forty. */
+  let lastCell = "";
+  /** Wheel travel that has not yet added up to a whole notch. */
+  let scrolled = 0;
+
+  /**
+   * What the program is listening for, or null if it is not listening.
+   *
+   * A pane scrolled up into its history is refused here rather than clamped. A
+   * report names a cell by where it is on the screen, and what is on screen is
+   * then not the program's screen; scrolling back is something the *terminal* is
+   * doing and the program should hear nothing whatever about it.
+   */
+  const modesNow = (): MouseModes | null => {
+    const em = terminalOf();
+    if (!em || em.viewportY > 0) return null;
+    const modes = mouseModes((mode) => em.getMode(mode));
+    return modes.tracking === "none" ? null : modes;
+  };
+
+  /**
+   * Which cell the pointer is over — clamped to the grid rather than refused,
+   * because a drag that leaves the pane should go on reporting the edge it left
+   * by. That is what makes selecting to the end of a line work in the program's
+   * own selection, and it is the same choice the emulator makes for its.
+   */
+  const cellOf = (event: MouseEvent): { col: number; row: number } | null => {
+    const em = terminalOf();
+    const canvas = em?.renderer?.getCanvas();
+    const width = em?.renderer?.charWidth ?? 0;
+    const height = em?.renderer?.charHeight ?? 0;
+    if (!em || !canvas || width <= 0 || height <= 0) return null;
+    const box = canvas.getBoundingClientRect();
+    return {
+      col: Math.max(0, Math.min(Math.floor((event.clientX - box.left) / width), em.cols - 1)),
+      row: Math.max(0, Math.min(Math.floor((event.clientY - box.top) / height), em.rows - 1)),
+    };
+  };
+
+  const claim = (event: Event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+
+  const report = (
+    modes: MouseModes,
+    action: "press" | "release" | "move",
+    button: number,
+    cell: { col: number; row: number },
+    event: MouseEvent,
+  ) => {
+    const data = encodeMouse(
+      { action, button, col: cell.col, row: cell.row, shift: event.shiftKey, alt: event.altKey, ctrl: event.ctrlKey },
+      modes,
+    );
+    if (data) send(data);
+  };
+
+  const onDrag = (event: MouseEvent) => {
+    if (held === null) return;
+    const modes = modesNow();
+    const cell = modes && cellOf(event);
+    if (!modes || !cell) return;
+    const key = `${cell.col},${cell.row}`;
+    if (key === lastCell) return;
+    lastCell = key;
+    report(modes, "move", held, cell, event);
+  };
+
+  const onUp = (event: MouseEvent) => {
+    if (held === null || event.button !== held) return;
+    const button = held;
+    held = null;
+    document.removeEventListener("mousemove", onDrag, true);
+    document.removeEventListener("mouseup", onUp, true);
+    const modes = modesNow();
+    const cell = modes && cellOf(event);
+    if (!modes || !cell) return;
+    claim(event);
+    report(modes, "release", button, cell, event);
+  };
+
+  const onDown = (event: MouseEvent) => {
+    // Shift is consulted here and nowhere else. It is the way back to a
+    // selection the browser paints — xterm's key for it, and Ghostty's — but
+    // once a button is down the gesture belongs to the program until it comes
+    // up, or the program is left believing it is still being held.
+    if (event.shiftKey || event.button > 2) return;
+    const modes = modesNow();
+    const cell = modes && cellOf(event);
+    if (!modes || !cell) return;
+    claim(event);
+    held = event.button;
+    lastCell = `${cell.col},${cell.row}`;
+    // Among the defaults `claim` just stopped was focusing the emulator's
+    // textarea, and a pane you clicked that does not then take the keyboard is
+    // worse than no mouse reporting at all.
+    terminalOf()?.focus();
+    report(modes, "press", event.button, cell, event);
+    // On the document, so a drag that leaves the pane keeps reporting rather
+    // than stopping at the divider — which is how a window resize in nvim, or a
+    // selection dragged past the edge, is finished off.
+    document.addEventListener("mousemove", onDrag, true);
+    document.addEventListener("mouseup", onUp, true);
+  };
+
+  const onHover = (event: MouseEvent) => {
+    if (held !== null || event.shiftKey) return;
+    const modes = modesNow();
+    if (!modes || modes.tracking !== "any") return;
+    const cell = cellOf(event);
+    if (!cell) return;
+    const key = `${cell.col},${cell.row}`;
+    if (key === lastCell) return;
+    lastCell = key;
+    // Not claimed, unlike everything else here: a hover report is information
+    // and conflicts with nothing, and taking the event would stop the emulator
+    // ever seeing a link to underline.
+    report(modes, "move", BUTTON_NONE, cell, event);
+  };
+
+  const onWheel = (event: WheelEvent) => {
+    if (event.shiftKey) return;
+    const modes = modesNow();
+    const cell = modes && cellOf(event);
+    if (!modes || !cell) return;
+    // Claimed before the arithmetic, and whatever the arithmetic decides: the
+    // emulator must not scroll its own scrollback under a program that has
+    // asked to be told about the wheel itself.
+    claim(event);
+    const step = event.deltaMode === 0 ? (terminalOf()?.renderer?.charHeight ?? 16) : 1;
+    // A reversal spends the bank rather than paying into it, or the first notch
+    // back the other way is eaten by what the last one left behind.
+    if (scrolled !== 0 && Math.sign(event.deltaY) !== Math.sign(scrolled)) scrolled = 0;
+    scrolled += event.deltaY / step;
+    const whole = Math.trunc(scrolled);
+    if (whole === 0) return;
+    scrolled -= whole;
+    const button = whole > 0 ? WHEEL_DOWN : WHEEL_UP;
+    for (let notch = Math.min(Math.abs(whole), MAX_NOTCHES); notch > 0; notch--) {
+      report(modes, "press", button, cell, event);
+    }
+  };
+
+  /**
+   * The emulator's own answers to these — a context menu, and a word selected by
+   * double-click — are exactly the gestures a program with tracking on has asked
+   * to handle itself. The press underneath each was already reported by
+   * `onDown`; this only stops the second answer arriving on top of it.
+   */
+  const onSuppress = (event: Event) => {
+    if (modesNow()) claim(event);
+  };
+
+  element.addEventListener("mousedown", onDown, true);
+  element.addEventListener("mousemove", onHover, true);
+  element.addEventListener("wheel", onWheel, { capture: true, passive: false });
+  element.addEventListener("contextmenu", onSuppress, true);
+  element.addEventListener("dblclick", onSuppress, true);
+
+  return () => {
+    element.removeEventListener("mousedown", onDown, true);
+    element.removeEventListener("mousemove", onHover, true);
+    element.removeEventListener("wheel", onWheel, true);
+    element.removeEventListener("contextmenu", onSuppress, true);
+    element.removeEventListener("dblclick", onSuppress, true);
+    document.removeEventListener("mousemove", onDrag, true);
+    document.removeEventListener("mouseup", onUp, true);
+  };
+}
+
 interface Pooled {
   readonly agentId: string;
   /** The element `open()` was called on. This is what moves between panes. */
@@ -217,6 +432,11 @@ function create(agentId: string): Pooled {
   let observer: ResizeObserver | null = null;
   let settle: ReturnType<typeof setTimeout> | null = null;
 
+  // Registered now rather than after `open()`, because being the first capture
+  // listener on this node is the only thing that lets it take a gesture off the
+  // emulator's own handlers. See `wireMouse`.
+  const unwireMouse = wireMouse(element, () => terminal, (data) => input(agentId, data));
+
   const entry: Pooled = {
     agentId,
     element,
@@ -232,6 +452,7 @@ function create(agentId: string): Pooled {
       if (disposed) return;
       disposed = true;
       if (settle) clearTimeout(settle);
+      unwireMouse();
       unsubscribe();
       typed?.dispose();
       observer?.disconnect();

@@ -136,3 +136,51 @@ export function readFile(root: string, rel: string): FileContent {
   }
   return { path: rel, text: readFileSync(full, "utf8"), truncated: false };
 }
+
+/**
+ * The media types this will name, and the whole reason the list is a list.
+ *
+ * A raw byte endpoint that guesses is an endpoint that can be talked into
+ * serving `text/html` off the user's disk to a tailnet, so the extension picks
+ * from a fixed table and anything not in it is refused rather than sent as
+ * `application/octet-stream`. Refusing is not a hardship: the only thing asking
+ * is an `<img>` inside a rendered document, and a format not on this list is one
+ * the browser could not have drawn anyway.
+ *
+ * SVG is on it, because a diagram checked into a repo is usually one. It is also
+ * the only entry that is a document rather than a bitmap — an `<img>` will not
+ * run script in it, but a browser pointed straight at the URL would, which is
+ * what the headers on this endpoint are for.
+ */
+const MEDIA_TYPES = new Map<string, string>([
+  ["png", "image/png"],
+  ["jpg", "image/jpeg"],
+  ["jpeg", "image/jpeg"],
+  ["gif", "image/gif"],
+  ["webp", "image/webp"],
+  ["avif", "image/avif"],
+  ["bmp", "image/bmp"],
+  ["ico", "image/x-icon"],
+  ["svg", "image/svg+xml"],
+]);
+
+export interface FileBytes {
+  bytes: Buffer;
+  type: string;
+}
+
+/**
+ * One file, as bytes, for the things a document points at rather than contains.
+ *
+ * Same two checks as everything else in here — `resolveInRoot` is the gate and
+ * this only decides what to call what comes back. A file too large is an error
+ * rather than a truncation, because half a PNG is not a smaller PNG.
+ */
+export function readBytes(root: string, rel: string): FileBytes {
+  const full = resolveInRoot(root, rel);
+  if (!full) throw new Error("path is outside the project");
+  const type = MEDIA_TYPES.get(rel.split(".").pop()?.toLowerCase() ?? "");
+  if (!type) throw new Error("not a media type this serves");
+  if (statSync(full).size > MAX_FILE_BYTES) throw new Error("file is too large to serve");
+  return { bytes: readFileSync(full), type };
+}

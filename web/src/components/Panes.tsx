@@ -54,6 +54,7 @@ import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
 import { AGENT_MIME, PANE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
 import { shortenPath, tabLabel } from "../labels";
 import * as api from "../session";
+import { ReaderView } from "./Reader";
 import { Status } from "./Status";
 import { TerminalView } from "./Terminal";
 
@@ -222,7 +223,7 @@ function Pane({
   /** Where in this strip a dropped tab would land, while one is over it. */
   const [dropAt, setDropAt] = useState<number | null>(null);
 
-  const takesTabs = dragging?.kind === "agent";
+  const takesTabs = dragging?.kind === "agent" && !pane.reader;
   /** Another pane is in flight, and it is not this one. */
   const takesPane = dragging?.kind === "pane" && dragging.id !== pane.id;
   /** This pane is the one being dragged; show it as picked up. */
@@ -281,7 +282,11 @@ function Pane({
         onDragLeave={() => setDropAt(null)}
         onDrop={dropOnStrip}
       >
-        {pane.agentIds.map((agentId, index) => {
+        {pane.reader ? (
+          <ReaderStrip pane={pane} />
+        ) : null}
+        {!pane.reader &&
+          pane.agentIds.map((agentId, index) => {
           const agent = agents.find((a) => a.id === agentId);
           if (!agent) return null;
           return (
@@ -322,17 +327,19 @@ function Pane({
               </button>
             </Fragment>
           );
-        })}
-        {dropAt === pane.agentIds.length && <span className="tab-insert" aria-hidden="true" />}
+          })}
+        {!pane.reader && dropAt === pane.agentIds.length && <span className="tab-insert" aria-hidden="true" />}
 
-        <button
-          className="tab tab-new"
-          onClick={() => void api.newTab({ paneId: pane.id })}
-          title="New terminal here (C-a T)"
-          aria-label="New tab"
-        >
-          +
-        </button>
+        {!pane.reader && (
+          <button
+            className="tab tab-new"
+            onClick={() => void api.newTab({ paneId: pane.id })}
+            title="New terminal here (C-a T)"
+            aria-label="New tab"
+          >
+            +
+          </button>
+        )}
 
         <span className="tab-spacer" />
         <button className="pane-btn" onClick={() => api.splitPane("row", pane.id)} title="Split right (C-a |)">
@@ -351,7 +358,9 @@ function Pane({
       </header>
 
       <div className="pane-body">
-        {showing ? (
+        {pane.reader ? (
+          <ReaderView reader={pane.reader} />
+        ) : showing ? (
           /* Deliberately unkeyed. A key here would rebuild this on every tab
              switch, which is what it used to be for — and the emulator it would
              have rebuilt is pooled now and outlives the pane, so the only thing
@@ -435,6 +444,43 @@ const EDGES: Record<string, ["row" | "col", boolean]> = {
   top: ["col", true],
   bottom: ["col", false],
 };
+
+/**
+/**
+ * A reader's strip: what it is showing, and whether it is still listening.
+ *
+ * The name comes from the path the pane already has rather than from the
+ * document's own first heading, which the server does send. A strip should say
+ * which file you are looking at — two notes both titled "Notes" are a strip that
+ * has stopped telling you anything.
+ *
+ * The toggle is the one control a reader needs. Following is the point of it, so
+ * that is the default and pinning is the exception: the moment you want to keep
+ * reading one file while the editor moves on.
+ */
+function ReaderStrip({ pane }: { pane: PaneState }) {
+  const reader = pane.reader;
+  if (!reader) return null;
+  const name = reader.path ? (reader.path.split("/").pop() ?? reader.path) : "reader";
+  const following = reader.follow !== null;
+  return (
+    <>
+      <span
+        className="tab tab-on tab-reader"
+        title={reader.path ? `${reader.root}/${reader.path}` : "waiting for the editor"}
+      >
+        {name}
+      </span>
+      <button
+        className="pane-btn"
+        onClick={() => api.pinReader(pane.id, !following)}
+        title={following ? "Following the editor — click to pin this file" : "Pinned — click to follow the editor"}
+      >
+        {following ? "⇄" : "⊙"}
+      </button>
+    </>
+  );
+}
 
 /**
  * A pane with no tabs, which is now a leftover rather than a starting point.

@@ -539,6 +539,23 @@ export function openPreview(port: number): void {
 }
 
 /**
+ * Put a reader beside this pane, following the editor in it.
+ *
+ * A verb, like everything else: the client does not decide where the pane goes
+ * or what it shows. It says *read what this terminal is reading* and draws the
+ * snapshot that comes back — which is what lets the same press from a phone put
+ * the same reader in front of the same file.
+ */
+export function openReader(paneId?: string, agentId?: string): void {
+  send({ type: "open-reader", paneId, agentId });
+}
+
+/** Stop following the editor, or start again. */
+export function pinReader(paneId: string, follow: boolean): void {
+  send({ type: "pin-reader", paneId, follow });
+}
+
+/**
  * The mascots, and the keyboard. Fire-and-forget like every other verb: the
  * snapshot that comes back is the answer, so Settings never holds a config of
  * its own and a second window sees the change without being told.
