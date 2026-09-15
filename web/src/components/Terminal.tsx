@@ -4,8 +4,21 @@
  * This is the thing the old UI was pretending to be. A `<pre>` of the current
  * screen could show you what an agent had drawn, but it could not be typed into,
  * scrolled back through, selected out of, or coloured — and an agent TUI is all
- * four of those. xterm.js is a real emulator, so the pane stops being a picture
- * of a terminal and becomes one.
+ * four of those. A real emulator is what stops the pane being a picture of a
+ * terminal and makes it one.
+ *
+ * The emulator is Ghostty's, compiled to WASM and rendering to a 2D canvas. It
+ * replaced xterm.js, and the reason was not speed — it was that xterm's renderer
+ * wanted a WebGL context per pane and a page gets about sixteen. Kururu builds a
+ * fresh emulator on every tab switch, workspace change, profile swap and pane
+ * rebuild, so the dead ones piled up holding contexts they would never draw with
+ * again; past sixteen Chromium does not refuse the new one, it kills the
+ * *oldest*, which is never a corpse but the pane you have had open longest. Every
+ * visible terminal would go black at once, for three seconds, several times an
+ * afternoon, with nothing wrong anywhere — which is exactly why it read as
+ * inexplicable. There is no context budget behind a 2D canvas, so that entire
+ * class of bug is not managed here any more, it is absent. What was
+ * `releaseWebglContexts` is gone with it, and nothing replaced it.
  *
  * The emulator is created once and lives in a ref, deliberately outside React's
  * knowledge. Output arrives sixty times a second; React must never see it. What
@@ -18,17 +31,15 @@
  * in, which is what SIGWINCH is for.
  */
 import { useEffect, useRef } from "react";
-import { FitAddon } from "@xterm/addon-fit";
-import { WebglAddon } from "@xterm/addon-webgl";
-import { Terminal } from "@xterm/xterm";
-import "@xterm/xterm/css/xterm.css";
+import { FitAddon, init, Terminal } from "ghostty-web";
 import { isFileDrag, textForDrop } from "../drop";
+import { usableGrid } from "../grid";
 import { input, resize, subscribeOutput } from "../session";
 
 /**
- * Colours, given to the emulator rather than the stylesheet — xterm paints into
- * a canvas, so CSS cannot reach any of this. Kept in step with styles.css by
- * hand, which is the trade for not rendering a thousand DOM nodes a frame.
+ * Colours, given to the emulator rather than the stylesheet — it paints into a
+ * canvas, so CSS cannot reach any of this. Kept in step with styles.css by hand,
+ * which is the trade for not rendering a thousand DOM nodes a frame.
  */
 const THEME = {
   background: "#0d0f0e",
@@ -58,42 +69,29 @@ const THEME = {
 const RESIZE_SETTLE_MS = 60;
 
 /**
- * Hand the GL context back, out loud, before the emulator that held it goes.
+ * The WASM module, started when this module is imported rather than when the
+ * first pane asks for it.
  *
- * This is the one that turned the whole window black. Disposing an xterm does
- * not release the WebGL context behind it: neither the addon nor the core ever
- * calls `loseContext`, so the context stays live until Chromium happens to
- * garbage-collect the canvas, which can be minutes or never. A page gets about
- * sixteen — and kururu builds a *fresh* emulator every time a tab is switched, a
- * workspace is changed, a profile is swapped or a pane is rebuilt, which is
- * dozens of times in an afternoon. The dead ones pile up holding contexts they
- * will never draw with again.
+ * Instantiating it is the one part of building a terminal that is not instant,
+ * and a page that is about to draw four of them would otherwise do that work on
+ * the frame the panes appear. Starting here overlaps it with the websocket
+ * connecting, which is dead time anyway. The module carries its own wasm inline
+ * as a data URL, so there is no request to fail and nothing to serve alongside
+ * the bundle.
  *
- * Past sixteen Chromium does not refuse the new one, it kills the **oldest** to
- * make room, and the oldest is not one of the corpses — it is the pane you have
- * had open longest. So the terminals that go dark are exactly the ones you were
- * watching, all of them, within a few tab switches of each other: every visible
- * pane blanks at once, stays blank for the three seconds the addon waits for a
- * restore that is not coming, and then comes back on the DOM renderer slower
- * than it left. That is the "screen went completely black" — not a crash, not
- * the server, not the agents, which are a process away and never noticed.
- *
- * `WEBGL_lose_context` is the only way to say "done with this" rather than
- * waiting to be collected. It has to run *before* `terminal.dispose()`, because
- * that is what takes the canvas out of the DOM and the addon exposes no handle
- * on the one it drew into — the host element is the only way back to it.
- *
- * Asking a canvas for a context it does not already have would create one, which
- * is the opposite of the point; every canvas in here already has its own, and a
- * 2D one (the texture atlas keeps those) answers `null` to a WebGL request
- * rather than being converted. So this only ever finds contexts that exist.
+ * It resolves to whether it worked rather than rejecting, because a rejection
+ * nobody is listening for yet is an unhandled one — no pane has mounted at this
+ * point. A machine that cannot run it gets empty panes and one line saying so,
+ * which is the failure that can be read; a thrown error inside an effect is the
+ * one that takes the window with it.
  */
-function releaseWebglContexts(element: HTMLElement): void {
-  for (const canvas of element.querySelectorAll("canvas")) {
-    const gl = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
-    gl?.getExtension("WEBGL_lose_context")?.loseContext();
-  }
-}
+const ready: Promise<boolean> = init().then(
+  () => true,
+  (err) => {
+    console.error("kururu: the terminal emulator could not start —", err);
+    return false;
+  },
+);
 
 interface Props {
   agentId: string;
@@ -104,227 +102,222 @@ interface Props {
 export function TerminalView({ agentId, focused }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
+  /**
+   * The focus effect below cannot reach an emulator that does not exist yet, and
+   * the first one on a page waits for the WASM. A pane that mounts already
+   * focused — which is every pane a split or a tab switch creates — would
+   * otherwise come up without the keyboard, because the only thing that would
+   * have given it focus ran before there was anything to give it to.
+   */
+  const wanted = useRef(focused);
+  wanted.current = focused;
 
   useEffect(() => {
     const element = host.current;
     if (!element) return;
 
-    const terminal = new Terminal({
-      theme: THEME,
-      /**
-       * The Nerd Font faces are in this stack for their glyphs, not their
-       * letterforms. An agent TUI — or an nvim opened inside one — draws
-       * devicons and powerline separators out of the private use area, and SF
-       * Mono contains none of them, so the browser has nothing to fall back to
-       * and paints tofu. Ghostty does not have this problem because it compiles
-       * Symbols Nerd Font Mono into its own binary and falls back to it
-       * silently; in a browser the fallback has to be named out loud, and the
-       * name has to be one the system actually has. Ghostty's copy is not
-       * installed anywhere, so naming it buys nothing on its own — it is kept
-       * only for the machine that has installed it properly.
-       *
-       * Two generations of patched font are named because no single one covers
-       * both. Nerd Fonts v3 moved Material Design Icons from U+F500–FD46 to
-       * U+F0001–F1AF0 and dropped the old range, so a dotfile written against
-       * v2 — which is most of them, since they get carried forward rather than
-       * rewritten — asks for codepoints a freshly patched font no longer has.
-       * MesloLGS NF is the v2-era build powerlevel10k ships, and it goes last
-       * precisely so it answers only what the v3 faces ahead of it cannot.
-       *
-       * They all stay *after* SF Mono deliberately: xterm measures the cell
-       * from the first face in the stack, so appending rather than prepending
-       * leaves the grid metrics exactly as they were. The "Mono" variants are
-       * the ones whose glyphs are a single cell wide, which is the only kind
-       * that can land in a grid without overhanging the next column.
-       *
-       * This fixes the machine that has the fonts installed, which is the
-       * desktop. A phone over Tailscale has none of them and will keep showing
-       * tofu until one is served as a webfont.
-       */
-      fontFamily:
-        '"SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", ' +
-        '"FiraCode Nerd Font Mono", "JetBrainsMono Nerd Font Mono", ' +
-        '"Symbols Nerd Font Mono", "MesloLGS NF", monospace',
-      fontSize: 12,
-      lineHeight: 1.2,
-      cursorBlink: true,
-      /**
-       * Option-drag selects, even while the program is grabbing the mouse.
-       *
-       * Claude Code turns on every mouse mode there is — `?1000h ?1002h ?1003h
-       * ?1006h`, which is click, drag, *all motion*, and SGR coordinates — so
-       * from then on every press, release and movement is an escape sequence
-       * sent to the agent rather than a gesture for the terminal, and dragging
-       * across the screen selects nothing. That is correct behaviour and every
-       * terminal does it; what every terminal also has is a modifier that says
-       * "this one is mine", and xterm.js ships that switched off.
-       *
-       * Option rather than shift because it is the only one xterm.js offers on
-       * macOS, and it is iTerm's default for the same job. Without it a terminal
-       * running an agent is one you cannot copy an error message out of, which
-       * is most of what reading an agent's output is for.
-       */
-      macOptionClickForcesSelection: true,
-      // History lives on the server too, but only what it has been asked for is
-      // sent; this is what the pane itself keeps once it is open.
-      scrollback: 10000,
-      allowProposedApi: true,
-    });
-    const fit = new FitAddon();
-    terminal.loadAddon(fit);
-    terminal.open(element);
-
     /**
-     * WebGL because an agent mid-stream repaints the whole grid many times a
-     * second and the DOM renderer spends it all in layout. It is allowed to
-     * fail — a machine with no GL context, or too many live ones — and the
-     * fallback renderer is correct, just slower, so this is not worth an error.
+     * Torn down before it was ready is the normal case, not the edge one:
+     * StrictMode mounts, unmounts and mounts again on every pane in development,
+     * and the very first pane of a session waits on the WASM besides. An
+     * emulator built after that would be building into a host element React has
+     * already taken back.
      */
-    let webgl: WebglAddon | null = null;
-    try {
-      webgl = new WebglAddon();
-      /**
-       * Losing the context is survivable: disposing the addon is what hands the
-       * terminal back to the DOM renderer, which draws the same screen out of
-       * the same buffer, and the only cost is speed.
-       *
-       * The variable goes back to null with it, because what it means everywhere
-       * else in here — including the `catch` below — is "the live addon, or
-       * nothing". An addon whose renderer has been torn down is not the first of
-       * those, and leaving it sitting in there is how the next person to reach
-       * for it calls into a dead renderer.
-       */
-      webgl.onContextLoss(() => {
-        webgl?.dispose();
-        webgl = null;
-      });
-      terminal.loadAddon(webgl);
-    } catch {
-      // DOM renderer it is.
-      webgl = null;
-    }
-
-    term.current = terminal;
-
-    /**
-     * Fit to the box, then tell the pty what shape it is now.
-     *
-     * Debounced, because the box changes continuously and the pty does not want
-     * to hear about every frame of it: dragging a divider fires this on every
-     * pointer move, and a pane sliding to a new position fires it for the whole
-     * animation. Each one is a SIGWINCH, and a program that redraws itself
-     * completely on every SIGWINCH — which is every agent TUI — would spend the
-     * drag repainting. So the emulator follows the box immediately and the pty
-     * hears the answer once the box has stopped moving.
-     */
+    let disposed = false;
+    let terminal: Terminal | null = null;
     let settle: ReturnType<typeof setTimeout> | null = null;
-    /**
-     * Nothing is asked for until the grid is the pane's.
-     *
-     * An xterm built without `cols`/`rows` is 80x24, and it stays 80x24 until a
-     * fit lands — which cannot happen on the frame after a split, when the box
-     * has no size yet, nor before the renderer has measured a character. The
-     * backlog is a screen *serialized at the size the server thinks it is*, so
-     * writing it into an 80-column grid wraps every line of it at 80 and leaves
-     * it wrapped; the later resize unwraps the text but not the damage, and what
-     * is left is a screen the agent believes it has already drawn correctly and
-     * will never repaint. Asking a frame later costs nothing and cannot land in
-     * the wrong shape.
-     *
-     * `proposeDimensions` rather than catching a throw from `fit`: fit does not
-     * throw when the renderer has no cell size yet, it quietly does nothing, so
-     * a try/catch cannot tell "fitted" from "silently skipped".
-     */
-    let opened = false;
     let unsubscribe = () => {};
-    // Annotated because the backlog's callback calls it, and a function that
-    // appears in its own initializer has no inferable type.
-    const push: () => void = () => {
-      const dims = fit.proposeDimensions();
-      if (!dims || !Number.isFinite(dims.cols) || !Number.isFinite(dims.rows)) return;
-      fit.fit();
-      if (!opened) {
-        opened = true;
-        unsubscribe = subscribeOutput(agentId, {
-          write: (data) => terminal.write(data),
-          /**
-           * The shape this emulator is drawing at, asked for rather than
-           * remembered: the pane is resizable, and a reconnect asks again on
-           * behalf of an emulator that has been sitting here for an hour.
-           */
-          grid: () => ({ cols: terminal.cols, rows: terminal.rows }),
-          /**
-           * A backlog replaces the whole screen, so the whole screen has to be
-           * painted again — which does not follow from writing it.
-           *
-           * xterm repaints the rows it knows changed, and after a `reset` plus a
-           * reconstruction its idea of what changed does not cover cells the
-           * renderer is still holding from before. The buffer is then right and
-           * the picture is wrong, and it stays wrong exactly where the agent
-           * never writes again: an agent redraws differentially, so a cell it
-           * believes is already correct is one it will never send. That is how a
-           * shell prompt from before the agent started ends up sitting inside
-           * its input box, visible until something forces a full repaint —
-           * resizing the window, which is what made it "go away".
-           *
-           * The atlas goes too. It caches rasterized glyphs against the cells
-           * that asked for them, and a screen that has just been replaced
-           * wholesale is the one moment that cache is describing a screen that
-           * no longer exists.
-           */
-          reset: (data, cols, rows) => {
+    let typed: { dispose(): void } | null = null;
+    let observer: ResizeObserver | null = null;
+
+    void ready.then((ok) => {
+      if (!ok || disposed) return;
+
+      terminal = new Terminal({
+        theme: THEME,
+        /**
+         * The Nerd Font faces are in this stack for their glyphs, not their
+         * letterforms. An agent TUI — or an nvim opened inside one — draws
+         * devicons and powerline separators out of the private use area, and SF
+         * Mono contains none of them, so the browser has nothing to fall back to
+         * and paints tofu. Ghostty's *native* app does not have this problem
+         * because it compiles Symbols Nerd Font Mono into its own binary and
+         * falls back to it silently; the WASM build has no font of its own and
+         * takes what the page names, so the fallback has to be spelled out here
+         * and has to name a face the system actually has.
+         *
+         * Two generations of patched font are named because no single one covers
+         * both. Nerd Fonts v3 moved Material Design Icons from U+F500–FD46 to
+         * U+F0001–F1AF0 and dropped the old range, so a dotfile written against
+         * v2 — which is most of them, since they get carried forward rather than
+         * rewritten — asks for codepoints a freshly patched font no longer has.
+         * MesloLGS NF is the v2-era build powerlevel10k ships, and it goes last
+         * precisely so it answers only what the v3 faces ahead of it cannot.
+         *
+         * They all stay *after* SF Mono deliberately: the cell is measured from
+         * the first face in the stack, so appending rather than prepending
+         * leaves the grid metrics exactly as they were. The "Mono" variants are
+         * the ones whose glyphs are a single cell wide, which is the only kind
+         * that can land in a grid without overhanging the next column.
+         *
+         * This fixes the machine that has the fonts installed, which is the
+         * desktop. A phone over Tailscale has none of them and will keep showing
+         * tofu until one is served as a webfont.
+         */
+        fontFamily:
+          '"SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", ' +
+          '"FiraCode Nerd Font Mono", "JetBrainsMono Nerd Font Mono", ' +
+          '"Symbols Nerd Font Mono", "MesloLGS NF", monospace',
+        fontSize: 12,
+        cursorBlink: true,
+        // History lives on the server too, but only what it has been asked for
+        // is sent; this is what the pane itself keeps once it is open.
+        scrollback: 10000,
+      });
+      const fit = new FitAddon();
+      terminal.loadAddon(fit);
+      terminal.open(element);
+      term.current = terminal;
+      if (wanted.current) terminal.focus();
+
+      // Captured so the closures below do not have to re-narrow a variable the
+      // cleanup is allowed to null out.
+      const em = terminal;
+
+      /**
+       * Fit to the box, then tell the pty what shape it is now.
+       *
+       * Debounced, because the box changes continuously and the pty does not
+       * want to hear about every frame of it: dragging a divider fires this on
+       * every pointer move, and a pane sliding to a new position fires it for
+       * the whole animation. Each one is a SIGWINCH, and a program that redraws
+       * itself completely on every SIGWINCH — which is every agent TUI — would
+       * spend the drag repainting. So the emulator follows the box immediately
+       * and the pty hears the answer once the box has stopped moving.
+       */
+      let opened = false;
+      /**
+       * Nothing is subscribed until the grid is the pane's.
+       *
+       * An emulator built without `cols`/`rows` is 80x24, and it stays 80x24
+       * until a fit lands — which cannot happen on the frame after a split, when
+       * the box has no size yet, nor before the renderer has measured a
+       * character. The backlog is a screen *serialized at the size the server
+       * thinks it is*, so writing it into an 80-column grid wraps every line of
+       * it at 80 and leaves it wrapped; the later resize unwraps the text but
+       * not the damage, and what is left is a screen the agent believes it has
+       * already drawn correctly and will never repaint. Asking a frame later
+       * costs nothing and cannot land in the wrong shape.
+       *
+       * `proposeDimensions` rather than catching a throw from `fit`: fit does
+       * not throw when the renderer has no cell size yet, it quietly does
+       * nothing, so a try/catch cannot tell "fitted" from "silently skipped".
+       *
+       * And its answer is put through `usableGrid` rather than merely checked
+       * for being a number, because this addon does not decline to measure an
+       * unlaid-out box — it clamps, and answers `2x1`. That is finite, positive
+       * and catastrophic: it fits the emulator to two columns, asks for a
+       * backlog serialized at two columns, and tells the server to SIGWINCH the
+       * pty, at which point the agent redraws itself into it. A pane is
+       * momentarily exactly that shape every time one is dragged.
+       */
+      // Annotated because the backlog's callback calls it, and a function that
+      // appears in its own initializer has no inferable type.
+      const push: () => void = () => {
+        if (disposed) return;
+        if (!usableGrid(fit.proposeDimensions())) return;
+        fit.fit();
+        if (!opened) {
+          opened = true;
+          unsubscribe = subscribeOutput(agentId, {
             /**
-             * The grid before the bytes. A backlog is a screen serialized at a
-             * width, and this is the width it was serialized at — normally the
-             * one this emulator asked for, and something else only if the pane
-             * moved while the answer was being prepared. Written into any other
-             * shape, every row longer than the target wraps, everything below it
-             * slides down, and the top scrolls away.
+             * Guarded, and not out of caution. Where xterm quietly ignored a
+             * write to a terminal that had gone, every one of these throws
+             * `Terminal has been disposed` — and a sink that throws is a sink
+             * that throws inside the socket's message loop, which is the one
+             * place in the client a single dead pane could take everything else
+             * with it. `session.ts` now catches that too; this is the half that
+             * stops it being raised in the first place.
              */
-            if (cols >= 2 && rows >= 2 && (cols !== terminal.cols || rows !== terminal.rows)) {
-              terminal.resize(cols, rows);
-            }
-            terminal.reset();
-            terminal.write(data, () => {
+            write: (data) => {
+              if (!disposed) em.write(data);
+            },
+            /**
+             * The shape this emulator is drawing at, asked for rather than
+             * remembered: the pane is resizable, and a reconnect asks again on
+             * behalf of an emulator that has been sitting here for an hour.
+             */
+            grid: () => ({ cols: em.cols, rows: em.rows }),
+            /**
+             * A backlog replaces the whole screen, and nothing has to be done to
+             * make that stick — which is worth saying, because under the old
+             * emulator it did.
+             *
+             * xterm repainted only the rows it believed had changed, so after a
+             * reset and a reconstruction its idea of what changed did not cover
+             * cells the renderer was still holding: the buffer was right and the
+             * picture was wrong, and it stayed wrong exactly where the agent
+             * never wrote again, since an agent redraws differentially and never
+             * resends a cell it believes is correct. That was the shell prompt
+             * sitting inside Claude Code's input box until a window resize
+             * forced a full repaint. It needed the texture atlas thrown away and
+             * an explicit `refresh` of every row.
+             *
+             * This renderer draws the viewport from the WASM buffer on its own
+             * loop rather than from a record of which cells it thinks are dirty,
+             * so a screen that has been replaced wholesale is simply the screen
+             * it draws next. If a backlog ever does land looking half-painted,
+             * this paragraph is the assumption that was wrong.
+             */
+            reset: (data, cols, rows) => {
+              if (disposed) return;
               /**
-               * Through the terminal rather than the addon: it clears whichever
-               * renderer is actually drawing, and after a context loss that is
-               * no longer the one this pane started with.
+               * The grid before the bytes. A backlog is a screen serialized at a
+               * width, and this is the width it was serialized at — normally the
+               * one this emulator asked for, and something else only if the pane
+               * moved while the answer was being prepared. Written into any
+               * other shape, every row longer than the target wraps, everything
+               * below it slides down, and the top scrolls away.
                */
-              terminal.clearTextureAtlas();
-              terminal.refresh(0, terminal.rows - 1);
-              /**
-               * And back to the box, in the case where that was not already the
-               * shape of it. Reflowing a correct screen is what xterm does for
-               * every window resize; reflowing a wrapped one would be reflowing
-               * damage.
-               */
-              push();
-            });
-          },
-        });
-      }
-      if (settle) clearTimeout(settle);
-      settle = setTimeout(() => resize(agentId, terminal.cols, terminal.rows), RESIZE_SETTLE_MS);
-    };
-    push();
+              if (cols >= 2 && rows >= 2 && (cols !== em.cols || rows !== em.rows)) {
+                em.resize(cols, rows);
+              }
+              em.reset();
+              em.write(data, () => {
+                /**
+                 * And back to the box, in the case where that was not already
+                 * the shape of it. Reflowing a correct screen is what an
+                 * emulator does for every window resize; reflowing a wrapped one
+                 * would be reflowing damage.
+                 */
+                push();
+              });
+            },
+          });
+        }
+        if (settle) clearTimeout(settle);
+        settle = setTimeout(() => resize(agentId, em.cols, em.rows), RESIZE_SETTLE_MS);
+      };
+      push();
 
-    const observer = new ResizeObserver(push);
-    observer.observe(element);
+      observer = new ResizeObserver(push);
+      observer.observe(element);
 
-    const typed = terminal.onData((data) => input(agentId, data));
-    // Mouse reporting and bracketed paste arrive here instead, already encoded.
-    const binary = terminal.onBinary((data) => input(agentId, data));
+      /**
+       * One channel, unlike xterm's two: mouse reports and bracketed paste
+       * arrive here already encoded rather than on a separate binary event. If
+       * mouse reporting ever looks wrong, that difference is where to start.
+       */
+      typed = em.onData((data) => input(agentId, data));
+    });
 
     return () => {
+      disposed = true;
       if (settle) clearTimeout(settle);
       unsubscribe();
-      typed.dispose();
-      binary.dispose();
-      observer.disconnect();
-      // Before the dispose, which is what removes the canvas this needs to find.
-      releaseWebglContexts(element);
-      terminal.dispose();
+      typed?.dispose();
+      observer?.disconnect();
+      terminal?.dispose();
       term.current = null;
     };
   }, [agentId]);

@@ -6,10 +6,10 @@
  * agent is saying. Hence the narrow sidebar, the one-line pane bars, and the
  * absence of anything with a shadow on it.
  *
- * Dark only, and not as a preference: these panes sit against xterm's own
- * canvas, whose colours are set in Terminal.tsx rather than here, and a light
- * chrome around a dark grid looks like a bug. The two palettes are kept in step
- * by hand — that is the price of a renderer CSS cannot reach.
+ * Dark only, and not as a preference: these panes sit against the emulator's
+ * own canvas, whose colours are set in Terminal.tsx rather than here, and a
+ * light chrome around a dark grid looks like a bug. The two palettes are kept
+ * in step by hand — that is the price of a renderer CSS cannot reach.
  */
 
 :root {
@@ -890,8 +890,8 @@ kbd {
 
 /**
  * The terminal itself. `min-height: 0` matters more than it looks: without it a
- * flex child refuses to shrink below its content, and xterm's content is however
- * many rows it last drew — so the pane would grow and never shrink back.
+ * flex child refuses to shrink below its content, and a terminal's content is
+ * however many rows it last drew — so the pane would grow and never shrink back.
  */
 .term {
   flex: 1;
@@ -929,13 +929,6 @@ kbd {
 }
 .tabstrip-lifted {
   background: var(--chrome-high);
-}
-.term .xterm {
-  height: 100%;
-}
-.xterm .xterm-viewport {
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
 }
 
 /* The whole pane is the button: there is one thing an empty pane can do, so it

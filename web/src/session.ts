@@ -95,6 +95,31 @@ function send(msg: ClientMessage): void {
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg));
 }
 
+/**
+ * Hand something to one pane's emulator without letting it take the socket down.
+ *
+ * The same argument `ptyhost.ts` makes about its port, one process further out.
+ * A sink is an emulator in a pane, and an emulator can be gone — a pane closed
+ * between a message being sent and being dispatched is ordinary, and Ghostty's
+ * terminal answers every call after `dispose()` by throwing rather than by doing
+ * nothing, which is what xterm did. Uncaught, that throw leaves the rest of the
+ * loop undelivered: the other panes watching the same agent miss the bytes, and
+ * those bytes do not come again, because an agent redraws differentially and
+ * will never resend what it believes is already on screen.
+ *
+ * Logged rather than swallowed. A pane that silently stops updating is the kind
+ * of bug that gets debugged by staring at a terminal wondering why it is stale,
+ * and the whole point of catching here is that the failure stays the size of one
+ * pane instead of becoming the size of the window.
+ */
+function deliver(to: () => void): void {
+  try {
+    to();
+  } catch (err) {
+    console.error("kururu: a terminal refused output and was skipped", err);
+  }
+}
+
 function connect(): void {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${proto}//${location.host}/ws`);
@@ -133,7 +158,7 @@ function connect(): void {
         set({ devServers: msg.servers });
         break;
       case "output":
-        for (const sink of sinks.get(msg.agentId) ?? []) sink.write(msg.data);
+        for (const sink of sinks.get(msg.agentId) ?? []) deliver(() => sink.write(msg.data));
         break;
       case "backlog": {
         /**
@@ -155,7 +180,7 @@ function connect(): void {
          */
         for (const sink of sinks.get(msg.agentId) ?? []) {
           if (epochs.get(sink) !== msg.epoch) continue;
-          sink.reset(msg.data, msg.cols, msg.rows);
+          deliver(() => sink.reset(msg.data, msg.cols, msg.rows));
         }
         break;
       }

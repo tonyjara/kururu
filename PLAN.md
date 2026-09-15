@@ -25,13 +25,21 @@ landing twice. Choosing web means the phone is a breakpoint.
 
 1. **Kururu owns its agents.** It spawns each one in a pty it holds, keeps an
    emulator beside it, and is the only thing that knows about it. This was
-   deliberately reversed: kururu used to be a *client* of ghosttown's control
-   socket, which meant one pty host and one set of agents shared with the TUI.
-   Owning them is what makes kururu a whole application — one launch, nothing to
-   have running first — and the price is exactly what the old principle warned
-   about: **kururu's agents and ghosttown's are two disjoint sets**, and they do
-   not outlive the app. Accepted knowingly, and mitigated where it is sharpest
-   (see principle 4).
+   deliberately reversed once: kururu used to be a *client* of ghosttown's
+   control socket, which meant one pty host and one set of agents shared with the
+   TUI. Owning them is what makes kururu a whole application, and the price is
+   what the old principle warned about: **kururu's agents and ghosttown's are two
+   disjoint sets.**
+
+   What is *no longer* the price is that they die with the app. That clause was
+   here, and it was a consequence of Electron forking the pty host rather than
+   anything the principle needed — the host is a daemon on a socket now
+   (`server/src/ptyhostd.ts`), so it outlives the window, the server and the
+   terminal any of them was started from. "One launch, nothing to have running
+   first" went with it, and that was the trade: kururu is two commands, and the
+   thing you get for the second one is that closing a window is not an act with
+   consequences. Only restarting the host ends an agent, and nothing does that
+   by accident.
 2. **Borrow, never reach across.** Ghosttown is not a dependency and is never
    edited from here, but it is a source: `status.ts` was copied verbatim and the
    agent-detection half of `procs.ts` with one call swapped. Where a problem is
@@ -42,14 +50,20 @@ landing twice. Choosing web means the phone is a breakpoint.
    the desktop layout was rebuilt around tiled terminals and the phone was not
    given a width of its own, so today this principle holds only in the sense
    that there is one build. See the open question below.
-4. **The window is dumb; the app is not.** Electron's main process owns a
-   window, a menu bar and one dialog. Everything stateful — the ptys, the
-   emulators, the proxies, the file reads — lives in the server, which runs as a
-   utilityProcess: still this app, still dying with it, but not on the thread
-   that draws. So closing the window disturbs nothing and the phone keeps
-   working while it is shut. **Only quitting stops the agents, and it asks
-   first.** That guard is the whole mitigation for principle 1's price; do not
-   remove the macOS `window-all-closed` behaviour that makes it possible.
+4. **The window is dumb, and it is now dumb enough to be disposable.** Electron's
+   main process owns a window and a menu bar. Everything stateful — the ptys, the
+   emulators, the proxies, the file reads — is in processes it did not start and
+   cannot stop.
+
+   It used to start them, as utilityProcesses: still the app, still dying with
+   it, but off the thread that draws. That bought a real thing (one launch) and
+   cost a confusing one — the agents were *the window's*, so quitting needed a
+   dialog, closing the window had to be specially prevented from quitting, and an
+   app running with no window, no tray icon and nothing to say it was there was
+   the result. All of that machinery was mitigation for a problem the split
+   removes. So: closing the last window quits, on every platform, and quitting
+   costs a window. The desktop finds a server the way the phone does, which also
+   means it can find one that is not on this machine.
 5. **Semantics on the phone, pixels on the desktop.** This used to say the
    phone never renders a terminal, and that half stands: mirroring a VT grid
    onto a 390px screen is the wrong thing done well, and a phone wants a status,
@@ -71,22 +85,29 @@ landing twice. Choosing web means the phone is a breakpoint.
 
 | Layer | Choice | Notes |
 |---|---|---|
-| Daemon | ghosttown's, unchanged | owns every pty; survives the GUI restarting |
-| Server | Bun | `Bun.serve` for HTTP + WS; `Bun.connect` for the control socket |
+| Pty host | kururu's own, a daemon on a unix socket | owns every pty; outlives the server and the window |
+| Server | Node | HTTP + WS; connects to the host, restarts freely |
 | UI | React 19 + Vite | one codebase, desktop and phone |
-| Desktop shell | Electron | main process is Node, which is *why* the server stays a separate Bun process |
-| Transport | WebSocket, JSON | server pushes state; RPC passes through to ghosttown |
+| Desktop shell | Electron | a viewer: finds a server and draws it, exactly as the phone does |
+| Host link | newline-delimited JSON over a unix socket | `hostlink.ts`'s protocol, `hostsock.ts`'s framing |
+| Transport | WebSocket, JSON | server pushes state; the client sends verbs |
 | Preview | reverse proxy, port per dev server | a path prefix cannot work — see below |
 | Phone access | `tailscale serve` | tailnet-only; run by you, never by kururu |
 
 ## How the pieces fit
 
 ```
-  ghosttown daemon ──unix socket── kururu server ──ws/http── web app
-   (ptys, state)      (poll+RPC)    (Bun)                     ├── Electron window
-                                      │                       └── phone, over tailscale
+  kururu pty host ──unix socket── kururu server ──ws/http── web app
+   (ptys, emulators)   (hostlink)   (Node)                   ├── Electron window, here or elsewhere
+   outlives everything              restarts freely          └── phone, over tailscale
+                                      │
                                       └── preview proxies ──── dev servers
 ```
+
+The two boundaries do different jobs and it is worth saying which. The **socket**
+is what makes a server restart cost nothing: the ptys are on the far side of it.
+The **HTTP boundary** is what makes the window disposable and the phone possible:
+everything above it is a client, and the desktop is not a privileged one.
 
 ### Why the server polls
 
@@ -280,6 +301,195 @@ looks like it worked.
    can inject a script into previewed HTML: long-press an element, capture the
    selector and source location, send it to the agent as *"the CTA in
    `src/Hero.tsx:42` wraps at 390px"*. Waits on the preview pane.
+
+## The terminal lifecycle rework
+
+Written 2026-09-15, after a session in which typing into a pane stopped
+arriving, workspaces came back borked, and selection looked broken. Those are
+not three bugs. They are one decision, and this section is the plan for undoing
+it in two parts, each of which can be executed on its own.
+
+**The decision: kururu ties an emulator's lifetime to the view that draws it.**
+A tab switch, a workspace change, a profile swap or a pane rebuild throws the
+emulator away and builds a new one, which then has to be refilled from a screen
+the server serializes on demand — at a width the client names in the request,
+because a serialized screen is laid out at a width and reconstructing it at any
+other one wraps every row and never recovers. Everything expensive in the
+terminal path exists to make that survivable: `screen.ts`'s serialize-at-a-size,
+the grid travelling on `request-backlog`, `awaiting` counting overlapping
+rebuilds, backlog-before-output ordering, the epoch matching an answer to the
+emulator that asked. A whole subsystem, and its only job is to paper over the
+rebuild.
+
+Nobody else does this, including the people who wrote our emulator.
+[coder/mux](https://github.com/coder/mux) is an Electron-plus-browser app for
+parallel coding agents built on ghostty-web by ghostty-web's own authors, and
+its `TerminalView.tsx` says, in a comment, *"we intentionally keep the terminal
+instance alive when hidden so we don't lose frontend-only state"* — created
+lazily on first visibility, kept through every hide. [rcarmo/webterm](https://github.com/rcarmo/webterm),
+which tiles live terminals the way our panes do, holds `Map<HTMLElement,
+WebTerminal>` and disposes only when the element leaves the document; a
+reconnect reconnects the socket and never the terminal. VS Code re-parents the
+same wrapper element between containers — `attachToElement` / `detachFromElement`
+in `terminalInstance.ts` — and has never rebuilt an xterm to move it.
+
+The WebGL blackouts that cost us xterm.js belong to this too. A page gets about
+sixteen contexts; sixteen is only a budget you can exhaust if you are building
+emulators continuously. The renderer was replaced to fix a symptom.
+
+Two more things follow from the same root, and they are Part 2.
+
+**The pty's size is decided by whichever client resized last.** mux proposes a
+size, resizes the *pty first*, and then sets its own emulator to match, so the
+server is authoritative and every client conforms to it. We do the opposite —
+`Terminal.tsx` fits the emulator to its box and tells the pty what shape it is
+now — which is why a backlog has to carry a grid, why the server's single shared
+screen gets reshaped to each client's guess at serialize time, and why two
+clients of different sizes fight forever. tmux settled this in the 1990s with
+`window-size`: `largest`, `smallest`, `manual`, `latest`. We have last-wins and
+no policy, which is fine with one window and is why a phone makes the desktop
+ragged.
+
+### Part 1 — one emulator per terminal, never rebuilt
+
+Client-side only. Nothing in `server/src/agents/`, `ptyhost*`, or `hostsock.ts`
+is touched, so this costs a repaint and never an agent.
+
+**The shape.** A new `web/src/terminals.ts` owns a pool keyed by agent id: the
+ghostty-web `Terminal`, the host `<div>` it was opened into, and its
+subscription to `session.ts`. It is created on first use and kept. A pane does
+not create a terminal, it **borrows** one: `TerminalView` renders an empty
+mount `<div>`, appends the pooled host element into it on mount, and on unmount
+leaves it detached in the pool. React must never render the pooled element as a
+child of anything — it would try to remove it — so it is appended imperatively
+into a ref'd node, which is what makes a tab switch, a workspace change and a
+drag a DOM move rather than a rebuild.
+
+`open()` throws on a second call in ghostty-web, which is not an obstacle: the
+element is moved, never re-opened.
+
+**Eviction.** The pool is capped — start at twelve, LRU — and an entry is
+disposed when its agent is closed or killed, or when it falls off the end. A
+terminal that has been evicted and comes back is exactly the cold case the
+backlog path still exists for, so nothing is lost; it just stops happening
+during ordinary navigation.
+
+**Watched vs warm, and the unread trap.** A pooled emulator must be fed whether
+or not it is on screen, or it goes stale and we are back to reconstructing. So
+the client sends two sets rather than one: what is *visible* (the active tab of
+every pane in the current workspace, which is what `watch` means today) and what
+is *warm* (everything in the pool). The host streams the union.
+
+The trap: `host.ts` derives `unread` from its watched set — *"output nobody is
+looking at is the definition of unread"* — so streaming the warm set would
+silently stop every unread mark from ever appearing. Do **not** fix that by
+editing `agents/host.ts`; that file costs the user every running agent to
+change. Move `unread` to the server instead, exactly as `activity` already
+lives there and for the same stated reason: `index.ts` sets it when output
+arrives for a terminal no client has visible, clears it when one does, and
+merges it into the snapshot over the host's now-vestigial flag.
+
+**Rendering cost to measure, not assume.** ghostty-web runs a
+`requestAnimationFrame` loop per terminal and exposes no way to pause it, so a
+dozen pooled terminals are a dozen loops drawing to detached canvases. Measure
+it with the pool full before deciding anything; if it shows up, the honest fix
+is a `setRenderingEnabled(boolean)` upstream, or a local patch, not a smaller
+pool that brings the rebuilds back.
+
+**What must still be true afterwards**
+
+- A backlog is requested only by a genuinely new emulator: a first mount, an
+  eviction that came back, or a reconnect. Switching tabs and workspaces asks
+  for nothing.
+- Closing a tab or killing an agent disposes its pooled entry. An emulator for
+  an agent that no longer exists is a leak with a canvas in it.
+- The focused pane still takes the keyboard, including after a dialog or a
+  sidebar rename closes (`paneKeyboard`, already in `App.tsx`).
+- `web/test` still passes, and the pane-tree tests are untouched by any of this.
+
+**Verify** — against an isolated instance, never the user's agents. A second
+kururu with `KURURU_PORT=7817 KURURU_HOST_SOCK=/tmp/k2.sock
+KURURU_STATE_DIR=/tmp/k2` is a complete, separate world; spawn terminals
+running `cat` or `sleep 300`, never `claude`. Then: split a pane, open four
+tabs, switch between them and confirm the screen is *identical* across the
+switch with no flash and no `request-backlog` on the wire; switch workspaces
+and back; drag a pane across the grid; reload the window and confirm exactly
+one backlog per visible terminal.
+
+### Part 2 — the server owns the size
+
+Server plus client. `server/src/index.ts` is the restartable half, so this costs
+a reconnect — `C-a B`, or automatic under `bun run dev` — and still never an
+agent. Do it after Part 1: the deletions below are only safe once nothing
+rebuilds emulators.
+
+**The inversion.** `Terminal.tsx` stops resizing the pty. It measures its box,
+puts the result through `usableGrid`, and *proposes* — `propose-size` on the
+wire. The server keeps the proposals per agent, applies a policy, resizes the
+pty once, and tells every watcher the authoritative grid; the client's emulator
+resizes when it is told, and at no other time. That is mux's order, and the
+reason for it is that the pty and the emulator can then never disagree about
+shape, which is the disagreement every borked screen has turned out to be.
+
+**The policy** is `smallest` — the smallest proposal among clients that
+currently have that terminal visible. Chosen over `latest` because a phone and a
+desktop looking at one agent should both see a correct screen rather than take
+turns, and over `largest` because the smaller client would clip. A terminal with
+no visible watcher keeps the size it had; it is not resized to nothing and it is
+not resized by a warm client that is only keeping its emulator current.
+
+**What this deletes.** `request-backlog` stops carrying `cols`/`rows` — the
+server serializes at the size it already owns. The `epoch` goes with it: it
+existed because two emulators could ask at two sizes and get each other's
+answers, and there is now one size and, after Part 1, usually no second asker.
+`sendBacklog` stops calling `host.resize`. `OutputSink.grid()` in `session.ts`
+goes. `awaiting` stays — a backlog must still precede live output for the client
+receiving it — but its inflight *count* can go back to a flag once rebuilds are
+not routine; check that before simplifying it, the count is cheap and the bug it
+prevents is expensive.
+
+**What must still be true afterwards**
+
+- A pane genuinely resizes the terminal: drag a divider, and `stty size` inside
+  the pty agrees within the settle window. The debounce stays; every resize is a
+  SIGWINCH and every agent TUI repaints completely on one.
+- An exited agent's screen still reflows (`host.resize` skips only the pty half
+  once `exited` is set).
+- Two clients of different widths on one workspace both draw correctly, and
+  neither makes the other ragged. This is the whole point; test it with two
+  browser windows before calling it done.
+- `server/test/screen.test.ts` still holds: serialize, rebuild, compare.
+
+### Not in either part
+
+**Selection.** Dragging over text in a busy pane looks broken, and the isolated
+finding is that it half is. In ghostty-web 0.4.0 a drag always selects — mouse
+tracking modes are irrelevant, since the library sends no mouse reports at all,
+which is its own missing feature — and the text *is* copied to the clipboard on
+release. What vanishes is the highlight: the selection is anchored to absolute
+rows, so output scrolling underneath carries it off the viewport within a frame
+or two, and in a pane running a chatty agent that is indistinguishable from
+nothing having happened. Part 1 removes the kururu-specific half of this (a
+rebuild and every backlog `reset()` destroy a selection outright). What is left
+is a product decision — hold the viewport while a selection exists, or show that
+the copy happened — and it wants its own pass.
+
+**The stale lines this invalidates.** `CLAUDE.md` still explains the tab-switch
+rebuild as a WebGL budget, `PLAN.md`'s "Done" still says xterm.js per pane, and
+the open question below about last-writer-wins resize is answered by Part 2.
+Each part should correct the prose it makes untrue, in the same change.
+
+### Rules for whoever executes this
+
+- **Never edit `server/src/agents/`, `ptyhostd.ts`, `ptyhost.ts`, `hostlink.ts`
+  or `hostsock.ts`** for either part. Every one of those costs the user every
+  agent they are running. If something seems to need it, it belongs on the
+  other side of the link — say so and stop.
+- A `bun run dev` may be watching `server/src` and `shared` while you work.
+  Check with `curl -s localhost:7717/api/health` before starting and say what
+  you are about to disturb.
+- No git commands, no `tailscale` commands, no edits to `../ghosttown`.
+- Test with `cat` and `sleep`, never a real agent CLI.
 
 ## Open questions
 

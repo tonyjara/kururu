@@ -81,6 +81,31 @@ export function App() {
    */
   const [editing, setEditing] = useState(false);
 
+  /**
+   * Whether the panes still hold the keyboard.
+   *
+   * Everything in here that takes typing takes it *from a terminal*, and the
+   * browser does not give it back: a dialog answered, a name committed in the
+   * sidebar, Settings closed — each of them leaves the focused element removed
+   * from the document and the focus itself on `<body>`, where every keystroke
+   * goes nowhere at all. The pane still looked focused, and the next thing
+   * typed was simply lost, which is why it read as the terminal having died
+   * rather than as a focus that had.
+   *
+   * So it is stated rather than repaired afterwards. The emulator is told
+   * whether the keyboard is the panes' to have, and the effect that already
+   * exists in `Terminal.tsx` — focus follows the focused pane — hands it back
+   * the moment nothing in the chrome wants it. Which pane is *focused* is
+   * untouched by any of this: it is still where the next keystroke belongs,
+   * and it still draws that way.
+   *
+   * `resizeMode` is deliberately not in the list. It takes every key in the
+   * capture phase before an emulator could see one, so the keyboard can stay
+   * exactly where it is and the terminal needs no second handover when hjkl
+   * stops moving a divider.
+   */
+  const paneKeyboard = !(dialog || editing || settings || help || reach);
+
   const profile = snapshot?.profile ?? null;
   const workspace = useMemo(
     () => profile?.workspaces.find((w) => w.id === profile.activeWorkspaceId) ?? null,
@@ -539,6 +564,7 @@ export function App() {
             agents={agents}
             mascot={mascot}
             zen={zen}
+            keyboard={paneKeyboard}
           />
         </main>
         <StatusBar

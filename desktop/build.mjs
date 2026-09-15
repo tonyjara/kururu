@@ -1,9 +1,9 @@
 /**
- * Bundle the server so Electron can load it.
+ * Bundle the server and the pty host into files node can run.
  *
- * Electron's main process cannot run TypeScript, and the server is TypeScript
- * that imports from `../../shared`. One esbuild pass resolves both problems and
- * produces a single file, which is also what makes the utilityProcess fork a
+ * Both are TypeScript that imports from `../../shared`, and neither node nor
+ * Electron runs TypeScript. One esbuild pass resolves both problems and produces
+ * a single file each, which is also what makes starting either of them a
  * one-liner: there is nothing to resolve at runtime.
  *
  * ESM output, not CJS, because the server uses `import.meta.url` to find the
@@ -14,10 +14,16 @@
  * inline a `.node` binary, which it cannot — so it is required at runtime from
  * node_modules like any other native dependency.
  *
- * Two bundles, not one, because the server runs as two processes: the pty host,
- * which owns everything that cannot be recreated, and the server, which can be
- * killed and re-forked whenever its code changes. Sharing one bundle would work
- * and would also mean every restart reloaded node-pty for no reason.
+ * Two bundles, not one, because this is two processes: the pty host, which owns
+ * everything that cannot be recreated, and the server, which is killed and
+ * started again whenever its code changes. Sharing one bundle would work and
+ * would also mean every restart reloaded node-pty for no reason.
+ *
+ * The output still lands in `desktop/dist` although Electron no longer starts
+ * either of them — the desktop is a viewer now and the server is something you
+ * run. Moving it is a rename nobody is asking for; what matters is that the two
+ * bundles sit beside each other, because that is how `index.ts` finds the host
+ * to spawn.
  */
 import { build } from "esbuild";
 import { chmodSync, existsSync } from "node:fs";
@@ -45,7 +51,7 @@ async function bundle(entry, outfile) {
   });
 }
 
-await bundle("server/src/ptyhost-main.ts", "dist/ptyhost.mjs");
+await bundle("server/src/ptyhostd.ts", "dist/ptyhostd.mjs");
 await bundle("server/src/index.ts", "dist/server.mjs");
 
 /**

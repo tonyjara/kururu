@@ -21,12 +21,16 @@
  * editing kururu is simply: if a change would touch this file, it costs the
  * user their agents, and it should be batched with one that already does.
  *
- * Normally this runs as an Electron utilityProcess of its own — see
- * `ptyhost-main.ts`, which is the entry point. It is a factory rather than a
- * module that does things on import so that the other arrangement also works:
- * `bun run dev` has no Electron to fork anything, so the server builds one of
- * these in its own process and links to it locally. Nothing about the protocol
- * changes; only whether the port crosses a process boundary.
+ * `ptyhostd.ts` is the entry point that runs this as a daemon, and it is the
+ * only one. This stays a factory rather than a module that does things on import
+ * because the thing it makes is worth being able to make twice — in a test, in a
+ * process that is also something else — and because a module with a running
+ * timer in it the moment you import it is a module you cannot reason about.
+ *
+ * It used to be forked by Electron, and there was a second arrangement where the
+ * server built one of these *inside itself* because there was no Electron to
+ * fork anything. That second one quietly did not deliver the split at all: the
+ * ptys were in the process being restarted. There is one arrangement now.
  */
 import type { AgentReport, AgentSnapshot } from "../../shared/model";
 import { AGENT_SCAN_MS, OUTPUT_FLUSH_MS, STATUS_TICK_MS } from "../../shared/wire";

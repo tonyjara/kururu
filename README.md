@@ -37,10 +37,15 @@ from it, but it owns its own agents now: what runs here is not what runs there.
   launch — as empty panes. Nothing is respawned; that is deliberate.
 - **Remembers what they said.** A pane opened ten minutes late is handed the
   history, because the server keeps an emulator beside every pty.
-- **Keeps them.** Closing the window leaves them running, and reloading it costs
-  a repaint. So does restarting the server — the ptys live in a host process of
-  their own, so `C-a B` puts kururu back on current code with every agent, its
-  scrollback and your layout intact. Only quitting stops them, and it asks first.
+- **Keeps them, through everything except being told not to.** The ptys live in
+  a host process of their own that nothing owns: quit the window, restart the
+  server, close the terminal you started it from — every agent, its scrollback
+  and your layout are still there. `C-a B` puts kururu back on current code
+  without one of them noticing. Only stopping the host itself ends them.
+- **Connects to a server, rather than being one.** The window finds a kururu
+  server, on this machine or on a box that is always on, and draws it — the same
+  thing the phone does. Start a server somewhere, point the desktop at it, and
+  close your laptop lid.
 
 Under the surface and waiting for a pane to live in: dev-server discovery, the
 preview proxy that lets a phone reach `localhost`, and a traversal-safe file API.
@@ -48,31 +53,66 @@ See [PLAN.md](./PLAN.md).
 
 ## Running it
 
+Two commands, and the split between them is the point.
+
 ```sh
 bun install
 
-# The whole thing. Starts the server, starts vite, opens the window.
-bun run dev:desktop
+bun run dev              # your agents: serves on :7717, restarts itself on save
+bun run dev:desktop      # a window onto one
 ```
 
-That is the only command you need: there is no server to start in another
-terminal and nothing to have running first.
+`bun run dev` is the half that matters. It starts the pty host if it is not
+already running — a detached daemon on a unix socket that holds every pty — and
+then a server in front of it. Editing the server restarts it and no agent
+notices; so does `C-a B`. Closing the terminal you ran it in leaves the host, and
+your agents, exactly where they were.
 
-Without the window, if you only want the phone to reach it:
+`bun run dev:desktop` opens a window and looks for a server. If it does not find
+one it says so and offers a box to type an address into, and it keeps looking —
+start a server and the window connects on its own. Addresses you have used are
+remembered, so the next launch goes straight there.
+
+For a built server with no watching:
 
 ```sh
-bun run start            # builds, then serves everything on :7717
+bun run start            # builds the web app, then serves on :7717
 ```
 
-Then `http://localhost:7717`.
+If the server goes away for good — you stopped it, or the machine it was on went
+to sleep — the window notices after about ten seconds and goes back to the
+address picker, where it starts looking again. A *restart* is not that: `C-a B`
+and editing a server file are a second or two of silence and the window sits
+through them without blinking.
 
-**Closing the window does not stop your agents** — they keep working and the
-phone keeps its connection. Quitting does stop them, and asks first.
+To see what is running, including the host, which otherwise has no face at all:
 
-### From your phone
+```sh
+bun run status
+bun run status http://vm:7717    # a server elsewhere
+```
+
+**Quitting the window stops nothing.** Neither does restarting the server. The
+one thing that ends your agents is stopping the host:
+
+```sh
+pkill -f ptyhostd        # ends every agent it is holding, after reaping the ptys
+```
+
+Its log, when something is wrong down there, is
+`~/.local/state/kururu/ptyhost.log`.
+
+### From your phone, or from another computer
+
+Same answer for both, and it is now the same mechanism: everything above the
+server is a client, and the desktop is not a privileged one. Put the server on
+your tailnet and point either at it.
 
 There is no auth in kururu and there does not need to be — it is meant to be
-reached over a tailnet, never off one:
+reached over a tailnet, never off one. That was true when the server was always
+on `localhost`; it carries considerably more weight now that it may be on a
+machine that is always on, so: tailnet only, never a public address. Anything
+that can reach the port gets a shell in your projects.
 
 ```sh
 tailscale serve --bg --https=8443 http://127.0.0.1:7717

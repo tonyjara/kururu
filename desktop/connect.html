@@ -1,0 +1,189 @@
+<!doctype html>
+<!--
+  The one page kururu draws itself.
+
+  Everywhere else the window loads what the server serves, which is the whole of
+  principle 3 — one build of the UI, no `file://` variant to keep in step. This
+  is the exception that the principle cannot cover: it is what is on screen when
+  there is no server, and a page served by the thing you are looking for is not
+  available at the moment you need to be told it is missing.
+
+  So it stays deliberately small. It picks an address and nothing else; anything
+  that grows here is a second UI, and the moment it can show an agent it has
+  become one.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>kururu</title>
+    <style>
+      :root {
+        --bg: #0d0f0e;
+        --chrome: #141817;
+        --chrome-high: #1b201e;
+        --line: #242b28;
+        --text: #d7dbd8;
+        --dim: #7c857f;
+        --dimmer: #565e59;
+        --accent: #7fd6a2;
+        --idle: #6b736e;
+        --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        /* The window is frameless-inset on macOS, so the traffic lights sit over
+           the top of whatever is here. */
+        padding: 48px 24px 24px;
+        -webkit-app-region: drag;
+      }
+      main { width: 100%; max-width: 420px; -webkit-app-region: no-drag; }
+      h1 { font-size: 15px; font-weight: 600; margin: 0 0 6px; letter-spacing: 0.01em; }
+      .lede { color: var(--dim); margin: 0 0 20px; }
+      .lede code { font-family: var(--mono); color: var(--text); }
+
+      ul { list-style: none; margin: 0 0 16px; padding: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+      li { display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: var(--chrome); }
+      li + li { border-top: 1px solid var(--line); }
+      li.up { background: var(--chrome-high); }
+
+      .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dimmer); flex: none; }
+      li.up .dot { background: var(--accent); }
+      /* A probe in flight is not a state worth animating: it lasts a few hundred
+         milliseconds and a pulsing row reads as something being wrong. */
+      li.checking .dot { background: var(--idle); }
+
+      .addr { font-family: var(--mono); font-size: 12px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .note { color: var(--dimmer); font-size: 11px; flex: none; }
+
+      button {
+        font: inherit;
+        font-size: 12px;
+        color: var(--text);
+        background: transparent;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 3px 9px;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--dim); }
+      button.go { border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); }
+      button.quiet { border-color: transparent; color: var(--dimmer); padding: 3px 5px; }
+      button.quiet:hover { color: var(--text); border-color: var(--line); }
+      button:disabled { opacity: 0.4; cursor: default; }
+
+      form { display: flex; gap: 8px; }
+      input {
+        flex: 1;
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--text);
+        background: var(--chrome);
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 7px 10px;
+      }
+      input::placeholder { color: var(--dimmer); }
+      input:focus { outline: none; border-color: var(--dim); }
+
+      .error { color: #ff9f43; margin: 12px 0 0; min-height: 18px; font-size: 12px; }
+      .hint { color: var(--dimmer); margin: 18px 0 0; font-size: 12px; }
+      .hint code { font-family: var(--mono); color: var(--dim); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>No server connected</h1>
+      <p class="lede">
+        Your agents live in a kururu server, not in this window — so this is a
+        viewer looking for one. Start one with <code>bun run dev</code> and it
+        will connect on its own.
+      </p>
+
+      <ul id="list"></ul>
+
+      <form id="add">
+        <input id="address" placeholder="100.84.2.19  ·  vm:7717  ·  https://box.ts.net" spellcheck="false" autocomplete="off" />
+        <button class="go" type="submit">Connect</button>
+      </form>
+
+      <p class="error" id="error"></p>
+      <p class="hint">
+        Remote servers are reached over your tailnet. Kururu has no
+        authentication, so never put one on a public address.
+      </p>
+    </main>
+
+    <script>
+      const list = document.getElementById("list");
+      const form = document.getElementById("add");
+      const address = document.getElementById("address");
+      const error = document.getElementById("error");
+
+      /** Re-rendered wholesale on every sweep; the list is a handful of rows. */
+      function render(state) {
+        list.replaceChildren();
+        for (const entry of state.entries) {
+          const row = document.createElement("li");
+          row.className = entry.reachable ? "up" : state.checking ? "checking" : "";
+
+          const dot = document.createElement("span");
+          dot.className = "dot";
+          row.append(dot);
+
+          const label = document.createElement("span");
+          label.className = "addr";
+          label.textContent = entry.address;
+          row.append(label);
+
+          if (entry.builtin && !entry.reachable) {
+            const note = document.createElement("span");
+            note.className = "note";
+            note.textContent = "this machine";
+            row.append(note);
+          }
+
+          const connect = document.createElement("button");
+          connect.textContent = entry.reachable ? "Connect" : "Try";
+          if (entry.reachable) connect.className = "go";
+          connect.onclick = () => go(entry.address);
+          row.append(connect);
+
+          if (!entry.builtin) {
+            const forget = document.createElement("button");
+            forget.className = "quiet";
+            forget.title = "Forget this address";
+            forget.textContent = "✕";
+            forget.onclick = () => window.picker.forget(entry.address);
+            row.append(forget);
+          }
+
+          list.append(row);
+        }
+      }
+
+      async function go(value) {
+        error.textContent = "";
+        const result = await window.picker.connect(value);
+        // A success navigates this page away, so there is nothing to do with it.
+        if (result && result.error) error.textContent = result.error;
+      }
+
+      form.onsubmit = (event) => {
+        event.preventDefault();
+        go(address.value);
+      };
+
+      window.picker.onState(render);
+      window.picker.ready();
+      address.focus();
+    </script>
+  </body>
+</html>
