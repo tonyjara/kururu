@@ -2,12 +2,13 @@
  * Whether a pane has actually been measured, which is not the same question as
  * whether its emulator answered.
  *
- * `Terminal.tsx` may not subscribe, fit, or tell the server a size until the
- * grid it is about to name is the pane's own. The reason is in CLAUDE.md at
- * length: a backlog is a screen serialized at a width, so a grid named before
- * the box is real produces a screen the agent believes it has already drawn
- * correctly and will never repaint — and worse, the size travels on to the pty,
- * where it is a SIGWINCH that makes an agent redraw itself into it.
+ * `terminals.ts` may not subscribe, or propose a size, until the grid it is
+ * about to name is the pane's own. The reason is in CLAUDE.md at length: a
+ * proposal is what the server sizes the pty to, and the policy it goes into is
+ * a *minimum*, which makes a bad small measurement the worst possible input —
+ * one unlaid-out pane would hold every other client watching that agent down
+ * to its own two columns. The resulting SIGWINCH then makes the agent redraw
+ * itself into them.
  *
  * Under xterm the test was simply whether `proposeDimensions()` returned
  * anything: a box it could not measure produced `undefined`, and there was

@@ -231,9 +231,10 @@ flatten each pty to plain text on a 150ms timer and push that, which is a
 reasonable thing to send a phone and a poor thing to put on a desktop: it cannot
 be typed into, scrolled back through or selected out of, and everything an agent
 says in colour arrives grey. Now the pty's bytes go down the socket untouched and
-xterm.js draws them, which also means the *pty follows the pane* — split a pane
-and the program inside genuinely redraws at the new size, because that is what
-SIGWINCH is for.
+a real emulator draws them, which also means the *pty follows the pane* — split
+a pane and the program inside genuinely redraws at the new size, because that is
+what SIGWINCH is for. Which pane it follows is the server's to decide (Part 2 of
+the lifecycle rework): a pane proposes a shape, it does not impose one.
 
 The server still keeps a headless emulator beside every pty, and it earns its
 place for a different reason than before: a pane opened ten minutes after an
@@ -269,9 +270,9 @@ looks like it worked.
   and working; nothing in the UI points at it since the window became terminals.
 - Traversal-safe file API. Same: built, tested, currently unused by the UI.
 - **Tiled terminals.** A Ghostty (WASM, 2D canvas) emulator per terminal over a
-  raw pty byte stream, panes split and resize, the pty follows the pane, and a
-  pane opened late is handed the history from the emulator the server keeps
-  beside every pty.
+  raw pty byte stream, panes split and resize, the pty follows the pane it is
+  given, and a pane opened late is handed the history from the emulator the
+  server keeps beside every pty.
 - **One emulator per terminal, never rebuilt** — Part 1 of the lifecycle rework
   below. Emulators are pooled by agent id in `web/src/terminals.ts` and *moved*
   between panes, so a tab switch, a workspace change and a drag are DOM moves
@@ -279,6 +280,14 @@ looks like it worked.
   and what it is keeping warm; the host streams the union, and the unread mark
   moved to the restartable half because the host's watched set is no longer the
   same question as "somebody is looking".
+- **The server owns the size** — Part 2. A pane measures its box and *proposes*
+  a grid; `index.ts` takes the smallest proposal among the clients that can see
+  that terminal, resizes the pty once, and tells every client what to draw at.
+  An emulator changes shape only when it is told, which is what makes the pty
+  and the picture of it unable to disagree — the disagreement every borked
+  screen has turned out to be. The policy is tmux's `window-size smallest` and
+  lives in `server/src/sizing.ts`, so a phone and a desktop on one agent both
+  see a correct screen rather than taking turns.
 - **The multiplexer hierarchy**, ghosttown's: profiles → workspaces → panes →
   tabs, owned by the server, driven by a ctrl+a prefix, and written to disk as
   structure that never respawns anything.
@@ -347,16 +356,16 @@ emulators continuously. The renderer was replaced to fix a symptom.
 
 Two more things follow from the same root, and they are Part 2.
 
-**The pty's size is decided by whichever client resized last.** mux proposes a
+**The pty's size was decided by whichever client resized last.** mux proposes a
 size, resizes the *pty first*, and then sets its own emulator to match, so the
-server is authoritative and every client conforms to it. We do the opposite —
-`Terminal.tsx` fits the emulator to its box and tells the pty what shape it is
-now — which is why a backlog has to carry a grid, why the server's single shared
-screen gets reshaped to each client's guess at serialize time, and why two
-clients of different sizes fight forever. tmux settled this in the 1990s with
-`window-size`: `largest`, `smallest`, `manual`, `latest`. We have last-wins and
-no policy, which is fine with one window and is why a phone makes the desktop
-ragged.
+server is authoritative and every client conforms to it. We did the opposite —
+`Terminal.tsx` fitted the emulator to its box and told the pty what shape it was
+now — which is why a backlog had to carry a grid, why the server's single shared
+screen got reshaped to each client's guess at serialize time, and why two
+clients of different sizes fought forever. tmux settled this in the 1990s with
+`window-size`: `largest`, `smallest`, `manual`, `latest`. We had last-wins and
+no policy, which is fine with one window and is why a phone made the desktop
+ragged. Part 2 is that inversion, and it is done.
 
 ### Part 1 — one emulator per terminal, never rebuilt — **done**
 
@@ -447,7 +456,7 @@ switch with no flash and no `request-backlog` on the wire; switch workspaces
 and back; drag a pane across the grid; reload the window and confirm exactly
 one backlog per visible terminal.
 
-### Part 2 — the server owns the size
+### Part 2 — the server owns the size — **done**
 
 Server plus client. `server/src/index.ts` is the restartable half, so this costs
 a reconnect — `C-a B`, or automatic under `bun run dev` — and still never an
@@ -467,17 +476,40 @@ currently have that terminal visible. Chosen over `latest` because a phone and a
 desktop looking at one agent should both see a correct screen rather than take
 turns, and over `largest` because the smaller client would clip. A terminal with
 no visible watcher keeps the size it had; it is not resized to nothing and it is
-not resized by a warm client that is only keeping its emulator current.
+not resized by a warm client that is only keeping its emulator current. It lives
+in `server/src/sizing.ts`, pure and tested, because it is the one decision in a
+change that is otherwise bookkeeping about whose proposals are still in play.
+
+**How "visible" is enforced, which was the one thing the plan did not settle.**
+Not by testing `watching` when the minimum is taken: a pane measures its box in
+a layout effect and the `watch` listing it arrives a passive effect later, so a
+proposal is reliably the *first* the server hears of a terminal being on screen,
+and requiring the watch to have landed already would mean answering the first
+backlog at a size nobody asked for. So a proposal counts from the moment it
+arrives and a `watch` that no longer lists the terminal is what withdraws it —
+which is also what keeps a warm client out, since a detached emulator cannot
+measure a box and never proposes in the first place.
 
 **What this deletes.** `request-backlog` stops carrying `cols`/`rows` — the
 server serializes at the size it already owns. The `epoch` goes with it: it
 existed because two emulators could ask at two sizes and get each other's
 answers, and there is now one size and, after Part 1, usually no second asker.
 `sendBacklog` stops calling `host.resize`. `OutputSink.grid()` in `session.ts`
-goes. `awaiting` stays — a backlog must still precede live output for the client
-receiving it — but its inflight *count* can go back to a flag once rebuilds are
-not routine; check that before simplifying it, the count is cheap and the bug it
-prevents is expensive.
+goes, replaced by `size()` going the other way. `awaiting` stays — a backlog
+must still precede live output for the client receiving it — and its inflight
+*count* stayed a count: it was checked, and it is free, and what it prevents is
+bytes the client never sees again.
+
+Two things the plan expected to delete that earned their place. The backlog
+*answer* keeps its `cols`/`rows`: a screen that states the shape it is laid out
+in cannot be desynchronised by anything, and it covers the one ordering a single
+authoritative size does not — a resize decided while a screen is being
+serialized, where the host answers at the older grid and a `grid` has already
+gone out naming the newer. `sendBacklog` sends a second `grid` behind the
+backlog for exactly that case. And the *request* still has a size beside it,
+one message earlier: `session.ts` sends `propose-size` and `request-backlog`
+from one function, so a history can never be asked for before the shape it will
+be laid out in has been established.
 
 **What must still be true afterwards**
 
@@ -490,6 +522,26 @@ prevents is expensive.
   neither makes the other ragged. This is the whole point; test it with two
   browser windows before calling it done.
 - `server/test/screen.test.ts` still holds: serialize, rebuild, compare.
+
+**Verified** — against an isolated instance on `KURURU_PORT=7817
+KURURU_HOST_SOCK=/tmp/k2/ptyhost.sock KURURU_STATE_DIR=/tmp/k2`, with bare login
+shells and never an agent CLI. One client's proposal comes back unchanged as the
+grid and `stty size` inside the pty agrees. A second, narrower client takes the
+pty down to the smaller of the two and **both** clients are told, so neither is
+drawing at a shape the pty is not. Each dimension is taken on its own: a short
+wide pane and a tall narrow one land on the intersection, which is neither
+proposal. A client that stops looking — by `watch`, or by dropping its socket —
+hands the size back to whoever is left, and a warm one never has a vote. A
+`watch` alone still produces no backlog; one that is asked for comes back at the
+grid the policy owns rather than the asker's own box, and carries no epoch. A
+terminal nobody can see keeps its shape, and watching it again is not itself a
+resize. An exited terminal's screen still reflows into a new pane with what it
+said intact. `bun test` covers the policy itself in `server/test/sizing.test.ts`.
+
+**Still wanted by hand:** two real browser windows of different widths on one
+workspace, which is the only way to see the letterboxing described in the open
+questions rather than reason about it, and a divider dragged through a real
+agent's TUI to watch it repaint once at the end rather than on every frame.
 
 ### Not in either part
 
@@ -505,10 +557,11 @@ rebuild and every backlog `reset()` destroy a selection outright). What is left
 is a product decision — hold the viewport while a selection exists, or show that
 the copy happened — and it wants its own pass.
 
-**The stale lines this invalidates.** `CLAUDE.md` still explains the tab-switch
-rebuild as a WebGL budget, `PLAN.md`'s "Done" still says xterm.js per pane, and
-the open question below about last-writer-wins resize is answered by Part 2.
-Each part should correct the prose it makes untrue, in the same change.
+**The stale lines this invalidates.** Both parts corrected the prose they made
+untrue, in the same change, which is what this section asked for: `CLAUDE.md`'s
+tab-switch-as-WebGL-budget and its "the pty follows the pane", `PLAN.md`'s
+"Done", and the open question about last-writer-wins resize, which Part 2
+answered and which has been replaced with what is actually open now.
 
 ### Rules for whoever executes this
 
@@ -539,11 +592,15 @@ Each part should correct the prose it makes untrue, in the same change.
   and changing it is a one-line edit. Kururu has no config system, and inventing
   one for a single value would be the wrong first user of it — but a second value
   wanting to be configurable is the signal to build one.
-- **One terminal in two panes resizes last-writer-wins.** A pty has one size and
-  a pane is a shape, so showing the same terminal twice at different widths makes
-  the smaller one ragged. Correct enough — the pane you just resized is the one
-  you are looking at — and the alternative is reflowing a grid nobody asked to
-  reflow.
+- **A client that is not the smallest draws its terminal letterboxed.** Answered
+  in part: the size is the server's now and the policy is `smallest`, so two
+  clients on one agent both see a *correct* screen instead of taking turns being
+  ragged. What is left is cosmetic and real — the wider pane has a band of
+  background where its box exceeds the grid it was given, because an emulator
+  drawing fewer columns than its box holds cannot fill it. Nothing is wrong on
+  screen; there is simply less of it. The alternative is `largest` and clipping
+  the smaller client, which is worse, so this waits on the phone having a view
+  of its own rather than a share of the desktop's.
 - **Agents do not survive the app** — but they do survive the server. The ptys
   moved into a pty host process of their own, so everything that changes weekly
   (protocol, layout, discovery) can be killed and re-forked without them

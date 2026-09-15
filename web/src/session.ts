@@ -26,6 +26,7 @@ import type { Direction } from "../../shared/layout";
 import type { Action } from "../../shared/keys";
 import type { MascotConfig, PtyKind, SessionSnapshot, WorkspaceColor } from "../../shared/model";
 import type { ClientMessage, DevServer, ServerMessage } from "../../shared/wire";
+import type { Grid } from "./grid";
 
 export interface KururuState {
   /** The websocket to the kururu server is open. */
@@ -69,40 +70,29 @@ export interface OutputSink {
    */
   reset(data: string, cols: number, rows: number): void;
   /**
-   * What shape this emulator is right now, for the request that asks for a
-   * history. The sink is asked rather than told because the answer changes —
-   * the pane is resizable — and because a reconnect has to ask again on behalf
-   * of a sink that has been sitting there for an hour.
-   */
-  grid(): { cols: number; rows: number };
-  /**
-   * The socket came back, and this sink is not on screen, so it has missed
-   * whatever arrived in the gap without being in a position to ask for it back.
+   * The shape the server has decided this terminal is. Become it.
    *
-   * A rebuild is a screen *at a size*, and a pooled emulator that no pane is
-   * holding has no size worth naming: it is detached, it measures nothing, and
-   * the last shape it drew at belongs to a pane that may be gone. Worse, asking
-   * anyway would resize the pty to it — a terminal that nobody can see would
-   * reach through a reconnect and reshape itself. So the sink is told, and it
-   * asks when a pane borrows it.
+   * The sink used to be *asked* its size instead, on the way to telling the
+   * server what the pty should be — the pane fitted itself to its box and the
+   * pty followed. That made the size whichever client resized last, and let a
+   * client and the pty hold two ideas of the shape at once, which is the
+   * disagreement underneath every screen kururu has drawn wrong. The traffic
+   * goes the other way now: a pane proposes, the server decides, and the
+   * emulator resizes here and nowhere else.
+   */
+  size(cols: number, rows: number): void;
+  /**
+   * The socket came back, so this sink has missed whatever arrived in the gap.
+   *
+   * It is told rather than rebuilt, because a rebuild is a screen at a size and
+   * only a sink in a pane can say what shape it is being drawn at. One that is
+   * on screen acts immediately; a pooled emulator that no pane is holding
+   * measures nothing, and waits until one borrows it. Which of those it is, is
+   * the sink's own question to answer — it is holding the element.
    */
   stale(): void;
 }
 const sinks = new Map<string, Set<OutputSink>>();
-
-/**
- * Which `request-backlog` each sink is waiting for.
- *
- * A backlog is a whole screen at a particular size, and the wrong one is worse
- * than none: an emulator that asked, was moved to a pane of another shape and
- * asked again must not be reset by the first answer, which is a screen laid out
- * for a box that is gone. So a sink takes only the answer to its own question
- * and the rest go past it. Rarer than it was — nothing rebuilds an emulator
- * during ordinary navigation any more — and kept because what it prevents is a
- * screen the agent believes it has already drawn and will never repaint.
- */
-const epochs = new WeakMap<OutputSink, number>();
-let nextEpoch = 1;
 
 function set(patch: Partial<KururuState>): void {
   state = { ...state, ...patch };
@@ -148,28 +138,20 @@ function connect(): void {
     set({ connected: true });
     /**
      * The server keeps no memory of a socket that went away, so every pane that
-     * is open has to say so again — and then ask, separately, for the history it
-     * missed while we were gone.
+     * is open has to say so again — what it has visible, and then, emulator by
+     * emulator, what shape it is and what it is missing.
      *
-     * Separately because those are two different questions and only one of them
-     * has a size in it. `watch` is sets of ids; it cannot say how wide anything
-     * is, and a history laid out at a width nobody is drawing at is a screen
-     * that stays wrong. Every emulator a pane is holding asks for itself, at
-     * whatever shape it is now.
+     * Separately, because those are different questions and `watch` can only
+     * answer the first: it is a set of ids and a set of ids cannot say how wide
+     * anything is. Every sink is simply told the socket is back, and each
+     * decides what that means for it — a pane's emulator proposes its size and
+     * asks for the screen it missed; a pooled one that is off screen notes it
+     * and waits to be borrowed, because a terminal nobody can see must not
+     * reach through a reconnect and reshape itself.
      */
     if (watched.size > 0 || warmed.size > 0) sendWatch();
-    /**
-     * And only the ones somebody can see ask for a screen. A pooled emulator
-     * that is off screen is equally out of date, but it cannot say what shape to
-     * rebuild it at without claiming a size for a pty nobody is looking at; it
-     * is told it is stale and asks when a pane picks it up. See `OutputSink`.
-     */
-    for (const [agentId, open] of sinks) {
-      const onScreen = watched.has(agentId);
-      for (const sink of open) {
-        if (onScreen) askBacklog(agentId, sink);
-        else deliver(() => sink.stale());
-      }
+    for (const open of sinks.values()) {
+      for (const sink of open) deliver(() => sink.stale());
     }
   };
 
@@ -190,26 +172,23 @@ function connect(): void {
       case "output":
         for (const sink of sinks.get(msg.agentId) ?? []) deliver(() => sink.write(msg.data));
         break;
+      case "grid":
+        for (const sink of sinks.get(msg.agentId) ?? [])
+          deliver(() => sink.size(msg.cols, msg.rows));
+        break;
       case "backlog": {
         /**
-         * Delivered to the emulator that asked, and to no other.
+         * Every emulator of that terminal, which is one of them.
          *
-         * A backlog used to arrive unbidden — the server sent one whenever a
-         * terminal came on screen — and could land before any emulator had
-         * subscribed to receive it, which is why one was held for the next sink
-         * to appear. It cannot now: the only thing that produces a backlog is a
-         * request an emulator made for itself, so the asker is already here, and
-         * an answer to a question nobody is waiting for any more is an answer to
-         * a pane that has closed.
-         *
-         * The epoch is what makes "the one that asked" a fact rather than a
-         * hope. Two panes on one terminal are two shapes and each asked for its
-         * own; an emulator rebuilt while its predecessor's answer was still in
-         * flight must not be reset by that answer, which is a screen laid out
-         * for a box that no longer exists.
+         * It used to be *the one that asked*, matched by an epoch the request
+         * carried, and the epoch existed because two panes on one terminal were
+         * two shapes: an emulator rebuilt while its predecessor's answer was
+         * still in flight must not be reset by a screen laid out for a box that
+         * no longer exists. There is one shape now — the server's — and an
+         * answer that states the grid it used is correct for whoever receives
+         * it, so there is nothing left to match.
          */
         for (const sink of sinks.get(msg.agentId) ?? []) {
-          if (epochs.get(sink) !== msg.epoch) continue;
           deliver(() => sink.reset(msg.data, msg.cols, msg.rows));
         }
         break;
@@ -312,29 +291,33 @@ export function warm(agentIds: Iterable<string>): void {
 }
 
 /**
- * Ask for this terminal's history, at the shape this emulator is drawing at.
+ * Say what shape this pane could draw the terminal at, then ask for its history
+ * — in that order, and from one function so it cannot be in any other.
  *
- * The size travels with the question because the answer is laid out for it, and
- * a round trip that has to be told the size afterwards has already produced a
- * wrong screen. The epoch travels with it so the answer can be matched back to
- * this asking and not to another.
+ * A history is a screen laid out at a width, and the width is the server's to
+ * choose. Which makes the ordering the whole of it: a pane that asked before
+ * saying how big it is would be answered at whatever shape the last client
+ * happened to leave behind, and a pane that said afterwards would already have
+ * the wrong screen. The two are separate messages because they are separate
+ * questions — one is an opinion the server weighs against every other client's,
+ * the other is a request only this emulator can have a reason to make — and
+ * they travel on one socket, so the server reads them in the order they were
+ * written.
  */
-function askBacklog(agentId: string, sink: OutputSink): void {
-  const { cols, rows } = sink.grid();
-  const epoch = nextEpoch++;
-  epochs.set(sink, epoch);
-  send({ type: "request-backlog", agentId, cols, rows, epoch });
+function askBacklog(agentId: string, grid: Grid): void {
+  proposeSize(agentId, grid.cols, grid.rows);
+  send({ type: "request-backlog", agentId });
 }
 
 /**
  * Ask for this terminal's history again, for a sink that is already subscribed.
  *
- * The one caller is a pooled emulator that was told it was `stale` and has just
- * been put in a pane, which is the only way a subscription that already exists
- * can need a screen it does not have.
+ * The one caller is a pooled emulator that was told it was `stale` and has a
+ * pane to measure, which is the only way a subscription that already exists can
+ * need a screen it does not have.
  */
-export function rebuild(agentId: string, sink: OutputSink): void {
-  askBacklog(agentId, sink);
+export function rebuild(agentId: string, grid: Grid): void {
+  askBacklog(agentId, grid);
 }
 
 /**
@@ -347,11 +330,11 @@ export function rebuild(agentId: string, sink: OutputSink): void {
  * built and has nothing in it. Asking here means every mount is correct without
  * anything having to reason about why it happened.
  */
-export function subscribeOutput(agentId: string, sink: OutputSink): () => void {
+export function subscribeOutput(agentId: string, sink: OutputSink, grid: Grid): () => void {
   let set = sinks.get(agentId);
   if (!set) sinks.set(agentId, (set = new Set()));
   set.add(sink);
-  askBacklog(agentId, sink);
+  askBacklog(agentId, grid);
   return () => {
     set.delete(sink);
     if (set.size === 0) sinks.delete(agentId);
@@ -363,9 +346,19 @@ export function input(agentId: string, data: string): void {
   send({ type: "input", agentId, data });
 }
 
-/** This pane is this many columns by this many rows now. */
-export function resize(agentId: string, cols: number, rows: number): void {
-  send({ type: "resize", agentId, cols, rows });
+/**
+ * This pane could draw that terminal at this many columns by this many rows.
+ *
+ * An opinion, and nothing happens to the emulator here. The server holds one
+ * proposal per client, takes the smallest over the clients that have the
+ * terminal visible, resizes the pty, and sends back the grid everybody is to
+ * draw at — which arrives as `size` on the sink. A window that is the only one
+ * looking gets exactly what it asked for; a phone and a desktop on one agent
+ * get an answer they can both draw, rather than taking turns making each other
+ * ragged.
+ */
+export function proposeSize(agentId: string, cols: number, rows: number): void {
+  send({ type: "propose-size", agentId, cols, rows });
 }
 
 /**

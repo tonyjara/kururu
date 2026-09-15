@@ -88,8 +88,9 @@ server that is mid-flight. **Check whether a server is running before you start
   parent to close.
 - `bun test` only exercises pure functions and a temp directory — `procs`,
   `report`, `status`, `files`, `workspaces` (which holds a tree and touches no
-  pty), `hostsock` (two ports over a socket, no pty anywhere), and the pane tree
-  in `web/test`. Keep it that way; no test should spawn a real agent CLI.
+  pty), `sizing` (a fold over some numbers, which is the whole size policy),
+  `hostsock` (two ports over a socket, no pty anywhere), and the pane tree in
+  `web/test`. Keep it that way; no test should spawn a real agent CLI.
 
 When testing by hand, spawn something harmless — `create-agent` takes a
 `command`, so use `sleep 30` or `cat` rather than `claude`, and spend no tokens
@@ -130,12 +131,15 @@ server/      Node (not Bun — it was Electron's once and the bundles stayed). T
   devservers.ts  lsof + ps discovery of dev servers, from both ends; stopping one
   proxy.ts       Per-dev-server reverse proxy (HTTP + WS) for phone access
   files.ts       Traversal-safe file listing/reading
+  sizing.ts      How big a terminal is when several panes have an opinion. tmux's
+                 `smallest`, pure, so the one decision in it can be tested
   index.ts       The half that restarts freely: HTTP, WS, static, one timer
 web/         React 19 + Vite. One build; the desktop is what it is shaped for.
   session.ts     Module-level store + useSyncExternalStore; the WS client.
                  Snapshots go through React; terminal output deliberately does not
   terminals.ts   Every emulator, pooled by agent id and moved between panes
-                 rather than rebuilt. Twelve, LRU, never one that is on screen
+                 rather than rebuilt. Twelve, LRU, never one that is on screen.
+                 Measures its box and proposes a grid; never resizes itself
   keys.ts        The prefix, and a KeyboardEvent as a string the table can be
                  looked up by. The table itself is shared/keys.ts now
   colors.ts      What a workspace colour name looks like. The web's half of it
@@ -338,19 +342,24 @@ and its log is the only place its side of a bug shows up.
   will never resend a row it believes is already correct. It was the borked text
   on a workspace switch and the cwd sitting inside an agent's input box, and
   those were the same bug.
-  So the grid travels **on** `request-backlog`, `index.ts` resizes the screen
-  before serializing, and the answer names the shape it used so the emulator can
-  become it before writing. `watch` deliberately produces no backlog at all: it
-  is a set of ids, it cannot carry a size, and answering it meant sending a
-  reconstruction before the emulator that would receive it had even been laid
-  out. Watching is the tap; rebuilding is the emulator's own question, and the
-  only things that ask it now are a genuinely new emulator — a terminal borrowed
-  for the first time, one that was evicted from the pool and came back — or a
-  reconnect. A tab switch and a workspace change ask for nothing. A pooled
-  emulator that was off screen when the socket dropped is told it is `stale` and
-  asks once a pane gives it a size; asking while detached would claim a grid for
-  a pty nobody is looking at. `server/test/screen.test.ts`
-  holds the invariant: serialize, rebuild, compare the buffers.
+  The grid used to travel **on** `request-backlog`, because the asking pane was
+  the only thing that knew it. It does not now — the server owns the size (see
+  below) and serializes at the one it already decided — but the *answer* still
+  names the shape it used, and that is deliberate: a screen that states its own
+  shape is correct for whoever receives it, and it covers the one ordering a
+  single authoritative size does not, which is a resize landing while a screen
+  is being built. `sendBacklog` then sends a second `grid` behind it.
+  `watch` deliberately produces no backlog at all: it is a set of ids, and
+  answering it meant sending a reconstruction before the emulator that would
+  receive it had even been laid out. Watching is the tap; rebuilding is the
+  emulator's own question, and the only things that ask it are a genuinely new
+  emulator — a terminal borrowed for the first time, one that was evicted from
+  the pool and came back — or a reconnect. A tab switch and a workspace change
+  ask for nothing. A pooled emulator that was off screen when the socket dropped
+  is told it is `stale` and asks once a pane gives it a box to measure; asking
+  while detached would propose a grid for a pty nobody is looking at.
+  `server/test/screen.test.ts` holds the invariant: serialize, rebuild, compare
+  the buffers.
 - **The pane's emulator must never want a GPU context, and that is why it is
   Ghostty's.** This is the one that turned the whole window black, twice, and
   the reason the renderer was replaced rather than patched. xterm.js drew on
@@ -402,11 +411,15 @@ and its log is the only place its side of a bug shows up.
   swapped out, so `ps` showed them at under 100 MB of RSS and hid it) and
   saturated swap. **That is ghosttown's to fix, not kururu's — see rule 1 — and
   it has been raised with the user rather than edited across.**
-- **The pty is told about a resize only once the box stops moving** (60ms in
-  `terminals.ts`). The emulator follows immediately; the pty does not, because
-  every resize is a SIGWINCH and every agent TUI repaints completely on one.
-  Without the debounce, dragging a divider or sliding a pane repaints the program
-  on every frame of it.
+- **A size is proposed only once the box stops moving** (60ms in `terminals.ts`).
+  Nothing follows immediately any more — the emulator does not resize itself
+  either — because the proposal ends at the pty, every resize there is a
+  SIGWINCH, and every agent TUI repaints completely on one. Without the
+  debounce, dragging a divider or sliding a pane repaints the program on every
+  frame of it. The two cases that skip the debounce are a pane *arriving* rather
+  than moving: a first subscription and a reconnect, both of which propose at
+  once because the history they are about to ask for is laid out in whatever the
+  server settles on.
 - **Two rebuilds can overlap, and the first to finish must not release the
   second's hold.** This is rare now that a tab switch asks for nothing — it takes
   a reconnect landing on a pane that is also being borrowed — and `awaiting` is
@@ -429,14 +442,15 @@ and its log is the only place its side of a bug shows up.
   screen replaced wholesale is simply the screen it draws next, and the call is
   gone. Symptom if that assumption is ever wrong: content from before the agent
   started, sitting inside its UI, until a window resize forces a full repaint.
-- **A backlog goes to the emulator that asked for it, and to no other.** It used
-  to arrive unbidden and could land before any emulator had subscribed, so
-  `session.ts` held one for whatever sink appeared next. Nothing sends one
-  unasked now, so the asker is always already there — and the `epoch` on the
-  request comes back on the answer, because "the one that asked" has to be a fact
-  rather than a hope. An emulator rebuilt while its predecessor's answer was
-  still in flight must not be reset by that answer: it is a screen laid out for a
-  box that no longer exists.
+- **A backlog is self-describing, which is what replaced matching it to a
+  particular asker.** It used to arrive unbidden and could land before any
+  emulator had subscribed, so `session.ts` held one for whatever sink appeared
+  next; then it was matched by an `epoch` the request carried, because two panes
+  of two widths asked two different questions about one terminal and each had to
+  be answered without wrecking the other. Both are gone. There is one shape now
+  and the server owns it, so there is one answer — and an answer that names the
+  grid it was laid out at is correct for whoever receives it, which is why
+  `reset` applies the size it was given rather than assuming it already matches.
 - **Backlog then output, in that order, per client.** A client that has just
   opened a pane clears its emulator and writes the history, so live output that
   overtakes the backlog is wiped. `index.ts` holds that terminal's output in the
@@ -738,19 +752,18 @@ and its log is the only place its side of a bug shows up.
   while it is armed and stops when it times out. An unlabelled mode is what makes
   people distrust modal interfaces — and the recovery, pressing it twice to send
   it through, has to be discoverable from somewhere.
-- **Nothing is subscribed until the grid is the pane's.** Now in `terminals.ts`,
-  where the emulator is. An emulator built
-  without `cols`/`rows` is 80x24 and stays that way until a fit lands, which cannot
-  happen on the frame after a split or before the renderer has measured a
-  character. A backlog is a screen serialized at a size; written into an
-  80-column grid it wraps and stays wrapped, and the result is a screen the agent
-  believes it already drew correctly and will never repaint. A *detached* pooled
-  element is the same question with a different cause and the same right answer:
-  it reports no width, the measurement is refused, and the emulator keeps the
-  shape it was last drawn at. The pool gates
-  on `proposeDimensions()` rather than on `fit()` throwing — fit does not throw
+- **Nothing is subscribed, and nothing proposed, until the measurement is the
+  pane's.** In `terminals.ts`, where the emulator is. A measurement is what the
+  server sizes the pty to, and a bad one taken on the frame after a split — or
+  before the renderer has measured a character — is a SIGWINCH into a shape no
+  box has. A *detached* pooled element is the same question with a different
+  cause and the same right answer: it reports no width, the measurement is
+  refused, and the emulator keeps the shape it was last *told*, which is the
+  server's and still correct for the bytes it is being fed. The pool gates on
+  `proposeDimensions()` rather than on `fit()` throwing — fit does not throw
   when the renderer has no cell size, it quietly does nothing, so a try/catch
-  cannot tell "fitted" from "skipped".
+  cannot tell "fitted" from "skipped". `fit()` itself is never called any more:
+  fitting is resizing, and resizing is the server's.
 - **A measurement that is merely *small* is how the fit addon says it failed.**
   The sharp edge of the emulator swap, and it cost a freeze on the first tab
   drag. xterm's `proposeDimensions()` returned `undefined` for a box it could not
@@ -759,17 +772,35 @@ and its log is the only place its side of a bug shows up.
   unlaid-out pane does not decline — **it answers `2x1`**, which is finite,
   positive and passes every check the old guard made. A pane is exactly that
   shape for a frame or two each time one is dragged, and believing it costs the
-  lot: the emulator fits to two columns, asks for a backlog serialized at two
-  columns, and tells the server a grid, which is a SIGWINCH that makes the agent
-  redraw itself into it. `web/src/grid.ts` reads the clamp floor back as what it
-  means — "I could not work this out" — and `web/test/grid.test.ts` holds it,
-  because the refused value is a well-formed grid and an `if` with a number in it
-  is what somebody simplifies away.
-- **The pty follows the pane, not the other way round.** The pooled emulator
-  measures its box, fits itself to it, and sends the resulting grid to the server,
-  which resizes both its own emulator and the pty. Never clamp a pane to a fixed
-  grid: the program inside genuinely redraws at the size of the box it is in, and
-  that is the whole difference between a terminal and a picture of one.
+  lot — more now than it did, because the size policy is a *minimum*: one
+  unlaid-out pane proposing two columns would hold every other client watching
+  that agent down to two columns, and the SIGWINCH makes the agent redraw itself
+  into them. `web/src/grid.ts` reads the clamp floor back as what it means — "I
+  could not work this out" — and `web/test/grid.test.ts` holds it, because the
+  refused value is a well-formed grid and an `if` with a number in it is what
+  somebody simplifies away.
+- **The pty follows the pane, but only the server may say which pane.** The
+  pooled emulator measures its box and *proposes* that grid; `index.ts` keeps a
+  proposal per client, takes the smallest over the clients that can see the
+  terminal, resizes the screen and the pty once, and sends every client the grid
+  to draw at. The emulator resizes when it is told and at no other time.
+
+  It was the other way round until Part 2 of the lifecycle rework: a pane fitted
+  itself and informed the pty afterwards, so the size was whichever client
+  resized last — fine with one window, and why a phone made the desktop ragged.
+  The deeper cost was that a client and the pty could hold two ideas of where a
+  row ends at once, which is the disagreement every borked screen has turned out
+  to be. The policy is `smallest` (tmux's `window-size`) so a phone and a desktop
+  on one agent both see something correct rather than taking turns; it is in
+  `server/src/sizing.ts`, pure and tested, because it is the one decision in
+  there. A proposal is withdrawn by a `watch` that stops listing the terminal as
+  visible — the same message that already says what a human can see — so a warm
+  client never has a vote and a terminal nobody can see keeps the shape it had
+  rather than being resized to nothing.
+
+  Still never clamp a pane to a fixed grid: the program inside genuinely redraws
+  at the size of the box it is in, and that is the whole difference between a
+  terminal and a picture of one.
 
 ## Keys
 
@@ -828,6 +859,19 @@ Also verified against a real pty, over the wire: a shell spawns interactive and
 echoes, a resize reaches the pty (`stty size` agrees), unwatched terminals stop
 streaming, history survives being unwatched and replays on re-watch, and
 `liveAgents` counts an agent but not a bare shell.
+
+And the server owning the size, against real ptys in an isolated instance
+(`KURURU_PORT=7817 KURURU_HOST_SOCK=/tmp/k2/ptyhost.sock KURURU_STATE_DIR=/tmp/k2`,
+bare login shells): one client's proposal comes back unchanged as the grid and
+`stty size` agrees; a second, narrower client takes the pty down to the smaller
+of the two and **both** clients are told; each dimension is taken on its own, so
+a short wide pane and a tall narrow one land on the intersection; a client that
+stops looking — by `watch`, or by dropping its socket — hands the size back to
+whoever is left, and a warm one never has a vote; a `watch` alone still produces
+no backlog, and one that is asked for comes back at the grid the *policy* owns
+rather than the grid the asker's own box is; a terminal nobody can see keeps its
+shape, and watching it again is not itself a resize; and an exited terminal's
+screen still reflows into a new pane with what it said intact.
 
 And the hierarchy, end to end: tabs stack in a pane and reorder, a split inherits
 its parent's project, `focus-dir` crosses splits and stops at the edge, workspaces

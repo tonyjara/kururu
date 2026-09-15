@@ -10,17 +10,18 @@
  * to save a dependency, and a terminal that cannot do those things is not one.
  *
  * So output is a byte stream, input is keystrokes rather than submitted turns,
- * and the client tells the server what size grid it is drawing into. Three
- * consequences worth naming:
+ * and the *size* of the grid is the server's to decide. Three consequences
+ * worth naming:
  *
  *  - `watch` takes two *sets*. Panes are tiled, so several terminals are visible
  *    at once and all of them want their bytes — and the client keeps emulators
  *    for terminals it is not showing, which want theirs too or they go stale.
- *  - A terminal that has just been opened needs the history it missed, which is
- *    `backlog` — reconstructed by the emulator the server keeps beside each pty,
- *    not a replay of raw bytes that may have been cut mid-sequence. A
- *    reconstruction is laid out at a width, so asking for one and saying how
- *    wide you are is a single message and the answer names the grid it used.
+ *  - A pane does not resize a terminal, it *proposes* a size. A pty has one
+ *    shape and there can be several clients, so the server collects the
+ *    proposals, picks one, resizes the pty, and tells every client what the
+ *    shape now is. The client's emulator changes size when it is told and at no
+ *    other time, which is what makes the two grids unable to disagree — and
+ *    every borked screen kururu has had was that disagreement.
  *  - `input` carries no id and gets no reply. It is a keystroke; a round trip
  *    per keypress to learn what the snapshot already says is not worth having.
  *
@@ -88,6 +89,24 @@ export type ServerMessage =
   /** Raw pty output, exactly as it arrived, for a terminal this client is watching. */
   | { type: "output"; agentId: string; data: string }
   /**
+   * The grid this terminal is being drawn at. The server decided it, the pty has
+   * already been told, and the client's emulator becomes this shape.
+   *
+   * It is an instruction rather than a notification, and that inversion is the
+   * whole of the sizing rework. A pane used to fit its emulator to its box and
+   * inform the pty afterwards, which made the size whichever client resized
+   * last — so a second client of another width made the first one ragged, the
+   * server's single screen had to be reshaped to each client's guess before it
+   * could be serialized, and the client and the pty could believe different
+   * things about where a row ends. They cannot now: there is one size, the
+   * server owns it, and this message is how anybody learns what it is.
+   *
+   * Sent to every client that is being streamed this terminal, warm ones
+   * included — a pooled emulator off screen is still being fed bytes an agent
+   * laid out for the pty's grid, so it has to be that grid.
+   */
+  | { type: "grid"; agentId: string; cols: number; rows: number }
+  /**
    * Everything that terminal has said so far, as the escape sequences that
    * rebuild it — and the grid it was serialized at, which is the point of
    * sending it rather than leaving the client to assume.
@@ -101,11 +120,16 @@ export type ServerMessage =
    * the client sizes its emulator to them before writing `data`, which is what
    * makes the two grids identical by construction rather than by luck.
    *
-   * `epoch` is the `request-backlog` this answers, so an emulator thrown away
-   * between the asking and the answering cannot have its replacement reset by a
-   * screen meant for its predecessor.
+   * They survive the server owning the size, and deliberately. The size is no
+   * longer in *question* — a `grid` saying the same thing has almost always
+   * already gone out — but a backlog is the one message whose correctness
+   * depends on the shape it is written into, and a screen that states its own
+   * shape cannot be desynchronised by anything. It also covers the one ordering
+   * a single authoritative size does not: a resize landing while this one was
+   * being serialized, where the answer names the shape the *host* used and a
+   * second `grid` follows it.
    */
-  | { type: "backlog"; agentId: string; data: string; cols: number; rows: number; epoch: number }
+  | { type: "backlog"; agentId: string; data: string; cols: number; rows: number }
   /** Answer to any client message carrying an `id`. */
   | { type: "reply"; id: number; ok: true; result: unknown }
   | { type: "reply"; id: number; ok: false; error: string };
@@ -145,12 +169,27 @@ export type ClientMessage =
    */
   | { type: "input"; agentId: string; data: string }
   /**
-   * The grid this client is drawing that terminal into. A pty has one size and
-   * panes are tiled, so the last pane to report wins — which is the right answer
-   * when the same terminal is on screen twice at different sizes, because the
-   * one you just resized is the one you are looking at.
+   * The grid this client's pane *could* draw that terminal at. A proposal, not
+   * a resize: the server collects them and decides.
+   *
+   * It was a resize, and the pane applied it to its own emulator on the way
+   * past. That made the size last-writer-wins, which is fine with one window and
+   * is why a phone made the desktop ragged — and, worse, meant the client and
+   * the pty could hold different ideas of the shape at once, which is the
+   * disagreement underneath every screen kururu has ever drawn wrong. tmux
+   * settled this in the 1990s with `window-size`; the policy here is its
+   * `smallest`, over the clients that have the terminal *visible*, so a phone
+   * and a desktop watching one agent both see a correct screen rather than take
+   * turns making each other wrong.
+   *
+   * A proposal is withdrawn by a `watch` that no longer lists the terminal as
+   * visible — the same message that already says what a human can see, rather
+   * than a second one that could disagree with it. So a warm client, which is
+   * keeping an emulator current and showing nobody anything, never has a say in
+   * the size; and a terminal no client can see keeps the shape it had rather
+   * than being resized to nothing.
    */
-  | { type: "resize"; agentId: string; cols: number; rows: number }
+  | { type: "propose-size"; agentId: string; cols: number; rows: number }
   /**
    * What this client has on screen, and what it is keeping an emulator for
    * without showing it. Both are sets: panes are tiled, and emulators are
@@ -170,25 +209,27 @@ export type ClientMessage =
    */
   | { type: "watch"; agentIds: string[]; warm?: string[] }
   /**
-   * Rebuild this terminal at this size. The only thing that produces a `backlog`.
+   * Rebuild this terminal. The only thing that produces a `backlog`.
    *
-   * It carries the grid because a history and the shape it is laid out in are
-   * one question rather than two. They were two: the emulator asked for its
-   * history the instant it mounted and mentioned its size sixty milliseconds
-   * later on the resize debounce, so the server answered at whatever size the
-   * pane that last drew this terminal happened to be. Switching workspace is
-   * where that was reliably wrong, a different workspace being a different pane
-   * geometry, and the reconstruction arrived wrapped for a width nobody was
-   * drawing at.
+   * It used to name a size, and to carry an `epoch` so that an answer could be
+   * matched to the emulator that asked. Both were consequences of the client
+   * owning the shape: two panes of two widths asked two different questions
+   * about one terminal, and each had to be answered without wrecking the other.
+   * There is one shape now and the server knows it, so there is one answer, and
+   * an answer that states the grid it used is correct for whoever receives it.
    *
-   * `watch` deliberately no longer does this. It says which terminals are on
-   * screen, and a set of ids cannot carry a size — asking there is how a
-   * wrong-sized screen got painted before the emulator that would receive it
-   * even existed. Watching is about streaming; this is about rebuilding, and
-   * only an emulator that has just been built knows it needs it. A fresh pane, a
-   * tab switch and a reconnect are the three ways that happens.
+   * What it still is not is `watch`. Watching says which terminals are on
+   * screen and starts their bytes flowing; this says *I have nothing in my
+   * emulator*, which only an emulator that has just been built can know. A
+   * first borrow, one that was evicted and came back, and a reconnect are the
+   * three ways that happens — a tab switch and a workspace change are not among
+   * them, which is the point of pooling emulators at all.
+   *
+   * It is sent immediately after a `propose-size` for the same terminal, and
+   * `web/src/session.ts` sends the two together so it cannot be otherwise: the
+   * shape has to be established before a screen is laid out in it.
    */
-  | { type: "request-backlog"; agentId: string; cols: number; rows: number; epoch: number }
+  | { type: "request-backlog"; agentId: string }
 
   // --- panes ---------------------------------------------------------------
   | { type: "split"; dir: "row" | "col"; paneId?: string }
