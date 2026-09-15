@@ -55,6 +55,7 @@ import { AGENT_MIME, PANE_MIME, allowDrop, beginDrag, endDrag, useDragging } fro
 import { shortenPath, tabLabel } from "../labels";
 import * as api from "../session";
 import { ReaderView } from "./Reader";
+import { Icon } from "./Icon";
 import { Status } from "./Status";
 import { TerminalView } from "./Terminal";
 
@@ -322,7 +323,7 @@ function Pane({
                     api.closeTab(agentId);
                   }}
                 >
-                  ✕
+                  <Icon name="close" />
                 </span>
               </button>
             </Fragment>
@@ -353,7 +354,7 @@ function Pane({
           onClick={() => api.closePane(pane.id)}
           title="Close this pane and everything in it (C-a x)"
         >
-          ✕
+          <Icon name="close" />
         </button>
       </header>
 

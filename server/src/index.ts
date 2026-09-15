@@ -74,6 +74,7 @@ import {
 import { readKeys, writeKeys } from "./keys";
 import { readAppearance, writeAppearance } from "./appearance";
 import { adoptAppearance, themeFor, type Appearance } from "../../shared/theme";
+import { skinFor } from "../../shared/skin";
 import { HostLink, type Port } from "./hostlink";
 import { connectToHost, hostSocketPath, type SocketPort } from "./hostsock";
 import { MouseEncoding } from "./mouseencoding";
@@ -1678,6 +1679,17 @@ function handleMessage(ws: WebSocket, raw: string): void {
      */
     case "set-theme":
       saveAppearance({ ...appearance, themeId: themeFor(msg.themeId).id });
+      return;
+
+    /**
+     * The same shape `set-theme` has, and nothing more, because the difference
+     * between the two is entirely on the client: a skin moves the line weight
+     * and the type ramp, so applying one re-measures every terminal, whereas a
+     * theme never does. That belongs where the measuring happens — nothing here
+     * resizes anything, for the reason `set-terminal-appearance` gives below.
+     */
+    case "set-skin":
+      saveAppearance({ ...appearance, skinId: skinFor(msg.skinId).id });
       return;
 
     /**

@@ -13,6 +13,7 @@
  * anybody can.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Icon } from "./Icon";
 
 export interface PickItem {
   id: string;
@@ -211,12 +212,12 @@ function Pick({ state, onClose }: { state: Extract<DialogState, { kind: "pick" }
             </button>
             {state.onRename && (
               <button className="mini" title="Rename" onClick={() => state.onRename!(item.id)}>
-                ✎
+                <Icon name="edit" />
               </button>
             )}
             {state.onDelete && (
               <button className="mini mini-danger" title="Delete" onClick={() => state.onDelete!(item.id)}>
-                ✕
+                <Icon name="close" />
               </button>
             )}
           </li>

@@ -1,5 +1,6 @@
 /**
- * That the stylesheet and the themes are talking about the same tokens.
+ * That the stylesheet, the themes and the skins are talking about the same
+ * tokens.
  *
  * This is the seam the whole theming design rests on and it is held together by
  * a string: `styles.css` asks for `var(--chrome-high)` and `web/src/theme.ts`
@@ -16,11 +17,20 @@
  * rule asks for is dead weight that the next person will keep filling in for
  * five themes. Neither is catastrophic on its own, which is exactly why neither
  * gets noticed.
+ *
+ * Skins are held to the same two checks, by the same seam and for a sharper
+ * reason. A colour that falls back is a colour in the right general family; a
+ * *radius* that falls back is 6px in a skin whose entire premise is that there
+ * are no curves, and it is 6px only on the one rule that was renamed, so what
+ * you get is a window that is almost eight-bit with one rounded corner in it.
+ * That reads as a rendering glitch rather than as a missing token, which is
+ * exactly the kind of bug that gets lived with rather than reported.
  */
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_THEME_ID, THEMES, themeFor } from "../../shared/theme";
+import { DEFAULT_SKIN_ID, ICON_NAMES, SKINS, skinFor } from "../../shared/skin";
 
 const css = readFileSync(join(import.meta.dir, "../src/styles.css"), "utf8");
 
@@ -43,8 +53,19 @@ function cssName(token: string): string {
  * component that draws them: a cell size being dragged in the mascot picker, a
  * status badge that is 16px in a row and 64px in a preview, a workspace tag, and
  * the accent a single theme card wears while it is being offered.
+ *
+ * `--ui` is in here rather than being simply excluded, and is now answered by a
+ * *skin* instead: the chrome's typeface turned out to be exactly a question of
+ * shape rather than of colour, which is the split `shared/skin.ts` is about.
+ * `--mono` stays nobody's, on the reasoning written beside it in the stylesheet.
  */
 const NOT_THEME = new Set(["--ui", "--mono", "--status-size", "--cell", "--tag", "--ring"]);
+
+/** What a skin fills in: its tokens, plus one per icon it may override. */
+const SKIN_TOKENS = new Set([
+  ...Object.keys(SKINS[0]!.tokens).map(cssName),
+  ...ICON_NAMES.map((name) => `--icon-${name}`),
+]);
 
 const asked = new Set(Array.from(css.matchAll(/var\((--[a-z0-9-]+)/g), (m) => m[1]!));
 
@@ -60,7 +81,9 @@ const answered = new Set(Object.keys(THEMES[0]!.ui).map(cssName));
 
 describe("the stylesheet and the themes", () => {
   it("has a theme token behind every colour the stylesheet asks for", () => {
-    const orphans = [...asked].filter((name) => !answered.has(name) && !NOT_THEME.has(name));
+    const orphans = [...asked].filter(
+      (name) => !answered.has(name) && !SKIN_TOKENS.has(name) && !NOT_THEME.has(name),
+    );
     expect(orphans).toEqual([]);
   });
 
@@ -80,6 +103,21 @@ describe("the stylesheet and the themes", () => {
   });
 
   /**
+   * The same two checks a theme gets, for the other axis. The second one is
+   * what would have caught `--ui` moving from the theme's side to the skin's
+   * with nothing declaring it in between.
+   */
+  it("has a skin token behind every shape the stylesheet asks for, and a rule for every one a skin fills in", () => {
+    const unused = [...SKIN_TOKENS].filter((name) => !asked.has(name));
+    expect(unused).toEqual([]);
+  });
+
+  it("declares a default for every skin token in :root", () => {
+    const root = rootBlock();
+    expect([...SKIN_TOKENS].filter((name) => !root.has(name))).toEqual([]);
+  });
+
+  /**
    * And that those defaults are the *default theme*, value for value.
    *
    * The `:root` block is hand-written and `THEMES` is not, so the two can drift
@@ -95,6 +133,30 @@ describe("the stylesheet and the themes", () => {
     for (const [token, value] of Object.entries(want)) {
       const name = cssName(token);
       expect(`${name}: ${declared.get(name)}`).toBe(`${name}: ${value}`);
+    }
+  });
+
+  /**
+   * And that those defaults are the *default skin*, exactly as the theme check
+   * above does and for a slightly worse failure: a `:root` a version behind on
+   * shape is a first paint at the old border weight, which reflows every pane
+   * the moment the snapshot lands — and a reflow is a new proposed grid, so the
+   * drift costs every agent in the window a SIGWINCH rather than a wrong colour.
+   *
+   * The icons are compared through the quoting `web/src/skin.ts` applies, since
+   * a `content` value is a *quoted* string and the token is the bare glyph.
+   */
+  it("holds exactly the default skin in :root", () => {
+    const declared = rootBlock();
+    const skin = skinFor(DEFAULT_SKIN_ID);
+    for (const [token, value] of Object.entries(skin.tokens)) {
+      const name = cssName(token);
+      expect(`${name}: ${declared.get(name)}`).toBe(`${name}: ${value}`);
+    }
+    for (const name of ICON_NAMES) {
+      expect(`--icon-${name}: ${declared.get(`--icon-${name}`)}`).toBe(
+        `--icon-${name}: "${skin.icons[name]}"`,
+      );
     }
   });
 

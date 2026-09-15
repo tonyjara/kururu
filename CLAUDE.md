@@ -126,6 +126,9 @@ shared/      Protocol types and the tree. No runtime deps; imported by everythin
                  saved. Shared because the server validates a rebinding
   theme.ts       Every theme, both halves of each — the chrome's tokens and the
                  emulator's ANSI palette. Shared because both sides draw from it
+  skin.ts        The other axis: what the window is *shaped* like. Radii, line
+                 weights, the type ramp, the frame recipe, the icon glyphs. A
+                 skin and a theme never mention each other
   wire.ts        Kururu's own browser↔server protocol + timer intervals
 server/      Node (not Bun — it was Electron's once and the bundles stayed). Two
              processes, and nothing owns either of them.
@@ -172,6 +175,8 @@ web/         React 19 + Vite. One build; the desktop is what it is shaped for.
                  theme, since a palette picked against one chrome is wrong on another
   theme.ts       Writes the theme's tokens onto <html> and hands the other half
                  to the emulators. One loop and a setProperty; no React anywhere
+  skin.ts        The same loop for the shape tokens, and the icons as custom
+                 properties a ::before draws. Also no React — deliberately
   desktop.ts     The preload bridge, typed. Null in a browser, and that's the contract
   drop.ts        A file dropped on a terminal → the path to type. Pure; tested
   labels.ts      What to call a terminal, in the two places that have to agree
@@ -191,6 +196,8 @@ web/         React 19 + Vite. One build; the desktop is what it is shaped for.
     SettingsAppearance.tsx  The theme list, drawn in the themes, and the terminal's
                    font and cursor. The tab Settings opens on
     StatusBar.tsx  Where you are, and the PREFIX badge
+    Icon.tsx       A class name and an aria-hidden span. The glyph is a custom
+                   property, so changing skin re-renders nothing
     Dialog.tsx     Prompt / confirm / pick. While one is up, no key reaches a pty
     HelpOverlay.tsx  Printed from the keymap, so it cannot document a dead key
 desktop/     Electron main + preload, and the esbuild step that bundles the server.
@@ -203,6 +210,9 @@ assets/      Artwork, served at runtime. Found the way web/dist is; KURURU_ASSET
   spritesheets/  The frog, and guide.png — which labels the animations and is
                  skipped by the picker for exactly that reason. One sheet ships;
                  anything else is imported to ~/.config/kururu/sheets
+web/public/  Copied verbatim into web/dist by vite. Fonts a skin names live here
+  fonts/         Press Start 2P (OFL, latin subset) and its licence. Served from
+                 kururu's own origin, never linked to a CDN — see the invariant
 ```
 
 ### What was ported from ghosttown, and why it must not drift casually
@@ -375,14 +385,16 @@ and its log is the only place its side of a bug shows up.
   so every mode goes back to its default and the cursor comes back visible. The
   serializer restores eight modes and DECTCEM is not among them, so nothing in
   the screen says otherwise, while the cursor's *position* is restored
-  faithfully. An agent that hides the real cursor and paints its own block in an
-  input box parks the hidden one at home, so every newly-opened pane came up
-  with a blinking cursor in its top-left corner and kept it: the sequence is
-  sent once at startup and never mentioned again. `screen.ts` appends
-  `\x1b[?25l` when `isCursorHidden`, and `server/test/screen.test.ts` holds both
-  halves of it. Worth knowing that this read as a *focus* bug for a while — it
-  is only ever visible in the focused pane, because the unfocused ones draw no
-  cursor at all.
+  faithfully. An agent that hides the real cursor and parks it at home would
+  therefore hand every newly-opened pane a visible cursor sitting on nothing,
+  and keep it, since the sequence is sent once at startup and never mentioned
+  again. `screen.ts` appends `\x1b[?25l` when `isCursorHidden`, and
+  `server/test/screen.test.ts` holds both halves of it.
+  This was found while chasing a blinking bar in the top-left of the focused
+  pane and **is not that bug** — that one is the caret in `styles.css`, and the
+  agents in question turned out not to hide their cursor at all. It is a real
+  hole in the reconstruction regardless, which is why it is fixed and kept; do
+  not go looking for a symptom to attach to it.
 - **A backlog is asked for at a size, and only an emulator can ask.** This is the
   one that took the longest to see. A backlog is the server's screen *serialized*,
   and a serialized screen is laid out at a width: reconstruct it into a grid of
@@ -600,6 +612,54 @@ and its log is the only place its side of a bug shows up.
   it — `web/test/theme.test.ts` fails on one, and also fails if a token the CSS
   asks for is one no theme answers, because that seam is held together by a
   string on both sides and drifting it is invisible in the default theme.
+- **A skin is the other axis, and changing one *does* resize a pty.** This is
+  the single line where a skin differs from a theme, and it is the inversion of
+  the rule above. Colours do not move the cell; a skin moves the *line weight*
+  and the *type ramp*, so applying one changes the box every pane holds, and a
+  changed box is a new proposed grid and therefore a SIGWINCH into every agent
+  watching. That is correct and intended — it is what picking a chunkier chrome
+  means. It also needs **no code**: every pooled emulator is already watched by a
+  `ResizeObserver` in `terminals.ts`, so the resize arrives through the path a
+  dragged divider already uses, with the same 60ms settle. Do not add an explicit
+  sweep in `web/src/skin.ts` to "make sure" — a second path to the same place is
+  the one that rots, and it would double every proposal. `applySkin` runs
+  *before* `applyTerminalAppearance` for the same reason, by exactly one frame:
+  measuring the box the window is about to have rather than the one it had.
+- **Never write a px into `styles.css` either.** The colour rule has a twin now.
+  A rule naming `border-radius: 6px` or `font-size: 11px` is a rule that stays
+  one shape while the window changes around it, which is what a hundred and
+  eighty of them did until `shared/skin.ts` existed. The scale is six radii, two
+  border widths and six type steps; if you need a step that is not there, add it
+  to `SkinTokens` and let every skin answer for it. `web/test/theme.test.ts`
+  fails on a token the CSS asks for that no skin fills in, on one a skin fills in
+  that no rule asks for, and on a `:root` default that has drifted from the
+  default skin — that last one matters more than its theme equivalent, because a
+  stale shape in `:root` reflows every pane the moment the snapshot lands, and a
+  reflow costs the agents a SIGWINCH rather than a wrong colour for a frame.
+- **An icon is a custom property, never a component that reads the skin.** The
+  glyph lives in `--icon-close`, a `::before` in `styles.css` draws it, and
+  `Icon.tsx` is a `<span>` with a class on it that holds no state and never
+  re-renders. Routing it through React would mean every button subscribing to a
+  context to learn one character. Two consequences worth keeping: an `<Icon>` is
+  always `aria-hidden` — the control around it already says what it does, and
+  "Close tab, X" is worse than "Close tab" — and a glyph is quoted on the way
+  into `content`, so `cssString` in `web/src/skin.ts` escapes it. That escape is
+  theoretical while every glyph is ours and stops being theoretical the day
+  skins arrive from the registry.
+- **`--mono` is nobody's and stays nobody's.** A skin sets `--ui`, because the
+  chrome's typeface is a question of shape. It does not set `--mono`: a rule that
+  names it is saying "this is a fragment of terminal" — a pid, a path, a key —
+  and it should go on looking like one whatever the chrome is set in. The
+  terminal's own face is the user's, in `appearance.json`, and is a third thing
+  again.
+- **A font a skin names is installed and served locally, never linked.** Press
+  Start 2P is in `web/public/fonts` with its OFL licence beside it rather than
+  pulled from Google, because a window that fetches a face from a third party
+  tells that third party when somebody is working. The same will hold for faces
+  that arrive with a registry skin. It is `font-display: block` and not `swap`
+  for a kururu-specific reason: this face is half the size of the sans at the
+  same px, so swapping it in late would reflow every pane and hand every pty a
+  SIGWINCH a second after the window settled.
 - **A theme is picked, not edited, and what is stored is its id.** Same argument
   `keys.ts` makes about storing the difference from the defaults: a saved palette
   would freeze kururu's tokens at the version you first opened Settings in, and a
@@ -628,6 +688,22 @@ and its log is the only place its side of a bug shows up.
   stop working. It does move the grid metrics, because the cell is measured from
   the first face — which is exactly what choosing a font means, and the reason
   the patched faces are appended in the first place.
+- **The emulator's offscreen textarea must not draw a caret, and a blinking bar
+  in the corner of the focused pane is what happens when it does.** ghostty-web
+  parks its 1x1 keystroke/IME textarea at `position: absolute; left: 0; top: 0`,
+  which anchors to `.pane-body` — so it lands in the pane's top-left corner, six
+  pixels left and four above where the canvas starts, and the browser blinks a
+  caret there for whichever terminal holds the keyboard. Only the focused one,
+  because only one textarea has DOM focus, which is exactly what makes it read
+  as a bug in the cursor work next door. It is not: the terminal's cursor is
+  painted on the canvas in the theme's colour and Settings' style, and was
+  measured to be in the right place throughout. The tell is the pixels — 1 CSS
+  px wide where a `bar` cursor is 2, and pure white where no theme token is,
+  because `:root` sets `color-scheme: dark` and a bare textarea inherits the
+  UA's dark-mode text colour. `.term textarea { caret-color: transparent }` in
+  `styles.css`. ghostty's own `opacity: 0` is supposed to cover this and does in
+  an isolated page in both Chrome and Electron, so if the rule ever looks
+  redundant, that is why it is not.
 - **Only the focused pane draws a cursor, and kururu has to arrange that
   itself.** ghostty-web has no concept of focus: `renderCursor` fills a rectangle
   whenever the viewport is at the bottom and the terminal's own cursor mode says
@@ -1182,6 +1258,26 @@ start with nothing running at all. The preview and the file tree are still out
 of the window — `proxy.ts` and `files.ts` run server-side with nothing pointing
 at them, which is where PLAN.md's next item starts.
 
+And the skin axis, against the running server: `shared/skin.ts` holds the shape
+tokens and two skins, `styles.css` has no hardcoded radius, border width or font
+size left in it (a hundred and eighty were tokenised), the icons are custom
+properties drawn by `::before` rather than glyphs in the TSX, and a live snapshot
+from the server on :7717 comes back carrying `skinId`. Press Start 2P is vendored
+under `web/public/fonts` with its OFL licence and served from kururu's own origin.
+`web/test/theme.test.ts` now holds both axes in both directions.
+
+The **styles registry** is designed and not built: `../kururu-styles` is a
+sibling repository whose README is the specification — themes, skins, mascots and
+packs as data, an `index.json` generated by CI, fetched by the *server* over
+HTTPS when somebody explores or checks for updates, and **installed and pinned**
+into `~/.config/kururu` rather than linked at runtime. Two things to hold onto
+when it is built: a manifest is a *difference* from the built-in base, for the
+reason every saved decision in kururu is an id rather than a copy; and an asset a
+style names is a file in its own package, never a URL, because a window that
+fetches a border from somebody else's host tells them when its owner is working.
+A skin may ship a stylesheet, scoped by `[data-skin="<id>"]`, with `@import` and
+off-package `url()` refused at install time.
+
 Next, in order — details in `PLAN.md`:
 
 1. The preview as a pane type, so the proxy has something pointing at it again
@@ -1191,6 +1287,8 @@ Next, in order — details in `PLAN.md`:
 5. Push notifications to the phone
 6. The element picker injected by the proxy — long-press an element, send the
    selector and source location to the agent
+7. The styles registry: the loader, the *Explore* tab and *Check for updates*,
+   after which 8-bit moves out of `shared/skin.ts` and into `../kururu-styles`
 
 Attributing dev servers to the terminal running them is done — `findDevServers`
 walks down from the pty pids kururu holds — but only one way round: the

@@ -492,6 +492,19 @@ export type ClientMessage =
    */
   | { type: "set-theme"; themeId: string }
   /**
+   * Which shape the window is, which is a separate decision from which colours
+   * — see `shared/skin.ts`. An id for `set-theme`'s reason, and doubly so here:
+   * a skin's tokens include a `font-family` and a `box-shadow`, so a message
+   * carrying them would be a client on the tailnet writing CSS values into the
+   * root element of every other client looking at this server.
+   *
+   * Changing it **does** re-measure every terminal, which is the one way this
+   * differs from `set-theme`: a skin moves the line weight and the type, and
+   * both move the box a pty is sized to. That resize goes through the same
+   * settle a dragged divider does, for the same reason.
+   */
+  | { type: "set-skin"; skinId: string }
+  /**
    * The type a terminal is set in, and the shape of its cursor. A whole
    * `TerminalAppearance` rather than one field at a time, which is the one place
    * this protocol departs from "a message is a verb" — and deliberately: these

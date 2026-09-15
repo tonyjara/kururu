@@ -38,6 +38,7 @@ import type { Action } from "../keys";
 import { agentLabel, agentSummary, shortenPath } from "../labels";
 import * as api from "../session";
 import { Menu, Popover } from "./Menu";
+import { Icon } from "./Icon";
 import { Mascot, Status } from "./Status";
 
 interface Props {
@@ -251,9 +252,7 @@ export function Sidebar({
           title="Profiles (C-a s)"
         >
           {profile.name}
-          <span className="profile-caret" aria-hidden>
-            ▾
-          </span>
+          <Icon name="caret" className="profile-caret" />
         </button>
       </header>
 
@@ -375,7 +374,7 @@ export function Sidebar({
                   }
                   aria-label={`${serving.has(workspace.id) ? "Restart" : "Run"} the dev server`}
                 >
-                  {serving.has(workspace.id) ? "↻" : "▸"}
+                  <Icon name={serving.has(workspace.id) ? "restart" : "run"} />
                 </button>
               )}
               {/* Under the number, and outside the row's own button rather than
@@ -473,7 +472,7 @@ export function Sidebar({
                   title={agent.exited ? "Remove this tab" : "End this agent and close its tab"}
                   aria-label={agent.exited ? "Dismiss" : "Kill"}
                 >
-                  ✕
+                  <Icon name="close" />
                 </button>
               </li>
             );

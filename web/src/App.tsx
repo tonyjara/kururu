@@ -46,6 +46,7 @@ import {
 import { isFileDrag } from "./drop";
 import { tabLabel } from "./labels";
 import { applyAppearance } from "./theme";
+import { skinFor } from "../../shared/skin";
 import * as api from "./session";
 import { useKururu } from "./session";
 import * as terminals from "./terminals";
@@ -675,6 +676,17 @@ export function App() {
       )}
       {reach && <Reach onClose={() => setReach(false)} />}
       {dialog && <Dialog state={dialog} onClose={() => setDialog(null)} />}
+      {/* The skin's effect layer — scanlines, a grain — over everything
+          including the terminal canvases, which is the only place it can go and
+          be visible. Rendered only when there is one to draw rather than always
+          and transparently: a fixed, full-window element is a real element even
+          at zero opacity, and the surest way for it to never be the thing that
+          swallowed a drag is for it not to exist. It reads the skin rather than
+          a CSS token because that is the one question CSS cannot answer about
+          itself — whether `--overlay` is `none`. */}
+      {skinFor(snapshot.appearance.skinId).tokens.overlay !== "none" && (
+        <div className="overlay" aria-hidden="true" />
+      )}
     </div>
   );
 }
