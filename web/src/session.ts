@@ -499,6 +499,15 @@ export function setWorkspaceColor(workspaceId: string, color: WorkspaceColor | n
 }
 
 /**
+ * Open this workspace's next terminals as another profile's accounts, or `null`
+ * to hand it back to the profile it lives in. A profile id and not an identity:
+ * the paths stay the server's, and this only points at one of them.
+ */
+export function setWorkspaceIdentity(workspaceId: string, profileId: string | null): void {
+  send({ type: "set-workspace-identity", workspaceId, profileId });
+}
+
+/**
  * The ▸ / ↻ on a workspace row. One verb for both faces of it: the server knows
  * better than this window whether anything is actually serving, since what the
  * button is drawn from is a scan up to three seconds old.

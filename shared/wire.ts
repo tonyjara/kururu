@@ -330,6 +330,22 @@ export type ClientMessage =
    */
   | { type: "set-workspace-mascot"; workspaceId: string; mascotId: string | null }
   /**
+   * Open this workspace's terminals as another profile's accounts, or `null` to
+   * hand it back to the profile it lives in.
+   *
+   * A profile id and not an identity, which is the whole of why this is safe to
+   * accept from a client: the three paths still live on a profile and are still
+   * only ever edited in Settings, so what arrives here is a choice between the
+   * environments the server already holds rather than a new one. A client that
+   * could name its own would be a client that could name any, and this one is
+   * reachable from the tailnet — the same argument `use-gh-account` makes about
+   * sending a name rather than a path. An id naming no profile is dropped.
+   *
+   * Read at spawn like the profile's own identity, so it changes the next
+   * terminal in this workspace and none of the ones already open in it.
+   */
+  | { type: "set-workspace-identity"; workspaceId: string; profileId: string | null }
+  /**
    * The ▸ / ↻ on a workspace row: get this workspace's dev server serving fresh.
    *
    * One verb rather than a start and a restart, because it is one intention and

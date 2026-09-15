@@ -96,8 +96,15 @@ bun run status http://vm:7717    # a server elsewhere
 one thing that ends your agents is stopping the host:
 
 ```sh
-pkill -f ptyhostd        # ends every agent it is holding, after reaping the ptys
+bun run kill-ptyhosts         # lists what it holds, asks, then reaps the ptys
+bun run kill-ptyhosts --list  # just the listing
 ```
+
+It finds hosts by their socket rather than by their name, because the host has
+no controlling terminal and macOS `pgrep -f` cannot be relied on to find it — a
+`pkill -f ptyhostd` that matches nothing looks exactly like a host that
+restarted and ignored you. By hand, the same thing is
+`kill $(lsof -t ~/.local/state/kururu/ptyhost.sock)`.
 
 Its log, when something is wrong down there, is
 `~/.local/state/kururu/ptyhost.log`.

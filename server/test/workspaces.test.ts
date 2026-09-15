@@ -130,6 +130,78 @@ describe("setProfileIdentity", () => {
   });
 });
 
+describe("setWorkspaceIdentity", () => {
+  /** A profile with somebody claimed, so borrowing it has something to show. */
+  function withAccounts(workspaces: Workspaces, name: string, claude: string): string {
+    const here = workspaces.active.id;
+    const id = workspaces.newProfile(name);
+    workspaces.setProfileIdentity(id, {
+      claudeConfigDir: claude,
+      ghConfigDir: null,
+      gitConfigGlobal: null,
+    });
+    workspaces.switchProfile(here);
+    return id;
+  }
+
+  it("opens a borrowing workspace's terminals as the profile it points at", () => {
+    const workspaces = new Workspaces();
+    const work = withAccounts(workspaces, "work", "/w/claude");
+    const mixed = workspaces.newWorkspace("theirs");
+
+    workspaces.setWorkspaceIdentity(mixed, work);
+
+    expect(workspaces.identityForWorkspace(mixed).claudeConfigDir).toBe("/w/claude");
+  });
+
+  it("leaves every other workspace on the profile it lives in", () => {
+    const workspaces = new Workspaces();
+    const work = withAccounts(workspaces, "work", "/w/claude");
+    const own = workspaces.activeWorkspace.id;
+    const mixed = workspaces.newWorkspace("theirs");
+    workspaces.setWorkspaceIdentity(mixed, work);
+
+    expect(workspaces.identityForWorkspace(own).claudeConfigDir).toBeNull();
+  });
+
+  it("hands a workspace back with null rather than by naming its own profile", () => {
+    const workspaces = new Workspaces();
+    const work = withAccounts(workspaces, "work", "/w/claude");
+    const mixed = workspaces.activeWorkspace.id;
+    workspaces.setWorkspaceIdentity(mixed, work);
+
+    workspaces.setWorkspaceIdentity(mixed, null);
+
+    expect(workspaces.workspaceById(mixed)?.identityProfileId).toBeNull();
+    expect(workspaces.identityForWorkspace(mixed).claudeConfigDir).toBeNull();
+  });
+
+  it("refuses a profile that is not there rather than storing a dead pointer", () => {
+    const workspaces = new Workspaces();
+    const mixed = workspaces.activeWorkspace.id;
+    workspaces.setWorkspaceIdentity(mixed, "nope");
+    expect(workspaces.workspaceById(mixed)?.identityProfileId).toBeNull();
+  });
+
+  it("falls back to the profile you are in once the borrowed one is deleted", () => {
+    // The pointer is deliberately not cleaned up when a profile goes — the
+    // fallback is the same answer a cleanup would have produced, which is why
+    // deleting a profile has nothing to chase.
+    const workspaces = new Workspaces();
+    const work = withAccounts(workspaces, "work", "/w/claude");
+    const mixed = workspaces.activeWorkspace.id;
+    workspaces.setWorkspaceIdentity(mixed, work);
+    workspaces.deleteProfile(work);
+
+    expect(workspaces.identityForWorkspace(mixed).claudeConfigDir).toBeNull();
+  });
+
+  it("is a statement about the next terminal, so an unknown workspace is not an error", () => {
+    const workspaces = new Workspaces();
+    expect(workspaces.identityForWorkspace("nope").claudeConfigDir).toBeNull();
+  });
+});
+
 describe("adopting a restored profile", () => {
   it("fills in a colour a previous version of the server never wrote", () => {
     // The host's blob, as an older server left it: no `color` anywhere.
@@ -159,6 +231,17 @@ describe("adopting a restored profile", () => {
       ghConfigDir: null,
       gitConfigGlobal: null,
     });
+  });
+
+  it("fills in a borrowed profile a previous version of the server never wrote", () => {
+    const before = new Workspaces();
+    const stale = JSON.parse(JSON.stringify(before.all()), (key, value) =>
+      key === "identityProfileId" ? undefined : value,
+    );
+    expect(stale[0].workspaces[0]).not.toHaveProperty("identityProfileId");
+
+    const after = new Workspaces(stale);
+    expect(after.activeWorkspace.identityProfileId).toBeNull();
   });
 
   it("drops a stored path that has stopped being absolute", () => {

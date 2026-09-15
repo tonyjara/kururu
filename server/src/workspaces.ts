@@ -100,6 +100,12 @@ function adopt(profile: Profile): Profile {
       // compares against null and gets a different answer than it did a restart
       // ago — which is the whole reason this function exists.
       mascotId: typeof workspace.mascotId === "string" ? workspace.mascotId : null,
+      // Likewise, and nothing checks that the profile it names still exists:
+      // `identityForWorkspace` falls back to the workspace's own profile for an
+      // id that resolves to nothing, so a check here would buy a refusal where
+      // the fallback is already the same answer.
+      identityProfileId:
+        typeof workspace.identityProfileId === "string" ? workspace.identityProfileId : null,
       // Likewise. The agent id inside it is *not* repaired against the host's
       // list here: index.ts already drops tabs pointing at terminals that are
       // gone, and a stale one costs nothing — `runDev` checks the terminal is
@@ -717,6 +723,37 @@ export class Workspaces {
     this.mutate(this.activeId, workspaceId, (w) => ({ ...w, mascotId: id }));
   }
 
+  /**
+   * Borrow another profile's accounts for this workspace, or null to hand it
+   * back to the profile it lives in.
+   *
+   * The one check is that the profile exists *now*, and it is not the check the
+   * fallback relies on — a profile deleted afterwards leaves an id that resolves
+   * to nothing and reads as null, which is the same answer. It is here because
+   * an id that named nothing on arrival is a client with a stale list, and
+   * storing it would draw a badge in the sidebar for a profile that is gone.
+   */
+  setWorkspaceIdentity(workspaceId: string, profileId: string | null): void {
+    if (profileId !== null && !this.profiles.some((p) => p.id === profileId)) return;
+    this.mutate(this.activeId, workspaceId, (w) => ({ ...w, identityProfileId: profileId }));
+  }
+
+  /**
+   * Whose accounts a terminal opened in this workspace belongs to.
+   *
+   * The active profile's, unless the workspace has borrowed somebody else's —
+   * which is the whole of the mixing feature, and it is one lookup because the
+   * override is a pointer rather than a copy. Both fallbacks land on the same
+   * place: a workspace nobody has heard of and one naming a profile that has
+   * since been deleted are both "the profile you are in", which is what kururu
+   * did before any of this existed.
+   */
+  identityForWorkspace(workspaceId: string): ProfileIdentity {
+    const borrowed = this.workspaceById(workspaceId)?.identityProfileId;
+    if (!borrowed) return this.active.identity;
+    return this.profiles.find((p) => p.id === borrowed)?.identity ?? this.active.identity;
+  }
+
   /** Deletes it and says what was inside. The last workspace cannot be deleted. */
   deleteWorkspace(workspaceId: string): string[] {
     const profile = this.active;
@@ -824,6 +861,7 @@ export class Workspaces {
       focusedPaneId: pane.pane.id,
       color: null,
       mascotId: null,
+      identityProfileId: null,
       dev: null,
     };
   }

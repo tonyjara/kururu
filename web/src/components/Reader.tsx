@@ -21,6 +21,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import type { ReaderState } from "../../../shared/layout";
+import { drawDiagrams } from "../mermaid";
 
 interface Rendered {
   path: string;
@@ -40,6 +41,7 @@ export function ReaderView({ reader }: { reader: ReaderState }) {
   const [doc, setDoc] = useState<Rendered | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
+  const article = useRef<HTMLElement>(null);
 
   const { root, path, rev } = reader;
 
@@ -73,6 +75,27 @@ export function ReaderView({ reader }: { reader: ReaderState }) {
   }, [root, path, rev]);
 
   /**
+   * Mermaid fences arrive as source and are drawn here, which is the one thing
+   * in this pane the server did not render — `web/src/mermaid.ts` says why. It
+   * runs after the commit that put the markup in, because the layout engine
+   * measures the text it is about to draw and can only do that once the nodes
+   * are in a document with the theme's font on it.
+   *
+   * Keyed on `doc` rather than on `path`, so a save redraws: the fetch hands
+   * back a new object every time and the markup under this node has just been
+   * replaced along with it. The abort is the same guarantee the fetch has — a
+   * document swapped out while its diagrams were still being laid out must not
+   * have the old ones land in the new one.
+   */
+  useEffect(() => {
+    const node = article.current;
+    if (!node || !doc) return;
+    const abort = new AbortController();
+    void drawDiagrams(node, abort.signal);
+    return () => abort.abort();
+  }, [doc]);
+
+  /**
    * A different file starts at the top; the same file written again does not.
    * Scroll position is the reader's own state, and losing it on every save would
    * make the pane unusable for exactly the document you are working on.
@@ -99,6 +122,7 @@ export function ReaderView({ reader }: { reader: ReaderState }) {
         // rather than trying to reconcile one file's headings into another's.
         <article
           key={doc?.path ?? path}
+          ref={article}
           className="md"
           dangerouslySetInnerHTML={{ __html: doc?.html ?? "" }}
         />

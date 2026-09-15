@@ -122,10 +122,49 @@ export class Screen {
     return this.term.rows;
   }
 
-  /** Everything said so far, as the escape sequences that rebuild it. */
+  /**
+   * Whether the program in here has asked for the cursor to be hidden.
+   *
+   * Reached for through `_core` because it is on none of the roads a backlog
+   * would otherwise travel: xterm's public API does not expose it, and the
+   * serializer's `_serializeModes` restores eight modes — application cursor
+   * keys, bracketed paste, insert, origin, wraparound, focus reporting and
+   * mouse tracking — of which DECTCEM is not one. That is not a new kind of
+   * reach, either: the serializer itself goes through `_core` for the current
+   * attributes it ends every screen with.
+   */
+  private get cursorHidden(): boolean {
+    const internals = this.term as unknown as {
+      _core?: { coreService?: { isCursorHidden?: boolean } };
+    };
+    return internals._core?.coreService?.isCursorHidden === true;
+  }
+
+  /**
+   * Everything said so far, as the escape sequences that rebuild it — plus the
+   * one piece of state a serialized screen does not carry.
+   *
+   * A backlog is applied by resetting the client's emulator and writing this,
+   * and ghostty-web's `reset()` does not clear a terminal so much as build a new
+   * one: the WASM terminal is freed and replaced, so every mode goes back to its
+   * default and the cursor comes back **visible**. Nothing in the serialized
+   * screen then says otherwise, because DECTCEM is not one of the modes the
+   * serializer restores. The pty's own cursor position is restored, though — and
+   * for an agent drawing its own block cursor in an input box, the real one is
+   * hidden and parked at home. So the pane came up with a blinking block in its
+   * top-left corner, sitting on nothing, and it stayed there forever: an Ink TUI
+   * hides the cursor once at startup and never mentions it again, so there was
+   * no later byte that would have put it right.
+   *
+   * It was only ever visible in the *focused* pane, which is what made it look
+   * like a focus bug rather than a backlog one — the unfocused panes were
+   * drawing no cursor at all by then, for the unrelated reason in
+   * `web/src/terminals.ts`.
+   */
   async backlog(): Promise<string> {
     if (this.pending > 0) await new Promise<void>((resolve) => this.drained.push(resolve));
-    return this.serializer.serialize({ scrollback: BACKLOG_LINES });
+    const screen = this.serializer.serialize({ scrollback: BACKLOG_LINES });
+    return this.cursorHidden ? `${screen}\x1b[?25l` : screen;
   }
 
   dispose(): void {

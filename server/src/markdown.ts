@@ -8,7 +8,9 @@
  * should be sent markup, not a parser and a highlighter and every grammar either
  * of them might turn out to need. It also means there is one renderer rather
  * than one per client, which is the same argument the layout makes for living on
- * the server.
+ * the server. There is exactly one exception and it is marked where it happens:
+ * a mermaid fence is handed to the client, because laying a diagram out means
+ * measuring text in a DOM and there is no DOM in here worth trusting.
  *
  * **Raw HTML is off, and that is the sanitizer.** A markdown file here is not a
  * document somebody wrote you — it is a file in a project, and increasingly one
@@ -202,8 +204,9 @@ export async function renderMarkdown(
     breaks: false,
     /**
      * Unknown languages render as a plain block rather than throwing, because a
-     * fence saying ```mermaid is not an error — it is a diagram this reader
-     * cannot draw yet, and the text of it is still worth showing.
+     * fence in a language this build has no grammar for is not an error and its
+     * text is still worth showing. `mermaid` never arrives here — it is taken
+     * off the fence rule below, before highlighting is even asked about.
      */
     highlight: (code, lang) => {
       if (!lang || !known.has(lang.toLowerCase())) return "";
@@ -218,6 +221,39 @@ export async function renderMarkdown(
       }
     },
   });
+
+  /**
+   * The one construct this module refuses to finish, and hands over instead.
+   *
+   * Everything else here is rendered on the server for the reason at the top of
+   * the file: the phone should be sent markup rather than a parser and every
+   * grammar it might turn out to need. A mermaid diagram cannot honour that,
+   * and the obstacle is not effort — it is that mermaid lays a graph out by
+   * *measuring text in a DOM*. Node sizes come from the width a label actually
+   * renders at in a real font. Running it under jsdom produces an SVG whose
+   * boxes are the wrong size for the words in them, which is worse than the
+   * code block it replaced, because a wrong diagram reads as a true one.
+   *
+   * So the server does the half it can do honestly: it says *this fence is a
+   * diagram*, escaped so the markup is still only ever markdown-it's own
+   * constructs, and `web/src/mermaid.ts` draws it where there is a layout
+   * engine to draw it with. A client that never runs that step — anything
+   * reading this HTML that is not the reader — still shows the source, which is
+   * exactly what it showed before.
+   */
+  const defaultFence = md.renderer.rules.fence;
+  md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+    const token = tokens[idx];
+    // `info` is the whole word after the backticks and may carry more than the
+    // language (```mermaid {init: ...}), so only the first word is the name.
+    const lang = token?.info.trim().split(/\s+/)[0]?.toLowerCase();
+    if (token && lang === "mermaid") {
+      return `<pre class="mermaid">${md.utils.escapeHtml(token.content)}</pre>\n`;
+    }
+    return defaultFence
+      ? defaultFence(tokens, idx, options, env, self)
+      : self.renderToken(tokens, idx, options);
+  };
 
   const dir = posix.dirname(rel);
   const base = dir === "." ? "" : dir;

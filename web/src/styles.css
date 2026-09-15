@@ -332,6 +332,31 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Whose accounts this workspace opens terminals as, when it is not the profile
+   it lives in. Quiet and outlined rather than filled: it is a fact about the
+   row, not a state worth competing with the dev-server button or a colour tag,
+   and it is only ever drawn on the handful of rows that have been mixed. It
+   keeps its width when the name is long — the name is the thing that gets the
+   ellipsis, because a truncated profile name is a badge that says nothing. */
+.ws-identity {
+  flex: none;
+  margin-left: auto;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  line-height: 13px;
+  letter-spacing: 0.02em;
+  color: var(--dim);
+  box-shadow: inset 0 0 0 1px var(--line);
+  max-width: 64px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ws-row-on .ws-identity {
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--line-high);
+}
 /* The dev server's button: ▸ while nothing is serving, ↻ while something is.
    Which one you see *is* the status, so there is nothing else on the row saying
    it — and a workspace that has never had a dev server draws no button at all,
@@ -2561,6 +2586,45 @@ kbd {
   border: 0;
   border-top: 1px solid var(--line);
   margin: 2em 0;
+}
+
+/* A diagram is allowed past the reading measure, because a graph is not prose
+   and the 72ch that makes a paragraph readable makes a flowchart illegible.
+   It scrolls on its own rather than widening the document, the way a table
+   does — and it keeps no border, since mermaid has already drawn every edge in
+   there and a box around them would be one line too many. */
+.mermaid-figure {
+  margin: 1.2em 0;
+  padding: 0;
+  max-width: none;
+  width: 100%;
+  overflow-x: auto;
+  text-align: center;
+}
+
+/* Mermaid writes its own `max-width` inline from the width it laid the diagram
+   out at, which is the one number here that has to be overridden: left alone it
+   pins a small diagram to a fraction of the pane and a large one past its edge. */
+.mermaid-figure svg {
+  max-width: 100%;
+  height: auto;
+  display: inline-block;
+}
+
+/* A diagram that would not draw stays the code block it arrived as. The accent
+   is on the line rather than the text, so it reads as a block that is flagged
+   rather than as an error message with some source attached to it. */
+.md pre.mermaid-failed {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+}
+
+.mermaid-error {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  color: var(--danger);
+  font-family: var(--ui);
+  font-size: 11px;
 }
 
 /* The strip's label for a reader: a tab that is not a button, because there is
