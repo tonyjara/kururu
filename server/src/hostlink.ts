@@ -20,9 +20,11 @@
  * pty to its replacement."* So the rule for this file is simple — anything that
  * would make `ptyhost.ts` need editing belongs on the other side of it.
  *
- * The transport is an Electron `MessagePortMain`, handed to both children at
- * startup. They talk to each other directly; the main process is not in the
- * middle of a terminal's output.
+ * This file is the protocol and nothing else — what the two say to each other,
+ * not how it travels. `hostsock.ts` carries it over a unix socket, which is the
+ * only transport there is; it was an Electron `MessagePortMain` once, and the
+ * change of transport is why the host can now run on a machine that has no
+ * window on it at all.
  */
 import type { AgentReport, AgentSnapshot, PtyKind } from "../../shared/model";
 
@@ -32,38 +34,6 @@ export interface Port {
   on(event: "message", listener: (event: { data: unknown }) => void): void;
   start?(): void;
   close?(): void;
-}
-
-/**
- * Two ports that talk to each other inside one process.
- *
- * For the arrangement with no Electron in it — `bun run dev`, and the tests. The
- * link is the same protocol either way, so nothing above has to know which side
- * of a process boundary it is on; only the restart guarantee differs, and in
- * that arrangement there was never anything to restart separately.
- */
-export function localPortPair(): [Port, Port] {
-  const make = (): Port & { deliver: (data: unknown) => void } => {
-    const listeners: Array<(event: { data: unknown }) => void> = [];
-    return {
-      postMessage() {},
-      on(_event, listener) {
-        listeners.push(listener);
-      },
-      deliver(data) {
-        // Asynchronously, so a send never re-enters its own sender — the real
-        // port crosses a process boundary and this one must not be more eager.
-        queueMicrotask(() => {
-          for (const listener of listeners) listener({ data });
-        });
-      },
-    };
-  };
-  const a = make();
-  const b = make();
-  a.postMessage = (message) => b.deliver(message);
-  b.postMessage = (message) => a.deliver(message);
-  return [a, b];
 }
 
 export type ToHost =

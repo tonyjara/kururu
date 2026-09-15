@@ -48,6 +48,43 @@ const DEV_SCRIPTS = ["dev", "start", "serve", "watch"];
 /** Heads that run a *script*, where the script name decides. */
 const PACKAGE_MANAGERS = new Set(["npm", "pnpm", "yarn", "bun", "deno", "make", "just", "task"]);
 
+/** Filler between a package manager and the script it was asked for. */
+const PM_SUBCOMMANDS = new Set(["run", "run-script", "task", "exec"]);
+
+/**
+ * Package-manager flags that eat the word *after* them.
+ *
+ * Dropping a flag and leaving its value standing is what made `bun run --cwd
+ * web dev` read as a request to run a script called `/Users/…/web` — no match,
+ * no button, and nothing on screen to say why. Every monorepo line is this
+ * shape (`npm --prefix api run dev`, `pnpm -C web dev`, `npm run -w web dev`),
+ * so it is not an edge case; it is how most people start the server they would
+ * actually press ▸ for. Enumerated rather than inferred: a lone `--port 3001`
+ * after the script name is a flag whose value must *not* be eaten, and nothing
+ * in the token itself distinguishes the two.
+ */
+const PM_VALUE_FLAGS = new Set([
+  "--cwd", "-C", "--prefix", "--dir", "--filter", "-F", "--workspace", "-w", "--package",
+]);
+
+/**
+ * The script a package manager was asked to run, from the tokens after its
+ * name — past the subcommand, past the flags, and past whatever a flag was
+ * carrying. Null when there is nothing left, which is `npm` on its own.
+ */
+function scriptAfter(tokens: string[]): string | null {
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!;
+    if (PM_VALUE_FLAGS.has(token)) {
+      i++; // and its value with it
+      continue;
+    }
+    if (isPreamble(token) || PM_SUBCOMMANDS.has(token)) continue;
+    return token;
+  }
+  return null;
+}
+
 /** Interpreters worth looking past: the server is the script they were given. */
 const LAUNCHERS = new Set(["node", "bun", "deno", "python", "python3", "npx", "bunx", "uv", "uvx", "sh", "bash", "zsh", "env"]);
 
@@ -90,8 +127,7 @@ export function matchDevCommand(args: string): string | null {
 
     // `npm run dev`, `bun dev`, `pnpm dev:web` — the script name decides.
     if (PACKAGE_MANAGERS.has(name)) {
-      const rest = tokens.slice(i + 1).filter((t) => !isPreamble(t) && t !== "run");
-      const script = rest[0];
+      const script = scriptAfter(tokens.slice(i + 1));
       if (!script) return null;
       const head = script.split(":")[0]!;
       return DEV_SCRIPTS.includes(head) ? `${name} ${script}` : null;

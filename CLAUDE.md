@@ -14,6 +14,13 @@ began as a front-end for [ghosttown](../ghosttown), the agent-first multiplexer
 in the sibling directory, and still borrows code from it (see below), but it is
 no longer a client of it: kururu's agents and ghosttown's are two separate sets.
 
+It is **three processes, and the window is the least important of them**. The
+pty host holds every pty and outlives everything; the server holds the protocol,
+the layout and the discovery, and is restarted constantly; the Electron window
+finds a server and draws it, exactly as the phone does. Which means the window
+is disposable in a way it used to not be — quitting it costs a window, and the
+server it was looking at may not even be on this machine.
+
 ## The rules that matter most
 
 1. **Never modify `../ghosttown` from this project.** Kururu borrows *from* it —
@@ -34,8 +41,8 @@ no longer a client of it: kururu's agents and ghosttown's are two separate sets.
    terminals had not changed — nothing asked for the history to refill it.
    Dragging a pane aside made its agent vanish until it happened to repaint.
    Switching *tabs* is a rebuild on purpose: a hidden tab is not watched, so its
-   emulator would be stale, and every live terminal holds a WebGL context of
-   which a page gets about sixteen.
+   emulator would be stale, and an emulator nobody can see is a canvas and a WASM
+   terminal being kept for nothing.
 4. **Do not run `tailscale` commands.** Putting a port on the user's tailnet is
    their decision, never a side effect of a code change. Document the command;
    do not execute it.
@@ -44,33 +51,39 @@ no longer a client of it: kururu's agents and ghosttown's are two separate sets.
 
 ## ⚠️ The live-agent hazard
 
-**Quitting the app kills every agent it is running. Restarting the *server* does
-not** — the ptys live one process over, in the pty host. The distinction is the
-one thing to keep straight when working in here:
+**Only the pty host holds ptys, and only restarting *it* costs anybody their
+agents.** Quitting the window does not. Restarting the server does not. The
+distinction is the one thing to keep straight when working in here:
 
 | you edit | what it costs |
 |---|---|
-| `web/` | a repaint — ⌘R, or `C-a R` |
-| `server/src/` (not `agents/`, not `ptyhost*`) | a reconnect — `C-a B`, or automatic under `KURURU_DEV=1` |
-| `server/src/agents/`, `ptyhost.ts`, `hostlink.ts` | **every agent the user is running** |
+| `web/`, `desktop/` | a repaint — ⌘R, or `C-a R` (a `desktop/` change wants the window relaunched, which is free) |
+| `server/src/` (not `agents/`, not `ptyhost*`, not `hostsock.ts`) | a reconnect — `C-a B`, or automatic under `bun run dev` |
+| `server/src/agents/`, `ptyhostd.ts`, `ptyhost.ts`, `hostlink.ts`, `hostsock.ts` | **every agent the user is running** |
 
-So: batch changes to the host, and say so before asking for a relaunch. This is the deliberate
-consequence of kururu owning its ptys instead of borrowing somebody else's, and
-it is the sharpest edge in the project.
+So: batch changes to the host, and say so before asking for one to be restarted.
+A live pty cannot be handed to a replacement process — ghosttown's config says
+the same thing about its daemon in the same words — and that irreducible fact is
+now the *only* thing in kururu that ends an agent by accident.
 
-- `before-quit` in `desktop/main.js` asks first, but only when something is
-  actually running. Do not "simplify" that dialog away.
-- **Closing the window is not quitting.** `window-all-closed` declines to quit
-  on macOS on purpose: it is what lets you shut the window while agents keep
-  working and the phone stays served. Removing that guard would make closing a
-  window destructive.
+**The trap this leaves, and it has already cost a session:** a running
+`bun run dev` is watching `server/src` and `shared`, so editing those files
+restarts the user's server *while you work*, without anybody asking. That is
+cheap and intended. What is not cheap is editing a file the watcher hands off —
+`agents/`, `ptyhost*`, `hostsock.ts` — or rebuilding the bundles underneath a
+server that is mid-flight. **Check whether a server is running before you start
+(`curl -s localhost:7717/api/health`), and say what you are about to disturb.**
+
 - Teardown signals the **process group**, not the pty's own pid — see the
   invariants below. Getting this wrong leaves orphaned agents with no terminal
   attached and no way to reach them again.
+- The host is **detached**, not a child of whoever spawned it. That is what makes
+  it survive, and it also means `pkill -f ptyhostd` is how it stops — there is no
+  parent to close.
 - `bun test` only exercises pure functions and a temp directory — `procs`,
   `report`, `status`, `files`, `workspaces` (which holds a tree and touches no
-  pty), and the pane tree in `web/test`. Keep it that way; no test should spawn a
-  real agent CLI.
+  pty), `hostsock` (two ports over a socket, no pty anywhere), and the pane tree
+  in `web/test`. Keep it that way; no test should spawn a real agent CLI.
 
 When testing by hand, spawn something harmless — `create-agent` takes a
 `command`, so use `sleep 30` or `cat` rather than `claude`, and spend no tokens
@@ -85,10 +98,14 @@ shared/      Protocol types and the tree. No runtime deps; imported by everythin
   keys.ts        Every action, ghosttown's default keys, and the overrides a user
                  saved. Shared because the server validates a rebinding
   wire.ts        Kururu's own browser↔server protocol + timer intervals
-server/      Node (not Bun — it loads inside Electron). Two processes, not one.
+server/      Node (not Bun — it was Electron's once and the bundles stayed). Two
+             processes, and nothing owns either of them.
   ptyhost.ts     The half that cannot be restarted: createPtyHost(), a factory
-  ptyhost-main.ts  ...as a process. The Electron entry; wiring only
-  hostlink.ts    The protocol between the two, and the local pair for standalone
+  ptyhostd.ts    ...as a daemon on a socket. Outlives every window and server
+  hostlink.ts    The protocol between the two, and the local pair for tests
+  hostsock.ts    That protocol over a unix socket. The framing, and nothing else
+  run.mjs        Builds, spawns and re-spawns the server. What `C-a B` reaches
+  status.mjs     The daemon has no face; this is it. Socket + /api/agents
   agents/        Owned by the pty host. Editing anything here costs the agents
     host.ts      Spawns and owns every pty; the snapshot comes from here
     screen.ts    One headless xterm per pty; history for a pane opened late
@@ -121,7 +138,8 @@ web/         React 19 + Vite. One build; the desktop is what it is shaped for.
   App.tsx        Draws the server's layout; owns the prefix, zen, and dialogs
   components/
     Panes.tsx      Walks the tree into nested flex boxes; tab strips; dividers
-    Terminal.tsx   One xterm per visible tab. Fits itself, then resizes the pty
+    Terminal.tsx   One Ghostty emulator per visible tab. Fits itself, then
+                   resizes the pty. WASM, on a 2D canvas — see the invariants
     Sidebar.tsx    Workspaces (numbered) and every agent in the profile
     Status.tsx     The status mark: a dot, or the mascot while it is working
     Settings.tsx   The cog's dialog: a tab bar, and the way out
@@ -131,8 +149,11 @@ web/         React 19 + Vite. One build; the desktop is what it is shaped for.
     Dialog.tsx     Prompt / confirm / pick. While one is up, no key reaches a pty
     HelpOverlay.tsx  Printed from the keymap, so it cannot document a dead key
 desktop/     Electron main + preload, and the esbuild step that bundles the server.
-  main.js        Forks the server as a utilityProcess, owns the quit dialog
-  build.mjs      server/src → dist/server.mjs (ESM, node-pty external)
+  main.js        Finds a server, draws it. Owns a window and nothing else
+  connect.html   The one page kururu draws itself — the address picker
+  servers.js     Addresses you have connected to, and what a typed one means
+  preload.js     Two bridges in one file, split on `file:` — see the comment
+  build.mjs      server/src → dist/{server,ptyhostd}.mjs (ESM, node-pty external)
 assets/      Artwork, served at runtime. Found the way web/dist is; KURURU_ASSETS
   spritesheets/  The frog, and guide.png — which labels the animations and is
                  skipped by the picker for exactly that reason. One sheet ships;
@@ -160,18 +181,28 @@ rather than editing across.
 
 ```sh
 bun install            # from the ROOT. See the workspace gotcha below.
-bun run dev:desktop    # the whole app: server + vite + window, one command
-bun run dev            # just the server on :7717 (build:server first)
-bun run dev:web        # vite on :5173, proxying /api and /ws to 7717
-bun run start          # build everything, then serve it on :7717
-bun run build          # web → web/dist, server → desktop/dist/server.mjs
-bun run build:server   # esbuild only; dev:desktop runs this for you
+bun run dev            # the agents: builds, starts the pty host if it is not
+                       # already up, serves on :7717, restarts itself on save
+bun run dev:desktop    # the window. Finds a server; starts vite for itself
+bun run status         # is the host up, is a server up, what are they holding
+bun run start          # same as dev without the watching, plus a web build
+bun run host           # the pty host in the foreground, for debugging it
+bun run dev:web        # vite alone, proxying to KURURU_SERVER or 7717
+bun run build          # web → web/dist, server → desktop/dist/*.mjs
+bun run build:server   # esbuild only; run.mjs does this for you
 bun run typecheck      # root tsconfig + web tsconfig
 bun test               # pure-function tests only
 ```
 
+**Two commands, not one, and that is the shape now.** `dev` is the half that
+holds your agents; `dev:desktop` is a window onto it. Kill the window and the
+agents carry on; kill the server and they *still* carry on, because they are in
+the host below it. Only `pkill -f ptyhostd` ends them.
+
 **Ports:** 7717 server · 5173 vite · **7800+** preview proxies (one per dev
-server, allocated on demand).
+server, allocated on demand). **Socket:** `~/.local/state/kururu/ptyhost.sock`,
+with `~/.local/state/kururu/ptyhost.log` beside it — the host is a daemon now
+and its log is the only place its side of a bug shows up.
 
 ## Gotchas that have already cost time
 
@@ -187,8 +218,15 @@ server, allocated on demand).
   Signal the group (`process.kill(-pid, …)`); node-pty opens the pty with setsid
   so the pty leader is the group leader.
 - **`EADDRINUSE` on 7717 means a stale server is still running**, usually from
-  an earlier turn. It is not a code bug. Kill it and retry:
-  `pkill -f "desktop/dist/server.mjs"`.
+  an earlier turn, and now possibly a supervisor holding one up. It is not a code
+  bug. Kill both and retry:
+  `pkill -f "server/run.mjs"; pkill -f "desktop/dist/server.mjs"`. The pty host is
+  deliberately *not* in that list — killing it is the one thing that costs agents.
+- **`EINVAL` from `listen` on a unix socket means the path is too long.** macOS
+  gives `sun_path` 104 bytes and complains about nothing else, so the error names
+  no limit and reads exactly like a bug in the caller. `hostsock.ts` checks the
+  length and says so; the default path is nowhere near it, and a
+  `KURURU_HOST_SOCK` pointing somewhere deep is how you find out.
 - **macOS `/tmp` is a symlink to `/private/tmp`.** Two different strings for one
   directory. `files.ts` realpaths roots on *both* sides for this reason; do not
   "simplify" it back to a string compare.
@@ -287,28 +325,30 @@ server, allocated on demand).
   out. Watching is the tap; rebuilding is the emulator's own question, and only a
   fresh pane, a tab switch or a reconnect asks it. `server/test/screen.test.ts`
   holds the invariant: serialize, rebuild, compare the buffers.
-- **A disposed emulator must hand its WebGL context back, out loud.** This is
-  the one that turned the whole window black, twice. `terminal.dispose()` does
-  *not* release the context: neither the addon nor xterm's core ever calls
-  `loseContext`, so it stays live until Chromium collects the canvas, which can
-  be never. A page gets about sixteen — and kururu builds a fresh emulator on
-  every tab switch, workspace change, profile swap and pane rebuild, so the
-  corpses accumulate in dozens over an afternoon. Past sixteen the browser does
-  not refuse the new context, it kills the **oldest**, and the oldest is not a
-  corpse: it is the pane you have had open longest. So the terminals that go
-  dark are precisely the ones you were watching, all of them within a few tab
-  switches of each other, for the three seconds the addon waits on a restore
-  that is not coming — and they come back on the DOM renderer, slower than they
-  left. Nothing is wrong with the server or the agents while this happens, which
-  is exactly why it reads as inexplicable. `releaseWebglContexts` in
-  `Terminal.tsx` runs **before** `terminal.dispose()`, because dispose is what
-  takes the canvas out of the DOM and the addon exposes no handle on it.
-  Measured: four live panes and eighteen rebuilds blacked out all four; with the
-  release, a hundred rebuilds cost nothing.
+- **The pane's emulator must never want a GPU context, and that is why it is
+  Ghostty's.** This is the one that turned the whole window black, twice, and
+  the reason the renderer was replaced rather than patched. xterm.js drew on
+  WebGL and `dispose()` did *not* release the context — neither the addon nor
+  xterm's core ever called `loseContext` — so it stayed live until Chromium
+  collected the canvas, which can be never. A page gets about sixteen, and kururu
+  builds a fresh emulator on every tab switch, workspace change, profile swap and
+  pane rebuild, so the corpses accumulated in dozens over an afternoon. Past
+  sixteen the browser does not refuse the new context, it kills the **oldest**,
+  and the oldest was never a corpse: it was the pane you had open longest. Every
+  terminal you were actually watching went dark at once, for the three seconds
+  the addon waited on a restore that was not coming, and came back slower on the
+  DOM renderer — with nothing wrong on the server and the agents a process away,
+  which is exactly why it read as inexplicable. It was survivable with an
+  explicit `loseContext` before every dispose, and that fix worked; it was still
+  a budget being spent to draw text. `ghostty-web` renders to a 2D canvas —
+  `getContext("2d")` is the only context call in the whole bundle — so there is
+  no budget to run out of and nothing to hand back. **Do not reintroduce a
+  GPU-backed renderer for a pane.** The thing to keep is the property, not the
+  library.
 - **A black window is a symptom with several causes, so each one has to say
-  which it is.** Flat `--bg` with nothing on it is what you get from a lost GL
-  context, a React root that unmounted, a renderer the OS killed, a server that
-  never answered, and a sleeping display — same picture, different fixes, and
+  which it is.** Flat `--bg` with nothing on it is what you get from a React root
+  that unmounted, a renderer the OS killed, a server that never answered, and a
+  sleeping display — same picture, different fixes, and
   guessing between them is what makes this class of bug expensive. Two of them
   now name themselves. `Crash` in `web/src/components/Crash.tsx` wraps the root
   so a render that throws prints the error and the component stack instead of
@@ -345,16 +385,18 @@ server, allocated on demand).
   wipes it on arrival, and those bytes never come again — the client's emulator
   is then permanently missing a piece the server's copy has. The hold lifts when
   the last rebuild is done.
-- **A backlog has to be *painted* again, not just written.** xterm repaints the
-  rows it knows changed, and after a `reset` plus a reconstruction its idea of
-  what changed does not cover cells the renderer is still holding. The buffer is
-  then right and the picture is wrong — and it stays wrong exactly where the
-  agent never writes again, because an agent redraws differentially and will
-  never resend a cell it believes is already correct. `Terminal.tsx` clears the
-  WebGL texture atlas and calls `refresh(0, rows-1)` in the `write` callback,
-  once the data has actually been parsed. Symptom when this is missing: content
-  from before the agent started, sitting inside its UI, until a window resize
-  forces a full repaint.
+- **A backlog no longer has to be *painted* again, and it is worth knowing why
+  it once did.** xterm repainted only the rows it believed had changed, and after
+  a `reset` plus a reconstruction its idea of what changed did not cover cells
+  the renderer was still holding: the buffer was right and the picture was wrong,
+  and it stayed wrong exactly where the agent never writes again, because an
+  agent redraws differentially and never resends a cell it believes is already
+  correct. That cost a `clearTextureAtlas` and a `refresh(0, rows-1)` in the
+  `write` callback. Ghostty's renderer draws the viewport from the WASM buffer on
+  its own loop rather than from a record of which cells it thinks are dirty, so a
+  screen replaced wholesale is simply the screen it draws next, and the call is
+  gone. Symptom if that assumption is ever wrong: content from before the agent
+  started, sitting inside its UI, until a window resize forces a full repaint.
 - **A backlog goes to the emulator that asked for it, and to no other.** It used
   to arrive unbidden and could land before any emulator had subscribed, so
   `session.ts` held one for whatever sink appeared next. Nothing sends one
@@ -514,6 +556,78 @@ server, allocated on demand).
   the emulators, and an *opaque* blob of whatever the server last called the
   arrangement — opaque because the moment it knows what a workspace is, changing
   what a workspace is means ending somebody's agents.
+- **The two halves find each other at a path, not through a parent.** The link
+  was an Electron `MessagePort` handed to both children, which worked and quietly
+  made Electron the only thing that could arrange the split at all: with no
+  Electron there was no second process, so `index.ts` built a host *inside
+  itself* and the property the seam exists for — restarting the server is free —
+  silently did not hold. Every `bun run dev` had it backwards and nothing said
+  so. A socket removes the matchmaker: the host listens, whoever wants it
+  connects, and a restarted server connects again and is handed back the agents
+  and the blob. It is also what lets the host run on a machine with no window.
+- **The host is spawned detached, and that word is the feature.** A server that
+  starts one is not its parent and does not take it down; that is the difference
+  between "my agents die when I close the terminal" and "my agents are a thing on
+  this machine". It follows that nothing *else* reaps it either, so it is stopped
+  on purpose (`pkill -f ptyhostd`) and its log is a file rather than somebody's
+  stdout.
+- **A second connection to the host replaces the first; it is not a second
+  client.** The host keeps one blob and pushes output to one place, and two
+  servers sharing that would each see the other's idea of the layout arrive as
+  their own. A new socket is treated as what it almost always is — the same
+  server, restarted, arriving before the old one's FIN did.
+- **A restart is an exit code, not a signal.** `C-a B` cannot re-fork the process
+  it is running in, and the thing that *can* is whatever is supervising it. So
+  the server exits 75 and `server/run.mjs` reads that as "start me again" —
+  distinguishable from a crash, which is left down on purpose, because a
+  supervisor that resurrects a server which cannot start is a loop that fills a
+  terminal with one error forever. Unsupervised, `restart-server` says so rather
+  than doing the half of it that ends the server.
+- **`connect.html` is the one page kururu draws itself, and it is the exception
+  that proves principle 3.** Everywhere else the window loads what the server
+  serves — one build of the UI, no `file://` variant to keep in step. This is
+  what is on screen when there is *no* server, and a page served by the thing you
+  are looking for cannot tell you it is missing. So it stays small enough to
+  never become a second UI: it picks an address and nothing else. The moment it
+  can show an agent, it is one.
+- **The picker's bridge and the app's bridge are split on `location.protocol`.**
+  A preload is chosen when a window is built and cannot be swapped per
+  navigation, so both live in `preload.js` — and the boundary is drawn where it
+  can actually be trusted. The picker can point this window at any address; the
+  served page must never be able to, because a served page that can call
+  `connect()` is a redirect attack with none of the work. Nothing arriving over
+  HTTP can make itself `file:`.
+- **An address is a decision, so it goes in config, not state.** `servers.json`
+  sits in `~/.config/kururu` beside the keymap on `config.ts`'s reasoning: a
+  state directory wiped between versions is an inconvenience, and kururu can no
+  more invent the address of your VM than it can invent your keyboard.
+  `127.0.0.1:7717` is a *built-in* candidate rather than a saved one, so that "the
+  local one" and "one I typed once" stay different things.
+- **Discovery is polling, and there is nothing else it could be.** A server
+  starting raises no event anything outside it can hear, so the picker asks every
+  second and that is what makes starting one in another terminal look like the
+  window noticing. It only sweeps while the picker is showing, which is what
+  stops it from ever moving you off a server you are already using.
+- **The window gives up on a server; `session.ts` never does, and both are
+  right.** The page reconnects forever because it has to — the server restarts on
+  every save and a phone drops the socket every time it sleeps, so a client that
+  gave up would be wrong far more often than right. But "forever" answers *a
+  gap*, not *a server that is not coming back*, and a window reconnecting into
+  nothing has no way to say where it would rather be pointed. So the main process
+  probes `/api/health` and falls back to the picker, and **the strike count times
+  the interval is the whole design**: a `run.mjs` restart is one to three seconds
+  of entirely legitimate silence, and bouncing during one would tear down every
+  emulator in the window to reconnect to a server that was always coming back.
+  Three strikes at three seconds is ~10s of confirmed silence — past any restart,
+  prompt when it is real. Both cases are tested by hand; if you retune either
+  number, retest the *negative* one, because that is the expensive direction.
+- **Status asks the server, never the host, and that is not politeness.** The
+  host's socket takes one server at a time and reads a second connection as a
+  restarted first (see above), so a status tool that asked the host directly
+  would knock the live server off its link to find out how things were going.
+  `/api/agents` exists for that reason. It follows that with no server running
+  there is nobody who *can* list the agents — `status.mjs` says so rather than
+  inventing it, which is also the honest description of the architecture.
 - **A restarted server prefers the host's blob over the disk snapshot.** The blob
   is complete and a moment old, with every tab still pointing at a live pty; the
   file is the cold-start fallback and has the processes deliberately stripped
@@ -592,8 +706,8 @@ server, allocated on demand).
   while it is armed and stops when it times out. An unlabelled mode is what makes
   people distrust modal interfaces — and the recovery, pressing it twice to send
   it through, has to be discoverable from somewhere.
-- **Nothing is subscribed until the grid is the pane's.** An xterm built without
-  `cols`/`rows` is 80x24 and stays that way until a fit lands, which cannot
+- **Nothing is subscribed until the grid is the pane's.** An emulator built
+  without `cols`/`rows` is 80x24 and stays that way until a fit lands, which cannot
   happen on the frame after a split or before the renderer has measured a
   character. A backlog is a screen serialized at a size; written into an
   80-column grid it wraps and stays wrapped, and the result is a screen the agent
@@ -601,6 +715,20 @@ server, allocated on demand).
   on `proposeDimensions()` rather than on `fit()` throwing — fit does not throw
   when the renderer has no cell size, it quietly does nothing, so a try/catch
   cannot tell "fitted" from "skipped".
+- **A measurement that is merely *small* is how the fit addon says it failed.**
+  The sharp edge of the emulator swap, and it cost a freeze on the first tab
+  drag. xterm's `proposeDimensions()` returned `undefined` for a box it could not
+  measure, so "did it answer" *was* the whole test. Ghostty's does the same
+  arithmetic and then ends it `Math.max(2, …)` by `Math.max(1, …)`, so an
+  unlaid-out pane does not decline — **it answers `2x1`**, which is finite,
+  positive and passes every check the old guard made. A pane is exactly that
+  shape for a frame or two each time one is dragged, and believing it costs the
+  lot: the emulator fits to two columns, asks for a backlog serialized at two
+  columns, and tells the server a grid, which is a SIGWINCH that makes the agent
+  redraw itself into it. `web/src/grid.ts` reads the clamp floor back as what it
+  means — "I could not work this out" — and `web/test/grid.test.ts` holds it,
+  because the refused value is a well-formed grid and an `if` with a number in it
+  is what somebody simplifies away.
 - **The pty follows the pane, not the other way round.** `Terminal.tsx` measures
   its box, fits the emulator to it, and sends the resulting grid to the server,
   which resizes both its own emulator and the pty. Never clamp a pane to a fixed
@@ -646,8 +774,19 @@ Match ghosttown — the user writes in a distinctive register and kururu follows
 Verified end to end: agent host (spawn / type / kill / exit, process-group
 teardown), status heuristic through a real pty, the report endpoint, dev-server
 discovery, preview proxy including HMR websockets with subprotocol negotiation,
-traversal-safe file browsing, and the Electron app bringing up server + vite +
-window from one command.
+and traversal-safe file browsing.
+
+And the three-process split, against a real pty: the server spawns a detached
+host when none is listening and links to it over the socket; input and output
+round-trip through the JSON framing with their escape sequences intact; the
+server is killed and started again and the agent comes back with **the same id
+and the same pid**, which is the whole point; `C-a B` does the same thing
+through `run.mjs` and the host's pid never moves; a host killed with SIGKILL
+leaves a socket file that the next server recognises as a corpse and clears; and
+a host sent SIGTERM reaps its ptys and unlinks. The desktop was left sitting on
+the picker with nothing reachable, a server was started in another terminal, and
+the window found it and connected within the second — which is the feature, and
+it is also the end-to-end test of it.
 
 Also verified against a real pty, over the wire: a shell spawns interactive and
 echoes, a resize reaches the pty (`stty size` agrees), unwatched terminals stop

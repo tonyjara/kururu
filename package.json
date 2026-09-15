@@ -10,13 +10,15 @@
     "desktop"
   ],
   "scripts": {
-    "dev": "bun run build:server && node desktop/dist/server.mjs",
+    "dev": "node server/run.mjs --watch",
     "dev:web": "bun run --cwd web dev",
-    "dev:desktop": "bun run build:server && KURURU_DEV=1 bun run --cwd desktop start",
-    "start": "bun run build && node desktop/dist/server.mjs",
+    "dev:desktop": "KURURU_DEV=1 bun run --cwd desktop start",
+    "start": "bun run build:web && node server/run.mjs",
     "build": "bun run build:web && bun run build:server",
     "build:web": "bun run --cwd web build",
     "build:server": "node desktop/build.mjs",
+    "host": "bun run build:server && node desktop/dist/ptyhostd.mjs",
+    "status": "node server/status.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && bun run --cwd web typecheck",
     "test": "bun test",
     "postinstall": "node desktop/brand.mjs"

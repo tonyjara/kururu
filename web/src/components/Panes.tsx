@@ -62,6 +62,17 @@ interface Props {
   mascot: MascotConfig;
   /** Zen: the focused pane takes the window and the rest are held out of sight. */
   zen: boolean;
+  /**
+   * Whether the panes are the ones holding the keyboard.
+   *
+   * False while something in the chrome has it — a dialog, a name being typed
+   * in the sidebar, Settings. It is passed down rather than inferred here
+   * because only `App.tsx` knows what is open, and it reaches the *emulator*
+   * rather than the pane: the focused pane goes on looking focused while a
+   * dialog is up, because it still is — it is where the next keystroke will go
+   * once the dialog is answered.
+   */
+  keyboard: boolean;
 }
 
 /** A normalized rect as the four percentages CSS wants. */
@@ -76,7 +87,7 @@ function place(rect: Rect): React.CSSProperties {
 
 const FULL: React.CSSProperties = { left: 0, top: 0, width: "100%", height: "100%" };
 
-export function Panes({ node, focusedPaneId, agents, mascot, zen }: Props) {
+export function Panes({ node, focusedPaneId, agents, mascot, zen, keyboard }: Props) {
   const area = useRef<HTMLDivElement>(null);
   const [resizing, setResizing] = useState(false);
   const boxes = rects(node);
@@ -103,7 +114,13 @@ export function Panes({ node, focusedPaneId, agents, mascot, zen }: Props) {
               : place(rect ?? { x: 0, y: 0, w: 1, h: 1 });
         return (
           <div className="pane-box" key={pane.id} style={style}>
-            <Pane pane={pane} focused={focused} agents={agents} mascot={mascot} />
+            <Pane
+              pane={pane}
+              focused={focused}
+              keyboard={keyboard}
+              agents={agents}
+              mascot={mascot}
+            />
           </div>
         );
       })}
@@ -187,11 +204,13 @@ function DividerBar({
 function Pane({
   pane,
   focused,
+  keyboard,
   agents,
   mascot,
 }: {
   pane: PaneState;
   focused: boolean;
+  keyboard: boolean;
   agents: AgentSnapshot[];
   mascot: MascotConfig;
 }) {
@@ -333,7 +352,7 @@ function Pane({
           /* Keyed on the terminal, so switching tabs builds a fresh emulator and
              the server's backlog fills it; keyed on nothing else, so the layout
              moving around cannot disturb it. */
-          <TerminalView key={showing} agentId={showing} focused={focused} />
+          <TerminalView key={showing} agentId={showing} focused={focused && keyboard} />
         ) : (
           <EmptyPane pane={pane} />
         )}

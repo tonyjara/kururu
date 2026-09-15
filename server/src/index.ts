@@ -22,11 +22,14 @@
  * do not notice — it asks the host what is running, asks for the arrangement it
  * left behind, and carries on. See `hostlink.ts` for where the line is drawn.
  *
- * Runs on Node, not Bun, because it is loaded inside the Electron app rather
- * than spawned beside it. Nothing here may import electron: it must stay
- * runnable as a plain `node` process, which is how it is tested.
+ * Runs on Node rather than Bun, which was once because Electron loaded it and is
+ * now simply what it is: the bundle is built for node and the desktop no longer
+ * starts it at all. Nothing here may import electron — this process is something
+ * you run, possibly on a machine with no window on it, and the window is one
+ * client of it exactly as the phone is.
  */
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { closeSync, createReadStream, existsSync, mkdirSync, openSync, statSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,6 +58,7 @@ import {
 } from "./mascot";
 import { readKeys, writeKeys } from "./keys";
 import { HostLink, type Port } from "./hostlink";
+import { connectToHost, hostSocketPath, type SocketPort } from "./hostsock";
 import { MouseEncoding } from "./mouseencoding";
 import { readSnapshot, writeSnapshot } from "./persist";
 import { closeAllPreviews, closePreview, openPreview, openPreviews } from "./proxy";
@@ -62,6 +66,15 @@ import { reach } from "./reach";
 import { Workspaces } from "./workspaces";
 
 const PORT = Number(process.env.KURURU_PORT ?? 7717);
+
+/**
+ * The exit code that means "start me again", as opposed to the ones that mean
+ * anything else. A restart has to be distinguishable from a crash or a clean
+ * stop, or a supervisor either resurrects a server that was asked to go away or
+ * declines to bring back one that asked to come back. 75 is sysexits' TEMPFAIL,
+ * which is as close as a standard list gets to the sentiment.
+ */
+const RESTART_EXIT_CODE = 75;
 const HERE = dirname(fileURLToPath(import.meta.url));
 /**
  * Where the built web app is. The Electron app passes this explicitly, because
@@ -1120,9 +1133,21 @@ function handleMessage(ws: WebSocket, raw: string): void {
       return;
 
     case "restart-server":
-      // Only the main process can re-fork us; running standalone there is
-      // nobody to ask, and nothing that a restart would preserve anyway.
-      parentPort?.postMessage({ type: "restart" });
+      /**
+       * Put this server back on current code, which costs a reconnect and
+       * nothing else — the agents are in the pty host, a process over.
+       *
+       * Exiting *is* the restart: only something supervising this process can
+       * bring a new one up, and `server/run.mjs` is what does, on this exit code
+       * specifically so that an ordinary crash is not mistaken for a request.
+       * Unsupervised there is nobody to ask, and exiting would take the server
+       * away rather than replace it — so it says so instead of doing half of it.
+       */
+      if (process.env.KURURU_SUPERVISED !== "1") {
+        console.error("kururu: nothing is supervising this server, so there is nobody to restart it");
+        return;
+      }
+      void shutdown().then(() => process.exit(RESTART_EXIT_CODE));
       return;
 
     case "open-preview": {
@@ -1265,6 +1290,37 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    * a poll running forever to keep a value only one dialog ever draws would be
    * a timer earning nothing. See `reach.ts`.
    */
+  /**
+   * What the pty host is holding, for something that is not a browser.
+   *
+   * The snapshot already goes to every client over the websocket, so this adds
+   * no knowledge — what it adds is a way to ask without becoming a client. The
+   * caller is `server/status.mjs`, a terminal command, and the alternative it
+   * exists to avoid is much worse than an endpoint: the host's socket accepts
+   * one server at a time and treats a second connection as a restarted first,
+   * so a status tool that asked the *host* directly would knock the live server
+   * off its own link to find out how things were going.
+   *
+   * So the rule stands that the host is opaque and the server is the thing that
+   * describes it — and when there is no server, there is genuinely nobody who
+   * can answer, which is a true thing for a status command to have to say.
+   */
+  if (url.pathname === "/api/agents") {
+    json(res, {
+      agents: host.agents.map((agent) => ({
+        id: agent.id,
+        name: agent.agent ?? agent.title ?? null,
+        program: agent.agent,
+        status: agent.status,
+        cwd: agent.cwd,
+        pid: agent.pid,
+        exited: agent.exited,
+        counts: countsAsAgent(agent),
+      })),
+    });
+    return;
+  }
+
   if (url.pathname === "/api/reach") {
     json(res, reach(PORT));
     return;
@@ -1555,33 +1611,89 @@ async function attach(port: Port): Promise<void> {
 }
 
 /**
- * How this process is started, in the two arrangements that exist.
+ * How this process finds the pty host.
  *
- * Under Electron the main process forks a pty host beside us and hands us a port
- * to it. Standalone — `bun run dev`, or a test — there is nobody to do that, so
- * we build a host in this process and link to it locally. The second one has no
- * restart guarantee, but there was never a second process to restart.
+ * There used to be two arrangements and only one of them worked the way the
+ * split promises. Under Electron the main process forked a host beside us and
+ * handed over a `MessagePort`; standalone, with nobody to do that, we built a
+ * host *inside this process* — which meant that during development, when the
+ * server is restarted on every save, every restart quietly killed every agent.
+ * The seam was there and the process boundary was not.
+ *
+ * So there is one arrangement now: the host listens on a socket and we connect
+ * to it. A server that has just been restarted connects again and `hello` hands
+ * it back the agents and the arrangement, which is exactly what a re-forked
+ * utilityProcess got. Starting the host if it is not there is a convenience for
+ * the common case of one machine and one person; it is spawned **detached**, so
+ * it is not our child and does not go down with us. That is the whole point.
  */
-const parentPort = (process as NodeJS.Process & {
-  parentPort?: {
-    on(ev: string, fn: (e: { data: unknown; ports?: Port[] }) => void): void;
-    postMessage(msg: unknown): void;
-  };
-}).parentPort;
+const SOCKET = hostSocketPath();
 
-if (parentPort) {
-  parentPort.on("message", (event) => {
-    const data = event.data as { type?: string } | null;
-    const linked = event.ports?.[0];
-    if (data?.type === "link" && linked && !host) void attach(linked);
+/**
+ * Start a host and wait for it to answer.
+ *
+ * Its output goes to a file rather than to ours: it outlives this process by
+ * design, so inheriting our stdio would leave it writing into a terminal that
+ * has moved on, and a daemon nobody can see the logs of is one nobody can debug.
+ */
+async function startPtyHost(): Promise<void> {
+  const entry = process.env.KURURU_PTYHOSTD || fileURLToPath(new URL("./ptyhostd.mjs", import.meta.url));
+  if (!existsSync(entry)) throw new Error(`no pty host to start at ${entry} — bun run build:server`);
+
+  mkdirSync(dirname(SOCKET), { recursive: true });
+  const log = openSync(join(dirname(SOCKET), "ptyhost.log"), "a");
+  const child = spawn(process.execPath, [entry], {
+    detached: true,
+    stdio: ["ignore", log, log],
+    // Harmless under node, and the one thing that makes this work if the binary
+    // running us ever turns out to be Electron's.
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
   });
-} else {
-  const { createPtyHost } = await import("./ptyhost");
-  const { localPortPair } = await import("./hostlink");
-  const [mine, theirs] = localPortPair();
-  createPtyHost().attach(theirs);
-  await attach(mine);
+  child.unref();
+  closeSync(log);
 }
+
+/**
+ * The link, however we have to get it.
+ *
+ * Retried rather than awaited once because a host that has just been spawned is
+ * not listening yet, and because two servers started together both find nothing
+ * and both spawn one — the loser exits on `EADDRINUSE` and the winner is there a
+ * moment later, so patience is also what resolves the race.
+ */
+async function linkToHost(): Promise<SocketPort> {
+  try {
+    return await connectToHost(SOCKET);
+  } catch {
+    // Nothing listening. Ours to start.
+  }
+  await startPtyHost();
+  for (let attempt = 0; attempt < 50; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    try {
+      return await connectToHost(SOCKET);
+    } catch {
+      // Still coming up.
+    }
+  }
+  throw new Error(`the pty host did not come up at ${SOCKET} — see ${join(dirname(SOCKET), "ptyhost.log")}`);
+}
+
+const link = await linkToHost();
+
+/**
+ * The host going away is not survivable, and pretending otherwise is worse than
+ * exiting. Every agent was in that process; what is left here is a layout full
+ * of tabs pointing at terminals that no longer exist and a UI that would draw
+ * them as though they did.
+ */
+link.onClose(() => {
+  if (stopping) return;
+  console.error("kururu: the pty host went away — every agent went with it");
+  process.exit(1);
+});
+
+await attach(link);
 
 // ---------------------------------------------------------------------------
 // Teardown

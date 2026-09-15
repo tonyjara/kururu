@@ -29,6 +29,27 @@ describe("matchDevCommand", () => {
     expect(matchDevCommand("pnpm serve")).toBe("pnpm serve");
   });
 
+  /**
+   * The monorepo shapes, which are most of the real ones: the flag's *value* is
+   * not the script, and filtering the flag out on its own left the value
+   * standing where the script should be. Kururu's own `dev:web` is this line.
+   */
+  it("steps over a flag the package manager takes a value for", () => {
+    expect(matchDevCommand("bun run --cwd /Users/x/kururu/web dev")).toBe("bun dev");
+    expect(matchDevCommand("npm --prefix ./api run dev")).toBe("npm dev");
+    expect(matchDevCommand("pnpm -C web dev")).toBe("pnpm dev");
+    expect(matchDevCommand("npm run -w web dev")).toBe("npm dev");
+    expect(matchDevCommand("pnpm --filter web dev")).toBe("pnpm dev");
+  });
+
+  it("does not eat the argument of a flag that comes after the script", () => {
+    expect(matchDevCommand("npm run dev -- --port 3001")).toBe("npm dev");
+  });
+
+  it("still refuses a non-dev script behind a flag", () => {
+    expect(matchDevCommand("bun run --cwd web typecheck")).toBeNull();
+  });
+
   it("does not match a dev server's name used as an argument", () => {
     expect(matchDevCommand("vim vite.config.ts")).toBeNull();
     expect(matchDevCommand("/usr/bin/ssh -N host")).toBeNull();
