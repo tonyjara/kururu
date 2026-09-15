@@ -8,7 +8,7 @@
  * serialized on demand, at a width the client named in the request, because a
  * serialized screen is laid out at a width and reconstructing it at any other
  * one wraps every row and never recovers. Almost everything expensive in the
- * terminal path exists to make that survivable, and its only job is to paper
+ * terminal path existed to make that survivable, and its only job was to paper
  * over the rebuild.
  *
  * Nobody else does it that way, including the people who wrote this emulator:
@@ -33,10 +33,18 @@
  * emulator asks — a first borrow, one that was evicted and came back, one whose
  * socket dropped while it was off screen. Ordinary navigation asks for nothing,
  * because there is nothing to rebuild.
+ *
+ * What is *no longer* true is that a pane decides how big its terminal is. An
+ * emulator here measures its box and proposes the grid; the server collects the
+ * proposals, picks one, resizes the pty, and sends back the shape everybody is
+ * to draw at. So the only places an emulator changes size are `sink.size` and
+ * `sink.reset`, both of which are the server answering — and the pty and the
+ * emulator can no longer hold two ideas of where a row ends, which is the
+ * disagreement underneath every screen kururu has drawn wrong.
  */
 import { FitAddon, init, Terminal } from "ghostty-web";
 import { usableGrid } from "./grid";
-import { input, rebuild, resize, subscribeOutput, warm } from "./session";
+import { input, proposeSize, rebuild, subscribeOutput, warm } from "./session";
 
 /**
  * How many emulators are kept.
@@ -54,7 +62,13 @@ import { input, rebuild, resize, subscribeOutput, warm } from "./session";
  */
 const POOL_MAX = 12;
 
-/** How long a pane has to stop changing size before the pty is told about it. */
+/**
+ * How long a pane has to stop changing size before the server hears about it.
+ *
+ * The pty is still on the far end of that proposal, and every resize it gets is
+ * a SIGWINCH that makes an agent TUI repaint completely — so dragging a divider
+ * without this repaints the program on every frame of the drag.
+ */
 const RESIZE_SETTLE_MS = 60;
 
 /**
@@ -246,45 +260,58 @@ function create(agentId: string): Pooled {
     if (entry.wantsFocus) em.focus();
 
     /**
-     * Nothing is subscribed until the grid is the pane's.
+     * Measure the box and say so — and do nothing else, which is the change.
      *
-     * An emulator built without `cols`/`rows` is 80x24, and it stays 80x24 until
-     * a fit lands — which cannot happen on the frame after a split, when the box
-     * has no size yet, nor before the renderer has measured a character. A
-     * backlog is a screen *serialized at the size the server thinks it is*, so
-     * writing one into an 80-column grid wraps every line of it at 80 and leaves
-     * it wrapped; the later resize unwraps the text but not the damage, and what
-     * is left is a screen the agent believes it has already drawn correctly and
-     * will never repaint. Asking a frame later costs nothing and cannot land in
-     * the wrong shape.
+     * The emulator used to fit itself here and tell the pty what it had become.
+     * That made the size whichever pane resized last, so a second client of
+     * another width made the first one ragged, and it let this emulator and the
+     * pty believe different things about where a row ends, which is the
+     * disagreement underneath every screen kururu has drawn wrong. So the box
+     * is measured, the measurement is *proposed*, and the emulator changes
+     * shape only when the server answers with one — in `sink.size`, and in
+     * `sink.reset`, which is the same answer arriving on the message that
+     * depends on it.
      *
-     * `proposeDimensions` rather than catching a throw from `fit`: fit does not
-     * throw when the renderer has no cell size yet, it quietly does nothing, so
-     * a try/catch cannot tell "fitted" from "silently skipped". And its answer
-     * goes through `usableGrid` rather than merely being checked for being a
-     * number, because this addon does not decline to measure an unlaid-out box —
-     * it clamps, and answers `2x1`, which is finite, positive and catastrophic.
+     * Nothing is proposed, and nothing subscribed, until the measurement is the
+     * pane's. `proposeDimensions` rather than catching a throw from `fit`: fit
+     * does not throw when the renderer has no cell size yet, it quietly does
+     * nothing, so a try/catch cannot tell "fitted" from "silently skipped". And
+     * its answer goes through `usableGrid` rather than merely being checked for
+     * being a number, because this addon does not decline to measure an
+     * unlaid-out box — it clamps, and answers `2x1`, which is finite, positive
+     * and catastrophic: the smallest proposal is the one the server takes, so a
+     * bad small one is the worst input this could possibly send.
      *
      * A detached element is the same question with a different cause and the
-     * same right answer: it reports no width, so the measurement is refused, the
-     * emulator keeps the shape it was last drawn at, and the pty hears nothing
-     * about a pane that no longer exists.
+     * same right answer: it reports no width, so the measurement is refused,
+     * the emulator keeps the shape it was last told, and a terminal nobody can
+     * see says nothing about how big it would like to be.
+     *
+     * Three cases, and only the last of them is a box moving. A first
+     * measurement subscribes; one that a reconnect left behind asks for the
+     * screen it missed; both of those are a pane *arriving*, so their proposal
+     * goes immediately — `askBacklog` sends it, because the history about to
+     * come back is laid out in whatever shape the server settles on. Everything
+     * after that is a divider being dragged or a window being resized, and that
+     * waits for the box to stop moving: every resize is a SIGWINCH and every
+     * agent TUI repaints completely on one.
      */
     const measure = () => {
       if (disposed) return;
-      if (!usableGrid(fit.proposeDimensions())) return;
-      fit.fit();
+      const grid = usableGrid(fit.proposeDimensions());
+      if (!grid) return;
       if (!subscribed) {
         subscribed = true;
-        unsubscribe = subscribeOutput(agentId, sink);
-      } else if (entry.stale) {
-        // A reconnect happened while this was off screen. Now that it is in a
-        // box again, it can say what shape to rebuild it at.
+        unsubscribe = subscribeOutput(agentId, sink, grid);
+        return;
+      }
+      if (entry.stale) {
         entry.stale = false;
-        rebuild(agentId, sink);
+        rebuild(agentId, grid);
+        return;
       }
       if (settle) clearTimeout(settle);
-      settle = setTimeout(() => resize(agentId, em.cols, em.rows), RESIZE_SETTLE_MS);
+      settle = setTimeout(() => proposeSize(agentId, grid.cols, grid.rows), RESIZE_SETTLE_MS);
     };
 
     const sink = {
@@ -300,18 +327,33 @@ function create(agentId: string): Pooled {
         if (!disposed) em.write(data);
       },
       /**
-       * The shape this emulator is drawing at, asked for rather than remembered:
-       * the pane is resizable, and a reconnect asks again on behalf of an
-       * emulator that has been sitting here for an hour.
+       * The shape the server says this terminal is. The one place a pooled
+       * emulator changes size, other than the backlog that carries the same
+       * answer on the message whose correctness depends on it.
+       *
+       * It applies while detached, and has to. A warm emulator goes on being
+       * fed bytes an agent laid out for the pty's grid, so one left at the old
+       * shape would wrap every line of them — and it would then hand that
+       * damage to the next pane that borrows it, having asked for nothing,
+       * because there is nothing about a tab switch that says a rebuild is
+       * needed.
        */
-      grid: () => ({ cols: em.cols, rows: em.rows }),
+      size: (cols: number, rows: number) => {
+        if (disposed) return;
+        if (cols < 2 || rows < 2) return;
+        if (cols === em.cols && rows === em.rows) return;
+        em.resize(cols, rows);
+      },
       /**
-       * The socket came back while this was off screen. It cannot be rebuilt
-       * here — a backlog is a screen at a width and a detached element has none
-       * — so it is noted and `measure` picks it up the moment a pane borrows it.
+       * The socket came back. What that costs depends on whether anybody can
+       * see this, and the element is what knows: `measure` refuses a detached
+       * box, so a pooled emulator off screen simply stays marked and is picked
+       * up the moment a pane borrows it, while one in a pane proposes its size
+       * and asks for the screen it missed on this very call.
        */
       stale: () => {
         entry.stale = true;
+        measure();
       },
       /**
        * A backlog replaces the whole screen, and nothing has to be done to make
@@ -332,20 +374,27 @@ function create(agentId: string): Pooled {
          * width, and this is the width it was serialized at. Written into any
          * other shape, every row longer than the target wraps, everything below
          * it slides down, and the top scrolls away.
+         *
+         * It is almost always the shape this already is — the server settled on
+         * it before serializing, and said so. Almost, because a resize can be
+         * decided while a screen is being built, and then the answer names the
+         * grid the *host* used and a `grid` follows it. Which is why this
+         * applies the size it was given rather than trusting that it matches:
+         * the screen and the shape it is laid out in travel together, and that
+         * is the only way the two can never be out of step.
          */
         if (cols >= 2 && rows >= 2 && (cols !== em.cols || rows !== em.rows)) {
           em.resize(cols, rows);
         }
         em.reset();
-        em.write(data, () => {
-          /**
-           * And back to the box, in the case where that was not already the
-           * shape of it. Reflowing a correct screen is what an emulator does for
-           * every window resize; reflowing a wrapped one would be reflowing
-           * damage.
-           */
-          measure();
-        });
+        em.write(data);
+        /**
+         * And nothing afterwards. This used to fit back to the box, because the
+         * emulator owned its own size and a backlog had just overwritten it
+         * with the server's idea of one. There is one idea now; the box's shape
+         * was proposed in the same breath as the request that produced this,
+         * and if it has moved since, the ResizeObserver has already said so.
+         */
       },
     };
 

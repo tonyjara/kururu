@@ -63,6 +63,7 @@ import { MouseEncoding } from "./mouseencoding";
 import { readSnapshot, writeSnapshot } from "./persist";
 import { closeAllPreviews, closePreview, openPreview, openPreviews } from "./proxy";
 import { reach } from "./reach";
+import { smallestGrid, type Grid } from "./sizing";
 import { Workspaces } from "./workspaces";
 
 const PORT = Number(process.env.KURURU_PORT ?? 7717);
@@ -113,6 +114,22 @@ interface ClientState {
    * terminal a client had pooled could ever be marked unread again.
    */
   warm: Set<string>;
+  /**
+   * The grid each of this client's panes says it could draw that terminal at.
+   *
+   * A proposal, never an instruction — see `applySize` for what is done with
+   * them. Kept per client rather than reduced on arrival because the policy is
+   * a minimum over the clients that can *see* the terminal, and a client going
+   * away or looking elsewhere changes the answer without anybody proposing
+   * anything.
+   *
+   * Withdrawn by `watch`: a terminal a client no longer lists as visible loses
+   * its entry here. That is deliberately the same message that already says
+   * what a human can see, rather than a second one that could disagree with it
+   * — and it is what stops a warm client, whose detached emulator cannot
+   * measure a box and so never proposes anyway, from having a vote.
+   */
+  proposals: Map<string, Grid>;
   /**
    * Terminals whose backlog is still being prepared, holding the live output
    * that arrived in the meantime.
@@ -486,6 +503,8 @@ function killAll(agentIds: string[]): void {
     activity.delete(agentId);
     lastAgent.delete(agentId);
     unread.delete(agentId);
+    sizes.delete(agentId);
+    for (const st of clients.values()) st.proposals.delete(agentId);
     forgetRecording(agentId);
     mouseEncodings.delete(agentId);
   }
@@ -511,6 +530,123 @@ function syncWatched(): void {
     for (const id of st.warm) watched.add(id);
   }
   host.watch(watched);
+}
+
+/**
+ * The shape each terminal is, as decided here rather than claimed by a pane.
+ *
+ * Empty at startup and filled by the first proposal, which is the honest state
+ * of affairs: a pty the host spawned has whatever grid the host gave it, this
+ * process has no way to ask, and the first client to put a pane on it is the
+ * first thing that makes the size a decision anybody made. See `ownedGrid` for
+ * the one path that has to answer before that has happened.
+ */
+const sizes = new Map<string, Grid>();
+
+/**
+ * The shape to fall back on for a terminal nothing has ever proposed a size for
+ * — and it is applied, not merely reported, which is what makes it safe.
+ *
+ * It mirrors the spawn grid in `agents/screen.ts` rather than importing it:
+ * that module is the pty host's and pulling it in here would drag a headless
+ * xterm into this bundle, and the alternative — a constant they share — means
+ * editing a file in `agents/`, which costs the user every agent they are
+ * running. A mirror that has drifted therefore has to be harmless, and it is:
+ * the screen is put into this shape before it is serialized, so the answer
+ * names a grid that is true whether or not the guess matched.
+ *
+ * Nothing should reach it. `web/src/session.ts` sends `propose-size` and
+ * `request-backlog` from one function for exactly this reason, so by the time
+ * a history is being built the server owns a size for that terminal.
+ */
+const FALLBACK_GRID: Grid = {
+  cols: Number(process.env.KURURU_COLS) || 120,
+  rows: Number(process.env.KURURU_ROWS) || 40,
+};
+
+/**
+ * The grid a terminal is at, establishing one if nobody has ever said.
+ *
+ * A read in every case that matters. The write is the cold path above, and it
+ * resizes rather than guessing quietly, because a caller asking this is about
+ * to lay a screen out in the answer.
+ */
+function ownedGrid(agentId: string): Grid {
+  const had = sizes.get(agentId);
+  if (had) return had;
+  host.resize(agentId, FALLBACK_GRID.cols, FALLBACK_GRID.rows);
+  const grid = { ...FALLBACK_GRID };
+  sizes.set(agentId, grid);
+  return grid;
+}
+
+/**
+ * Decide how big a terminal is, resize it, and tell everybody drawing it.
+ *
+ * This is the inversion Part 2 of the lifecycle rework exists for. A pane used
+ * to fit its emulator to its own box and inform the pty afterwards, so the size
+ * was whichever client resized last — which is fine with one window, is why a
+ * phone made the desktop ragged, and, worse, let the client and the pty hold
+ * two ideas of the shape at once. Every screen kururu has drawn wrong has been
+ * that disagreement. Now the pty is resized first and each client's emulator
+ * conforms to what it is told, in that order, so the two cannot diverge.
+ *
+ * The policy itself is `sizing.ts`, which argues for it. What is here is whose
+ * proposals are still in play, and the answer is *everyone who has one* — with
+ * no test against `watching`, deliberately. A pane measures its box in a layout
+ * effect and the watch listing it arrives a passive effect later, so a proposal
+ * is reliably the first this server hears of a terminal being on screen;
+ * requiring `watching` to already contain it would mean answering the first
+ * backlog at a size nobody asked for and correcting it a moment afterwards. So
+ * a proposal counts from the moment it arrives, and `watch` is what takes it
+ * away again — which is also what keeps a warm client, whose detached emulator
+ * cannot measure a box and so never proposes anyway, out of the minimum.
+ */
+function applySize(agentId: string): void {
+  const proposals: Grid[] = [];
+  for (const st of clients.values()) {
+    const proposed = st.proposals.get(agentId);
+    if (proposed) proposals.push(proposed);
+  }
+  const next = smallestGrid(proposals);
+  if (!next) return;
+  const { cols, rows } = next;
+  const had = sizes.get(agentId);
+  if (had && had.cols === cols && had.rows === rows) return;
+  sizes.set(agentId, next);
+  // Recorded for the same reason an input is: a repaint arriving on the wrong
+  // side of a resize is the shape of most terminal bugs, and the bytes alone
+  // cannot show which side it was on.
+  recordNote(agentId, "resize", `${cols}x${rows}`);
+  host.resize(agentId, cols, rows);
+  /**
+   * Warm clients are told too. A pooled emulator that is off screen is still
+   * being fed bytes the agent laid out for the pty's grid, so an emulator left
+   * at the old shape would wrap every one of them — and it would carry that
+   * damage into the pane that borrows it next, having asked for nothing,
+   * because there is nothing about a tab switch that says a rebuild is needed.
+   */
+  for (const [ws, st] of clients) {
+    if (sees(st, agentId)) send(ws, { type: "grid", agentId, cols, rows });
+  }
+}
+
+/**
+ * A client went away, which is a window closing, a phone going to sleep, or
+ * this server being about to be replaced. Everything it was holding open goes
+ * with it: the terminals it had streaming, and its say in how big they are.
+ *
+ * The sizes are decided again *after* it is out of the map, so its proposals
+ * are gone from the minimum. Closing the narrow window is how the wide one gets
+ * its columns back, and without this the last shape a departed client asked for
+ * would outlive it for as long as the terminal did.
+ */
+function dropClient(ws: WebSocket): void {
+  const st = clients.get(ws);
+  if (!st) return;
+  clients.delete(ws);
+  syncWatched();
+  for (const agentId of st.proposals.keys()) applySize(agentId);
 }
 
 /**
@@ -552,33 +688,30 @@ function openQueue(st: ClientState, agentId: string): void {
 }
 
 /**
- * Size the terminal to the pane that asked, then hand that pane the history.
+ * Hand a pane the history of a terminal, at the size the server owns.
  *
- * The resize comes first and that ordering is the whole fix. A backlog is the
- * server's emulator *serialized*, and a serialized screen is laid out at a
- * particular width: reconstructed into a grid of a different one it wraps, the
- * rows below shift, and the top scrolls away. The client's buffer then disagrees
- * with the server's about where everything is — permanently, because an agent
- * redraws differentially and never resends a row it believes is already right.
- * That was the borked text on a workspace switch and the cwd sitting inside an
- * agent's input box, and both are the same disagreement.
+ * It used to resize first, to whatever grid the asking pane claimed on the
+ * request, because a backlog is the server's emulator *serialized* and a
+ * serialized screen is laid out at a particular width: reconstructed into a
+ * grid of a different one it wraps, the rows below shift, and the top scrolls
+ * away. The client's buffer then disagrees with the server's about where
+ * everything is — permanently, because an agent redraws differentially and
+ * never resends a row it believes is already right. That was the borked text on
+ * a workspace switch and the cwd sitting inside an agent's input box.
  *
- * So the pane's grid arrives on the same message as the request, the screen is
- * put into that shape before it is serialized, and the answer names the shape it
- * used. The resize is not debounced here the way a live one is: this is not the
- * box moving, it is a pane arriving, and it happens once.
+ * The shape still has to be right; what changed is who says so. It is settled
+ * before this is ever called, by the `propose-size` the client sends in the
+ * same breath as its request, so there is nothing to resize here and nothing to
+ * take a pane's word for. The answer names the grid all the same — a screen
+ * that states its own shape is correct for whoever receives it, and that is
+ * worth keeping for the one ordering a single size does not cover.
  *
- * Everything after the `await` re-checks. A pane can close, or the whole socket
- * go away, in the time it takes to drain the write queue and serialize.
+ * Everything after the `await` re-checks. A pane can close, the whole socket go
+ * away, or the size be decided again by another client, in the time it takes to
+ * drain the write queue and serialize.
  */
-async function sendBacklog(
-  ws: WebSocket,
-  agentId: string,
-  cols: number,
-  rows: number,
-  epoch: number,
-): Promise<void> {
-  host.resize(agentId, cols, rows);
+async function sendBacklog(ws: WebSocket, agentId: string): Promise<void> {
+  const { cols, rows } = ownedGrid(agentId);
   /**
    * The serialized screen, plus the one thing it cannot carry. Appended here
    * rather than in `screen.ts` so this fix costs a reconnect and not every agent
@@ -595,7 +728,23 @@ async function sendBacklog(
     // explained by replaying exactly what rebuilt it.
     recordNote(agentId, "backlog", `${data.length} bytes rebuilt at ${cols}x${rows}`);
     recordBacklog(agentId, data);
-    send(ws, { type: "backlog", agentId, data, cols, rows, epoch });
+    send(ws, { type: "backlog", agentId, data, cols, rows });
+    /**
+     * And the shape again, if it moved while this was being built.
+     *
+     * The host serialized at `cols`x`rows` — it had the request before any
+     * later resize — so the answer is correct and the client is right to
+     * become that shape to read it. But the `grid` announcing the newer size
+     * went out *before* this did, so without this the client would end up back
+     * at the older one while the pty sat at the newer, which is exactly the
+     * permanent disagreement everything else here is arranged to prevent. It
+     * takes two clients and a resize inside a few milliseconds to reach, and it
+     * costs one message to close.
+     */
+    const now = sizes.get(agentId);
+    if (now && (now.cols !== cols || now.rows !== rows)) {
+      send(ws, { type: "grid", agentId, cols: now.cols, rows: now.rows });
+    }
   }
   // A later rebuild is still being prepared, so the hold stays on for it.
   if (--pending.inflight > 0) return;
@@ -945,12 +1094,20 @@ function handleMessage(ws: WebSocket, raw: string): void {
       host.write(msg.agentId, msg.data);
       return;
 
-    case "resize":
-      // Recorded because a repaint arriving on the wrong side of a resize is the
-      // shape of most terminal bugs, and the bytes alone cannot show which.
-      recordNote(msg.agentId, "resize", `${msg.cols}x${msg.rows}`);
-      host.resize(msg.agentId, msg.cols, msg.rows);
+    case "propose-size": {
+      /**
+       * A pane's opinion, not its decision. Checked to the same floor the host
+       * checks to, so a box that has not been laid out cannot enter the
+       * minimum: the smallest proposal wins, which makes a bad small one the
+       * worst possible input this could take.
+       */
+      const { agentId, cols, rows } = msg;
+      if (!Number.isInteger(cols) || !Number.isInteger(rows)) return;
+      if (cols < 2 || rows < 2) return;
+      st.proposals.set(agentId, { cols, rows });
+      applySize(agentId);
       return;
+    }
 
     case "watch": {
       const next = new Set(msg.agentIds);
@@ -958,6 +1115,19 @@ function handleMessage(ws: WebSocket, raw: string): void {
       const opened = [...next].filter((id) => !st.watching.has(id));
       st.watching = next;
       st.warm = kept;
+      /**
+       * Withdraw the proposals for whatever this client can no longer see, and
+       * decide those terminals again without them. This is how a pane closing
+       * gives the size back — the other client watching the same agent stops
+       * being held to a width nobody is drawing at, and a terminal with no
+       * visible watcher left keeps the shape it had rather than being resized
+       * by whoever merely has it pooled.
+       */
+      for (const id of [...st.proposals.keys()]) {
+        if (next.has(id)) continue;
+        st.proposals.delete(id);
+        applySize(id);
+      }
       // A pane that closed while its backlog was in flight should not receive it
       // — unless the emulator behind it is still pooled, in which case it is the
       // same emulator and the same question, merely off screen.
@@ -989,9 +1159,11 @@ function handleMessage(ws: WebSocket, raw: string): void {
       // Queue this terminal's live output behind the history: the client is
       // about to clear its emulator, and anything that overtakes the answer
       // would be wiped by it. `openQueue` counts rather than sets, so two
-      // rebuilds in flight at once do not release each other's hold.
+      // rebuilds in flight at once do not release each other's hold — rare now
+      // that ordinary navigation rebuilds nothing, and kept because counting is
+      // free and the bug it prevents is bytes the client never sees again.
       openQueue(st, msg.agentId);
-      void sendBacklog(ws, msg.agentId, msg.cols, msg.rows, msg.epoch);
+      void sendBacklog(ws, msg.agentId);
       return;
 
     // --- panes -------------------------------------------------------------
@@ -1595,19 +1767,18 @@ server.on("upgrade", (req, socket, head) => {
     return;
   }
   wss.handleUpgrade(req, socket, head, (ws) => {
-    clients.set(ws, { watching: new Set(), warm: new Set(), awaiting: new Map() });
+    clients.set(ws, {
+      watching: new Set(),
+      warm: new Set(),
+      proposals: new Map(),
+      awaiting: new Map(),
+    });
     send(ws, { type: "snapshot", snapshot: snapshot() });
     send(ws, { type: "dev-servers", servers: state.devServers });
 
     ws.on("message", (data) => handleMessage(ws, data.toString()));
-    ws.on("close", () => {
-      clients.delete(ws);
-      syncWatched();
-    });
-    ws.on("error", () => {
-      clients.delete(ws);
-      syncWatched();
-    });
+    ws.on("close", () => dropClient(ws));
+    ws.on("error", () => dropClient(ws));
   });
 });
 

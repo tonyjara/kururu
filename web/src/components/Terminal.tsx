@@ -5,8 +5,9 @@
  * by agent id in `terminals.ts` and live as long as their terminal does, because
  * tying one to the view that draws it is what made a tab switch, a workspace
  * change and a drag each throw a screen away and rebuild it from a
- * reconstruction the server had to serialize at whatever width the asker
- * claimed. This component borrows one on mount and hands it back on unmount, and
+ * reconstruction. Nor does it own a *size*: a pane proposes one and the server
+ * decides, so there is nothing here that fits, measures or resizes anything.
+ * This component borrows an emulator on mount and hands it back on unmount, and
  * the handing back is a `removeChild` rather than a teardown.
  *
  * The pooled element is appended imperatively into the ref'd mount rather than
