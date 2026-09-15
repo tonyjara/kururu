@@ -24,8 +24,8 @@
  * profile, it always has at least one workspace, that workspace always has at
  * least one pane, and the focused pane always exists.
  */
-import type { Profile, ProfileSummary, Workspace, WorkspaceDev } from "../../shared/model";
-import { isWorkspaceColor } from "../../shared/model";
+import type { Profile, ProfileIdentity, ProfileSummary, Workspace, WorkspaceDev } from "../../shared/model";
+import { adoptIdentity, blankIdentity, isWorkspaceColor } from "../../shared/model";
 import {
   addTab,
   closePane,
@@ -86,6 +86,12 @@ const id = nextId;
 function adopt(profile: Profile): Profile {
   return {
     ...profile,
+    // Three paths a blob written before this version simply does not have, and
+    // an absent identity is the same answer as an empty one: every tool as the
+    // machine has it. Adopted rather than spread through, because a path that
+    // has stopped being absolute is a path that would mean a different
+    // directory in every pane it opened a terminal in.
+    identity: adoptIdentity(profile.identity),
     workspaces: profile.workspaces.map((workspace) => ({
       ...workspace,
       color: isWorkspaceColor(workspace.color) ? workspace.color : null,
@@ -151,6 +157,7 @@ export class Workspaces {
       name: profile.name,
       workspaces: profile.workspaces.length,
       agents: liveAgents(profile.id),
+      identity: profile.identity,
     }));
   }
 
@@ -766,6 +773,30 @@ export class Workspaces {
   }
 
   /**
+   * Point a profile's terminals at a different set of accounts.
+   *
+   * Any profile, not just the active one — Settings shows them all at once, and
+   * having to switch profile to describe one would make filling in a form a
+   * thing you do by standing somewhere. It touches nothing that is running:
+   * `ProfileIdentity` is read when a pty is spawned, so this is a statement
+   * about the next terminal.
+   */
+  setProfileIdentity(profileId: string, identity: ProfileIdentity): void {
+    if (!this.profiles.some((p) => p.id === profileId)) return;
+    this.profiles = this.profiles.map((p) => (p.id === profileId ? { ...p, identity } : p));
+    this.onChange();
+  }
+
+  /**
+   * Who a profile is, for the endpoint that asks the tools about it. Blank for
+   * an id nobody has: an unknown profile and one that has claimed nobody are the
+   * same answer, which is the machine exactly as it stands.
+   */
+  identityOf(profileId: string): ProfileIdentity {
+    return this.profiles.find((p) => p.id === profileId)?.identity ?? blankIdentity();
+  }
+
+  /**
    * Delete a profile and say what it was running. The last one cannot go — there
    * is always somewhere to be.
    */
@@ -805,6 +836,10 @@ export class Workspaces {
       workspaces: [workspace],
       activeWorkspaceId: workspace.id,
       lastWorkspaceId: null,
+      // Nobody in particular. A new profile inherits nothing, on the same
+      // reasoning as a new workspace's null colour: a default copied at
+      // creation is a default that stops following the machine.
+      identity: blankIdentity(),
     };
   }
 

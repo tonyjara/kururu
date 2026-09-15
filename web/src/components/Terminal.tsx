@@ -28,11 +28,17 @@ import { borrow, release, setFocused } from "../terminals";
 
 interface Props {
   agentId: string;
-  /** Focused panes get the keyboard. Only one does. */
+  /** This is the focused pane. Only one is. Drives the cursor. */
   focused: boolean;
+  /**
+   * Keys may reach a pty — false while a dialog, Settings or the help overlay
+   * is up. Drives the DOM focus, and deliberately not the cursor: see
+   * `setFocused`.
+   */
+  keyboard: boolean;
 }
 
-export function TerminalView({ agentId, focused }: Props) {
+export function TerminalView({ agentId, focused, keyboard }: Props) {
   const mount = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -46,8 +52,8 @@ export function TerminalView({ agentId, focused }: Props) {
   // rather than applied once, because the first emulator of a session is still
   // waiting on the WASM when the pane that would focus it mounts.
   useEffect(() => {
-    setFocused(agentId, focused);
-  }, [agentId, focused]);
+    setFocused(agentId, focused, keyboard);
+  }, [agentId, focused, keyboard]);
 
   /**
    * A file dropped from the Finder is typed in, escaped, exactly as every other

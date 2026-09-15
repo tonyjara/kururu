@@ -104,6 +104,8 @@ shared/      Protocol types and the tree. No runtime deps; imported by everythin
   layout.ts      The split tree and every pure operation on it. Both halves use it
   keys.ts        Every action, ghosttown's default keys, and the overrides a user
                  saved. Shared because the server validates a rebinding
+  theme.ts       Every theme, both halves of each — the chrome's tokens and the
+                 emulator's ANSI palette. Shared because both sides draw from it
   wire.ts        Kururu's own browser↔server protocol + timer intervals
 server/      Node (not Bun — it was Electron's once and the bundles stayed). Two
              processes, and nothing owns either of them.
@@ -127,7 +129,11 @@ server/      Node (not Bun — it was Electron's once and the bundles stayed). T
   mascot.ts      Which sheets the badge can animate, which parts, and which one.
                  Also the import: the one endpoint that writes a file for a client
   keys.ts        The keymap a user has amended. Persistence only; the table is shared
-  config.ts      ~/.config/kururu, and how the two settings files are written
+  identity.ts    Which accounts a profile's terminals open as: three env vars,
+                 the CLIs asked who that turned out to be and what there is to
+                 pick from, and the five lines of gh config a choice is stored as
+  appearance.ts  The theme id and the terminal's type. Persistence only, likewise
+  config.ts      ~/.config/kururu, and how the three settings files are written
   devservers.ts  lsof + ps discovery of dev servers, from both ends; stopping one
   proxy.ts       Per-dev-server reverse proxy (HTTP + WS) for phone access
   files.ts       Traversal-safe file listing/reading
@@ -142,7 +148,10 @@ web/         React 19 + Vite. One build; the desktop is what it is shaped for.
                  Measures its box and proposes a grid; never resizes itself
   keys.ts        The prefix, and a KeyboardEvent as a string the table can be
                  looked up by. The table itself is shared/keys.ts now
-  colors.ts      What a workspace colour name looks like. The web's half of it
+  colors.ts      What a workspace colour name looks like — now a lookup into the
+                 theme, since a palette picked against one chrome is wrong on another
+  theme.ts       Writes the theme's tokens onto <html> and hands the other half
+                 to the emulators. One loop and a setProperty; no React anywhere
   desktop.ts     The preload bridge, typed. Null in a browser, and that's the contract
   drop.ts        A file dropped on a terminal → the path to type. Pure; tested
   labels.ts      What to call a terminal, in the two places that have to agree
@@ -155,8 +164,12 @@ web/         React 19 + Vite. One build; the desktop is what it is shaped for.
     Sidebar.tsx    Workspaces (numbered) and every agent in the profile
     Status.tsx     The status mark: a dot, or the mascot while it is working
     Settings.tsx   The cog's dialog: a tab bar, and the way out
+    SettingsProfiles.tsx  The profiles — switch, rename, delete — and the paths
+                   that say which Claude and which github account each opens with
     SettingsMascot.tsx  The ones you kept, and a run of cells dragged out of a sheet
     SettingsKeys.tsx    Every action, its keys, and a capture box to change them
+    SettingsAppearance.tsx  The theme list, drawn in the themes, and the terminal's
+                   font and cursor. The tab Settings opens on
     StatusBar.tsx  Where you are, and the PREFIX badge
     Dialog.tsx     Prompt / confirm / pick. While one is up, no key reaches a pty
     HelpOverlay.tsx  Printed from the keymap, so it cannot document a dead key
@@ -437,11 +450,18 @@ and its log is the only place its side of a bug shows up.
   and it stayed wrong exactly where the agent never writes again, because an
   agent redraws differentially and never resends a cell it believes is already
   correct. That cost a `clearTextureAtlas` and a `refresh(0, rows-1)` in the
-  `write` callback. Ghostty's renderer draws the viewport from the WASM buffer on
-  its own loop rather than from a record of which cells it thinks are dirty, so a
-  screen replaced wholesale is simply the screen it draws next, and the call is
-  gone. Symptom if that assumption is ever wrong: content from before the agent
-  started, sitting inside its UI, until a window resize forces a full repaint.
+  `write` callback. Ghostty's renderer needs no equivalent, and the reason is
+  narrower than this file used to claim — it said the renderer draws the viewport
+  from the WASM buffer rather than from a record of what is dirty, and **that is
+  not true**. `startRenderLoop` calls `render(buffer, forceAll = false, …)` and
+  redraws only the rows the buffer reports dirty, plus the cursor's row. What
+  saves the backlog is that replacing a whole screen dirties the whole screen, so
+  the ordinary path happens to be a full repaint; `forceAll` is passed only by
+  `open`, `resize` and a font change. Symptom if *that* is ever wrong: content
+  from before the agent started, sitting inside its UI, until a window resize
+  forces a full repaint. Anything that changes how the screen *looks* without
+  writing to it — a palette swap is the one that exists — has to force the
+  repaint itself, because nothing marks a row dirty for it.
 - **A backlog is self-describing, which is what replaced matching it to a
   particular asker.** It used to arrive unbidden and could land before any
   emulator had subscribed, so `session.ts` held one for whatever sink appeared
@@ -531,6 +551,151 @@ and its log is the only place its side of a bug shows up.
   dot said. A 16px sprite is in the class of a spinner, not the sliding parallax
   that preference exists to stop, so it is offered in Settings instead of obeyed
   silently.
+- **There is one palette, and a theme names both halves of it.** It was two,
+  kept in step by hand: the chrome in `styles.css`, the emulator's in a `THEME`
+  constant in `terminals.ts`, because ghostty paints into a canvas CSS cannot
+  reach. That was a fair price for one hand-sync and an unpayable one per theme,
+  so a `Theme` in `shared/theme.ts` holds the chrome tokens, the sixteen ANSI
+  slots, and the eight workspace tags together. `web/src/theme.ts` writes the
+  first onto `<html>` as custom properties and hands the second to every pooled
+  emulator. **Never write a hex into `styles.css` or a component.** A rule that
+  names a colour is a rule that stays one colour while the window changes around
+  it — `web/test/theme.test.ts` fails on one, and also fails if a token the CSS
+  asks for is one no theme answers, because that seam is held together by a
+  string on both sides and drifting it is invisible in the default theme.
+- **A theme is picked, not edited, and what is stored is its id.** Same argument
+  `keys.ts` makes about storing the difference from the defaults: a saved palette
+  would freeze kururu's tokens at the version you first opened Settings in, and a
+  token added later would be unset forever for everybody who had ever chosen. So
+  `appearance.json` holds an id, `themeFor` falls back rather than refusing (a
+  name from a downgrade draws the default, which is the same answer a check would
+  have bought), and a flavour restyled later restyles everywhere.
+- **Changing the theme must never resize a pty.** Colours do not move the cell,
+  so `applyTerminalAppearance` re-measures only when the *font* moved — a
+  proposal is a SIGWINCH into every agent watching, and paying that to go from
+  Mocha to Macchiato would make choosing a colour scheme repaint everybody's
+  work. A font change *does* re-measure, and goes through the same 60ms settle a
+  dragged divider does, for the same reason: a slider is dragged.
+- **Restyle an emulator; never rebuild one to restyle it.** The renderer's theme
+  is set directly (`renderer.setTheme`) rather than through `options.theme`,
+  which warns it is unsupported and is half right: the palette also went to the
+  WASM terminal at construction and nothing updates it there. That half only
+  answers colour *queries*, and it is right again the moment the emulator is
+  rebuilt; the renderer's copy is what every cell is actually drawn from, and it
+  repaints on the next animation frame with nothing to force. Rebuilding instead
+  would cost every visible terminal a backlog and every warm one its scrollback,
+  which is the whole thing the pool exists to prevent.
+- **The font setting is prepended to the built-in stack, never a replacement.**
+  That stack ends in four patched Nerd Font faces so an agent TUI's devicons are
+  not tofu, and somebody naming a font has said nothing about wanting those to
+  stop working. It does move the grid metrics, because the cell is measured from
+  the first face — which is exactly what choosing a font means, and the reason
+  the patched faces are appended in the first place.
+- **Only the focused pane draws a cursor, and kururu has to arrange that
+  itself.** ghostty-web has no concept of focus: `renderCursor` fills a rectangle
+  whenever the viewport is at the bottom and the terminal's own cursor mode says
+  visible, and nothing asks whether anybody is typing into it. Tiled, that is a
+  solid blinking block in every pane at once — and a terminal sitting at its home
+  position draws it in the top-left corner, which is how it was noticed. A real
+  terminal draws a hollow box unfocused; this renderer has no outline path, so
+  the choice is solid or nothing, and nothing is right because `pane-on` already
+  says where the keyboard is going. `setFocused` gives an unfocused emulator a
+  cursor style the renderer does not recognise, whose switch has no default case
+  and therefore draws nothing. Do **not** "fix" this by tinting the cursor to the
+  background instead: `renderCursor` paints over the glyph and never redraws it
+  in `cursorAccent`, so that is an erased character rather than a hidden cursor.
+- **A profile's identity is a pointer, never a secret.** Tying a Claude account
+  and a github account to a profile turns out to be three environment variables
+  — `CLAUDE_CONFIG_DIR`, which scopes a Claude Code login *completely* (a
+  directory that has not been logged in to comes up logged out, so two of them
+  are two accounts signed in at once rather than a switch with global state),
+  `GH_CONFIG_DIR`, which only names which of the accounts already in gh's keyring
+  is active, and `GIT_CONFIG_GLOBAL`. So `ProfileIdentity` is three paths. It is
+  three paths and not a free-form env map for a reason that is the same one
+  `files.ts` argues from: a profile travels in every snapshot and is written to
+  `session.json`, and kururu is reachable from the tailnet, so a map somebody
+  could put `ANTHROPIC_API_KEY` into would be a credential store every client can
+  read and that lands in plain text on disk. A path is not a secret; the secrets
+  stay in the login keychain and in files the OS is already protecting. A profile
+  that needs a key names an `apiKeyHelper` in the settings file the first path
+  points at, and kururu never learns it.
+  Null means the machine's default rather than the default *path*, on `mascotId`'s
+  reasoning. A path that is not absolute is **refused, not resolved** — a relative
+  one would resolve against whatever directory each terminal opened in, which is
+  the bug the feature exists to prevent arriving through the feature itself, and
+  unlike a run of cells a path has no nearest legal value.
+- **The identity reaches a pty at spawn and at no other time.** Which makes
+  changing it a statement about the *next* terminal, not about the five already
+  running — the same way `Workspace.dev` is a memory of a command rather than a
+  command. The overlay is built in `index.ts` from the **active** profile, never
+  from anything a client sends: every gesture that ends in a spawn is one
+  somebody just made in the profile they are looking at, and a client that could
+  name its own environment is a client that could name any environment. The host
+  takes it as an opaque map and merges it *under* `KURURU_AGENT_ID`, so nothing
+  nameable from outside can take the hook's own variable away from it. This is
+  the whole reason `agents/host.ts` had to be touched at all, and it is the one
+  place the host learns anything new about a spawn — it is told a map, never a
+  profile, for the same reason it holds the arrangement as a blob it cannot read.
+- **What is picked is an account; a directory is how the choice is stored.**
+  Nobody thinks "my work profile uses `~/.config/gh/work`" — they think "my work
+  profile is that github user". So Settings offers the accounts the tools already
+  know about and a path appears only in the line underneath and behind `Custom…`,
+  which exists for an arrangement kururu did not make and should not stand in the
+  way of. The two lists are built differently and the asymmetry is the tools':
+  gh holds several accounts in one keyring and a config directory only says which
+  is *active*, so an account has a name before any directory exists — which is
+  why gh directories are named after the **account** (`identities/gh/<login>`),
+  shared by every profile that picks it, and written by the server rather than
+  named by a client. A Claude account *is* its config directory and has no name
+  until somebody has signed in to one, so those are named after the **profile**
+  (`identities/claude/<slug>`) and labelled with whatever email is found in them.
+  `ensureGhConfig` writes that file once and never again: gh rewrites it itself
+  on every login and logout inside one of those terminals, and a file kururu
+  regenerated would throw away what gh had just recorded. Nothing it writes is a
+  secret — the file names an account and the keyring answers for it, which is the
+  whole reason a pointer is enough. And `slug()` trims leading dots as well as
+  dashes, because a profile called `..` is a name a client typed that would
+  otherwise build a path one directory up.
+- **Signing in is a terminal, not a dialog.** Both flows are a browser, a code to
+  paste and a few questions; the only thing a wrapper could add is somewhere for
+  them to go wrong quietly. So `sign-in` does the setup and then does what the
+  dev-server button does — opens a tab and types the line a person would type —
+  in the profile it is about, switched to first, so the prompt is on screen
+  rather than in a pane somewhere else. A **new** tab, never a live one, for the
+  reason the dev buttons have the same rule: a command typed at a waiting agent
+  is a prompt. The two tools want opposite things here and each half is load
+  bearing. Claude: the profile gets a directory of its own *before* anything is
+  typed, because signing in with nothing set would put the new account in
+  `~/.claude` and replace the one the machine had. Github: the login belongs in
+  gh's own config, where it is registered once and becomes pickable from every
+  profile — hence `env -u GH_CONFIG_DIR`, undoing this profile's override for the
+  length of one command rather than adding a second account to a directory named
+  after the first.
+  **Both lines name their own environment instead of relying on the pty's, and
+  that is not belt and braces — it is the one place this feature meets the
+  restart rule.** The overlay is applied by the pty host, the one process that
+  does not pick up an edit when you save it, so every change to this feature
+  opens a window where the server sends an `env` the running host is too old to
+  understand and silently drops. A terminal that opens as the wrong account is a
+  bad afternoon; a *login* that goes to the wrong directory replaces an account
+  somebody had. It cost exactly that once — the profile's directory left empty,
+  `~/.claude` written instead, and Settings correctly reporting "not signed in"
+  for a profile the user had just signed in from. A command that states its own
+  target works on any host, and being on screen it says where it is going while
+  it goes there. `shellQuote` is there because that target is a path somebody
+  named and the line is typed at a live shell.
+- **Who a profile *is* is fetched, not pushed.** Everything else Settings edits is
+  kururu's own state and arrives in the snapshot. This is the world's: it changes
+  when somebody runs `claude auth login` inside a terminal the server is only
+  watching, and answering it means running three CLIs. So `/api/identity` is
+  asked by the one page that draws it, at the moment it draws it, and the answer
+  is cached by the *environment* rather than by the profile — two profiles pointed
+  at one directory are one account and should not be two lookups. Asking is not
+  quite free of consequence and it is worth knowing which way: `claude auth
+  status` creates the config directory it is pointed at. That is the directory the
+  person just named and where their login is about to go, and the alternative —
+  refusing to describe a path until something else has created it — leaves a new
+  profile blank for no reason anybody could see.
 - **A workspace colour is a name, never a CSS value.** `set-workspace-color`
   takes one of `WORKSPACE_COLORS` and the server refuses everything else,
   *leaving the old value alone* rather than clearing it — a rejected write that
@@ -597,6 +762,20 @@ and its log is the only place its side of a bug shows up.
   phone drops the socket every time it sleeps. Disconnection is the normal case;
   render `connected`, do not throw. Note the agents survive it — they are
   processes on the other end, not a view onto somebody else's.
+- **`ptyhost.ts`'s relay forwards the request whole, and never names its
+  fields.** `case "create"` spreads everything but `type` and `id` into
+  `host.create`. It used to list them — `{ cwd, command, kind }` — and that cost
+  a restart nobody had budgeted for: `env` was added to `ToHost`, to
+  `HostLink.create` and to `AgentHost.create`, and dropped at this one line
+  between them. Nothing complained, because passing fewer properties than an
+  optional parameter accepts is perfectly good TypeScript, and the symptom was
+  three rooms away — a profile whose terminals kept opening as the wrong account,
+  with correct code on both sides of the gap. The general shape is worth
+  remembering whenever this feature is extended: a change to what a pty is
+  spawned with touches **four** files (`shared/wire.ts` or `hostlink.ts` for the
+  type, `index.ts` to send it, `ptyhost.ts` to relay it, `agents/host.ts` to use
+  it), three of them cost the agents, and only the last two look like they
+  matter. Do not reintroduce an enumeration here to "be explicit".
 - **Anything that would make `ptyhost.ts` need editing belongs on the other side
   of the link.** That is the whole rule of the split. The host holds the ptys,
   the emulators, and an *opaque* blob of whatever the server last called the
@@ -712,6 +891,24 @@ and its log is the only place its side of a bug shows up.
   they were working in, and the terminal you open in one starts there. This is
   the exception to the rule above, and the line is that a restored pane is not a
   pane being made: nobody just asked for it.
+- **Switching a profile is a menu; editing one is a page.** This has been all
+  three things a switcher can be, and the split it landed on is the one worth
+  keeping. It was a pick dialog, which was right while a profile was a name over
+  a list of workspaces. Then a profile grew an identity, which is a form, and a
+  dialog that picks beside a page that edits is two places that immediately start
+  disagreeing about what a profile is — so all of it moved to Settings →
+  Profiles. **That overcorrected, and the tell was a "Switch to" button on every
+  row.** Switching never stopped being *navigation*: it is done ten times an
+  afternoon, and routing it through a modal meant opening a dialog, reading a
+  list and clicking twice to move between two rooms — leaving the dialog standing
+  over a window that had changed behind it.
+  So the sidebar's profile name opens a menu (every profile, what each has
+  running, then "New profile…" and "Profile settings…"), `switch-profile`
+  (prefix+s) opens the same menu by measuring that button rather than guessing a
+  corner, and **Settings does not switch at all** — it marks the current profile
+  and otherwise edits. Each is the shape of its own job and neither duplicates
+  the other. Which is also why `Settings` takes the tab to open on: where it
+  opens is the caller's to say, where it goes next is not.
 - **An empty pane is the button.** The two ways to have one are closing a pane's
   last tab and restoring a layout, and in both there is exactly one thing it can
   do — so the pane body itself is what you click, rather than something drawn in
@@ -872,6 +1069,32 @@ no backlog, and one that is asked for comes back at the grid the *policy* owns
 rather than the grid the asker's own box is; a terminal nobody can see keeps its
 shape, and watching it again is not itself a resize; and an exited terminal's
 screen still reflows into a new pane with what it said intact.
+
+And profiles carrying an identity, against a real pty: an env overlay handed to
+`AgentHost.create` arrives in the pty's environment intact (`echo
+$CLAUDE_CONFIG_DIR` in a spawned shell prints it), `CLAUDE_CONFIG_DIR` was
+confirmed to scope a Claude login rather than only its settings (a scratch
+directory reports `loggedIn: false` while the default reports the real account),
+`GH_CONFIG_DIR` was confirmed to select a different one of the accounts in gh's
+keyring with the real config untouched, and `/api/identity` answers for a profile
+in about a second cold and instantly warm.
+
+And the picking: `/api/identity/known` enumerates every github account gh holds
+(three, each with the directory it would be stored as) alongside the Claude
+logins it can find, in about two seconds cold; `ensureGhConfig` writes a config
+gh then reads back as that account with a working token, is idempotent, leaves a
+file gh has since rewritten alone, and refuses an account name with a path in it;
+and `env -u GH_CONFIG_DIR` was confirmed to put a command back on the default
+registry from inside a profile that has an override.
+
+Both sign-in flows have since been run for real, and two accounts are signed in
+at once in two profiles. The overlay reaching an ordinary terminal is the part
+that is **still unproven in place**: the first attempt was against a host that
+predated the `env` parameter, and the second — with the host restarted and both
+bundles current — found that `ptyhost.ts` was dropping the field as it relayed
+it (see the invariant above). That is fixed and costs one more host restart to
+take effect. The check is `echo $CLAUDE_CONFIG_DIR` in a terminal opened in a
+profile that has claimed an account.
 
 And the hierarchy, end to end: tabs stack in a pane and reorder, a split inherits
 its parent's project, `focus-dir` crosses splits and stops at the edge, workspaces

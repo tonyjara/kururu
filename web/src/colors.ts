@@ -7,28 +7,42 @@
  * how it is *drawn* stays on the side that draws. A repaint can restyle the
  * whole palette; nobody's saved session has to be rewritten for it.
  *
- * Chosen against the chrome rather than against each other. These sit on
- * `--chrome` at a few pixels wide — a rule down the side of a row, a dot under a
- * number — so they are pitched brighter than the text and flatter than an
- * accent: bright enough to read at four pixels, dull enough that eight of them
- * in a list is not a toy. The first two are `--accent` and `--done` exactly, so
- * a tagged workspace never introduces a green or a blue the window did not
- * already have.
+ * It used to hold eight hexes, chosen against the chrome rather than against
+ * each other — these sit on `--chrome` at a few pixels wide, so they are pitched
+ * brighter than the text and flatter than an accent. That argument is exactly
+ * why they could not stay here once there was more than one chrome to be chosen
+ * against: a palette picked to sit on `#141817` is not the palette that sits on
+ * Latte. So the eight live in the theme now and this module is the lookup, which
+ * leaves the split above untouched — the server still stores a name, and what a
+ * name means is still entirely the web's business.
+ *
+ * The theme is read through the DOM rather than held, and that is deliberate.
+ * `applyTheme` has already written every token onto the root element, so the
+ * document is the one place that cannot be out of date with what is on screen —
+ * a copy kept here would be a second answer to "which theme is on", and the
+ * moment it disagreed the tags would be from the theme before last.
  */
 import type { WorkspaceColor } from "../../shared/model";
+import { themeFor } from "../../shared/theme";
 
-export const COLOR_VALUES: Record<WorkspaceColor, string> = {
-  green: "#7fd6a2",
-  blue: "#7aa6da",
-  amber: "#e3c46a",
-  coral: "#e08f7a",
-  violet: "#b49ae0",
-  cyan: "#74c7c4",
-  rose: "#dd8fae",
-  lime: "#b5cf7a",
-};
+/**
+ * The palette the window is currently wearing.
+ *
+ * `data-theme` is stamped on `<html>` by `applyTheme`, so this is the same
+ * answer the CSS is cascading — and `themeFor` falls back rather than refusing,
+ * which covers the frame before the first snapshot has landed and stamped
+ * anything at all.
+ */
+function palette(): Record<WorkspaceColor, string> {
+  return themeFor(document.documentElement.dataset.theme).workspace;
+}
+
+/** Every tag colour, for the picker that shows all eight at once. */
+export function colorValues(): Record<WorkspaceColor, string> {
+  return palette();
+}
 
 /** The CSS value for a tag, or null for an untagged workspace. */
 export function colorValue(color: WorkspaceColor | null | undefined): string | null {
-  return color ? COLOR_VALUES[color] : null;
+  return color ? palette()[color] : null;
 }

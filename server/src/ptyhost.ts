@@ -139,9 +139,27 @@ export function createPtyHost(): PtyHost {
         reply(msg.id, () => ({ agents: host.list(), blob }));
         return;
 
-      case "create":
-        reply(msg.id, () => host.create({ cwd: msg.cwd, command: msg.command, kind: msg.kind }));
+      /**
+       * Everything but the framing, handed straight through.
+       *
+       * This listed the fields once — `{ cwd, command, kind }` — and that cost a
+       * restart nobody had budgeted for. `env` was added to the protocol, to
+       * `HostLink.create` and to `AgentHost.create`, and dropped here, one line
+       * before it would have been used: passing fewer properties than an
+       * optional parameter accepts is perfectly good TypeScript, so nothing
+       * said a word. The symptom was a profile whose terminals kept opening as
+       * the wrong account, with correct code on both sides of this line.
+       *
+       * So the relay no longer names them. `type` and `id` are the envelope and
+       * everything else is the request, which means the next field added to a
+       * `create` arrives here whether or not anybody remembered this file — and
+       * this is the file where forgetting is most expensive.
+       */
+      case "create": {
+        const { type, id, ...options } = msg;
+        reply(id, () => host.create(options));
         return;
+      }
 
       case "backlog":
         void replyAsync(msg.id, async () => (await host.backlog(msg.agentId)) ?? "");

@@ -89,6 +89,47 @@ describe("setWorkspaceColor", () => {
   });
 });
 
+describe("setProfileIdentity", () => {
+  it("lands on the profile named, not on the one you are standing in", () => {
+    const workspaces = new Workspaces();
+    const here = workspaces.active.id;
+    const there = workspaces.newProfile("work");
+    workspaces.switchProfile(here);
+
+    workspaces.setProfileIdentity(there, {
+      claudeConfigDir: "/w/claude",
+      ghConfigDir: null,
+      gitConfigGlobal: null,
+    });
+
+    expect(workspaces.active.id).toBe(here);
+    expect(workspaces.identityOf(there).claudeConfigDir).toBe("/w/claude");
+    expect(workspaces.identityOf(here).claudeConfigDir).toBeNull();
+  });
+
+  it("is carried on the summaries, which is how Settings can edit all of them", () => {
+    const workspaces = new Workspaces();
+    const id = workspaces.active.id;
+    workspaces.setProfileIdentity(id, {
+      claudeConfigDir: null,
+      ghConfigDir: "/w/gh",
+      gitConfigGlobal: null,
+    });
+    expect(workspaces.summaries(() => 0)[0]?.identity.ghConfigDir).toBe("/w/gh");
+  });
+
+  it("ignores a profile that is not there rather than inventing one", () => {
+    const workspaces = new Workspaces();
+    workspaces.setProfileIdentity("nope", {
+      claudeConfigDir: "/w/claude",
+      ghConfigDir: null,
+      gitConfigGlobal: null,
+    });
+    expect(workspaces.all()).toHaveLength(1);
+    expect(workspaces.identityOf("nope").claudeConfigDir).toBeNull();
+  });
+});
+
 describe("adopting a restored profile", () => {
   it("fills in a colour a previous version of the server never wrote", () => {
     // The host's blob, as an older server left it: no `color` anywhere.
@@ -100,5 +141,37 @@ describe("adopting a restored profile", () => {
 
     const after = new Workspaces(stale);
     expect(after.activeWorkspace.color).toBeNull();
+  });
+
+  it("fills in an identity a previous version of the server never wrote", () => {
+    // A blob from before profiles had one at all: the field is simply absent,
+    // and an `undefined` where the type promises three nulls is the class of
+    // bug `adopt` exists for.
+    const before = new Workspaces();
+    const stale = JSON.parse(JSON.stringify(before.all()), (key, value) =>
+      key === "identity" ? undefined : value,
+    );
+    expect(stale[0]).not.toHaveProperty("identity");
+
+    const after = new Workspaces(stale);
+    expect(after.active.identity).toEqual({
+      claudeConfigDir: null,
+      ghConfigDir: null,
+      gitConfigGlobal: null,
+    });
+  });
+
+  it("drops a stored path that has stopped being absolute", () => {
+    const before = new Workspaces();
+    before.setProfileIdentity(before.active.id, {
+      claudeConfigDir: "/w/claude",
+      ghConfigDir: null,
+      gitConfigGlobal: null,
+    });
+    const stale = JSON.parse(JSON.stringify(before.all()));
+    stale[0].identity.claudeConfigDir = "relative/claude";
+
+    const after = new Workspaces(stale);
+    expect(after.active.identity.claudeConfigDir).toBeNull();
   });
 });

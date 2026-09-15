@@ -24,8 +24,15 @@
 import { useSyncExternalStore } from "react";
 import type { Direction } from "../../shared/layout";
 import type { Action } from "../../shared/keys";
-import type { MascotConfig, PtyKind, SessionSnapshot, WorkspaceColor } from "../../shared/model";
+import type {
+  MascotConfig,
+  ProfileIdentity,
+  PtyKind,
+  SessionSnapshot,
+  WorkspaceColor,
+} from "../../shared/model";
 import type { ClientMessage, DevServer, ServerMessage } from "../../shared/wire";
+import type { TerminalAppearance } from "../../shared/theme";
 import type { Grid } from "./grid";
 
 export interface KururuState {
@@ -525,6 +532,32 @@ export function deleteProfile(profileId: string): void {
 }
 
 /**
+ * Which accounts this profile opens terminals as. Sent whole rather than a field
+ * at a time — the three are one decision and are edited on one page — and it
+ * reaches the next pty rather than the ones already running.
+ */
+export function setProfileIdentity(profileId: string, identity: ProfileIdentity): void {
+  send({ type: "set-profile-identity", profileId, identity });
+}
+
+/**
+ * Use a github account by name. The server writes the config directory that
+ * means it — a path is not the client's to invent — and points the profile at
+ * it. Null hands the profile back to whatever gh itself is set to.
+ */
+export function useGhAccount(profileId: string, account: { host: string; login: string } | null): void {
+  send({ type: "use-gh-account", profileId, account });
+}
+
+/**
+ * Start a login for a profile. There is no reply and there is no dialog: what
+ * happens is a terminal opening in that profile with the login prompt in it.
+ */
+export function signIn(profileId: string, tool: "claude" | "gh"): void {
+  send({ type: "sign-in", profileId, tool });
+}
+
+/**
  * Put the server back on current source. The agents are not in it — they are in
  * the pty host beside it — so this costs a reconnect, which this module does
  * anyway and forever.
@@ -593,6 +626,21 @@ export function bindKey(key: string, action: Action | null): void {
 
 export function resetKeys(): void {
   send({ type: "reset-keys" });
+}
+
+/**
+ * How it looks. A verb like the rest, which is what makes a theme picked on the
+ * phone arrive on the desktop — nothing applies anything locally and waits for
+ * the server to agree, because there would then be a moment where the two
+ * disagreed and a dropped socket would make it permanent.
+ */
+export function setTheme(themeId: string): void {
+  send({ type: "set-theme", themeId });
+}
+
+/** The terminal's type and cursor, all four at once — they are edited together. */
+export function setTerminalAppearance(terminal: TerminalAppearance): void {
+  send({ type: "set-terminal-appearance", terminal });
 }
 
 // ---------------------------------------------------------------------------

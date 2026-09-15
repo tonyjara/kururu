@@ -97,7 +97,10 @@ export const ACTION_INFO: Record<Action, { label: string; group: ActionGroup }> 
   "delete-workspace": { label: "delete workspace (ends what is in it)", group: "workspaces" },
   "find-workspace": { label: "find a workspace", group: "workspaces" },
 
-  "switch-profile": { label: "switch profile", group: "profiles" },
+  // The id is what a saved override points at, so it keeps the name it was
+  // bound under even though the page it opens now does more than switch. The
+  // label is what the help overlay prints, and that has to be true today.
+  "switch-profile": { label: "profiles: switch, rename, accounts", group: "profiles" },
   "new-profile": { label: "new profile", group: "profiles" },
 
   "open-reader": { label: "read the markdown open next door", group: "panes" },

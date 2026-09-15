@@ -367,7 +367,7 @@ function Pane({
              a key could still throw away is the empty box it lives in. The
              agent id is a dependency of the effect that borrows, which is where
              a tab switch belongs: one `removeChild`, one `appendChild`. */
-          <TerminalView agentId={showing} focused={focused && keyboard} />
+          <TerminalView agentId={showing} focused={focused} keyboard={keyboard} />
         ) : (
           <EmptyPane pane={pane} />
         )}

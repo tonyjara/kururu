@@ -35,7 +35,62 @@
  */
 import type { Direction } from "./layout";
 import type { Action } from "./keys";
-import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
+import type { MascotConfig, ProfileIdentity, PtyKind, SessionSnapshot } from "./model";
+import type { TerminalAppearance } from "./theme";
+
+/**
+ * Who a profile's terminals open as: what `claude` and `gh` and `git` say when
+ * they are asked with that profile's environment. The reply to `/api/identity`.
+ *
+ * A fetch rather than part of the snapshot, because unlike everything else a
+ * profile holds this is not kururu's state — it is the world's. It changes when
+ * somebody logs in inside a terminal the server is only watching, and answering
+ * it means running three CLIs. Null for a tool that could not be asked at all,
+ * which covers not-installed and timed-out alike: both mean the page cannot say.
+ */
+export interface IdentityWho {
+  claude: { loggedIn: boolean; email: string | null; org: string | null; plan: string | null } | null;
+  gh: GhAccount | null;
+  git: { name: string | null; email: string | null } | null;
+}
+
+/** One github account as gh describes it. `active` is true of one per directory. */
+export interface GhAccount {
+  host: string;
+  login: string;
+  /** gh's own word for whether the token still works; "success" when it does. */
+  state: string | null;
+  gitProtocol: string | null;
+  active: boolean;
+}
+
+/**
+ * What there is to pick between — the reply to `/api/identity/known`.
+ *
+ * Accounts, not directories, because an account is the thing somebody has in
+ * mind and a directory is only how kururu stores the choice. The asymmetry
+ * between the two lists is the tools': gh knows a login before any directory
+ * exists, so an account can be named and its directory written when it is
+ * picked; a Claude account has no name until somebody has logged into a
+ * directory, so there the directory comes first and the email is what is found
+ * in it. `dir: null` is the machine's own `~/.claude`.
+ */
+export interface KnownAccounts {
+  claude: { dir: string | null; email: string | null; org: string | null }[];
+  gh: KnownGhAccount[];
+}
+
+/**
+ * A github account, plus where a profile gets pointed to use it.
+ *
+ * The directory is named after the account and written on first use, which is
+ * what lets the client tell which option is selected by comparing strings rather
+ * than waiting to be told — and what makes two profiles picking one account
+ * share one directory instead of accumulating copies.
+ */
+export interface KnownGhAccount extends GhAccount {
+  dir: string;
+}
 
 /**
  * How to reach this server from a device that is not this machine — the answer
@@ -300,6 +355,39 @@ export type ClientMessage =
   | { type: "switch-profile"; profileId: string }
   | { type: "rename-profile"; profileId: string; name: string }
   | { type: "delete-profile"; profileId: string }
+  /**
+   * Which accounts this profile's terminals are opened as — see
+   * `ProfileIdentity`, which is three paths and deliberately not three secrets.
+   *
+   * The whole identity rather than one field at a time, for the reason
+   * `set-terminal-appearance` gives: they are edited together on one page and a
+   * per-field verb would make that page send three messages to describe one
+   * decision. Adopted rather than trusted on arrival — a path that is not
+   * absolute is dropped rather than resolved, because a relative one would mean
+   * a different directory in every pane.
+   *
+   * It reaches the pty at spawn and at no other time, so this changes the next
+   * terminal in the profile and none of the ones already in it.
+   */
+  | { type: "set-profile-identity"; profileId: string; identity: ProfileIdentity }
+  /**
+   * Use a github account that already exists, named rather than located.
+   *
+   * The server writes the five lines of config that make a directory mean that
+   * account and points the profile at it, which is the half a client cannot do
+   * — and should not: a client that sent a path would be a client that could
+   * send any path, and this one is reachable from the tailnet. Null hands the
+   * profile back to whatever gh itself is set to.
+   */
+  | { type: "use-gh-account"; profileId: string; account: { host: string; login: string } | null }
+  /**
+   * Sign in to a new account for this profile, which is not something a dialog
+   * can do: both flows are a browser, a code to paste and a few questions. So it
+   * is done the way the dev-server button does its job — by opening a terminal
+   * and typing the line a person would type — in the profile it is about, so
+   * that what happens next is on screen rather than in a pane somewhere else.
+   */
+  | { type: "sign-in"; profileId: string; tool: "claude" | "gh" }
 
   /**
    * Put the server back on current source. It owns no ptys, so this costs a
@@ -372,7 +460,35 @@ export type ClientMessage =
    */
   | { type: "bind-key"; key: string; action: Action | null }
   /** Back to ghosttown's table, exactly. Deletes the overrides rather than writing them out. */
-  | { type: "reset-keys" };
+  | { type: "reset-keys" }
+
+  // --- how it looks --------------------------------------------------------
+  /**
+   * Wear a different theme. An id from `shared/theme.ts` and nothing else — the
+   * server refuses anything it does not recognise, which is `set-workspace-color`'s
+   * rule and is here for a stronger version of the same reason: a palette is not
+   * eight values in a style attribute, it is forty, and kururu is reachable from
+   * the tailnet.
+   *
+   * An id rather than the tokens, so that a theme improved in a later version
+   * improves for everybody who picked it instead of leaving them on a copy taken
+   * the day they chose.
+   */
+  | { type: "set-theme"; themeId: string }
+  /**
+   * The type a terminal is set in, and the shape of its cursor. A whole
+   * `TerminalAppearance` rather than one field at a time, which is the one place
+   * this protocol departs from "a message is a verb" — and deliberately: these
+   * four are edited together on one page, they have no meaning apart, and a
+   * per-field verb would make a Settings panel send four messages to describe
+   * one decision.
+   *
+   * It is adopted rather than trusted on arrival. `fontSize` especially: it
+   * decides the cell, the cell decides the grid a pane proposes, and the grid is
+   * what every pty watching gets resized to — so a number typed too large is a
+   * SIGWINCH into a shape no box has, and `adoptAppearance` clamps it.
+   */
+  | { type: "set-terminal-appearance"; terminal: TerminalAppearance };
 
 /**
  * How often the status heuristic is asked to notice that work has stopped.

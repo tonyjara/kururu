@@ -25,7 +25,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Profile, Workspace } from "../../shared/model";
-import { isWorkspaceColor } from "../../shared/model";
+import { adoptIdentity, isWorkspaceColor } from "../../shared/model";
 import type { LayoutNode } from "../../shared/layout";
 import { nextId } from "./workspaces";
 
@@ -67,6 +67,15 @@ interface StoredProfile {
   workspaces: StoredWorkspace[];
   /** Index rather than id: ids are regenerated on the way back in. */
   activeWorkspace: number;
+  /**
+   * Which accounts this profile opens terminals as. Kept, where every other
+   * live thing here is stripped, because it is not a live thing: three paths a
+   * person chose, which the rule against restoring processes has nothing to say
+   * about. They are also the one part of a restored profile that still works
+   * with no pty host in sight — an empty pane opened tomorrow gets the right
+   * account without anybody being asked again.
+   */
+  identity?: unknown;
 }
 interface StoredSession {
   version: number;
@@ -109,6 +118,7 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
     activeProfile: Math.max(0, profiles.findIndex((p) => p.id === activeProfileId)),
     profiles: profiles.map((profile) => ({
       name: profile.name,
+      identity: profile.identity,
       activeWorkspace: Math.max(
         0,
         profile.workspaces.findIndex((w) => w.id === profile.activeWorkspaceId),
@@ -226,6 +236,11 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
       workspaces,
       activeWorkspaceId: workspaces[at]!.id,
       lastWorkspaceId: null,
+      // Read as defensively as the colour above: a file written before this
+      // version has no identity at all, and one with a path that is no longer
+      // absolute comes back as untagged rather than as a directory that would
+      // resolve differently in every pane.
+      identity: adoptIdentity(stored.identity),
     });
   }
   if (profiles.length === 0) return null;

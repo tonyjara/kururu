@@ -21,6 +21,14 @@ export interface MenuItem {
   sep?: boolean;
   danger?: boolean;
   disabled?: boolean;
+  /**
+   * This row is the one you are already on. A menu that is a list of places
+   * rather than a list of actions has to say which place you are in, or the
+   * first thing you do with it is pick the one you are already standing in.
+   */
+  mark?: boolean;
+  /** A few quiet characters on the right — a count, a number, a shortcut. */
+  hint?: string;
   run: () => void;
 }
 
@@ -32,9 +40,13 @@ export interface MenuAt {
 export function Menu({ at, items, onClose }: { at: MenuAt; items: MenuItem[]; onClose: () => void }) {
   return (
     <Popover at={at} onClose={onClose} className="menu" role="menu">
-      {items.map((item) => (
+      {items.map((item, at) => (
         <button
-          key={item.label}
+          // By position, not by label: a menu of workspaces or profiles is a
+          // menu of things a person named, and two of them may be called the
+          // same thing. The list is built fresh each time it opens, so there is
+          // no reordering for a key to survive.
+          key={at}
           role="menuitem"
           className={`menu-item ${item.danger ? "menu-danger" : ""} ${item.sep ? "menu-sep" : ""}`}
           disabled={item.disabled}
@@ -43,7 +55,14 @@ export function Menu({ at, items, onClose }: { at: MenuAt; items: MenuItem[]; on
             onClose();
           }}
         >
-          {item.label}
+          {/* Always rendered, so the labels line up whether or not anything in
+              this menu is markable — a list that shifts sideways by a character
+              when one row is current is a list you re-read. */}
+          <span className="menu-mark" aria-hidden>
+            {item.mark ? "•" : ""}
+          </span>
+          <span className="menu-label">{item.label}</span>
+          {item.hint && <span className="menu-hint">{item.hint}</span>}
         </button>
       ))}
     </Popover>
