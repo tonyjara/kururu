@@ -294,6 +294,13 @@ export type ClientMessage =
   /** prefix+hjkl. Nothing that way is not an error; the client focuses the sidebar. */
   | { type: "focus-dir"; dir: Direction }
   | { type: "step-pane"; delta: number }
+  /**
+   * The other pane: back where focus came from, and the next one along when
+   * there is no back yet. A toggle rather than a walk, the way `last-workspace`
+   * is one level up — it is what a phone flips between two agents with, since a
+   * narrow window draws one pane at a time.
+   */
+  | { type: "last-pane" }
   | { type: "set-ratio"; splitId: string; ratio: number }
   /**
    * A whole pane, dragged by its tab strip. Dropped on another pane's middle it
@@ -428,8 +435,30 @@ export type ClientMessage =
    *
    * A pane that is already a reader is re-pointed rather than split again: the
    * second press of a key that made a pane should not make another one.
+   *
+   * `focus` moves the focus onto the reader instead of leaving it where it was,
+   * and it is the client's to decide because it is a fact about the window
+   * rather than about the layout. On a desktop the reader lands *beside* the
+   * editor and taking the keyboard away from what you were typing into would be
+   * wrong; on a phone only the focused pane is drawn at all, so a reader you
+   * asked for and cannot see is a reader that did not open.
    */
-  | { type: "open-reader"; paneId?: string; agentId?: string }
+  | { type: "open-reader"; paneId?: string; agentId?: string; focus?: boolean }
+
+  /**
+   * Point a reader at a file somebody chose, and stop following an editor.
+   *
+   * The unfollowing is not a separate decision the caller gets to make: a file
+   * you picked by hand that the next `:w` on another machine could replace is a
+   * document that walks away mid-sentence. Picking *is* pinning, which is what
+   * `pin-reader` already means — this is the other half of it, the half that
+   * says which file to pin to.
+   *
+   * `root` is one of the roots the server already holds. A client naming a root
+   * of its own is the one thing `files.ts` exists to refuse, so this is checked
+   * there like every other path that arrives from outside.
+   */
+  | { type: "open-doc"; paneId: string; root: string; path: string }
 
   /**
    * Stop following an editor and sit on the file it is showing now.

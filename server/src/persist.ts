@@ -255,6 +255,10 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
         name: w.name,
         layout,
         focusedPaneId: first,
+        // Nowhere to go back to: focus itself is reset to the first pane on the
+        // way in, so a remembered second one would be a memory of a move nobody
+        // in this session made.
+        lastPaneId: null,
         color,
         mascotId,
         // Filled in below, once every profile has an id again. It cannot be

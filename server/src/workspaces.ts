@@ -95,6 +95,10 @@ function adopt(profile: Profile): Profile {
     workspaces: profile.workspaces.map((workspace) => ({
       ...workspace,
       color: isWorkspaceColor(workspace.color) ? workspace.color : null,
+      // A field this version has and the blob may not, like the three below.
+      // It is deliberately not checked against the layout: a pane that has gone
+      // reads as "nowhere to go back to" where it is used.
+      lastPaneId: typeof workspace.lastPaneId === "string" ? workspace.lastPaneId : null,
       // A field this version has and the one that wrote the blob did not. An
       // `undefined` where the type promises `null` is invisible until something
       // compares against null and gets a different answer than it did a restart
@@ -240,7 +244,44 @@ export class Workspaces {
   focusPane(paneId: string): void {
     const workspace = this.activeWorkspace;
     if (!findPane(workspace.layout, paneId) || workspace.focusedPaneId === paneId) return;
-    this.mutateWorkspace(workspace.id, (w) => ({ ...w, focusedPaneId: paneId }));
+    // Where you were, so that `lastPane` can be the way back. Recorded here
+    // rather than in each of the four callers, because every one of them is a
+    // move of the focus and the memory is a property of the move.
+    this.mutateWorkspace(workspace.id, (w) => ({
+      ...w,
+      focusedPaneId: paneId,
+      lastPaneId: w.focusedPaneId,
+    }));
+  }
+
+  /**
+   * The other pane: back where focus came from, or onwards when there is no
+   * back yet.
+   *
+   * With two panes the two answers are the same one, which is the case this
+   * exists for — a phone draws one pane at a time and two is what somebody
+   * watching a pair of agents has. With more, the memory is what makes it a
+   * toggle rather than a cycle: you go between the two you are working in and
+   * the third is left where it is. A pane the memory names that has since been
+   * closed falls through to the step, because a button that does nothing when
+   * pressed is worse than one that goes somewhere predictable.
+   *
+   * Nothing happens with one pane. The client draws the button disabled — it
+   * can count panes itself — and this refuses as well, since a snapshot a
+   * gesture behind is not a reason to focus a pane that is not there.
+   */
+  lastPane(): void {
+    const workspace = this.activeWorkspace;
+    const all = panes(workspace.layout);
+    if (all.length < 2) return;
+    const remembered =
+      workspace.lastPaneId &&
+      workspace.lastPaneId !== workspace.focusedPaneId &&
+      all.some((pane) => pane.id === workspace.lastPaneId)
+        ? workspace.lastPaneId
+        : null;
+    const next = remembered ?? stepPane(workspace.layout, workspace.focusedPaneId, 1);
+    if (next) this.focusPane(next);
   }
 
   /** prefix+hjkl. Returns false when there is nothing that way — the client
@@ -272,6 +313,10 @@ export class Workspaces {
       ...w,
       layout: split(w.layout, paneId, dir, id("s"), fresh),
       focusedPaneId: fresh.pane.id,
+      // The half you split is where "back" means, the same as if you had
+      // focused the new pane yourself — which on a phone is the whole gesture:
+      // split, and then flip between the two.
+      lastPaneId: paneId,
     }));
     return fresh.pane.id;
   }
@@ -493,7 +538,7 @@ export class Workspaces {
    * one. A key that makes a pane has to be safe to lean on, and two readers of
    * one editor would both be correct and both be in the way.
    */
-  openReader(paneId: string, agentId: string | null): string | null {
+  openReader(paneId: string, agentId: string | null, root = ""): string | null {
     if (agentId) {
       const existing = panes(this.activeWorkspace.layout).find((pane) => pane.reader?.follow === agentId);
       if (existing) {
@@ -513,7 +558,15 @@ export class Workspaces {
       ...w,
       layout: updatePane(w.layout, made, (pane) => ({
         ...pane,
-        reader: { root: "", path: "", follow: agentId, rev: 0 },
+        /**
+         * The root is carried in at birth, empty and meaning "not known yet"
+         * when the caller could not work one out. It is what the picker opens
+         * on, and a reader that knows which project it is for before it knows
+         * which file is the difference between one tap and two. Nothing here
+         * learns what a root *is* — this stores the string it was handed, the
+         * way `setReaderTarget` already does.
+         */
+        reader: { root, path: "", follow: agentId, rev: 0 },
       })),
       focusedPaneId: paneId,
     }));
@@ -537,6 +590,21 @@ export class Workspaces {
     const pane = findPane(this.activeWorkspace.layout, paneId);
     if (!pane?.reader) return;
     this.setReaderFollow(paneId, follow ? (pane.reader.follow ?? null) : null);
+  }
+
+  /**
+   * Point a reader at a file somebody picked, and stop following.
+   *
+   * The two halves are one gesture rather than two calls a caller could make
+   * separately, because a hand-picked file that an editor can still replace is
+   * the bug this exists to avoid, not a configuration. In the active workspace
+   * only: a pick comes from a pane on somebody's screen, unlike an editor's
+   * report, which arrives for whatever workspace the reader happens to be in.
+   */
+  openDoc(paneId: string, root: string, path: string): boolean {
+    if (!this.setReaderTarget(this.activeWorkspace.id, paneId, root, path)) return false;
+    this.setReaderFollow(paneId, null);
+    return true;
   }
 
   /**
@@ -859,6 +927,7 @@ export class Workspaces {
       name,
       layout: pane,
       focusedPaneId: pane.pane.id,
+      lastPaneId: null,
       color: null,
       mascotId: null,
       identityProfileId: null,

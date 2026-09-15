@@ -602,6 +602,29 @@ export function App() {
        */
       if (isModifier(event)) return;
 
+      /**
+       * A key aimed at a text field belongs to the field, prefix included:
+       * ctrl+a in a box you are typing in means select-all everywhere else on
+       * this machine, and a filter you cannot get to the start of is a filter
+       * that behaves like nothing else on screen. `editing` says the same thing
+       * for the fields the chrome knows about by name — the sidebar's rename,
+       * Settings' capture box — and this is the general form of it, for a field
+       * inside a pane, which no flag up here could know about.
+       *
+       * An `<input>` and nothing else, which is not laziness: ghostty-web parks
+       * a 1x1 `<textarea>` under every terminal to catch keystrokes and IME, and
+       * it is *focused* whenever you are typing into a pty. Excluding textareas
+       * as a class would therefore exclude the prefix from every terminal in the
+       * window — the exact keyboard this handler exists to provide.
+       *
+       * Escape is the exception and goes on through, because it is the way out
+       * of the thing the field is *in* — Settings, a dialog — as often as it is
+       * the way out of the field, and those below decide between the two. The
+       * field still sees it: this listener captures, and letting an event past
+       * without taking it is what leaves it to arrive at its target.
+       */
+      if (event.target instanceof HTMLInputElement && keyName(event) !== "escape") return;
+
       // A dialog is modal over everything, including the prefix: while one is
       // open every key is text or an answer, and the component owns them. A name
       // being typed in the sidebar — or in Settings, or a key being captured
@@ -878,6 +901,13 @@ export function App() {
              worse than no control. */
           keybarOpen={touch ? keybarOpen : null}
           onToggleKeybar={() => setKeybarOpen((open) => !open)}
+          /* The jump between panes, drawn only where the panes are not all on
+             screen at once — on a wide window the one you would jump to is
+             already in front of you, and a click on it is the jump. Null rather
+             than a count on the rest, so the bar can tell "there is nothing to
+             jump to" from "there is nothing to jump *from*". */
+          panes={narrow ? panes(workspace.layout).length : null}
+          onLastPane={() => api.lastPane()}
           onHelp={() => setHelp(true)}
         />
       </div>

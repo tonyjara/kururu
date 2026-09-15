@@ -43,7 +43,7 @@ import { parseReport } from "./agents/report";
 import { dump as dumpRecording, forget as forgetRecording, recordBacklog, recordInput, recordNote, recordOutput } from "./record";
 import { processCwd } from "./cwd";
 import { scanDevServers, stopDev, type DevProc } from "./devservers";
-import { allowedRoots, allowRoot, listDir, readBytes, readFile } from "./files";
+import { allowedRoots, allowRoot, findDocs, listDir, readBytes, readFile, resolveInRoot } from "./files";
 import {
   describeIdentity,
   ensureClaudeDir,
@@ -1273,6 +1273,22 @@ function rootFor(absolute: string): { root: string; rel: string } | null {
 }
 
 /**
+ * The root a *directory* is in, or "" — `rootFor` asked about a path that may
+ * be a root itself rather than something underneath one.
+ *
+ * Which is the common case here and not an edge: `allowRoot` is told about a
+ * terminal's cwd, so a pane's cwd is usually a root exactly, and `rootFor`
+ * matches on a prefix and therefore answers nothing for it. The empty string is
+ * a real answer and the picker draws it — a reader that cannot guess its project
+ * asks which one, rather than guessing wrong and looking broken.
+ */
+function rootForDir(dir: string | undefined): string {
+  if (!dir) return "";
+  if (allowedRoots().includes(dir)) return dir;
+  return rootFor(dir.endsWith("/") ? dir : `${dir}/`)?.root ?? "";
+}
+
+/**
  * An editor saying where it is. The one endpoint whose caller is a program
  * kururu installed rather than a person or a client — `report-cli.ts`'s shape,
  * for the same reason: the thing that knows is the thing that should say so.
@@ -1547,6 +1563,10 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "step-pane":
       workspaces.stepFocus(msg.delta);
+      return;
+
+    case "last-pane":
+      workspaces.lastPane();
       return;
 
     case "set-ratio":
@@ -1867,7 +1887,16 @@ function handleMessage(ws: WebSocket, raw: string): void {
     case "open-reader": {
       const paneId = msg.paneId ?? workspaces.focusedPaneId;
       const agentId = msg.agentId ?? workspaces.activeAgentIn(paneId);
-      if (!workspaces.openReader(paneId, agentId)) return;
+      /**
+       * The project comes from where the pane already is, and from what the
+       * pane *remembers* rather than from the kernel: `cwdForNewTab` asks lsof
+       * because a new terminal landing in `~` all afternoon is a real cost, and
+       * here the worst case of being a directory behind is a picker that opens
+       * on the project list. That is not worth an async spawn on a keypress.
+       */
+      const made = workspaces.openReader(paneId, agentId, rootForDir(workspaces.cwdFor(paneId)));
+      if (!made) return;
+      if (msg.focus) workspaces.focusPane(made);
       // Ahead of the sweep, because the pane is on screen now and a reader that
       // is blank for two seconds reads as one that does not work.
       if (agentId) void hookEditor(agentId);
@@ -1876,6 +1905,18 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "pin-reader":
       workspaces.pinReader(msg.paneId, msg.follow);
+      return;
+
+    case "open-doc":
+      /**
+       * Checked where every path from a client is checked, and a pick that does
+       * not resolve is simply not made: the pane keeps the document it had. A
+       * refusal that blanked the reader would read as the feature being broken
+       * rather than as a refusal, which is the argument `set-workspace-color`
+       * makes about a colour it will not take.
+       */
+      if (!resolveInRoot(msg.root, msg.path)) return;
+      workspaces.openDoc(msg.paneId, msg.root, msg.path);
       return;
   }
 }
@@ -2230,6 +2271,32 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         // an editor that sent something unparseable is not worth a log line
       });
     json(res, { ok: true });
+    return;
+  }
+  /**
+   * The documents a picker offers, and the projects it could offer them from.
+   *
+   * The roots travel with every answer rather than being a second request: the
+   * list and the thing that changes which list it is belong on screen together,
+   * and this is answering a tap on a phone. With exactly one project there is no
+   * choice to make and the client is not asked to make one — it gets the
+   * documents straight away. With several and no root named, `root` comes back
+   * empty and the client draws the projects instead, which is a question kururu
+   * genuinely cannot answer for it.
+   */
+  if (url.pathname === "/api/docs") {
+    const roots = allowedRoots();
+    const asked = url.searchParams.get("root") ?? "";
+    const root = asked || (roots.length === 1 ? (roots[0] ?? "") : "");
+    if (!root) {
+      json(res, { roots, root: "", docs: [] });
+      return;
+    }
+    try {
+      json(res, { roots, root, docs: findDocs(root) });
+    } catch (err) {
+      json(res, { roots, root: "", docs: [], error: err instanceof Error ? err.message : String(err) }, 400);
+    }
     return;
   }
   if (url.pathname === "/api/markdown") {
