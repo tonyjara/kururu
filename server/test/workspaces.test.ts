@@ -258,3 +258,93 @@ describe("adopting a restored profile", () => {
     expect(after.active.identity.claudeConfigDir).toBeNull();
   });
 });
+
+/**
+ * The way back to the other pane — the phone's whole navigation between two
+ * agents, since a narrow window draws one pane at a time.
+ */
+describe("lastPane", () => {
+  it("is the other one when there are two, with nothing remembered yet", () => {
+    const workspaces = new Workspaces();
+    const first = workspaces.focusedPaneId;
+    const second = workspaces.split("row", first)!;
+    expect(workspaces.focusedPaneId).toBe(second);
+    workspaces.lastPane();
+    expect(workspaces.focusedPaneId).toBe(first);
+    // And back, which is what makes it a toggle rather than a walk.
+    workspaces.lastPane();
+    expect(workspaces.focusedPaneId).toBe(second);
+  });
+
+  it("goes between the two you are in and leaves the third where it is", () => {
+    const workspaces = new Workspaces();
+    const a = workspaces.focusedPaneId;
+    const b = workspaces.split("row", a)!;
+    const c = workspaces.split("col", b)!;
+    workspaces.focusPane(a);
+    workspaces.focusPane(c);
+    workspaces.lastPane();
+    expect(workspaces.focusedPaneId).toBe(a);
+    workspaces.lastPane();
+    expect(workspaces.focusedPaneId).toBe(c);
+    // b was never in the pair, and a toggle must not wander into it.
+    expect(workspaces.focusedPaneId).not.toBe(b);
+  });
+
+  it("steps on rather than doing nothing when the pane it remembers has gone", () => {
+    const workspaces = new Workspaces();
+    const a = workspaces.focusedPaneId;
+    const b = workspaces.split("row", a)!;
+    const c = workspaces.split("col", b)!;
+    // Focus is on c, having come from b. Close b and the memory names nothing.
+    workspaces.closePane(b);
+    expect(workspaces.activeWorkspace.lastPaneId).toBe(b);
+    workspaces.lastPane();
+    expect(workspaces.focusedPaneId).toBe(a);
+  });
+
+  it("does nothing at all with one pane", () => {
+    const workspaces = new Workspaces();
+    const only = workspaces.focusedPaneId;
+    workspaces.lastPane();
+    expect(workspaces.focusedPaneId).toBe(only);
+  });
+});
+
+/**
+ * The reader, at the two points where picking a file by hand differs from
+ * following an editor: the project it opens on, and what happens to the follow.
+ */
+describe("the reader", () => {
+  it("carries the project in at birth, so the picker has somewhere to open", () => {
+    const workspaces = new Workspaces();
+    const made = workspaces.openReader(workspaces.focusedPaneId, null, "/home/you/project")!;
+    const reader = panes(workspaces.activeWorkspace.layout).find((p) => p.id === made)?.reader;
+    expect(reader).toMatchObject({ root: "/home/you/project", path: "", follow: null });
+  });
+
+  it("leaves the focus where it was — the caller decides whether to move it", () => {
+    const workspaces = new Workspaces();
+    const from = workspaces.focusedPaneId;
+    const made = workspaces.openReader(from, null)!;
+    expect(workspaces.focusedPaneId).toBe(from);
+    workspaces.focusPane(made);
+    expect(workspaces.focusedPaneId).toBe(made);
+  });
+
+  it("stops following when a file is picked, so a save elsewhere cannot take it away", () => {
+    const workspaces = new Workspaces();
+    const made = workspaces.openReader(workspaces.focusedPaneId, "agent-1")!;
+    expect(workspaces.readersFollowing("agent-1")).toHaveLength(1);
+
+    expect(workspaces.openDoc(made, "/home/you/project", "docs/PLAN.md")).toBe(true);
+    const reader = panes(workspaces.activeWorkspace.layout).find((p) => p.id === made)?.reader;
+    expect(reader).toMatchObject({ root: "/home/you/project", path: "docs/PLAN.md", follow: null });
+    expect(workspaces.readersFollowing("agent-1")).toHaveLength(0);
+  });
+
+  it("does nothing to a pane that is not a reader", () => {
+    const workspaces = new Workspaces();
+    expect(workspaces.openDoc(workspaces.focusedPaneId, "/home/you/project", "README.md")).toBe(false);
+  });
+});

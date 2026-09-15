@@ -560,6 +560,22 @@ export interface Workspace {
   layout: LayoutNode;
   focusedPaneId: string;
   /**
+   * The pane focus was on before this one, so that going back is one gesture.
+   *
+   * `lastWorkspaceId` one level down, and for the same job: on a phone the panes
+   * are drawn one at a time, and somebody watching two agents crosses between
+   * them every few seconds. A list to pick from is the wrong shape for a move
+   * you make that often — it is the argument the profile switcher lost, and a
+   * toggle is what wins it.
+   *
+   * Null is "nowhere to go back to yet", which a fresh workspace and a restored
+   * one both are. Nothing keeps it honest as panes close: an id naming a pane
+   * that has gone reads as null at the point it is used, on `mascotId`'s
+   * reasoning — a check on the way in would buy a repair where the fallback is
+   * already the same answer.
+   */
+  lastPaneId: string | null;
+  /**
    * A tag, not a theme: it marks the workspace's number in the sidebar and rules
    * a line down the left of every agent living in it, so "which of these is the
    * one I have the browser open for" is answered by glancing rather than by

@@ -204,6 +204,11 @@ export function Panes({ node, focusedPaneId, agents, mascot, zen, solo, keyboard
                one pane at a time the two are the same subject. */
             { label: "Split right", sep: true, run: () => api.splitPane("row", shown?.id) },
             { label: "Split down", run: () => api.splitPane("col", shown?.id) },
+            /* The reader's only other door is prefix+M, which is a keyboard this
+               window does not have — and on a phone it is the whole reason for
+               reading anything here at all. It asks for the focus as well, since
+               a pane you cannot see is one that did not open. */
+            { label: "Open a document", run: () => api.openReader(shown?.id, undefined, true) },
           ]}
         />
       )}
@@ -333,6 +338,14 @@ function Pane({
   const dragging = useDragging();
   /** Where in this strip a dropped tab would land, while one is over it. */
   const [dropAt, setDropAt] = useState<number | null>(null);
+  /**
+   * The reader's picker is open over its document. Local to the pane and not in
+   * the layout, because it is a question somebody is in the middle of asking
+   * rather than a fact about the arrangement — the answer is what the server
+   * gets told, and a second window has no business having its picker opened from
+   * here. It is the same line `Settings` draws about which tab it has open.
+   */
+  const [picking, setPicking] = useState(false);
 
   const takesTabs = dragging?.kind === "agent" && !pane.reader;
   /** Another pane is in flight, and it is not this one. */
@@ -394,7 +407,7 @@ function Pane({
         onDrop={dropOnStrip}
       >
         {pane.reader ? (
-          <ReaderStrip pane={pane} />
+          <ReaderStrip pane={pane} picking={picking} onPick={() => setPicking((open) => !open)} />
         ) : null}
         {!pane.reader &&
           pane.agentIds.map((agentId, index) => {
@@ -487,7 +500,12 @@ function Pane({
 
       <div className="pane-body">
         {pane.reader ? (
-          <ReaderView reader={pane.reader} />
+          <ReaderView
+            paneId={pane.id}
+            reader={pane.reader}
+            picking={picking}
+            onPicked={() => setPicking(false)}
+          />
         ) : showing ? (
           /* Deliberately unkeyed. A key here would rebuild this on every tab
              switch, which is what it used to be for — and the emulator it would
@@ -630,7 +648,6 @@ const EDGES: Record<string, ["row" | "col", boolean]> = {
 };
 
 /**
-/**
  * A reader's strip: what it is showing, and whether it is still listening.
  *
  * The name comes from the path the pane already has rather than from the
@@ -638,23 +655,42 @@ const EDGES: Record<string, ["row" | "col", boolean]> = {
  * which file you are looking at — two notes both titled "Notes" are a strip that
  * has stopped telling you anything.
  *
- * The toggle is the one control a reader needs. Following is the point of it, so
- * that is the default and pinning is the exception: the moment you want to keep
- * reading one file while the editor moves on.
+ * Two controls, and they are the two ways a reader can be pointed at something.
+ * The toggle is the editor: following is the point of the pane, so that is the
+ * default and pinning is the exception — the moment you want to keep reading one
+ * file while the editor moves on. The name is the other way, for the window that
+ * has no editor to follow, and picking a file there pins it by doing so.
  */
-function ReaderStrip({ pane }: { pane: PaneState }) {
+function ReaderStrip({
+  pane,
+  picking,
+  onPick,
+}: {
+  pane: PaneState;
+  picking: boolean;
+  onPick: () => void;
+}) {
   const reader = pane.reader;
   if (!reader) return null;
   const name = reader.path ? (reader.path.split("/").pop() ?? reader.path) : "reader";
   const following = reader.follow !== null;
   return (
     <>
-      <span
-        className="tab tab-on tab-reader"
-        title={reader.path ? `${reader.root}/${reader.path}` : "waiting for the editor"}
+      {/* The name is the way back to the list, which is why it is a button and
+          not the label it used to be. A picker reachable only from an empty
+          reader would be a picker you could use once — and the file you are
+          reading is the obvious place to ask for a different one. */}
+      <button
+        className={`tab tab-on tab-reader ${picking ? "tab-picking" : ""}`}
+        onClick={onPick}
+        aria-expanded={picking}
+        title={reader.path ? `${reader.root}/${reader.path}\nClick to open another document` : "waiting for the editor"}
       >
         {name}
-      </span>
+        <span className="tab-caret" aria-hidden="true">
+          ▾
+        </span>
+      </button>
       <button
         className="pane-btn"
         onClick={() => api.pinReader(pane.id, !following)}

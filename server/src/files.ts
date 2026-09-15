@@ -184,3 +184,97 @@ export function readBytes(root: string, rel: string): FileBytes {
   if (statSync(full).size > MAX_FILE_BYTES) throw new Error("file is too large to serve");
   return { bytes: readFileSync(full), type };
 }
+
+/**
+ * Every document under a root, newest first — the list a phone picks from.
+ *
+ * The reader is reached from an editor on the desktop: nvim says which buffer it
+ * is on and the pane follows. A phone has no editor to follow, so it needs to be
+ * able to *ask*, and the question it is asking is "which of my markdown files"
+ * rather than "what is in this directory". So this is a search and not a tree:
+ * one tap from opening the pane to reading the file, where a drill-down would be
+ * four on a touch screen, and the drill-down would buy nothing anyway because a
+ * file the reader cannot render is a file the picker should not offer.
+ *
+ * Breadth-first, so the cap — when a repository is large enough to hit one —
+ * falls on the documents buried deepest rather than on the README. Ordered by
+ * when each was last written, because the document you want is nearly always the
+ * one something has just touched, and a phone reading kururu's own output wants
+ * the plan the agent rewrote a minute ago at the top.
+ *
+ * Symlinks are passed over rather than followed. A symlinked tree is how a
+ * bounded walk becomes an unbounded one, and a symlinked *file* would list a row
+ * that `resolveInRoot` then refuses to open — a row that cannot be tapped is
+ * worse than one that is not there.
+ */
+const DOC_EXTENSIONS = new Set(["md", "markdown", "mdx"]);
+/** Deep enough for `docs/adr/0001-foo.md`, shallow enough to stay a tap. */
+const MAX_DOC_DEPTH = 5;
+const MAX_DOCS = 400;
+/**
+ * The budget that actually matters, and the one a cap on *results* does not
+ * buy: a root can be somebody's home directory. It is not a hypothetical —
+ * kururu learns a root from a terminal's cwd, and a terminal opened in `~` is
+ * one gesture, so `/Users/you` is sitting in `allowedRoots` on this machine
+ * right now with `Library` underneath it. Reading it to the depth above took a
+ * second of wall clock, and this walk is synchronous on the server that is
+ * relaying every pty: a second here is a second of nobody's terminal moving.
+ *
+ * So the walk stops at a number of directories as well as a number of files.
+ * Breadth-first is what makes the truncation defensible rather than arbitrary —
+ * what gets cut is the deepest, and the README of the project you are standing
+ * in was found long before the budget ran out.
+ */
+const MAX_DOC_DIRS = 1200;
+
+export interface Doc {
+  /** Relative to the root, forward slashes — the shape `readFile` takes. */
+  path: string;
+  /** Last written, in milliseconds. What the list is ordered by. */
+  mtime: number;
+}
+
+export function findDocs(root: string): Doc[] {
+  const base = resolveInRoot(root, "");
+  if (!base) throw new Error("path is outside the project");
+
+  const found: Doc[] = [];
+  let read = 0;
+  let level = [""];
+  for (let depth = 0; depth <= MAX_DOC_DEPTH && level.length > 0; depth++) {
+    const next: string[] = [];
+    for (const rel of level) {
+      if (found.length >= MAX_DOCS || read >= MAX_DOC_DIRS) return sorted(found);
+      read++;
+      let entries;
+      try {
+        entries = readdirSync(resolve(base, rel), { withFileTypes: true });
+      } catch {
+        continue; // unreadable, or gone since the level above listed it
+      }
+      for (const dirent of entries) {
+        const name = dirent.name;
+        if (name.startsWith(".") && name !== ".claude" && name !== ".github") continue;
+        const path = rel ? `${rel}/${name}` : name;
+        if (dirent.isDirectory()) {
+          if (!SKIP_DIRS.has(name)) next.push(path);
+          continue;
+        }
+        if (!dirent.isFile()) continue;
+        if (!DOC_EXTENSIONS.has(name.split(".").pop()?.toLowerCase() ?? "")) continue;
+        try {
+          found.push({ path, mtime: statSync(resolve(base, path)).mtimeMs });
+        } catch {
+          // written and removed while we were walking; not worth a row
+        }
+      }
+    }
+    level = next;
+  }
+  return sorted(found);
+}
+
+/** Newest first. Every return from the walk goes through here, budget or not. */
+function sorted(docs: Doc[]): Doc[] {
+  return docs.sort((a, b) => b.mtime - a.mtime);
+}

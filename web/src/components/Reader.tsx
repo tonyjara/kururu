@@ -22,6 +22,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReaderState } from "../../../shared/layout";
 import { drawDiagrams } from "../mermaid";
+import { DocPicker } from "./DocPicker";
 
 interface Rendered {
   path: string;
@@ -37,7 +38,18 @@ interface Rendered {
  * exists to respond to, and the document is almost always nearly identical to
  * the one already there.
  */
-export function ReaderView({ reader }: { reader: ReaderState }) {
+export function ReaderView({
+  paneId,
+  reader,
+  picking,
+  onPicked,
+}: {
+  paneId: string;
+  reader: ReaderState;
+  /** The strip asking for the picker. A reader with no file shows it regardless. */
+  picking: boolean;
+  onPicked: () => void;
+}) {
   const [doc, setDoc] = useState<Rendered | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -104,13 +116,19 @@ export function ReaderView({ reader }: { reader: ReaderState }) {
     scroller.current?.scrollTo({ top: 0 });
   }, [root, path]);
 
-  if (!path) {
-    return (
-      <div className="reader reader-idle">
-        <p className="reader-hint">No markdown open.</p>
-        <p className="reader-sub">Open a .md file in the editor next door and it appears here.</p>
-      </div>
-    );
+  /**
+   * A reader with nothing in it *is* the picker, rather than a message about
+   * where documents come from. It used to say "open a .md in the editor next
+   * door", which is true on a desktop and is advice you cannot take on a phone —
+   * the one place this pane is most of the point. Same argument the empty pane
+   * makes: where there is exactly one thing to do, the space is the button.
+   *
+   * `onClose` is null in that state for the other half of it. There is no
+   * document behind the picker to go back to, and a close button that left a
+   * pane blank would be offering a worse version of what is already there.
+   */
+  if (picking || !path) {
+    return <DocPicker paneId={paneId} root={root} onClose={path ? onPicked : null} />;
   }
 
   return (

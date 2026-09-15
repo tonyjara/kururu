@@ -441,6 +441,11 @@ export function stepPane(delta: number): void {
   send({ type: "step-pane", delta });
 }
 
+/** The other pane — where focus came from, or the next one along. See the wire. */
+export function lastPane(): void {
+  send({ type: "last-pane" });
+}
+
 export function setRatio(splitId: string, ratio: number): void {
   send({ type: "set-ratio", splitId, ratio });
 }
@@ -588,13 +593,21 @@ export function openPreview(port: number): void {
  * snapshot that comes back — which is what lets the same press from a phone put
  * the same reader in front of the same file.
  */
-export function openReader(paneId?: string, agentId?: string): void {
-  send({ type: "open-reader", paneId, agentId });
+export function openReader(paneId?: string, agentId?: string, focus?: boolean): void {
+  send({ type: "open-reader", paneId, agentId, focus });
 }
 
 /** Stop following the editor, or start again. */
 export function pinReader(paneId: string, follow: boolean): void {
   send({ type: "pin-reader", paneId, follow });
+}
+
+/**
+ * Read this file in this pane. The other half of `pinReader`: it says which
+ * document, and the server stops following an editor because of it.
+ */
+export function openDoc(paneId: string, root: string, path: string): void {
+  send({ type: "open-doc", paneId, root, path });
 }
 
 /**

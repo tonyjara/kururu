@@ -1658,6 +1658,27 @@ kbd {
   color: var(--dim);
 }
 
+/* The jump between panes, next to the key bar's toggle. It borrows the bars
+   button's shape rather than inventing a third size for a bar that now has
+   three icon buttons in it; what it does not borrow is the hover, because on
+   the device this is drawn for there is none. */
+.sb-panes {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 28px;
+  color: var(--dim);
+}
+/* One pane, so there is nowhere to go. Dim rather than gone: the bar keeps its
+   shape across a split, and a button that appears when you are not looking at
+   it is one you have to find twice. */
+.sb-panes:disabled {
+  color: var(--dimmer);
+  opacity: 0.4;
+  cursor: default;
+}
+
 .sb-sep {
   color: var(--dimmer);
 }
@@ -3074,22 +3095,6 @@ kbd {
   line-height: 1.65;
 }
 
-.reader-idle {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  text-align: center;
-  padding: 24px;
-}
-
-.reader-hint {
-  color: var(--dim);
-  margin: 0;
-}
-
-.reader-sub,
 .reader-error {
   color: var(--dimmer);
   font-size: var(--fs-md);
@@ -3098,6 +3103,156 @@ kbd {
 
 .reader-error {
   padding: 24px;
+}
+
+/* The picker: the reader asking which document, which is the only question this
+   pane can ask. Full-bleed rather than a popover, because the window it has to
+   work in is a phone showing one pane — and at that size a list of files with
+   somewhere to type is a screen, not a menu hanging off a corner. */
+.docs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--ui);
+  overflow: hidden;
+}
+
+.docs-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border-bottom: var(--border) var(--border-style) var(--line);
+}
+
+.docs-title {
+  flex: 1 1 auto;
+  padding-left: 4px;
+  font-size: var(--fs-md);
+  color: var(--dim);
+}
+
+.docs-filter {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 8px;
+  background: var(--chrome);
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--ui);
+  /* Deliberately larger than the chrome's own size: iOS zooms the page when a
+     field it focuses is under 16px, and a picker that zooms the window is a
+     picker that leaves you somewhere else when it closes. */
+  font-size: var(--fs-xl);
+  /* A search field is a shape Safari draws itself unless it is told not to,
+     and a skin that has decided what a corner looks like should not be
+     overruled by the platform's idea of what a search box is. */
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.docs-filter::placeholder {
+  color: var(--dimmer);
+}
+
+.docs-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* A row is a touch target first. The name and where it lives share a line on a
+   wide pane and wrap on a narrow one, which is what the `flex-wrap` is for —
+   `docs/adr/0001-record-the-thing.md` is a path no phone shows in one line. */
+.docs-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  width: 100%;
+  padding: 10px 8px;
+  border-radius: var(--radius-md);
+  text-align: left;
+  color: var(--text);
+}
+
+.docs-row:hover {
+  background: var(--chrome-high);
+}
+
+.docs-name {
+  flex: 0 1 auto;
+  font-size: var(--fs-lg);
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docs-dir {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-md);
+  color: var(--dimmer);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Right-aligned and tabular, so the ages line up into a column you can read
+   down — which is the only way "the recent ones stop here" is visible at all. */
+.docs-age {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--fs-sm);
+  color: var(--dimmer);
+  font-variant-numeric: tabular-nums;
+}
+
+.docs-none {
+  padding: 16px 12px;
+  font-size: var(--fs-md);
+  color: var(--dimmer);
+}
+
+.docs-foot {
+  flex: none;
+  padding: 4px;
+  border-top: var(--border) var(--border-style) var(--line);
+}
+
+.docs-elsewhere {
+  width: 100%;
+  padding: 8px;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-md);
+  color: var(--dim);
+  text-align: left;
+}
+
+.docs-elsewhere:hover {
+  background: var(--chrome-high);
+  color: var(--text);
+}
+
+/* The caret on a reader's tab: this name opens something. Quiet, because the
+   file name is what you read and this is only the promise that it is a door. */
+.tab-caret {
+  margin-left: 4px;
+  font-size: var(--fs-xs);
+  color: var(--dimmer);
+}
+
+.tab-picking .tab-caret {
+  color: var(--accent);
 }
 
 /* A measure rather than the pane's full width: a pane dragged wide is a line
