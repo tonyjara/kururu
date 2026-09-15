@@ -12,7 +12,15 @@
  * What is left in here is exactly what a client should own: which keys mean what
  * (`keys.ts`), what is visible and therefore worth watching, and the handful of
  * view states the server has no business knowing about — whether the sidebar is
- * open, whether one pane has been zoomed, and what dialog is up.
+ * open and how wide, whether one pane has been zoomed, and what dialog is up.
+ *
+ * The sidebar's width is the newest of those and the one most obviously the
+ * server's if you do not think about it, so: a phone and a desktop watching one
+ * server are two windows of two shapes, and a width in the snapshot would be
+ * each of them overwriting the other's every time somebody dragged an edge. It
+ * lives in `localStorage`, which is per device, which is the scope of the
+ * decision. The same reasoning makes the *breakpoint* live here rather than in
+ * `styles.css` — see `NARROW`.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -43,6 +51,7 @@ import {
   PREFIX_TIMEOUT_MS,
   type Action,
 } from "./keys";
+import { desktop } from "./desktop";
 import { isFileDrag } from "./drop";
 import { tabLabel } from "./labels";
 import { applyAppearance } from "./theme";
@@ -54,10 +63,61 @@ import * as terminals from "./terminals";
 /** How far one press of a resize key moves a divider. */
 const NUDGE = 0.03;
 
+/**
+ * The sidebar's width, and the floor and ceiling a drag is held between.
+ *
+ * The floor is the interesting number. A sidebar is a list of names and every
+ * one of them is already truncated at 224px, so there is a width below which
+ * the column still draws but has stopped answering the question it exists to
+ * answer — which workspace, which agent — and a divider you can drag to
+ * nothing is a way to lose the sidebar that looks like a bug rather than like
+ * hiding it. Hiding it is `toggle-sidebar`, and it comes back; a 20px column
+ * does not say how.
+ */
+const SIDEBAR_DEFAULT = 224;
+const SIDEBAR_MIN = 168;
+const SIDEBAR_MAX = 460;
+/** Where a width the user chose is kept. Per browser, on purpose — see below. */
+const SIDEBAR_WIDTH_KEY = "kururu.sidebar.width";
+
+/**
+ * When the window stops being wide enough for a column beside the panes.
+ *
+ * Stated here in JavaScript and nowhere else, and `styles.css` reads it back off
+ * `:root[data-narrow]` rather than writing a media query of its own. A
+ * breakpoint in both halves is a number held together by nothing, and the half
+ * that drifts is invisible until a phone gets a full-screen sidebar that still
+ * thinks it is a column — the same argument `theme.test.ts` makes about a token
+ * the CSS asks for that no skin answers, except that here one of the two sides
+ * also has to *behave* differently and so has to know.
+ */
+const NARROW = "(max-width: 720px)";
+
 export function App() {
   const { snapshot, connected } = useKururu();
 
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  /**
+   * Whether the window is narrow enough that the sidebar stops being a column
+   * and becomes a screen. Read from `matchMedia` rather than from a resize
+   * listener because the browser already knows the answer and will say when it
+   * changes; a listener on every resize event would recompute it sixty times a
+   * second while a divider is being dragged.
+   */
+  const narrow = useNarrow();
+  /**
+   * Open, and how wide.
+   *
+   * Both are this window's, not the server's, and the width especially: a phone
+   * and a desktop looking at one server want two different sidebars, so a width
+   * in the snapshot would be one of them constantly overwriting the other — the
+   * same argument `zen` and `sidebarOpen` already make. It goes to
+   * `localStorage`, which is per browser and per device, which is exactly the
+   * scope of the decision. A read that throws (a private window, blocked site
+   * data) is not an error worth reporting; it is a window that opens at the
+   * default width.
+   */
+  const [sidebarOpen, setSidebarOpen] = useState(() => !matchesNarrow());
+  const [sidebarWidth, setSidebarWidth] = useState(storedSidebarWidth);
   /** Zen: the focused pane takes the window. A view state, never the server's. */
   const [zen, setZen] = useState(false);
   const [prefixArmed, setPrefixArmed] = useState(false);
@@ -171,6 +231,59 @@ export function App() {
     if (appearance) applyAppearance(appearance);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appearanceKey]);
+
+  /**
+   * Tell the stylesheet which shape the window is in.
+   *
+   * An attribute on the root rather than a `@media` rule of its own, so the
+   * breakpoint is stated once — see `NARROW` above. It is the same trick
+   * `theme.ts` and `skin.ts` use for a different reason: the cascade is the
+   * cheapest way to tell several hundred rules something, and it costs no
+   * render at all.
+   */
+  useEffect(() => {
+    document.documentElement.toggleAttribute("data-narrow", narrow);
+  }, [narrow]);
+
+  /**
+   * Crossing the breakpoint decides for you, once.
+   *
+   * Going narrow closes the sidebar, because a sidebar that is a full-screen
+   * overlay is not something to leave standing over the panes; coming back wide
+   * opens it, because a column beside them is the ordinary state of the window.
+   * Only on the *crossing* — a deliberate `toggle-sidebar` either side of it
+   * survives until the window changes shape again, which is the difference
+   * between the layout having an opinion and the layout overruling you.
+   */
+  useEffect(() => {
+    setSidebarOpen(!narrow);
+  }, [narrow]);
+
+  /** Remember the width for the next time this browser opens kururu. */
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
+    } catch {
+      // No storage is a window that opens at the default width, not a failure.
+    }
+  }, [sidebarWidth]);
+
+  /**
+   * A width proposed by the drag handle, held between the floor and the ceiling.
+   *
+   * The clamp is here rather than in the handle because the handle's job is to
+   * report where the pointer is and this is the file that knows what a sidebar
+   * is for. Note what this costs downstream and why nothing has to be done
+   * about it: a narrower sidebar is a wider stage, so every pane's box moves,
+   * and a moved box is a new proposed grid and therefore a SIGWINCH into every
+   * agent on screen. That is correct — it is what dragging the edge of the
+   * window means — and it arrives through the `ResizeObserver` in
+   * `terminals.ts` with the same 60ms settle a dragged divider gets, so a drag
+   * is one resize at the end of it rather than one per frame.
+   */
+  const resizeSidebar = useCallback((px: number) => {
+    setSidebarWidth(Math.round(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, px))));
+  }, []);
 
   /**
    * Tell the server what is on screen: the active tab of every pane, and only of
@@ -597,7 +710,17 @@ export function App() {
   }
 
   return (
-    <div className={`app ${zen ? "app-zen" : ""}`}>
+    /* The width is a custom property rather than an inline width on the aside,
+       because two rules need it: the sidebar itself, and — while it is an
+       overlay — nothing at all. Putting it on the root lets the stylesheet
+       decide which of those applies, which is the whole point of stating the
+       breakpoint once. `app-window` says this is Electron rather than a browser
+       tab, and exists for exactly one thing: the traffic lights, which float
+       over this corner and are not there on a phone. */
+    <div
+      className={`app ${zen ? "app-zen" : ""} ${desktop() ? "app-window" : ""}`}
+      style={{ "--sidebar-w": `${sidebarWidth}px` } as React.CSSProperties}
+    >
       {sidebarOpen && !zen && (
         <Sidebar
           profile={profile}
@@ -618,10 +741,32 @@ export function App() {
           onEditing={setEditing}
           onSettings={() => setSettings("appearance")}
           onReach={() => setReach(true)}
+          /* Whether it is a column or a screen, and how to get rid of it. The
+             sidebar draws a close button only in the second case — in the first
+             the panes beside it are already the way out. */
+          overlay={narrow}
+          onClose={() => setSidebarOpen(false)}
+          onResize={resizeSidebar}
+          onResetWidth={() => setSidebarWidth(SIDEBAR_DEFAULT)}
         />
+      )}
+      {/* A full-screen sidebar sits over the panes, so it needs something
+          behind it to swallow the taps that miss. Escape is deliberately *not*
+          a way out of it: escape belongs to whatever is running in the pty —
+          it is how you leave insert mode — and a chrome that took it would be
+          a chrome that broke vim to save a keystroke. */}
+      {sidebarOpen && !zen && narrow && (
+        <div className="sidebar-scrim" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
       )}
 
       <div className="stage">
+        {/* Somewhere to drag the window by when the sidebar is not there to be
+            it. The traffic lights float over the top-left corner whether or not
+            anything is drawn under them, so a hidden sidebar used to leave them
+            sitting on a terminal with nothing to grab the window by at all —
+            which mattered little while hiding it was a keyboard gesture and
+            matters rather more now that a narrow window starts that way. */}
+        {!sidebarOpen && !zen && <div className="stage-drag" aria-hidden="true" />}
         <main className="panes">
           <Panes
             node={workspace.layout}
@@ -638,6 +783,12 @@ export function App() {
           connected={connected}
           prefixArmed={prefixArmed}
           resizeMode={resizeMode}
+          /* The pointer's door onto `toggle-sidebar`. It has always had a key,
+             and a key is no use at all in the one state that needs this most:
+             the sidebar hidden on a phone, where there is no keyboard to press
+             it with and nothing on screen saying the list is still there. */
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={() => run("toggle-sidebar")}
           onHelp={() => setHelp(true)}
         />
       </div>
@@ -689,6 +840,51 @@ export function App() {
       )}
     </div>
   );
+}
+
+/**
+ * Is the window narrow enough that the sidebar should be a screen?
+ *
+ * `matchMedia` rather than a `resize` listener: the browser is already
+ * evaluating this query for the stylesheet and will say when the answer flips,
+ * so subscribing to the answer costs one event per crossing instead of one per
+ * frame of a window drag.
+ */
+function useNarrow(): boolean {
+  const [narrow, setNarrow] = useState(matchesNarrow);
+  useEffect(() => {
+    const query = window.matchMedia(NARROW);
+    const onChange = () => setNarrow(query.matches);
+    query.addEventListener("change", onChange);
+    // And once now, in case the window changed between the initial state being
+    // computed and this effect running.
+    onChange();
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+  return narrow;
+}
+
+function matchesNarrow(): boolean {
+  return typeof window !== "undefined" && window.matchMedia(NARROW).matches;
+}
+
+/**
+ * The width this browser was last left at, or the default.
+ *
+ * Clamped on the way in as well as on the way out, because what comes back is a
+ * string somebody could have edited and a sidebar restored to four pixels is
+ * one with no way to get hold of its own drag handle.
+ */
+function storedSidebarWidth(): number {
+  try {
+    const saved = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    if (Number.isFinite(saved) && saved > 0) {
+      return Math.round(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, saved)));
+    }
+  } catch {
+    // Storage that refuses to answer is a default width, not an error.
+  }
+  return SIDEBAR_DEFAULT;
 }
 
 /** The terminal the focused pane is showing, if any. */
