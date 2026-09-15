@@ -27,6 +27,7 @@
  */
 import type { KeyOverrides } from "./keys";
 import type { LayoutNode } from "./layout";
+import type { Appearance } from "./theme";
 
 /**
  * `idle`, `working` and `done` are inferred from output timing (agents/status.ts).
@@ -151,6 +152,19 @@ export interface AgentSnapshot {
    * whether to draw ↻ or ▸.
    */
   dev?: string | null;
+  /**
+   * How much memory this terminal is holding, in bytes: the resident set of the
+   * pty's own process and everything under it, added up. Null for a terminal
+   * whose process could not be read, which is what an exited one looks like.
+   *
+   * Server-side like the three fields above it and for the same reason — it is
+   * learnt from the process table rather than from a pty, so the half of kururu
+   * that cannot be restarted never has to hear about it. What the number does
+   * and does not cover (shared pages counted twice; compressed pages not counted
+   * at all) is `server/src/memory.ts`'s business, and it is worth reading before
+   * treating this as the truth about a machine.
+   */
+  rss?: number | null;
   /**
    * A name the user typed (rename-tab). Wins over everything else a tab could
    * be called, and unlike the detected program it is never overwritten.
@@ -601,6 +615,80 @@ export interface WorkspaceDev {
   agentId: string | null;
 }
 
+/**
+ * Who a profile is, as pointers to the files that already hold the answer.
+ *
+ * Each of these is the environment variable the tool itself reads, and between
+ * them they are what "my work account" means in practice. `CLAUDE_CONFIG_DIR`
+ * scopes a Claude Code login completely — a directory that has not been logged
+ * in to comes up logged out, so two of them are two accounts signed in at once
+ * rather than a switch with global state. `GH_CONFIG_DIR` decides which of the
+ * accounts already in gh's keyring is the active one, so no profile has to log
+ * in again for an account another profile has added. `GIT_CONFIG_GLOBAL` is the
+ * name a commit ends up with.
+ *
+ * Pointers rather than values, and that is the whole shape of this type. A
+ * profile travels in every snapshot and is written to `session.json`, and kururu
+ * is reachable from the tailnet, so a free-form environment map on here would be
+ * a credential store that every client can read and that lands in plain text on
+ * disk. A path is not a secret. The secrets stay where the tools already keep
+ * them — the login keychain, and files the OS is already protecting — and kururu
+ * never learns one; a profile that needs an API key names an `apiKeyHelper` in
+ * the settings file the first of these paths points at.
+ *
+ * Null is "the machine's default", which is deliberately not the same as naming
+ * the default directory: it follows `~/.claude` wherever that moves, the way a
+ * workspace's null `mascotId` follows the default mascot rather than freezing a
+ * copy of whatever was default the day it was chosen.
+ */
+export interface ProfileIdentity {
+  /** CLAUDE_CONFIG_DIR: a whole Claude Code config directory, login included. */
+  claudeConfigDir: string | null;
+  /** GH_CONFIG_DIR: a `hosts.yml` naming which github account is active. */
+  ghConfigDir: string | null;
+  /** GIT_CONFIG_GLOBAL: the `.gitconfig` a commit takes its author from. */
+  gitConfigGlobal: string | null;
+}
+
+/** Nobody in particular — every tool as the machine has it. */
+export function blankIdentity(): ProfileIdentity {
+  return { claudeConfigDir: null, ghConfigDir: null, gitConfigGlobal: null };
+}
+
+/**
+ * One path out of a client, or out of a blob an older server wrote.
+ *
+ * Refused rather than repaired, which is `set-workspace-color`'s rule and is
+ * here for a plainer reason: there is no nearest legal value for a path. A
+ * relative one is the only shape worth singling out — it would resolve against
+ * whatever directory the terminal happened to open in, so `.config` would mean
+ * a different account in every pane, which is precisely the bug this feature
+ * exists to stop. `~` is left unexpanded because that is what a person types;
+ * `server/src/identity.ts` expands it at spawn, where there is a home directory
+ * to expand it against.
+ */
+function adoptPath(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const path = value.trim();
+  if (!path) return null;
+  return path.startsWith("/") || path.startsWith("~/") || path === "~" ? path : null;
+}
+
+/** An identity out of a client or a restored blob, with the junk taken out. */
+export function adoptIdentity(value: unknown): ProfileIdentity {
+  const raw = (value ?? {}) as Record<string, unknown>;
+  return {
+    claudeConfigDir: adoptPath(raw.claudeConfigDir),
+    ghConfigDir: adoptPath(raw.ghConfigDir),
+    gitConfigGlobal: adoptPath(raw.gitConfigGlobal),
+  };
+}
+
+/** Whether anything has been chosen at all — what decides if a row says so. */
+export function hasIdentity(identity: ProfileIdentity): boolean {
+  return Boolean(identity.claudeConfigDir || identity.ghConfigDir || identity.gitConfigGlobal);
+}
+
 /** A named session: a list of workspaces, and which of them you are in. */
 export interface Profile {
   id: string;
@@ -613,6 +701,13 @@ export interface Profile {
    * rather than a walk through the list.
    */
   lastWorkspaceId: string | null;
+  /**
+   * Which accounts a terminal opened in here belongs to. Read at spawn and
+   * nowhere else, so changing it is a statement about the next terminal rather
+   * than about the five already running — the same way `Workspace.dev` is a
+   * memory of a command rather than a command.
+   */
+  identity: ProfileIdentity;
 }
 
 /** A profile you are not in, as much of it as a switcher needs to draw. */
@@ -622,6 +717,13 @@ export interface ProfileSummary {
   workspaces: number;
   /** Live ptys inside it. The reason switching away is not the same as closing. */
   agents: number;
+  /**
+   * Carried here as well as on the profile, which is the one thing a summary
+   * holds that a switcher does not need. Settings edits every profile on one
+   * page, and a page that could only reach the active one would have you visit
+   * a profile in order to describe it — filling in a form by standing in it.
+   */
+  identity: ProfileIdentity;
 }
 
 /**
@@ -655,6 +757,16 @@ export interface SessionSnapshot {
    * and a rebinding survives a reload.
    */
   keys: KeyOverrides;
+  /**
+   * Which theme is on and what the terminals are set in. Server-owned like the
+   * keyboard and for the same reasons — a phone and a desktop cannot end up
+   * looking like two applications, and a reload does not cost you the choice.
+   *
+   * A theme *id* travels, never a palette: `shared/theme.ts` holds what each one
+   * means and both halves import it, so a flavour restyled in a later version
+   * restyles everywhere rather than being frozen in somebody's config file.
+   */
+  appearance: Appearance;
 }
 
 /** What an agent (or a Claude Code hook) may tell kururu about itself. */

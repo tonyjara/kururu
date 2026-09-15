@@ -43,6 +43,14 @@
  * disagreement underneath every screen kururu has drawn wrong.
  */
 import { FitAddon, init, Terminal } from "ghostty-web";
+import {
+  DEFAULT_APPEARANCE,
+  themeFor,
+  type CursorStyle,
+  type TerminalAppearance,
+  type TerminalTokens,
+} from "../../shared/theme";
+import { installBoxDrawing } from "./boxdraw";
 import { usableGrid } from "./grid";
 import { BUTTON_NONE, encodeMouse, type MouseModes, mouseModes, WHEEL_DOWN, WHEEL_UP } from "./mouse";
 import { input, proposeSize, rebuild, subscribeOutput, warm } from "./session";
@@ -73,33 +81,71 @@ const POOL_MAX = 12;
 const RESIZE_SETTLE_MS = 60;
 
 /**
- * Colours, given to the emulator rather than the stylesheet — it paints into a
- * canvas, so CSS cannot reach any of this. Kept in step with styles.css by hand,
- * which is the trade for not rendering a thousand DOM nodes a frame.
+ * What the emulator is currently painting with, and what it is set in.
+ *
+ * Module state rather than an argument, because an emulator is built at the
+ * moment a pane first borrows it and that is nowhere near the moment a theme is
+ * chosen: the pool builds terminals all afternoon and every one of them has to
+ * come up wearing whatever is on. So the current values live here, `restyle`
+ * writes them and walks the pool, and `create` reads them.
+ *
+ * Colours go to the emulator rather than to the stylesheet because it paints
+ * into a canvas and CSS cannot reach any of it. That used to mean a second
+ * palette kept in step with `styles.css` by hand; it does not now — both halves
+ * come out of one `Theme` in `shared/theme.ts`, and this is simply the half that
+ * is handed over as an object instead of being set as custom properties.
  */
-const THEME = {
-  background: "#0d0f0e",
-  foreground: "#d7dbd8",
-  cursor: "#7fd6a2",
-  cursorAccent: "#0d0f0e",
-  selectionBackground: "#2b3a33",
-  black: "#1b1f1d",
-  red: "#e57373",
-  green: "#7fd6a2",
-  yellow: "#e3c46a",
-  blue: "#7aa6da",
-  magenta: "#c28fd8",
-  cyan: "#77c8c8",
-  white: "#c8cec9",
-  brightBlack: "#5a635e",
-  brightRed: "#ff8a80",
-  brightGreen: "#9bf0bd",
-  brightYellow: "#ffdd8a",
-  brightBlue: "#9cc3f0",
-  brightMagenta: "#dbabef",
-  brightCyan: "#96e5e5",
-  brightWhite: "#f0f3f1",
-};
+let palette: TerminalTokens = themeFor(null).terminal;
+let type: TerminalAppearance = DEFAULT_APPEARANCE.terminal;
+
+/**
+ * The cursor style an unfocused pane is given, which is not one of the three.
+ *
+ * ghostty-web has no idea what focus is. `renderCursor` fills a rectangle in
+ * `theme.cursor` whenever the viewport is at the bottom and the terminal's own
+ * cursor mode says visible, and nothing in the library — renderer or terminal —
+ * asks whether anybody is typing into it. So a tiled window draws a solid
+ * blinking block in *every* pane at once, and a pane whose terminal is sitting
+ * at its home position draws it in the top-left corner, which is how this was
+ * noticed: focus one pane and the others keep theirs.
+ *
+ * A real terminal draws a hollow box when it loses focus. This renderer cannot
+ * — there is no outline path in it — so the choice is a solid cursor or none,
+ * and none is right here: `pane-on` already marks where the keyboard is going,
+ * and a cursor in every pane actively contradicts it.
+ *
+ * The mechanism is that `renderCursor` switches on the style and has **no
+ * default case**, so a style it does not recognise draws nothing. That is being
+ * leant on rather than merely observed, so it is worth saying what breaks it: a
+ * future version of the library adding a `default:` to that switch puts every
+ * cursor back, and the symptom is exactly the one described above — a cursor in
+ * the corner of every pane you are not typing into. It is cosmetic and visible
+ * immediately, which is why it is an acceptable thing to lean on; check that
+ * switch in `node_modules/ghostty-web/dist/ghostty-web.js` before looking
+ * anywhere else.
+ *
+ * The alternative was to keep a real style and tint the cursor to the
+ * background for unfocused panes, which needs no unhandled case and was
+ * rejected anyway — `renderCursor` paints its rectangle *over* the glyph and
+ * never redraws it in `cursorAccent`, so a background-coloured block is an
+ * erased character rather than an invisible cursor.
+ */
+const CURSOR_HIDDEN = "none" as CursorStyle;
+
+/**
+ * The face stack, with whatever the user named at the front of it.
+ *
+ * Prepended, and that is the point: the built-in stack below exists so an agent
+ * TUI's devicons are not tofu, and somebody who types "Berkeley Mono" has said
+ * nothing about wanting those to stop working. It does move the grid metrics,
+ * since the cell is measured from the first face — which is exactly what
+ * choosing a font means, and the reason the patched faces are appended rather
+ * than prepended in the first place.
+ */
+function fontStack(): string {
+  const chosen = type.fontFamily.trim();
+  return chosen ? `"${chosen}", ${FONT_STACK}` : FONT_STACK;
+}
 
 /**
  * The Nerd Font faces are in this stack for their glyphs, not their letterforms.
@@ -379,8 +425,24 @@ interface Pooled {
   readonly element: HTMLDivElement;
   /** A pane has it right now, which is what makes it ineligible for eviction. */
   attached: boolean;
-  /** The pane holding it has the keyboard. Remembered, because `open()` is late. */
+  /**
+   * It should be holding the DOM focus. Remembered, because `open()` is late.
+   *
+   * Not the same question as `showsCursor` below, and conflating them was a bug
+   * for about ten minutes: this one is false while a dialog is up, because keys
+   * typed into Settings must not reach a pty.
+   */
   wantsFocus: boolean;
+  /**
+   * Its pane is the focused one, which is the question the *cursor* answers to.
+   *
+   * Deliberately not `wantsFocus`. A dialog takes the keyboard without moving
+   * where the keyboard will go back to — `Panes.tsx` keeps drawing `pane-on`
+   * through one for exactly that reason — so a cursor keyed on the DOM focus
+   * would vanish from every pane the moment Settings opened, which is the one
+   * moment somebody is looking at a cursor on purpose.
+   */
+  showsCursor: boolean;
   /**
    * The socket dropped while this was off screen, so what it holds is missing
    * whatever arrived in the gap. Nothing is done about it until it is borrowed:
@@ -397,6 +459,18 @@ interface Pooled {
    * while the element is detached, which is how being in the pool costs nothing.
    */
   measure(): void;
+  /**
+   * Wear whatever `palette` and `type` now say. A no-op until the emulator
+   * exists, which costs nothing: one built after a theme change reads the same
+   * two module variables in its constructor and comes up already wearing it.
+   */
+  restyle(remeasure: boolean): void;
+  /**
+   * Draw a cursor, or stop: this pane has the keyboard, or it does not. A no-op
+   * until the emulator exists, which is fine — one built later reads
+   * `wantsFocus` for itself.
+   */
+  applyCursor(): void;
   /** Hand it the keyboard, if it exists yet. See `setFocused`. */
   focus(): void;
   dispose(): void;
@@ -442,11 +516,14 @@ function create(agentId: string): Pooled {
     element,
     attached: false,
     wantsFocus: false,
+    showsCursor: false,
     stale: false,
     usedAt: ++clock,
-    // Replaced once the emulator exists. Until then there is nothing to measure
-    // and nothing that could be told a size.
+    // Replaced once the emulator exists. Until then there is nothing to measure,
+    // nothing that could be told a size, and nothing wearing the wrong colours.
     measure: () => {},
+    restyle: () => {},
+    applyCursor: () => {},
     focus: () => terminal?.focus(),
     dispose: () => {
       if (disposed) return;
@@ -466,10 +543,13 @@ function create(agentId: string): Pooled {
     if (!ok || disposed) return;
 
     const em = new Terminal({
-      theme: THEME,
-      fontFamily: FONT_STACK,
-      fontSize: 12,
-      cursorBlink: true,
+      theme: palette,
+      fontFamily: fontStack(),
+      fontSize: type.fontSize,
+      // Right from the start rather than corrected a beat later: a pane that is
+      // not the focused one must never paint a cursor, not even for a frame.
+      cursorStyle: entry.showsCursor ? type.cursorStyle : CURSOR_HIDDEN,
+      cursorBlink: type.cursorBlink,
       // History lives on the server too, but only what it has been asked for is
       // sent; this is what the emulator itself keeps once it is open.
       scrollback: 10000,
@@ -478,6 +558,9 @@ function create(agentId: string): Pooled {
     em.loadAddon(fit);
     em.open(element);
     terminal = em;
+    // Has to come after `open`, which is where the renderer and its canvas are
+    // built; there is nothing to point at before that.
+    if (em.renderer) installBoxDrawing(em.renderer);
     if (entry.wantsFocus) em.focus();
 
     /**
@@ -543,9 +626,17 @@ function create(agentId: string): Pooled {
        * socket's message loop, which is the one place in the client a single
        * dead pane could take everything else with it. `session.ts` catches that
        * too; this is the half that stops it being raised in the first place.
+       *
+       * Nothing is the other thing that throws, and it took a black pane to
+       * find. `write("")` in ghostty-web 0.4.0 asks WASM for a zero-length
+       * array, gets back the dangling pointer Zig hands out for one, and
+       * `Uint8Array.set` rejects that offset before it ever notices there are no
+       * bytes to copy. Empty is not a corner case in here either: the backlog of
+       * a terminal that has not printed anything yet is exactly zero bytes, so
+       * every new tab raised one.
        */
       write: (data: string) => {
-        if (!disposed) em.write(data);
+        if (!disposed && data) em.write(data);
       },
       /**
        * The shape the server says this terminal is. The one place a pooled
@@ -583,10 +674,12 @@ function create(agentId: string): Pooled {
        * reset its idea of what changed did not cover cells the renderer was
        * still holding, and the picture stayed wrong exactly where the agent
        * never writes again. This renderer draws the viewport from the WASM
-       * buffer on its own loop rather than from a record of which cells it
-       * thinks are dirty, so a screen replaced wholesale is simply the screen it
-       * draws next. If a backlog ever does land looking half-painted, this
-       * paragraph is the assumption that was wrong.
+       * buffer on a loop of its own. It does track dirty rows — the loop passes
+       * `forceAll = false` — but replacing a whole screen dirties a whole
+       * screen, so the repaint follows from the write rather than having to be
+       * asked for. If a backlog ever does land looking half-painted, that is the
+       * assumption that was wrong, and `restyle` next door is the worked example
+       * of the case where it does not hold.
        */
       reset: (data: string, cols: number, rows: number) => {
         if (disposed) return;
@@ -608,7 +701,8 @@ function create(agentId: string): Pooled {
           em.resize(cols, rows);
         }
         em.reset();
-        em.write(data);
+        // Nothing to write is nothing to do, and would throw — see `write`.
+        if (data) em.write(data);
         /**
          * And nothing afterwards. This used to fit back to the box, because the
          * emulator owned its own size and a backlog had just overwritten it
@@ -617,6 +711,68 @@ function create(agentId: string): Pooled {
          * and if it has moved since, the ResizeObserver has already said so.
          */
       },
+    };
+
+    /**
+     * Colours go straight to the renderer rather than through `em.options.theme`.
+     *
+     * Setting that option is the documented route and it warns that "theme
+     * changes after open() are not yet fully supported", which is true of the
+     * half it cannot reach: the palette is also handed to the WASM terminal when
+     * it is built, and nothing updates it there. That half only answers colour
+     * *queries* — a program asking what the background is — and it is right
+     * again the moment this emulator is rebuilt, whereas the renderer's copy is
+     * what every cell on screen is actually drawn from. So the renderer is set
+     * directly, the warning is not earned, and the one thing left stale is a
+     * question almost nothing asks.
+     *
+     * The repaint afterwards is not optional, and finding that out is what this
+     * comment is for. The render loop is self-rescheduling, so it was tempting
+     * to assume the next frame would simply be the new palette — but it renders
+     * with `forceAll = false` and the renderer redraws only the rows the buffer
+     * reports dirty. An agent redraws differentially and a settled one reports
+     * nothing dirty at all, so a theme change would repaint the line under the
+     * cursor and leave the rest of the screen in the colours it had, for as long
+     * as the agent had nothing to say. `forceAll` is reachable only by calling
+     * the renderer directly, which is why this reaches past `em` for the one
+     * call in kururu that does.
+     *
+     * The font is the opposite case and goes through `options` on purpose:
+     * assigning `fontSize` or `fontFamily` is what makes the emulator remeasure
+     * its cell and resize its canvas, and doing that by hand would be
+     * reimplementing `handleFontChange` from the outside.
+     */
+    entry.applyCursor = () => {
+      if (disposed) return;
+      const want = entry.showsCursor ? type.cursorStyle : CURSOR_HIDDEN;
+      if (em.options.cursorStyle === want) return;
+      em.options.cursorStyle = want;
+      /**
+       * And repaint, because the loop will not do it on its own. It renders
+       * dirty rows only, and the row the cursor is on is redrawn just when the
+       * cursor *moved* or is blinking — so with `cursorBlink` switched off, a
+       * pane that lost the keyboard would keep the cursor it had until the
+       * agent next wrote to that line, which for an idle agent is never.
+       */
+      if (em.renderer && em.wasmTerm) em.renderer.render(em.wasmTerm, true, em.viewportY, em);
+    };
+
+    entry.restyle = (remeasure: boolean) => {
+      if (disposed) return;
+      em.renderer?.setTheme(palette);
+      if (em.renderer && em.wasmTerm) {
+        em.renderer.render(em.wasmTerm, true, em.viewportY, em);
+      }
+      entry.applyCursor();
+      em.options.cursorBlink = type.cursorBlink;
+      em.options.fontSize = type.fontSize;
+      em.options.fontFamily = fontStack();
+      // A cell that changed size is a different grid in the same box, and the
+      // server is the only thing allowed to act on that — so this proposes, the
+      // way a dragged divider does, and waits out the settle for the same
+      // reason: a slider is dragged, and every step of it would otherwise be a
+      // SIGWINCH into every agent watching.
+      if (remeasure) measure();
     };
 
     entry.measure = measure;
@@ -706,11 +862,24 @@ export function release(agentId: string, mount: HTMLElement): void {
  * than only applied, because the first emulator of a session is still waiting on
  * the WASM when the pane that would focus it mounts.
  */
-export function setFocused(agentId: string, focused: boolean): void {
+/**
+ * Which pane this terminal is in, and whether keys may reach a pty at all.
+ *
+ * Two arguments because the emulator wants two different answers out of them.
+ * The DOM focus follows both — a dialog is up, so nothing typed should arrive
+ * in a terminal — while the cursor follows only the first, because a dialog
+ * does not move where the keyboard will go back to.
+ */
+export function setFocused(agentId: string, focused: boolean, keyboard: boolean): void {
   const entry = pool.get(agentId);
   if (!entry) return;
-  entry.wantsFocus = focused;
-  if (focused) entry.focus();
+  entry.wantsFocus = focused && keyboard;
+  entry.showsCursor = focused;
+  // Both directions, unlike the focus call below it: losing the keyboard is
+  // exactly when a pane has to stop drawing a cursor, and it is the half that
+  // nothing else would do.
+  entry.applyCursor();
+  if (entry.wantsFocus) entry.focus();
 }
 
 /**
@@ -733,9 +902,53 @@ export function retain(liveIds: ReadonlySet<string>): void {
   let changed = false;
   for (const [agentId, entry] of pool) {
     if (liveIds.has(agentId)) continue;
+    /**
+     * Except one a pane is holding, which is never gone whatever the list says
+     * — and the asymmetry is not caution, it is that the two mistakes cost
+     * different things. Keeping an emulator a moment too long costs a canvas
+     * until the next snapshot. Disposing one a pane has *borrowed* empties that
+     * pane for good: borrowing happens in an effect keyed on the agent id, and
+     * the id has not changed, so nothing will ever ask for a second one. That
+     * was the black pane on a new tab — the server pushed the layout with the
+     * new terminal in it one microtask before the agent list caught up (see
+     * `HostLink.create`), and this disposed the emulator the pane had just
+     * built.
+     *
+     * It costs nothing to skip: a terminal that really has ended loses its tab
+     * in the same snapshot, the pane releases the element while React is still
+     * committing, and this effect runs afterwards to find it detached.
+     */
+    if (entry.attached) continue;
     pool.delete(agentId);
     entry.dispose();
     changed = true;
   }
   if (changed) announce();
+}
+
+/**
+ * Put every emulator — the ones on screen and the ones being kept warm — into
+ * this theme and this type.
+ *
+ * Called from the snapshot rather than from Settings, which is what makes a
+ * theme picked on the phone land on the desktop: the verb goes to the server,
+ * the server writes it down and pushes a snapshot, and every client restyles
+ * because its snapshot changed. Nothing here knows a dialog exists.
+ *
+ * It restyles rather than rebuilding, and that is the whole reason this is three
+ * lines instead of a page. A rebuild would be correct and ruinous — every
+ * visible terminal would ask for a backlog, every warm one would lose its
+ * scrollback and its scroll position, and the pool exists precisely so that the
+ * things which look like they ought to rebuild an emulator do not.
+ *
+ * A re-measure is asked for only when the *font* moved. Colours do not change
+ * the cell, so a theme swap must not propose anything: a proposal is a pty
+ * resize and a SIGWINCH into every agent, and paying that to go from Mocha to
+ * Macchiato would make choosing a colour scheme repaint everybody's work.
+ */
+export function applyTerminalAppearance(tokens: TerminalTokens, next: TerminalAppearance): void {
+  const remeasure = next.fontFamily !== type.fontFamily || next.fontSize !== type.fontSize;
+  palette = tokens;
+  type = next;
+  for (const entry of pool.values()) entry.restyle(remeasure);
 }

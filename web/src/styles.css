@@ -6,31 +6,59 @@
  * agent is saying. Hence the narrow sidebar, the one-line pane bars, and the
  * absence of anything with a shadow on it.
  *
- * Dark only, and not as a preference: these panes sit against the emulator's
- * own canvas, whose colours are set in Terminal.tsx rather than here, and a
- * light chrome around a dark grid looks like a bug. The two palettes are kept
- * in step by hand — that is the price of a renderer CSS cannot reach.
+ * Every colour in here is a token, and that is now load-bearing rather than
+ * tidy. The values below are written onto the root element at runtime by
+ * `web/src/theme.ts` out of whichever theme the server says is on, so a rule
+ * that names a hex is a rule that stays one colour while the window around it
+ * changes — which is what the last dozen of them did, and why `#ff8a80`,
+ * `#33413a` and three different near-blacks are now `--danger`, `--line-high`
+ * and `--on-accent`. If you need a colour that is not here, add a token to
+ * `UiTokens` and let every theme answer for it; do not reach for a hex.
+ *
+ * The block below is therefore a default and not the palette. It holds
+ * Catppuccin Mocha, which is what kururu opens in, and it is what is on screen
+ * for the frame between this stylesheet painting and the first snapshot
+ * arriving — a first paint in some other theme's colours would be a flash of
+ * the wrong application. It is also what keeps this file readable on its own.
+ *
+ * The terminal's own palette is *not* here and cannot be: the emulator paints
+ * into a canvas, so CSS reaches none of it. It used to be a second palette kept
+ * in step with this one by hand; it is not now. Both halves come out of one
+ * `Theme` in `shared/theme.ts`, and the other half is handed to ghostty as an
+ * object in `terminals.ts`.
  */
 
 :root {
-  --bg: #0d0f0e;
-  --chrome: #141817;
-  --chrome-high: #1b201e;
-  --line: #242b28;
-  --text: #d7dbd8;
-  --dim: #7c857f;
-  --dimmer: #565e59;
-  --accent: #7fd6a2;
+  color-scheme: dark;
 
-  --idle: #6b736e;
+  --bg: #1e1e2e;
+  --chrome: #181825;
+  --chrome-high: #313244;
+  --line: #45475a;
+  --line-high: #585b70;
+  --text: #cdd6f4;
+  --text-strong: #cdd6f4;
+  --dim: #a6adc8;
+  --dimmer: #6c7086;
+  --accent: #a6e3a1;
+  --on-accent: #11111b;
+
+  --idle: #7f849c;
   /* Orange, and not the accent green it used to be: "working" was the same
      colour as every focus ring and unread mark in here, which made the one
      state worth spotting the least distinguishable thing on the row. Warm
      enough to be told apart from `--blocked` above it at a glance. */
-  --working: #ff9f43;
-  --blocked: #e3c46a;
-  --done: #7aa6da;
-  --exited: #4a524d;
+  --working: #fab387;
+  --blocked: #f9e2af;
+  --done: #89b4fa;
+  --exited: #585b70;
+
+  --danger: #f38ba8;
+  --danger-bg: #f38ba8;
+  --on-danger: #11111b;
+
+  --scrim: rgba(0, 0, 0, 0.5);
+  --shadow: rgba(0, 0, 0, 0.5);
 
   --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --mono: "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace;
@@ -114,7 +142,7 @@ kbd {
   color: var(--text);
 }
 .mini-danger:hover {
-  color: #ff8a80;
+  color: var(--danger);
 }
 
 /* --------------------------------------------------------------------------
@@ -146,6 +174,10 @@ kbd {
 
 .profile-btn {
   -webkit-app-region: no-drag;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -158,6 +190,18 @@ kbd {
 }
 .profile-btn:hover {
   background: var(--chrome-high);
+}
+/* The one mark that says this name is a menu and not a label. Small and dim
+   until you are on it: the sidebar header has one other thing in it and neither
+   should be the loudest part of the window. */
+.profile-caret {
+  flex: none;
+  font-size: 8px;
+  line-height: 1;
+  color: var(--dimmer);
+}
+.profile-btn:hover .profile-caret {
+  color: var(--dim);
 }
 .dot {
   width: 7px;
@@ -439,7 +483,7 @@ kbd {
   opacity: 1;
 }
 .agent-kill:hover {
-  color: #ff8a80;
+  color: var(--danger);
 }
 
 /* The status mark. Whatever is inside it, the box is the same size: a sidebar
@@ -557,6 +601,18 @@ kbd {
   flex: none;
 }
 
+/* Quieter than the context figure beside it, and one step smaller: memory is the
+   number you go looking for, not the one you watch, and two numbers drawn with
+   equal weight would make the row read as a readout instead of a label. */
+.mem {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dimmer);
+  white-space: nowrap;
+  flex: none;
+}
+
 /* Tabular figures so the column does not shuffle sideways as the number grows. */
 .ctx-pct {
   font-family: var(--mono);
@@ -592,7 +648,7 @@ kbd {
   padding: 6px 10px;
   border-radius: 6px;
   background: var(--accent);
-  color: #06100b;
+  color: var(--on-accent);
   font-size: 12px;
   font-weight: 600;
 }
@@ -607,8 +663,8 @@ kbd {
   font-weight: 500;
 }
 .button-danger {
-  background: #b3453c;
-  color: #fff;
+  background: var(--danger-bg);
+  color: var(--on-danger);
 }
 
 /* --------------------------------------------------------------------------
@@ -707,7 +763,7 @@ kbd {
 
 /* The focused pane is the one the keyboard is going to. Worth being obvious. */
 .pane-on {
-  border-color: #33413a;
+  border-color: var(--line-high);
 }
 .pane-on .tabstrip {
   background: var(--chrome-high);
@@ -772,7 +828,7 @@ kbd {
   opacity: 1;
 }
 .tab-close:hover {
-  color: #ff8a80;
+  color: var(--danger);
 }
 
 .tab-new {
@@ -830,7 +886,7 @@ kbd {
   transition: background 90ms ease;
 }
 .dz-on {
-  background: rgba(127, 214, 162, 0.22);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
@@ -838,7 +894,7 @@ kbd {
    one — enough to tell you at a glance that this drop rearranges the window
    rather than moving one terminal. */
 .dropzones-pane .dz-on {
-  background: rgba(122, 166, 218, 0.24);
+  background: color-mix(in srgb, var(--done) 24%, transparent);
   box-shadow: inset 0 0 0 1px var(--done);
 }
 
@@ -1023,11 +1079,11 @@ kbd {
 /* The prefix is a mode, and an unlabelled mode is what makes modes distrusted. */
 .sb-prefix {
   background: var(--blocked);
-  color: #101019;
+  color: var(--on-accent);
 }
 .sb-resize {
   background: var(--done);
-  color: #08111b;
+  color: var(--on-accent);
 }
 .sb-off {
   background: transparent;
@@ -1051,7 +1107,7 @@ kbd {
 .scrim {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--scrim);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -1066,7 +1122,7 @@ kbd {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 14px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 16px 48px var(--shadow);
 }
 .help {
   width: min(520px, 92vw);
@@ -1095,7 +1151,7 @@ kbd {
   outline: none;
 }
 .dialog-input:focus {
-  border-color: #33413a;
+  border-color: var(--line-high);
 }
 
 .dialog-actions {
@@ -1182,7 +1238,7 @@ kbd {
   background: var(--chrome);
   border: 1px solid var(--line);
   border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 12px 32px var(--shadow);
   display: flex;
   flex-direction: column;
 }
@@ -1195,7 +1251,7 @@ kbd {
   background: var(--chrome);
   border: 1px solid var(--line);
   border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 12px 32px var(--shadow);
 }
 
 .picker-grid {
@@ -1243,12 +1299,38 @@ kbd {
   color: var(--text);
 }
 
+/* Three columns rather than a line of text: the mark holds its width whether or
+   not this menu has a current row, so a list of profiles does not shift sideways
+   by a character when one of them is the one you are in. */
 .menu-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   padding: 5px 8px;
   border-radius: 5px;
   text-align: left;
   font-size: 12px;
   color: var(--dim);
+}
+.menu-mark {
+  flex: none;
+  width: 6px;
+  color: var(--accent);
+}
+.menu-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Pushed to the right and quieter than the label, because it is the answer to a
+   question you did not ask — a count you glance at, not a thing you read. */
+.menu-hint {
+  flex: none;
+  padding-left: 10px;
+  font-size: 10px;
+  color: var(--dimmer);
+  font-variant-numeric: tabular-nums;
 }
 .menu-item:hover:not(:disabled) {
   background: var(--chrome-high);
@@ -1259,7 +1341,7 @@ kbd {
   cursor: default;
 }
 .menu-danger:hover:not(:disabled) {
-  color: #ff8a80;
+  color: var(--danger);
 }
 /* A rule above, not below: it separates what follows from what came before. */
 .menu-sep {
@@ -1400,7 +1482,7 @@ kbd {
 }
 .set-select:focus,
 .set-num:focus {
-  border-color: #33413a;
+  border-color: var(--line-high);
 }
 .set-num {
   width: 68px;
@@ -1410,6 +1492,128 @@ kbd {
   flex: 1;
   min-width: 140px;
   accent-color: var(--accent);
+}
+
+/* The text box on the Appearance page — a font name, which is the only free
+   string anywhere in Settings. Sized like `.set-select` so a row holding both
+   does not look like two dialogs. */
+.set-text {
+  flex: 1;
+  min-width: 160px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 7px;
+  font: 12px var(--mono);
+  outline: none;
+}
+.set-text:focus {
+  border-color: var(--line-high);
+}
+.set-text::placeholder {
+  color: var(--dimmer);
+}
+
+/* The number beside a slider. Monospaced and fixed-width so dragging one does
+   not shuffle the row left and right as the digits change. */
+.set-value {
+  font: 11px var(--mono);
+  color: var(--dim);
+  min-width: 38px;
+  text-align: right;
+}
+
+.set-check {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--dim);
+  cursor: pointer;
+}
+.set-check input {
+  accent-color: var(--accent);
+}
+
+/* A page inside the dialog body, and the sections it stacks. Only Appearance
+   has more than one subject on it; the other two tabs are one thing each and
+   use the body directly. */
+.set-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.set-section {
+  display: flex;
+  flex-direction: column;
+}
+.set-h {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dimmer);
+}
+/* A note that explains the control above it rather than the section below, so
+   it sits tight under that control instead of leading the next one. */
+.set-note-under {
+  margin: 2px 0 0;
+}
+
+/* --------------------------------------------------------------------------
+   Themes
+
+   Each option is drawn in its own colours rather than named in the window's,
+   because the colours are the entire thing being chosen — a list of names makes
+   you pick one to find out what it is, and then pick again. The values come
+   inline from the Theme itself (see SettingsAppearance.tsx): a stylesheet can
+   hold one palette at a time and this list is five at once.
+   -------------------------------------------------------------------------- */
+
+.theme-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.theme-opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid;
+  font-size: 12px;
+  text-align: left;
+}
+/* The ring is the theme's own accent — `--ring` is set inline per card, so the
+   mark that says "this one" is itself a sample of what picking it does. Two
+   pixels of it, because a one-pixel ring on top of a one-pixel border of the
+   same colour is indistinguishable from no ring at all. */
+.theme-opt-on {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+.theme-opt-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.theme-opt-swatches {
+  display: flex;
+  flex: none;
+  gap: 3px;
+}
+/* Chrome, accent, and the three states worth spotting. Not a row of neutrals:
+   every dark flavour has the same neutrals, and telling two of them apart is
+   the whole question somebody is asking here. */
+.theme-opt-swatch {
+  width: 7px;
+  height: 14px;
+  border-radius: 2px;
 }
 
 /* Three buttons where a radio group would be, because the choice is small and
@@ -1433,6 +1637,135 @@ kbd {
   border-color: var(--working);
 }
 
+/* --------------------------------------------------------------------------
+   Profiles
+
+   A card per profile rather than a row, because a row is a thing you pick and
+   this is a thing you fill in: the name and the two buttons are the row the
+   picker used to be, and the three paths underneath are the part a dialog could
+   never have held. The active one is marked with the accent down its left edge
+   rather than a filled background — the cards are already the busiest thing in
+   Settings, and a highlight behind twelve controls reads as a selection you are
+   about to lose rather than as "you are here".
+   -------------------------------------------------------------------------- */
+
+.prof-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.prof {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid transparent;
+  border-radius: 8px;
+  background: var(--chrome-high);
+}
+.prof-on {
+  border-left-color: var(--accent);
+}
+
+.prof-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+/* The name is an input that does not look like one until you are in it: a
+   profile is renamed about once, and a box drawn around it permanently would
+   make the card look like a form with a required field at the top of it. */
+.prof-name {
+  flex: 1 1 140px;
+  min-width: 100px;
+  border-color: transparent;
+  background: transparent;
+  font-weight: 600;
+}
+.prof-name:hover {
+  border-color: var(--line);
+}
+.prof-meta {
+  flex: none;
+  font-size: 11px;
+  color: var(--dimmer);
+  font-variant-numeric: tabular-nums;
+}
+/* Not a button, and shaped so it cannot be mistaken for the one beside it: the
+   thing you press is "switch to", and the profile you are already in has
+   nothing to press. */
+.prof-here {
+  flex: none;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.prof-id {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* Label, box, and what the tool says — three columns so the answers line up
+   down the card and a profile with the wrong account in one row is something
+   you spot without reading. */
+.prof-field {
+  display: grid;
+  grid-template-columns: 52px minmax(120px, 1fr) minmax(0, 1.2fr);
+  align-items: center;
+  gap: 8px;
+}
+/* A select in a grid column will happily be as wide as its longest option
+   unless it is told otherwise, and one of the options is a path. */
+.prof-field .set-select {
+  min-width: 0;
+  width: 100%;
+}
+/* The custom path drops onto its own line under the control it belongs to,
+   rather than squeezing a fourth thing into a row that already has three. */
+.prof-path {
+  grid-column: 2 / -1;
+}
+.prof-who {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--dim);
+}
+/* Still being asked. Dimmer rather than a spinner: the answer takes about a
+   second and something moving for a second is worse than something quiet. */
+.prof-who-off {
+  color: var(--dimmer);
+}
+
+.prof-new {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.prof-new .set-text {
+  flex: 1 1 auto;
+}
+
+/* Under a phone's width the three columns stop being a grid worth keeping: a
+   52px label beside a path beside an email is three ellipses. */
+@media (max-width: 560px) {
+  .prof-field {
+    grid-template-columns: 52px minmax(0, 1fr);
+  }
+  .prof-who,
+  .prof-path {
+    grid-column: 2;
+  }
+}
+
 /* The file input is never seen — the button beside it is what you click, because
    a browser's own file control cannot be styled into this chrome and says
    "No file chosen" forever afterwards. */
@@ -1446,7 +1779,8 @@ kbd {
   line-height: 1.5;
   color: var(--dim);
 }
-.set-hint code {
+.set-hint code,
+.set-note code {
   font-family: var(--mono);
   color: var(--text);
 }
@@ -1664,8 +1998,8 @@ kbd {
   position: absolute;
   inset: 0;
   background-image:
-    repeating-linear-gradient(to right, rgba(127, 214, 162, 0.22) 0 1px, transparent 1px var(--cell)),
-    repeating-linear-gradient(to bottom, rgba(127, 214, 162, 0.22) 0 1px, transparent 1px var(--cell));
+    repeating-linear-gradient(to right, color-mix(in srgb, var(--accent) 22%, transparent) 0 1px, transparent 1px var(--cell)),
+    repeating-linear-gradient(to bottom, color-mix(in srgb, var(--accent) 22%, transparent) 0 1px, transparent 1px var(--cell));
   pointer-events: none;
 }
 
@@ -1674,7 +2008,7 @@ kbd {
 .sheet-sel {
   position: absolute;
   border: 1px solid var(--accent);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 0 0 1px var(--shadow);
   pointer-events: none;
 }
 
@@ -2147,7 +2481,7 @@ kbd {
   border-bottom-color: var(--accent);
 }
 
-.md strong { color: #eef1ef; }
+.md strong { color: var(--text-strong); }
 .md em { color: var(--text); }
 
 .md ul,

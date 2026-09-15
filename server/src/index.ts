@@ -34,7 +34,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
-import { adoptMascot, countsAsAgent, defaultMascot } from "../../shared/model";
+import { adoptIdentity, adoptMascot, countsAsAgent, defaultMascot } from "../../shared/model";
 import { bindKey } from "../../shared/keys";
 import type { AgentSnapshot, MascotSet, Profile, PtyKind, SessionSnapshot } from "../../shared/model";
 import type { ClientMessage, DevServer, ServerMessage } from "../../shared/wire";
@@ -44,7 +44,19 @@ import { dump as dumpRecording, forget as forgetRecording, recordBacklog, record
 import { processCwd } from "./cwd";
 import { scanDevServers, stopDev, type DevProc } from "./devservers";
 import { allowedRoots, allowRoot, listDir, readBytes, readFile } from "./files";
+import {
+  describeIdentity,
+  ensureClaudeDir,
+  ensureGhConfig,
+  expandHome,
+  ghIn,
+  identityEnv,
+  knownAccounts,
+  shellQuote,
+  tildify,
+} from "./identity";
 import { renderMarkdown } from "./markdown";
+import { scanMemory } from "./memory";
 import { attach as attachEditor, findNvim } from "./nvim";
 import { panes } from "../../shared/layout";
 import {
@@ -60,6 +72,8 @@ import {
   writeMascots,
 } from "./mascot";
 import { readKeys, writeKeys } from "./keys";
+import { readAppearance, writeAppearance } from "./appearance";
+import { adoptAppearance, themeFor, type Appearance } from "../../shared/theme";
 import { HostLink, type Port } from "./hostlink";
 import { connectToHost, hostSocketPath, type SocketPort } from "./hostsock";
 import { MouseEncoding } from "./mouseencoding";
@@ -230,6 +244,21 @@ function pushSnapshot(): void {
 adoptLegacySheet();
 let mascots = readMascots();
 let keys = readKeys();
+let appearance = readAppearance();
+
+/**
+ * Every appearance change is the same two steps the mascot's are — write it
+ * down, then tell every client — and the snapshot is the answer, exactly as it
+ * is to a split. Nothing here restarts, reloads or repaints anything: the
+ * window redraws because the snapshot it is rendering changed, which is what
+ * makes a theme picked on the desktop land on the phone without either of them
+ * knowing about the other.
+ */
+function saveAppearance(next: Appearance): void {
+  appearance = next;
+  writeAppearance(next);
+  pushSnapshot();
+}
 
 /**
  * Every mascot change goes through here, because all five of them are the same
@@ -259,6 +288,7 @@ function snapshot(): SessionSnapshot {
     agents: host.agents.filter((agent) => mine.has(agent.id)).map(overlay),
     mascots,
     keys,
+    appearance,
   };
 }
 
@@ -331,6 +361,18 @@ function sees(st: ClientState, agentId: string): boolean {
 const lastAgent = new Map<string, string>();
 
 /**
+ * How much memory each terminal is holding, in bytes, by agent id.
+ *
+ * Here rather than on the host for the reason `activity` and `lastAgent` are:
+ * it is read out of the process table, the pty host has nothing to do with it,
+ * and losing it on a restart costs one poll. See `memory.ts` for what the figure
+ * covers — and for why it is rounded before it lands in here rather than on the
+ * way out, which is what stops a number that never holds still from being a
+ * broadcast that never stops.
+ */
+const memory = new Map<string, number>();
+
+/**
  * How each terminal writes its mouse reports, so the backlog can say it too.
  * See `mouseencoding.ts` — the serializer restores the mouse being *on* and
  * loses how it speaks, and the two halves disagreeing types into the program.
@@ -356,12 +398,14 @@ function overlay(agent: AgentSnapshot): AgentSnapshot {
   const was = lastAgent.get(agent.id);
   const serving = devRunning.get(agent.id);
   const fresh = unread.has(agent.id);
-  if (!said && !was && !serving && !fresh) return agent;
+  const held = memory.get(agent.id);
+  if (!said && !was && !serving && !fresh && !held) return agent;
   return {
     ...agent,
     ...(said ? { activity: said } : {}),
     ...(was ? { lastAgent: was } : {}),
     ...(serving ? { dev: serving.program } : {}),
+    ...(held ? { rss: held } : {}),
     // Only ever set, never cleared: see `unread`. The host still answers for the
     // terminals it is not streaming to this process.
     ...(fresh ? { unread: true } : {}),
@@ -426,6 +470,77 @@ async function followCwd(agentId: string): Promise<string | undefined> {
 }
 
 /**
+ * Sign a profile in to an account, by opening a terminal and typing the line a
+ * person would type.
+ *
+ * Neither flow can happen in a dialog: both are a browser, a code to paste and a
+ * few questions, and the only thing kururu could add by wrapping them is a place
+ * for them to go wrong silently. So this is the dev-server button's approach for
+ * the same reason it was right there — the useful part is the setup around the
+ * command, not the command — and it happens in the profile it is about, switched
+ * to first, so that what comes next is on screen rather than in a pane somewhere
+ * else. A new tab rather than a live one, because the one thing worse than a
+ * login prompt you cannot find is a login prompt typed into a waiting agent.
+ *
+ * The two tools want opposite things and that is the whole of the difference
+ * here. A Claude account *is* a config directory, so this makes sure the profile
+ * has one of its own before anything is typed — signing in with nothing set
+ * would put the new account in `~/.claude` and replace the one the machine had.
+ * A github account is a name gh holds in its keyring, so the login belongs in
+ * gh's own config where it is registered once and pickable from every profile;
+ * hence `env -u`, undoing this profile's override for the length of one command
+ * rather than adding a second account to a directory named after the first.
+ *
+ * **Both lines name their own environment rather than relying on the pty's, and
+ * that is not belt and braces.** The overlay is applied by the pty host, which is
+ * the one process in kururu that does not restart when you edit it — so there is
+ * a window, every time this feature changes, where the server sends an `env` the
+ * running host is too old to understand and drops. A terminal that quietly opens
+ * as the wrong account is a bad afternoon; a *login* that quietly goes to the
+ * wrong directory replaces an account somebody had. It cost exactly that once,
+ * with the profile's directory left empty and the default written instead. A
+ * command that states its target works on any host and, being on screen, says
+ * where it is going while it goes there.
+ */
+async function signIn(profileId: string, tool: "claude" | "gh"): Promise<void> {
+  workspaces.switchProfile(profileId);
+  const profile = workspaces.active;
+  if (profile.id !== profileId) return;
+
+  let command = "env -u GH_CONFIG_DIR gh auth login";
+  if (tool === "claude") {
+    let dir = profile.identity.claudeConfigDir;
+    if (!dir) {
+      dir = tildify(ensureClaudeDir(profile.name));
+      workspaces.setProfileIdentity(profileId, { ...profile.identity, claudeConfigDir: dir });
+    }
+    command = `CLAUDE_CONFIG_DIR=${shellQuote(expandHome(dir))} claude auth login`;
+  }
+
+  const agent = await openTerminal(workspaces.focusedPaneId);
+  await settle(DEV_SPAWN_SETTLE_MS);
+  if (!host.isLive(agent.id)) return;
+  typeCommand(agent.id, command, "sign-in");
+}
+
+/**
+ * Which accounts the pty about to be spawned belongs to.
+ *
+ * The active profile's, and only ever the active profile's, because every
+ * gesture that reaches a spawn is one somebody just made in the profile they are
+ * looking at — a split, a new tab, a new workspace, ▸ on a workspace row. It is
+ * read here rather than carried on the message for the same reason the layout is
+ * the server's: a client that named its own environment would be a client that
+ * could name any environment, and this one is reachable from the tailnet.
+ *
+ * Undefined when the profile has claimed nobody, which is the common case and
+ * means the host spawns exactly as it always did.
+ */
+function spawnEnv(): Record<string, string> | undefined {
+  return identityEnv(workspaces.active.identity);
+}
+
+/**
  * Open a terminal in a pane.
  *
  * Everything that *makes* a pane comes through here — a split, a new workspace,
@@ -447,6 +562,7 @@ async function openTerminal(
   const agent = await host.create({
     cwd: options.cwd ?? (await cwdForNewTab(options.from ?? paneId)),
     command: options.command,
+    env: spawnEnv(),
     /**
      * A terminal unless the client insists otherwise. The window stopped
      * offering "start me an agent" as a separate thing to click: it is one
@@ -505,6 +621,7 @@ function killAll(agentIds: string[]): void {
     // otherwise grow for the life of the process.
     activity.delete(agentId);
     lastAgent.delete(agentId);
+    memory.delete(agentId);
     unread.delete(agentId);
     sizes.delete(agentId);
     for (const st of clients.values()) st.proposals.delete(agentId);
@@ -911,11 +1028,15 @@ function canTypeInto(agentId: string | null | undefined): agentId is string {
   return Boolean(agent && !agent.exited && !agent.agent);
 }
 
-/** Type a command and press return, the way a person would. */
-function typeCommand(agentId: string, command: string): void {
+/**
+ * Type a command and press return, the way a person would. The tag is what the
+ * tape calls it (`record.ts`), and it is a parameter because two features now
+ * do this: the dev-server button, and signing a profile in to an account.
+ */
+function typeCommand(agentId: string, command: string, tag: "dev" | "sign-in" = "dev"): void {
   const line = `${command}\r`;
   recordInput(agentId, line);
-  recordNote(agentId, "dev", `running ${command}`);
+  recordNote(agentId, tag, `running ${command}`);
   host.write(agentId, line);
 }
 
@@ -955,7 +1076,7 @@ async function runDev(workspaceId: string): Promise<void> {
     return;
   }
 
-  const agent = await host.create({ cwd: memory.cwd || undefined, kind: "shell" });
+  const agent = await host.create({ cwd: memory.cwd || undefined, kind: "shell", env: spawnEnv() });
   workspaces.addTabTo(workspaceId, agent.id, agent.cwd);
   allowRoot(agent.cwd);
   devBusy.add(agent.id);
@@ -1114,14 +1235,79 @@ function nvimBuffer(body: unknown): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// What each terminal is costing the machine
+// ---------------------------------------------------------------------------
+
 /**
- * One timer left in this process. The status heuristic and the process scan went
- * with the ptys — they are questions about processes, and the host is where
- * those live now.
+ * How often memory is measured.
+ *
+ * Slower than everything else out here on purpose. A process growing raises no
+ * event, so this has to be a poll like the other two — but it is the only one
+ * whose answer nobody acts on within a second: you look at it when a fan comes
+ * on, not while you type. Five seconds is inside the attention span of "which of
+ * these is the heavy one" and well outside the rate at which a `ps` is worth
+ * running.
+ */
+const MEM_SCAN_MS = 5000;
+
+/**
+ * Which pids to add up from: every live pty, and deliberately not the filtered
+ * set the dev scan walks.
+ *
+ * `devRoots` withholds terminals with an agent running in them, because what it
+ * feeds is a button that types into one. Nothing here types anywhere — it reads
+ * a number out of a table — and an agent's terminal is the one whose memory is
+ * worth knowing, so withholding it would leave the feature answering only for
+ * the rows nobody asked about.
+ */
+function memRoots(): Array<[string, number]> {
+  const roots: Array<[string, number]> = [];
+  if (!host) return roots;
+  for (const agent of host.agents) {
+    if (agent.exited || !agent.pid) continue;
+    roots.push([agent.id, agent.pid]);
+  }
+  return roots;
+}
+
+/**
+ * Measure, and say so only when the figure moved.
+ *
+ * The comparison is against what was already rounded (see `memory.ts`), which is
+ * the whole reason this can push at all: on the raw byte count every working
+ * agent changes every poll, and a snapshot every five seconds for the life of a
+ * session is a lot of bytes to spend redrawing `390 MB` as `390 MB`.
+ */
+async function pollMemory(): Promise<void> {
+  const found = await scanMemory(memRoots());
+  let changed = false;
+  for (const [agentId, bytes] of found) {
+    if (memory.get(agentId) !== bytes) changed = true;
+    memory.set(agentId, bytes);
+  }
+  // A terminal the scan could not find is one whose process has gone; the row
+  // stays (an exited agent is still listed) and simply stops saying a number,
+  // rather than keeping the last one it had, which would be a claim about a
+  // process that does not exist.
+  for (const agentId of [...memory.keys()]) {
+    if (found.has(agentId)) continue;
+    memory.delete(agentId);
+    changed = true;
+  }
+  if (changed) pushSnapshot();
+}
+
+/**
+ * The timers left in this process, and what they have in common: each one asks
+ * the *machine* a question no pty can raise an event about. The status heuristic
+ * and the agent scan went with the ptys, because those are questions about a
+ * process kururu owns and the host is where those live now.
  */
 const timers = [
   setInterval(() => void pollDevServers(), DEV_SCAN_MS),
   setInterval(() => void pollEditors(), NVIM_SCAN_MS),
+  setInterval(() => void pollMemory(), MEM_SCAN_MS),
 ];
 
 void pollDevServers();
@@ -1462,6 +1648,33 @@ function handleMessage(ws: WebSocket, raw: string): void {
       return;
     }
 
+    // --- how it looks ------------------------------------------------------
+    /**
+     * `themeFor` is the check and the fallback in one, which is the shape
+     * `mascotFor` has and is right for the same reason: an id naming nothing is
+     * what a downgrade looks like, and the default drawn is a better answer than
+     * a refusal nobody is listening for. What gets written is therefore always
+     * an id this version can draw.
+     */
+    case "set-theme":
+      saveAppearance({ ...appearance, themeId: themeFor(msg.themeId).id });
+      return;
+
+    /**
+     * Adopted rather than trusted — a font size arrives as a number somebody
+     * typed, and it is the one setting in kururu that reaches a pty: the cell
+     * follows the size, the proposed grid follows the cell, and every client
+     * watching that terminal is resized to whatever policy picks. `adoptAppearance`
+     * clamps it, so the worst a bad message can do is a legal grid.
+     *
+     * Nothing is resized here. The size still comes the only way it ever comes —
+     * a pane measures its box and proposes, `applySize` decides — so a font
+     * change is a client re-measuring, not a server deciding a shape.
+     */
+    case "set-terminal-appearance":
+      saveAppearance(adoptAppearance({ ...appearance, terminal: msg.terminal }));
+      return;
+
     case "delete-workspace":
       killAll(workspaces.deleteWorkspace(msg.workspaceId));
       return;
@@ -1496,6 +1709,56 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "delete-profile":
       killAll(workspaces.deleteProfile(msg.profileId));
+      return;
+
+    /**
+     * Adopted rather than trusted, like the mascot and the workspace colour, and
+     * refused rather than repaired: a path that is not absolute is dropped,
+     * because there is no nearest legal value for a path and a relative one
+     * would resolve against whatever directory each terminal happened to open
+     * in. Nothing running is touched — the overlay is read at spawn.
+     */
+    case "set-profile-identity":
+      workspaces.setProfileIdentity(msg.profileId, adoptIdentity(msg.identity));
+      return;
+
+    /**
+     * A github account picked by name. The directory that means it is written
+     * here rather than named by the client, which is the point of the verb: a
+     * client that sent a path would be a client that could send any path, and
+     * a config directory is a thing kururu creates in the user's home.
+     *
+     * `git_protocol` is carried over from wherever gh already knows the account,
+     * so a profile that picks it does not quietly go back to https on an account
+     * set up for ssh. Nothing else is copied: gh owns that file afterwards.
+     */
+    case "use-gh-account": {
+      const account = msg.account;
+      const before = workspaces.identityOf(msg.profileId);
+      if (!account) {
+        workspaces.setProfileIdentity(msg.profileId, { ...before, ghConfigDir: null });
+        return;
+      }
+      void (async () => {
+        const known = (await ghIn(null)) ?? [];
+        const match = known.find((a) => a.host === account.host && a.login === account.login);
+        const dir = ensureGhConfig(account.host, account.login, match?.gitProtocol ?? undefined);
+        workspaces.setProfileIdentity(msg.profileId, {
+          ...workspaces.identityOf(msg.profileId),
+          ghConfigDir: tildify(dir),
+        });
+      })().catch((err) => {
+        console.error("kururu: could not use that github account:", err instanceof Error ? err.message : err);
+      });
+      return;
+    }
+
+    case "sign-in":
+      // Nothing to reply to: what says it worked is a terminal appearing with a
+      // login prompt in it, which is also the thing the user has to go and do.
+      void signIn(msg.profileId, msg.tool).catch((err) => {
+        console.error("kururu: could not start a sign-in:", err instanceof Error ? err.message : err);
+      });
       return;
 
     case "restart-server":
@@ -1709,6 +1972,41 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   }
 
   /**
+   * Who a profile's terminals would open as — the answer `claude` and `gh` give
+   * when asked with that profile's environment.
+   *
+   * A fetch rather than a field in the snapshot, and that is the interesting
+   * decision here. Everything else Settings edits is server state that changes
+   * when somebody changes it; this is the *world's* state, it changes when a
+   * person logs in inside a terminal kururu is only watching, and answering it
+   * means running two CLIs. Putting it in the snapshot would mean either running
+   * them on every status tick or pushing an answer that is quietly hours old. So
+   * it is asked for by the one page that draws it, at the moment it is drawn.
+   */
+  /**
+   * What there is to pick between. Separate from `/api/identity` because it is a
+   * different question with a different shape — that one is "who is this
+   * profile", this one is "who could it be" — and because it spans every profile
+   * at once, where that one is about a single identity.
+   */
+  if (url.pathname === "/api/identity/known") {
+    knownAccounts(workspaces.all().map((profile) => profile.identity)).then(
+      (known) => json(res, known),
+      () => json(res, { claude: [], gh: [] }),
+    );
+    return;
+  }
+
+  if (url.pathname === "/api/identity") {
+    const profileId = url.searchParams.get("profile") ?? "";
+    describeIdentity(workspaces.identityOf(profileId)).then(
+      (who) => json(res, who),
+      () => json(res, { claude: null, gh: null, git: null }),
+    );
+    return;
+  }
+
+  /**
    * How an agent tells kururu what it is doing. The only source of `blocked`
    * and of context usage; see agents/report.ts for why neither is inferable.
    */
@@ -1868,7 +2166,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     void (async () => {
       try {
         const file = readFile(root, path);
-        json(res, await renderMarkdown(file.text, root, path));
+        json(res, await renderMarkdown(file.text, root, path, appearance.themeId));
       } catch (err) {
         json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
       }

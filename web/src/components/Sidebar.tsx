@@ -21,7 +21,7 @@
  * prefix+W does — and they exist because a keymap is worth nothing until it has
  * been learnt, and a row has no room to print five buttons.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { panes } from "../../../shared/layout";
 import type {
   AgentSnapshot,
@@ -31,7 +31,7 @@ import type {
   WorkspaceColor,
 } from "../../../shared/model";
 import { defaultMascot, mascotFor, WORKSPACE_COLORS } from "../../../shared/model";
-import { COLOR_VALUES, colorValue } from "../colors";
+import { colorValue, colorValues } from "../colors";
 import { AGENT_MIME, WORKSPACE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
 import type { Action } from "../keys";
 import { agentLabel, agentSummary, shortenPath } from "../labels";
@@ -54,6 +54,16 @@ interface Props {
   focusedAgentId: string | null;
   /** The same table the keyboard runs, so a button and its shortcut cannot differ. */
   onRun: (action: Action) => void;
+  /**
+   * The profile button, handed up so the app can hang a menu off it.
+   *
+   * The menu is the app's — `switch-profile` opens it, and that action has a key
+   * as well as this button — but *where* it goes is a fact about a button only
+   * this file draws. A ref is the whole of what has to cross: the click still
+   * goes through `onRun` like every other control in here, so there is one door
+   * and two ways of knocking on it.
+   */
+  profileRef: RefObject<HTMLButtonElement | null>;
   /**
    * Deleting a workspace ends every terminal in it, so the confirmation belongs
    * to the app rather than to this list — it is the same dialog prefix+X puts up.
@@ -78,6 +88,7 @@ export function Sidebar({
   mascots,
   focusedAgentId,
   onRun,
+  profileRef,
   onDeleteWorkspace,
   onEditing,
   onSettings,
@@ -191,8 +202,21 @@ export function Sidebar({
           className={`dot ${connected ? "dot-on" : "dot-off"}`}
           title={connected ? "connected" : "reconnecting…"}
         />
-        <button className="profile-btn" onClick={() => onRun("switch-profile")} title="Switch profile (C-a s)">
+        {/* The name is where you change profile, and it says so: a menu hangs off
+            it with every profile in it, because switching is navigation and
+            navigation wants to be one click from wherever you already are.
+            Editing one is a different job and lives in Settings, which the last
+            item in that menu goes to. See `switch-profile` in App.tsx. */}
+        <button
+          ref={profileRef}
+          className="profile-btn"
+          onClick={() => onRun("switch-profile")}
+          title="Profiles (C-a s)"
+        >
           {profile.name}
+          <span className="profile-caret" aria-hidden>
+            ▾
+          </span>
         </button>
       </header>
 
@@ -373,10 +397,11 @@ export function Sidebar({
                     {agent.unread && <span className="unread" aria-label="new output" />}
                     <span className="agent-ws">{at ? at.workspace : "—"}</span>
                   </span>
-                  {/* What it is doing, and how much room it has left to do it
-                      in. Both change constantly, which is why they are on their
-                      own line: a row whose top half is stable is a row you can
-                      find something in without re-reading it.
+                  {/* What it is doing, what it is costing, and how much room
+                      it has left to do it in. All three change constantly, which
+                      is why they are on their own line: a row whose top half is
+                      stable is a row you can find something in without
+                      re-reading it.
 
                       The cwd stands in only when nothing has said anything at
                       all — no hook has reported and the program has not named
@@ -387,6 +412,7 @@ export function Sidebar({
                     <span className="agent-activity">
                       {agentSummary(agent) || shortenPath(agent.cwd)}
                     </span>
+                    {agent.rss ? <Memory bytes={agent.rss} /> : null}
                     {agent.contextUsage && <ContextRing usage={agent.contextUsage} />}
                   </span>
                 </button>
@@ -526,7 +552,7 @@ function ColorPicker({
             role="option"
             aria-selected={current === color}
             className={`chip ${current === color ? "chip-on" : ""}`}
-            style={{ background: COLOR_VALUES[color] }}
+            style={{ background: colorValues()[color] }}
             title={color}
             aria-label={color}
             onClick={() => onPick(color)}
@@ -618,6 +644,39 @@ function MascotPicker({
  * whose size you cannot see is only half of the answer — 95% of 200k and 19% of
  * 1M are the same conversation, and only one of them is a problem.
  */
+/**
+ * What the terminal is holding, next to what it has left to think with.
+ *
+ * The two numbers are a pair and that is why they sit together: one says how
+ * much of this agent's turn is left, the other says what having it open is
+ * costing, and the row where you decide which of five agents to end is the row
+ * that has to answer both. It is drawn quieter than the context ring because it
+ * is the one you go looking for rather than the one you watch — nothing about
+ * 400 MB is news until the machine starts swapping.
+ *
+ * Two figures and no more, because that is all the server sends: it rounds
+ * before it decides whether the number changed, so a third digit here would be
+ * one that never moved. See `server/src/memory.ts`, which is also where the
+ * tooltip's caveat comes from — this counts what is resident, and the kernel
+ * compressing a process out of sight makes it *smaller* here.
+ */
+function Memory({ bytes }: { bytes: number }) {
+  return (
+    <span
+      className="mem"
+      title={`${formatBytes(bytes)} resident — this terminal and everything running under it`}
+    >
+      {formatBytes(bytes)}
+    </span>
+  );
+}
+
+/** `409993216` → `391 MB`. Gigabytes once megabytes stop being readable. */
+function formatBytes(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+}
+
 function ContextRing({ usage }: { usage: ContextUsage }) {
   const percent = Math.min(100, Math.round((usage.used / usage.window) * 100));
   const circumference = 2 * Math.PI * 5;

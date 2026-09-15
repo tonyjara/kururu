@@ -1,12 +1,12 @@
 /**
- * Settings: the cog's dialog, and the two things in it.
+ * Settings: the cog's dialog, and the pages in it.
  *
  * It was one page because it had one setting on it. A second — the keyboard —
- * would have made it a scroll through two unrelated subjects, where the sheet
- * picker is a picture you drag on and the keymap is a list of thirty rows. Tabs
- * rather than sections for exactly that reason: these are two jobs, you are
- * doing one of them, and the other one being a page-down away is worse than it
- * being a click away.
+ * would have made it a scroll through unrelated subjects, where the sheet picker
+ * is a picture you drag on and the keymap is a list of thirty rows. Tabs rather
+ * than sections for exactly that reason: these are separate jobs, you are doing
+ * one of them, and the others being a page-down away is worse than them being a
+ * click away.
  *
  * The tab is local state and deliberately not the server's. Which page of
  * Settings a window is on is not a fact about the session — a phone should not
@@ -14,31 +14,62 @@
  * line the `settings` flag in `App.tsx` already draws: what this *edits* is the
  * server's, whether it is open is the window's.
  *
- * Neither page holds what it edits. Both send verbs and draw what comes back in
- * the snapshot, which is the rule the layout follows and the reason a second
- * window sees a rebinding without being told.
+ * No page holds what it edits. Each sends verbs and draws what comes back in the
+ * snapshot, which is the rule the layout follows and the reason a second window
+ * sees a rebinding, or a renamed profile, without being told.
  */
 import { useState } from "react";
 import type { KeyOverrides } from "../../../shared/keys";
-import type { MascotSet } from "../../../shared/model";
+import type { MascotSet, ProfileSummary } from "../../../shared/model";
+import type { Appearance } from "../../../shared/theme";
+import { AppearanceSettings } from "./SettingsAppearance";
 import { KeySettings } from "./SettingsKeys";
 import { MascotSettings } from "./SettingsMascot";
+import { ProfileSettings } from "./SettingsProfiles";
 
-type Tab = "mascot" | "keys";
+export type Tab = "appearance" | "profiles" | "mascot" | "keys";
 
+/**
+ * Appearance first, and not alphabetically: it is the page somebody opens
+ * Settings to find, and the rest are things you go looking for once. It is also
+ * the only one whose effect is visible behind the dialog while you are using it,
+ * which is worth having on the tab that opens by default.
+ *
+ * Profiles is second and is the exception that makes the ordering worth
+ * defending: it is the one page that is mostly arrived at rather than browsed
+ * for, because the profile name in the sidebar opens Settings straight onto it.
+ * Which is also why `tab` is a prop here — where Settings opens is the caller's
+ * to say, even though where it goes next is not.
+ */
 const TABS: ReadonlyArray<readonly [Tab, string, string]> = [
+  ["appearance", "Appearance", "the theme, and what a terminal is set in"],
+  ["profiles", "Profiles", "the sessions, and which accounts they open terminals as"],
   ["mascot", "Mascot", "what the badge does while an agent is working"],
   ["keys", "Keys", "what each key does after the prefix"],
 ];
 
 export function Settings({
+  appearance,
   mascots,
   keys,
+  profiles,
+  activeProfileId,
+  initialTab,
   onClose,
   onEditing,
 }: {
+  appearance: Appearance;
   mascots: MascotSet;
   keys: KeyOverrides;
+  profiles: ProfileSummary[];
+  activeProfileId: string;
+  /**
+   * Which page this opening is about. Only the opening: the tab you move to
+   * afterwards is this window's business and not the server's, which is the same
+   * line the `settings` flag in `App.tsx` draws — what this *edits* is shared,
+   * whether it is open, and where it is, is not.
+   */
+  initialTab: Tab;
   onClose: () => void;
   /**
    * Something in here is taking typing — a name being edited, or a key being
@@ -49,7 +80,7 @@ export function Settings({
    */
   onEditing: (on: boolean) => void;
 }) {
-  const [tab, setTab] = useState<Tab>("mascot");
+  const [tab, setTab] = useState<Tab>(initialTab);
   const note = TABS.find(([id]) => id === tab)?.[2];
 
   return (
@@ -77,7 +108,16 @@ export function Settings({
         </div>
 
         <div className="set-body">
-          {tab === "mascot" ? (
+          {tab === "appearance" ? (
+            <AppearanceSettings appearance={appearance} onEditing={onEditing} />
+          ) : tab === "profiles" ? (
+            <ProfileSettings
+              profiles={profiles}
+              activeProfileId={activeProfileId}
+              onEditing={onEditing}
+              onClose={onClose}
+            />
+          ) : tab === "mascot" ? (
             <MascotSettings mascots={mascots} onEditing={onEditing} />
           ) : (
             <KeySettings keys={keys} onEditing={onEditing} />

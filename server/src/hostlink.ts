@@ -39,7 +39,14 @@ export interface Port {
 export type ToHost =
   /** Asks for everything a freshly-started server needs: the agents, and the blob. */
   | { type: "hello"; id: number }
-  | { type: "create"; id: number; cwd?: string; command?: string; kind?: PtyKind }
+  /**
+   * `env` is an overlay on the host's own environment, not a replacement for it:
+   * a handful of variables that say which accounts this pty belongs to (see
+   * `server/src/identity.ts`). It travels as a bare map because that is all the
+   * host should ever know about it — the moment the host learns what a *profile*
+   * is, changing what a profile is costs somebody their agents.
+   */
+  | { type: "create"; id: number; cwd?: string; command?: string; kind?: PtyKind; env?: Record<string, string> }
   | { type: "kill"; agentId: string }
   | { type: "write"; agentId: string; data: string }
   | { type: "resize"; agentId: string; cols: number; rows: number }
@@ -146,8 +153,35 @@ export class HostLink {
     return state;
   }
 
-  create(options: { cwd?: string; command?: string; kind?: PtyKind }): Promise<AgentSnapshot> {
-    return this.request<AgentSnapshot>((id) => ({ type: "create", id, ...options }));
+  /**
+   * Spawn a pty — and take the reply as news about the agent list as well as an
+   * answer, exactly as `hello` does and for the same reason.
+   *
+   * The `agents` push that follows says it too, and says it completely. But it
+   * is a separate frame on a socket, coalesced to a microtask on the host's
+   * side, so it lands a turn of the event loop later than the reply. In between
+   * there is a window where this server knows an agent exists — it is on the
+   * next line, putting it in a pane — and `agents` does not list it. Anything
+   * that pushes a snapshot in that window sends a layout naming a terminal the
+   * same snapshot says is not there.
+   *
+   * The client is entitled to believe that, and does: `web/src/terminals.ts`
+   * disposes the emulator of every agent a snapshot has stopped listing, which
+   * is the only way it is ever told a terminal has ended. So a brand-new tab had
+   * its emulator built and thrown away in the same breath, and came back black
+   * — until it was switched away from and back, which borrowed a second one.
+   */
+  async create(options: {
+    cwd?: string;
+    command?: string;
+    kind?: PtyKind;
+    env?: Record<string, string>;
+  }): Promise<AgentSnapshot> {
+    const agent = await this.request<AgentSnapshot>((id) => ({ type: "create", id, ...options }));
+    // Appended rather than spliced in anywhere: the host lists oldest first and
+    // this is the newest, which is what `cwdForNewTab` reads the order for.
+    if (!this.agents.some((held) => held.id === agent.id)) this.agents = [...this.agents, agent];
+    return agent;
   }
 
   backlog(agentId: string): Promise<string> {

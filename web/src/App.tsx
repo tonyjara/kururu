@@ -27,9 +27,10 @@ import { keymapFrom } from "../../shared/keys";
 import { mascotFor } from "../../shared/model";
 import { Dialog, type DialogState } from "./components/Dialog";
 import { HelpOverlay } from "./components/HelpOverlay";
+import { Menu, type MenuAt } from "./components/Menu";
 import { Panes } from "./components/Panes";
 import { Reach } from "./components/Reach";
-import { Settings } from "./components/Settings";
+import { Settings, type Tab as SettingsTab } from "./components/Settings";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import {
@@ -44,6 +45,7 @@ import {
 } from "./keys";
 import { isFileDrag } from "./drop";
 import { tabLabel } from "./labels";
+import { applyAppearance } from "./theme";
 import * as api from "./session";
 import { useKururu } from "./session";
 import * as terminals from "./terminals";
@@ -62,12 +64,29 @@ export function App() {
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [help, setHelp] = useState(false);
   /**
-   * Settings. A view state like the help overlay rather than anything the server
-   * knows about — what it *edits* is the server's, but whether it is open is
-   * this window's, and a phone should not be dragged into a picker because the
-   * desktop opened one.
+   * Settings: which page of it is open, or null for closed. A view state like the
+   * help overlay rather than anything the server knows about — what it *edits* is
+   * the server's, but whether it is open is this window's, and a phone should not
+   * be dragged into a picker because the desktop opened one.
+   *
+   * A tab rather than a flag because there are now two doors into it that want
+   * different pages: the cog opens where somebody browsing would want to start,
+   * and the profile name opens the page about profiles. Only the opening — where
+   * the dialog goes next is its own business.
    */
-  const [settings, setSettings] = useState(false);
+  const [settings, setSettings] = useState<SettingsTab | null>(null);
+  /**
+   * The profile menu, and the button it hangs under.
+   *
+   * View state like Settings and the help overlay: which profile you are *in* is
+   * the server's, whether a menu about it is open is this window's. The ref is
+   * how the keyboard gets the same menu as the click — `switch-profile` measures
+   * the button rather than guessing a corner, so the menu comes up in the same
+   * place either way and the sidebar keeps sole responsibility for where its own
+   * button is.
+   */
+  const [profileMenu, setProfileMenu] = useState<MenuAt | null>(null);
+  const profileButton = useRef<HTMLButtonElement>(null);
   /**
    * The phone dialog: which addresses this server answers at, as QR codes. A
    * view state for the same reason Settings is — and more so, since it is about
@@ -105,7 +124,7 @@ export function App() {
    * exactly where it is and the terminal needs no second handover when hjkl
    * stops moving a divider.
    */
-  const paneKeyboard = !(dialog || editing || settings || help || reach);
+  const paneKeyboard = !(dialog || editing || settings || help || reach || profileMenu);
 
   const profile = snapshot?.profile ?? null;
   const workspace = useMemo(
@@ -129,6 +148,28 @@ export function App() {
     () => (snapshot && workspace ? mascotFor(snapshot.mascots, workspace.mascotId) : null),
     [snapshot, workspace],
   );
+
+  /**
+   * Wear whatever the server says. The chrome's tokens go onto the root element
+   * and the palette goes to every pooled emulator, neither of which is anything
+   * React draws — which is the point of doing it in an effect rather than in the
+   * tree. A theme is a property of the document, and threading forty colours
+   * through a context so that components could re-render to learn them would be
+   * paying a render of the whole window for something the cascade does for free.
+   *
+   * Keyed on the appearance *serialized*, and that is not laziness. A snapshot
+   * goes out on every status tick and arrives as JSON, so the object is a new
+   * one several times a second however little has changed — keying on it would
+   * ask every pooled emulator whether its font had moved twice a second, for the
+   * lifetime of the window. Five fields stringified is the cheapest thing that
+   * is actually stable.
+   */
+  const appearance = snapshot?.appearance;
+  const appearanceKey = appearance ? JSON.stringify(appearance) : null;
+  useEffect(() => {
+    if (appearance) applyAppearance(appearance);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appearanceKey]);
 
   /**
    * Tell the server what is on screen: the active tab of every pane, and only of
@@ -157,9 +198,10 @@ export function App() {
   }, [snapshot, agents]);
 
   /**
-   * The one prompt two doors lead to: the keybind, and the + at the bottom of
-   * the switcher. Naming it here rather than writing it twice is the same
-   * reason the action table exists at all.
+   * Making a profile without going and looking at the list of them, which is
+   * what prefix+S is for. Settings has a box of its own for the same job — a
+   * page that is already a form does not want a modal on top of it to collect
+   * one word — so this is the quick door rather than the only one.
    */
   const promptNewProfile = useCallback(() => {
     setDialog({
@@ -252,7 +294,7 @@ export function App() {
         case "toggle-sidebar":
           return setSidebarOpen((open) => !open);
         case "settings":
-          return setSettings(true);
+          return setSettings("appearance");
         case "zen-mode":
           return setZen((on) => !on);
         case "resize-mode":
@@ -307,40 +349,29 @@ export function App() {
               api.selectTab(pane.id, pane.agentIds.indexOf(id));
             },
           });
-        case "switch-profile":
-          if (!snapshot) return;
-          return setDialog({
-            kind: "pick",
-            title: "Profiles",
-            hint: "The one you leave keeps running.",
-            items: snapshot.profiles.map((p) => ({
-              id: p.id,
-              label: p.name,
-              hint: `${p.workspaces} ws · ${p.agents} live`,
-            })),
-            onPick: (id) => api.switchProfile(id),
-            onCreate: { label: "New profile", run: promptNewProfile },
-            onDelete: (id) => {
-              if (snapshot.profiles.length < 2) return;
-              const doomed = snapshot.profiles.find((p) => p.id === id);
-              setDialog({
-                kind: "confirm",
-                title: `Delete profile “${doomed?.name ?? id}”?`,
-                hint: `${doomed?.agents ?? 0} live terminal(s) in it will be ended.`,
-                confirmLabel: "Delete",
-                onConfirm: () => api.deleteProfile(id),
-              });
-            },
-            onRename: (id) => {
-              const current = snapshot.profiles.find((p) => p.id === id);
-              setDialog({
-                kind: "prompt",
-                title: "Rename profile",
-                value: current?.name ?? "",
-                onSubmit: (name) => api.renameProfile(id, name),
-              });
-            },
-          });
+        /**
+         * The profile menu, under the sidebar's profile name.
+         *
+         * This has been all three things a switcher can be, and the split it
+         * landed on is the useful one. It was a pick dialog; then a profile grew
+         * an identity, which is a form, and a dialog that picks beside a page
+         * that edits is two places that disagree about what a profile is — so it
+         * all moved into Settings. That overcorrected. *Switching* never stopped
+         * being navigation: it is the thing you do ten times an afternoon, and
+         * routing it through a modal with a "Switch to" button on every row put
+         * three clicks and a dialog in front of a move between two rooms.
+         *
+         * So: the menu is the switcher, Settings is the editor, and the menu's
+         * last item is the door between them. Each is the shape of its own job,
+         * and neither duplicates the other — Settings no longer switches at all.
+         */
+        case "switch-profile": {
+          const at = profileButton.current?.getBoundingClientRect();
+          // Below the button's left edge, or the corner if the sidebar is hidden
+          // and there is no button to measure. Both are somewhere sensible; the
+          // first is somewhere it was asked for.
+          return setProfileMenu(at ? { x: at.left, y: at.bottom + 2 } : { x: 8, y: 34 });
+        }
         case "new-profile":
           return promptNewProfile();
         case "reload":
@@ -401,6 +432,15 @@ export function App() {
       if (dialog || editing) return;
 
       /**
+       * A menu is modal in the same small way. It closes itself on escape, on a
+       * click, on a scroll and on a resize (`Popover`), so all this has to do is
+       * keep the rest of the keyboard out from under it — a key that armed the
+       * prefix or switched workspace behind an open menu would leave it pointing
+       * at a window that had moved on.
+       */
+      if (profileMenu) return;
+
+      /**
        * Settings is modal over the keyboard for the same reason a dialog is —
        * it is full of fields, and ctrl+a in one of them is select-all. Escape is
        * taken because the scrim and the Done button are pointer gestures and a
@@ -409,7 +449,7 @@ export function App() {
       if (settings) {
         if (keyName(event) === "escape") {
           take();
-          setSettings(false);
+          setSettings(null);
         }
         return;
       }
@@ -486,7 +526,7 @@ export function App() {
 
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [prefixArmed, resizeMode, dialog, editing, help, settings, reach, workspace, keymap, run, arm, disarm]);
+  }, [prefixArmed, resizeMode, dialog, editing, help, settings, reach, profileMenu, workspace, keymap, run, arm, disarm]);
 
   /**
    * A file dropped anywhere that is not a terminal does nothing.
@@ -560,6 +600,7 @@ export function App() {
       {sidebarOpen && !zen && (
         <Sidebar
           profile={profile}
+          profileRef={profileButton}
           agents={agents}
           connected={connected}
           mascots={snapshot.mascots}
@@ -570,7 +611,7 @@ export function App() {
           onRun={run}
           onDeleteWorkspace={confirmDeleteWorkspace}
           onEditing={setEditing}
-          onSettings={() => setSettings(true)}
+          onSettings={() => setSettings("appearance")}
           onReach={() => setReach(true)}
         />
       )}
@@ -599,10 +640,33 @@ export function App() {
       {help && <HelpOverlay keymap={keymap} onClose={() => setHelp(false)} />}
       {settings && (
         <Settings
+          appearance={snapshot.appearance}
           mascots={snapshot.mascots}
           keys={snapshot.keys}
-          onClose={() => setSettings(false)}
+          profiles={snapshot.profiles}
+          activeProfileId={profile.id}
+          initialTab={settings}
+          onClose={() => setSettings(null)}
           onEditing={setEditing}
+        />
+      )}
+      {profileMenu && snapshot && (
+        <Menu
+          at={profileMenu}
+          onClose={() => setProfileMenu(null)}
+          items={[
+            ...snapshot.profiles.map((p) => ({
+              label: p.name,
+              mark: p.id === profile.id,
+              // What you would be leaving running, which is the one thing worth
+              // knowing about a profile you are not in. Blank rather than "0
+              // live" for the empty ones: a column of zeroes is noise.
+              hint: p.agents ? `${p.agents} live` : "",
+              run: () => api.switchProfile(p.id),
+            })),
+            { label: "New profile…", sep: true, run: promptNewProfile },
+            { label: "Profile settings…", run: () => setSettings("profiles") },
+          ]}
         />
       )}
       {reach && <Reach onClose={() => setReach(false)} />}
