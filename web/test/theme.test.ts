@@ -70,6 +70,10 @@ const NOT_THEME = new Set([
   // `App.tsx` writes onto the root element — a length, not a colour and not a
   // shape, and nothing a theme or a skin has any business having an opinion on.
   "--sidebar-w",
+  // How much of the window an on-screen keyboard has taken, written onto the
+  // root by `useKeyboardInset`. A length the browser reports, like `--sidebar-w`
+  // and for the same reason: not a colour, not a shape, nobody's to theme.
+  "--keyboard",
 ]);
 
 /** What a skin fills in: its tokens, plus one per icon it may override. */

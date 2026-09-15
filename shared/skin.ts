@@ -63,11 +63,11 @@
  * reasoning. After the merge every name has a glyph, so nothing downstream has
  * to carry a fallback.
  */
-export type IconName = "close" | "run" | "restart" | "caret" | "add" | "edit";
+export type IconName = "close" | "run" | "restart" | "caret" | "add" | "edit" | "external";
 
 export type IconSet = Record<IconName, string>;
 
-export const ICON_NAMES: readonly IconName[] = ["close", "run", "restart", "caret", "add", "edit"];
+export const ICON_NAMES: readonly IconName[] = ["close", "run", "restart", "caret", "add", "edit", "external"];
 
 /**
  * The shape tokens, as `styles.css` asks for them.
@@ -238,6 +238,8 @@ export const BASE_ICONS: IconSet = {
   caret: "▾",
   add: "+",
   edit: "✎",
+  /** Leaves kururu — a dev server opened in the browser's own tab. */
+  external: "↗",
 };
 
 /**
@@ -364,6 +366,12 @@ const EIGHT_BIT = skin(
     // such problem — which is the next step and not this one.
     restart: null,
     edit: null,
+    /**
+     * Also the base's. The arrow is already a single glyph at any size and the
+     * pixel alternatives are all two characters wide, which would make the dev
+     * row the one place in this skin where an icon changes a row's height.
+     */
+    external: null,
   },
 );
 

@@ -118,6 +118,7 @@
   --icon-caret: "▾";
   --icon-add: "+";
   --icon-edit: "✎";
+  --icon-external: "↗";
 }
 
 * {
@@ -161,6 +162,7 @@
 .icon-run::before { content: var(--icon-run); }
 .icon-restart::before { content: var(--icon-restart); }
 .icon-caret::before { content: var(--icon-caret); }
+.icon-external::before { content: var(--icon-external); }
 .icon-add::before { content: var(--icon-add); }
 .icon-edit::before { content: var(--icon-edit); }
 
@@ -206,9 +208,17 @@ button {
   cursor: pointer;
 }
 
+/**
+ * The window, minus whatever an on-screen keyboard has taken.
+ *
+ * `--keyboard` is written onto the root by `useKeyboardInset` in `App.tsx` and
+ * is `0px` everywhere there is no such thing. Shortening the app rather than
+ * sliding it is deliberate: everything inside reflows, so the agent redraws its
+ * input box at the new bottom instead of the bottom going under the keyboard.
+ */
 .app {
   display: flex;
-  height: 100%;
+  height: calc(100% - var(--keyboard, 0px));
 }
 
 .muted {
@@ -271,7 +281,26 @@ kbd {
  */
 .sidebar {
   position: relative;
-  width: var(--sidebar-w, 224px);
+  /**
+   * The width the user chose, or as much of it as this window can spare.
+   *
+   * The stored width is absolute, and it has to be — it is a preference about a
+   * list of names, not a fraction of whatever screen you happen to be on. But
+   * absolute is wrong the moment the window is small: a sidebar dragged to 460px
+   * on a desktop took **60%** of a small tablet and 55% of a phone in landscape,
+   * which is the same preference honoured into uselessness. So the preference is
+   * kept and the *rendering* yields.
+   *
+   * The clamp cannot fight `SIDEBAR_MIN`, and that is not luck: a column only
+   * exists above the `NARROW` breakpoint, so the viewport is always wider than
+   * 720px here and a third of it is always more than the 168px floor. Below that
+   * breakpoint there is no column to clamp — the sidebar is a screen.
+   *
+   * It is deliberately not clamped in `App.tsx` as well. Doing it there would
+   * write the small number back to `localStorage`, so opening kururu once on a
+   * phone would throw away the width somebody had set on their desktop.
+   */
+  width: min(var(--sidebar-w, 224px), 33vw);
   flex: none;
   display: flex;
   flex-direction: column;
@@ -837,6 +866,74 @@ kbd {
   color: var(--dim);
 }
 
+/* The dev servers, pinned under the agent list rather than scrolling with it.
+   `.side-agents` is the section that grows, so this one keeps its height and
+   stays on screen with a profile's worth of terminals above it — which is the
+   whole point on a phone, where the list you want is two taps of scrolling away
+   from the list you are looking at. */
+.dev-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 6px;
+  overflow-y: auto;
+  max-height: 25vh;
+}
+.dev-list li {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-lg);
+}
+.dev-list li:hover {
+  background: var(--chrome-high);
+}
+
+.dev-row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: var(--radius-lg);
+  color: var(--dim);
+  /* A link in the chrome, so it wears the chrome's underline rules rather than
+     the browser's. The ↗ is what says it leaves. */
+  text-decoration: none;
+  cursor: pointer;
+}
+.dev-row:hover,
+.dev-row:focus-visible {
+  color: var(--accent);
+  outline: none;
+}
+
+.dev-name {
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The dev server's own port, not the proxy's. It is the number the person
+   recognises — what they would have typed on the desktop — and printing the
+   proxy's instead would be showing them kururu's plumbing in the one place they
+   are trying to identify their own app. The address that actually opens is on
+   the href and in the tooltip. */
+.dev-port {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--dimmer);
+}
+
+/* Running, but with no address this client could use — see `previewUrl`. Not a
+   link, so it must not look like one or invite the tap that does nothing. */
+.dev-row-off {
+  cursor: default;
+  color: var(--dimmer);
+}
+
 .sidebar-foot {
   border-top: var(--border) var(--border-style) var(--line);
   padding: 6px 8px;
@@ -917,6 +1014,19 @@ kbd {
 }
 :root[data-narrow] .ws-run {
   color: var(--dim);
+}
+
+/* Every pixel of width is worth more on a phone than the gutter it was spent on.
+   The stage's gutter and the terminal's inset exist to keep tiled panes apart
+   and to stop glyphs touching the frame; tiled panes are not what a 390px screen
+   has, and at that width those twenty-odd pixels are three or four columns of an
+   agent's output — which is the difference between a wrapped line and a readable
+   one. The pane keeps its border: it is the frame, not padding. */
+:root[data-narrow] .panes {
+  padding: 0;
+}
+:root[data-narrow] .term {
+  padding: 2px 3px;
 }
 
 /* Behind a full-screen sidebar, to catch the taps that miss it — and to say,
@@ -1148,6 +1258,50 @@ kbd {
   min-width: 8px;
 }
 
+/* The pane's controls, which do not scroll with the tabs.
+   The strip is a horizontal scroller — tabs keep their width and run off the
+   end rather than shrinking to nothing — and these sat at the end of it, so a
+   second tab was enough to push them past the edge. That is survivable on a
+   desktop, where every one of them is also a key; it is not on a phone, where
+   the switcher in here is the only door to the other panes and there is no
+   keyboard to reach them with instead.
+
+   Sticky rather than a second element outside the scroller, because the strip
+   is also the pane's drag handle and its drop target: splitting it in two would
+   mean two elements answering for one gesture. It carries the strip's own
+   background so the tabs pass *under* it rather than through it. */
+.tab-actions {
+  position: sticky;
+  right: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  flex: none;
+  background: var(--chrome);
+}
+.pane-on .tab-actions {
+  background: var(--chrome-high);
+}
+
+/* And a hand's width of fade in front of it, so a tab sliding underneath reads
+   as going under something rather than being cut off. It is drawn on this side
+   of the block — `right: 100%` — which means it exists only where there is
+   something to cover: with room to spare the strip is one flat colour and the
+   gradient lands on more of it. */
+.tab-actions::before {
+  content: "";
+  position: absolute;
+  right: 100%;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  background: linear-gradient(to right, transparent, var(--chrome));
+  pointer-events: none;
+}
+.pane-on .tab-actions::before {
+  background: linear-gradient(to right, transparent, var(--chrome-high));
+}
+
 .pane-btn {
   color: var(--dimmer);
   padding: 0 4px;
@@ -1157,6 +1311,24 @@ kbd {
 }
 .pane-btn:hover {
   color: var(--text);
+}
+
+/* The corner of a pane in a window too narrow to tile: which pane this is, out
+   of how many. It carries a number where the other strip buttons carry a glyph,
+   because it is the only thing on screen saying the other panes are there — a
+   bare icon would be a control you have to press to find out whether it does
+   anything. Wider than a `.pane-btn` for the same reason the sidebar's rows are
+   taller here: it is the one thing in the strip a thumb has to hit. */
+.pane-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 7px;
+  color: var(--dim);
+}
+.pane-switch-count {
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
 }
 
 /**
@@ -1280,6 +1452,34 @@ kbd {
   min-width: 0;
   padding: 4px 6px;
   overflow: hidden;
+  /**
+   * The gestures over a terminal are kururu's, not the browser's.
+   *
+   * There is nothing here for the browser to scroll — the emulator is a canvas
+   * of a fixed size and its history is in WASM — so left to itself it answers a
+   * drag by panning a page that does not move and by synthesising a mouse drag,
+   * which is what reached ghostty-web's selection manager and painted a
+   * selection instead of scrolling. `none` rather than `pan-y`: once the
+   * browser has decided a gesture is its own pan it stops honouring
+   * `preventDefault`, and the drag would be lost halfway through. The handler
+   * that answers instead is `wirePointer` in `terminals.ts`.
+   *
+   * It costs pinch-to-zoom over a pane, which is the honest trade and a small
+   * one: the thing somebody pinching a terminal actually wants is bigger text,
+   * and that is a setting — Settings → Appearance — that changes the grid rather
+   * than magnifying a bitmap of it.
+   */
+  touch-action: none;
+}
+
+/* iOS answers a press on a canvas with a callout and a magnifier, neither of
+   which can do anything useful here — ghostty paints its own selection and the
+   browser cannot see a glyph of it. On the canvas rather than on `.term`, so the
+   keystroke textarea beside it keeps every default that IME relies on. */
+.term canvas {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 /**
@@ -1309,6 +1509,26 @@ kbd {
  */
 .term textarea {
   caret-color: transparent;
+  /**
+   * And it must not be *small*, which is a different bug with the same cause:
+   * this is the only focusable field in a terminal, and iOS Safari zooms the
+   * whole page in whenever an editable element with a computed font size under
+   * 16px takes focus. It does not zoom back out afterwards. So tapping a pane
+   * to type left the page magnified and scrolled to a 1px box in the corner —
+   * which reads as the terminal having stopped fitting the screen, and takes the
+   * sidebar with it, because the thing that no longer fits is the *viewport*.
+   *
+   * 16 is a literal here and must stay one. It is not a size the design chose,
+   * it is the threshold Safari checks, so it cannot come from the type ramp —
+   * a skin is entitled to make `--fs-xl` eight pixels, and the pixel skin does
+   * exactly that sort of thing, which would silently put the zoom back. Nothing
+   * is ever drawn at it: the box is 1x1, `opacity: 0` and clipped.
+   *
+   * The other focusable element, `.term` itself, is `contenteditable` and also
+   * under 16px — and needs nothing, because on a touch device it never holds
+   * the focus at all. See the `focus` listener in `terminals.ts`.
+   */
+  font-size: 16px;
 }
 
 .tab[draggable="true"]:active {
@@ -1390,6 +1610,18 @@ kbd {
   align-items: center;
   gap: 6px;
   padding: 3px 10px;
+  /**
+   * And clear of the home indicator, which `viewport-fit=cover` in `index.html`
+   * otherwise lets this sit underneath — the bar is the bottom edge of the app,
+   * so it is the one thing that has to know about the bottom inset.
+   *
+   * Netted against the keyboard rather than added unconditionally: when a
+   * keyboard is up it is covering the home indicator, and reserving room for
+   * something behind a keyboard would push the terminal up by another
+   * thirty-odd pixels for nothing. `max(0px, …)` because the subtraction goes
+   * negative the moment the keyboard is taller than the inset, which is always.
+   */
+  padding-bottom: max(3px, calc(env(safe-area-inset-bottom, 0px) - var(--keyboard, 0px)));
   background: var(--chrome);
   border-top: var(--border) var(--border-style) var(--line);
   font-size: var(--fs-base);
@@ -1705,6 +1937,11 @@ kbd {
   font-size: var(--fs-sm);
   color: var(--dimmer);
   font-variant-numeric: tabular-nums;
+}
+/* The rows are aligned on their baselines, which a dot does not have — without
+   this it hangs off the bottom of the text it belongs to. */
+.menu-item .unread {
+  align-self: center;
 }
 .menu-item:hover:not(:disabled) {
   background: var(--chrome-high);
@@ -3050,4 +3287,143 @@ kbd {
 .tab-reader {
   cursor: default;
   font-style: italic;
+}
+
+/* --------------------------------------------------------------------------
+   The touch key bar
+
+   The keys a phone keyboard does not have, in a row above the one it does.
+   `Keybar.tsx` says why a press is a synthetic KeyboardEvent and why the focus
+   must not move; what is left for the stylesheet is that this is a row of
+   *targets*, so every number in here is about a thumb rather than about a
+   pointer, and that it must never be the reason the pane below it reflows.
+   -------------------------------------------------------------------------- */
+
+.keybar {
+  flex: none;
+  background: var(--chrome);
+  border-top: var(--border) var(--border-style) var(--line);
+}
+
+/* The scroller. `pan-x` rather than `auto` is what lets a press and a scroll
+   tell themselves apart: the browser claims a horizontal drag and sends the
+   button a `pointercancel`, which is exactly the signal Keybar drops a press
+   on, while a straight-down tap is never a pan and so is never cancelled.
+   Vertical is deliberately not offered — this is one row, and a bar that could
+   be dragged up and down would wobble under every press. */
+.keybar-keys {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  touch-action: pan-x;
+  scrollbar-width: none;
+  /* A key is a control, not a word: selecting one is never what was meant, and
+     on a phone a long press that starts a selection also puts a magnifier over
+     the thing you were trying to press. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  overscroll-behavior-x: contain;
+}
+/* The bar is one row of a fixed height and the scrollbar is a second row's
+   worth of chrome on the platforms that reserve space for one. It would also be
+   the only scrollbar in the window, which is its own kind of wrong. */
+.keybar-keys::-webkit-scrollbar {
+  display: none;
+}
+
+/**
+ * One key.
+ *
+ * 38px is the floor, not a size: it is about what a thumb hits reliably, and
+ * every guideline that names a number lands between 36 and 48. `flex: none` so
+ * that a narrow phone scrolls the row rather than squeezing twenty keys into
+ * twenty slivers — which is the failure that makes a toolbar look present and
+ * be unusable.
+ */
+.keybar-key {
+  flex: none;
+  min-width: 38px;
+  height: 38px;
+  padding: 0 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  line-height: 1;
+  color: var(--text);
+  background: var(--chrome-high);
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+/* The ones with a word on them — esc, home, pgdn — need the room the glyphs do
+   not. Still a floor rather than a width, so a longer label grows the key. */
+.keybar-key-wide {
+  min-width: 52px;
+  font-size: var(--fs-sm);
+}
+
+/* Pressed. Driven by a class and not by `:active`, because the press is
+   cancelled on `mousedown` to keep the focus in the terminal and a browser is
+   entitled to skip the pseudo-class along with it. A key with no feedback is a
+   key you press twice. */
+.keybar-key-held {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+}
+
+/**
+ * A latched modifier, in its two states.
+ *
+ * Two treatments and not one, because the difference is the whole reason the
+ * lock exists: armed is spent by the next key and locked is not, and somebody
+ * who cannot tell them apart has a ctrl that either stops working or will not
+ * stop. Armed is the accent as an outline — a mode that is about to end — and
+ * locked is the accent filled in, which is the heavier of the two for the state
+ * that lasts longer.
+ */
+.keybar-key-armed {
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 var(--border) var(--accent);
+}
+.keybar-key-locked {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+}
+
+/* A mouse never sees this bar, but a tablet with a trackpad might. */
+@media (hover: hover) {
+  .keybar-key:hover {
+    border-color: var(--line-high);
+  }
+}
+
+/* The status bar's toggle, which is the bar's only way back. Matched to
+   `.sb-bars` rather than to the keys it talks about: it is a piece of the
+   status bar, and a control the size of a key would make the status bar as tall
+   as the thing it hides. */
+.sb-keys {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  border-radius: var(--radius-md);
+  color: var(--dimmer);
+  flex: none;
+}
+.sb-keys-on {
+  color: var(--text);
+}
+.sb-keys:hover {
+  color: var(--text);
+  background: var(--chrome-high);
 }

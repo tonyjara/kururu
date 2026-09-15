@@ -20,6 +20,14 @@ interface Props {
   sidebarOpen: boolean;
   /** `toggle-sidebar`, for a pointer. See below for why the bar is where it is. */
   onToggleSidebar: () => void;
+  /**
+   * Whether the touch key toolbar is up, or null on a device that cannot have
+   * one. Null rather than a second boolean beside it, so that "there is no such
+   * thing here" and "it is currently hidden" cannot be confused for each other
+   * by whoever reads this next — which is the same shape `mascotId` argues for.
+   */
+  keybarOpen: boolean | null;
+  onToggleKeybar: () => void;
   onHelp: () => void;
 }
 
@@ -31,6 +39,8 @@ export function StatusBar({
   resizeMode,
   sidebarOpen,
   onToggleSidebar,
+  keybarOpen,
+  onToggleKeybar,
   onHelp,
 }: Props) {
   const index = profile.workspaces.findIndex((w) => w.id === workspace.id);
@@ -68,6 +78,22 @@ export function StatusBar({
       {!connected && <span className="sb-badge sb-off">reconnecting…</span>}
 
       <span className="sb-spacer" />
+      {/* The toolbar's only way back, so it lives somewhere that is never
+          covered by it. It is drawn only where there is a toolbar to talk
+          about — on a desktop the keys it offers are all on the keyboard
+          already, and a toggle for a bar that would never appear is a control
+          that teaches somebody the wrong thing about the window. */}
+      {keybarOpen !== null && (
+        <button
+          className={`sb-keys ${keybarOpen ? "sb-keys-on" : ""}`}
+          onClick={onToggleKeybar}
+          title={keybarOpen ? "Hide the key bar" : "Show the key bar"}
+          aria-label={keybarOpen ? "Hide the key bar" : "Show the key bar"}
+          aria-pressed={keybarOpen}
+        >
+          <KeysIcon />
+        </button>
+      )}
       <button className="sb-help" onClick={onHelp} title="Keys">
         {PREFIX_LABEL} ?
       </button>
@@ -88,6 +114,22 @@ function BarsIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
          strokeLinecap="round" aria-hidden="true">
       <path d="M4 7h16M4 12h16M4 17h16" />
+    </svg>
+  );
+}
+
+/**
+ * A keyboard, drawn here rather than taken from the skin's icon set on
+ * `BarsIcon`'s reasoning: the set names the glyphs a skin is expected to
+ * restyle, and this is a picture of a physical object that means the same thing
+ * in any chrome.
+ */
+function KeysIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="6" width="20" height="12" rx="2" />
+      <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8" />
     </svg>
   );
 }

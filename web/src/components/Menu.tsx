@@ -29,6 +29,14 @@ export interface MenuItem {
   mark?: boolean;
   /** A few quiet characters on the right — a count, a number, a shortcut. */
   hint?: string;
+  /**
+   * Something in here has output nobody has looked at, drawn as the same dot a
+   * tab carries. It is a separate field rather than a character in the label
+   * because the label is what you read to find the row and the dot is what you
+   * scan for, and because `mark` has already spent the bullet on "you are here"
+   * — two bullets in one row would be a row saying two things with one glyph.
+   */
+  unread?: boolean;
   run: () => void;
 }
 
@@ -62,6 +70,7 @@ export function Menu({ at, items, onClose }: { at: MenuAt; items: MenuItem[]; on
             {item.mark ? "•" : ""}
           </span>
           <span className="menu-label">{item.label}</span>
+          {item.unread && <span className="unread" aria-label="new output" />}
           {item.hint && <span className="menu-hint">{item.hint}</span>}
         </button>
       ))}

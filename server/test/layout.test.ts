@@ -25,6 +25,7 @@ import {
   removeTab,
   selectTab,
   setRatio,
+  soloPane,
   split,
   splitWith,
   stepPane,
@@ -289,6 +290,20 @@ describe("setRatio", () => {
   it("clamps so a pane is never dragged out of existence", () => {
     expect((setRatio(tree(), "s1", 0) as { ratio: number }).ratio).toBe(0.1);
     expect((setRatio(tree(), "s1", 2) as { ratio: number }).ratio).toBe(0.9);
+  });
+});
+
+describe("soloPane", () => {
+  it("is the focused pane", () => {
+    const node = tree();
+    expect(soloPane(node, "C").id).toBe("C");
+  });
+
+  it("falls back to the first rather than leaving a phone with nothing on screen", () => {
+    const node = tree();
+    // What a focus left pointing at a pane that has since been closed looks
+    // like from here. A narrow window has no second pane to fall back on.
+    expect(soloPane(node, "gone").id).toBe("A");
   });
 });
 

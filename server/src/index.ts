@@ -945,6 +945,46 @@ function devRoots(): Array<[string, number]> {
 async function pollDevServers(): Promise<void> {
   const { servers, running } = await scanDevServers(devRoots());
   for (const server of servers) allowRoot(server.cwd);
+  /**
+   * Every dev server gets a proxy, whether or not anything has asked for one.
+   *
+   * This used to wait for `open-preview`, which is the right shape for a preview
+   * *pane* — it is opened deliberately, and the pane can wait a round trip for
+   * the port to come back. It is the wrong shape for a link. A phone opening a
+   * dev server wants a real anchor with a real href, because that is what buys
+   * long-press to copy, the share sheet, a background tab, and Add to Home
+   * Screen; a button that sends a message, waits for the next `dev-servers`
+   * push and then calls `window.open` gets none of those, and is additionally
+   * blocked by mobile Safari for opening a window outside the gesture that
+   * asked for it. An href cannot be built after the fact, so the port has to
+   * exist before anybody taps.
+   *
+   * The cost is a listener per dev server for sessions that never look at one —
+   * an idle accept loop, which is nothing, and which `closePreview` reclaims as
+   * soon as the dev server stops. Opening these only while a non-loopback client
+   * is connected was the obvious economy and is a worse feature: previews are
+   * global while that test is per-client, so a link would appear and disappear
+   * according to who *else* had the window open.
+   */
+  const proxyPorts = new Set(openPreviews().values());
+  for (const server of servers) {
+    /**
+     * Never a preview of a preview. `scanDevServers` already refuses this
+     * process's own sockets, which is where the loop actually came from and the
+     * fix that matters; this is the second lock on the same door, because the
+     * failure mode is not a wrong row in a list but a process that opens
+     * listeners until it runs out of ports, and the two guards fail for
+     * different reasons — that one needs the pid to be ours, this one only needs
+     * the port to be one we handed out.
+     */
+    if (proxyPorts.has(server.port)) continue;
+    try {
+      openPreview(server.port);
+    } catch {
+      // Out of preview ports. The snapshot simply carries no proxyPort for this
+      // one, and the sidebar row draws without a link rather than with a broken.
+    }
+  }
   const proxied = openPreviews();
   for (const server of servers) {
     const proxyPort = proxied.get(server.port);

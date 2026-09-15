@@ -27,6 +27,7 @@ import {
   activeAgent,
   paneInDirection,
   panes,
+  soloPane,
   visibleAgents,
   type Direction,
   type LayoutNode,
@@ -35,6 +36,7 @@ import { keymapFrom } from "../../shared/keys";
 import { mascotFor } from "../../shared/model";
 import { Dialog, type DialogState } from "./components/Dialog";
 import { HelpOverlay } from "./components/HelpOverlay";
+import { Keybar } from "./components/Keybar";
 import { Menu, type MenuAt } from "./components/Menu";
 import { Panes } from "./components/Panes";
 import { Reach } from "./components/Reach";
@@ -81,6 +83,19 @@ const SIDEBAR_MAX = 460;
 const SIDEBAR_WIDTH_KEY = "kururu.sidebar.width";
 
 /**
+ * Whether the touch key toolbar is drawn, on the device that decided.
+ *
+ * `localStorage` on the sidebar width's reasoning, and rather more obviously so:
+ * this is a bar that only exists on a touch screen, and a desktop watching the
+ * same server has no opinion about it that is worth sending anywhere. It
+ * defaults to *on*, because the device that draws it at all is by definition one
+ * whose keyboard is missing the keys on it — somebody who does not want the rows
+ * it costs can put it away, and that is a smaller surprise than a phone where
+ * escape is unreachable until you find a toggle.
+ */
+const KEYBAR_KEY = "kururu.keybar";
+
+/**
  * When the window stops being wide enough for a column beside the panes.
  *
  * Stated here in JavaScript and nowhere else, and `styles.css` reads it back off
@@ -92,6 +107,19 @@ const SIDEBAR_WIDTH_KEY = "kururu.sidebar.width";
  * also has to *behave* differently and so has to know.
  */
 const NARROW = "(max-width: 720px)";
+
+/**
+ * How much of the window an on-screen keyboard has to take before kururu
+ * believes it is one.
+ *
+ * The visual viewport shrinks for things that are not keyboards — a phone
+ * browser collapsing its address bar moves it by forty or fifty pixels, and
+ * treating that as a keyboard would reflow every pane, and therefore SIGWINCH
+ * every agent, every time somebody scrolled. A keyboard is a third of the
+ * screen; a hundred and twenty pixels is comfortably above the one and below
+ * the other.
+ */
+const KEYBOARD_MIN = 120;
 
 export function App() {
   const { snapshot, connected } = useKururu();
@@ -120,6 +148,16 @@ export function App() {
   const [sidebarWidth, setSidebarWidth] = useState(storedSidebarWidth);
   /** Zen: the focused pane takes the window. A view state, never the server's. */
   const [zen, setZen] = useState(false);
+  /**
+   * The touch toolbar, and whether this device has any use for one.
+   *
+   * Two things rather than one because they answer different questions and only
+   * one of them is a preference: `touch` is a fact about the hardware and
+   * `keybarOpen` is what somebody chose about it, so a mouse never draws the bar
+   * however the flag is set, and a phone that put it away keeps it away.
+   */
+  const touch = useCoarsePointer();
+  const [keybarOpen, setKeybarOpen] = useState(storedKeybar);
   const [prefixArmed, setPrefixArmed] = useState(false);
   const [resizeMode, setResizeMode] = useState(false);
   const [dialog, setDialog] = useState<DialogState | null>(null);
@@ -245,6 +283,19 @@ export function App() {
     document.documentElement.toggleAttribute("data-narrow", narrow);
   }, [narrow]);
 
+  // Remembered per device, for the reason the sidebar's width is. Storage that
+  // refuses to answer is a bar that comes back next time, not an error.
+  useEffect(() => {
+    try {
+      localStorage.setItem(KEYBAR_KEY, keybarOpen ? "1" : "0");
+    } catch {
+      // A private window keeps the default. Nothing here is worth a dialog.
+    }
+  }, [keybarOpen]);
+
+  /** Give the window back to the keyboard when one is up. See `useKeyboardInset`. */
+  useKeyboardInset();
+
   /**
    * Crossing the breakpoint decides for you, once.
    *
@@ -289,8 +340,21 @@ export function App() {
    * Tell the server what is on screen: the active tab of every pane, and only of
    * the workspace you are in. A workspace you are not looking at is not costing
    * anything — which is the point of having several.
+   *
+   * A narrow window draws one pane (see `Panes`), so it says one terminal — and
+   * that is load bearing rather than tidiness. *Visible* is what gives a client
+   * a vote on the size of a pty, the policy is the smallest vote over everybody
+   * who can see it, and a phone claiming to see four panes would hold all four
+   * down to a quarter of a phone screen on the desktop watching the same agents.
+   * The rest stay warm and keep being fed: the pool says so separately, which is
+   * the whole reason `watch` carries two sets.
    */
-  const visible = useMemo(() => (workspace ? visibleAgents(workspace.layout) : []), [workspace]);
+  const visible = useMemo(() => {
+    if (!workspace) return [];
+    if (!narrow) return visibleAgents(workspace.layout);
+    const shown = activeAgent(soloPane(workspace.layout, workspace.focusedPaneId));
+    return shown ? [shown] : [];
+  }, [workspace, narrow]);
   useEffect(() => {
     api.watch(visible);
   }, [visible]);
@@ -774,9 +838,29 @@ export function App() {
             agents={agents}
             mascot={mascot}
             zen={zen}
+            /* One pane at a time once there is no room to tile — the same
+               number that turns the sidebar into a screen, for the same
+               reason, which is why it is this flag and not a second
+               breakpoint. */
+            solo={narrow}
             keyboard={paneKeyboard}
           />
         </main>
+        {/* Between the panes and the status bar, which puts it directly above
+            the on-screen keyboard — `.app` is already shortened by `--keyboard`,
+            so the bar rides up with the bottom edge and needs to know nothing
+            about any of it. Not below the status bar, thumb reach
+            notwithstanding: the bar is a keyboard, the keyboard belongs against
+            the keys it extends, and the status bar is the window's bottom edge
+            and the one thing that owns the home indicator's inset.
+
+            Hidden in zen for the same reason the status bar is. Zen means the
+            pane takes the window, and a toolbar is chrome — and unlike the
+            sidebar toggle there is nothing here that cannot be reached another
+            way, since zen is itself something you left by pressing a key. */}
+        {touch && keybarOpen && !zen && (
+          <Keybar agentId={focusedAgentOf(workspace)} keyboard={paneKeyboard} />
+        )}
         <StatusBar
           profile={profile}
           workspace={workspace}
@@ -789,6 +873,11 @@ export function App() {
              it with and nothing on screen saying the list is still there. */
           sidebarOpen={sidebarOpen}
           onToggleSidebar={() => run("toggle-sidebar")}
+          /* Null on a mouse, which is how the bar draws no toggle at all rather
+             than a disabled one: a control for a thing that cannot exist here is
+             worse than no control. */
+          keybarOpen={touch ? keybarOpen : null}
+          onToggleKeybar={() => setKeybarOpen((open) => !open)}
           onHelp={() => setHelp(true)}
         />
       </div>
@@ -862,6 +951,100 @@ function useNarrow(): boolean {
     return () => query.removeEventListener("change", onChange);
   }, []);
   return narrow;
+}
+
+/**
+ * Is this a device somebody touches?
+ *
+ * The same question `terminals.ts` asks before it takes the focus, through the
+ * same query string, and asked here as a subscription rather than a call
+ * because this one decides what is *rendered* — a tablet that has just had a
+ * keyboard folded onto it should lose the toolbar without a reload, and only a
+ * listener can do that. `matchMedia` rather than a resize listener on
+ * `useNarrow`'s reasoning: the browser already knows and will say.
+ */
+function useCoarsePointer(): boolean {
+  const [coarse, setCoarse] = useState(terminals.fingerPointer);
+  useEffect(() => {
+    const query = window.matchMedia(terminals.COARSE_POINTER);
+    const onChange = () => setCoarse(query.matches);
+    query.addEventListener("change", onChange);
+    onChange();
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+  return coarse;
+}
+
+/** Whether this device last left the touch toolbar up. Defaults to up. */
+function storedKeybar(): boolean {
+  try {
+    return localStorage.getItem(KEYBAR_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Keep the window above the on-screen keyboard.
+ *
+ * A phone keyboard does not resize the page: it is drawn *over* it, and the
+ * layout viewport carries on believing it has the whole screen. So the bottom
+ * third of the terminal — which is exactly where an agent draws the box you are
+ * typing into — sits underneath it, and you type into something you cannot see.
+ * The one thing that knows otherwise is the **visual** viewport, so that is what
+ * this watches, on both `resize` and `scroll` because a phone answers a keyboard
+ * with some of each.
+ *
+ * What comes out is a length on the root element and nothing else — no React
+ * state — for the reason `applyTheme` is an effect and not a context: the answer
+ * is consumed by one CSS rule, and re-rendering the window to tell it a number
+ * the cascade can carry is paying a render for nothing.
+ *
+ * **The terminal then genuinely reflows, and that is the feature rather than a
+ * side effect.** The pane is shorter, so it proposes fewer rows, so the pty is
+ * resized and the agent redraws its input box at the new bottom — which is the
+ * whole point, and it is why this shortens the window rather than sliding it
+ * upwards. Sliding would have left the rows where they were and pushed the top
+ * of the screen out of sight, so the thing you are typing into would be visible
+ * and everything it was replying to would not.
+ *
+ * Two consequences worth knowing. The proposal goes through the same 60ms
+ * settle a dragged divider does, so a keyboard costs one SIGWINCH on the way up
+ * and one on the way down rather than one per frame of the animation. And the
+ * size policy is `smallest` over every client that can see the terminal, so
+ * while you are typing on a phone the desktop watching the same agent is drawn
+ * at the phone's row count too. That is the policy working rather than a bug —
+ * the phone really can only see that many rows — but it is visible, and it is
+ * the reason this file says so out loud.
+ */
+function useKeyboardInset(): void {
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    // Every browser kururu runs in has this; the guard is for the one that does
+    // not, where the answer is simply that there is no keyboard to make room for.
+    if (!viewport) return;
+
+    const apply = () => {
+      /**
+       * `offsetTop` is in here because a phone does not only shrink the visual
+       * viewport, it also slides it — iOS scrolls the focused field into view,
+       * and without this the slide reads as the keyboard having grown by however
+       * far it scrolled.
+       */
+      const inset = window.innerHeight - viewport.height - viewport.offsetTop;
+      const keyboard = inset > KEYBOARD_MIN ? Math.round(inset) : 0;
+      document.documentElement.style.setProperty("--keyboard", `${keyboard}px`);
+    };
+
+    apply();
+    viewport.addEventListener("resize", apply);
+    viewport.addEventListener("scroll", apply);
+    return () => {
+      viewport.removeEventListener("resize", apply);
+      viewport.removeEventListener("scroll", apply);
+      document.documentElement.style.removeProperty("--keyboard");
+    };
+  }, []);
 }
 
 function matchesNarrow(): boolean {
