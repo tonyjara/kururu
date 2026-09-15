@@ -13,8 +13,9 @@
  * and the client tells the server what size grid it is drawing into. Three
  * consequences worth naming:
  *
- *  - `watch` takes a *set*. Panes are tiled, so several terminals are visible at
- *    once and all of them want their bytes.
+ *  - `watch` takes two *sets*. Panes are tiled, so several terminals are visible
+ *    at once and all of them want their bytes — and the client keeps emulators
+ *    for terminals it is not showing, which want theirs too or they go stale.
  *  - A terminal that has just been opened needs the history it missed, which is
  *    `backlog` — reconstructed by the emulator the server keeps beside each pty,
  *    not a replay of raw bytes that may have been cut mid-sequence. A
@@ -151,11 +152,23 @@ export type ClientMessage =
    */
   | { type: "resize"; agentId: string; cols: number; rows: number }
   /**
-   * Which terminals this client has on screen. A set, not one: panes are tiled.
-   * Re-sent after a reconnect — the server keeps no memory of a socket that went
-   * away.
+   * What this client has on screen, and what it is keeping an emulator for
+   * without showing it. Both are sets: panes are tiled, and emulators are
+   * pooled. Re-sent after a reconnect — the server keeps no memory of a socket
+   * that went away.
+   *
+   * Two fields rather than one because the server answers two questions with
+   * them and only one of the answers is their union. What to *stream* is the
+   * union: a pooled emulator that stops being fed goes stale, and a stale one
+   * has to be reconstructed, which is the thing pooling exists to stop happening
+   * during ordinary navigation. What counts as *unread* is `agentIds` alone —
+   * the mark means "output arrived where nobody was looking", and an emulator
+   * kept warm in a workspace you are not in is nobody looking.
+   *
+   * `warm` is optional so a client that has not been updated still watches
+   * exactly as it did; an absent warm set is an empty one.
    */
-  | { type: "watch"; agentIds: string[] }
+  | { type: "watch"; agentIds: string[]; warm?: string[] }
   /**
    * Rebuild this terminal at this size. The only thing that produces a `backlog`.
    *

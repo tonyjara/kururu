@@ -40,9 +40,15 @@ server it was looking at may not even be on this machine.
    emulator inside it came back empty, and — because the *set* of visible
    terminals had not changed — nothing asked for the history to refill it.
    Dragging a pane aside made its agent vanish until it happened to repaint.
-   Switching *tabs* is a rebuild on purpose: a hidden tab is not watched, so its
-   emulator would be stale, and an emulator nobody can see is a canvas and a WASM
-   terminal being kept for nothing.
+
+   Switching *tabs* used to be a rebuild on purpose, and that reason is gone:
+   an emulator is pooled by agent id in `web/src/terminals.ts` and lives as long
+   as its terminal does, so a hidden tab keeps being fed off screen and comes
+   back with its screen, its scrollback and its scroll position. **Nothing in
+   the client rebuilds an emulator during ordinary navigation.** A pane renders
+   an empty mount and the pooled element is moved into it, which means React
+   must never render that element as a child of anything — it would remove it on
+   the next commit.
 4. **Do not run `tailscale` commands.** Putting a port on the user's tailnet is
    their decision, never a side effect of a code change. Document the command;
    do not execute it.
@@ -128,6 +134,8 @@ server/      Node (not Bun — it was Electron's once and the bundles stayed). T
 web/         React 19 + Vite. One build; the desktop is what it is shaped for.
   session.ts     Module-level store + useSyncExternalStore; the WS client.
                  Snapshots go through React; terminal output deliberately does not
+  terminals.ts   Every emulator, pooled by agent id and moved between panes
+                 rather than rebuilt. Twelve, LRU, never one that is on screen
   keys.ts        The prefix, and a KeyboardEvent as a string the table can be
                  looked up by. The table itself is shared/keys.ts now
   colors.ts      What a workspace colour name looks like. The web's half of it
@@ -138,8 +146,8 @@ web/         React 19 + Vite. One build; the desktop is what it is shaped for.
   App.tsx        Draws the server's layout; owns the prefix, zen, and dialogs
   components/
     Panes.tsx      Walks the tree into nested flex boxes; tab strips; dividers
-    Terminal.tsx   One Ghostty emulator per visible tab. Fits itself, then
-                   resizes the pty. WASM, on a 2D canvas — see the invariants
+    Terminal.tsx   A box for a pooled emulator, and the file drop. Owns no
+                   emulator: it borrows one on mount and hands it back
     Sidebar.tsx    Workspaces (numbered) and every agent in the profile
     Status.tsx     The status mark: a dot, or the mascot while it is working
     Settings.tsx   The cog's dialog: a tab bar, and the way out
@@ -297,11 +305,24 @@ and its log is the only place its side of a bug shows up.
   could not be events — end-of-work is *silence*, and the process table has to be
   asked — plus one that coalesces output at 16ms, because a pty mid-build emits
   thousands of writes a second and a socket should not.
-- **Only watched terminals are streamed.** Bytes for a terminal nobody has open
-  never become a message. Note what changed: every pty is still *parsed* by its
-  own emulator whether or not anyone is looking, because that is what makes a
-  pane opened later able to show history. Parsing is not rendering; there is no
-  renderer anywhere in the server.
+- **Watched is now two sets, and only one of them is "somebody is looking".**
+  `watch` carries what a client has *visible* and what it is keeping an emulator
+  for (*warm*); the host is told to stream the union, because a pooled emulator
+  that stops being fed is one that has to be reconstructed, which is the whole
+  cost pooling removes. Bytes for a terminal that is in neither set still never
+  become a message. Every pty is still *parsed* by its own emulator whether or
+  not anyone is looking, because that is what makes a pane opened later able to
+  show history; parsing is not rendering, and there is no renderer anywhere in
+  the server.
+- **`unread` is answered from both ends, and that is not redundancy.** The host
+  derives it from its watched set — which now contains terminals a client is
+  merely keeping warm, so the host clears the mark for exactly the terminals you
+  would want it for. So `index.ts` keeps a set of its own: output arriving for a
+  terminal no client has *visible* marks it, a client showing it clears it, and
+  `overlay` ors the two. The host answers for what it is not streaming to this
+  process (which `index.ts` cannot see at all), this side answers for what it
+  is. Do **not** "finish the job" by editing `agents/host.ts`; that file costs
+  the user every running agent.
 - **`screen.ts` exists so a pane opened late is not empty.** It no longer renders
   anything — the browser does that. It is a headless emulator per pty, serialized
   on demand into the escape sequences that rebuild what it holds. Do not replace
@@ -322,8 +343,13 @@ and its log is the only place its side of a bug shows up.
   become it before writing. `watch` deliberately produces no backlog at all: it
   is a set of ids, it cannot carry a size, and answering it meant sending a
   reconstruction before the emulator that would receive it had even been laid
-  out. Watching is the tap; rebuilding is the emulator's own question, and only a
-  fresh pane, a tab switch or a reconnect asks it. `server/test/screen.test.ts`
+  out. Watching is the tap; rebuilding is the emulator's own question, and the
+  only things that ask it now are a genuinely new emulator — a terminal borrowed
+  for the first time, one that was evicted from the pool and came back — or a
+  reconnect. A tab switch and a workspace change ask for nothing. A pooled
+  emulator that was off screen when the socket dropped is told it is `stale` and
+  asks once a pane gives it a size; asking while detached would claim a grid for
+  a pty nobody is looking at. `server/test/screen.test.ts`
   holds the invariant: serialize, rebuild, compare the buffers.
 - **The pane's emulator must never want a GPU context, and that is why it is
   Ghostty's.** This is the one that turned the whole window black, twice, and
@@ -331,8 +357,12 @@ and its log is the only place its side of a bug shows up.
   WebGL and `dispose()` did *not* release the context — neither the addon nor
   xterm's core ever called `loseContext` — so it stayed live until Chromium
   collected the canvas, which can be never. A page gets about sixteen, and kururu
-  builds a fresh emulator on every tab switch, workspace change, profile swap and
-  pane rebuild, so the corpses accumulated in dozens over an afternoon. Past
+  built a fresh emulator on every tab switch, workspace change, profile swap and
+  pane rebuild, so the corpses accumulated in dozens over an afternoon. (It does
+  not any more — see the pool — and that is the point: sixteen is only a budget
+  you can exhaust if you are building emulators continuously, so the renderer was
+  replaced to fix a symptom of the lifetime bug. The rule below still stands on
+  its own.) Past
   sixteen the browser does not refuse the new context, it kills the **oldest**,
   and the oldest was never a corpse: it was the pane you had open longest. Every
   terminal you were actually watching went dark at once, for the three seconds
@@ -373,13 +403,15 @@ and its log is the only place its side of a bug shows up.
   saturated swap. **That is ghosttown's to fix, not kururu's — see rule 1 — and
   it has been raised with the user rather than edited across.**
 - **The pty is told about a resize only once the box stops moving** (60ms in
-  `Terminal.tsx`). The emulator follows immediately; the pty does not, because
+  `terminals.ts`). The emulator follows immediately; the pty does not, because
   every resize is a SIGWINCH and every agent TUI repaints completely on one.
   Without the debounce, dragging a divider or sliding a pane repaints the program
   on every frame of it.
 - **Two rebuilds can overlap, and the first to finish must not release the
-  second's hold.** Flick between two tabs fast enough and the second emulator
-  asks before the first one's answer has been serialized. `awaiting` in
+  second's hold.** This is rare now that a tab switch asks for nothing — it takes
+  a reconnect landing on a pane that is also being borrowed — and `awaiting` is
+  deliberately still a count rather than a flag, because the cost of counting is
+  nothing and the bug it prevents is bytes the client never sees again. `awaiting` in
   `index.ts` therefore counts rebuilds rather than flagging them: letting the
   earlier one lift the hold sends live output ahead of the later screen, which
   wipes it on arrival, and those bytes never come again — the client's emulator
@@ -706,12 +738,16 @@ and its log is the only place its side of a bug shows up.
   while it is armed and stops when it times out. An unlabelled mode is what makes
   people distrust modal interfaces — and the recovery, pressing it twice to send
   it through, has to be discoverable from somewhere.
-- **Nothing is subscribed until the grid is the pane's.** An emulator built
+- **Nothing is subscribed until the grid is the pane's.** Now in `terminals.ts`,
+  where the emulator is. An emulator built
   without `cols`/`rows` is 80x24 and stays that way until a fit lands, which cannot
   happen on the frame after a split or before the renderer has measured a
   character. A backlog is a screen serialized at a size; written into an
   80-column grid it wraps and stays wrapped, and the result is a screen the agent
-  believes it already drew correctly and will never repaint. `Terminal.tsx` gates
+  believes it already drew correctly and will never repaint. A *detached* pooled
+  element is the same question with a different cause and the same right answer:
+  it reports no width, the measurement is refused, and the emulator keeps the
+  shape it was last drawn at. The pool gates
   on `proposeDimensions()` rather than on `fit()` throwing — fit does not throw
   when the renderer has no cell size, it quietly does nothing, so a try/catch
   cannot tell "fitted" from "skipped".
@@ -729,8 +765,8 @@ and its log is the only place its side of a bug shows up.
   means — "I could not work this out" — and `web/test/grid.test.ts` holds it,
   because the refused value is a well-formed grid and an `if` with a number in it
   is what somebody simplifies away.
-- **The pty follows the pane, not the other way round.** `Terminal.tsx` measures
-  its box, fits the emulator to it, and sends the resulting grid to the server,
+- **The pty follows the pane, not the other way round.** The pooled emulator
+  measures its box, fits itself to it, and sends the resulting grid to the server,
   which resizes both its own emulator and the pty. Never clamp a pane to a fixed
   grid: the program inside genuinely redraws at the size of the box it is in, and
   that is the whole difference between a terminal and a picture of one.

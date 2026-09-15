@@ -893,6 +893,24 @@ kbd {
  * flex child refuses to shrink below its content, and a terminal's content is
  * however many rows it last drew — so the pane would grow and never shrink back.
  */
+/**
+ * The box a pane renders, and the emulator that is moved into it.
+ *
+ * Two elements rather than one because they have different lifetimes: the mount
+ * belongs to the pane and is rebuilt whenever React feels like it, while `.term`
+ * is the element `open()` was called on and lives as long as its terminal does
+ * (see `web/src/terminals.ts`). The mount is a flex container and nothing else,
+ * so `.term` is laid out in exactly the box it always was — which matters,
+ * because the fit addon measures that element's client box and its padding to
+ * decide how many columns the pty is told it has.
+ */
+.term-mount {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+}
+
 .term {
   flex: 1;
   min-height: 0;
