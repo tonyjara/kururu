@@ -456,9 +456,116 @@ export class Workspaces {
     if (!paneId || paneId === keep) return;
     const workspace = this.activeWorkspace;
     const pane = findPane(workspace.layout, paneId);
-    if (!pane || pane.agentIds.length > 0) return;
+    // A reader holds no terminals and is not therefore a hole: it is a pane
+    // somebody asked for, showing something, and closing it because a tab left
+    // the pane next door would be the opposite of what the drag meant.
+    if (!pane || pane.reader || pane.agentIds.length > 0) return;
     if (panes(workspace.layout).length < 2) return;
     this.closePane(paneId);
+  }
+
+  // -------------------------------------------------------------------------
+  // The reader
+  // -------------------------------------------------------------------------
+
+  /**
+   * Put a reader beside this pane, following this terminal's editor.
+   *
+   * It splits rather than taking the pane over, because the pane you asked from
+   * is the one with the editor in it. Focus is handed back to where it was
+   * afterwards — `split` moves it to what it made, which is right for a split
+   * you are going to type into and wrong for one you are going to read.
+   *
+   * Asking twice finds the reader you already have rather than making a second
+   * one. A key that makes a pane has to be safe to lean on, and two readers of
+   * one editor would both be correct and both be in the way.
+   */
+  openReader(paneId: string, agentId: string | null): string | null {
+    if (agentId) {
+      const existing = panes(this.activeWorkspace.layout).find((pane) => pane.reader?.follow === agentId);
+      if (existing) {
+        this.focusPane(existing.id);
+        return existing.id;
+      }
+    }
+    const source = findPane(this.activeWorkspace.layout, paneId);
+    if (!source) return null;
+    if (source.reader) {
+      this.setReaderFollow(source.id, agentId);
+      return source.id;
+    }
+    const made = this.split("row", paneId);
+    if (!made) return null;
+    this.mutateWorkspace(this.activeWorkspace.id, (w) => ({
+      ...w,
+      layout: updatePane(w.layout, made, (pane) => ({
+        ...pane,
+        reader: { root: "", path: "", follow: agentId, rev: 0 },
+      })),
+      focusedPaneId: paneId,
+    }));
+    return made;
+  }
+
+  private setReaderFollow(paneId: string, agentId: string | null): void {
+    this.mutateWorkspace(this.activeWorkspace.id, (w) => ({
+      ...w,
+      layout: updatePane(w.layout, paneId, (pane) =>
+        pane.reader ? { ...pane, reader: { ...pane.reader, follow: agentId } } : pane,
+      ),
+    }));
+  }
+
+  /**
+   * Stop following, or start again. Pinning keeps the file that is showing;
+   * unpinning takes whatever the editor says next.
+   */
+  pinReader(paneId: string, follow: boolean): void {
+    const pane = findPane(this.activeWorkspace.layout, paneId);
+    if (!pane?.reader) return;
+    this.setReaderFollow(paneId, follow ? (pane.reader.follow ?? null) : null);
+  }
+
+  /**
+   * Every reader following this terminal, anywhere.
+   *
+   * Across all profiles and all workspaces, not just the one on screen. An
+   * editor goes on saying where it is whether or not you are looking at the
+   * workspace its reader is in, and a reader that only kept up while visible
+   * would be showing the wrong file the moment you came back to it.
+   */
+  readersFollowing(agentId: string): { workspaceId: string; paneId: string }[] {
+    const found: { workspaceId: string; paneId: string }[] = [];
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) {
+        for (const pane of panes(workspace.layout)) {
+          if (pane.reader?.follow === agentId) found.push({ workspaceId: workspace.id, paneId: pane.id });
+        }
+      }
+    }
+    return found;
+  }
+
+  /**
+   * Point a reader at a file, and say the file moved on.
+   *
+   * `rev` only advances when the target is unchanged, because it means "what you
+   * have is stale" and a client that is being handed a different path already
+   * knows that. Re-pointing at the same file is what a save looks like from
+   * here, and it is the only reason this counts at all.
+   */
+  setReaderTarget(workspaceId: string, paneId: string, root: string, path: string): boolean {
+    let changed = false;
+    this.mutateWorkspace(workspaceId, (w) => ({
+      ...w,
+      layout: updatePane(w.layout, paneId, (pane) => {
+        if (!pane.reader) return pane;
+        const same = pane.reader.root === root && pane.reader.path === path;
+        changed = true;
+        return { ...pane, reader: { ...pane.reader, root, path, rev: same ? pane.reader.rev + 1 : 0 } };
+      }),
+    }));
+    return changed;
   }
 
   /** The terminal a pane is showing, if any. */

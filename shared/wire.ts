@@ -311,6 +311,31 @@ export type ClientMessage =
   /** Open a proxy for this dev server so a phone can reach it. */
   | { type: "open-preview"; port: number }
 
+  // --- the reader ----------------------------------------------------------
+  /**
+   * Split a reader off the pane a terminal is in, and point it at that
+   * terminal's editor.
+   *
+   * It splits rather than replacing, because the pane you asked from is the one
+   * with the editor in it and taking that away to show the file would be a
+   * strange reading of "show me this". `paneId` is the pane to split; `agentId`
+   * is whose nvim to follow, and with neither the focused pane and its showing
+   * terminal are used, which is what the keybinding sends.
+   *
+   * A pane that is already a reader is re-pointed rather than split again: the
+   * second press of a key that made a pane should not make another one.
+   */
+  | { type: "open-reader"; paneId?: string; agentId?: string }
+
+  /**
+   * Stop following an editor and sit on the file it is showing now.
+   *
+   * The reader is mostly worth having *because* it follows, so this is not the
+   * common case — it is for the moment you want to read one file while the
+   * editor goes somewhere else, and it is reversible by asking again.
+   */
+  | { type: "pin-reader"; paneId: string; follow: boolean }
+
   // --- the mascot ----------------------------------------------------------
   /**
    * Change one saved mascot. A verb like everything else here: Settings does not

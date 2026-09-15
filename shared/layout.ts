@@ -19,6 +19,36 @@
  * see a change.
  */
 
+/**
+ * What a reader pane is looking at.
+ *
+ * A path and the root it is under, which is all `files.ts` will answer to — and
+ * deliberately nothing else, because this goes to disk with the layout. A
+ * rendered document is derived from a file somebody else owns, so the pane
+ * remembers where to look and nothing about what it found: reopening kururu
+ * shows the file as it is now, not as it was when the window closed.
+ *
+ * `follow` is the agent whose editor it is tracking, when it is tracking one.
+ * Null means somebody pointed the pane at a file and it should stay there.
+ */
+export interface ReaderState {
+  root: string;
+  /** Relative to `root`, forward slashes, the shape `files.ts` takes. */
+  path: string;
+  /** The terminal whose nvim drives this, or null for a pinned file. */
+  follow: string | null;
+  /**
+   * Bumped every time the file is written, which is the whole mechanism for
+   * "it updates when I save".
+   *
+   * The snapshot carries this rather than the rendered markup: a snapshot goes
+   * out on every change to anything, and putting a document's HTML in one would
+   * send a README to every client because somebody switched tabs. So the client
+   * fetches the render, and this is what tells it the answer it has is stale.
+   */
+  rev: number;
+}
+
 /** A leaf: terminals stacked as tabs, in strip order, one of them showing. */
 export interface PaneState {
   id: string;
@@ -33,6 +63,16 @@ export interface PaneState {
    * that pane was for rather than in `~`.
    */
   cwd?: string;
+  /**
+   * When set, this pane is a reader and not a terminal pane at all.
+   *
+   * Mutually exclusive with `agentIds` rather than a tab alongside them, which
+   * is the plan's "one pane type per thing worth looking at". A tab strip that
+   * mixed the two would have to answer what closing a tab means when one of them
+   * ends a process and the other closes a view — two verbs wearing one button,
+   * which is the thing `kill-agent` and `close-pane` are kept apart to avoid.
+   */
+  reader?: ReaderState;
 }
 
 export type LayoutNode = PaneNode | SplitNode;

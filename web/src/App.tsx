@@ -247,6 +247,8 @@ export function App() {
           }
           return api.focusDirection(dir);
         }
+        case "open-reader":
+          return api.openReader();
         case "toggle-sidebar":
           return setSidebarOpen((open) => !open);
         case "settings":

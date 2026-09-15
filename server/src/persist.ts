@@ -34,6 +34,14 @@ const VERSION = 1;
 
 interface StoredPane {
   cwd?: string;
+  /**
+   * Where a reader pane was looking, and deliberately not *what* it was
+   * following. A pane's shape is structure and survives; the editor it was
+   * tracking is a process, and this file has no business remembering one. So a
+   * restored reader comes back pinned to its last file — which is the honest
+   * answer, because the nvim that was driving it is gone.
+   */
+  reader?: { root: string; path: string };
 }
 type StoredNode =
   | { type: "pane"; pane: StoredPane }
@@ -83,7 +91,14 @@ export function snapshotPath(): string {
 
 function strip(node: LayoutNode): StoredNode {
   if (node.type === "pane") {
-    return { type: "pane", pane: node.pane.cwd ? { cwd: node.pane.cwd } : {} };
+    const { cwd, reader } = node.pane;
+    return {
+      type: "pane",
+      pane: {
+        ...(cwd ? { cwd } : {}),
+        ...(reader?.path ? { reader: { root: reader.root, path: reader.path } } : {}),
+      },
+    };
   }
   return { type: "split", dir: node.dir, ratio: node.ratio, a: strip(node.a), b: strip(node.b) };
 }
@@ -132,7 +147,12 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
 function revive(node: StoredNode): LayoutNode {
   if (node.type === "pane") {
     const cwd = typeof node.pane?.cwd === "string" ? node.pane.cwd : undefined;
-    return { type: "pane", pane: { id: nextId("n"), agentIds: [], activeIdx: 0, cwd } };
+    const stored = node.pane?.reader;
+    const reader =
+      stored && typeof stored.root === "string" && typeof stored.path === "string"
+        ? { root: stored.root, path: stored.path, follow: null, rev: 0 }
+        : undefined;
+    return { type: "pane", pane: { id: nextId("n"), agentIds: [], activeIdx: 0, cwd, reader } };
   }
   const ratio = typeof node.ratio === "number" && node.ratio > 0 && node.ratio < 1 ? node.ratio : 0.5;
   return {
