@@ -600,6 +600,10 @@ export function App() {
       {sidebarOpen && !zen && (
         <Sidebar
           profile={profile}
+          /* For the one row that says it opens as somebody else: a workspace
+             borrowing another profile's accounts stores a pointer, and only the
+             list of profiles has the name on the other end of it. */
+          profiles={snapshot.profiles}
           profileRef={profileButton}
           agents={agents}
           connected={connected}

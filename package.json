@@ -19,6 +19,7 @@
     "build:server": "node desktop/build.mjs",
     "host": "bun run build:server && node desktop/dist/ptyhostd.mjs",
     "status": "node server/status.mjs",
+    "kill-ptyhosts": "node server/kill-hosts.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && bun run --cwd web typecheck",
     "test": "bun test",
     "postinstall": "node desktop/brand.mjs"

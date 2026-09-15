@@ -83,9 +83,29 @@ server that is mid-flight. **Check whether a server is running before you start
 - Teardown signals the **process group**, not the pty's own pid — see the
   invariants below. Getting this wrong leaves orphaned agents with no terminal
   attached and no way to reach them again.
-- The host is **detached**, not a child of whoever spawned it. That is what makes
-  it survive, and it also means `pkill -f ptyhostd` is how it stops — there is no
-  parent to close.
+- The host is **detached**, not a child of whoever spawned it. Its parent is pid
+  1, it is its own process group and it has no controlling terminal, which is
+  what makes it survive — and it also means it has to be stopped on purpose,
+  because there is no parent to close. There is a command for it:
+
+  ```sh
+  bun run kill-ptyhosts          # lists them, asks, SIGTERMs — see server/kill-hosts.mjs
+  bun run kill-ptyhosts --list   # what it would end, without ending it
+  bun run kill-ptyhosts /tmp/k2  # only the scratch instance, not your work
+  ```
+
+  It finds hosts **by their socket, not by their name**, and so should you if you
+  are doing it by hand (`kill $(lsof -t ~/.local/state/kururu/ptyhost.sock)`).
+  `pkill -f ptyhostd` is the obvious command and it is **not reliable here**:
+  macOS `pgrep -f` was observed matching two scratch hosts while consistently
+  skipping the real one, with `ps -ww` showing an identical command line for all
+  three. A `pkill` that silently matches nothing reads exactly like a host that
+  restarted and did not pick up your change. The socket has one holder by
+  construction (a second connection replaces the first), so asking it who is
+  listening cannot match the wrong process. Note the script never *connects* to
+  a host to find out what it is holding — that would knock the live server off
+  its link — so the terminal count it prints is counted from the outside, as the
+  host's own children.
 - `bun test` only exercises pure functions and a temp directory — `procs`,
   `report`, `status`, `files`, `workspaces` (which holds a tree and touches no
   pty), `sizing` (a fold over some numbers, which is the whole size policy),
@@ -210,6 +230,7 @@ bun run dev            # the agents: builds, starts the pty host if it is not
                        # already up, serves on :7717, restarts itself on save
 bun run dev:desktop    # the window. Finds a server; starts vite for itself
 bun run status         # is the host up, is a server up, what are they holding
+bun run kill-ptyhosts  # THE destructive one: ends every agent. --list to dry-run
 bun run start          # same as dev without the watching, plus a web build
 bun run host           # the pty host in the foreground, for debugging it
 bun run dev:web        # vite alone, proxying to KURURU_SERVER or 7717
@@ -222,7 +243,9 @@ bun test               # pure-function tests only
 **Two commands, not one, and that is the shape now.** `dev` is the half that
 holds your agents; `dev:desktop` is a window onto it. Kill the window and the
 agents carry on; kill the server and they *still* carry on, because they are in
-the host below it. Only `pkill -f ptyhostd` ends them.
+the host below it. Only `bun run kill-ptyhosts` ends them — which asks first,
+and which finds the host by its socket rather than by its name, for the reason
+in the hazard section above.
 
 **Ports:** 7717 server · 5173 vite · **7800+** preview proxies (one per dev
 server, allocated on demand). **Socket:** `~/.local/state/kururu/ptyhost.sock`,
@@ -346,6 +369,20 @@ and its log is the only place its side of a bug shows up.
   it with a ring buffer of raw bytes: trimming those to a budget cuts a sequence
   in half, and a cut sequence swallows everything after it until something
   resynchronises.
+- **A serialized screen does not carry the cursor's *visibility*, and it has to
+  be told to.** A pane applies a backlog by resetting its emulator and writing
+  it, and ghostty-web's `reset()` frees the WASM terminal and builds a new one —
+  so every mode goes back to its default and the cursor comes back visible. The
+  serializer restores eight modes and DECTCEM is not among them, so nothing in
+  the screen says otherwise, while the cursor's *position* is restored
+  faithfully. An agent that hides the real cursor and paints its own block in an
+  input box parks the hidden one at home, so every newly-opened pane came up
+  with a blinking cursor in its top-left corner and kept it: the sequence is
+  sent once at startup and never mentioned again. `screen.ts` appends
+  `\x1b[?25l` when `isCursorHidden`, and `server/test/screen.test.ts` holds both
+  halves of it. Worth knowing that this read as a *focus* bug for a while — it
+  is only ever visible in the focused pane, because the unfocused ones draw no
+  cursor at all.
 - **A backlog is asked for at a size, and only an emulator can ask.** This is the
   one that took the longest to see. A backlog is the server's screen *serialized*,
   and a serialized screen is laid out at a width: reconstruct it into a grid of
@@ -636,6 +673,27 @@ and its log is the only place its side of a bug shows up.
   the whole reason `agents/host.ts` had to be touched at all, and it is the one
   place the host learns anything new about a spawn — it is told a map, never a
   profile, for the same reason it holds the arrangement as a blob it cannot read.
+- **A workspace may borrow another profile's accounts, and what it stores is a
+  pointer.** A profile is one set of accounts and a workspace is one piece of
+  work, and those disagree the afternoon a repository of your own turns up in
+  your work profile. The alternative was a second profile holding a copy of the
+  workspace, and a copy is where the two start diverging: same project, same dev
+  server, same colour, different window. So `Workspace.identityProfileId` names
+  a *profile*, never three paths — an identity has one home and this points at
+  it, so an account re-pointed in Settings follows every workspace borrowing it.
+  Null means the profile the workspace lives in, on `mascotId`'s reasoning, and
+  an id naming a deleted profile reads as null because `identityForWorkspace`
+  already falls back to exactly that. It is why `spawnEnv` takes a workspace:
+  every other gesture spawns where you are standing, but ▸ on a workspace row
+  deliberately starts a dev server somewhere you are not looking, and it has to
+  start it as *that* workspace's accounts. On disk the pointer is an **index**
+  into the stored profile list (`persist.ts`), the trick `activeWorkspace`
+  already uses: profile ids are regenerated on the way back in, so an id written
+  there would name nothing by the time it was read. It changes the next terminal
+  in the workspace and none of the ones already running in it — and note the
+  sign-in flows are unaffected by a borrowing workspace precisely because both
+  lines name their own environment, which is the invariant above earning itself
+  a second time.
 - **What is picked is an account; a directory is how the choice is stored.**
   Nobody thinks "my work profile uses `~/.config/gh/work`" — they think "my work
   profile is that github user". So Settings offers the accounts the tools already
@@ -793,8 +851,11 @@ and its log is the only place its side of a bug shows up.
 - **The host is spawned detached, and that word is the feature.** A server that
   starts one is not its parent and does not take it down; that is the difference
   between "my agents die when I close the terminal" and "my agents are a thing on
-  this machine". It follows that nothing *else* reaps it either, so it is stopped
-  on purpose (`pkill -f ptyhostd`) and its log is a file rather than somebody's
+  this machine". It follows that nothing *else* reaps it either — closing the
+  terminal `bun run dev` is running in does not, because Ctrl-C signals that
+  terminal's foreground process group and the host left that group the moment it
+  was spawned. So it is stopped on purpose and by the socket rather than by name
+  (`bun run kill-ptyhosts`), and its log is a file rather than somebody's
   stdout.
 - **A second connection to the host replaces the first; it is not a second
   client.** The host keeps one blob and pushes output to one place, and two

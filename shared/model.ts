@@ -579,6 +579,31 @@ export interface Workspace {
    */
   mascotId: string | null;
   /**
+   * Whose accounts a terminal opened in here belongs to, or null for the
+   * profile the workspace lives in.
+   *
+   * A profile is one set of accounts across every workspace in it, which is
+   * right until the afternoon you are in your work profile and one of the
+   * repositories on screen is your own. The alternative was a second profile
+   * holding a copy of the workspace, and a copy is where the two start
+   * disagreeing: same project, same dev server, same colour, different window.
+   * So the override is per workspace and it names a *profile* rather than three
+   * paths — an identity has one home (`Profile.identity`, edited in Settings)
+   * and this is a pointer at it, so an account re-pointed there follows every
+   * workspace borrowing it.
+   *
+   * Null rather than a copy of the owning profile's id, for the reason `color`
+   * and `mascotId` are nullable: "I have not chosen" and "I chose the one I am
+   * already in" stay different, and only the first follows the workspace if it
+   * is ever moved. An id naming a profile that has since been deleted reads as
+   * null, which is why deleting one has nothing to clean up here.
+   *
+   * Like the profile's own identity, it reaches a pty at spawn and at no other
+   * time: changing it is a statement about the next terminal in this workspace,
+   * never about the ones already running in it.
+   */
+  identityProfileId: string | null;
+  /**
    * The last dev server this workspace had serving, so it can be started again.
    * Null until one has been seen running in here.
    */

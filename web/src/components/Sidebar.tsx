@@ -28,6 +28,7 @@ import type {
   ContextUsage,
   MascotSet,
   Profile,
+  ProfileSummary,
   WorkspaceColor,
 } from "../../../shared/model";
 import { defaultMascot, mascotFor, WORKSPACE_COLORS } from "../../../shared/model";
@@ -41,6 +42,13 @@ import { Mascot, Status } from "./Status";
 
 interface Props {
   profile: Profile;
+  /**
+   * Every profile, which this list needs for one thing only: a workspace can
+   * borrow another profile's accounts, and a pointer draws nothing without the
+   * name on the other end of it. The summaries are already in the snapshot for
+   * the switcher, so this costs a prop rather than a request.
+   */
+  profiles: ProfileSummary[];
   agents: AgentSnapshot[];
   connected: boolean;
   /** What the working badge animates; drawn here, owned by the server. */
@@ -83,6 +91,7 @@ interface Props {
 
 export function Sidebar({
   profile,
+  profiles,
   agents,
   connected,
   mascots,
@@ -108,12 +117,40 @@ export function Sidebar({
   const [mascotPicker, setMascotPicker] = useState<{ workspaceId: string; x: number; y: number } | null>(
     null,
   );
+  /** And for the profile a workspace borrows its accounts from. */
+  const [identityMenu, setIdentityMenu] = useState<{
+    workspaceId: string;
+    x: number;
+    y: number;
+  } | null>(null);
   /**
    * Escape cancels a rename by blurring the field, which is also how enter and
    * clicking away commit one — so the commit lives in `blur` and this is what
    * tells it which of the three just happened.
    */
   const cancelled = useRef(false);
+
+  /**
+   * The profile each workspace's terminals open as, for the ones not opening as
+   * the profile they live in. Absent is by far the common case and draws
+   * nothing: a badge on every row would say only "these are your accounts",
+   * which is what the profile name at the top of the sidebar already says.
+   *
+   * A pointer at a profile that has gone is absent too, because that is what the
+   * server does with it — see `identityForWorkspace`. The sidebar agrees rather
+   * than reporting it; a row is not where you would want to find that out.
+   *
+   * A map built once rather than a lookup per row, for the reason `mascotId` is
+   * carried on `where` above: the answer is a search through every profile, and
+   * the badge, its tooltip and the menu item all ask for it.
+   */
+  const borrowed = new Map<string, ProfileSummary>();
+  for (const workspace of profile.workspaces) {
+    const id = workspace.identityProfileId;
+    if (!id || id === profile.id) continue;
+    const lender = profiles.find((p) => p.id === id);
+    if (lender) borrowed.set(workspace.id, lender);
+  }
 
   useEffect(() => {
     onEditing(renaming !== null);
@@ -300,6 +337,20 @@ export function Sidebar({
                 >
                   <span className="ws-index">{index < 9 ? index + 1 : "·"}</span>
                   <span className="ws-name">{workspace.name}</span>
+                  {/* Whose accounts the next terminal in here opens as, when it
+                      is not this profile's. Drawn inside the row rather than
+                      beside it because it is a fact *about* the workspace and
+                      not a control — the thing that changes it is the menu, and
+                      a second clickable target on a row this size would be one
+                      you hit by accident on a phone. */}
+                  {borrowed.has(workspace.id) && (
+                    <span
+                      className="ws-identity"
+                      title={`Opens terminals as ${borrowed.get(workspace.id)!.name}`}
+                    >
+                      {borrowed.get(workspace.id)!.name}
+                    </span>
+                  )}
                 </button>
               )}
               {/* The dev server, if this workspace has ever had one. Outside the
@@ -467,6 +518,14 @@ export function Sidebar({
               run: () => setMascotPicker({ workspaceId: menuWorkspace.id, x: menu.x, y: menu.y }),
             },
             {
+              // The accounts, named by the profile that holds them. It says who
+              // it is currently opening as rather than only offering to change
+              // it, because the badge on the row is deliberately absent for the
+              // ordinary case and this is then the only place that answers it.
+              label: `Accounts: ${borrowed.get(menuWorkspace.id)?.name ?? profile.name}…`,
+              run: () => setIdentityMenu({ workspaceId: menuWorkspace.id, x: menu.x, y: menu.y }),
+            },
+            {
               label: "Move up",
               disabled: menuAt === 0,
               run: () => api.moveWorkspace(menuWorkspace.id, menuAt - 1),
@@ -486,6 +545,35 @@ export function Sidebar({
               run: () => onDeleteWorkspace(menuWorkspace.id),
             },
           ]}
+        />
+      )}
+
+      {/* Whose accounts this workspace's terminals open as: a list of profiles,
+          with the one it is using marked. A list rather than a form, because
+          what is being picked is one of the identities Settings already holds —
+          three paths have one home and this points at it, so an account
+          re-pointed there follows every workspace borrowing it.
+
+          Nothing that is already running moves: the environment reaches a pty
+          at spawn and at no other time, which is the same thing the profile's
+          own identity says about itself and the reason neither needs an "are
+          you sure". The next terminal in here is the one that changes. */}
+      {identityMenu && (
+        <Menu
+          at={identityMenu}
+          onClose={() => setIdentityMenu(null)}
+          items={profiles.map((p) => ({
+            label: p.id === profile.id ? `${p.name} (this profile)` : p.name,
+            // Null for the profile the workspace lives in, rather than its id:
+            // "I have not chosen" and "I chose the one I am in" are different
+            // states, and only the first follows the workspace anywhere.
+            mark: p.id === (borrowed.get(identityMenu.workspaceId)?.id ?? profile.id),
+            run: () =>
+              api.setWorkspaceIdentity(
+                identityMenu.workspaceId,
+                p.id === profile.id ? null : p.id,
+              ),
+          }))}
         />
       )}
 

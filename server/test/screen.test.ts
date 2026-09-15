@@ -99,6 +99,46 @@ describe("backlog", () => {
 });
 
 /**
+ * The cursor an agent has hidden, which a serialized screen does not carry.
+ *
+ * A pane applies a backlog by resetting its emulator and writing it, and a reset
+ * puts every mode back to its default — including a visible cursor. The screen
+ * restores where the cursor *is* and says nothing about whether it should be
+ * drawn, so an agent that hides the real cursor and paints its own block in an
+ * input box handed every newly-opened pane a blinking cursor in its top-left
+ * corner, parked where the hidden one happened to be sitting. It stayed there
+ * for good: the sequence is sent once at startup and never again.
+ */
+describe("a cursor the program has hidden", () => {
+  /** What a fresh emulator says about the cursor after a backlog is written in. */
+  const hidden = (term: Terminal) =>
+    (term as unknown as { _core: { coreService: { isCursorHidden: boolean } } })._core.coreService
+      .isCursorHidden;
+
+  it("survives the rebuild, because a reset would otherwise show it again", async () => {
+    const screen = new Screen();
+    await drawSession(screen, screen.cols, screen.rows);
+    // DECTCEM off and the cursor parked at home: an Ink TUI mid-turn.
+    screen.write("\x1b[?25l\x1b[H");
+
+    const backlog = await screen.backlog();
+    const client = await rebuild(backlog, screen.cols, screen.rows);
+
+    expect(hidden(client)).toBe(true);
+  });
+
+  it("leaves a shell's cursor alone, which is the other half of it", async () => {
+    const screen = new Screen();
+    screen.write("nytoair@mac ~ % ");
+
+    const backlog = await screen.backlog();
+    const client = await rebuild(backlog, screen.cols, screen.rows);
+
+    expect(hidden(client)).toBe(false);
+  });
+});
+
+/**
  * The title an agent sets, and the two things the emulator has to do with it.
  *
  * Reading it at all is the feature — a tab strip of four claudes is unreadable

@@ -526,18 +526,30 @@ async function signIn(profileId: string, tool: "claude" | "gh"): Promise<void> {
 /**
  * Which accounts the pty about to be spawned belongs to.
  *
- * The active profile's, and only ever the active profile's, because every
- * gesture that reaches a spawn is one somebody just made in the profile they are
- * looking at — a split, a new tab, a new workspace, ▸ on a workspace row. It is
- * read here rather than carried on the message for the same reason the layout is
- * the server's: a client that named its own environment would be a client that
- * could name any environment, and this one is reachable from the tailnet.
+ * The active profile's, unless the workspace it is landing in has borrowed
+ * somebody else's — which is the one thing a profile could not express, because
+ * a profile is one set of accounts and a workspace is one piece of work, and the
+ * afternoon those disagree is the afternoon a repository of your own turns up in
+ * your work profile.
  *
- * Undefined when the profile has claimed nobody, which is the common case and
- * means the host spawns exactly as it always did.
+ * It is still read here rather than carried on the message, for the same reason
+ * the layout is the server's: what a client sends is a *pointer* at a profile it
+ * can already see, never three paths of its own. A client that named its own
+ * environment would be a client that could name any environment, and this one is
+ * reachable from the tailnet.
+ *
+ * The workspace defaults to the active one because that is where every gesture
+ * that reaches a spawn happens — a split, a new tab, a new workspace — with one
+ * exception that is the whole reason this takes an argument at all: ▸ on a
+ * workspace row deliberately starts a dev server somewhere you are not looking,
+ * and it must start it as that workspace's accounts rather than as the ones
+ * belonging to the workspace you happen to be standing in.
+ *
+ * Undefined when nobody has been claimed, which is the common case and means the
+ * host spawns exactly as it always did.
  */
-function spawnEnv(): Record<string, string> | undefined {
-  return identityEnv(workspaces.active.identity);
+function spawnEnv(workspaceId = workspaces.activeWorkspace.id): Record<string, string> | undefined {
+  return identityEnv(workspaces.identityForWorkspace(workspaceId));
 }
 
 /**
@@ -1076,7 +1088,11 @@ async function runDev(workspaceId: string): Promise<void> {
     return;
   }
 
-  const agent = await host.create({ cwd: memory.cwd || undefined, kind: "shell", env: spawnEnv() });
+  const agent = await host.create({
+    cwd: memory.cwd || undefined,
+    kind: "shell",
+    env: spawnEnv(workspaceId),
+  });
   workspaces.addTabTo(workspaceId, agent.id, agent.cwd);
   allowRoot(agent.cwd);
   devBusy.add(agent.id);
@@ -1544,6 +1560,10 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "set-workspace-color":
       workspaces.setWorkspaceColor(msg.workspaceId, msg.color);
+      return;
+
+    case "set-workspace-identity":
+      workspaces.setWorkspaceIdentity(msg.workspaceId, msg.profileId);
       return;
 
     case "set-workspace-mascot":
