@@ -61,11 +61,123 @@
   --shadow: rgba(0, 0, 0, 0.5);
 
   --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  /* Not a skin token, and the one piece of type a skin does not get to move: a
+     rule that names `--mono` is saying "this is a fragment of terminal" — a pid,
+     a path, a key — and it should go on looking like one whatever the chrome is
+     set in. The terminal's own face is the user's, in `appearance.json`. */
   --mono: "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace;
+
+  /* ----------------------------------------------------------------------
+     The shape, which is the other half and comes from `shared/skin.ts`.
+
+     Everything below is the Soft skin, written out, for the same reason the
+     colours above are Mocha written out: it is what is on screen for the frame
+     between this stylesheet painting and the first snapshot arriving, and it is
+     what keeps this file readable as a stylesheet rather than as half of one.
+     `web/src/skin.ts` overwrites all of it on every snapshot.
+
+     A rule that names a radius, a border width or a font size in pixels is a
+     rule that stays one shape while the window changes around it — which is
+     what a hundred and eighty of them did until this block existed. If you need
+     a step that is not here, add it to `SkinTokens` and let every skin answer
+     for it; do not reach for a px. */
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+  --radius-round: 50%;
+
+  --border: 1px;
+  --border-thick: 2px;
+  --border-style: solid;
+
+  --fs-xs: 9px;
+  --fs-sm: 10px;
+  --fs-base: 11px;
+  --fs-md: 12px;
+  --fs-lg: 13px;
+  --fs-xl: 15px;
+  --ui-line-height: 1.4;
+  --ui-letter-spacing: normal;
+  --ui-smoothing: antialiased;
+
+  --frame: none;
+  --frame-on: none;
+  --elev-dialog: 0 16px 48px var(--shadow);
+  --elev-menu: 0 12px 32px var(--shadow);
+
+  --image-rendering: pixelated;
+
+  --overlay: none;
+  --overlay-opacity: 1;
+
+  --icon-close: "✕";
+  --icon-run: "▸";
+  --icon-restart: "↻";
+  --icon-caret: "▾";
+  --icon-add: "+";
+  --icon-edit: "✎";
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* --------------------------------------------------------------------------
+   Skin machinery
+
+   Three small things the token block cannot express on its own: a face to load,
+   a way to draw an icon without a component, and a layer to put an effect on.
+   -------------------------------------------------------------------------- */
+
+/* Press Start 2P, SIL Open Font License 1.1, latin subset — see
+   `web/public/fonts/OFL.txt`. Served from kururu's own origin rather than linked
+   to Google, because a window that fetches a font from a third party tells that
+   third party when somebody is working, and a skin is not worth that. The same
+   rule will apply to faces that arrive with a registry skin: installed locally,
+   served locally, never a URL somebody else controls. */
+@font-face {
+  font-family: "Press Start 2P";
+  font-style: normal;
+  font-weight: 400;
+  /* `block` rather than `swap`: this face is half the size of the sans at the
+     same px, so swapping it in late would reflow every pane and hand every pty
+     a SIGWINCH a second after the window settled. A brief blank label is much
+     cheaper than that, and at 4.7KB the block is barely perceptible. */
+  font-display: block;
+  src: url("/fonts/press-start-2p-latin.woff2") format("woff2");
+}
+
+/* An icon is a custom property and a pseudo-element, never a component — see
+   the header of `web/src/skin.ts`. `::before` rather than the span's own text so
+   that nothing has to re-render when the skin changes: the property moves and
+   the glyph follows, with React none the wiser. */
+.icon {
+  display: inline-block;
+  line-height: 1;
+}
+.icon-close::before { content: var(--icon-close); }
+.icon-run::before { content: var(--icon-run); }
+.icon-restart::before { content: var(--icon-restart); }
+.icon-caret::before { content: var(--icon-caret); }
+.icon-add::before { content: var(--icon-add); }
+.icon-edit::before { content: var(--icon-edit); }
+
+/* The effect layer: scanlines, a grain, a vignette. Above the panes, which is
+   the only place it can be — the emulator paints into a canvas CSS cannot reach,
+   so a layer underneath one would be invisible over exactly the part of the
+   window worth looking at. It is not rendered at all by a skin that wants none,
+   rather than rendered transparent: a full-window element with pointer events
+   off is still a full-window element, and the one that does not exist cannot be
+   the thing intercepting a drag two months from now. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  pointer-events: none;
+  background: var(--overlay);
+  opacity: var(--overlay-opacity);
 }
 
 html,
@@ -78,10 +190,11 @@ body,
 body {
   background: var(--bg);
   color: var(--text);
-  font: 13px/1.4 var(--ui);
+  font: var(--fs-lg)/var(--ui-line-height) var(--ui);
   /* The window is the app; nothing about it scrolls as a page. */
   overflow: hidden;
-  -webkit-font-smoothing: antialiased;
+  -webkit-font-smoothing: var(--ui-smoothing);
+  letter-spacing: var(--ui-letter-spacing);
 }
 
 button {
@@ -125,16 +238,16 @@ button {
 
 kbd {
   font-family: var(--mono);
-  font-size: 10px;
-  border: 1px solid var(--line);
-  border-radius: 3px;
+  font-size: var(--fs-sm);
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-sm);
   padding: 0 3px;
   color: var(--dim);
 }
 
 .mini {
   color: var(--dimmer);
-  font-size: 11px;
+  font-size: var(--fs-base);
   padding: 0 5px;
   line-height: 1;
 }
@@ -155,7 +268,7 @@ kbd {
   display: flex;
   flex-direction: column;
   background: var(--chrome);
-  border-right: 1px solid var(--line);
+  border-right: var(--border) var(--border-style) var(--line);
   min-height: 0;
 }
 
@@ -178,12 +291,12 @@ kbd {
   align-items: baseline;
   gap: 4px;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--fs-md);
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--text);
   padding: 2px 6px;
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -196,7 +309,7 @@ kbd {
    should be the loudest part of the window. */
 .profile-caret {
   flex: none;
-  font-size: 8px;
+  font-size: var(--fs-xs);
   line-height: 1;
   color: var(--dimmer);
 }
@@ -206,7 +319,7 @@ kbd {
 .dot {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   flex: none;
 }
 .dot-on {
@@ -231,7 +344,7 @@ kbd {
   justify-content: space-between;
   margin: 6px 0 2px;
   padding: 0 12px;
-  font-size: 10px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -254,7 +367,7 @@ kbd {
 .agent-list li {
   display: flex;
   align-items: center;
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
 }
 .ws-list li:hover,
 .agent-list li:hover {
@@ -274,7 +387,7 @@ kbd {
   /* Bottom padding is the swatch's room. It is reserved whether or not this
      workspace has a colour, so tagging one does not push the list around. */
   padding: 5px 8px 11px;
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   text-align: left;
   color: var(--dim);
 }
@@ -291,7 +404,7 @@ kbd {
   height: 3px;
   padding: 0;
   border: none;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: var(--dimmer);
   opacity: 0.5;
   cursor: pointer;
@@ -300,15 +413,15 @@ kbd {
 .ws-swatch:focus-visible {
   opacity: 1;
   outline: none;
-  box-shadow: 0 0 0 2px var(--chrome-high);
+  box-shadow: 0 0 0 var(--border-thick) var(--chrome-high);
 }
 .ws-swatch-off {
   background: transparent;
-  box-shadow: inset 0 0 0 1px var(--dimmer);
+  box-shadow: inset 0 0 0 var(--border) var(--dimmer);
 }
 .ws-swatch-off:hover,
 .ws-swatch-off:focus-visible {
-  box-shadow: inset 0 0 0 1px var(--dim), 0 0 0 2px var(--chrome-high);
+  box-shadow: inset 0 0 0 var(--border) var(--dim), 0 0 0 var(--border-thick) var(--chrome-high);
 }
 .ws-row-on {
   color: var(--text);
@@ -321,13 +434,13 @@ kbd {
 /* The number is the shortcut. A key you cannot see is a key you do not press. */
 .ws-index {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-sm);
   color: var(--dimmer);
   width: 10px;
   flex: none;
 }
 .ws-name {
-  font-size: 12px;
+  font-size: var(--fs-md);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -342,12 +455,12 @@ kbd {
   flex: none;
   margin-left: auto;
   padding: 0 4px;
-  border-radius: 3px;
-  font-size: 9px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
   line-height: 13px;
   letter-spacing: 0.02em;
   color: var(--dim);
-  box-shadow: inset 0 0 0 1px var(--line);
+  box-shadow: inset 0 0 0 var(--border) var(--line);
   max-width: 64px;
   white-space: nowrap;
   overflow: hidden;
@@ -355,7 +468,7 @@ kbd {
 }
 .ws-row-on .ws-identity {
   color: var(--text);
-  box-shadow: inset 0 0 0 1px var(--line-high);
+  box-shadow: inset 0 0 0 var(--border) var(--line-high);
 }
 /* The dev server's button: ▸ while nothing is serving, ↻ while something is.
    Which one you see *is* the status, so there is nothing else on the row saying
@@ -371,10 +484,10 @@ kbd {
   margin-bottom: 6px;
   padding: 2px 5px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: none;
   color: var(--dimmer);
-  font-size: 12px;
+  font-size: var(--fs-md);
   line-height: 1;
   cursor: pointer;
 }
@@ -395,17 +508,17 @@ kbd {
   min-width: 0;
   margin: 1px 0;
   padding: 4px 8px;
-  border: 1px solid var(--accent);
-  border-radius: 6px;
+  border: var(--border) var(--border-style) var(--accent);
+  border-radius: var(--radius-lg);
   background: var(--bg);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--fs-md);
   outline: none;
 }
 
 .sidebar-empty {
   padding: 8px 6px;
-  font-size: 12px;
+  font-size: var(--fs-md);
 }
 
 /* Two pixels of the workspace's colour, always reserved. `--tag` is set per row
@@ -417,8 +530,8 @@ kbd {
    `.agent-item`, quietly keeping its own border-radius. */
 .agent-list .agent-item {
   position: relative;
-  border-left: 2px solid var(--tag, transparent);
-  border-radius: 0 6px 6px 0;
+  border-left: var(--border-thick) var(--border-style) var(--tag, transparent);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
 }
 
 /* Where the keyboard is. Deliberately not the same treatment as :hover — the
@@ -426,7 +539,7 @@ kbd {
    not look alike. Hence the ring as well as the ground. */
 .agent-list .agent-item-on {
   background: var(--chrome-high);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
+  box-shadow: inset 0 0 0 var(--border) color-mix(in srgb, var(--accent) 38%, transparent);
 }
 .agent-item-on .agent-name {
   color: var(--text);
@@ -439,7 +552,7 @@ kbd {
   flex-direction: column;
   gap: 2px;
   padding: 5px 8px 6px;
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
   text-align: left;
 }
 
@@ -460,7 +573,7 @@ kbd {
 
 .agent-name {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-md);
   color: var(--dim);
   white-space: nowrap;
   overflow: hidden;
@@ -471,7 +584,7 @@ kbd {
 .agent-ws {
   margin-left: auto;
   padding-right: 16px;
-  font-size: 10px;
+  font-size: var(--fs-sm);
   color: var(--dimmer);
   white-space: nowrap;
   overflow: hidden;
@@ -485,7 +598,7 @@ kbd {
 .agent-activity {
   flex: 1;
   min-width: 0;
-  font-size: 10px;
+  font-size: var(--fs-sm);
   color: var(--dimmer);
   white-space: nowrap;
   overflow: hidden;
@@ -501,7 +614,7 @@ kbd {
   opacity: 0;
   padding: 2px 6px;
   color: var(--dim);
-  font-size: 11px;
+  font-size: var(--fs-base);
 }
 .agent-list li:hover .agent-kill,
 .agent-item-on .agent-kill {
@@ -537,7 +650,7 @@ kbd {
   margin: auto;
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: currentColor;
 }
 
@@ -561,7 +674,7 @@ kbd {
    absence — the pty is gone and only its screen is left. */
 .status-exited .status-dot {
   background: transparent;
-  border: 1px solid currentColor;
+  border: var(--border) var(--border-style) currentColor;
 }
 
 /* The mascot: a row of sheet cells, slid past the box above one cell per step.
@@ -574,7 +687,7 @@ kbd {
   top: 0;
   left: 0;
   background-repeat: no-repeat;
-  image-rendering: pixelated;
+  image-rendering: var(--image-rendering);
   animation-name: hop;
   animation-iteration-count: infinite;
 }
@@ -608,7 +721,7 @@ kbd {
 .unread {
   width: 5px;
   height: 5px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--accent);
   flex: none;
 }
@@ -631,7 +744,7 @@ kbd {
    equal weight would make the row read as a readout instead of a label. */
 .mem {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
   color: var(--dimmer);
   white-space: nowrap;
@@ -641,13 +754,13 @@ kbd {
 /* Tabular figures so the column does not shuffle sideways as the number grows. */
 .ctx-pct {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
   color: var(--dim);
 }
 
 .sidebar-foot {
-  border-top: 1px solid var(--line);
+  border-top: var(--border) var(--border-style) var(--line);
   padding: 6px 8px;
   display: flex;
 }
@@ -660,7 +773,7 @@ kbd {
   justify-content: center;
   width: 26px;
   height: 26px;
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   color: var(--dimmer);
 }
 .cog:hover {
@@ -671,10 +784,10 @@ kbd {
 .button {
   flex: 1;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   background: var(--accent);
   color: var(--on-accent);
-  font-size: 12px;
+  font-size: var(--fs-md);
   font-weight: 600;
 }
 .button:disabled {
@@ -684,7 +797,7 @@ kbd {
 .button-quiet {
   background: var(--chrome-high);
   color: var(--text);
-  border: 1px solid var(--line);
+  border: var(--border) var(--border-style) var(--line);
   font-weight: 500;
 }
 .button-danger {
@@ -762,7 +875,7 @@ kbd {
   content: "";
   position: absolute;
   inset: 4px 3px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
 }
 .dividerbar-col::after {
   inset: 3px 4px;
@@ -777,8 +890,13 @@ kbd {
   display: flex;
   flex-direction: column;
   background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-xl);
+  /* The skin's frame, over and above the border — an inset second line for a
+     skin that wants its panes to have thickness, `none` for one that wants a
+     hairline. It is a shadow rather than a picture so that it composes with the
+     theme instead of replacing it; the argument is in `shared/skin.ts`. */
+  box-shadow: var(--frame);
   overflow: hidden;
 }
 .app-zen .pane {
@@ -789,6 +907,7 @@ kbd {
 /* The focused pane is the one the keyboard is going to. Worth being obvious. */
 .pane-on {
   border-color: var(--line-high);
+  box-shadow: var(--frame-on);
 }
 .pane-on .tabstrip {
   background: var(--chrome-high);
@@ -804,7 +923,7 @@ kbd {
   gap: 1px;
   padding: 3px 4px;
   background: var(--chrome);
-  border-bottom: 1px solid var(--line);
+  border-bottom: var(--border) var(--border-style) var(--line);
   flex: none;
   overflow-x: auto;
   scrollbar-width: none;
@@ -818,8 +937,8 @@ kbd {
   align-items: center;
   gap: 6px;
   padding: 3px 7px;
-  border-radius: 5px;
-  font-size: 11px;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-base);
   color: var(--dim);
   white-space: nowrap;
   max-width: 180px;
@@ -831,7 +950,7 @@ kbd {
 .tab-on {
   background: var(--bg);
   color: var(--text);
-  box-shadow: inset 0 0 0 1px var(--line);
+  box-shadow: inset 0 0 0 var(--border) var(--line);
 }
 .tab-exited .tab-label {
   color: var(--dimmer);
@@ -846,7 +965,7 @@ kbd {
 
 .tab-close {
   opacity: 0;
-  font-size: 9px;
+  font-size: var(--fs-xs);
   color: var(--dimmer);
 }
 .tab:hover .tab-close {
@@ -870,7 +989,7 @@ kbd {
   color: var(--dimmer);
   padding: 0 4px;
   line-height: 1;
-  font-size: 12px;
+  font-size: var(--fs-md);
   flex: none;
 }
 .pane-btn:hover {
@@ -912,7 +1031,7 @@ kbd {
 }
 .dz-on {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: inset 0 0 0 var(--border) var(--accent);
 }
 
 /* A pane in flight lands somewhere structural, so its highlight is the colder
@@ -920,7 +1039,7 @@ kbd {
    rather than moving one terminal. */
 .dropzones-pane .dz-on {
   background: color-mix(in srgb, var(--done) 24%, transparent);
-  box-shadow: inset 0 0 0 1px var(--done);
+  box-shadow: inset 0 0 0 var(--border) var(--done);
 }
 
 .dz-left {
@@ -959,13 +1078,13 @@ kbd {
   flex: none;
   width: 2px;
   margin: 2px 1px;
-  border-radius: 1px;
+  border-radius: var(--radius-xs);
   background: var(--accent);
 }
 
 /* A workspace row that would take the drop. */
 .ws-over {
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: inset 0 0 0 var(--border) var(--accent);
   background: var(--chrome-high);
 }
 
@@ -998,6 +1117,35 @@ kbd {
   min-width: 0;
   padding: 4px 6px;
   overflow: hidden;
+}
+
+/**
+ * The emulator's offscreen textarea must not draw a caret of its own.
+ *
+ * ghostty-web keeps a 1x1 textarea beside the canvas to receive keystrokes and
+ * IME, and parks it at `position: absolute; left: 0; top: 0` — which anchors to
+ * the nearest positioned ancestor, and that is `.pane-body`. So it sits in the
+ * pane's top-left corner, six pixels left and four above where the canvas
+ * actually starts, and the browser blinks a caret there for whichever terminal
+ * currently has the keyboard. One blinking bar in the corner of the focused
+ * pane, and only the focused one, because only one textarea has DOM focus.
+ *
+ * It reads exactly like a terminal cursor in the wrong place, which is what
+ * made it expensive: it is not one. The terminal's cursor is drawn on the
+ * canvas by `renderCursor`, in the theme's colour and the style Settings names
+ * — a green block here — and it was measured to be in the right place all
+ * along. This is a 1px caret in `caret-color`, which resolves to white because
+ * `:root` sets `color-scheme: dark` and a bare textarea then inherits the UA's
+ * dark-mode text colour. Wrong colour, wrong shape, wrong element.
+ *
+ * ghostty already hides the textarea with `opacity: 0` and `clip-path`, and in
+ * an isolated page — Chrome and Electron both — that is enough and no caret is
+ * painted. It is not enough here, so the caret is turned off explicitly rather
+ * than left to a rule that demonstrably does not always hold. Hiding it costs
+ * nothing: nothing in that box is ever meant to be seen.
+ */
+.term textarea {
+  caret-color: transparent;
 }
 
 .tab[draggable="true"]:active {
@@ -1055,14 +1203,18 @@ kbd {
 }
 
 .pane-empty-hint {
-  font-size: 12px;
+  font-size: var(--fs-md);
 }
 .pane-empty-hint::before {
-  content: "+ ";
+  /* The one icon that was always a rule rather than a component, and it stays
+     one: it is a hint's prefix, not a control, so there is nothing for an
+     `<Icon>` to sit inside. The space is outside the token because a skin
+     choosing a glyph has said nothing about the gap after it. */
+  content: var(--icon-add) " ";
 }
 
 .pane-empty-keys {
-  font-size: 11px;
+  font-size: var(--fs-base);
 }
 
 /* --------------------------------------------------------------------------
@@ -1076,8 +1228,8 @@ kbd {
   gap: 6px;
   padding: 3px 10px;
   background: var(--chrome);
-  border-top: 1px solid var(--line);
-  font-size: 11px;
+  border-top: var(--border) var(--border-style) var(--line);
+  font-size: var(--fs-base);
   color: var(--dim);
 }
 .app-zen .statusbar {
@@ -1096,9 +1248,9 @@ kbd {
 
 .sb-badge {
   padding: 1px 7px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   font-weight: 700;
-  font-size: 10px;
+  font-size: var(--fs-sm);
   letter-spacing: 0.06em;
 }
 /* The prefix is a mode, and an unlabelled mode is what makes modes distrusted. */
@@ -1118,7 +1270,7 @@ kbd {
 
 .sb-help {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-sm);
   color: var(--dimmer);
 }
 .sb-help:hover {
@@ -1144,10 +1296,10 @@ kbd {
 .help {
   width: min(440px, 90vw);
   background: var(--chrome);
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-xl);
   padding: 14px;
-  box-shadow: 0 16px 48px var(--shadow);
+  box-shadow: var(--elev-dialog);
 }
 .help {
   width: min(520px, 92vw);
@@ -1155,13 +1307,13 @@ kbd {
 
 .dialog-title {
   margin: 0 0 4px;
-  font-size: 13px;
+  font-size: var(--fs-lg);
   font-weight: 600;
 }
 
 .dialog-hint {
   margin: 0 0 10px;
-  font-size: 11px;
+  font-size: var(--fs-base);
   color: var(--dim);
 }
 
@@ -1169,10 +1321,10 @@ kbd {
   width: 100%;
   background: var(--bg);
   color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-lg);
   padding: 7px 9px;
-  font: 12px var(--mono);
+  font: var(--fs-md) var(--mono);
   outline: none;
 }
 .dialog-input:focus {
@@ -1201,7 +1353,7 @@ kbd {
 .dialog-row {
   display: flex;
   align-items: center;
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
 }
 .dialog-row-on,
 .dialog-row:hover {
@@ -1219,11 +1371,11 @@ kbd {
 }
 .dialog-label {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-md);
 }
 .dialog-rowhint {
   margin-left: auto;
-  font-size: 10px;
+  font-size: var(--fs-sm);
   color: var(--dimmer);
   white-space: nowrap;
   overflow: hidden;
@@ -1231,7 +1383,7 @@ kbd {
 }
 .dialog-empty {
   padding: 8px;
-  font-size: 12px;
+  font-size: var(--fs-md);
 }
 
 /* The create row is part of the list but not one of the things in it, so it is
@@ -1261,9 +1413,9 @@ kbd {
   min-width: 156px;
   padding: 4px;
   background: var(--chrome);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  box-shadow: 0 12px 32px var(--shadow);
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elev-menu);
   display: flex;
   flex-direction: column;
 }
@@ -1274,9 +1426,9 @@ kbd {
   position: fixed;
   padding: 6px;
   background: var(--chrome);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  box-shadow: 0 12px 32px var(--shadow);
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elev-menu);
 }
 
 .picker-grid {
@@ -1290,29 +1442,29 @@ kbd {
   height: 18px;
   padding: 0;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   cursor: pointer;
 }
 .chip:hover,
 .chip:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--chrome), 0 0 0 3px var(--dim);
+  box-shadow: 0 0 0 var(--border-thick) var(--chrome), 0 0 0 3px var(--dim);
 }
 /* Ringed rather than ticked: a tick would have to sit on the colour it names. */
 .chip-on {
-  box-shadow: 0 0 0 2px var(--chrome), 0 0 0 3px var(--text);
+  box-shadow: 0 0 0 var(--border-thick) var(--chrome), 0 0 0 3px var(--text);
 }
 .chip-on:hover,
 .chip-on:focus-visible {
-  box-shadow: 0 0 0 2px var(--chrome), 0 0 0 3px var(--text);
+  box-shadow: 0 0 0 var(--border-thick) var(--chrome), 0 0 0 3px var(--text);
 }
 
 .picker-none {
   width: 100%;
   margin-top: 6px;
   padding: 4px 6px;
-  border-radius: 5px;
-  font-size: 11px;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-base);
   color: var(--dim);
   text-align: left;
 }
@@ -1332,9 +1484,9 @@ kbd {
   align-items: baseline;
   gap: 6px;
   padding: 5px 8px;
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   text-align: left;
-  font-size: 12px;
+  font-size: var(--fs-md);
   color: var(--dim);
 }
 .menu-mark {
@@ -1353,7 +1505,7 @@ kbd {
 .menu-hint {
   flex: none;
   padding-left: 10px;
-  font-size: 10px;
+  font-size: var(--fs-sm);
   color: var(--dimmer);
   font-variant-numeric: tabular-nums;
 }
@@ -1371,7 +1523,7 @@ kbd {
 /* A rule above, not below: it separates what follows from what came before. */
 .menu-sep {
   margin-top: 5px;
-  border-top: 1px solid var(--line);
+  border-top: var(--border) var(--border-style) var(--line);
   padding-top: 7px;
 }
 
@@ -1380,7 +1532,7 @@ kbd {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 0;
-  font-size: 11px;
+  font-size: var(--fs-base);
 }
 .help-list > div {
   display: contents;
@@ -1432,17 +1584,17 @@ kbd {
   align-items: baseline;
   gap: 4px;
   margin-bottom: 12px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: var(--border) var(--border-style) var(--line);
 }
 
 .set-tab {
   padding: 6px 10px;
   background: none;
   border: none;
-  border-bottom: 2px solid transparent;
+  border-bottom: var(--border-thick) var(--border-style) transparent;
   margin-bottom: -1px;
   color: var(--dim);
-  font-size: 12px;
+  font-size: var(--fs-md);
   font-weight: 600;
 }
 .set-tab:hover {
@@ -1465,12 +1617,12 @@ kbd {
   align-items: baseline;
   gap: 8px;
   margin: 0 0 8px;
-  font-size: 12px;
+  font-size: var(--fs-md);
   font-weight: 600;
 }
 
 .set-note {
-  font-size: 11px;
+  font-size: var(--fs-base);
   font-weight: 400;
   color: var(--dim);
 }
@@ -1486,7 +1638,7 @@ kbd {
 }
 
 .set-label {
-  font-size: 11px;
+  font-size: var(--fs-base);
   color: var(--dim);
   min-width: 44px;
 }
@@ -1499,10 +1651,10 @@ kbd {
 .set-num {
   background: var(--bg);
   color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-lg);
   padding: 5px 7px;
-  font: 12px var(--mono);
+  font: var(--fs-md) var(--mono);
   outline: none;
 }
 .set-select:focus,
@@ -1527,10 +1679,10 @@ kbd {
   min-width: 160px;
   background: var(--bg);
   color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-lg);
   padding: 5px 7px;
-  font: 12px var(--mono);
+  font: var(--fs-md) var(--mono);
   outline: none;
 }
 .set-text:focus {
@@ -1543,7 +1695,7 @@ kbd {
 /* The number beside a slider. Monospaced and fixed-width so dragging one does
    not shuffle the row left and right as the digits change. */
 .set-value {
-  font: 11px var(--mono);
+  font: var(--fs-base) var(--mono);
   color: var(--dim);
   min-width: 38px;
   text-align: right;
@@ -1553,7 +1705,7 @@ kbd {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: var(--fs-base);
   color: var(--dim);
   cursor: pointer;
 }
@@ -1575,7 +1727,7 @@ kbd {
 }
 .set-h {
   margin: 0 0 4px;
-  font-size: 11px;
+  font-size: var(--fs-base);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1610,9 +1762,9 @@ kbd {
   justify-content: space-between;
   gap: 8px;
   padding: 9px 10px;
-  border-radius: 8px;
-  border: 1px solid;
-  font-size: 12px;
+  border-radius: var(--radius-xl);
+  border: var(--border) var(--border-style);
+  font-size: var(--fs-md);
   text-align: left;
 }
 /* The ring is the theme's own accent — `--ring` is set inline per card, so the
@@ -1620,7 +1772,7 @@ kbd {
    pixels of it, because a one-pixel ring on top of a one-pixel border of the
    same colour is indistinguishable from no ring at all. */
 .theme-opt-on {
-  box-shadow: 0 0 0 2px var(--ring);
+  box-shadow: 0 0 0 var(--border-thick) var(--ring);
 }
 .theme-opt-name {
   overflow: hidden;
@@ -1638,18 +1790,87 @@ kbd {
 .theme-opt-swatch {
   width: 7px;
   height: 14px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* The skin list. Wider cards than the themes get, and the reason is what is
+   being compared: five swatches answer "which palette" at a glance, but "which
+   shape" needs a border, a corner and a line of the actual typeface before it
+   means anything — and the typeface is the part that surprises people. Every
+   card draws itself from its own tokens, set inline in `SkinOption`; the rules
+   here only lay them out. Deliberately *no* geometry in this block that the card
+   sets for itself, or the two would fight and the stylesheet would win. */
+.skin-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.skin-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-color: var(--line);
+  background: var(--bg);
+  color: var(--text);
+  text-align: left;
+  overflow: hidden;
+}
+.skin-opt-on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 var(--border-thick) var(--accent);
+}
+
+/* A pane, two centimetres across: the border, the corner and the frame inset,
+   which together are most of what a skin is. The little bar across the top is
+   the tab strip, and the glyph on it is the skin's own `run` icon — the one
+   place the icon set is visible before you have picked it. */
+.skin-opt-preview {
+  flex: none;
+  width: 46px;
+  height: 34px;
+  display: flex;
+  flex-direction: column;
+  border-color: var(--line-high);
+  background: var(--bg);
+  overflow: hidden;
+}
+.skin-opt-bar {
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  height: 11px;
+  background: var(--chrome-high);
+  color: var(--dim);
+  line-height: 1;
+}
+
+.skin-opt-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.skin-opt-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skin-opt-desc {
+  color: var(--dim);
 }
 
 /* Three buttons where a radio group would be, because the choice is small and
    always visible, and a select would hide two thirds of it behind a click. */
 .set-choice {
   padding: 4px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  border: var(--border) var(--border-style) var(--line);
   background: var(--chrome-high);
   color: var(--dim);
-  font-size: 11px;
+  font-size: var(--fs-base);
 }
 .set-choice-on {
   color: var(--text);
@@ -1688,9 +1909,9 @@ kbd {
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px;
-  border: 1px solid var(--line);
+  border: var(--border) var(--border-style) var(--line);
   border-left: 3px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: var(--chrome-high);
 }
 .prof-on {
@@ -1718,7 +1939,7 @@ kbd {
 }
 .prof-meta {
   flex: none;
-  font-size: 11px;
+  font-size: var(--fs-base);
   color: var(--dimmer);
   font-variant-numeric: tabular-nums;
 }
@@ -1728,7 +1949,7 @@ kbd {
 .prof-here {
   flex: none;
   padding: 4px 10px;
-  font-size: 11px;
+  font-size: var(--fs-base);
   color: var(--accent);
 }
 
@@ -1761,7 +1982,7 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--fs-base);
   color: var(--dim);
 }
 /* Still being asked. Dimmer rather than a spinner: the answer takes about a
@@ -1800,7 +2021,7 @@ kbd {
 
 .set-hint {
   margin: 6px 0;
-  font-size: 11px;
+  font-size: var(--fs-base);
   line-height: 1.5;
   color: var(--dim);
 }
@@ -1839,8 +2060,8 @@ kbd {
   align-items: center;
   gap: 8px;
   padding: 5px 6px;
-  border-radius: 6px;
-  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  border: var(--border) var(--border-style) transparent;
   cursor: pointer;
 }
 .mascot-row:hover {
@@ -1861,7 +2082,7 @@ kbd {
 .mascot-name {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--fs-md);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1877,7 +2098,7 @@ kbd {
   border: none;
   background: none;
   color: var(--dimmer);
-  font-size: 12px;
+  font-size: var(--fs-md);
   line-height: 1;
 }
 .mascot-star:hover {
@@ -1892,10 +2113,10 @@ kbd {
   width: 18px;
   height: 18px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: none;
   color: var(--dimmer);
-  font-size: 13px;
+  font-size: var(--fs-lg);
   line-height: 1;
   opacity: 0;
 }
@@ -1911,11 +2132,11 @@ kbd {
 .mascot-add {
   margin-top: 6px;
   padding: 5px 8px;
-  border: 1px dashed var(--line);
-  border-radius: 6px;
+  border: var(--border) dashed var(--line);
+  border-radius: var(--radius-lg);
   background: none;
   color: var(--dim);
-  font-size: 11px;
+  font-size: var(--fs-base);
   text-align: left;
 }
 .mascot-add:hover {
@@ -1944,8 +2165,8 @@ kbd {
   align-items: center;
   gap: 8px;
   padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-lg);
   background: var(--bg);
 }
 
@@ -1973,8 +2194,8 @@ kbd {
   align-items: flex-start;
   gap: 8px;
   padding: 16px;
-  border: 1px dashed var(--line);
-  border-radius: 8px;
+  border: var(--border) dashed var(--line);
+  border-radius: var(--radius-xl);
 }
 
 /* The two animations, kept a little apart from the sheet controls above them. */
@@ -2000,8 +2221,8 @@ kbd {
    has no size limit at all. */
 .sheet-wrap {
   overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-xl);
   background: var(--bg);
   padding: 8px;
   max-height: 40vh;
@@ -2013,7 +2234,7 @@ kbd {
    the thing being chosen. */
 .sheet {
   position: relative;
-  image-rendering: pixelated;
+  image-rendering: var(--image-rendering);
   background-repeat: no-repeat;
   touch-action: none;
   cursor: crosshair;
@@ -2032,7 +2253,7 @@ kbd {
    trying to read, and reading it is the entire point of the picker. */
 .sheet-sel {
   position: absolute;
-  border: 1px solid var(--accent);
+  border: var(--border) var(--border-style) var(--accent);
   box-shadow: 0 0 0 1px var(--shadow);
   pointer-events: none;
 }
@@ -2064,8 +2285,8 @@ kbd {
   gap: 8px;
   width: 100%;
   padding: 5px 6px;
-  border: 1px solid transparent;
-  border-radius: 6px;
+  border: var(--border) var(--border-style) transparent;
+  border-radius: var(--radius-lg);
   background: none;
   color: var(--text);
   text-align: left;
@@ -2092,8 +2313,8 @@ kbd {
   align-items: center;
   gap: 10px;
   padding: 3px 4px;
-  border-radius: 6px;
-  border-left: 2px solid transparent;
+  border-radius: var(--radius-lg);
+  border-left: var(--border-thick) var(--border-style) transparent;
 }
 .key-row:hover {
   background: var(--chrome-high);
@@ -2102,7 +2323,7 @@ kbd {
 .key-what {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--fs-md);
   color: var(--text);
 }
 
@@ -2131,12 +2352,12 @@ kbd {
   gap: 3px;
   min-width: 22px;
   padding: 2px 6px;
-  border: 1px solid var(--line);
-  border-bottom-width: 2px;
-  border-radius: 5px;
+  border: var(--border) var(--border-style) var(--line);
+  border-bottom-width: var(--border-thick);
+  border-radius: var(--radius-md);
   background: var(--chrome-high);
   color: var(--text);
-  font: 11px var(--mono);
+  font: var(--fs-base) var(--mono);
 }
 .key-chip:hover {
   border-color: var(--working);
@@ -2144,25 +2365,25 @@ kbd {
 }
 .key-x {
   opacity: 0;
-  font-size: 10px;
+  font-size: var(--fs-sm);
 }
 .key-chip:hover .key-x {
   opacity: 1;
 }
 
 .key-none {
-  font-size: 11px;
+  font-size: var(--fs-base);
   color: var(--dimmer);
   font-style: italic;
 }
 
 .key-add {
   padding: 2px 7px;
-  border: 1px dashed var(--line);
-  border-radius: 5px;
+  border: var(--border) dashed var(--line);
+  border-radius: var(--radius-md);
   background: none;
   color: var(--dim);
-  font-size: 11px;
+  font-size: var(--fs-base);
 }
 .key-add:hover {
   color: var(--text);
@@ -2193,7 +2414,7 @@ kbd {
   gap: 10px;
   margin-top: 16px;
   padding-top: 10px;
-  border-top: 1px solid var(--line);
+  border-top: var(--border) var(--border-style) var(--line);
 }
 .key-foot .button-quiet:disabled {
   opacity: 0.4;
@@ -2214,7 +2435,7 @@ kbd {
 .sheet-wrap::-webkit-scrollbar-thumb,
 .set-body::-webkit-scrollbar-thumb {
   background: var(--line);
-  border-radius: 5px;
+  border-radius: var(--radius-md);
 }
 .sheet-wrap::-webkit-scrollbar-thumb:hover,
 .set-body::-webkit-scrollbar-thumb:hover {
@@ -2245,7 +2466,7 @@ kbd {
 }
 .crash h1 {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--fs-xl);
   font-weight: 600;
 }
 .crash p {
@@ -2257,10 +2478,10 @@ kbd {
   max-width: 100%;
   margin: 0;
   padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-lg);
   background: var(--chrome);
-  font: 11px/1.5 var(--mono);
+  font: var(--fs-base)/1.5 var(--mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   user-select: text;
@@ -2304,7 +2525,7 @@ kbd {
 
 .reach-title {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-md);
   font-weight: 600;
 }
 
@@ -2316,7 +2537,7 @@ kbd {
   max-width: 190px;
   aspect-ratio: 1;
   display: block;
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   background: #fff;
 }
 
@@ -2325,7 +2546,7 @@ kbd {
    as a label: on the desktop it is not useful, but this dialog is served to
    the phone too, and there the other code is a tap away. */
 .reach-url {
-  font: 11px var(--mono);
+  font: var(--fs-base) var(--mono);
   color: var(--text);
   text-decoration: none;
   overflow-wrap: anywhere;
@@ -2337,12 +2558,12 @@ kbd {
 
 .reach-note {
   margin: 0;
-  font-size: 10.5px;
+  font-size: var(--fs-sm);
   line-height: 1.45;
   color: var(--dim);
 }
 .reach-note code {
-  font: 10.5px var(--mono);
+  font: var(--fs-sm) var(--mono);
   color: var(--text);
 }
 
@@ -2358,10 +2579,10 @@ kbd {
   align-items: center;
   justify-content: center;
   padding: 14px;
-  border: 1px dashed var(--line);
-  border-radius: 6px;
+  border: var(--border) dashed var(--line);
+  border-radius: var(--radius-lg);
   color: var(--dimmer);
-  font-size: 11px;
+  font-size: var(--fs-base);
   line-height: 1.5;
 }
 .reach-absent p {
@@ -2379,11 +2600,11 @@ kbd {
 }
 .reach-alt {
   padding: 2px 6px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-md);
   background: var(--chrome-high);
   color: var(--dim);
-  font: 10px var(--mono);
+  font: var(--fs-sm) var(--mono);
 }
 .reach-alt:hover {
   color: var(--text);
@@ -2415,7 +2636,7 @@ kbd {
   background: var(--bg);
   color: var(--text);
   font-family: var(--ui);
-  font-size: 13px;
+  font-size: var(--fs-lg);
   line-height: 1.65;
 }
 
@@ -2437,7 +2658,7 @@ kbd {
 .reader-sub,
 .reader-error {
   color: var(--dimmer);
-  font-size: 12px;
+  font-size: var(--fs-md);
   margin: 0;
 }
 
@@ -2472,12 +2693,12 @@ kbd {
 
 .md h1 {
   font-size: 1.7em;
-  border-bottom: 1px solid var(--line);
+  border-bottom: var(--border) var(--border-style) var(--line);
   padding-bottom: 0.3em;
 }
 .md h2 {
   font-size: 1.35em;
-  border-bottom: 1px solid var(--line);
+  border-bottom: var(--border) var(--border-style) var(--line);
   padding-bottom: 0.25em;
 }
 .md h3 { font-size: 1.15em; }
@@ -2500,7 +2721,7 @@ kbd {
 .md a {
   color: var(--accent);
   text-decoration: none;
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-bottom: var(--border) var(--border-style) color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .md a:hover {
   border-bottom-color: var(--accent);
@@ -2518,7 +2739,7 @@ kbd {
 .md li > ol { margin: 0.2em 0; }
 
 .md blockquote {
-  border-left: 2px solid var(--line);
+  border-left: var(--border-thick) var(--border-style) var(--line);
   padding: 0 0 0 1em;
   color: var(--dim);
 }
@@ -2529,17 +2750,17 @@ kbd {
   font-family: var(--mono);
   font-size: 0.88em;
   background: var(--chrome-high);
-  border: 1px solid var(--line);
-  border-radius: 3px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-sm);
   padding: 0.1em 0.35em;
 }
 
 .md pre {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-md);
   line-height: 1.5;
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-md);
   padding: 10px 12px;
   overflow-x: auto;
 }
@@ -2564,7 +2785,7 @@ kbd {
 
 .md th,
 .md td {
-  border: 1px solid var(--line);
+  border: var(--border) var(--border-style) var(--line);
   padding: 5px 10px;
   text-align: left;
 }
@@ -2577,14 +2798,14 @@ kbd {
 .md img {
   max-width: 100%;
   height: auto;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   display: block;
   margin: 0.5em 0;
 }
 
 .md hr {
   border: 0;
-  border-top: 1px solid var(--line);
+  border-top: var(--border) var(--border-style) var(--line);
   margin: 2em 0;
 }
 
@@ -2621,10 +2842,10 @@ kbd {
 .mermaid-error {
   margin-top: 8px;
   padding-top: 6px;
-  border-top: 1px solid var(--line);
+  border-top: var(--border) var(--border-style) var(--line);
   color: var(--danger);
   font-family: var(--ui);
-  font-size: 11px;
+  font-size: var(--fs-base);
 }
 
 /* The strip's label for a reader: a tab that is not a button, because there is

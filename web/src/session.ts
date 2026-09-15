@@ -647,6 +647,18 @@ export function setTheme(themeId: string): void {
   send({ type: "set-theme", themeId });
 }
 
+/**
+ * What shape the window is, which travels the same road as the theme for the
+ * same reason and has one extra consequence at the far end: a skin moves the
+ * line weight and the type ramp, so the snapshot that comes back resizes every
+ * pane box, and a resized box is a new grid proposed to the pty. That happens
+ * through the `ResizeObserver` `terminals.ts` already has — see the header of
+ * `web/src/skin.ts` — so there is nothing to do here but send the verb.
+ */
+export function setSkin(skinId: string): void {
+  send({ type: "set-skin", skinId });
+}
+
 /** The terminal's type and cursor, all four at once — they are edited together. */
 export function setTerminalAppearance(terminal: TerminalAppearance): void {
   send({ type: "set-terminal-appearance", terminal });

@@ -22,6 +22,7 @@
  * anything written out beside it.
  */
 import { useEffect, useState } from "react";
+import { SKINS, type Skin } from "../../../shared/skin";
 import {
   CURSOR_STYLES,
   MAX_FONT_SIZE,
@@ -76,6 +77,25 @@ export function AppearanceSettings({
               theme={theme}
               on={theme.id === appearance.themeId}
               onPick={() => api.setTheme(theme.id)}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="set-section">
+        <h3 className="set-h">Skin</h3>
+        <p className="set-note">
+          What shape the window is, which is a separate question from what colour — every skin works
+          in every theme. This one does reach an agent: a heavier border and a different typeface
+          change the box a pane holds, so the terminals in it are resized to match.
+        </p>
+        <div className="skin-list" role="radiogroup" aria-label="Skin">
+          {SKINS.map((skin) => (
+            <SkinOption
+              key={skin.id}
+              skin={skin}
+              on={skin.id === appearance.skinId}
+              onPick={() => api.setSkin(skin.id)}
             />
           ))}
         </div>
@@ -155,6 +175,54 @@ export function AppearanceSettings({
         </label>
       </section>
     </div>
+  );
+}
+
+/**
+ * One skin, drawn in itself — `ThemeOption`'s argument, about the other axis.
+ *
+ * A row of names would make you pick a skin to find out what it is and then pick
+ * again, and for shape that is worse than it is for colour: "8-bit" tells you
+ * roughly what the palette would have been, but nothing about how thick a border
+ * gets or how much smaller the type becomes. So the card wears its own tokens —
+ * its own radius, its own border weight, its own face — and the little pane
+ * inside it carries the frame recipe, which is the one thing you cannot infer
+ * from a label at all.
+ *
+ * It sets *shape* inline and leaves *colour* to the cascade, which is the exact
+ * inverse of `ThemeOption` and is what keeps the two lists honest: this card is
+ * in whatever theme is currently on, so a skin is never previewed in colours the
+ * window is not actually wearing.
+ */
+function SkinOption({ skin, on, onPick }: { skin: Skin; on: boolean; onPick: () => void }) {
+  const t = skin.tokens;
+  return (
+    <button
+      role="radio"
+      aria-checked={on}
+      className={`skin-opt ${on ? "skin-opt-on" : ""}`}
+      onClick={onPick}
+      style={{
+        borderRadius: t.radiusXl,
+        borderWidth: t.border,
+        borderStyle: t.borderStyle,
+        fontFamily: t.ui,
+      }}
+    >
+      <span className="skin-opt-preview" style={{ borderRadius: t.radiusLg, borderWidth: t.border, borderStyle: t.borderStyle, boxShadow: t.frame }}>
+        <span className="skin-opt-bar" style={{ fontSize: t.fsXs, letterSpacing: t.uiLetterSpacing }}>
+          {skin.icons.run}
+        </span>
+      </span>
+      <span className="skin-opt-text">
+        <span className="skin-opt-name" style={{ fontSize: t.fsLg, letterSpacing: t.uiLetterSpacing }}>
+          {skin.name}
+        </span>
+        <span className="skin-opt-desc" style={{ fontSize: t.fsXs, letterSpacing: t.uiLetterSpacing, lineHeight: t.uiLineHeight }}>
+          {skin.description}
+        </span>
+      </span>
+    </button>
   );
 }
 

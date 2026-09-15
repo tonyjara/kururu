@@ -33,6 +33,8 @@
  * are a different kind of decision and survive changing your mind about colour.
  * Nobody picks Macchiato and means "and 14px".
  */
+import { DEFAULT_SKIN_ID, skinFor } from "./skin";
+
 
 /**
  * The chrome, as `styles.css` asks for it.
@@ -586,11 +588,22 @@ export interface TerminalAppearance {
  */
 export interface Appearance {
   themeId: string;
+  /**
+   * Which *shape* the window is, independent of which colours it is in.
+   *
+   * Beside `themeId` rather than inside the theme because the two axes are
+   * orthogonal — see the header of `shared/skin.ts` — and the test of that is
+   * that both crossings are things somebody wants: an eight-bit chrome in
+   * Catppuccin, and rounded chrome in an eight-bit palette. An id rather than
+   * the tokens, for the reason every other saved decision in kururu is an id.
+   */
+  skinId: string;
   terminal: TerminalAppearance;
 }
 
 export const DEFAULT_APPEARANCE: Appearance = {
   themeId: DEFAULT_THEME_ID,
+  skinId: DEFAULT_SKIN_ID,
   terminal: {
     fontFamily: "",
     fontSize: DEFAULT_FONT_SIZE,
@@ -615,11 +628,12 @@ export const DEFAULT_APPEARANCE: Appearance = {
  * somebody's machine and the server has no way to know them.
  */
 export function adoptAppearance(value: unknown): Appearance {
-  const raw = (value ?? {}) as { themeId?: unknown; terminal?: unknown };
+  const raw = (value ?? {}) as { themeId?: unknown; skinId?: unknown; terminal?: unknown };
   const term = (raw.terminal ?? {}) as Partial<Record<keyof TerminalAppearance, unknown>>;
   const d = DEFAULT_APPEARANCE.terminal;
   return {
     themeId: themeFor(typeof raw.themeId === "string" ? raw.themeId : null).id,
+    skinId: skinFor(typeof raw.skinId === "string" ? raw.skinId : null).id,
     terminal: {
       fontFamily: adoptFontFamily(term.fontFamily),
       fontSize: clampFontSize(term.fontSize),

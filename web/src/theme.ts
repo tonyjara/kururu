@@ -22,8 +22,10 @@
  * somebody dragged a font-size slider.
  */
 import { applyTerminalAppearance } from "./terminals";
+import { applySkin } from "./skin";
 import type { Appearance, Theme, UiTokens } from "../../shared/theme";
 import { themeFor } from "../../shared/theme";
+import { skinFor } from "../../shared/skin";
 
 /**
  * `chromeHigh` → `--chrome-high`. The one mechanical translation in here, and it
@@ -31,8 +33,13 @@ import { themeFor } from "../../shared/theme";
  * would be a place for the two spellings of a token to disagree, and the
  * disagreement would be a colour that silently falls back to whatever the
  * `:root` block happens to say.
+ *
+ * Exported because `skin.ts` does the identical translation for the identical
+ * reason, and two copies of it is precisely the disagreement this paragraph is
+ * about — one file gaining a rule about digits, or acronyms, or a leading
+ * capital, and the other not.
  */
-function cssName(token: string): string {
+export function cssName(token: string): string {
   return `--${token.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
 }
 
@@ -67,5 +74,14 @@ export function applyTheme(theme: Theme): void {
 export function applyAppearance(appearance: Appearance): void {
   const theme = themeFor(appearance.themeId);
   applyTheme(theme);
+  /**
+   * Before the emulators rather than after, and it matters by exactly one
+   * frame: a skin moves the chrome's line weight and type ramp, so applying it
+   * resizes every pane box, and doing that first means the `ResizeObserver`
+   * measurement that follows is taken against the boxes the window is about to
+   * actually have. The other order measures the old box and corrects a frame
+   * later, which is a SIGWINCH nobody needed.
+   */
+  applySkin(skinFor(appearance.skinId));
   applyTerminalAppearance(theme.terminal, appearance.terminal);
 }
