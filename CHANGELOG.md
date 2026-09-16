@@ -13,6 +13,8 @@ shows, so it is written once and read in three places — see
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-16
+
 ### Added
 
 - **kururu installs its own updates.** The About tab has always been able to
@@ -76,5 +78,6 @@ shows, so it is written once and read in three places — see
   release's notes — which are this file.
 - **Installs from a DMG**, signed and notarized, or from the Homebrew tap.
 
-[Unreleased]: https://github.com/tonyjara/kururu/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/tonyjara/kururu/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/tonyjara/kururu/releases/tag/v0.2.0
 [0.1.0]: https://github.com/tonyjara/kururu/releases/tag/v0.1.0
