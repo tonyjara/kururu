@@ -23,7 +23,7 @@
  * does — `aria-label="Close tab"`, `title="Run dev server"` — so a screen reader
  * that also read the glyph would say the thing twice, and it would say it as
  * whatever character the current skin happens to use. "Close tab, X" is worse
- * than "Close tab", and under the eight-bit skin it is worse again.
+ * than "Close tab", and under a skin that draws it as `x` it is worse again.
  */
 import type { IconName } from "../../../shared/skin";
 

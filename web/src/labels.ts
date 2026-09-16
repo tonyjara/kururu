@@ -1,69 +1,21 @@
 /**
- * What to call a terminal, what to say it is doing, and how to shorten a path.
+ * How the window draws the answers, where `shared/labels.ts` decides them.
  *
- * Two places need the same answer — the sidebar and the pane's own bar — and a
- * terminal that is called one thing in the list and another on screen is a
- * terminal you have to look twice at.
+ * The two that say *which terminal is this* moved down to `shared/` when the
+ * server started composing notifications — see the header there. What is left
+ * here is the part that is about drawing: a tab strip has one line and has to
+ * choose which question to answer with it, a tooltip needs a word for a colour,
+ * and a path needs shortening to the width of a column. None of those is a
+ * thing the server has an opinion about.
  *
- * There are two questions, not one, and keeping them apart is the whole shape of
- * this module. *What is this* is answered by the program running in the pty and
- * changes about twice in a terminal's life. *What is it doing* changes every
- * turn. A row that puts the second where the first goes is a row whose top line
- * moves while you are reading it, and the sidebar's whole layout — stable line
- * above, live line below — depends on the two never being confused.
+ * The two are re-exported rather than re-imported at each call site, because
+ * `agentLabel` beside `tabLabel` is how they are read and a component asking two
+ * modules for one row's worth of strings is a split with nothing behind it.
  */
 import type { AgentSnapshot } from "../../shared/model";
+import { agentLabel, agentSummary, basename } from "../../shared/labels";
 
-/**
- * What a terminal *is*: a name the user typed, else the program actually running
- * in it.
- *
- * A rename wins over everything and is never overwritten — it is the only answer
- * that knows what somebody meant. After that it is the process table rather than
- * what we launched, because a shell reports itself as a shell until you type
- * `claude` into it, at which point it starts calling itself claude, which is the
- * honest answer.
- *
- * Deliberately *not* the title the program set for itself, however useful that
- * is: see `agentSummary`, which is where that belongs. A label that renamed
- * itself every turn would be a label you cannot find anything by.
- */
-export function agentLabel(agent: AgentSnapshot): string {
-  if (agent.titleOverride) return agent.titleOverride;
-  if (agent.agent) return agent.agent;
-  /**
-   * A dead pty reports no program, because there is no process to find one in.
-   * What it *was* is then the only true thing left to call it, and it is a far
-   * better label than "exited" — the dot and the strikethrough already say it is
-   * gone, so the word was spending the whole row saying that twice.
-   *
-   * Only when it has exited. A live shell that has run claude and come back to a
-   * prompt is a shell again, and calling it claude would be claiming a process
-   * that is not there.
-   */
-  if (agent.exited) return agent.lastAgent ?? "exited";
-  return agent.kind === "shell" ? basename(agent.command) : "starting…";
-}
-
-/**
- * What a terminal is *doing*, in one line, from whichever half of kururu knows.
- *
- * Two sources, and the order is the same argument `status.ts` makes about a
- * reported status beating a guessed one. `activity` is an agent telling kururu
- * outright, through the report endpoint a Claude Code hook posts to — the prompt
- * it was handed, the thing it is asking permission for. Nothing beats being
- * told. The title is what it says when nobody asked: claude writes a summary of
- * the turn into its window title once it has had a prompt, which arrives for
- * free with no hook installed and is the reason this line is usually populated
- * at all.
- *
- * Null when neither has said anything, so the caller can decide what a terminal
- * with nothing to report is worth saying about — which is not the same decision
- * in a tab as it is in a list.
- */
-export function agentSummary(agent: AgentSnapshot): string | null {
-  return agent.activity || agent.title || null;
-}
+export { agentLabel, agentSummary, basename };
 
 /**
  * What a tab is called, which is one line for both questions.
@@ -110,10 +62,6 @@ export function statusLabel(agent: AgentSnapshot): string {
     default:
       return "idle";
   }
-}
-
-export function basename(path: string): string {
-  return path.split("/").filter(Boolean).pop() || path;
 }
 
 /** `/Users/me/Desktop/Nyto/kururu` → `…/Nyto/kururu`. Enough to tell projects apart. */

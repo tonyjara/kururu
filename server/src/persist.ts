@@ -287,6 +287,10 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
       // absolute comes back as untagged rather than as a directory that would
       // resolve differently in every pane.
       identity: adoptIdentity(stored.identity),
+      // Empty, and not because the file is old: the order is a list of agent
+      // ids, agent ids are processes, and this file restores structure and
+      // never processes. A cold start has nothing to put in an order.
+      agentOrder: [],
     });
   }
   if (profiles.length === 0) return null;

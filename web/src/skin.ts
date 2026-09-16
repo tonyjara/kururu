@@ -86,9 +86,76 @@ export function applySkin(skin: Skin): void {
    * two never means two sets of rules fighting over one window.
    */
   root.dataset.skin = skin.id;
+  applyFonts(skin);
+  applyStylesheet(skin);
+}
+
+/**
+ * The `@font-face` rules for a skin that brought its own faces.
+ *
+ * Written here rather than in `styles.css`, and the reason is that the
+ * stylesheet cannot know them: a rule in that file could only ever name a font
+ * that shipped with kururu, and these arrive from `../kururu-styles` and are
+ * served out of the user's own config directory. So the one `<style>` element
+ * below is rewritten when the skin changes, and `src` is always a URL the
+ * *server* produced — a manifest may not contain one, which is the whole reason
+ * an installed style is a copy on this machine rather than a link to somebody
+ * else's host.
+ *
+ * `font-display: block` in every case and not `swap`, and this is not a
+ * preference. The chrome's face decides the size of every label in the window,
+ * so a face swapping in late reflows every pane — and a reflow in kururu is a
+ * new proposed grid, which means a SIGWINCH into every agent that is running.
+ * A blank label for a moment is enormously cheaper than that.
+ *
+ * Rewritten only when the text actually changes, because assigning `textContent`
+ * re-parses the block and a re-parsed `@font-face` is a font the browser may
+ * decide to fetch again — and `applySkin` is called on every snapshot.
+ */
+function applyFonts(skin: Skin): void {
+  const rules = (skin.fonts ?? [])
+    .map(
+      (font) =>
+        `@font-face { font-family: ${JSON.stringify(font.family)}; src: url(${JSON.stringify(font.src)});` +
+        ` font-weight: ${font.weight}; font-style: ${font.style}; font-display: block; }`,
+    )
+    .join("\n");
+  const el = element("style", "kururu-skin-fonts") as HTMLStyleElement;
+  if (el.textContent !== rules) el.textContent = rules;
+}
+
+/**
+ * A stylesheet a skin brought, for what the tokens genuinely cannot express.
+ *
+ * A `<link>` rather than the text inlined, so the browser caches it and so that
+ * a skin's CSS never travels in a snapshot. It is scoped by `[data-skin="<id>"]`
+ * at the source and the registry's CI refuses one that is not, which is what
+ * stops two installed skins from ever fighting over one window — and is why
+ * leaving the old link in place while the new one loads would be wrong: the
+ * rules are inert the moment `data-skin` moves, so swapping the `href` is the
+ * whole of the change.
+ */
+function applyStylesheet(skin: Skin): void {
+  const el = element("link", "kururu-skin-css") as HTMLLinkElement;
+  const href = skin.stylesheet ?? "";
+  if (el.rel !== "stylesheet") el.rel = "stylesheet";
+  if (el.getAttribute("href") !== href) {
+    if (href) el.setAttribute("href", href);
+    else el.removeAttribute("href");
+  }
+}
+
+/** The one element with this id, made if it is not there yet. */
+function element(tag: string, id: string): HTMLElement {
+  const found = document.getElementById(id);
+  if (found) return found;
+  const made = document.createElement(tag);
+  made.id = id;
+  document.head.appendChild(made);
+  return made;
 }
 
 /** The glyph for a name, for the rare caller that needs it as a string rather than as a rule. */
-export function iconGlyph(skinId: string | null | undefined, name: IconName): string {
-  return skinFor(skinId).icons[name];
+export function iconGlyph(skinId: string | null | undefined, name: IconName, extra: readonly Skin[] = []): string {
+  return skinFor(skinId, extra).icons[name];
 }

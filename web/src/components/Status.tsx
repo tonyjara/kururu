@@ -76,8 +76,23 @@ export function Status({ agent, mascot }: { agent: AgentSnapshot; mascot: Mascot
  * The trim comes from the mascot rather than the clip, which is what keeps a
  * sitting frog the same size as a jumping one: see `MascotConfig.trim`.
  */
-export function Mascot({ config, clip }: { config: MascotConfig; clip: MascotClip }) {
-  const src = sheetUrl(config.sheet);
+export function Mascot({
+  config,
+  clip,
+  src: from,
+}: {
+  config: MascotConfig;
+  clip: MascotClip;
+  /**
+   * Where the sheet is, for the one caller that is not drawing an installed
+   * mascot: the registry's Styles tab previews entries nobody has downloaded,
+   * and the server proxies the picture for it. Everything else in the window
+   * names a sheet and lets `sheetUrl` find it, which is why this is an override
+   * rather than a parameter every call site has to answer.
+   */
+  src?: string;
+}) {
+  const src = from ?? sheetUrl(config.sheet);
   const sheet = useSheet(src);
   /**
    * The dot stands in until the sheet is known, and for good if it never is: a

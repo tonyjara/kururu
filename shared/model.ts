@@ -27,6 +27,8 @@
  */
 import type { KeyOverrides } from "./keys";
 import type { LayoutNode } from "./layout";
+import type { NotifySettings } from "./notify";
+import type { StyleLibrary } from "./styles";
 import type { Appearance } from "./theme";
 
 /**
@@ -749,6 +751,24 @@ export interface Profile {
    * memory of a command rather than a command.
    */
   identity: ProfileIdentity;
+  /**
+   * The order somebody dragged the sidebar's agent list into, by id.
+   *
+   * Spawn order is the default and it is a good one: it never moves under you,
+   * which is what you want from a list you are scanning. It is a poor
+   * *arrangement*, though — the two agents you are alternating between this
+   * afternoon arrived an hour apart, and nothing else in kururu puts them next
+   * to each other, since the layout answers where a terminal is drawn and not
+   * where it is listed.
+   *
+   * Ids of processes rather than structure, which is what decides where this
+   * lives. It rides in the host's blob, so it survives a server restart
+   * alongside the terminals it names, and `persist.ts` deliberately does not
+   * write it: a cold start has no agents to put in an order. Ids that have since
+   * gone are ignored on the way out rather than pruned on the way in — the two
+   * give the same list, and only one of them costs a write per snapshot.
+   */
+  agentOrder: string[];
 }
 
 /** A profile you are not in, as much of it as a switcher needs to draw. */
@@ -781,7 +801,12 @@ export interface SessionSnapshot {
   profile: Profile;
   /** Every profile including the active one, in creation order. */
   profiles: ProfileSummary[];
-  /** Every agent in the active profile, in creation order. */
+  /**
+   * Every agent in the active profile, in the order the sidebar lists them:
+   * creation order, rearranged by whatever has been dragged. Ordered here rather
+   * than in the client for the reason the layout is — the arrangement is the
+   * server's, so two clients cannot end up holding it differently.
+   */
   agents: AgentSnapshot[];
   /**
    * Every mascot the user has kept, and which one the working badge is. In the
@@ -808,6 +833,40 @@ export interface SessionSnapshot {
    * restyles everywhere rather than being frozen in somebody's config file.
    */
   appearance: Appearance;
+  /**
+   * When kururu may interrupt you, and what it sounds like.
+   *
+   * In the snapshot for the keyboard's reasons, and with one of its own. A
+   * notification is the one thing kururu does that reaches you when you are not
+   * looking at it, so a phone and a desktop disagreeing about whether it may
+   * would be the setting failing in the only case it exists for — and unlike the
+   * theme, nothing on screen would show you which of them was wrong.
+   *
+   * What is *here* is only the choice. The policy is applied on the server, per
+   * client, before a notification is sent at all (see `shared/notify.ts`); this
+   * travels because the client needs two of the five fields to make the noise,
+   * and because the page that edits it draws what comes back rather than holding
+   * anything.
+   */
+  notify: NotifySettings;
+  /**
+   * The themes and skins installed from `../kururu-styles`, resolved.
+   *
+   * This is the one place a palette genuinely does travel, and it is the
+   * exception that proves the rule above: an installed theme is not in
+   * `shared/theme.ts` and never will be, so there is no id both halves could
+   * look up. The server reads the manifests, checks them — see
+   * `shared/styles.ts`, where every value in here is somebody else's string —
+   * and sends the same `Theme` and `Skin` shapes the built-ins already are, so
+   * every list in the window is one concatenation rather than two code paths.
+   *
+   * In the snapshot rather than behind its own fetch, for the mascots' reason:
+   * the client cannot draw the window without it, it changes while the window is
+   * open because Settings is a second client writing it, and it is nothing next
+   * to a list of agents. The *catalogue* — what there is to install — is the
+   * opposite on all three counts and is a fetch.
+   */
+  styles: StyleLibrary;
 }
 
 /** What an agent (or a Claude Code hook) may tell kururu about itself. */

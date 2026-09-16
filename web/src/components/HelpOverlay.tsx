@@ -43,6 +43,15 @@ export function HelpOverlay({
           {PREFIX_LABEL} twice sends it to the terminal. ⌘D, ⇧⌘D, ⌘T, ⇧⌘W and ⌘[ ⌘] still work
           without it. The keys above are yours to change, under the cog.
         </p>
+        {/* Not in the list, because the list is what the prefix does and these
+            are not prefixed. A reader has no pty to take keys from, so + − and 0
+            mean there what they mean in every other document viewer — and that
+            is the whole reason they are unprefixed, which makes it worth one
+            line here rather than a row among bindings nobody could rebind. */}
+        <p className="dialog-hint">
+          In a reader pane, <kbd>+</kbd> and <kbd>-</kbd> resize the text and <kbd>0</kbd> puts it
+          back. No prefix — that pane has no terminal to take the keys from.
+        </p>
       </div>
     </div>
   );

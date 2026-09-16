@@ -21,24 +21,34 @@
  * built from the same `Theme` the window is about to wear rather than from
  * anything written out beside it.
  */
-import { useEffect, useState } from "react";
-import { SKINS, type Skin } from "../../../shared/skin";
+import { useEffect, useMemo, useState } from "react";
+import { allSkins, type Skin } from "../../../shared/skin";
+import { EMPTY_LIBRARY, type StyleLibrary } from "../../../shared/styles";
 import {
+  allThemes,
   CURSOR_STYLES,
   MAX_FONT_SIZE,
   MIN_FONT_SIZE,
-  THEMES,
   type Appearance,
   type CursorStyle,
   type Theme,
 } from "../../../shared/theme";
+import { canEnumerate, enumerate, knownFonts } from "../fonts";
 import * as api from "../session";
 
 export function AppearanceSettings({
   appearance,
+  styles = EMPTY_LIBRARY,
   onEditing,
 }: {
   appearance: Appearance;
+  /**
+   * What has been installed from the registry, so that the two lists here are
+   * every theme and every skin rather than only the ones kururu shipped. It is
+   * the same list the window is already wearing one of — see `applyAppearance` —
+   * and it arrives in the snapshot for that reason.
+   */
+  styles?: StyleLibrary;
   /**
    * The font box takes typing, so the window's keyboard stands down while it is
    * focused — without it, a `d` typed into a font name closes the pane it was
@@ -71,7 +81,7 @@ export function AppearanceSettings({
           the chrome around it are the same set of colours.
         </p>
         <div className="theme-list" role="radiogroup" aria-label="Theme">
-          {THEMES.map((theme) => (
+          {allThemes(styles.themes).map((theme) => (
             <ThemeOption
               key={theme.id}
               theme={theme}
@@ -90,7 +100,7 @@ export function AppearanceSettings({
           change the box a pane holds, so the terminals in it are resized to match.
         </p>
         <div className="skin-list" role="radiogroup" aria-label="Skin">
-          {SKINS.map((skin) => (
+          {allSkins(styles.skins).map((skin) => (
             <SkinOption
               key={skin.id}
               skin={skin}
@@ -108,33 +118,16 @@ export function AppearanceSettings({
           decides how many columns a pane holds, and the pty is resized to match.
         </p>
 
-        <label className="set-row">
-          <span className="set-label">Font</span>
-          <input
-            className="set-text"
-            placeholder="System default"
-            spellCheck={false}
-            autoCapitalize="off"
-            autoCorrect="off"
-            value={typing ?? terminal.fontFamily}
-            onChange={(event) => setTyping(event.target.value)}
-            onFocus={() => setTyping(terminal.fontFamily)}
-            onBlur={() => {
-              if (typing !== null && typing !== terminal.fontFamily) set({ fontFamily: typing });
-              setTyping(null);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") event.currentTarget.blur();
-              if (event.key === "Escape") {
-                setTyping(null);
-                event.currentTarget.blur();
-              }
-            }}
-          />
-        </label>
+        <FontRow
+          value={terminal.fontFamily}
+          typing={typing}
+          onTyping={setTyping}
+          onPick={(fontFamily) => set({ fontFamily })}
+        />
         <p className="set-note set-note-under">
           A face to put in front of the built-in stack, not instead of it — the patched Nerd Font
-          faces stay behind whatever you name, so an agent's devicons keep working.
+          faces stay behind whatever you name, so an agent's devicons keep working. The list is what
+          this device can draw, which on a phone is not what the desktop has.
         </p>
 
         <label className="set-row">
@@ -179,12 +172,118 @@ export function AppearanceSettings({
 }
 
 /**
+ * The terminal's face, as a list of the ones this machine has.
+ *
+ * It was a text box, which is the honest implementation of "the server cannot
+ * know what is installed" and a poor answer to "what can I pick": a name typed
+ * one character wrong does not fail, it falls through to the next face in the
+ * stack and looks exactly like the setting being ignored. A list cannot be
+ * misspelled.
+ *
+ * The box is still here behind `Custom…`, and that is not a hedge. `web/src/fonts.ts`
+ * finds fonts two ways and neither is complete — one needs a permission the
+ * browser may not have, the other only finds faces it already knew to ask about
+ * — so there will always be a machine with a font that is not in the list, and
+ * the server accepts any string precisely because what is *valid* and what is
+ * *offered* are different questions.
+ *
+ * The enumeration is hung off `onPointerDown` because the good API needs a
+ * transient user activation and therefore cannot be called on mount. Opening a
+ * dropdown is an activation; doing it there is invisible when it works and costs
+ * nothing when the browser has never heard of it.
+ */
+function FontRow({
+  value,
+  typing,
+  onTyping,
+  onPick,
+}: {
+  value: string;
+  typing: string | null;
+  onTyping: (value: string | null) => void;
+  onPick: (value: string) => void;
+}) {
+  const [scanned, setScanned] = useState(0);
+  // Recomputed when a scan lands, and not otherwise: the installed faces are a
+  // fact about the machine and do not change while the window is open.
+  const fonts = useMemo(() => knownFonts(), [scanned]);
+  const custom = typing !== null || (value !== "" && !fonts.includes(value));
+
+  return (
+    <>
+      <label className="set-row">
+        <span className="set-label">Font</span>
+        <select
+          className="set-select set-select-wide"
+          value={custom ? CUSTOM : value}
+          onPointerDown={() => {
+            if (canEnumerate()) void enumerate().then((more) => more && setScanned((n) => n + 1));
+          }}
+          onChange={(event) => {
+            const next = event.target.value;
+            // Picking `Custom…` opens the box on what is already set rather than
+            // on nothing, so that "I want to tweak this name" is one keystroke
+            // instead of retyping it.
+            if (next === CUSTOM) onTyping(value);
+            else {
+              onTyping(null);
+              onPick(next);
+            }
+          }}
+        >
+          <option value="">System default</option>
+          {fonts.map((font) => (
+            <option key={font} value={font} style={{ fontFamily: `"${font}", monospace` }}>
+              {font}
+            </option>
+          ))}
+          <option value={CUSTOM}>Custom…</option>
+        </select>
+      </label>
+      {custom && (
+        <label className="set-row">
+          <span className="set-label" />
+          <input
+            className="set-text"
+            placeholder="A font name, exactly as the system spells it"
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+            autoFocus
+            value={typing ?? value}
+            onChange={(event) => onTyping(event.target.value)}
+            onFocus={() => onTyping(typing ?? value)}
+            onBlur={() => {
+              if (typing !== null && typing !== value) onPick(typing);
+              onTyping(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+              if (event.key === "Escape") {
+                onTyping(null);
+                event.currentTarget.blur();
+              }
+            }}
+          />
+        </label>
+      )}
+    </>
+  );
+}
+
+/**
+ * Not a font name, and it cannot become one: `adoptFontFamily` strips `<` and
+ * `>` on the way in, so no value the server will ever hold can collide with it.
+ */
+const CUSTOM = "<custom>";
+
+/**
  * One skin, drawn in itself — `ThemeOption`'s argument, about the other axis.
  *
  * A row of names would make you pick a skin to find out what it is and then pick
- * again, and for shape that is worse than it is for colour: "8-bit" tells you
- * roughly what the palette would have been, but nothing about how thick a border
- * gets or how much smaller the type becomes. So the card wears its own tokens —
+ * again, and for shape that is worse than it is for colour: "Blueprint" tells
+ * you roughly what the palette would have been, but nothing about how thin a
+ * border gets or how much smaller the type becomes. So the card wears its own tokens —
  * its own radius, its own border weight, its own face — and the little pane
  * inside it carries the frame recipe, which is the one thing you cannot infer
  * from a label at all.

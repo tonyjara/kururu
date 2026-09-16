@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "bun:test";
 import { panes } from "../../shared/layout";
-import { Workspaces } from "../src/workspaces";
+import { Workspaces, nextId, orderAgents } from "../src/workspaces";
 
 describe("split", () => {
   it("returns the pane it made, and it is in the tree", () => {
@@ -202,6 +202,116 @@ describe("setWorkspaceIdentity", () => {
   });
 });
 
+/**
+ * Where the counter is right now, which a test cannot assume: `seq` is
+ * module-level and every `Workspaces` built above has already moved it.
+ */
+function counterAt(): number {
+  return Number(/(\d+)$/.exec(nextId("probe"))![1]);
+}
+
+/**
+ * Rewrite every id in an arrangement to run upward from `from`, references and
+ * all, by renaming the tokens in its JSON.
+ *
+ * This is how a *fresh process* is simulated in a test that shares one counter
+ * with everything before it. The bug is that a new server starts at zero while
+ * the host's blob already holds `n1`, `w2`, `p3` — so what has to be reproduced
+ * is not a particular number but the overlap: a blob holding precisely the ids
+ * this process is about to hand out next.
+ *
+ * Rewriting the serialized form rather than walking the tree is deliberate.
+ * `focusedPaneId` and `activeWorkspaceId` are the same token as the id they
+ * point at, so replacing tokens keeps them pointing at the right thing — and a
+ * test that had to know which fields are references would be a test that goes
+ * stale the day one is added.
+ */
+function renumber(profiles: unknown, from: number): never[] {
+  const seen = new Map<string, string>();
+  let n = from;
+  const json = JSON.stringify(profiles).replace(/"([a-z])(\d+)"/g, (_whole, prefix: string, num: string) => {
+    const key = `${prefix}${num}`;
+    if (!seen.has(key)) seen.set(key, `${prefix}${n++}`);
+    return `"${seen.get(key)}"`;
+  });
+  return JSON.parse(json);
+}
+
+/** Every id in an arrangement, so a test can look for one used twice. */
+function allIds(workspaces: Workspaces): string[] {
+  const out: string[] = [];
+  const walk = (node: any): void => {
+    if (node.type === "pane") out.push(node.pane.id);
+    else {
+      out.push(node.id);
+      walk(node.a);
+      walk(node.b);
+    }
+  };
+  for (const profile of workspaces.all()) {
+    out.push(profile.id);
+    for (const workspace of profile.workspaces) {
+      out.push(workspace.id);
+      walk(workspace.layout);
+    }
+  }
+  return out;
+}
+
+/**
+ * The id counter across a restart, which is the one thing about `adopt` that is
+ * not about a missing field.
+ *
+ * `persist.ts` mints every id as it rebuilds a stored tree, so the disk path
+ * walks the counter past its own work for free. The host's blob does not: it is
+ * the arrangement exactly as the last server left it, handed over whole, and a
+ * new process starting at zero will mint `n1` for a layout that already has one.
+ * Nothing throws — a duplicate is a perfectly good string — and the symptom is
+ * two panes in one workspace answering to one id, where `findPane` takes
+ * whichever comes first and focusing or closing acts on the wrong pane.
+ */
+describe("the id counter across a restart", () => {
+  it("starts above every id the blob already holds", () => {
+    const fresh = new Workspaces();
+    const blob = renumber(fresh.all(), 9000);
+
+    new Workspaces(blob);
+    expect(counterAt()).toBeGreaterThan(9000);
+  });
+
+  it("does not hand out an id the restored arrangement is using", () => {
+    // A blob holding exactly what this process would mint next, which is what a
+    // server that has just restarted is looking at.
+    const blob = renumber(new Workspaces().all(), counterAt() + 1);
+    const restored = new Workspaces(blob);
+    const before = allIds(restored);
+
+    // Now do what the previous server would have gone on doing.
+    restored.split("row");
+    restored.split("col");
+    restored.newWorkspace("second");
+    restored.split("row");
+    restored.newProfile("second");
+
+    const after = allIds(restored);
+    expect(new Set(after).size).toBe(after.length);
+    // And the restored ids are all still there, rather than having been
+    // repaired by renaming somebody's live arrangement out from under them.
+    for (const id of before) expect(after).toContain(id);
+  });
+
+  it("leaves the disk path alone, where the counter is already past its work", () => {
+    // `persist.ts` mints as it revives, so a restore from disk arrives with ids
+    // below the counter and this must not push it anywhere.
+    const fresh = new Workspaces();
+    const at = counterAt();
+    new Workspaces(renumber(fresh.all(), 1));
+    // Only the probe above moved it: `adoptSeq` found nothing higher than it
+    // already was, which is what a disk restore always looks like.
+    expect(counterAt()).toBe(at + 1);
+  });
+});
+
 describe("adopting a restored profile", () => {
   it("fills in a colour a previous version of the server never wrote", () => {
     // The host's blob, as an older server left it: no `color` anywhere.
@@ -346,5 +456,66 @@ describe("the reader", () => {
   it("does nothing to a pane that is not a reader", () => {
     const workspaces = new Workspaces();
     expect(workspaces.openDoc(workspaces.focusedPaneId, "/home/you/project", "README.md")).toBe(false);
+  });
+});
+
+/**
+ * The sidebar's list, which is the one thing here that is an order rather than a
+ * tree. Spawn order is the default and a drag is a memory laid over it, so the
+ * interesting cases are all about what happens when the two disagree: a terminal
+ * that started after the drag, and one in the memory that has since been killed.
+ */
+describe("orderAgents", () => {
+  it("is spawn order until something has been dragged", () => {
+    expect(orderAgents(["a", "b", "c"], [])).toEqual(["a", "b", "c"]);
+  });
+
+  it("puts what was dragged first and everything spawned since behind it", () => {
+    expect(orderAgents(["a", "b", "c", "d"], ["c", "a"])).toEqual(["c", "a", "b", "d"]);
+  });
+
+  it("skips a remembered id nothing answers to, rather than drawing a dead row", () => {
+    expect(orderAgents(["a", "c"], ["c", "b", "a"])).toEqual(["c", "a"]);
+  });
+});
+
+describe("reorderAgent", () => {
+  /** A profile with three terminals in it, in the order they were spawned. */
+  const three = (): { workspaces: Workspaces; ids: string[] } => {
+    const workspaces = new Workspaces();
+    const ids = ["a1", "a2", "a3"];
+    for (const id of ids) workspaces.addTab(id, "/home/you/project");
+    return { workspaces, ids };
+  };
+
+  it("puts a terminal above the row it was dropped on", () => {
+    const { workspaces, ids } = three();
+    workspaces.reorderAgent("a3", "a1", ids);
+    expect(orderAgents(ids, workspaces.active.agentOrder)).toEqual(["a3", "a1", "a2"]);
+  });
+
+  it("puts it last when there is nothing below the row it was dropped on", () => {
+    const { workspaces, ids } = three();
+    workspaces.reorderAgent("a1", null, ids);
+    expect(orderAgents(ids, workspaces.active.agentOrder)).toEqual(["a2", "a3", "a1"]);
+  });
+
+  it("moves nothing: the terminal stays in the pane it was in", () => {
+    const { workspaces, ids } = three();
+    const pane = workspaces.focusedPaneId;
+    workspaces.reorderAgent("a3", "a1", ids);
+    expect(panes(workspaces.activeWorkspace.layout).find((p) => p.id === pane)?.agentIds).toEqual(ids);
+  });
+
+  it("leaves the order alone when a row is dropped on itself", () => {
+    const { workspaces, ids } = three();
+    workspaces.reorderAgent("a2", "a2", ids);
+    expect(workspaces.active.agentOrder).toEqual([]);
+  });
+
+  it("ignores a terminal this profile does not hold", () => {
+    const { workspaces, ids } = three();
+    workspaces.reorderAgent("nobody", "a1", ids);
+    expect(orderAgents(ids, workspaces.active.agentOrder)).toEqual(ids);
   });
 });

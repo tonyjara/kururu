@@ -31,7 +31,8 @@ import type {
   SessionSnapshot,
   WorkspaceColor,
 } from "../../shared/model";
-import type { ClientMessage, DevServer, ServerMessage } from "../../shared/wire";
+import type { ClientMessage, DevServer, Notification, ServerMessage } from "../../shared/wire";
+import type { NotifySettings } from "../../shared/notify";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { Grid } from "./grid";
 
@@ -100,6 +101,30 @@ export interface OutputSink {
   stale(): void;
 }
 const sinks = new Map<string, Set<OutputSink>>();
+
+/**
+ * Who to hand a notification to, or null when nothing is listening yet.
+ *
+ * One rather than a set, because there is one window and it has one answer —
+ * and deliberately *not* wired straight to `web/src/notify.ts` from here. That
+ * would be a cycle: the click handler on a card sends `reveal-agent`, which is
+ * this module. A registration turns the cycle into a line, and it puts the
+ * wiring in `App.tsx` beside every other window-level behaviour rather than
+ * hiding it in an import that exists for its side effect.
+ *
+ * A notification that arrives before anybody has registered is dropped, which
+ * is the correct handling of an event: there is nothing to catch up on, and a
+ * card queued from before the app mounted would be news about a status two
+ * seconds stale.
+ */
+let notifyListener: ((card: Notification) => void) | null = null;
+
+export function onNotify(listener: (card: Notification) => void): () => void {
+  notifyListener = listener;
+  return () => {
+    if (notifyListener === listener) notifyListener = null;
+  };
+}
 
 function set(patch: Partial<KururuState>): void {
   state = { ...state, ...patch };
@@ -200,6 +225,12 @@ function connect(): void {
         }
         break;
       }
+      case "notify":
+        // Everything has already been decided; see `shared/notify.ts`. Wrapped
+        // the way output is, for the reason output is: a listener that throws
+        // must not take the rest of the socket's dispatch down with it.
+        if (notifyListener) deliver(() => notifyListener?.(msg.notification));
+        break;
       case "reply": {
         const waiting = pending.get(msg.id);
         if (!waiting) break;
@@ -415,6 +446,15 @@ export function splitWith(
 /** Dropped on a workspace row: send it there, into whatever pane has focus. */
 export function moveTabToWorkspace(agentId: string, workspaceId: string): void {
   send({ type: "move-tab-to-workspace", agentId, workspaceId });
+}
+
+/**
+ * Dropped on another row of the sidebar's agent list: put it above that one, or
+ * at the end when there is nothing below it. Rearranges the list and moves
+ * nothing — the two above are what move a terminal.
+ */
+export function reorderAgent(agentId: string, beforeAgentId: string | null): void {
+  send({ type: "reorder-agent", agentId, beforeAgentId });
 }
 
 export function renameTab(agentId: string, name: string): void {
@@ -675,6 +715,23 @@ export function setSkin(skinId: string): void {
 /** The terminal's type and cursor, all four at once — they are edited together. */
 export function setTerminalAppearance(terminal: TerminalAppearance): void {
   send({ type: "set-terminal-appearance", terminal });
+}
+
+/** When kururu may interrupt you, and what it sounds like. All five at once. */
+export function setNotify(notify: NotifySettings): void {
+  send({ type: "set-notify", notify });
+}
+
+/**
+ * Go to that terminal, wherever it is — the click on a notification.
+ *
+ * A verb like every other navigation, which is what makes it work at all from a
+ * card about an agent in a profile this window is not showing: the client does
+ * not know where that agent is and has no business finding out. It says *take
+ * me to this one* and draws the snapshot that comes back.
+ */
+export function revealAgent(agentId: string): void {
+  send({ type: "reveal-agent", agentId });
 }
 
 // ---------------------------------------------------------------------------

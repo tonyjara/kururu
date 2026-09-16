@@ -46,6 +46,12 @@ if (isPicker) {
     /** Which server this window is showing, for the rare thing that needs an absolute URL. */
     serverUrl: () => ipcRenderer.invoke("kururu:server-url"),
     /**
+     * Raise this window, for a click on a notification. See the note on
+     * `show?()` in `web/src/desktop.ts` for why this is on the bridge and why
+     * it is the whole of what it can do.
+     */
+    show: () => ipcRenderer.send("kururu:show"),
+    /**
      * Where a file dropped onto the window actually is on disk.
      *
      * This has to be here because it cannot be anywhere else. A renderer is given

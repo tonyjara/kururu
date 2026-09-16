@@ -1,133 +1,107 @@
 # kururu
 
-_Kururu_ is Guaraní for **frog**. It runs your coding agents and gives them
-eyes: a GUI for the agents it is running — on the desktop, and on your phone.
+```text
+     ▒▒▒▒▒▒    ▒▒▒▒▒▒▒▒
+   ▒▒██████▒▒▒▒████████▒▒▒▒
+   ▒▒    ████████    ██████▒▒
+   ▒▒    ████████    ████████▒▒
+   ░░████████████████████████░░░░
+   ░░████      ██████████████░░██░░
+   ░░██████████████████████████████░░
+   ░░██████████████████████▒▒██████▒▒
+     ░░██████████████████░░████████▒▒
+     ▒▒████████▒▒████████░░░░██████░░
+   ░░██▒▒████▒▒██▒▒████▒▒████████░░
+   ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+```
 
-A terminal cannot show you a rendered markdown file, an image, or the app you
-are building. Kururu is the other half — your agents, in a window that can draw.
-It began as a front-end for [ghosttown](../ghosttown) and still borrows code
-from it, but it owns its own agents now: what runs here is not what runs there.
+_Kururu_ is Guaraní for **frog**. It runs your coding agents and gives them a
+window that can draw — on the desktop, and on your phone.
 
-## What it does today
+A terminal cannot show you a rendered markdown file, an image, or the app you are
+building. Kururu is the other half.
 
-- **Runs your agents.** Spawns each one in a pty it owns, in the project you
-  point it at. Plain shells too — "terminal" and "agent" are the same machinery
-  and the same list.
-- **Tiles them.** Split a pane right or down, drag the divider, stack terminals
-  in a pane as tabs. Real terminals: xterm.js over the raw pty stream, so colour,
-  scrollback, selection and mouse all work, and the pty resizes to the pane. A
-  pane you make arrives with a terminal already in it — a split's starts in the
-  directory the half you split is in — because there was nothing else it could
-  have offered you.
-- **Rearranges by dragging, at two scales.** Pick up a *tab* — from a strip or
-  from the sidebar — and drop it along a strip, into another pane, onto a pane's
-  edge to split it that way, or onto a workspace to send it there. Or pick up a
-  whole *pane* by its tab strip and drop it on another pane to swap the two, on
-  an edge to move it to that side, or on a tab strip to pour its tabs in.
-  Nothing is ever stopped by moving it.
-- **Organises them, the way ghosttown does.** Profiles are named sessions,
-  workspaces are named layouts inside one, panes tile inside those, tabs stack
-  inside a pane. Switching a workspace or a profile never stops anything.
-- **Is driven from a prefix.** `C-a` then a key, tmux-style — the same table
-  ghosttown uses, so your hands already know it. `C-a` twice sends it through.
-- **Sees them.** Sidebar of everything running, live status (idle / working /
-  blocked / done), unread marks, context-window rings.
-- **Remembers the arrangement.** Workspaces, splits and each pane's project are
-  written to `~/.local/state/kururu/session.json` and come back on the next
-  launch — as empty panes. Nothing is respawned; that is deliberate.
-- **Remembers what they said.** A pane opened ten minutes late is handed the
-  history, because the server keeps an emulator beside every pty.
-- **Keeps them, through everything except being told not to.** The ptys live in
-  a host process of their own that nothing owns: quit the window, restart the
-  server, close the terminal you started it from — every agent, its scrollback
-  and your layout are still there. `C-a B` puts kururu back on current code
-  without one of them noticing. Only stopping the host itself ends them.
-- **Connects to a server, rather than being one.** The window finds a kururu
-  server, on this machine or on a box that is always on, and draws it — the same
-  thing the phone does. Start a server somewhere, point the desktop at it, and
-  close your laptop lid.
+## What it does
 
-Under the surface and waiting for a pane to live in: dev-server discovery, the
-preview proxy that lets a phone reach `localhost`, and a traversal-safe file API.
-See [PLAN.md](./PLAN.md).
+- **Runs your agents** in ptys it owns. Plain shells too — terminal and agent are
+  the same machinery.
+- **Tiles them.** Split right or down, drag dividers, stack tabs in a pane. Real
+  terminals ([ghostty-web](https://www.npmjs.com/package/ghostty-web) over the raw
+  stream): colour, scrollback, selection, mouse, and the pty resizes to the pane.
+- **Renders what a terminal cannot** — a pane can hold markdown with highlighted
+  code, images and mermaid diagrams instead of a grid.
+- **Rearranges by dragging**, a tab or a whole pane. Nothing is stopped by being
+  moved.
+- **Organises.** Profiles hold workspaces, workspaces hold panes, panes hold tabs.
+- **Opens terminals as the right account** — a profile carries which Claude login
+  and which github account it spawns with.
+- **Is driven from a prefix**, `C-a` then a key, tmux-style.
+- **Shows status** — idle / working / blocked / done, unread marks, context rings.
+- **Is yours to dress:** themes, skins and mascots, with a registry of each.
+- **Remembers the arrangement**, and brings it back as empty panes. Nothing is
+  respawned.
+- **Remembers what agents said.** A pane opened late is handed the history.
+- **Keeps agents alive.** The ptys live in a host process nothing owns: quit the
+  window, restart the server, close the terminal you started it from.
+- **Connects to a server rather than being one.** Run it on a box that is always
+  on and point the desktop — or the phone — at it.
+
+Still unwired: the preview proxy that lets a phone reach `localhost`. See
+[PLAN.md](./PLAN.md).
 
 ## Running it
-
-Two commands, and the split between them is the point.
 
 ```sh
 bun install
 
 bun run dev              # your agents: serves on :7717, restarts itself on save
 bun run dev:desktop      # a window onto one
+bun run start            # built, no watching
 ```
 
-`bun run dev` is the half that matters. It starts the pty host if it is not
-already running — a detached daemon on a unix socket that holds every pty — and
-then a server in front of it. Editing the server restarts it and no agent
-notices; so does `C-a B`. Closing the terminal you ran it in leaves the host, and
-your agents, exactly where they were.
+`dev` starts the pty host if it is not up — a detached daemon on a unix socket
+holding every pty — then a server in front of it. Editing the server restarts it
+and no agent notices.
 
-`bun run dev:desktop` opens a window and looks for a server. If it does not find
-one it says so and offers a box to type an address into, and it keeps looking —
-start a server and the window connects on its own. Addresses you have used are
-remembered, so the next launch goes straight there.
-
-For a built server with no watching:
+`dev:desktop` looks for a server, offers a box to type an address into if there
+is none, and keeps looking. Addresses you have used are remembered. A server that
+goes away for good drops the window back to that picker after ~10s; a restart is
+a second of silence and it sits through it.
 
 ```sh
-bun run start            # builds the web app, then serves on :7717
-```
-
-If the server goes away for good — you stopped it, or the machine it was on went
-to sleep — the window notices after about ten seconds and goes back to the
-address picker, where it starts looking again. A *restart* is not that: `C-a B`
-and editing a server file are a second or two of silence and the window sits
-through them without blinking.
-
-To see what is running, including the host, which otherwise has no face at all:
-
-```sh
-bun run status
+bun run status                   # host, server, what they hold
 bun run status http://vm:7717    # a server elsewhere
 ```
 
 **Quitting the window stops nothing.** Neither does restarting the server. The
-one thing that ends your agents is stopping the host:
+one thing that ends your agents:
 
 ```sh
-bun run kill-ptyhosts         # lists what it holds, asks, then reaps the ptys
+bun run kill-ptyhosts         # lists what it holds, asks, then reaps
 bun run kill-ptyhosts --list  # just the listing
 ```
 
-It finds hosts by their socket rather than by their name, because the host has
-no controlling terminal and macOS `pgrep -f` cannot be relied on to find it — a
-`pkill -f ptyhostd` that matches nothing looks exactly like a host that
-restarted and ignored you. By hand, the same thing is
-`kill $(lsof -t ~/.local/state/kururu/ptyhost.sock)`.
-
-Its log, when something is wrong down there, is
+It finds hosts by socket, not by name — the host has no controlling terminal and
+`pgrep -f` cannot be relied on to match it. By hand:
+`kill $(lsof -t ~/.local/state/kururu/ptyhost.sock)`. Its log is
 `~/.local/state/kururu/ptyhost.log`.
 
-### From your phone, or from another computer
+### From your phone, or another computer
 
-Same answer for both, and it is now the same mechanism: everything above the
-server is a client, and the desktop is not a privileged one. Put the server on
-your tailnet and point either at it.
+Everything above the server is a client; the desktop is not a privileged one. Put
+the server where both can reach it and point either at it. The sidebar's **phone
+button** draws two QR codes: the LAN address (faster, same Wi-Fi) and the tailnet
+one (works from a train).
 
-There is no auth in kururu and there does not need to be — it is meant to be
-reached over a tailnet, never off one. That was true when the server was always
-on `localhost`; it carries considerably more weight now that it may be on a
-machine that is always on, so: tailnet only, never a public address. Anything
-that can reach the port gets a shell in your projects.
+There is no auth. Kururu is for a tailnet or a LAN you trust and never off one —
+anything that can reach the port gets a shell in your projects.
 
 ```sh
 tailscale serve --bg --https=8443 http://127.0.0.1:7717
 ```
 
-Preview proxies get their own ports (7800 and up); serve each one you want
-reachable the same way. Kururu never runs `tailscale` for you: putting a port on
-your tailnet is your decision to make, not a side effect of opening a tab.
+Preview proxies get their own ports (7800+); serve each the same way. Kururu never
+runs `tailscale` for you.
 
 ## Layout
 
@@ -136,7 +110,7 @@ your tailnet is your decision to make, not a side effect of opening a tab.
 │ ● main    │ [claude ●][zsh][+]            ⊟ ⊞ ✕        │
 │           │ > running the tests…                        │
 │ WORKSPACES│                                             │
-│ 1 main   3│                    │                        │
+│ 1 main  ▸3│                    │                        │
 │ 2 review 1├────────────────────┴────────────────────────┤
 │           │ [zsh ●][build][+]             ⊟ ⊞ ✕        │
 │ AGENTS    │ $ git status                                │
@@ -150,104 +124,106 @@ your tailnet is your decision to make, not a side effect of opening a tab.
 ### Keys
 
 `C-a` arms the prefix for three seconds; the bar says `PREFIX` while it is armed.
-Press `C-a` twice to send it to the terminal.
+Twice sends it through.
 
 | after `C-a` | |
 |---|---|
-| `\|` `\` `%` / `-` `"` | split right / down |
+| `\|` `\` `%` `]` / `-` `"` `[` | split right / down |
 | `T` | new terminal |
 | `n` `p` | next / previous tab |
 | `D` | close tab — **ends that terminal** |
 | `,` | rename tab |
 | `x` | close pane and everything in it |
 | `h` `j` `k` `l` | focus pane left / down / up / right |
+| `M` | open the reader on the markdown next door |
 | `1`…`9` | jump to workspace |
-| `C` / `N` `P` / `z` | new workspace / next, previous / last (a toggle) |
+| `C` / `N` `P` / `z` | new workspace / next, previous / last |
 | `W` `X` | rename / delete workspace |
 | `w` `a` | find workspace / agent |
-| `s` `S` | switch / new profile |
+| `s` `S` | profiles — switch, rename, accounts / new profile |
 | `r` | resize mode — then `hjkl`, `esc` to leave |
 | `m` `b` | zen mode / toggle sidebar |
 | `g` | settings |
 | `R` `B` | reload the window / restart the server (agents keep running) |
 | `?` | these keys |
 
-These are the **defaults** — ghosttown's, key for key. Every one of them can be
-rebound under the cog (see [Settings](#settings)), and `C-a ?` prints the keymap
-you are actually using rather than this table.
+These are defaults; everything is rebindable under the cog, and `C-a ?` prints the
+keymap you are actually using. ⌘ shortcuts are a second door — `⌘D` `⇧⌘D` split,
+`⌘T` new terminal, `⇧⌘W` close pane, `⌘[` `⌘]` move focus. `⌘W` and `⌘R` stay
+Electron's.
 
-The ⌘ shortcuts still work as a second door: `⌘D` `⇧⌘D` split, `⌘T` new terminal,
-`⇧⌘W` close pane, `⌘[` `⌘]` move focus.
-
-Every tab is a terminal — there is no separate "start an agent" button, because
-that is a terminal with `claude` typed into it, and the tab says so either way
-once it is running. A new one opens where the terminal you were just in *is*,
-not where it was opened: the directory you cd'd to, read from the pty itself.
+There is no "start an agent" button: that is a terminal with `claude` typed into
+it. A new tab opens where the terminal you were just in *is*, read from the pty.
 
 ### The sidebar
 
-Workspaces are numbered because the number is the shortcut. **Double-click** one
-to rename it in place; **right-click** one for the rest — rename, colour, move it
-up or down the list, a new workspace, and delete, which ends every terminal in it
-and asks first.
+Workspaces are numbered because the number is the shortcut. Double-click to
+rename; right-click for colour, mascot, reorder, new, and delete. The colour
+swatch tags a workspace and every terminal in it gets a rule down its left in that
+colour.
 
-Under each number is a **colour swatch**. Click it to tag the workspace, and
-every terminal living in that workspace gets a rule down its left in the same
-colour — so "which of these six is the one I have the browser open for" is
-answered by glancing instead of reading. Untagged is the default and stays that
-way: a list where everything is coloured says nothing.
+The list below is **agents**, not terminals — the test is "has an agent ever been
+seen in here", so a row does not flicker out while claude is between things, and
+an exited agent stays listed with its screen and a `✕` to dismiss it. Every
+terminal is still in its tab strip, and `C-a a` finds all of them.
 
-The list below is **agents**, not terminals. A shell you opened to run `ls` in
-is not one, and with a few of those open they would be most of the list and none
-of them what you came looking for. The test is "has an agent ever been seen in
-here" rather than "is one running right now" — so a row does not flicker out
-while claude is between things, and an agent that has *exited* stays listed,
-because its screen is the only record of what it said and the ✕ on its row is
-how you dismiss it. Nothing becomes unreachable: every terminal is still in its
-tab strip, and `C-a a` still finds all of them by name.
-
-Each one takes two lines, and they are split by how often they change:
+Each row is two lines:
 
 | | |
 |---|---|
-| **top** | status — a dot, or the hopping mascot while it is working — what is running (`claude`, `codex`, a shell), which workspace it is in, and a `✕` that ends it |
+| **top** | status dot (or the hopping mascot while working), what is running, which workspace, and a `✕` that ends it |
 | **bottom** | what it is doing, and how much of its context window is gone |
 
-The top line is the one you search the list with, so nothing on it moves while
-you read. The bottom line is the one that changes. The terminal the keyboard is
-currently pointed at is ringed and brightened — with six agents open, which one
-the next keystroke belongs to is the most useful thing on the row.
+"What it is doing" is reported, never guessed — it needs
+[the hook](#telling-kururu-what-an-agent-is-doing), and shows where the agent is
+working until then.
 
-"What it is doing" is reported, never guessed: it is the prompt the agent was
-handed, or the reason it stopped to ask you something. It needs the hook below.
-Until an agent has reported, that line shows where it is working instead.
+Clicking a row reveals that terminal where it already is; dragging one moves it.
+The profile menu is at the top, the cog and phone button at the bottom.
 
-Clicking a terminal in the list shows it where it already is, without
-rearranging anything. Dragging one moves it.
+### The reader
 
-### Telling kururu what an agent is doing
+`C-a M` splits the pane and puts a document in the new half: markdown rendered —
+headings, tables, highlighted code, images, mermaid. Pressed from a reader it
+re-points that one instead of making a second. It is a pane like any other, so it
+splits, drags, stacks and moves between workspaces as a terminal does.
 
-The mark beside every terminal is its status — idle, **working**, **done**, or
-**blocked**. Three of those are a dot, because three of them mean *stopped* and
-the only question is which kind. Working is the one that is not, so it gets the
-**mascot**: a frog, hopping. A pulsing dot answers "is this one still going?"
-only if you watch it for a second, and nobody watches a sidebar — they glance at
-it, and movement is what a glance picks up. Hover any of them for the word.
+**On the desktop it follows your editor**: an nvim in a neighbouring pane and the
+reader shows whatever buffer it is on, re-rendering on write. Nothing to install —
+neovim listens on a socket named after its pid, kururu knows the pid of every pty,
+and an autocmd does the rest. **On a phone** there is no editor to follow, so it
+has a picker: the project's markdown, most recently written first.
 
-Kururu guesses that from the shape of the output over time, which is enough to
-tell "still going" from "finished", and not enough for anything else. Two things
-it cannot guess:
+Rendering happens on the **server**, so the phone is sent markup rather than a
+parser and a highlighter. Raw HTML passthrough is off, which is also the
+sanitizer.
 
-- **`blocked`.** Nothing in a byte stream distinguishes *waiting for you to
-  approve something* from *thinking hard*.
-- **How full the context window is.** That is a number the agent knows and the
-  terminal never carries.
+The strip has **⇄ / ⊙** (follow the editor, or pin the file) and **− / +** (type
+size, or `-` `+` `0` with the keyboard). The zoom is this device's and never
+reaches the server.
 
-Both arrive from the agent instead, through a hook. Point Claude Code's hooks at
-`report-cli.ts` and the guess is replaced by the agent's own account of itself —
-permanently, per agent: a process that reports once is a better source than a
-heuristic forever after. The percentage used then shows beside the ring in the
-sidebar.
+### Dev servers
+
+A workspace row grows a **▸** the first time kururu sees a dev server inside one of
+its terminals, and **↻** while one is up. Which button you see is the status.
+
+Nothing is configured: the scan notices `npm run dev` in a pty, the workspace
+remembers the line and directory, and ▸ types it again in a fresh tab. The memory
+is never cleared — a stopped server is when it is worth something. The buttons
+never type into a terminal with an agent in it, since `npm run dev` arriving at a
+waiting Claude Code is a prompt.
+
+## Telling kururu what an agent is doing
+
+Status is idle, **working**, **done** or **blocked**. Three of those mean
+*stopped*, so they are dots; working gets the hopping mascot, because a glance
+picks up movement and not a pulse.
+
+Kururu guesses from the shape of the output over time, which tells "still going"
+from "finished" and nothing else. It cannot guess **blocked** (nothing in a byte
+stream separates *waiting for you* from *thinking*) or **how full the context
+window is**. Both arrive through a hook, which replaces the guess permanently, per
+agent.
 
 In `~/.claude/settings.json`:
 
@@ -266,229 +242,230 @@ In `~/.claude/settings.json`:
 }
 ```
 
-Nothing is passed in to say *which* agent is reporting, and nothing needs to be:
-kururu spawns every pty with `KURURU_AGENT_ID` in its environment, a hook is a
-child of the agent, and a child inherits the environment. Which is also why this
-is a hook rather than something the server works out on its own — it can see that
-an agent is running in some directory, but two agents in one project would be
-indistinguishable to it, and a context percentage on the wrong agent is worse
-than none.
+Nothing says which agent is reporting and nothing needs to: every pty is spawned
+with `KURURU_AGENT_ID` and a hook is a child of the agent. Safe to install
+globally — outside kururu the variable is absent and it exits silently.
 
-It is safe to install globally. Outside kururu `KURURU_AGENT_ID` is simply
-absent, and it exits silently without touching the network.
+## Settings
 
-### Settings
+The cog, or `C-a g`. Five tabs, all server-side, in `~/.config/kururu` — so a
+change reaches a second window and the phone without being told.
 
-The cog in the bottom-left corner of the sidebar opens Settings — or `C-a g`.
-Two pages: the **mascot**, and the **keys**.
+| | |
+|---|---|
+| **Appearance** | the theme, the skin, and what a terminal is set in |
+| **Styles** | themes, skins and mascots from the registry |
+| **Profiles** | the sessions, and which accounts they open terminals as |
+| **Mascot** | what the badge does while an agent is working |
+| **Keys** | what each key does after the prefix |
 
-Both are the server's rather than the browser's, so a change reaches a second
-window and the phone without being told, and survives a restart. They live in
-`~/.config/kururu` — the config directory, not the state one the session
-arrangement is written to, because these are decisions kururu would never invent
-and must not lose.
+### Appearance
 
-#### The mascot
+A **theme** is the palette — the chrome's tokens and the terminal's sixteen ANSI
+slots in one place, since the emulator paints into a canvas CSS cannot reach. A
+**skin** is the shape: radii, line weights, the type ramp, the icon glyphs.
+Neither mentions the other, so "Catppuccin in a chunkier chrome" is a real thing
+to ask for. Every theme is drawn in itself, so the list is the preview; four
+Catppuccin flavours ship plus kururu's own green, default Mocha.
 
-**Which part of which sprite sheet the mascot is** — and you can keep several.
+Below that, the terminal's own **font and cursor**. The list is built on the device
+that draws, because over Tailscale the face has to exist on the phone. What you
+name is prepended to a stack ending in four patched Nerd Font faces, so devicons
+keep working.
 
-The list down the left is the ones you have kept, each hopping so you can tell
-them apart; click one to edit it, **+ Add** copies the one you are looking at,
-double-click a name to rename it. The **★** marks the default — what a workspace
-gets when it has not picked one of its own. It starts on the frog and is yours to
-move.
+Changing the theme never resizes a pty. Changing the skin or the font does — they
+move the cell, and a moved cell is a SIGWINCH into every agent watching.
 
-Each mascot has **two animations**: `Working` while the agent is going, `Idle`
-while it is stopped. Switch between them above the picker and drag out a run of
-cells for each; the sheet marks the other one faintly so you do not pick the same
-frames twice. Idle starts as a dot on any mascot you made before it existed —
-**Animate idle** gives it frames, **Use the dot** takes them away.
+### Styles
 
-`blocked` and `done` keep their dots on purpose. Those are the two states that
-*want you*, and in a sidebar where everything else is moving a still dot is the
-thing that stands out — which is the right way round.
+Appearance is what you are wearing; Styles is the shop. It lists what
+[`kururu-styles`](https://github.com/tonyjara/kururu-styles) offers — five IDE
+themes, three skins, five mascots cut from CC0 art, and packs that wear all three
+— with what you have and what has a newer version.
 
-Drag along a row of the sheet to take a run of cells — that is an animation. The
-sheets that ship hold idle, croak, jump, hop and shock across eight facings, and
-`assets/spritesheets/guide.png` is the labelled key to which columns are which.
-The frog hops beside the picker while you choose, at the size it will actually be
-in a row and once more big enough to see.
+**Picking is installing**, and an installed style is a **copy with its version
+pinned**, never a link: kururu has to come up with no network, and *check for
+updates* means nothing without a version to compare against. The server fetches
+the registry, never the browser; a font a skin names ships with it and is served
+from kururu's own origin.
 
-Three things you can set, and one you cannot:
+### Profiles
+
+Profiles are named sessions — a set of workspaces with their own layouts. The
+sidebar's profile name switches between them; this page renames, deletes, and
+gives them an **identity**: which accounts their terminals open as. Underneath it
+is three paths — `CLAUDE_CONFIG_DIR`, `GH_CONFIG_DIR`, `GIT_CONFIG_GLOBAL` — but
+the page offers the accounts the tools already know about, and a path appears only
+in the line underneath and behind `Custom…`.
+
+`CLAUDE_CONFIG_DIR` scopes a Claude Code login completely, so two profiles are two
+accounts signed in at once rather than a switch with global state.
+
+**Signing in is a terminal, not a dialog.** The button does the setup, then opens
+a new tab in the profile it is about and types the line you would have typed.
+
+**A profile is a pointer, never a secret** — three paths, not a free-form
+environment map, because a profile travels in every snapshot and kururu is
+reachable from the tailnet. Secrets stay in the keychain.
+
+A **workspace** can borrow another profile's accounts (right-click → **Accounts**)
+for the afternoon a repository of your own turns up in your work profile. It
+stores a pointer, so re-pointing the account follows every workspace borrowing it.
+
+The identity reaches a pty at spawn and at no other time: changing it is a
+statement about the next terminal, not the five already running.
+
+### The mascot
+
+Which part of which sprite sheet the badge is, and you can keep several. The list
+down the left is the ones you kept, each hopping; click to edit, **+ Add** copies
+the one you are looking at, double-click to rename, **★** marks the default.
+
+Each mascot has two animations — `Working` and `Idle` — and you drag out a run of
+cells for each. **Animate idle** gives idle frames, **Use the dot** takes them
+away. `blocked` and `done` keep their dots on purpose: among moving neighbours a
+still dot is what stands out, and those are the two states that want you.
 
 | | |
 |---|---|
 | **Sheet** | the frog that ships, or anything you imported |
 | **Cell** | the sheet's grid, in pixels. 32 for the ones that ship |
-| **Speed** | one loop, end to end. Per animation — idle wants to be slower |
+| **Speed** | one loop end to end, per animation — idle wants to be slower |
 | **Motion** | always, follow the system, or never |
-| *trim* | **computed.** The part of a cell the sprite is in, measured off the pixels |
+| *trim* | **computed** off the pixels, not offered |
 
-The trim is not offered because it is not a preference — you want "the part of
-the cell the sprite is actually in", and a canvas answers that off the pixels
-better than anybody types it. One box for every frame of *both* animations,
-though, never each frame's own. Within an animation: where a sprite sits in its
-cell is how a sheet draws a jump, so trimming frame by frame would land them all
-on the floor and throw the jump away. Across the two: a sitting frog is smaller
-than a jumping one, so a box each would scale them to the same badge and the frog
-would visibly change size the moment its agent stopped.
+The trim is one box across every frame of *both* animations. Per frame would land
+a jump on the floor; per animation would scale a sitting frog and a jumping one to
+the same badge, and the sprite would change size the moment its agent stopped.
 
-Setting **Motion** to *never* (or to *follow the system* on a machine with Reduce
-Motion on) puts idle back to a dot. An idle animation that cannot animate is the
-same picture as a frozen working one, so it would cost you the one distinction
-the badge is for; a still working frog is still not a dot, so that one stays.
+**Motion** at *never* (or *follow the system* with Reduce Motion on) puts idle back
+to a dot — an idle animation that cannot animate is the same picture as a frozen
+working one. Always is the default: a 16px indicator is a spinner, not sliding
+parallax.
 
-**Motion is a setting rather than a media query, and “always” is the default.**
-A 16px status indicator is in the class of a spinner, not the sliding parallax
-`prefers-reduced-motion` exists to stop, and frozen on one frame it says exactly
-as much as the dot it replaced: nothing. So the preference is offered instead of
-obeyed — which is also the only way a machine with Reduce Motion switched on
-system-wide gets to have this feature at all. Pick **Follow system** if you would
-rather it went the other way.
+The sheets that ship hold idle, croak, jump, hop and shock across eight facings;
+`assets/spritesheets/guide.png` labels the columns.
 
 #### Your own sprites
 
-**Import…** beside the sheet dropdown takes a PNG and puts it in
-`~/.config/kururu/sheets`, then selects it. Dropping a PNG in that directory
-yourself does exactly the same thing — the directory is the mechanism and the
-button is a door onto it. **Remove** appears for sheets you brought, never for
-the one that ships.
-
-Any grid of frames will do: set **Cell** to your frame size and drag out the run
-you want. A plain horizontal strip is a sheet one row tall, so that works too.
-
-**PNG, and only PNG.** The trim is measured off the alpha channel, so the format
-has to have one. Aseprite's own files are not supported and are not worth
-supporting — *File → Export Sprite Sheet* gives you a PNG laid out as exactly the
-grid this picker wants, which is one step and the thing you would export anyway.
+**Import…** takes a PNG into `~/.config/kururu/sheets` and selects it; dropping one
+in that directory does the same. Any grid of frames works — set **Cell** to your
+frame size and drag out a run. **PNG only**, because the trim is measured off the
+alpha channel; Aseprite's *Export Sprite Sheet* gives exactly this grid.
 
 An import is checked on the way in — a real PNG, under a megabyte, under a name
-that is a name — because it is a client asking the server to write a file into
-your config directory, and kururu is reachable from the tailnet. A file you put
-in the directory *yourself* is served exactly as you left it: if it turns out not
-to be a PNG it fails in the browser and the row falls back to the dot, because
-quietly substituting the frog would read as the feature being broken rather than
-as the file being wrong.
-
-A sheet left at the old `~/.config/kururu/mascot.png` is moved into the directory
-on the next start rather than being stranded beside it.
-
-They are written to `~/.config/kururu/mascot.json`. A file from the version of
-kururu that could only hold one mascot becomes the first entry in the list rather
-than being thrown away.
+that is a name — because it is a client asking the server to write into your config
+directory. A file you put there yourself is served as you left it, and falls back
+to the dot if it is not a PNG.
 
 #### A mascot per workspace
 
-Right-click a workspace in the sidebar → **Mascot…**, the same place its colour
-lives. Each option is drawn animating, because "Michi" means nothing until you
-have seen it hop.
+Right-click a workspace → **Mascot…**, where its colour lives; each option is drawn
+animating. **Default** is an option in the list rather than a way of dismissing it:
+it means the ★ moving in Settings moves this workspace too. Deleting a mascot a
+workspace used needs no clean-up.
 
-**Default** is an option in that list rather than a way of dismissing it: it is a
-choice with a consequence, namely that moving the ★ in Settings later moves this
-workspace too. Picking a specific one opts out of that.
+#### The icon is the same frog, and is not a setting
 
-Deleting a mascot a workspace was using needs no clean-up — an id that names
-nothing draws the default, which is the same answer as never having picked.
+`bun run icon` cuts the sitting pose out of the sheet and writes the `.icns`, the
+favicon and the home-screen icon. The cell is named in `tools/icon.mjs` and is
+deliberately not read from your mascot config — an app's identity should not change
+because somebody browsed a picker.
 
-#### The keys
+### The keys
 
-Every action after the prefix, with the keys that reach it. Click **+** and press
-the key you want; click a key to unbind it. Taking a key another action had is
-allowed — it says which one it came from, and the row it left is on the same
-screen — because a key means exactly one thing, while an action can have several.
+**+** captures a key, clicking a key unbinds it, and taking a key another action
+had is allowed. What is stored is the **difference** from the defaults, in
+`~/.config/kururu/keys.json`, so a key you never touched follows kururu's table as
+it changes. `1`–`9` and `C-a` itself are not up for grabs — the first are the
+workspace jumps, the second is what you need to fix a keyboard you have broken.
 
-What is stored is the **difference** from the defaults, in
-`~/.config/kururu/keys.json`. So a key you never touched follows kururu's table
-as it changes, and an action added in a later version arrives with its key
-working rather than unbound. **Reset to defaults** deletes the differences.
+## On a phone
 
-Two keys are not up for grabs. `1`–`9` jump to workspaces by number, and a
-binding there would take one out of reach with nothing on screen to say where it
-went. And **ctrl+a itself** stays ctrl+a, because it is what you need in order to
-fix a keyboard you have broken — as is the cog, which is a mouse away whatever
-you have done to the keys.
+Same URL, same components; what changes is the width.
 
-The help overlay (`C-a ?`) prints your keymap rather than a list beside it, so it
-cannot end up documenting a key you moved.
+- **One pane at a time.** A narrow window draws the focused pane and says so to
+  the server, so it does not hold a desktop watching the same agents down to a
+  quarter of a phone screen.
+- **The sidebar is a sheet**, and going narrow closes it.
+- **A row of the keys a soft keyboard lacks**: escape, tab, control, arrows, `^C`,
+  `^D`, `^L`, `^R`, shell punctuation, `C-a`. It sends a `KeyboardEvent` rather
+  than bytes, so an arrow is `\e[A` or `\eOA` depending on what the program asked
+  for.
 
-### Selecting text out of an agent
+The phone is for watching and steering, not for writing code.
 
-Hold **⌥ (option)** and drag. Agents turn on every mouse mode there is, so from
-then on a plain drag is an escape sequence sent to the agent rather than a
-selection — option is what says "this one is mine".
+## Odds and ends
 
-### Dropping a file in
+**Selecting text.** Hold **⌥** and drag. Agents turn on every mouse mode there is,
+so a plain drag is an escape sequence; option says "this one is mine".
 
-Drag a file from the Finder onto a terminal and its path is typed in, escaped,
-with a space after it — what every terminal has done for thirty years, and how
-you hand a screenshot to an agent that only takes text. It goes to the pane you
-dropped on, not the focused one.
+**Dropping a file in.** Drag it onto a terminal and the path is typed in, escaped,
+with a space after — how you hand a screenshot to an agent that only takes text.
+It goes to the pane you dropped on. Dropped anywhere else it does nothing: a web
+page's default answer is to navigate to the file, and this page is the whole app.
 
-A file dropped anywhere else does nothing, deliberately: a web page's default
-answer to a dropped file is to navigate to it, and this page is the whole
-application.
-
-### When a terminal does something inexplicable
-
-Kururu keeps the last 128KB of each open terminal's raw stream, interleaved with
-what it did to that terminal — every resize, every time a pane opened it, every
-backlog it replayed. Ordering is what most terminal bugs turn out to be about,
-and a screenshot shows what was drawn rather than what was said.
+**When a terminal misbehaves.** Kururu keeps the last 128KB of each open
+terminal's raw stream interleaved with what it did to that terminal — every
+resize, pane open and backlog replayed — because most terminal bugs are about
+ordering, and a screenshot shows what was drawn rather than what was said.
 
 ```sh
 curl 'http://127.0.0.1:7717/api/record?agent=a7&tail=40'     # the last 40 entries
 curl 'http://127.0.0.1:7717/api/record?agent=a7' > tape.txt  # all of it
 ```
 
-Escape sequences come out spelled (`\e[?1049h`), so printing one cannot repaint
-the screen you are reading it on. It records only terminals that are open in a
-pane, it is forgotten when the server restarts, and `KURURU_RECORD=0` turns it
-off.
+Sequences come out spelled (`\e[?1049h`), so printing the tape cannot repaint the
+screen you read it on. Forgotten on restart; `KURURU_RECORD=0` turns it off.
 
-### Dragging
+## Dragging
 
-Grab a **tab** to move one terminal. Grab the **tab strip itself** — the bit
-beside the tabs, which is the pane's title bar — to move the whole pane.
+Grab a **tab** to move one terminal, or the **tab strip** — the pane's title bar —
+to move the whole pane.
 
 | drag | drop on | what happens |
 |---|---|---|
 | a tab | its own strip | reorders |
 | a tab | another pane's strip | moves there, at the position you dropped it |
 | a tab | the middle of a pane | joins that pane |
-| a tab | a pane's left / right / top / bottom quarter | splits it that way, tab in the new half |
+| a tab | a pane's left / right / top / bottom quarter | splits it that way |
 | a tab, or an agent from the sidebar | a workspace row | moves to that workspace |
 | **a pane** | the middle of another pane | **the two swap places**, contents and all |
 | **a pane** | another pane's edge | moves to that side of it |
 | **a pane** | another pane's tab strip | pours its tabs in and disappears |
 | a workspace row | another workspace row | reorders the list |
 
-So: two agents on the left, a terminal on the right — grab the left pane's strip,
-drop it on the right pane, and they trade places. Dropping it on the right pane's
-*right* edge does the same thing the long way round, and neither one nests the
-tree deeper than it was.
+Neither swap nor move nests the tree deeper than it was. A pane you drag the last
+tab out of closes itself; one you split and left empty on purpose stays.
 
-A pane you drag the last tab out of closes itself. A pane you split and left
-empty on purpose stays. Moving a terminal never stops it.
-
-`⌘W` and `⌘R` are left to Electron on purpose: `⌘W` closes the window, which is
-the gesture that shuts it while the agents keep working.
-
-**View** has both reloads, because they are not two strengths of the same thing.
-`⌘R` **Reload Window** redraws the UI from the same server. `⇧⌘R` **Restart
-Server** throws the server process away and forks a new one, which is how a
-change to the protocol, the layout or the discovery gets picked up. The agents
-are in neither — they live in the pty host, one process over, and watch both
-happen without noticing.
+`⌘R` **Reload Window** redraws the UI from the same server; `⇧⌘R` **Restart
+Server** forks a new server process, which is how a change to the protocol, the
+layout or the discovery is picked up. The agents are in neither.
 
 ## Shape
 
+Three processes, and the window is the least important.
+
 ```
-shared/     protocol types: the model, the split tree, the browser↔server wire
-server/     Node. Agent host (ptys + emulators), the arrangement and its
-            snapshot, dev-server discovery, preview proxy, file API.
-            Runs inside the app, not beside it.
-web/        React + Vite. Draws the server's layout; owns the keymap
-desktop/    Electron main + preload, and the esbuild step for the server
+pty host    holds every pty and an emulator beside each. Outlives everything;
+            restarting IT is the only thing that ends an agent
+server      the protocol, the layout, the discovery, the renderers. Restarted
+            constantly and freely; reconnects to the host over a unix socket
+window      finds a server and draws it — exactly as the phone does
 ```
 
-See [PLAN.md](./PLAN.md) for why it is arranged this way.
+```
+shared/     protocol types: the model, the split tree, the wire, the keymap,
+            the themes and the skins. No runtime deps; imported by everything
+server/     Node. The pty host and its daemon, the arrangement and its snapshot,
+            markdown and highlighting, the styles registry, identities,
+            dev-server discovery, the preview proxy, the file API
+web/        React + Vite. Draws the server's layout; owns no state worth keeping
+desktop/    Electron main + preload, the address picker, the esbuild step for
+            the server, and the branding stamped into the dev shell
+assets/     the sprite sheets, served at runtime
+tools/      run by hand, outputs committed. The icon generator lives here
+```
+
+See [PLAN.md](./PLAN.md) for why it is arranged this way, and
+[CLAUDE.md](./CLAUDE.md) for what will bite you if you work on it.

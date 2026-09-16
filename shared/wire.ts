@@ -36,6 +36,7 @@
 import type { Direction } from "./layout";
 import type { Action } from "./keys";
 import type { MascotConfig, ProfileIdentity, PtyKind, SessionSnapshot } from "./model";
+import type { NotifyEvent, NotifySettings } from "./notify";
 import type { TerminalAppearance } from "./theme";
 
 /**
@@ -136,6 +137,26 @@ export interface DevServer {
   proxyPort?: number;
 }
 
+/**
+ * One notification, composed by the server and ready to draw.
+ *
+ * The text is composed *there* and not here, and it is worth saying why, since
+ * the client has a snapshot and could do it itself. It could not: the snapshot
+ * holds the active profile's agents only, and the notifications worth having are
+ * mostly from the profile you are not looking at. `notifyText` in
+ * `shared/notify.ts` is what writes these two strings.
+ */
+export interface Notification {
+  /** Where clicking it goes. See `reveal-agent`. */
+  agentId: string;
+  /** Which transition raised it, so the client can tell two cards apart. */
+  event: NotifyEvent;
+  /** The headline: which terminal, and what changed. */
+  title: string;
+  /** What it wants, then where it is. Empty when there is nothing to add. */
+  body: string;
+}
+
 export type ServerMessage =
   /** Sent on connect and whenever anything about any agent changes. Complete, never a delta. */
   | { type: "snapshot"; snapshot: SessionSnapshot }
@@ -185,6 +206,27 @@ export type ServerMessage =
    * second `grid` follows it.
    */
   | { type: "backlog"; agentId: string; data: string; cols: number; rows: number }
+  /**
+   * Something wants a human, and this client is one of the ones that should be
+   * told.
+   *
+   * The only message here that is not about state. Everything else says what
+   * *is* — and a notification is an event: it happens once, it is stale a
+   * heartbeat later, and a client that reconnects and finds it has missed one
+   * has missed nothing worth resending. Which is exactly why it cannot be a
+   * field on the snapshot: the snapshot goes out several times a second and is
+   * complete, so an agent that finished would keep on having finished, and the
+   * card would be raised again on every tick for as long as the status held.
+   *
+   * Addressed rather than broadcast, and that is the other half. The gate in
+   * `shared/notify.ts` asks whether *this* client has the terminal on screen,
+   * which is a different answer for the desktop showing it and the phone in
+   * your pocket — the same reason `watch` carries what a client can see rather
+   * than the server assuming one answer for everybody. Everything has already
+   * been decided by the time this is sent: the client plays the sound and draws
+   * the card, and applies no policy of its own.
+   */
+  | { type: "notify"; notification: Notification }
   /** Answer to any client message carrying an `id`. */
   | { type: "reply"; id: number; ok: true; result: unknown }
   | { type: "reply"; id: number; ok: false; error: string };
@@ -216,6 +258,15 @@ export type ClientMessage =
   | { type: "split-with"; agentId: string; paneId: string; dir: "row" | "col"; before: boolean }
   /** Dropped on a workspace in the sidebar: send it there, to whatever has focus. */
   | { type: "move-tab-to-workspace"; agentId: string; workspaceId: string }
+  /**
+   * Dropped on another row of the sidebar's agent list: put this terminal above
+   * that one, or at the end when `beforeAgentId` is null.
+   *
+   * It rearranges the *list* and nothing else — the terminal stays in the pane
+   * and the workspace it was in, which the row it is drawn in goes on saying.
+   * The two verbs above are the ones that move it.
+   */
+  | { type: "reorder-agent"; agentId: string; beforeAgentId: string | null }
   /** Name a tab. An empty name hands it back to what it would be called anyway. */
   | { type: "rename-tab"; agentId: string; name: string }
   /**
@@ -419,6 +470,24 @@ export type ClientMessage =
    */
   | { type: "restart-server" }
 
+  /**
+   * Go to that terminal, wherever it is: switch profile, switch workspace, focus
+   * the pane, select the tab.
+   *
+   * Sent by a click on a notification, and it is one verb rather than the four
+   * the client could have sent instead. Four would have to be sent in order,
+   * against a layout the sender is by definition not looking at — the whole
+   * point of the card is that the agent is somewhere else — and any of them
+   * arriving after the tree has moved would land somewhere nobody asked for. The
+   * server is holding the arrangement and can do all four against one state,
+   * which is the same argument every other verb in here makes.
+   *
+   * It is deliberately not restricted to the profile this client is in. That is
+   * the feature: an agent blocked in the profile you left is exactly the one you
+   * cannot see and most need taking to.
+   */
+  | { type: "reveal-agent"; agentId: string }
+
   /** Open a proxy for this dev server so a phone can reach it. */
   | { type: "open-preview"; port: number }
 
@@ -546,7 +615,21 @@ export type ClientMessage =
    * what every pty watching gets resized to — so a number typed too large is a
    * SIGWINCH into a shape no box has, and `adoptAppearance` clamps it.
    */
-  | { type: "set-terminal-appearance"; terminal: TerminalAppearance };
+  | { type: "set-terminal-appearance"; terminal: TerminalAppearance }
+
+  /**
+   * When kururu may interrupt you, and what it sounds like — all five fields at
+   * once, on `set-terminal-appearance`'s reasoning: they are one decision and
+   * they are edited on one page.
+   *
+   * A verb like the rest, so the choice reaches the phone as well as the window
+   * that made it. The *sound* is the interesting one to think about here: what
+   * travels is an id, and the id is resolved against `/System/Library/Sounds` on
+   * the machine running the server. A phone has never heard of that directory
+   * and gets the sound anyway, because it fetches the bytes from `/api/sound`
+   * like it fetches everything else.
+   */
+  | { type: "set-notify"; notify: NotifySettings };
 
 /**
  * How often the status heuristic is asked to notice that work has stopped.

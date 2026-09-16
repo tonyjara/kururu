@@ -21,28 +21,27 @@
  * document is the one place that cannot be out of date with what is on screen —
  * a copy kept here would be a second answer to "which theme is on", and the
  * moment it disagreed the tags would be from the theme before last.
+ *
+ * Which is why this is now a `var()` and not a lookup at all. It used to find
+ * the theme again from `data-theme` and read its `workspace` block, and that
+ * broke the day a theme could be *installed*: the id on the element then names
+ * something `shared/theme.ts` has never heard of, `themeFor` falls back, and the
+ * tags come out in eight plausible colours from the default palette — wrong, and
+ * wrong in the way nobody reports. `applyTheme` writes the eight onto the root
+ * instead, so a tag follows the cascade and there is nothing left here that
+ * could disagree with what is on screen.
  */
 import type { WorkspaceColor } from "../../shared/model";
-import { themeFor } from "../../shared/theme";
-
-/**
- * The palette the window is currently wearing.
- *
- * `data-theme` is stamped on `<html>` by `applyTheme`, so this is the same
- * answer the CSS is cascading — and `themeFor` falls back rather than refusing,
- * which covers the frame before the first snapshot has landed and stamped
- * anything at all.
- */
-function palette(): Record<WorkspaceColor, string> {
-  return themeFor(document.documentElement.dataset.theme).workspace;
-}
+import { WORKSPACE_COLORS } from "../../shared/model";
 
 /** Every tag colour, for the picker that shows all eight at once. */
 export function colorValues(): Record<WorkspaceColor, string> {
-  return palette();
+  const out = {} as Record<WorkspaceColor, string>;
+  for (const name of WORKSPACE_COLORS) out[name] = `var(--ws-${name})`;
+  return out;
 }
 
 /** The CSS value for a tag, or null for an untagged workspace. */
 export function colorValue(color: WorkspaceColor | null | undefined): string | null {
-  return color ? palette()[color] : null;
+  return color ? `var(--ws-${color})` : null;
 }

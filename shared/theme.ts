@@ -33,7 +33,7 @@
  * are a different kind of decision and survive changing your mind about colour.
  * Nobody picks Macchiato and means "and 14px".
  */
-import { DEFAULT_SKIN_ID, skinFor } from "./skin";
+import { DEFAULT_SKIN_ID, isStyleId } from "./skin";
 
 
 /**
@@ -514,6 +514,14 @@ export const THEMES: readonly Theme[] = [
 export const DEFAULT_THEME_ID = "catppuccin-mocha";
 
 /**
+ * Every theme there is *here*, plus whatever has been installed. `allSkins`'s
+ * shape, for `allSkins`'s reasons, including the ordering.
+ */
+export function allThemes(extra: readonly Theme[] = []): readonly Theme[] {
+  return extra.length === 0 ? THEMES : [...extra, ...THEMES];
+}
+
+/**
  * The theme for an id, falling back rather than refusing.
  *
  * An id naming nothing is what a downgrade looks like — a config written by a
@@ -521,9 +529,16 @@ export const DEFAULT_THEME_ID = "catppuccin-mocha";
  * the default, drawn, rather than a window with no colours in it. It is the same
  * call `mascotFor` makes about a deleted mascot, for the same reason: the
  * fallback *is* the answer, so there is nothing a check would buy.
+ *
+ * `extra` is the themes this server has installed from the registry. It is a
+ * parameter rather than something this module reaches for, because `shared/` is
+ * imported by both halves and neither of them may hold mutable state the other
+ * cannot see: the server reads the installed set off disk, the client reads it
+ * out of the snapshot, and this function is told.
  */
-export function themeFor(id: string | null | undefined): Theme {
-  return THEMES.find((t) => t.id === id) ?? THEMES.find((t) => t.id === DEFAULT_THEME_ID) ?? THEMES[0]!;
+export function themeFor(id: string | null | undefined, extra: readonly Theme[] = []): Theme {
+  const all = allThemes(extra);
+  return all.find((t) => t.id === id) ?? all.find((t) => t.id === DEFAULT_THEME_ID) ?? all[0]!;
 }
 
 // ---------------------------------------------------------------------------
@@ -625,15 +640,25 @@ export const DEFAULT_APPEARANCE: Appearance = {
  * `fontFamily` is the one free string, and it ends up in a CSS `font-family`,
  * so it is stripped of the two characters that could end the declaration and
  * start another. It is not a name from a list because the list is the fonts on
- * somebody's machine and the server has no way to know them.
+ * somebody's machine and the server has no way to know them — the client
+ * enumerates them and offers a dropdown, which is a different question from what
+ * is *valid*, and this is the one that has to hold for a hand-edited file.
+ *
+ * The two ids are checked for being ids and otherwise left alone, which is a
+ * change the registry forced and an improvement on its own terms. They used to
+ * be resolved here — run through `themeFor` and written back as whatever this
+ * version could draw — and that is exactly wrong once a theme can be installed
+ * and removed: uninstalling one would rewrite the choice to the default, and
+ * reinstalling it would not bring the choice back. Resolution belongs at the
+ * moment of drawing, where the fallback is a frame long rather than permanent.
  */
 export function adoptAppearance(value: unknown): Appearance {
   const raw = (value ?? {}) as { themeId?: unknown; skinId?: unknown; terminal?: unknown };
   const term = (raw.terminal ?? {}) as Partial<Record<keyof TerminalAppearance, unknown>>;
   const d = DEFAULT_APPEARANCE.terminal;
   return {
-    themeId: themeFor(typeof raw.themeId === "string" ? raw.themeId : null).id,
-    skinId: skinFor(typeof raw.skinId === "string" ? raw.skinId : null).id,
+    themeId: isStyleId(raw.themeId) ? raw.themeId : DEFAULT_THEME_ID,
+    skinId: isStyleId(raw.skinId) ? raw.skinId : DEFAULT_SKIN_ID,
     terminal: {
       fontFamily: adoptFontFamily(term.fontFamily),
       fontSize: clampFontSize(term.fontSize),

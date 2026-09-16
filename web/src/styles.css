@@ -156,23 +156,16 @@
    a way to draw an icon without a component, and a layer to put an effect on.
    -------------------------------------------------------------------------- */
 
-/* Press Start 2P, SIL Open Font License 1.1, latin subset — see
-   `web/public/fonts/OFL.txt`. Served from kururu's own origin rather than linked
-   to Google, because a window that fetches a font from a third party tells that
-   third party when somebody is working, and a skin is not worth that. The same
-   rule will apply to faces that arrive with a registry skin: installed locally,
-   served locally, never a URL somebody else controls. */
-@font-face {
-  font-family: "Press Start 2P";
-  font-style: normal;
-  font-weight: 400;
-  /* `block` rather than `swap`: this face is half the size of the sans at the
-     same px, so swapping it in late would reflow every pane and hand every pty
-     a SIGWINCH a second after the window settled. A brief blank label is much
-     cheaper than that, and at 4.7KB the block is barely perceptible. */
-  font-display: block;
-  src: url("/fonts/press-start-2p-latin.woff2") format("woff2");
-}
+/* No `@font-face` lives here any more, and the absence is the design rather
+   than a gap. A face belongs to a *skin*, skins now arrive from
+   `../kururu-styles`, and a rule written in this file could only ever name a
+   font that shipped with kururu — so `web/src/skin.ts` writes the `@font-face`
+   at runtime from what the installed skin declares, pointing at
+   `/api/styles/asset`, which is kururu's own origin. That last part is the one
+   thing that does not bend: a window that fetches a face from a third party
+   tells that third party when its owner is working, so an installed style's
+   assets are files on this machine and a manifest that names a URL is refused
+   at install time. */
 
 /* An icon is a custom property and a pseudo-element, never a component — see
    the header of `web/src/skin.ts`. `::before` rather than the span's own text so
@@ -671,8 +664,35 @@ kbd {
   background: var(--chrome-high);
   box-shadow: inset 0 0 0 var(--border) color-mix(in srgb, var(--accent) 38%, transparent);
 }
-.agent-item-on .agent-name {
+.agent-item-on .agent-ws {
   color: var(--text);
+}
+
+/* Where a dragged row would land. A line between two rows rather than a glow on
+   one, for the reason the tab strip draws one: a reorder does not go *into*
+   anything, it goes between two things. It is a pseudo-element on the row and
+   not an element between rows, because a real one would be a row of its own and
+   every row below it would step down under the pointer while you were aiming. */
+.agent-over::before,
+.agent-under::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--border-thick);
+  border-radius: var(--radius-xs);
+  background: var(--accent);
+  z-index: 1;
+}
+/* Inside the row rather than in the gap above it, because there is no gap — the
+   rows are flush — and because the list scrolls: a line hung two pixels above
+   the first row is a line the scroll container clips, which is exactly the drop
+   that puts something at the top. */
+.agent-over::before {
+  top: 0;
+}
+.agent-under::after {
+  bottom: 0;
 }
 
 .agent-row {
@@ -696,12 +716,23 @@ kbd {
   min-width: 0;
 }
 
+/* A terminal that has exited, said twice and quietly. The strike is on the
+   program rather than on the workspace beside it: the terminal is the thing that
+   ended, and a line through a workspace name would read as the workspace having
+   gone. The workspace fades instead. */
 .agent-row-exited .agent-name {
-  color: var(--dimmer);
   text-decoration: line-through;
 }
+.agent-row-exited .agent-ws {
+  color: var(--dimmer);
+}
 
-.agent-name {
+/* Which workspace it is in, which is what the row is found by: the list spans a
+   whole profile and several rows of it are running the same program, so the
+   program name is the word that says least about which row this is. It gets the
+   line's slack and ellipsizes, because a workspace is named by a person and can
+   be named anything. */
+.agent-ws {
   font-family: var(--mono);
   font-size: var(--fs-md);
   color: var(--dim);
@@ -710,8 +741,10 @@ kbd {
   text-overflow: ellipsis;
 }
 
-/* Which workspace it is in, pushed right and kept clear of the ✕ above it. */
-.agent-ws {
+/* And what is running in it, pushed right and kept clear of the ✕ above it. Read
+   once you have found the row rather than the thing you find it by, so it is the
+   smaller, dimmer half of the pair. */
+.agent-name {
   margin-left: auto;
   padding-right: 16px;
   font-size: var(--fs-sm);
@@ -1237,8 +1270,8 @@ kbd {
      separates a pane from the window now is *ground* — `.panes` is the darker
      `--chrome` well and the pane is `--bg` on it, which is the same distinction
      made with a step in tone instead of a line. A skin that genuinely wants a
-     frame still gets one, because that is what this token is; the 8-bit skin's
-     inset is untouched. */
+     frame still gets one, because that is what this token is, and the inset a
+     registry skin asks for lands here untouched. */
   box-shadow: var(--frame);
   overflow: hidden;
 }
@@ -2254,6 +2287,41 @@ kbd {
 .set-check input {
   accent-color: var(--accent);
 }
+/* A checkbox that is a row of the form rather than a control tucked beside
+   another one. `.set-check` alone is the second kind — the `Blink` box sitting
+   next to the cursor select — so the spacing is here rather than on the base
+   class, which would push those two apart. */
+.set-check-row {
+  margin: 5px 0;
+}
+/* The explanation after a checkbox's label, on the same line while there is
+   room for it. `.set-note` is a block elsewhere; this is the one place it is a
+   fragment of a sentence somebody is already reading. */
+.set-note-inline {
+  display: inline;
+}
+
+/* A group of controls that turns off with the switch above it.
+   `<fieldset disabled>` is what actually disables them — this only undoes the
+   browser's default frame and says so visibly, because a form that dims without
+   explanation reads as broken rather than as switched off. */
+.set-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.set-fieldset:disabled {
+  opacity: 0.5;
+}
+
+/* A button sitting inside a paragraph of explanation, which is where the one
+   thing on the Notifications page that is not a setting lives: asking the
+   browser for permission is a gesture, not a value, and it belongs in the
+   sentence that says why it is needed. */
+.set-button-inline {
+  vertical-align: baseline;
+}
 
 /* A page inside the dialog body, and the sections it stacks. Only Appearance
    has more than one subject on it; the other two tabs are one thing each and
@@ -3169,7 +3237,16 @@ kbd {
 
 /* The one place in kururu that is a document rather than a grid, so it is the
    one place with a measure, a line height meant for prose, and a scrollbar of
-   its own. Everything else in a pane is sized by the terminal inside it. */
+   its own. Everything else in a pane is sized by the terminal inside it.
+
+   And the one place with a zoom. It is the skin's step *multiplied*, never a
+   size of its own: a skin is entitled to move `--fs-lg` — Teletype from the
+   registry sets it to 12px where the default sets 13 — and a reader that named
+   a px would be a zoom that quietly undid whichever skin was on. `web/src/zoom.ts`
+   writes the multiplier onto the root element and says why it is per device;
+   the fallback here is what a window paints with before that module has run.
+   Every size below this one is an `em` or a `ch` off it, so the headings, the
+   code, the measure and the quotes all move together. */
 .reader {
   flex: 1;
   min-width: 0;
@@ -3178,7 +3255,7 @@ kbd {
   background: var(--bg);
   color: var(--text);
   font-family: var(--ui);
-  font-size: var(--fs-lg);
+  font-size: calc(var(--fs-lg) * var(--reader-zoom, 1));
   line-height: 1.65;
 }
 
@@ -3431,9 +3508,14 @@ kbd {
   padding: 0.1em 0.35em;
 }
 
+/* Relative rather than `--fs-md`, which is what it was: a fenced block sized
+   off the skin's ramp directly is the one thing in this document that would sit
+   still while the prose around it zoomed, and a README read at 175% with 12px of
+   code in the middle of it is worse than either size on its own. The ratio is
+   the default skin's own — 12 over 13 — so nothing moves at 100%. */
 .md pre {
   font-family: var(--mono);
-  font-size: var(--fs-md);
+  font-size: 0.92em;
   line-height: 1.5;
   border: var(--border) var(--border-style) var(--line);
   border-radius: var(--radius-md);
@@ -3529,6 +3611,35 @@ kbd {
 .tab-reader {
   cursor: default;
   font-style: italic;
+}
+
+/* The way back from a zoom, and it is drawn only while there is one to come back
+   from. A percentage that said 100% all day would be a readout with nothing to
+   report sitting in the corner of the one pane that is meant to be a page, and
+   the strip on a phone has no room to spend on it. Tabular figures because it is
+   next to a button and 90% must not be narrower than 100%. */
+.reader-zoom {
+  flex: none;
+  padding: 0 2px;
+  line-height: 1;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+  cursor: pointer;
+}
+.reader-zoom:hover {
+  color: var(--text);
+}
+
+/* An end of the ladder. Dimmed rather than removed, because a button that
+   vanished at the last step would move the other one out from under the finger
+   that was pressing it. */
+.pane-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.pane-btn:disabled:hover {
+  color: var(--dimmer);
 }
 
 /* --------------------------------------------------------------------------
@@ -3668,4 +3779,255 @@ kbd {
 .sb-keys:hover {
   color: var(--text);
   background: var(--chrome-high);
+}
+
+/* --------------------------------------------------------------------------
+   The styles registry
+
+   Settings → Styles, which is a list of things that are not installed yet.
+   Every card here is drawn *as itself* — a theme in its colours, a skin in its
+   shape, a mascot moving — for the reason the theme list next door already
+   gives: a row of names makes you install one to find out what it is.
+
+   Two of these cards are the only place in the stylesheet that deliberately
+   leaves a property unset. A skin card takes its radius, its border weight and
+   its face from inline values the entry supplies, because a card in the *current*
+   skin would describe the one you already have; a theme card takes its colours
+   the same way. So the rules below set everything except the thing being
+   previewed, which is the inverse of how the rest of this file works and is why
+   they are gathered here rather than grown onto `.set-*`.
+   -------------------------------------------------------------------------- */
+
+/* A note and a button on one line, where the note is prose rather than a label.
+   `.set-row` alone would stretch the button to half the width, because `.button`
+   is `flex: 1` for the dialog footer it was written for. */
+.set-row-split {
+  align-items: flex-start;
+  gap: 12px;
+}
+.set-note-flush {
+  margin: 0;
+  flex: 1;
+}
+.style-refresh,
+.set-row-split .button {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* A path, a file name, a repository — a fragment of terminal sitting in prose.
+   `--mono` and not `--ui` on purpose: see the note beside the token. */
+.set-mono {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text);
+}
+
+/* Something did not work and the list is still usable. Not `--danger-bg`: this
+   is a sentence, not a destructive control, and a filled red bar over a list of
+   themes reads as far more broken than it is. */
+.set-warn {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--chrome-high);
+  border-left: var(--border-thick) var(--border-style) var(--blocked);
+  color: var(--dim);
+  font-size: var(--fs-sm);
+}
+
+/* The font list, which holds names far longer than a cursor style does. */
+.set-select-wide {
+  flex: 1;
+  min-width: 0;
+}
+
+.style-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+.style-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: var(--radius-lg);
+  border: var(--border) var(--border-style) var(--line);
+  background: var(--chrome);
+}
+/* Installed rows are the ones you are most likely to be looking for when you
+   come back, so they are lifted rather than dimmed. */
+.style-row-have {
+  border-color: var(--line-high);
+  background: var(--chrome-high);
+}
+.style-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+.style-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.style-version {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--dimmer);
+}
+.style-desc {
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.style-meta {
+  font-size: var(--fs-xs);
+  color: var(--dimmer);
+}
+.style-link {
+  color: var(--dim);
+  text-decoration: none;
+}
+.style-link:hover {
+  color: var(--accent);
+}
+.style-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.style-button {
+  flex: none;
+  white-space: nowrap;
+}
+.style-state {
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  white-space: nowrap;
+}
+.style-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-md);
+  color: var(--dimmer);
+  flex: none;
+}
+.style-remove:hover {
+  color: var(--danger);
+  background: var(--bg);
+}
+
+/* Every preview sits in the same box, whatever it is a preview of, so that the
+   rows line up and the eye can run down the list rather than around it. */
+.style-shot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 36px;
+  flex: none;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  color: var(--dim);
+}
+
+/* The colours come inline from the entry. What is here is the arrangement: a
+   strip of chrome along the top and the four marks you actually look at all day
+   — the accent, and the three that say an agent wants you. */
+.style-shot-theme {
+  position: relative;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 0;
+  border: var(--border) var(--border-style) var(--line);
+}
+.style-shot-chrome {
+  height: 10px;
+  flex: none;
+}
+.style-shot-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  flex: 1;
+}
+.style-shot-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-round);
+}
+
+/* The shape comes inline. This is a little pane wearing the skin's own frame
+   recipe, which is the one thing a label genuinely cannot tell you. */
+.style-shot-skin {
+  border-color: var(--line-high);
+  background: var(--bg);
+  color: var(--dim);
+}
+
+/* Bigger than a sidebar badge, because the whole question here is what the
+   animation looks like and 16px answers it badly. `--status-size` is the one
+   number the mascot's geometry is expressed in, so setting it is the whole of
+   scaling it — see the arithmetic in Status.tsx. */
+.style-shot-mascot {
+  --status-size: 30px;
+  /* `.mascot` is `position: absolute`, and everywhere else in the window it sits
+     inside `.status`, which is relative and clips it. Here there was no
+     positioned ancestor at all, so its containing block became the *viewport*
+     and every preview in the list piled up in the top-left corner of the app,
+     unclipped, animating over the tab strip. `overflow: hidden` on this element
+     did nothing about it, because overflow does not clip a descendant whose
+     containing block is outside the element. */
+  background: var(--bg);
+  border: var(--border) var(--border-style) var(--line);
+}
+/* One cell of the strip, and the containing block for it. `.mascot` is
+   `position: absolute`, and everywhere else in the window it sits inside
+   `.status`, which is relative and clips it to exactly one frame. Without a
+   positioned ancestor here its containing block became the *viewport*, so every
+   preview in the list piled up in the top-left corner of the app, unclipped,
+   animating over the tab strip — and `overflow: hidden` on the box above did
+   nothing about it, because overflow does not clip a descendant whose
+   containing block is outside the element. */
+.style-shot-cell {
+  position: relative;
+  width: var(--status-size);
+  height: var(--status-size);
+  overflow: hidden;
+}
+
+/* A pack is three names and no picture of its own, on purpose: it *is* a
+   reference to three other rows, and inventing a composite thumbnail would be
+   drawing something that does not exist. */
+.style-shot-pack {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 4px;
+  border: var(--border) var(--border-style) var(--line);
+  background: var(--bg);
+  font-size: var(--fs-xs);
+  line-height: 1.1;
+  color: var(--dimmer);
+}
+.style-shot-part {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
