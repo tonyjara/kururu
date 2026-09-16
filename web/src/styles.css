@@ -82,10 +82,10 @@
      a step that is not here, add it to `SkinTokens` and let every skin answer
      for it; do not reach for a px. */
   --radius-xs: 2px;
-  --radius-sm: 3px;
-  --radius-md: 5px;
-  --radius-lg: 6px;
-  --radius-xl: 8px;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 5px;
   --radius-round: 50%;
 
   --border: 1px;
@@ -111,6 +111,30 @@
 
   --overlay: none;
   --overlay-opacity: 1;
+
+  /* The window's bottom edge, read twice.
+     The status bar and the corner of the sidebar the cog sits in are the same
+     line of the window, and until now they were two heights that happened to be
+     near each other — the foot was as tall as a cog plus its padding, the bar as
+     tall as whatever was in it, and the step between them was visible exactly
+     where the two meet. One number, so they cannot drift. It is a minimum
+     rather than a height, because the status bar also has to grow for the home
+     indicator's inset and a skin is allowed a taller type ramp.
+
+     Not a skin token: every skin wants its chrome to have one bottom edge, so
+     there is nothing here for a skin to disagree about, and a token every skin
+     had to answer for to give the same answer is a token that rots. */
+  --bar-h: 38px;
+
+  /* The tab strip's ground: one step between the well the panes sit on and the
+     terminal inside them, so the strip is separable from both without a rule
+     under it. Derived from two theme tokens rather than being a third, so it
+     follows a palette that has never heard of it — which is also why it is not
+     something a theme fills in. It is here rather than written out at each of
+     the three rules that want it (the strip, the sticky block of pane controls,
+     and the gradient in front of that block) because those three have to agree
+     or the controls stop looking like part of the strip. */
+  --strip: color-mix(in srgb, var(--chrome) 60%, var(--bg));
 
   --icon-close: "✕";
   --icon-run: "▸";
@@ -305,7 +329,6 @@ kbd {
   display: flex;
   flex-direction: column;
   background: var(--chrome);
-  border-right: var(--border) var(--border-style) var(--line);
   min-height: 0;
 }
 
@@ -567,7 +590,7 @@ kbd {
   line-height: 13px;
   letter-spacing: 0.02em;
   color: var(--dim);
-  box-shadow: inset 0 0 0 var(--border) var(--line);
+  box-shadow: inset 0 0 0 var(--border) var(--chrome-high);
   max-width: 64px;
   white-space: nowrap;
   overflow: hidden;
@@ -788,11 +811,29 @@ kbd {
    Where those cells are and how big they are is set per element in Status.tsx,
    because all of it comes from the selection the user made and this file has
    never seen it. `pixelated` because the sheets are pixel art and the browser's
-   default smoothing turns a 21px frog into a smudge. */
+   default smoothing turns a 21px frog into a smudge.
+
+   The lift is the other half, and it is why a dot and a sprite are not aligned
+   the same way: a dot is centred on the line of text beside it, and a sprite
+   *stands* on it. The badge is a square and the trim inside it is the union of
+   every frame of both clips — so for anything that jumps, the top of the box is
+   the headroom the apex needs and the bottom of the box is the floor. A resting
+   frame therefore sits flush against the bottom edge, and centring that box
+   against a line of text puts the floor below the text's baseline by the depth
+   of its descenders: the tab's name reads as sitting on a line and the mascot
+   reads as hanging under one. The misalignment is in the geometry rather than in
+   anybody's sheet, and every mascot with a jump in it has it.
+
+   So the sprite is lifted until its floor is the baseline, in `em` — the
+   distance from a line box's bottom to its baseline is a property of the type,
+   and the type is the skin's, so a pixel ramp at 8px wants a different number of
+   pixels and the same fraction of an em. The dot keeps the centre it always
+   had; it is not standing on anything. */
 .mascot {
   position: absolute;
   top: 0;
   left: 0;
+  translate: 0 -0.3em;
   background-repeat: no-repeat;
   image-rendering: var(--image-rendering);
   animation-name: hop;
@@ -935,9 +976,10 @@ kbd {
 }
 
 .sidebar-foot {
-  border-top: var(--border) var(--border-style) var(--line);
   padding: 6px 8px;
+  min-height: var(--bar-h);
   display: flex;
+  align-items: center;
 }
 
 /* The one icon in the app, and deliberately quiet: settings is a place you go
@@ -1025,6 +1067,24 @@ kbd {
 :root[data-narrow] .panes {
   padding: 0;
 }
+/* And the pane box's own half of the gutter with it. A gutter is what keeps
+   tiled panes apart, and a narrow window draws exactly one pane — so every
+   pixel of it was being spent separating the pane from the edge of the screen,
+   which is not a thing that needs separating. The radius goes for the same
+   reason: a rounded corner against the bezel is a corner with nothing on the
+   other side of it, and it shows the well through in four places. */
+:root[data-narrow] .pane-box {
+  padding: 0;
+}
+:root[data-narrow] .pane {
+  border-radius: 0;
+}
+/* And no focus ring, because there is nothing for it to distinguish this pane
+   from: a narrow window draws one pane, so the outline would be a hairline
+   traced around the edge of the screen saying something that is always true. */
+:root[data-narrow] .pane-on {
+  outline: none;
+}
 :root[data-narrow] .term {
   padding: 2px 3px;
 }
@@ -1089,6 +1149,12 @@ kbd {
   display: flex;
   /* 3px here and 3px on each pane box makes every gutter 6px, edges included. */
   padding: 3px;
+  /* The well. It is what replaced the panes' borders: a step down in tone does
+     the same job as a grey stroke and does not draw a rectangle round every
+     terminal to do it. It is the sidebar's colour on purpose, so the chrome
+     reads as one ground with the panes floating on it rather than as three
+     surfaces that happen to be adjacent. */
+  background: var(--chrome);
 }
 .app-zen .panes {
   padding: 0;
@@ -1163,23 +1229,37 @@ kbd {
   display: flex;
   flex-direction: column;
   background: var(--bg);
-  border: var(--border) var(--border-style) var(--line);
   border-radius: var(--radius-xl);
-  /* The skin's frame, over and above the border — an inset second line for a
-     skin that wants its panes to have thickness, `none` for one that wants a
-     hairline. It is a shadow rather than a picture so that it composes with the
-     theme instead of replacing it; the argument is in `shared/skin.ts`. */
+  /* The skin's frame, and the only thing left drawing a pane's edge. There used
+     to be a `--line` border under this and there is not now: a grey stroke
+     around every pane is the loudest thing in a window whose whole content is
+     text, and it was drawing four of them across a two-pane split. What
+     separates a pane from the window now is *ground* — `.panes` is the darker
+     `--chrome` well and the pane is `--bg` on it, which is the same distinction
+     made with a step in tone instead of a line. A skin that genuinely wants a
+     frame still gets one, because that is what this token is; the 8-bit skin's
+     inset is untouched. */
   box-shadow: var(--frame);
   overflow: hidden;
 }
 .app-zen .pane {
-  border: 0;
   border-radius: 0;
 }
 
-/* The focused pane is the one the keyboard is going to. Worth being obvious. */
+/* The focused pane is the one the keyboard is going to, and with the borders
+   gone it has to say so some other way. The tab strip lifting to `--chrome-high`
+   is most of it; this is the rest — a hairline in the accent, mixed most of the
+   way out, on the reasoning `.agent-item-on` already uses for the same job.
+   Deliberately not grey: a grey ring here would be the border this sweep just
+   removed, reinstated on the one pane you are looking at.
+
+   An `outline` rather than a second `box-shadow` because `box-shadow` is the
+   skin's (`--frame-on`), and a skin whose frame is `none` cannot have anything
+   appended to it — `none` is not a shadow you can put a comma after. Inset by
+   its own width so it lands on the pane rather than in the gutter. */
 .pane-on {
-  border-color: var(--line-high);
+  outline: var(--border) var(--border-style) color-mix(in srgb, var(--accent) 30%, transparent);
+  outline-offset: calc(-1 * var(--border));
   box-shadow: var(--frame-on);
 }
 .pane-on .tabstrip {
@@ -1195,8 +1275,11 @@ kbd {
   align-items: stretch;
   gap: 1px;
   padding: 3px 4px;
-  background: var(--chrome);
-  border-bottom: var(--border) var(--border-style) var(--line);
+  /* Its own tone rather than the well's — see `--strip`. Two unfocused panes
+     side by side would otherwise share one unbroken bar across the gutter
+     between them, and the strip is the part of a pane that says where the pane
+     starts. */
+  background: var(--strip);
   flex: none;
   overflow-x: auto;
   scrollbar-width: none;
@@ -1220,10 +1303,13 @@ kbd {
   background: var(--chrome-high);
   color: var(--text);
 }
+/* The tab whose terminal is showing. It wears the terminal's own colour, which
+   is what says the two are one thing — and that is the whole signal now: the
+   grey ring that used to be round it is gone with the rest of them, and a ring
+   was never what made an active tab legible anyway. */
 .tab-on {
   background: var(--bg);
   color: var(--text);
-  box-shadow: inset 0 0 0 var(--border) var(--line);
 }
 .tab-exited .tab-label {
   color: var(--dimmer);
@@ -1277,7 +1363,7 @@ kbd {
   align-items: stretch;
   gap: 1px;
   flex: none;
-  background: var(--chrome);
+  background: var(--strip);
 }
 .pane-on .tab-actions {
   background: var(--chrome-high);
@@ -1295,7 +1381,7 @@ kbd {
   top: 0;
   bottom: 0;
   width: 14px;
-  background: linear-gradient(to right, transparent, var(--chrome));
+  background: linear-gradient(to right, transparent, var(--strip));
   pointer-events: none;
 }
 .pane-on .tab-actions::before {
@@ -1609,6 +1695,8 @@ kbd {
   display: flex;
   align-items: center;
   gap: 6px;
+  /* The same edge as the sidebar's foot — see `--bar-h`. */
+  min-height: var(--bar-h);
   padding: 3px 10px;
   /**
    * And clear of the home indicator, which `viewport-fit=cover` in `index.html`
@@ -1623,7 +1711,6 @@ kbd {
    */
   padding-bottom: max(3px, calc(env(safe-area-inset-bottom, 0px) - var(--keyboard, 0px)));
   background: var(--chrome);
-  border-top: var(--border) var(--border-style) var(--line);
   font-size: var(--fs-base);
   color: var(--dim);
 }
@@ -3454,10 +3541,11 @@ kbd {
    pointer, and that it must never be the reason the pane below it reflows.
    -------------------------------------------------------------------------- */
 
+/* No rule along the top: the keys are filled caps on a darker bar, which is
+   already the whole of what says where the bar starts. */
 .keybar {
   flex: none;
   background: var(--chrome);
-  border-top: var(--border) var(--border-style) var(--line);
 }
 
 /* The scroller. `pan-x` rather than `auto` is what lets a press and a scroll
@@ -3512,7 +3600,6 @@ kbd {
   line-height: 1;
   color: var(--text);
   background: var(--chrome-high);
-  border: var(--border) var(--border-style) var(--line);
   border-radius: var(--radius-md);
   cursor: pointer;
 }
@@ -3557,7 +3644,7 @@ kbd {
 /* A mouse never sees this bar, but a tablet with a trackpad might. */
 @media (hover: hover) {
   .keybar-key:hover {
-    border-color: var(--line-high);
+    background: var(--line-high);
   }
 }
 

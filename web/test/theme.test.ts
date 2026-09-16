@@ -74,6 +74,17 @@ const NOT_THEME = new Set([
   // root by `useKeyboardInset`. A length the browser reports, like `--sidebar-w`
   // and for the same reason: not a colour, not a shape, nobody's to theme.
   "--keyboard",
+  // The height of the window's bottom edge, which the status bar and the
+  // sidebar's foot both have to be. A constant the stylesheet declares for
+  // itself: it exists so those two cannot drift apart, and there is nothing in
+  // it for a theme to have an opinion about or for a skin to disagree with.
+  "--bar-h",
+  // The tab strip's ground, which is a colour and still nobody's to fill in: it
+  // is *derived* from `--chrome` and `--bg` rather than picked, so it follows a
+  // palette that has never heard of it. A theme answering for it directly would
+  // be a theme that could put the strip anywhere in the window's tonal range,
+  // including on the wrong side of the two surfaces it is meant to sit between.
+  "--strip",
 ]);
 
 /** What a skin fills in: its tokens, plus one per icon it may override. */
