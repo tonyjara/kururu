@@ -43,6 +43,7 @@
  * disagreement underneath every screen kururu has drawn wrong.
  */
 import { FitAddon, init, Terminal } from "ghostty-web";
+import { type ProgramCursor, scanCursor } from "../../shared/cursor";
 import {
   DEFAULT_APPEARANCE,
   themeFor,
@@ -51,6 +52,7 @@ import {
   type TerminalTokens,
 } from "../../shared/theme";
 import { installBoxDrawing } from "./boxdraw";
+import { type CursorRenderer, installCursorText } from "./cursortext";
 import { usableGrid } from "./grid";
 import { BUTTON_NONE, encodeMouse, type MouseModes, mouseModes, WHEEL_DOWN, WHEEL_UP } from "./mouse";
 import { input, proposeSize, rebuild, subscribeOutput, warm } from "./session";
@@ -125,10 +127,12 @@ let type: TerminalAppearance = DEFAULT_APPEARANCE.terminal;
  * anywhere else.
  *
  * The alternative was to keep a real style and tint the cursor to the
- * background for unfocused panes, which needs no unhandled case and was
- * rejected anyway — `renderCursor` paints its rectangle *over* the glyph and
- * never redraws it in `cursorAccent`, so a background-coloured block is an
- * erased character rather than an invisible cursor.
+ * background for unfocused panes, which needs no unhandled case and is still
+ * wrong. It was wrong because `renderCursor` painted its rectangle *over* the
+ * glyph and never put it back, so a background-coloured block was an erased
+ * character rather than an invisible cursor. `cursortext.ts` draws the glyph
+ * again now — in `cursorAccent`, which is the background — so the same tint
+ * would paint the character onto its own colour and erase it a second way.
  */
 const CURSOR_HIDDEN = "none" as CursorStyle;
 
@@ -688,6 +692,20 @@ function create(agentId: string): Pooled {
   let terminal: Terminal | null = null;
   let disposed = false;
   let subscribed = false;
+  /**
+   * The cursor the program in this pty has asked for: its shape, and its
+   * colour, each null while nothing has been asked and Settings is the answer.
+   *
+   * Two nullables rather than one object, because they arrive as two sequences
+   * and a program may send either without the other. Per emulator rather than
+   * per pane, because it is a fact about the pty: nvim in insert mode is in
+   * insert mode whichever pane is showing it, and a tab switch moves this
+   * element rather than rebuilding it.
+   */
+  let shape: ProgramCursor | null = null;
+  let color: string | null = null;
+  /** See `CursorScan.carry`: a sequence cut in half by a read boundary. */
+  let carry = "";
   let unsubscribe = () => {};
   let typed: { dispose(): void } | null = null;
   let observer: ResizeObserver | null = null;
@@ -787,7 +805,25 @@ function create(agentId: string): Pooled {
     terminal = em;
     // Has to come after `open`, which is where the renderer and its canvas are
     // built; there is nothing to point at before that.
-    if (em.renderer) installBoxDrawing(em.renderer);
+    if (em.renderer) {
+      installBoxDrawing(em.renderer);
+      /**
+       * And the character the cursor is sitting on, which the renderer paints
+       * over and never puts back. The three questions it cannot answer for
+       * itself are all decisions this file owns: which style is really in force
+       * (the unfocused one draws nothing, and must draw no glyph either), what
+       * the theme calls the colour of text under a cursor, and which face the
+       * line it is covering was drawn in.
+       */
+      installCursorText(em.renderer as unknown as CursorRenderer, {
+        style: () => em.options.cursorStyle ?? type.cursorStyle,
+        color: () => palette.cursorAccent,
+        font: () => ({
+          size: em.options.fontSize ?? type.fontSize,
+          family: em.options.fontFamily ?? fontStack(),
+        }),
+      });
+    }
     // The same gate `setFocused` applies, for the emulator that was not there
     // yet when the pane asked. Without it, the very first terminal of a session
     // opens the keyboard on a phone before anybody has touched anything.
@@ -848,6 +884,31 @@ function create(agentId: string): Pooled {
       settle = setTimeout(() => proposeSize(agentId, grid.cols, grid.rows), RESIZE_SETTLE_MS);
     };
 
+    /**
+     * Take the cursor's shape off the stream on the way past.
+     *
+     * The one thing in here that reads the bytes rather than handing them
+     * over, and `shared/cursor.ts` is where the case for that is made: the
+     * emulator parses DECSCUSR and will not say what it parsed, so a program
+     * that asks for a bar in insert mode would otherwise be drawn with
+     * whatever is in Settings for as long as it ran.
+     *
+     * Before the write rather than after, which costs nothing and means the
+     * shape and the bytes it was sent with land in the same frame.
+     */
+    const readCursor = (data: string) => {
+      const scan = scanCursor(data, carry);
+      carry = scan.carry;
+      if (scan.shape !== undefined) {
+        shape = scan.shape;
+        entry.applyCursor();
+      }
+      if (scan.color !== undefined) {
+        color = scan.color;
+        applyPalette();
+      }
+    };
+
     const sink = {
       /**
        * Guarded, and not out of caution. Where xterm quietly ignored a write to
@@ -866,7 +927,9 @@ function create(agentId: string): Pooled {
        * every new tab raised one.
        */
       write: (data: string) => {
-        if (!disposed && data) em.write(data);
+        if (disposed || !data) return;
+        readCursor(data);
+        em.write(data);
       },
       /**
        * The shape the server says this terminal is. The one place a pooled
@@ -931,8 +994,24 @@ function create(agentId: string): Pooled {
           em.resize(cols, rows);
         }
         em.reset();
+        /**
+         * And the cursor the program had asked for goes with it, because the
+         * backlog is about to say so again if it still holds. A backlog is a
+         * whole screen and DECSCUSR rides in it like any other sequence — see
+         * `shared/cursor.ts` for why the server puts it there — so what is left
+         * after this is either what the program is asking for now or the one in
+         * Settings, and never a shape left over from before the reconnect.
+         */
+        shape = null;
+        color = null;
+        carry = "";
         // Nothing to write is nothing to do, and would throw — see `write`.
-        if (data) em.write(data);
+        if (data) {
+          readCursor(data);
+          em.write(data);
+        }
+        entry.applyCursor();
+        applyPalette();
         /**
          * And nothing afterwards. This used to fit back to the box, because the
          * emulator owned its own size and a backlog had just overwritten it
@@ -941,6 +1020,54 @@ function create(agentId: string): Pooled {
          * and if it has moved since, the ResizeObserver has already said so.
          */
       },
+    };
+
+    /**
+     * Wear the theme, with whatever the program has said about its cursor
+     * painted over the top of it.
+     *
+     * `OSC 12` is a colour for one thing in one terminal, and the renderer's
+     * palette is the only place that colour can go — there is no per-cursor
+     * override in it, so the theme is handed over with one field replaced. It
+     * outranks the theme for the same reason DECSCUSR outranks the setting, and
+     * it is a null beside the palette rather than a value copied into it so
+     * that `OSC 112` has something to fall back to.
+     */
+    const applyPalette = () => {
+      if (disposed || !em.renderer) return;
+      em.renderer.setTheme(color ? { ...palette, cursor: color } : palette);
+      // See `restyle`: the render loop repaints dirty rows, and a colour change
+      // dirties nothing at all.
+      if (em.wasmTerm) em.renderer.render(em.wasmTerm, true, em.viewportY, em);
+    };
+
+    /**
+     * Three answers about one cursor, in the order of who is allowed to give
+     * them: this pane has the keyboard or it does not, then the program in the
+     * pty if it has said, then the user.
+     *
+     * The middle one is what makes kururu a terminal rather than a picture of
+     * one. DECSCUSR is how an editor says that insert mode is a bar, and the
+     * style in Settings is the *default* it falls back to — which is why the
+     * program's answer is a nullable beside the setting rather than a value
+     * copied over it: `CSI 0 SP q` hands the decision back, and the setting has
+     * to still be there to hand it back to.
+     */
+    entry.applyCursor = () => {
+      if (disposed) return;
+      const want = entry.showsCursor ? (shape?.style ?? type.cursorStyle) : CURSOR_HIDDEN;
+      const blink = shape?.blink ?? type.cursorBlink;
+      if (em.options.cursorStyle === want && em.options.cursorBlink === blink) return;
+      em.options.cursorBlink = blink;
+      em.options.cursorStyle = want;
+      /**
+       * And repaint, because the loop will not do it on its own. It renders
+       * dirty rows only, and the row the cursor is on is redrawn just when the
+       * cursor *moved* or is blinking — so with `cursorBlink` switched off, a
+       * pane that lost the keyboard would keep the cursor it had until the
+       * agent next wrote to that line, which for an idle agent is never.
+       */
+      if (em.renderer && em.wasmTerm) em.renderer.render(em.wasmTerm, true, em.viewportY, em);
     };
 
     /**
@@ -972,29 +1099,12 @@ function create(agentId: string): Pooled {
      * its cell and resize its canvas, and doing that by hand would be
      * reimplementing `handleFontChange` from the outside.
      */
-    entry.applyCursor = () => {
-      if (disposed) return;
-      const want = entry.showsCursor ? type.cursorStyle : CURSOR_HIDDEN;
-      if (em.options.cursorStyle === want) return;
-      em.options.cursorStyle = want;
-      /**
-       * And repaint, because the loop will not do it on its own. It renders
-       * dirty rows only, and the row the cursor is on is redrawn just when the
-       * cursor *moved* or is blinking — so with `cursorBlink` switched off, a
-       * pane that lost the keyboard would keep the cursor it had until the
-       * agent next wrote to that line, which for an idle agent is never.
-       */
-      if (em.renderer && em.wasmTerm) em.renderer.render(em.wasmTerm, true, em.viewportY, em);
-    };
-
     entry.restyle = (remeasure: boolean) => {
       if (disposed) return;
-      em.renderer?.setTheme(palette);
-      if (em.renderer && em.wasmTerm) {
-        em.renderer.render(em.wasmTerm, true, em.viewportY, em);
-      }
+      applyPalette();
+      // Both halves of the cursor, since a program's DECSCUSR outranks the
+      // setting for the blink exactly as it does for the shape.
       entry.applyCursor();
-      em.options.cursorBlink = type.cursorBlink;
       em.options.fontSize = type.fontSize;
       em.options.fontFamily = fontStack();
       // A cell that changed size is a different grid in the same box, and the
@@ -1087,11 +1197,6 @@ export function release(agentId: string, mount: HTMLElement): void {
   entry.attached = false;
 }
 
-/**
- * Whether this terminal is the one the keyboard belongs to. Remembered rather
- * than only applied, because the first emulator of a session is still waiting on
- * the WASM when the pane that would focus it mounts.
- */
 /**
  * Put a key into this terminal as though somebody had typed it.
  *

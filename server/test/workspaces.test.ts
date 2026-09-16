@@ -460,6 +460,76 @@ describe("the reader", () => {
 });
 
 /**
+ * What a terminal ending does to the arrangement it was in. `removeTab` is the
+ * gesture — close this tab, keep the pane, it is a place you are keeping —
+ * and `reapTab` is the pty being gone, which takes the pane with it unless
+ * something else is left in there. The two refusals are the interesting half:
+ * a workspace must keep a pane to focus, and a reader is not a hole.
+ */
+describe("reapTab", () => {
+  it("takes the pane with the tab when there is nothing else in it", () => {
+    const workspaces = new Workspaces();
+    const first = workspaces.focusedPaneId;
+    const second = workspaces.split("row")!;
+    workspaces.addTab("a1", "/home/you/project", first);
+    workspaces.addTab("a2", "/home/you/project", second);
+
+    workspaces.reapTab("a2");
+    expect(panes(workspaces.activeWorkspace.layout).map((p) => p.id)).toEqual([first]);
+    expect(workspaces.focusedPaneId).toBe(first);
+  });
+
+  it("leaves a pane that still has a tab in it", () => {
+    const workspaces = new Workspaces();
+    const pane = workspaces.focusedPaneId;
+    workspaces.split("row");
+    workspaces.addTab("a1", "/home/you/project", pane);
+    workspaces.addTab("a2", "/home/you/project", pane);
+
+    workspaces.reapTab("a1");
+    expect(panes(workspaces.activeWorkspace.layout)).toHaveLength(2);
+    expect(workspaces.agentsHere()).toEqual(["a2"]);
+  });
+
+  /**
+   * The last pane is emptied rather than removed, which is `closePane`'s own
+   * rule: a workspace with no panes has nothing to focus and nothing to aim an
+   * action at. What is left is the empty pane, which is the button that opens
+   * the next terminal.
+   */
+  it("keeps the last pane of a workspace, emptied", () => {
+    const workspaces = new Workspaces();
+    const only = workspaces.focusedPaneId;
+    workspaces.addTab("a1", "/home/you/project", only);
+
+    workspaces.reapTab("a1");
+    expect(panes(workspaces.activeWorkspace.layout).map((p) => p.id)).toEqual([only]);
+    expect(workspaces.agentsHere()).toEqual([]);
+  });
+
+  it("reaches a terminal in a workspace you are not looking at", () => {
+    const workspaces = new Workspaces();
+    const there = workspaces.focusedPaneId;
+    const gone = workspaces.split("row")!;
+    workspaces.addTab("a1", "/home/you/project", there);
+    workspaces.addTab("a2", "/home/you/project", gone);
+    const away = workspaces.newWorkspace("elsewhere");
+
+    workspaces.reapTab("a2");
+    expect(workspaces.activeWorkspace.id).toBe(away);
+    expect(workspaces.allAgents()).toEqual(["a1"]);
+  });
+
+  it("is nothing at all for a terminal no pane is showing", () => {
+    const workspaces = new Workspaces();
+    workspaces.split("row");
+    const before = JSON.stringify(workspaces.activeWorkspace.layout);
+    workspaces.reapTab("a9");
+    expect(JSON.stringify(workspaces.activeWorkspace.layout)).toBe(before);
+  });
+});
+
+/**
  * The sidebar's list, which is the one thing here that is an order rather than a
  * tree. Spawn order is the default and a drag is a memory laid over it, so the
  * interesting cases are all about what happens when the two disagree: a terminal

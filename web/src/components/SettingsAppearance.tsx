@@ -166,6 +166,11 @@ export function AppearanceSettings({
             Blink
           </label>
         </label>
+        <p className="set-note set-note-under">
+          The default, not the rule. A program that has an opinion about its own cursor gets it —
+          nvim drawing a bar in insert mode and a block in normal is the usual one — and this is
+          what a terminal wears before anything has asked, and again the moment it stops asking.
+        </p>
       </section>
     </div>
   );

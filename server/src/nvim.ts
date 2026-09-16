@@ -192,20 +192,3 @@ export function attach(instance: NvimInstance, agentId: string, port: number): P
     });
   });
 }
-
-/**
- * Ask outright, for the cases the hook cannot cover: an nvim that was already
- * sitting on a file when kururu found it, and the reconnect after a server
- * restart, when the autocmd is still installed but pointing at a port this
- * process may not have.
- */
-export function currentFile(instance: NvimInstance): Promise<string | null> {
-  return new Promise((resolve) => {
-    execFile(
-      "nvim",
-      ["--server", instance.socket, "--remote-expr", 'expand("%:p")'],
-      { timeout: 3000 },
-      (err, stdout) => resolve(err ? null : stdout.trim() || null),
-    );
-  });
-}

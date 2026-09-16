@@ -939,20 +939,6 @@ function MascotPicker({
 }
 
 /**
- * How full the window is: a ring, and the number beside it.
- *
- * The ring alone was the trend, which is the part you read at a glance and the
- * part that matters most of the time — but "how much is left" is a question with
- * an actual answer, and asking somebody to estimate it off an arc is asking them
- * to squint. Ghosttown prints the number for the same reason, in the same
- * direction: the percentage *used*, so it climbs towards the thing you are
- * watching for rather than counting down to it.
- *
- * The tooltip says both numbers outright, because a percentage of a window
- * whose size you cannot see is only half of the answer — 95% of 200k and 19% of
- * 1M are the same conversation, and only one of them is a problem.
- */
-/**
  * What the terminal is holding, next to what it has left to think with.
  *
  * The two numbers are a pair and that is why they sit together: one says how
@@ -985,6 +971,20 @@ function formatBytes(bytes: number): string {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
 }
 
+/**
+ * How full the window is: a ring, and the number beside it.
+ *
+ * The ring alone was the trend, which is the part you read at a glance and the
+ * part that matters most of the time — but "how much is left" is a question with
+ * an actual answer, and asking somebody to estimate it off an arc is asking them
+ * to squint. Ghosttown prints the number for the same reason, in the same
+ * direction: the percentage *used*, so it climbs towards the thing you are
+ * watching for rather than counting down to it.
+ *
+ * The tooltip says both numbers outright, because a percentage of a window
+ * whose size you cannot see is only half of the answer — 95% of 200k and 19% of
+ * 1M are the same conversation, and only one of them is a problem.
+ */
 function ContextRing({ usage }: { usage: ContextUsage }) {
   const percent = Math.min(100, Math.round((usage.used / usage.window) * 100));
   const circumference = 2 * Math.PI * 5;

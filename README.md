@@ -43,11 +43,11 @@ building. Kururu is the other half.
 - **Remembers what agents said.** A pane opened late is handed the history.
 - **Keeps agents alive.** The ptys live in a host process nothing owns: quit the
   window, restart the server, close the terminal you started it from.
+- **Opens your dev server on the phone.** A reverse proxy per dev server, so
+  the app you are building is reachable from the device in your hand and not
+  only from `localhost`.
 - **Connects to a server rather than being one.** Run it on a box that is always
   on and point the desktop — or the phone — at it.
-
-Still unwired: the preview proxy that lets a phone reach `localhost`. See
-[PLAN.md](./PLAN.md).
 
 ## Running it
 
