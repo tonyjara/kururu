@@ -197,11 +197,27 @@ export interface Skin {
  * written as the handful of things it actually changes.
  */
 const BASE_TOKENS: SkinTokens = {
+  /**
+   * Tighter than kururu shipped at — 2/3/5/6/8 became 2/2/3/4/5 — and the
+   * reason is what the radius is *for* on a window made almost entirely of
+   * rectangles. A corner's job here is to say "this is a surface with an edge",
+   * and past about four pixels it stops saying that and starts being a style of
+   * its own: an 8px pane on a 6px gutter reads as a card floating in an
+   * application, which is the opposite of a multiplexer whose whole premise is
+   * that the grid *is* the interface. The tab strip was where it showed worst,
+   * because a 5px radius on a row 20px tall is a quarter of its height and the
+   * tab stops looking like a tab.
+   *
+   * It is deliberately not zero. Zero is the 8-bit skin's answer and it is a
+   * *statement* — hard edges are what that chrome is about. The base is meant to
+   * be the window you stop noticing, and a hairline corner is how a surface
+   * admits it has an edge without drawing attention to the fact.
+   */
   radiusXs: "2px",
-  radiusSm: "3px",
-  radiusMd: "5px",
-  radiusLg: "6px",
-  radiusXl: "8px",
+  radiusSm: "2px",
+  radiusMd: "3px",
+  radiusLg: "4px",
+  radiusXl: "5px",
   radiusRound: "50%",
 
   border: "1px",
