@@ -607,7 +607,7 @@ export function App() {
           return setHelp((on) => !on);
       }
     },
-    [workspace, profile, agents, snapshot, promptNewProfile, confirmDeleteWorkspace],
+    [workspace, profile, agents, promptNewProfile, confirmDeleteWorkspace],
   );
 
   // -------------------------------------------------------------------------

@@ -488,8 +488,29 @@ export type ClientMessage =
    */
   | { type: "reveal-agent"; agentId: string }
 
-  /** Open a proxy for this dev server so a phone can reach it. */
-  | { type: "open-preview"; port: number }
+  /*
+   * There was an `open-preview` here, carrying a port, and it is worth saying
+   * why there is not one now rather than leaving the gap to be refilled.
+   *
+   * It was how a client asked for a proxy, back when one was opened on demand.
+   * `pollDevServers` opens one for every dev server it finds instead — a link
+   * needs a real `href` before anybody taps it, which is the whole argument
+   * written out beside that loop — so by the time any client could have asked,
+   * the answer was already in the snapshot as `proxyPort`. The verb went on
+   * existing with nothing calling it.
+   *
+   * That is not free. A port on a `ClientMessage` is a port kururu was told,
+   * not one it found, and `openPreview` binds `0.0.0.0` — so the dead verb was
+   * a way for one unauthenticated message to put a listener on every interface
+   * this machine has, forwarding to any loopback port it named. Loopback-only
+   * services are loopback-only precisely because they are unauthenticated, and
+   * this reached past the tailnet onto whatever network the laptop was on.
+   *
+   * `devservers.ts` states the rule it broke: ports come from the kernel, never
+   * from a command line — or, here, from a client. If the preview *pane* ever
+   * needs a verb, it should name a dev server kururu has already discovered,
+   * never a number.
+   */
 
   // --- the reader ----------------------------------------------------------
   /**

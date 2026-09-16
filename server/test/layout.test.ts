@@ -413,3 +413,78 @@ describe("paneInDirection", () => {
     expect(paneInDirection(root, "A", "right")).toBe("B");
   });
 });
+
+/**
+ * That a number arriving from a client cannot get into the tree unless it is
+ * one.
+ *
+ * This is the bug class the clamps in `layout.ts` looked like they already
+ * covered and did not: NaN loses every comparison it appears in, so
+ * `Math.max(0.1, Math.min(0.9, NaN))` is NaN, and `index < 0 || index >= n` is
+ * false for NaN and false again for the string `"x"`. Each guard therefore read
+ * as a range check and behaved as a pass-through.
+ *
+ * Asserted through `JSON.stringify` rather than against NaN directly, because
+ * that is the step that made it permanent rather than merely wrong: the tree is
+ * handed to the pty host as the arrangement and debounced onto disk by
+ * `persist.ts`, and NaN serializes to `null` — so one malformed message left a
+ * layout that came back broken on every start afterwards, with no gesture in the
+ * window able to undo it. A test written as `not.toBeNaN()` would also pass for
+ * a pane holding the string `"x"`, which is the other half of what was getting
+ * through.
+ */
+describe("numbers that are not numbers", () => {
+  const bad = [NaN, Infinity, -Infinity, undefined, null, "x", "0.5", {}] as unknown[];
+
+  /** The stored shape of one pane — what the host is handed and the disk gets. */
+  const stored = (node: LayoutNode, paneId: string) =>
+    JSON.parse(JSON.stringify(panes(node).find((p) => p.id === paneId)!));
+
+  const twoTabs = () => addTab(addTab(tree(), "A", "a1"), "A", "a2");
+
+  it("leaves the ratio alone rather than taking a non-number", () => {
+    for (const value of bad) {
+      const after = setRatio(tree(), "s1", value as number);
+      expect(JSON.parse(JSON.stringify(after)).ratio).toBe(0.5);
+    }
+  });
+
+  it("leaves the ratio alone when a nudge is not a number", () => {
+    for (const value of bad) {
+      const after = nudge(tree(), "B", "left", value as number);
+      expect(JSON.parse(JSON.stringify(after)).ratio).toBe(0.5);
+    }
+  });
+
+  it("still clamps a real number, which is what the guard is there for", () => {
+    const ratioOf = (node: LayoutNode) => JSON.parse(JSON.stringify(node)).ratio;
+    expect(ratioOf(setRatio(tree(), "s1", 5))).toBe(0.9);
+    expect(ratioOf(setRatio(tree(), "s1", -5))).toBe(0.1);
+    expect(ratioOf(setRatio(tree(), "s1", 0.25))).toBe(0.25);
+  });
+
+  it("refuses a tab index that is not a whole number", () => {
+    for (const value of [...bad, -1, 1.5]) {
+      expect(stored(selectTab(twoTabs(), "A", value as number), "A").activeIdx).toBe(1);
+    }
+    // And still selects one that is.
+    expect(stored(selectTab(twoTabs(), "A", 0), "A").activeIdx).toBe(0);
+  });
+
+  it("refuses a cycle delta that is not a whole number", () => {
+    for (const value of [...bad, 1.5]) {
+      expect(stored(cycleTab(twoTabs(), "A", value as number), "A").activeIdx).toBe(1);
+    }
+    expect(stored(cycleTab(twoTabs(), "A", 1), "A").activeIdx).toBe(0);
+  });
+
+  it("reads a bad drop position as no position, not as NaN", () => {
+    // `index` is already optional here, so the end of the strip — what a drop
+    // with nothing to say about position has always meant — is the honest
+    // reading of a bad one. What must not happen is NaN reaching `activeIdx`.
+    for (const value of bad) {
+      const after = moveTabTo(twoTabs(), "a1", "B", value as number);
+      expect(stored(after, "B")).toMatchObject({ agentIds: ["a1"], activeIdx: 0 });
+    }
+  });
+});

@@ -154,8 +154,3 @@ function element(tag: string, id: string): HTMLElement {
   document.head.appendChild(made);
   return made;
 }
-
-/** The glyph for a name, for the rare caller that needs it as a string rather than as a rule. */
-export function iconGlyph(skinId: string | null | undefined, name: IconName, extra: readonly Skin[] = []): string {
-  return skinFor(skinId, extra).icons[name];
-}

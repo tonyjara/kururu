@@ -620,11 +620,6 @@ export function restartServer(): void {
   send({ type: "restart-server" });
 }
 
-/** Ask for a proxy port so this dev server is reachable from the phone. */
-export function openPreview(port: number): void {
-  send({ type: "open-preview", port });
-}
-
 /**
  * Put a reader beside this pane, following the editor in it.
  *

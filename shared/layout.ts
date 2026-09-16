@@ -105,6 +105,43 @@ export function makePane(id: string, cwd?: string): PaneNode {
   return { type: "pane", pane: { id, agentIds: [], activeIdx: 0, cwd } };
 }
 
+/**
+ * The numbers that arrive from outside, and why they are checked here rather
+ * than at the socket.
+ *
+ * Every one of these comes off a `ClientMessage` — a ratio from a dragged
+ * divider, an index from a clicked tab — and a message is JSON from a client on
+ * the tailnet, so "a number" is a thing to establish rather than assume. The
+ * clamps were already here and already meant to be that check. They were not,
+ * because **NaN loses every comparison it is in**: `Math.max(0.1, Math.min(0.9,
+ * NaN))` is NaN, and `index < 0 || index >= length` is *false* for NaN and false
+ * again for the string `"x"`, so the guard that looks like a range check waves
+ * both of them straight through to the assignment below it.
+ *
+ * What made that worth fixing rather than noting is where the value goes. A
+ * tree is not scratch state: it is handed to the pty host as the arrangement and
+ * debounced onto disk by `persist.ts`, and `JSON.stringify(NaN)` is `null`. So a
+ * single malformed message put a `"ratio": null` in `session.json` that came
+ * back every start afterwards, with the geometry it produces wrong in a way no
+ * gesture in the window could undo — the divider you would drag to fix it is
+ * computed from the ratio that is broken.
+ *
+ * Refused rather than repaired, and that is the same line `set-workspace-color`
+ * draws. A ratio of `"x"` is not a drag that went too far, with a nearest legal
+ * value to snap to; it is not a drag at all, and the tree it was aimed at is
+ * already a perfectly good one. `propose-size` in `index.ts` has always taken
+ * this shape — it is the same argument, arriving at the same answer, for the one
+ * number that was already known to reach a pty.
+ */
+function clampRatio(ratio: number): number {
+  return Math.max(0.1, Math.min(0.9, ratio));
+}
+
+/** A tab position: a whole number, and not a negative one. */
+function isIndex(value: number): boolean {
+  return Number.isInteger(value) && value >= 0;
+}
+
 /** Every pane, left to right and top to bottom — which is also cycle order. */
 export function panes(node: LayoutNode): PaneState[] {
   if (node.type === "pane") return [node.pane];
@@ -203,13 +240,15 @@ export function removeTab(node: LayoutNode, agentId: string): LayoutNode {
 }
 
 export function selectTab(node: LayoutNode, paneId: string, index: number): LayoutNode {
+  if (!isIndex(index)) return node;
   return updatePane(node, paneId, (pane) =>
-    index < 0 || index >= pane.agentIds.length ? pane : { ...pane, activeIdx: index },
+    index >= pane.agentIds.length ? pane : { ...pane, activeIdx: index },
   );
 }
 
 /** Next or previous tab in a pane, wrapping. */
 export function cycleTab(node: LayoutNode, paneId: string, delta: number): LayoutNode {
+  if (!Number.isInteger(delta)) return node;
   return updatePane(node, paneId, (pane) => {
     const n = pane.agentIds.length;
     if (n < 2) return pane;
@@ -235,11 +274,17 @@ export function moveTabTo(
   index?: number,
 ): LayoutNode {
   if (!paneWithAgent(node, agentId)) return node;
+  // An index that is not one is read as "no index given" rather than refused:
+  // unlike a ratio this argument is already optional, and the end of the strip
+  // is what a drop with nothing to say about position has always meant. See
+  // `clampRatio` for what a number arriving here may turn out to be — without
+  // this, `Math.min` passes NaN through and it lands in `activeIdx` below.
+  const wanted = index !== undefined && !isIndex(index) ? undefined : index;
   // Remove first, so an index within the same strip means what it looks like:
   // the position the tab will occupy once it is gone from where it was.
   const without = removeTab(node, agentId);
   return updatePane(without, toPaneId, (pane) => {
-    const at = Math.max(0, Math.min(index ?? pane.agentIds.length, pane.agentIds.length));
+    const at = Math.max(0, Math.min(wanted ?? pane.agentIds.length, pane.agentIds.length));
     const agentIds = [...pane.agentIds];
     agentIds.splice(at, 0, agentId);
     return { ...pane, agentIds, activeIdx: at };
@@ -389,8 +434,9 @@ export function mergePanes(node: LayoutNode, fromId: string, intoId: string): La
 
 /** Drag a divider. Clamped so a pane can always be grabbed again. */
 export function setRatio(node: LayoutNode, splitId: string, ratio: number): LayoutNode {
+  if (!Number.isFinite(ratio)) return node;
   if (node.type === "pane") return node;
-  if (node.id === splitId) return { ...node, ratio: Math.max(0.1, Math.min(0.9, ratio)) };
+  if (node.id === splitId) return { ...node, ratio: clampRatio(ratio) };
   const a = setRatio(node.a, splitId, ratio);
   const b = setRatio(node.b, splitId, ratio);
   return a === node.a && b === node.b ? node : { ...node, a, b };
@@ -487,6 +533,12 @@ export function nudge(
   dir: Direction,
   delta: number,
 ): LayoutNode {
+  // Checked here rather than in `adjust`, and the difference is not filing: the
+  // sign is applied by multiplying, and multiplication *coerces*, so `"0.5"`
+  // would arrive below as a perfectly good -0.5 and `null` as -0. This is the
+  // last point at which the argument is still what the client sent. See
+  // `clampRatio` for why that matters.
+  if (!Number.isFinite(delta)) return node;
   const axis = dir === "left" || dir === "right" ? "row" : "col";
   const sign = dir === "right" || dir === "down" ? 1 : -1;
   const target = nearestSplit(node, paneId, axis);
@@ -496,7 +548,7 @@ export function nudge(
 /** setRatio, relative — the ratio it is moving from is the tree's, not the caller's. */
 function adjust(node: LayoutNode, splitId: string, by: number): LayoutNode {
   if (node.type === "pane") return node;
-  if (node.id === splitId) return { ...node, ratio: Math.max(0.1, Math.min(0.9, node.ratio + by)) };
+  if (node.id === splitId) return { ...node, ratio: clampRatio(node.ratio + by) };
   const a = adjust(node.a, splitId, by);
   const b = adjust(node.b, splitId, by);
   return a === node.a && b === node.b ? node : { ...node, a, b };

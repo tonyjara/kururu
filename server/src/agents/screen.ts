@@ -22,6 +22,7 @@
  */
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { Terminal } from "@xterm/headless";
+import { decscusr, osc12, type ProgramCursor, scanCursor } from "../../../shared/cursor";
 import { cleanTitle } from "../../../shared/model";
 
 /**
@@ -73,6 +74,22 @@ export class Screen {
    */
   onTitle: (title: string) => void = () => {};
 
+  /**
+   * The cursor the program in this pty has asked for: its shape and its colour,
+   * each null until something asks.
+   *
+   * Read off the stream on the way past rather than out of the emulator, and
+   * `shared/cursor.ts` makes that case at length. The short version is that the
+   * client reads the same bytes with the same function, so the screen it is
+   * handed and the output it is fed can never disagree about the cursor — which
+   * is the only reason this is written down at all.
+   */
+  private cursor: { shape: ProgramCursor | null; color: string | null } = {
+    shape: null,
+    color: null,
+  };
+  private cursorCarry = "";
+
   constructor() {
     this.term = new Terminal({
       cols: COLS,
@@ -96,6 +113,10 @@ export class Screen {
   }
 
   write(data: string): void {
+    const scan = scanCursor(data, this.cursorCarry);
+    this.cursorCarry = scan.carry;
+    if (scan.shape !== undefined) this.cursor.shape = scan.shape;
+    if (scan.color !== undefined) this.cursor.color = scan.color;
     this.pending++;
     this.term.write(data, () => {
       if (--this.pending > 0) return;
@@ -142,7 +163,7 @@ export class Screen {
 
   /**
    * Everything said so far, as the escape sequences that rebuild it — plus the
-   * one piece of state a serialized screen does not carry.
+   * two pieces of state a serialized screen does not carry.
    *
    * A backlog is applied by resetting the client's emulator and writing this,
    * and ghostty-web's `reset()` does not clear a terminal so much as build a new
@@ -160,11 +181,25 @@ export class Screen {
    * like a focus bug rather than a backlog one — the unfocused panes were
    * drawing no cursor at all by then, for the unrelated reason in
    * `web/src/terminals.ts`.
+   *
+   * The cursor's *shape and colour* are the same hole with a quieter symptom,
+   * and they are here for the same reason. An editor says that insert mode is a
+   * grey bar by sending DECSCUSR and OSC 12 once, when the mode changes; a pane
+   * opened after that has missed both and would draw the block from Settings
+   * over an nvim sitting in insert, until the next keystroke that changed mode
+   * put it right. So they go on the end as the sequences a program would have
+   * sent, and `shared/cursor.ts` is the one thing that interprets them.
    */
   async backlog(): Promise<string> {
     if (this.pending > 0) await new Promise<void>((resolve) => this.drained.push(resolve));
     const screen = this.serializer.serialize({ scrollback: BACKLOG_LINES });
-    return this.cursorHidden ? `${screen}\x1b[?25l` : screen;
+    const { shape, color } = this.cursor;
+    return (
+      screen +
+      (shape ? decscusr(shape) : "") +
+      (color ? osc12(color) : "") +
+      (this.cursorHidden ? "\x1b[?25l" : "")
+    );
   }
 
   dispose(): void {

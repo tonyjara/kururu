@@ -18,6 +18,7 @@
  */
 import { describe, expect, it } from "bun:test";
 import { Terminal } from "@xterm/headless";
+import { scanCursor } from "../../shared/cursor";
 import { Screen } from "../src/agents/screen";
 
 /** What a terminal holds, as the rows a person would see. */
@@ -135,6 +136,87 @@ describe("a cursor the program has hidden", () => {
     const client = await rebuild(backlog, screen.cols, screen.rows);
 
     expect(hidden(client)).toBe(false);
+  });
+});
+
+/**
+ * The shape a program asked its cursor to be, which a serialized screen does
+ * not carry either.
+ *
+ * An editor sends DECSCUSR once, at the moment the mode changes. A pane opened
+ * after that has missed it, so without this the cursor in Settings is drawn
+ * over an nvim sitting in insert mode — and it stays wrong until the next
+ * keystroke that happens to change mode, which for somebody reading a file is
+ * a while. The client reads the sequence out of the stream (`shared/cursor.ts`,
+ * and `web/src/terminals.ts` for what it does with it), so the backlog only has
+ * to put it back where the client is already looking.
+ */
+describe("the cursor shape a program asked for", () => {
+  it("rides the backlog, so a pane opened late draws the one nvim asked for", async () => {
+    const screen = new Screen();
+    screen.write("nytoair@mac ~/Desktop/Nyto/kururu % nvim\r\n");
+    // Insert mode under the default guicursor: a steady bar.
+    screen.write("\x1b[6 q");
+
+    expect(scanCursor(await screen.backlog()).shape).toEqual({ style: "bar", blink: false });
+  });
+
+  it("keeps the blink the program asked for, which is the other half of it", async () => {
+    const screen = new Screen();
+    screen.write("\x1b[3 q");
+    expect(scanCursor(await screen.backlog()).shape).toEqual({ style: "underline", blink: true });
+  });
+
+  it("says nothing once the program has handed the decision back", async () => {
+    const screen = new Screen();
+    screen.write("\x1b[6 q");
+    // What nvim sends on the way out: the terminal's own cursor, not a shape.
+    screen.write("\x1b[0 q");
+
+    expect(scanCursor(await screen.backlog()).shape).toBeUndefined();
+  });
+
+  it("says nothing about a shell, which has never had an opinion", async () => {
+    const screen = new Screen();
+    screen.write("nytoair@mac ~ % ");
+    expect(scanCursor(await screen.backlog()).shape).toBeUndefined();
+  });
+
+  it("carries the colour beside it, since a mode change sends both", async () => {
+    const screen = new Screen();
+    // What nvim sends entering insert under the stock guicursor.
+    screen.write("\x1b[6 q\x1b]12;#787878\x07");
+
+    const scan = scanCursor(await screen.backlog());
+    expect(scan.shape).toEqual({ style: "bar", blink: false });
+    expect(scan.color).toBe("#787878");
+  });
+
+  it("stops carrying the colour once the program has reset it", async () => {
+    const screen = new Screen();
+    screen.write("\x1b]12;#9745be\x07");
+    screen.write("\x1b]112\x07");
+    expect(scanCursor(await screen.backlog()).color).toBeUndefined();
+  });
+
+  it("sees a sequence the pty cut in half, since the reads are its own", async () => {
+    const screen = new Screen();
+    // A pty hands over whatever the read returned, and the boundary is nobody's
+    // decision. The emulator resynchronises on its own; the scan beside it has
+    // to be told to.
+    screen.write("\x1b[6 q\x1b]12;#78");
+    screen.write("7878\x07");
+    expect(scanCursor(await screen.backlog()).color).toBe("#787878");
+  });
+
+  it("does not disturb the screen it is appended to", async () => {
+    const screen = new Screen();
+    await drawSession(screen, screen.cols, screen.rows);
+    screen.write("\x1b[6 q");
+
+    const backlog = await screen.backlog();
+    const client = await rebuild(backlog, screen.cols, screen.rows);
+    expect(grid(client)).toEqual(grid(screenTerminal(screen)));
   });
 });
 

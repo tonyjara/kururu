@@ -122,10 +122,18 @@ server that is mid-flight. **Check whether a server is running before you start
   `hostsock` (two ports over a socket, no pty anywhere), `notify` (the gate, the
   words and what a hand-edited settings file can say), `sounds` (the catalogue
   against a temp directory — an id resolves by lookup, so there is nothing to
-  traverse), `styles` (the registry
+  traverse), `cursor` (DECSCUSR and OSC 12 in both directions, every
+  spelling of a colour, a sequence cut in half by a read boundary, and that the
+  two directions round-trip — which is the whole of what holds the halves in
+  step),
+  `styles` (the registry
   format and every check applied to a manifest a stranger wrote — no network, no
-  disk), and the pane tree in `web/test`. Keep it that way; no test should spawn
-  a real agent CLI.
+  disk), `markdown` (the reader's whole security story: that raw HTML cannot be
+  emitted and that no `href` or `src` carries a scheme the browser would run —
+  the one test here that drives a real dependency, since Shiki's wasm has to
+  load, and still no pty, no network and nothing written), and the pane tree in
+  `web/test` — including that a number arriving from a client cannot enter the
+  tree unless it is one. Keep it that way; no test should spawn a real agent CLI.
 
 When testing by hand, spawn something harmless — `create-agent` takes a
 `command`, so use `sleep 30` or `cat` rather than `claude`, and spend no tokens
@@ -146,6 +154,11 @@ shared/      Protocol types and the tree. No runtime deps; imported by everythin
                  strip, and the server composing a notification
   notify.ts      When kururu may interrupt you, and the words it uses. The gate
                  and the text are PORTED from ghosttown; the delivery is not
+  cursor.ts      The cursor a program asks for — DECSCUSR for the shape, OSC 12
+                 for the colour — and the two directions that answer travels:
+                 scanned off the stream by both halves, written back onto a
+                 backlog by the server. One parser over one stream, because two
+                 would be a cursor that changed when you reopened a pane
   theme.ts       Every theme, both halves of each — the chrome's tokens and the
                  emulator's ANSI palette. Shared because both sides draw from it
   skin.ts        The other axis: what the window is *shaped* like. Radii, line
@@ -169,6 +182,18 @@ server/      Node (not Bun — it was Electron's once and the bundles stayed). T
   record.ts      Rolling raw-stream tape per agent, for bugs you can't reproduce
   transcript.ts  How full a Claude Code window is, off its transcript. PORTED
   report-cli.ts  What a Claude Code hook runs to say so. Not in agents/ on purpose
+  cwd.ts         Where a process *is*, not where it was spawned. One lsof, so a
+                 new tab lands in the project rather than in ~
+  memory.ts      What each terminal is costing the machine, off `ps`. Rounded
+                 before it decides it changed, or the number never stops moving
+  mouseencoding.ts  How a terminal writes its mouse reports. The serializer
+                 restores the mouse being *on* and loses how it speaks, and the
+                 two halves disagreeing types into the program
+  markdown.ts    Markdown → markup, with Shiki. Server-side so the phone gets no
+                 parser; `html: false` IS the sanitizer — see the invariant
+  nvim.ts        The editor inside a pane, found by its socket and asked to say
+                 what it is showing. An autocmd, not a poll; needs no user config
+  reach.ts       Which addresses this machine answers to, for the phone's QR
   workspaces.ts  Profiles, workspaces, focus. The arrangement lives HERE, not in web/
   persist.ts     The arrangement on disk. Structure only — never respawns anything
   mascot.ts      Which sheets the badge can animate, which parts, and which one.
@@ -213,6 +238,28 @@ web/         React 19 + Vite. One build; the desktop is what it is shaped for.
                  properties a ::before draws. Also no React — deliberately
   desktop.ts     The preload bridge, typed. Null in a browser, and that's the contract
   drop.ts        A file dropped on a terminal → the path to type. Pure; tested
+  drag.ts        What is in flight, because `dataTransfer` cannot be read on
+                 `dragover` — a pane has to know before it may light up
+  grid.ts        Whether a pane was really measured. A clamped floor is the fit
+                 addon saying it failed, and believing it costs everyone columns
+  mouse.ts       The mouse as the program in the pty sees it. Selection and
+                 reporting cannot both have the gesture
+  boxdraw.ts     Box-drawing and block glyphs painted to the cell, so a rule is
+                 unbroken whatever the font does
+  cursortext.ts  The character under a block cursor, drawn again on top of it.
+                 The renderer fills a rectangle and never puts the glyph back
+  keybar.ts      The keys a soft keyboard has not got — escape, tab, ctrl,
+                 arrows — as events, so ghostty's own encoder does the bytes
+  mermaid.ts     The one thing the reader draws itself: a diagram needs a DOM to
+                 measure text in, and there is none in the server
+  docs.ts        The document list, reduced to the three decisions it makes
+  preview.ts     Where to send a browser for a dev server, from where this page
+                 already is. Pure; tested
+  qr.ts          A QR code, encoded here — one short URL is the smallest job the
+                 format has. Pure; tested
+  zoom.ts        How big the reader's type is, per device. Not the server's: two
+                 windows of two shapes would overwrite each other
+  main.tsx       The root, wrapped in Crash
   labels.ts      What to call a terminal, in the two places that have to agree
   mascot.ts      Loads a sheet once per URL and reports how big it is
   App.tsx        Draws the server's layout; owns the prefix, zen, and dialogs
@@ -238,6 +285,15 @@ web/         React 19 + Vite. One build; the desktop is what it is shaped for.
     Icon.tsx       A class name and an aria-hidden span. The glyph is a custom
                    property, so changing skin re-renders nothing
     Dialog.tsx     Prompt / confirm / pick. While one is up, no key reaches a pty
+    Menu.tsx       Right-click: the actions a row has, where the pointer is
+    Reader.tsx     A pane that draws a document instead of a grid — the thing
+                   kururu was built for
+    DocPicker.tsx  Pointing a reader at a file by hand, which is the only way a
+                   phone can: it has no editor to follow
+    Keybar.tsx     The missing-keys row above a soft keyboard. Nearly all of it
+                   is about not stealing the focus it is typing into
+    Reach.tsx      Two addresses as two things to point a camera at
+    Crash.tsx      What to show instead of a black window when a render throws
     HelpOverlay.tsx  Printed from the keymap, so it cannot document a dead key
 desktop/     Electron main + preload, and the esbuild step that bundles the server.
   main.js        Finds a server, draws it. Owns a window and nothing else
@@ -867,8 +923,66 @@ things does not write into the user's own `~/.config/kururu`.
   says where the keyboard is going. `setFocused` gives an unfocused emulator a
   cursor style the renderer does not recognise, whose switch has no default case
   and therefore draws nothing. Do **not** "fix" this by tinting the cursor to the
-  background instead: `renderCursor` paints over the glyph and never redraws it
-  in `cursorAccent`, so that is an erased character rather than a hidden cursor.
+  background instead. That was wrong because `renderCursor` painted over the
+  glyph and never put it back, so a background-coloured block was an erased
+  character rather than a hidden cursor — and it is still wrong now that
+  `cursortext.ts` does put it back, in `cursorAccent`, which *is* the background:
+  the same tint would draw the character onto its own colour and erase it a
+  second way.
+- **The cursor in Settings is the *default*; the program in the pty outranks
+  it.** Two sequences, and a mode change sends both: `CSI Ps SP q` — DECSCUSR —
+  is the shape, `OSC 12` is the colour and `OSC 112` puts it back. A terminal
+  that always draws the configured cursor is not a simplification of that, it is
+  a terminal that does not implement them. So `applyCursor` in `terminals.ts`
+  resolves three answers in order of who is allowed to give them — this pane has
+  the keyboard or it does not, then the program if it has said, then the user —
+  and `applyPalette` beside it hands the renderer the theme with one field
+  replaced, since there is nowhere else a cursor colour can go. Both are
+  **nullables beside** the setting rather than values copied over it, because
+  `CSI 0 SP q` and `OSC 112` hand the decision back — they are the last things
+  nvim sends on the way out — and the setting has to still be there to hand it
+  back to. Two nullables rather than one object, for the same reason: a program
+  may send either without the other.
+  Kururu has to read the sequence off the byte stream itself, and it is the only
+  thing in the client that parses one. ghostty-web *does* parse it — Ghostty's VT
+  keeps a style beside the cursor and the wasm's render state packs a byte for
+  it — but the bridge will not hand it back: `getCursor()` returns `style:
+  "block"` with a `// TODO` beside it and there is no
+  `ghostty_render_state_get_cursor_style` to call instead. That is the one piece
+  of terminal state the emulator answers for and then withholds; `mouse.ts` next
+  door is the shape of it when the answer does come back.
+  The scan carries a fragment between chunks on purpose. A pty's writes are cut
+  wherever the read ended, and a sequence cut in half is not a sequence the
+  parser resynchronises on — it is one nobody ever sees, because neither half
+  matches, leaving the cursor in a shape the program has moved on from.
+- **A backlog carries both, for `\x1b[?25l`'s reason.** The serializer restores
+  eight modes and these are not modes at all — so a pane opened ten minutes into
+  an nvim session drew the block from Settings over an editor sitting in insert,
+  and kept it until a keystroke happened to change mode. `screen.ts` appends the
+  sequences a program would have sent, and null is "the user's cursor", so the
+  backlog says *nothing* rather than saying block.
+  It gets them by scanning its own stream with `shared/cursor.ts` rather than by
+  asking its xterm, and that is deliberate. It could ask: DECSCUSR lands in
+  `decPrivateModes` and OSC 12 fires an event, both behind an underscore. But
+  then one half of kururu would learn the cursor from xterm's parser and the
+  other from ours, over the same bytes, and the whole point of a backlog is that
+  the two agree. One parser over one stream cannot disagree with itself — and
+  the private reach going away is a bonus rather than the reason.
+- **The character under a block cursor is drawn again, or it is not there.**
+  `renderCursor` is one `fillRect` in the cursor's colour, painted after the line
+  beneath it and over the top of it, so a block cursor in kururu did not sit on a
+  character, it replaced one — normal-mode nvim over `hello` drew `ello` with a
+  rectangle where the `h` was. It is easy not to notice, because the missing
+  letter is the one you are looking at and your eye supplies it. It is also the
+  whole reason an editor colours its cursor per mode: a colour you cannot read a
+  letter through is not doing the job, and in *visual* mode what is under the
+  block is the thing being selected. `cursortext.ts` wraps `renderCursor` the way
+  `boxdraw.ts` wraps `fillText` — the library draws it wrong, kururu draws it
+  afterwards — and asks the pane for the three things the renderer cannot answer
+  for itself: which style is *really* in force (the unfocused one draws nothing
+  and must draw no glyph either), what the theme calls the colour of text under a
+  cursor, and which face the line it is covering was drawn in. Only the block is
+  covered, because only the block covers anything.
 - **A profile's identity is a pointer, never a secret.** Tying a Claude account
   and a github account to a profile turns out to be three environment variables
   — `CLAUDE_CONFIG_DIR`, which scopes a Claude Code login *completely* (a
@@ -1117,16 +1231,33 @@ things does not write into the user's own `~/.config/kururu`.
   distinguishes "waiting for you" from "thinking". It arrives only via
   `POST /api/report`, and one report disables the heuristic for that agent
   permanently — a process that knows its own state beats a guess forever after.
-- **An exited agent stays listed, and its screen still reflows.** That screen is
-  the only record of what it said, including whatever it printed on the way out —
-  and the record is handed out by being serialized at the emulator's current
-  width, so a dead terminal that refused to resize would give every pane that
-  opened it a screen laid out for the box it died in. `host.resize` therefore
-  skips only the pty half once `exited` is set. The buffer is frozen, not
-  immutable; there is simply no SIGWINCH to send about it. `kill-agent` is what
-  removes it; that is the dismiss gesture. Closing a *pane* never kills anything
-  — the two gestures are not undoable to the same degree, so they are not the
-  same button.
+- **The host keeps an exited agent listed; the server clears it away.** Two
+  halves, and the split is the point. The *host* cannot know whether anybody
+  still wants to read a dead terminal, so it keeps the pty listed with its screen
+  intact — and that screen still reflows, because the record is handed out by
+  being serialized at the emulator's current width and a dead terminal that
+  refused to resize would give every pane that opened it a screen laid out for
+  the box it died in. `host.resize` therefore skips only the pty half once
+  `exited` is set; the buffer is frozen, not immutable, and there is simply no
+  SIGWINCH to send about it.
+  Deciding is the *server's*, and the answer is that a tab is where a terminal
+  lives, so a terminal that has gone leaves a tab with nothing to be.
+  `reapExited` in `index.ts` ends it and `Workspaces.reapTab` takes the pane with
+  it when nothing else is in there — tmux's default, and what typing `exit` means
+  everywhere else. The cost is the screen, and the thing it buys is not
+  accumulating a dead tab for every terminal you ever finished with. It is
+  noticed on the restartable side, never in `agents/`, for `lastStatus`'s reason:
+  every threshold in here is a matter of taste and that file costs the user every
+  running agent to edit.
+  Two refusals come with the pane half, and they are `pruneEmptied`'s: never the
+  last pane of a workspace, which would leave nothing to focus and nothing to aim
+  an action at, and never a reader, which holds no terminals and is therefore not
+  a hole. And `close-tab` deliberately does **not** prune — closing a tab is a
+  gesture aimed at the tab, so the pane it empties stays standing as the button
+  that opens the next terminal, while a pty ending is not a gesture about the
+  pane at all. `kill-agent` is still the dismiss gesture, and closing a *pane*
+  still kills everything in it: those two are not undoable to the same degree, so
+  they are not the same button.
 - **A shell is an agent with nothing claimed about it.** Same pty, same emulator,
   same teardown; `kind` only records what was asked for. It is not counted by the
   quit dialog *unless* `procs.ts` finds an agent running inside it — err towards
@@ -1236,6 +1367,26 @@ things does not write into the user's own `~/.config/kururu`.
   out. Neither is trusted blindly — a tab pointing at a terminal the host does
   not have is dropped, and an agent the host has that no layout mentions is
   placed, because otherwise it is running with nothing pointing at it.
+- **A clamp is not a check, because NaN loses every comparison it is in.** The
+  layout's numeric guards all looked like range checks and three of them were
+  pass-throughs: `Math.max(0.1, Math.min(0.9, NaN))` is NaN, and
+  `index < 0 || index >= n` is *false* for NaN and false again for the string
+  `"x"`, so the line that appears to bound the value assigns it instead. Every
+  one of these numbers arrives on a `ClientMessage`, and the tree they land in
+  is handed to the pty host and debounced onto disk — where `JSON.stringify`
+  turns NaN into `null`. So one malformed message left a `"ratio": null` in
+  `session.json` that came back every start afterwards, unfixable from the
+  window, because the divider you would drag is computed from the ratio that is
+  broken. `shared/layout.ts` now refuses rather than repairs (`set-workspace-color`'s
+  argument: `"x"` is not a drag that went too far, it is not a drag) and the
+  guard is at the *entry point* rather than beside the clamp — `nudge` applies
+  its sign by multiplying, and multiplication coerces, so `"0.5"` reaches an
+  inner check as a perfectly good number. `propose-size` in `index.ts` had the
+  right shape all along. Anything new that takes a number off the wire gets
+  `Number.isFinite` or `Number.isInteger`, and `server/test/layout.test.ts`
+  asserts through `JSON.stringify` — a test written as `not.toBeNaN()` passes
+  for a pane holding the string `"x"`, which was the other half of it.
+
 - **The arrangement is the server's, and the client sends verbs.** `web/` draws
   the layout in the snapshot; it never holds one. A message says *split the
   focused pane*, not *here is my new tree*. That is what makes a window reload
@@ -1569,6 +1720,34 @@ a report, and a click on a real OS notification — neither can be driven from a
 script, and both are one agent-turn away from being seen by hand. PLAN.md's item
 5 is *push* notifications, which is a different thing and still open: this is the
 foreground layer, and web push is what would reach a phone whose screen is off.
+
+**The cursor a program asks for is honoured — shape, colour, and the character
+underneath it — and all of it was verified against an isolated instance** (`KURURU_PORT=7817 KURURU_HOST_SOCK=/tmp/k2/ptyhost.sock
+KURURU_STATE_DIR=/tmp/k2 XDG_CONFIG_HOME=/tmp/k2/config`, with a real nvim under
+the default `guicursor` rather than an agent). Live, in a headless Electron
+client pointed at that server: normal mode drew a block, insert a bar, replace an
+underline, and each transition was a repaint of one cell. Through the backlog:
+`request-backlog` came back ending in `ESC[2 q`, `ESC[6 q` and `ESC[4 q` for
+those three modes and in nothing at all once nvim had quit, and a **window reload
+— every emulator new, every pane asking for a screen — came back drawing the bar**,
+which is the half that only the reconstruction can be wrong about.
+
+Then the same again with the colour and the user's own colourscheme, which is
+where the **one trap in testing this** turned up: the isolated instance sets
+`XDG_CONFIG_HOME` so that installing a style cannot touch the real config, and
+**nvim reads its config from there too**, so it comes up with no colourscheme and
+no per-mode colours at all. The shapes were right and the colour never moved,
+which reads exactly like the feature not working. `XDG_CONFIG_HOME=$HOME/.config
+nvim` on the command line is the fix — kururu stays isolated and nvim does not.
+With that, normal drew a rosewater block, insert a grey bar and visual a purple
+block, `OSC 112` put the theme's own cursor back when nvim quit, and a reload
+came back still wearing nvim's colour rather than the theme's. The character was
+legible through the block in every one of those, which is the other half of what
+a per-mode colour is for.
+
+nvim in a pty was watched directly first, to see what it actually sends: `CSI 2
+SP q` with `OSC 12;#f4dbd6` for normal, `6` with `#787878` for insert, `#9745be`
+for visual, and `CSI 0 SP q` with `OSC 112` on the way out.
 
 Next, in order — details in `PLAN.md`:
 

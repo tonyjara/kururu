@@ -117,11 +117,6 @@ function adoptSeq(profiles: Profile[]): void {
 }
 
 /**
- * Called after anything here changes. The server pushes a snapshot; `persist.ts`
- * writes the structure. Both are debounced by their own callers — this fires on
- * every mutation and does not care how often that is.
- */
-/**
  * Make a restored profile match what the types here promise.
  *
  * What comes back is not necessarily what this version of the server wrote. The
@@ -230,6 +225,11 @@ export class Workspaces {
   private profiles: Profile[] = [];
   private activeId: string;
 
+  /**
+   * Called after anything here changes. The server pushes a snapshot; `persist.ts`
+   * writes the structure. Both are debounced by their own callers — this fires on
+   * every mutation and does not care how often that is.
+   */
   onChange: ChangeHandler = () => {};
 
   constructor(restored?: Profile[]) {
@@ -545,6 +545,40 @@ export class Workspaces {
       for (const workspace of profile.workspaces) {
         if (!paneWithAgent(workspace.layout, agentId)) continue;
         this.mutate(profile.id, workspace.id, (w) => ({ ...w, layout: removeTab(w.layout, agentId) }));
+      }
+    }
+  }
+
+  /**
+   * The same thing, for a terminal that ended on its own — and the pane goes
+   * with it if that was the only thing in there.
+   *
+   * The difference from `removeTab` is who asked. Closing a tab is a gesture
+   * aimed at the tab, so the pane it empties is a place somebody is keeping and
+   * stays standing as the button that opens the next terminal. A pty that
+   * *ended* is not a gesture about the pane at all: the reason the pane was
+   * there has gone, and leaving it would mean rearranging accumulated holes —
+   * which is exactly what `pruneEmptied` says about a pane a drag emptied. This
+   * cannot call that one, because it is about the workspace you are looking at
+   * and a terminal ends wherever it was left.
+   *
+   * Its two refusals are that one's, for the same reasons: never the last pane
+   * of a workspace, which would leave nothing to focus and nothing to aim an
+   * action at, and never a reader, which holds no terminals and is therefore
+   * not a hole. `repair` moves the focus if the pane holding it went.
+   */
+  reapTab(agentId: string): void {
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) {
+        const pane = paneWithAgent(workspace.layout, agentId);
+        if (!pane) continue;
+        this.mutate(profile.id, workspace.id, (w) => {
+          const layout = removeTab(w.layout, agentId);
+          const emptied = findPane(layout, pane.id);
+          if (!emptied || emptied.reader || emptied.agentIds.length > 0) return { ...w, layout };
+          if (panes(layout).length < 2) return { ...w, layout };
+          return { ...w, layout: closePane(layout, pane.id) ?? layout };
+        });
       }
     }
   }

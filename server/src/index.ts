@@ -247,16 +247,6 @@ function pushSnapshot(): void {
 }
 
 /**
- * The two halves, joined. The host knows what is running and the arrangement
- * knows where it is; neither one has an opinion about the other, which is what
- * keeps a pty out of the layout code and a split out of the pty code.
- *
- * Agents are scoped to the active profile because that is the window you are
- * looking at. The ones in the profile you left are still running — their count
- * is on the profile's row in the switcher, which is the whole point of saying
- * that switching is not closing.
- */
-/**
  * The two things a person chose: their mascots, and their keyboard.
  *
  * Held rather than re-read per snapshot because a snapshot goes out on every
@@ -372,6 +362,16 @@ async function installOne(kind: string, id: string, activate: boolean): Promise<
   return { ok: true };
 }
 
+/**
+ * The two halves, joined. The host knows what is running and the arrangement
+ * knows where it is; neither one has an opinion about the other, which is what
+ * keeps a pty out of the layout code and a split out of the pty code.
+ *
+ * Agents are scoped to the active profile because that is the window you are
+ * looking at. The ones in the profile you left are still running — their count
+ * is on the profile's row in the switcher, which is the whole point of saying
+ * that switching is not closing.
+ */
 function snapshot(): SessionSnapshot {
   // Every snapshot is also the moment we learn what is running where, because it
   // is the one function that is called whenever anything about an agent changes.
@@ -874,17 +874,55 @@ function killAll(agentIds: string[]): void {
     host.kill(agentId);
     // It must not be left as a tab pointing at a terminal that no longer exists.
     workspaces.removeTab(agentId);
-    // Nor as a sentence about what a dead terminal is doing. Ids are not reused,
-    // so this is housekeeping rather than correctness — but the map would
-    // otherwise grow for the life of the process.
-    activity.delete(agentId);
-    lastAgent.delete(agentId);
-    memory.delete(agentId);
-    unread.delete(agentId);
-    sizes.delete(agentId);
-    for (const st of clients.values()) st.proposals.delete(agentId);
-    forgetRecording(agentId);
-    mouseEncodings.delete(agentId);
+    forget(agentId);
+  }
+}
+
+/**
+ * Everything on this side that was about one terminal.
+ *
+ * Ids are not reused, so none of this is correctness — but every one of these
+ * maps would otherwise grow for the life of the process. `lastStatus` and
+ * `notifiedAt` are deliberately not in here: `noticeStatuses` drops an id the
+ * moment the host stops listing it, which is the same event by a shorter road.
+ */
+function forget(agentId: string): void {
+  activity.delete(agentId);
+  lastAgent.delete(agentId);
+  memory.delete(agentId);
+  unread.delete(agentId);
+  sizes.delete(agentId);
+  for (const st of clients.values()) st.proposals.delete(agentId);
+  forgetRecording(agentId);
+  mouseEncodings.delete(agentId);
+}
+
+/**
+ * Clear away terminals whose pty has ended on its own — `exit` at a shell, a
+ * command that ran out, an agent that quit.
+ *
+ * The host keeps an exited pty listed with its screen intact, and that is right
+ * for the host: it cannot know whether anybody still wants to read it, and a
+ * screen is the only record a dead terminal leaves. Deciding is this side's
+ * job, and the answer is that a tab is where a terminal *lives* — so when the
+ * terminal has gone the tab has nothing left to be, and a pane holding nothing
+ * else goes with it (`reapTab`). That is tmux's default and what typing `exit`
+ * means everywhere else; the cost is the screen, and the alternative was a dead
+ * tab per terminal you ever closed, waiting to be dismissed by hand.
+ *
+ * It is noticed here rather than in `agents/host.ts` for the reason `lastStatus`
+ * is: that file costs the user every running agent to edit, and this is a matter
+ * of taste that will be tuned. Nothing has to be remembered between calls,
+ * because the reap is what makes the host stop listing it — the kill is a
+ * message, so the same agent may still be in the list on the next push, and a
+ * second kill is swallowed by `ptyhost.ts` and a second `reapTab` finds no pane.
+ */
+function reapExited(): void {
+  for (const agent of host.agents) {
+    if (!agent.exited) continue;
+    host.kill(agent.id);
+    workspaces.reapTab(agent.id);
+    forget(agent.id);
   }
 }
 
@@ -2010,17 +2048,6 @@ function handleMessage(ws: WebSocket, raw: string): void {
       return;
 
     /**
-     * Adopted rather than trusted — a font size arrives as a number somebody
-     * typed, and it is the one setting in kururu that reaches a pty: the cell
-     * follows the size, the proposed grid follows the cell, and every client
-     * watching that terminal is resized to whatever policy picks. `adoptAppearance`
-     * clamps it, so the worst a bad message can do is a legal grid.
-     *
-     * Nothing is resized here. The size still comes the only way it ever comes —
-     * a pane measures its box and proposes, `applySize` decides — so a font
-     * change is a client re-measuring, not a server deciding a shape.
-     */
-    /**
      * A notification was clicked. Take them to it — see `Workspaces.reveal` for
      * why the four moves are one method, and note the one thing this does *not*
      * do: nothing here raises the window. That is the desktop bridge's, because
@@ -2035,6 +2062,17 @@ function handleMessage(ws: WebSocket, raw: string): void {
       saveNotify(adoptNotify(msg.notify));
       return;
 
+    /**
+     * Adopted rather than trusted — a font size arrives as a number somebody
+     * typed, and it is the one setting in kururu that reaches a pty: the cell
+     * follows the size, the proposed grid follows the cell, and every client
+     * watching that terminal is resized to whatever policy picks. `adoptAppearance`
+     * clamps it, so the worst a bad message can do is a legal grid.
+     *
+     * Nothing is resized here. The size still comes the only way it ever comes —
+     * a pane measures its box and proposes, `applySize` decides — so a font
+     * change is a client re-measuring, not a server deciding a shape.
+     */
     case "set-terminal-appearance":
       saveAppearance(adoptAppearance({ ...appearance, terminal: msg.terminal }));
       return;
@@ -2143,17 +2181,6 @@ function handleMessage(ws: WebSocket, raw: string): void {
       void shutdown().then(() => process.exit(RESTART_EXIT_CODE));
       return;
 
-    case "open-preview": {
-      try {
-        openPreview(msg.port);
-      } catch {
-        // out of preview ports; the next dev-servers push just omits proxyPort
-      }
-      lastDevJson = "";
-      void pollDevServers();
-      return;
-    }
-
     // --- the reader --------------------------------------------------------
 
     case "open-reader": {
@@ -2230,7 +2257,6 @@ function text(res: ServerResponse, body: string, status = 200): void {
   res.end(body);
 }
 
-/** Read a JSON request body, with a cap — this endpoint is tailnet-reachable. */
 /**
  * A little over the sheet cap, so a file that is too big is refused by the thing
  * that can say *why* rather than by the socket closing mid-upload.
@@ -2256,6 +2282,7 @@ function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
   });
 }
 
+/** Read a JSON request body, with a cap — this endpoint is tailnet-reachable. */
 function readJsonBody(req: IncomingMessage, limit = 64 * 1024): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -2317,13 +2344,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   }
 
   /**
-   * The addresses this machine can be reached at, for the QR the phone scans.
-   * Asked for rather than pushed: it changes when somebody joins a different
-   * network or brings tailscale up, neither of which raises an event here, and
-   * a poll running forever to keep a value only one dialog ever draws would be
-   * a timer earning nothing. See `reach.ts`.
-   */
-  /**
    * What the pty host is holding, for something that is not a browser.
    *
    * The snapshot already goes to every client over the websocket, so this adds
@@ -2354,8 +2374,29 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return;
   }
 
+  /**
+   * The addresses this machine can be reached at, for the QR the phone scans.
+   * Asked for rather than pushed: it changes when somebody joins a different
+   * network or brings tailscale up, neither of which raises an event here, and
+   * a poll running forever to keep a value only one dialog ever draws would be
+   * a timer earning nothing. See `reach.ts`.
+   */
   if (url.pathname === "/api/reach") {
     json(res, reach(PORT));
+    return;
+  }
+
+  /**
+   * What there is to pick between. Separate from `/api/identity` because it is a
+   * different question with a different shape — that one is "who is this
+   * profile", this one is "who could it be" — and because it spans every profile
+   * at once, where that one is about a single identity.
+   */
+  if (url.pathname === "/api/identity/known") {
+    knownAccounts(workspaces.all().map((profile) => profile.identity)).then(
+      (known) => json(res, known),
+      () => json(res, { claude: [], gh: [] }),
+    );
     return;
   }
 
@@ -2371,20 +2412,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    * them on every status tick or pushing an answer that is quietly hours old. So
    * it is asked for by the one page that draws it, at the moment it is drawn.
    */
-  /**
-   * What there is to pick between. Separate from `/api/identity` because it is a
-   * different question with a different shape — that one is "who is this
-   * profile", this one is "who could it be" — and because it spans every profile
-   * at once, where that one is about a single identity.
-   */
-  if (url.pathname === "/api/identity/known") {
-    knownAccounts(workspaces.all().map((profile) => profile.identity)).then(
-      (known) => json(res, known),
-      () => json(res, { claude: [], gh: [] }),
-    );
-    return;
-  }
-
   if (url.pathname === "/api/identity") {
     const profileId = url.searchParams.get("profile") ?? "";
     describeIdentity(workspaces.identityOf(profileId)).then(
@@ -2450,18 +2477,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   }
 
   /**
-   * One sprite sheet. `?sheet=` names it — Settings asks for each in turn to
-   * draw its picker — and without one you get whichever is currently selected,
-   * which is all a row drawing a badge ever needs to know.
-   *
-   * An endpoint rather than a static file because most sheets live outside the
-   * app entirely, in the user's config directory, and because the name has to be
-   * checked against the list rather than pasted into a path: this is reachable
-   * from the tailnet. `no-cache` so a
-   * user who overwrites their own sheet sees it after a reload rather than after
-   * a restart; the sheets that ship never change, and they are fifteen kilobytes.
-   */
-  /**
    * What there is to be notified *by*: kururu's own sounds and the machine's.
    *
    * A fetch rather than a snapshot field, on `/api/styles`' split — the snapshot
@@ -2502,6 +2517,18 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return;
   }
 
+  /**
+   * One sprite sheet. `?sheet=` names it — Settings asks for each in turn to
+   * draw its picker — and without one you get whichever is currently selected,
+   * which is all a row drawing a badge ever needs to know.
+   *
+   * An endpoint rather than a static file because most sheets live outside the
+   * app entirely, in the user's config directory, and because the name has to be
+   * checked against the list rather than pasted into a path: this is reachable
+   * from the tailnet. `no-cache` so a user who overwrites their own sheet sees
+   * it after a reload rather than after a restart; the sheets that ship never
+   * change, and they are fifteen kilobytes.
+   */
   if (url.pathname === "/api/mascot.png") {
     const body = sheetImage(url.searchParams.get("sheet") ?? defaultMascot(mascots).sheet);
     if (!body) {
@@ -2865,11 +2892,14 @@ server.requestTimeout = 0;
 async function attach(port: Port): Promise<void> {
   host = new HostLink(port);
   host.onAgents = () => {
-    // One event, two readers. Notifications want the *transition* and the
+    // One event, three readers. Notifications want the *transition* and the
     // snapshot carries the state, so this has to run wherever the state is
     // learnt — a second subscription would be a second thing to keep in step
-    // with a status that already only changes in one place.
+    // with a status that already only changes in one place. The reap is the
+    // same argument again, and runs after the notice so that a terminal which
+    // said something on its way out has still been heard.
     noticeStatuses();
+    reapExited();
     pushSnapshot();
   };
   host.onOutput = onOutput;
@@ -2903,7 +2933,17 @@ async function attach(port: Port): Promise<void> {
   // pointing at it — put it somewhere rather than leave it unreachable.
   const placed = new Set(workspaces.allAgents());
   for (const agent of state.agents) {
-    if (!placed.has(agent.id)) workspaces.addTab(agent.id, agent.cwd);
+    if (placed.has(agent.id)) continue;
+    // One that ended while nothing was attached is reaped rather than placed:
+    // `live` has already dropped its tab, and putting a dead terminal in
+    // whatever pane happens to be focused is worse than not showing it at all.
+    // Straight to the host, because the layout no longer mentions it and the
+    // rest of `reapExited` would be looking for a tab that is not there.
+    if (agent.exited) {
+      host.kill(agent.id);
+      continue;
+    }
+    workspaces.addTab(agent.id, agent.cwd);
   }
 
   workspaces.onChange = () => {
