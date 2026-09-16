@@ -56,7 +56,7 @@ import {
 } from "./keys";
 import { desktop } from "./desktop";
 import { isFileDrag } from "./drop";
-import { announce, primeAudio } from "./notify";
+import { announce, primeAudio, primeNotifyPermission } from "./notify";
 import { tabLabel } from "./labels";
 import { applyAppearance } from "./theme";
 import { skinFor } from "../../shared/skin";
@@ -394,6 +394,13 @@ export function App() {
     // The browser will not let a page make a noise until it has been touched,
     // and there is no way to ask whether it has — so be there when it happens.
     primeAudio();
+    // And ask for the cards on that same first touch, so somebody opening kururu
+    // for the first time is asked rather than finding out months later that the
+    // notifications they never saw were a permission nobody had requested. The
+    // gesture matters: Safari ignores an ask without one, and a prompt raised
+    // while the window is still drawing gets dismissed — which is `denied`, and
+    // a page cannot take that back.
+    primeNotifyPermission();
     return api.onNotify((card) => {
       const settings = notifyRef.current;
       if (settings) announce(card, settings);

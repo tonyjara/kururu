@@ -421,6 +421,50 @@ things does not write into the user's own `~/.config/kururu`.
   `codesign -dvvv`. And `codesign -dv` prints to **stderr** and exits 0, so an
   idempotence check built on `execFileSync` reads an empty string and re-signs
   every time while reporting that it did.
+- **Re-signing fixes the bundle, not a window that is already open.** A Mach-O's
+  code-signing identity is fixed at exec, so a window launched before `brand.mjs`
+  re-signed goes on being refused for as long as it stays up — no prompt, no
+  error, and nothing in the page that could report it, while the sound keeps
+  playing because that half is kururu's own Web Audio and never asks macOS
+  anything. It has cost a morning exactly once, and the shape is worth
+  remembering: the fix had landed at 00:39 and the window being tested had been
+  running since 23:33, so the feature was correct and the process watching it
+  predated the correction. **Anything that re-signs the Electron copy ends in
+  relaunching the window** — which is free, on the table above: the agents are in
+  the pty host below and do not notice.
+- **Launch Services can hold two registrations for one bundle id, and the stale
+  one is enough to keep notifications dead.** Stamping `CFBundleIdentifier` and
+  setting the code-signing identifier are two acts at two times, and macOS
+  records each, so the dump comes back with one entry reading
+  `codeInfoID: Electron` and another reading `codeInfoID: com.twonary.kururu.dev`
+  for the same .app — with nothing about the bundle on disk looking wrong.
+  `lsregister -u <app>` then `lsregister -f <app>` clears it, from
+  `/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister`,
+  and `-dump | grep -A3 'identifier:.*kururu'` is how to see which records exist.
+- **Do not diagnose a missing banner from `com.apple.ncprefs` or the `usernoted`
+  database.** Both read exactly like "this app was never authorised" when they
+  are simply not where the answer lives on this macOS: a card was raised,
+  displayed and clicked while `com.twonary.kururu.dev` was absent from both, and
+  absent again afterwards while System Settings → Notifications was listing it as
+  allowed. `log show` for `usernotificationsd` answers nothing from a Claude Code
+  shell either. The one probe that cannot mislead is an Electron `Notification`
+  **in the main process** with `show`, `failed` and `click` handlers on it, since
+  a `click` is the single event no misreading can manufacture — somebody had to
+  be there to click it. Give such a probe eighty seconds rather than six; the
+  six-second one here proved nothing either way.
+  Two things suppress the banner while leaving everything else working, and both
+  are worth excluding before reading a single byte of kururu. A **Focus**, which
+  stops the card and never the sound — an empty `storeAssertionRecords` in
+  `~/Library/DoNotDisturb/DB/Assertions.json` means none is active. And
+  **Notification Center being open**: macOS draws no banners at all while that
+  panel is up, so an afternoon spent opening it to check whether the cards
+  arrived is an afternoon during which none of them can appear. That was the
+  actual answer the one time this was chased end to end, and the cruel part is
+  that looking for the symptom is what causes it.
+  Note also that macOS files *every* notification into Notification Center
+  whether or not it drew a banner, so a growing `record` count says only that
+  delivery works — it cannot tell a presented card from a suppressed one, and
+  reading it as though it could is what made the hunt long.
 - **node-pty needs no `@electron/rebuild`.** Its prebuilds are N-API, so the
   same binary loads in Node 24 (ABI 137) and Electron 44 (ABI 149). Do not add a
   rebuild step to "fix" a spawn failure — check the executable bit first.

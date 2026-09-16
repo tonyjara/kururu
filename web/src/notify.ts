@@ -175,31 +175,125 @@ export async function askPermission(): Promise<Permission> {
 }
 
 /**
- * Raise the card, and wire up what a click on it does.
+ * Ask for the permission once, at the first moment a browser will honour it.
  *
- * `tag` is the agent id, which makes the browser *replace* a live card from the
- * same terminal rather than stacking a second one — ghosttown's `-group`, and
- * the same reasoning: two cards about one agent is one agent's worth of news
- * taking up two slots in Notification Center.
+ * `askPermission` above is the button, and the button is still the honest place
+ * to put a *re-*ask. This is the other half: somebody opening kururu for the
+ * first time should be asked, rather than discovering months later that the
+ * cards they never saw were a permission nobody had requested.
+ *
+ * It is hung off the first gesture rather than fired on mount, which is the same
+ * latch `primeAudio` uses and is not merely deference to Safari's activation
+ * rule — a prompt that arrives while the window is still drawing is one people
+ * dismiss to get at the thing behind it, and a dismissal is `denied`, which a
+ * page cannot take back. `default` only: `denied` must be re-asked from the
+ * browser's own site settings, and `granted` has nothing to ask.
+ *
+ * In the Electron window this is a no-op, because Electron answers `granted`
+ * without consulting anybody. That is worth knowing rather than working around:
+ * on the desktop the permission that actually decides is macOS's, which is not
+ * this one and cannot be read from here at all — which is what `CardOutcome`
+ * below exists to let Settings say out loud.
+ */
+export function primeNotifyPermission(): void {
+  if (typeof Notification === "undefined" || Notification.permission !== "default") return;
+  const ask = () => void askPermission();
+  for (const event of ["pointerdown", "keydown", "touchstart"] as const) {
+    window.addEventListener(event, ask, { once: true, passive: true });
+  }
+}
+
+/**
+ * What became of a card we tried to raise.
+ *
+ * The reason this is a value rather than a `void` is Settings' test button, and
+ * the reason the test button needed one is that **`Notification.permission` is
+ * not the permission that decides.** In a browser it is. In the Electron window
+ * it is always `granted` — Electron never asks anybody — while the answer that
+ * matters is macOS's authorisation of the *bundle*, which no API on this side
+ * can read. So a test that only checked `permission` would report success on
+ * precisely the machine where the user is looking at no banner, which is the
+ * one case a test exists for.
+ *
+ * Hence `silent`: the browser took the card, never reported an error, and never
+ * reported showing it either. And hence the care Settings takes with `ok`: it
+ * says the browser accepted the card, never that a banner appeared, because
+ * nothing on this side of the process boundary can know that it did.
+ */
+export type CardOutcome =
+  | { ok: true }
+  | { ok: false; reason: "unsupported" | "blocked" | "unasked" | "threw" | "silent"; detail?: string };
+
+/**
+ * Build the card. `tag` is the agent id, which makes the browser *replace* a
+ * live card from the same terminal rather than stacking a second one —
+ * ghosttown's `-group`, and the same reasoning: two cards about one agent is one
+ * agent's worth of news taking up two slots in Notification Center.
  *
  * `silent` because we have just played the sound ourselves. Letting the OS pick
  * one too would mean two noises, one of which is not the one that was chosen.
+ */
+function build(card: Card): Notification {
+  return new Notification(card.title, {
+    body: card.body,
+    tag: card.agentId,
+    silent: true,
+    icon: "/favicon-32.png",
+  });
+}
+
+/**
+ * Raise the card, and wire up what a click on it does.
  */
 function raise(card: Card): void {
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
   let note: Notification;
   try {
-    note = new Notification(card.title, {
-      body: card.body,
-      tag: card.agentId,
-      silent: true,
-      icon: "/favicon-32.png",
-    });
+    note = build(card);
   } catch {
     // Some browsers refuse the constructor outright when the page is only
     // reachable over a service worker. Nothing to do; the sound has played.
     return;
   }
+  wireClick(note, card);
+}
+
+/**
+ * Raise a card and say what happened to it, for the one caller that is trying to
+ * find out rather than trying to notify — Settings' *Send a test notification*.
+ *
+ * The timeout is what makes `silent` observable. `onshow` is the browser saying
+ * it handed the card to the platform, and on a machine where the platform then
+ * drops it that event is the last true thing anybody gets to hear; two and a
+ * half seconds is long enough that a slow platform is not slandered and short
+ * enough to still feel like the answer to a button press.
+ */
+export async function testCard(card: Card, settings: NotifySettings): Promise<CardOutcome> {
+  void playSound(settings.sound, settings.volume);
+  if (typeof Notification === "undefined") return { ok: false, reason: "unsupported" };
+  if (Notification.permission === "denied") return { ok: false, reason: "blocked" };
+  if (Notification.permission !== "granted") return { ok: false, reason: "unasked" };
+
+  let note: Notification;
+  try {
+    note = build(card);
+  } catch (error) {
+    return { ok: false, reason: "threw", detail: error instanceof Error ? error.message : String(error) };
+  }
+  wireClick(note, card);
+
+  return await new Promise<CardOutcome>((resolve) => {
+    const settle = (outcome: CardOutcome) => {
+      clearTimeout(timer);
+      resolve(outcome);
+    };
+    const timer = setTimeout(() => settle({ ok: false, reason: "silent" }), 2500);
+    note.onshow = () => settle({ ok: true });
+    note.onerror = () => settle({ ok: false, reason: "threw", detail: "the browser reported an error raising it" });
+  });
+}
+
+function wireClick(note: Notification, card: Card): void {
   note.onclick = () => {
     /**
      * Three things, and only the first is kururu's own state. The server moves

@@ -24,7 +24,14 @@
  */
 import { useEffect, useState } from "react";
 import { NOTIFY_EVENTS, type NotifyEvent, type NotifySettings } from "../../../shared/notify";
-import { announce, askPermission, notifyPermission, playSound, type Permission } from "../notify";
+import {
+  askPermission,
+  notifyPermission,
+  playSound,
+  testCard,
+  type CardOutcome,
+  type Permission,
+} from "../notify";
 import * as api from "../session";
 
 /** One row of `/api/sounds`. Mirrors `SoundInfo`; a fetch, so it is untyped on arrival. */
@@ -43,6 +50,8 @@ const EVENT_LABELS: Record<NotifyEvent, [string, string]> = {
 export function NotifySettings({ notify }: { notify: NotifySettings }) {
   const [sounds, setSounds] = useState<Sound[] | null>(null);
   const [permission, setPermission] = useState<Permission>(notifyPermission);
+  /** What the last press of the test button came to. Null until somebody presses it. */
+  const [outcome, setOutcome] = useState<CardOutcome | "trying" | null>(null);
 
   /**
    * What there is to choose from, asked once when the page opens.
@@ -203,9 +212,9 @@ export function NotifySettings({ notify }: { notify: NotifySettings }) {
               /**
                * The whole path, not just the noise: this is the only way to find
                * out whether the *card* works on this device before an agent
-               * depends on it. It goes through `announce` for exactly that
-               * reason — a test that took a shortcut would pass on a browser
-               * where the real thing is silent.
+               * depends on it. It goes through the same construction the real
+               * thing does for exactly that reason — a test that took a shortcut
+               * would pass on a device where the real thing is silent.
                *
                * After the permission and not beside it. Asking is asynchronous
                * even when the answer is already `granted`, so a test that fired
@@ -213,18 +222,21 @@ export function NotifySettings({ notify }: { notify: NotifySettings }) {
                * it — which is precisely the press that is trying to find out
                * whether cards work.
                */
-              void askPermission().then((granted) => {
+              setOutcome("trying");
+              void askPermission().then(async (granted) => {
                 setPermission(granted);
-                announce(
-                  {
-                    // No agent, so a click on it reveals nothing — which is
-                    // what `reveal-agent` does with an id nothing holds anyway.
-                    agentId: "",
-                    event: "done",
-                    title: "kururu",
-                    body: "This is what a notification looks like.",
-                  },
-                  notify,
+                setOutcome(
+                  await testCard(
+                    {
+                      // No agent, so a click on it reveals nothing — which is
+                      // what `reveal-agent` does with an id nothing holds anyway.
+                      agentId: "",
+                      event: "done",
+                      title: "kururu",
+                      body: "This is what a notification looks like.",
+                    },
+                    notify,
+                  ),
                 );
               });
             }}
@@ -232,8 +244,63 @@ export function NotifySettings({ notify }: { notify: NotifySettings }) {
             Send a test notification
           </button>
         </div>
+        <Tried outcome={outcome} />
       </fieldset>
     </div>
+  );
+}
+
+/**
+ * What the test button found out, in the words each answer deserves.
+ *
+ * The reason this exists at all is that the page's own permission is not the
+ * permission that decides. In the Electron window `Notification.permission` is
+ * `granted` always — Electron asks nobody — while the authorisation that governs
+ * is macOS's, against the *bundle*, and no API on this side can read it. So a
+ * test that reported "permission granted, sent" was capable of saying everything
+ * is fine to somebody sitting in front of a window that has never shown a card,
+ * which is the one situation the button exists for.
+ *
+ * Hence the deliberate hedge on success: it says the browser *accepted* it, not
+ * that a banner appeared, and then names who is left to blame. Claiming a banner
+ * nobody saw is how the last version of this cost a morning.
+ */
+function Tried({ outcome }: { outcome: CardOutcome | "trying" | null }) {
+  if (outcome === null) return null;
+  if (outcome === "trying") return <p className="set-note set-note-under">Sending…</p>;
+  if (outcome.ok) {
+    return (
+      <p className="set-note set-note-under">
+        Sent, and the browser says it drew it. If no banner appeared, it was stopped after that
+        point — by the system rather than by kururu. On macOS: check that kururu is allowed in
+        System Settings → Notifications with its style set to Banners or Alerts rather than None,
+        and that no Focus is switched on. The sound is unaffected by either, which is why you can
+        hear this one and not see it.
+      </p>
+    );
+  }
+  return (
+    <p className="set-note set-note-under">
+      {outcome.reason === "unsupported" ? (
+        <>No card: this browser has none to give. The sound is the whole of the notification here.</>
+      ) : outcome.reason === "blocked" ? (
+        <>
+          No card: they are blocked for this address, and a page is not allowed to ask again — the
+          browser's own site settings are the only way back. On an iPhone, add kururu to the home
+          screen first: Safari only offers notifications to an installed app.
+        </>
+      ) : outcome.reason === "unasked" ? (
+        <>No card: nothing has been granted yet. Use “Allow notification cards” above.</>
+      ) : outcome.reason === "threw" ? (
+        <>The browser refused to raise it{outcome.detail ? `: ${outcome.detail}` : "."}</>
+      ) : (
+        <>
+          The browser took the card and then never reported drawing it, which is what a platform
+          silently dropping it looks like from in here. On macOS that is the bundle's notification
+          authorisation — check kururu in System Settings → Notifications, and that no Focus is on.
+        </>
+      )}
+    </p>
   );
 }
 
