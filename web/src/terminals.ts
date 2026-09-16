@@ -755,6 +755,24 @@ function create(agentId: string): Pooled {
   };
   element.addEventListener("focus", onFocus);
 
+  /**
+   * ⌘C, and Edit → Copy, which is the same command arriving from the menu.
+   *
+   * The selection ghostty-web draws is a picture on a canvas, not a DOM
+   * selection, so the browser's own copy runs against a focused container with
+   * nothing selected in it and quietly leaves the clipboard alone. ghostty lets
+   * ⌘C through its key handler precisely so that this event fires, and then
+   * nothing on its side answers it — it copies on mouseup instead, which is not
+   * the gesture anybody reaches for. Answering the event rather than the key is
+   * what covers the menu too, and with no selection it stays out of the way.
+   */
+  const onCopy = (event: ClipboardEvent) => {
+    if (!terminal?.hasSelection() || !event.clipboardData) return;
+    event.clipboardData.setData("text/plain", terminal.getSelection());
+    event.preventDefault();
+  };
+  element.addEventListener("copy", onCopy);
+
   const entry: Pooled = {
     agentId,
     element,
@@ -775,6 +793,7 @@ function create(agentId: string): Pooled {
       if (settle) clearTimeout(settle);
       unwirePointer();
       element.removeEventListener("focus", onFocus);
+      element.removeEventListener("copy", onCopy);
       unsubscribe();
       typed?.dispose();
       observer?.disconnect();

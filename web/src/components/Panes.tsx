@@ -462,7 +462,7 @@ function Pane({
             title="New terminal here (C-a T)"
             aria-label="New tab"
           >
-            +
+            <Icon name="add" />
           </button>
         )}
 
@@ -480,11 +480,21 @@ function Pane({
               a split made on the desktop is a row in the switcher on the phone. */}
           {!solo && (
             <>
-              <button className="pane-btn" onClick={() => api.splitPane("row", pane.id)} title="Split right (C-a |)">
-                ⊟
+              <button
+                className="pane-btn"
+                onClick={() => api.splitPane("row", pane.id)}
+                title="Split right (C-a |)"
+                aria-label="Split right"
+              >
+                <Icon name="split-right" />
               </button>
-              <button className="pane-btn" onClick={() => api.splitPane("col", pane.id)} title="Split down (C-a -)">
-                ⊞
+              <button
+                className="pane-btn"
+                onClick={() => api.splitPane("col", pane.id)}
+                title="Split down (C-a -)"
+                aria-label="Split down"
+              >
+                <Icon name="split-down" />
               </button>
             </>
           )}
@@ -493,6 +503,7 @@ function Pane({
             className="pane-btn"
             onClick={() => api.closePane(pane.id)}
             title="Close this pane and everything in it (C-a x)"
+            aria-label="Close pane"
           >
             <Icon name="close" />
           </button>
@@ -553,30 +564,11 @@ function PaneSwitch({ solo }: { solo: SoloAt }) {
         solo.open({ x: box.left, y: box.bottom + 4 });
       }}
     >
-      <PanesIcon />
+      <Icon name="panes" />
       <span className="pane-switch-count">
         {solo.index + 1}/{solo.count}
       </span>
     </button>
-  );
-}
-
-/** Two boxes side by side: the window this one is a slice of. */
-function PanesIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="3" y="4" width="7.5" height="16" rx="1.5" />
-      <rect x="13.5" y="4" width="7.5" height="16" rx="1.5" />
-    </svg>
   );
 }
 
@@ -697,16 +689,15 @@ function ReaderStrip({
         title={reader.path ? `${reader.root}/${reader.path}\nClick to open another document` : "waiting for the editor"}
       >
         {name}
-        <span className="tab-caret" aria-hidden="true">
-          ▾
-        </span>
+        <Icon name="caret" className="tab-caret" />
       </button>
       <button
         className="pane-btn"
         onClick={() => api.pinReader(pane.id, !following)}
         title={following ? "Following the editor — click to pin this file" : "Pinned — click to follow the editor"}
+        aria-label={following ? "Pin this file" : "Follow the editor"}
       >
-        {following ? "⇄" : "⊙"}
+        <Icon name={following ? "follow" : "pin"} />
       </button>
       <button
         className="pane-btn"

@@ -344,8 +344,8 @@ export function Sidebar({
       <section className="side-section">
         <h2>
           Workspaces
-          <button className="mini" onClick={() => onRun("new-workspace")} title="New workspace (C-a C)">
-            +
+          <button className="mini" onClick={() => onRun("new-workspace")} title="New workspace (C-a C)" aria-label="New workspace">
+            <Icon name="add" />
           </button>
         </h2>
         <ul className="ws-list">
@@ -643,7 +643,7 @@ export function Sidebar({
           What the corner is for instead is the thing with no other door. */}
       <div className="sidebar-foot">
         <button className="cog" onClick={onSettings} title="Settings" aria-label="Settings">
-          <CogIcon />
+          <Icon name="settings" />
         </button>
         {/* Beside the cog rather than in it: getting kururu onto a phone is a
             thing you do at the start of a session, not a preference you set —
@@ -655,7 +655,7 @@ export function Sidebar({
           title="Open on your phone"
           aria-label="Open on your phone"
         >
-          <QrIcon />
+          <Icon name="share" />
         </button>
       </div>
 
@@ -1010,39 +1010,6 @@ function ContextRing({ usage }: { usage: ContextUsage }) {
 /** `189377` → `189k`. A token count is a magnitude, never an exact figure. */
 function format(tokens: number): string {
   return tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : String(tokens);
-}
-
-/**
- * A cog, drawn rather than imported: it is the only icon in the whole app, and a
- * dependency for one of them would be a dependency for one of them.
- */
-function CogIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </svg>
-  );
-}
-
-/**
- * A QR code, drawn as one — three finders and a scatter of modules.
- *
- * Not a phone, which is the other obvious glyph for this and the wrong one: a
- * phone icon says "there is a mobile app", and there is not. There is a code to
- * scan, and the icon is a small picture of the thing the button produces.
- */
-function QrIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="3" width="6" height="6" rx="1" />
-      <rect x="15" y="3" width="6" height="6" rx="1" />
-      <rect x="3" y="15" width="6" height="6" rx="1" />
-      <path d="M15 15h2M19 15h2M15 19h2M19 19h2M17 17h2" />
-    </svg>
-  );
 }
 
 /**

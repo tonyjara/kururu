@@ -29,10 +29,11 @@
  *     bun /path/to/kururu/server/src/report-cli.ts working
  *
  * The status is optional; with none, it reports only the context reading, which
- * is what a `PostToolUse` or `SessionStart` hook wants.
+ * is what a `PostToolUse` or `SessionStart` hook wants — and `SessionStart` is
+ * the one that makes `/clear` empty the ring the moment it happens.
  */
 import { isAgentStatus } from "../../shared/model";
-import { readContext } from "./transcript";
+import { STANDARD_WINDOW, readContext } from "./transcript";
 
 /** A turn must never wait on us. Long enough for a local socket, and no longer. */
 const TIMEOUT_MS = 1500;
@@ -98,7 +99,14 @@ async function main(): Promise<void> {
 
   const payload = await readPayload();
   const path = typeof payload?.transcript_path === "string" ? payload.transcript_path : "";
-  const context = path ? await readContext(path) : null;
+  /**
+   * `SessionStart` is the one event where no file is still an answer. After
+   * `/clear` the hook can run before Claude Code has written the new transcript,
+   * and reading nothing would leave the ring on the conversation that was just
+   * cleared. A session that is starting has used nothing, whatever the disk says.
+   */
+  const starting = payload?.hook_event_name === "SessionStart" && payload.source !== "resume";
+  const context = (path ? await readContext(path) : null) ?? (starting ? { used: 0, window: STANDARD_WINDOW } : null);
   const message = activityFrom(payload);
 
   // Nothing to say. The endpoint would answer 400, which is correct of it and

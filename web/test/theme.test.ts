@@ -60,6 +60,13 @@ function cssName(token: string): string {
  * `--mono` stays nobody's, on the reasoning written beside it in the stylesheet.
  */
 const NOT_THEME = new Set([
+  // An icon's drawing, and the two names a rule hands it on by. Written by
+  // `web/src/icons.ts` once at load and by no theme or skin: a skin may swap an
+  // icon for a glyph, which is `--icon-<name>`, but it never gets to supply the
+  // vector — that would be a stranger's SVG in a data URI on the root element.
+  ...ICON_NAMES.map((name) => `--icon-${name}-svg`),
+  "--icon-svg",
+  "--icon-glyph",
   "--ui",
   "--mono",
   "--status-size",

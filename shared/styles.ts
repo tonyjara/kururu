@@ -440,6 +440,7 @@ export function adoptSkinManifest(
   if (moved === 0) return null;
 
   const icons = { ...BASE_ICONS };
+  const glyphs: IconName[] = [];
   const givenIcons = (raw.icons ?? {}) as Record<string, unknown>;
   for (const name of ICON_NAMES) {
     const glyph = givenIcons[name as IconName];
@@ -450,6 +451,7 @@ export function adoptSkinManifest(
     const trimmed = glyph.trim();
     if (!trimmed || [...trimmed].length > 2 || /[\r\n\\]/.test(trimmed)) continue;
     icons[name] = trimmed;
+    glyphs.push(name);
   }
 
   const fonts: SkinFont[] = [];
@@ -476,6 +478,7 @@ export function adoptSkinManifest(
     description: line(raw.description),
     tokens,
     icons,
+    glyphs,
     ...(fonts.length ? { fonts } : {}),
     ...(sheet ? { stylesheet: sheet } : {}),
   };
