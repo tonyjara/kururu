@@ -69,14 +69,54 @@ jobs:
       - name: The notes, which must exist before a minute is spent building
         run: node tools/release-notes.mjs "${{ steps.version.outputs.version }}" > "$RUNNER_TEMP/notes.md"
 
+      # The certificate is imported by hand rather than through electron-builder's
+      # `CSC_LINK`, and that is not a preference. `importCerts` in
+      # app-builder-lib creates its temporary keychain with a random 32-byte
+      # password and then calls `set-key-partition-list -k <the .p12 password>`
+      # to unlock it — two different secrets, so it fails every time with
+      # `SecKeychainUnlock: The user name or passphrase you entered is not
+      # correct`, which reads exactly like a wrong password in the repository's
+      # secrets and is not. Doing it here costs a dozen lines and takes signing
+      # out of the part that is broken.
+      #
+      # It also guarantees what the local build had to be fixed by hand to get:
+      # this keychain holds exactly one certificate, so codesign can never be
+      # ambiguous about which to use.
+      - name: Import the signing certificate
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/kururu.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+          printf '%s' "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          # No auto-lock and no timeout: a keychain that relocks halfway through
+          # signing fails on a file somewhere in the middle of the bundle.
+          security set-keychain-settings "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          # Without this, codesign prompts for permission to use the key — and a
+          # runner has nobody to answer, so it hangs until the job times out.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+            -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          # Prepended to the search list rather than replacing it, or the system
+          # roots go missing and nothing validates.
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
       - name: Build, sign and notarize
         env:
-          # The certificate, as base64 of a .p12 and its password. electron-builder
-          # makes a throwaway keychain out of these and removes it afterwards —
-          # which is also why the ambiguity that bites locally cannot happen here:
-          # that keychain holds exactly one certificate, because it put one in.
-          CSC_LINK: ${{ secrets.MACOS_CERT_P12 }}
-          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          # No CSC_LINK: the certificate is already in the keychain the step above
+          # built, and electron-builder finds it there by auto-discovery.
+          CSC_KEYCHAIN: ${{ env.KEYCHAIN }}
           # Two credential shapes, and `desktop/notarize.mjs` takes whichever is
           # present: an App Store Connect API key, or an Apple ID with an
           # app-specific password. Both are what `notarytool store-credentials`
@@ -105,10 +145,12 @@ jobs:
           ./node_modules/.bin/electron-builder --projectDir desktop \
             --mac dmg zip --arm64 --x64 --publish never
 
-      # Whatever happens next, the key does not stay on disk a moment longer.
-      - name: Shred the key
+      # Whatever happens next, neither secret stays on disk a moment longer.
+      - name: Shred the key and the keychain
         if: always()
-        run: rm -f "$RUNNER_TEMP/notary.p8"
+        run: |
+          rm -f "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/cert.p12"
+          security delete-keychain "$RUNNER_TEMP/kururu.keychain-db" 2>/dev/null || true
 
       - name: Say what came out, and refuse to publish half a release
         run: |
