@@ -2541,6 +2541,7 @@ a.button {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -2568,6 +2569,42 @@ a.button {
   font-family: var(--mono);
   font-size: var(--fs-sm);
   color: var(--dim);
+}
+
+/* The slot that holds *Get it*, which is a button, a progress bar or a link
+   depending on what the runtime under the page can actually do — a packaged
+   window can replace itself, a browser and the phone can only send you to
+   GitHub. All three live in the same corner of the release header, so the row
+   has to take any of them without moving the title. */
+.about-get {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* A bare `<progress>` is painted by the UA in its own blue — the one colour on
+   this page that answers to no theme and would go on being blue through every
+   one of them. Reset and repainted in the accent, which is the fill the button
+   it replaced was wearing a moment earlier, so pressing it looks like the same
+   object carrying on rather than a different control arriving. */
+.about-progress {
+  appearance: none;
+  width: 110px;
+  height: 4px;
+  border: 0;
+  border-radius: var(--radius-round);
+  overflow: hidden;
+  background: var(--line);
+}
+.about-progress::-webkit-progress-bar {
+  background: var(--line);
+  border-radius: var(--radius-round);
+}
+.about-progress::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: var(--radius-round);
 }
 
 /* --------------------------------------------------------------------------

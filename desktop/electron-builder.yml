@@ -105,12 +105,21 @@ mac:
 dmg:
   # The window it opens in: the app on the left, Applications on the right, which
   # is the gesture every Mac user already knows.
+  #
+  # These are electron-builder's own default positions and they are copied here
+  # rather than left out, because the background art is drawn *for* them. The
+  # stock background is a 540x380 plate with a dashed arrow on it, and that arrow
+  # is positioned for icons at y=220 — so the first spelling of this block, which
+  # moved them up to y=190 for no reason anybody recorded, put both icons a clear
+  # thirty pixels above the arrow pointing between them. Nothing warns about it:
+  # the DMG builds, opens and works, and only looks subtly wrong. If the art is
+  # ever replaced with kururu's own, these move with it.
   contents:
-    - x: 140
-      y: 190
+    - x: 130
+      y: 220
       type: file
-    - x: 400
-      y: 190
+    - x: 410
+      y: 220
       type: link
       path: /Applications
 

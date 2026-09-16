@@ -76,5 +76,30 @@ if (isPicker) {
         return null;
       }
     },
+    /**
+     * Replacing this application with a newer one.
+     *
+     * The whole of what a page may say is "fetch it" and "restart into it".
+     * Where the download comes from is `app-update.yml` inside the bundle and
+     * is not addressable from here, and Squirrel refuses an archive that is not
+     * signed the way the running app is — so this is two verbs and no nouns,
+     * which is what makes it something a served page can be handed. See the
+     * long note in `main.js`; it also answers `unavailable` for every case
+     * except a packaged window showing the server it started itself.
+     *
+     * `onState` hands back its own unsubscribe rather than relying on the page
+     * living as long as the window: Settings is a dialog that opens and closes
+     * all afternoon, and a listener per open is a listener per open forever.
+     */
+    update: {
+      state: () => ipcRenderer.invoke("kururu:update-state"),
+      onState: (listener) => {
+        const relay = (_event, state) => listener(state);
+        ipcRenderer.on("kururu:update", relay);
+        return () => ipcRenderer.removeListener("kururu:update", relay);
+      },
+      download: () => ipcRenderer.send("kururu:update-download"),
+      install: () => ipcRenderer.send("kururu:update-install"),
+    },
   });
 }
