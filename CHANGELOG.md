@@ -13,6 +13,8 @@ shows, so it is written once and read in three places — see
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-16
+
 ### Added
 
 - **Runs your agents**, and plain shells, in ptys kururu owns. A pty host
@@ -59,4 +61,5 @@ shows, so it is written once and read in three places — see
   release's notes — which are this file.
 - **Installs from a DMG**, signed and notarized, or from the Homebrew tap.
 
-[Unreleased]: https://github.com/tonyjara/kururu/commits/main
+[Unreleased]: https://github.com/tonyjara/kururu/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/tonyjara/kururu/releases/tag/v0.1.0
