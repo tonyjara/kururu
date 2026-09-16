@@ -791,6 +791,146 @@ function finishQuit(alsoAgents) {
   app.quit();
 }
 
+// ---------------------------------------------------------------------------
+// Updating
+// ---------------------------------------------------------------------------
+
+/**
+ * Replacing this application with a newer one — the half of the update story
+ * the server is deliberately not allowed to have.
+ *
+ * `server/src/update.ts` answers *what is out there* and stops there, because
+ * what installing means depends on how kururu arrived: a DMG has this, a
+ * Homebrew cask has `brew upgrade`, a checkout has `git pull`, and only the
+ * thing that did the installing knows which. So the doing is here, in the one
+ * process that knows it is a packaged .app, and the About tab drives it across
+ * the bridge rather than the server driving anything at all.
+ *
+ * **It is offered only when this window started the server it is showing**, and
+ * that condition is load bearing rather than cautious. About draws the
+ * *server's* version, since that is what `/api/health` reports and what the
+ * check compares against GitHub — and that number is this bundle's exactly when
+ * the window launched the server out of its own Resources. Pointed at the box
+ * in the cupboard, or at a `bun run dev` that answered on 7717 first, swapping
+ * this .app would leave the page reporting the number it reported before, which
+ * reads as an update that silently did not happen. Those cases get the link to
+ * the release page, which is the honest answer for both and is also what a
+ * browser and the phone have always got.
+ *
+ * Nothing downloads until somebody presses the button (`autoDownload = false`)
+ * and nothing is applied until they press the second one. What a page can ask
+ * for is exactly "fetch it" and "now" — the *feed* is `app-update.yml`, written
+ * into the bundle by electron-builder out of the `publish` block and not
+ * addressable from a renderer, so a served page cannot point the updater
+ * anywhere. Squirrel then refuses an archive whose signature does not match the
+ * running app's. Those two together are what make this safe to put on a surface
+ * a server across a tailnet can reach: the worst a hostile one can do is make
+ * kururu download its own genuine update and restart into it.
+ */
+
+/**
+ * electron-updater, loaded on first use rather than beside the requires at the
+ * top of this file.
+ *
+ * A packaging mistake that left it out of the bundle would, as a top-level
+ * require, take the whole window down at startup — which is the worst available
+ * outcome for the one feature whose absence costs nothing at all. Loaded here it
+ * degrades to the link instead. `undefined` is "not tried yet" and `null` is
+ * "tried and there is none", so a build without it does not re-throw on every
+ * keystroke in the About tab.
+ */
+let updater;
+
+function loadUpdater() {
+  if (updater !== undefined) return updater;
+  try {
+    updater = require("electron-updater").autoUpdater;
+  } catch (error) {
+    console.error("kururu: this build has no updater in it —", error.message);
+    updater = null;
+    return null;
+  }
+
+  updater.autoDownload = false;
+  updater.on("download-progress", (progress) => {
+    setUpdate({ status: "downloading", percent: Math.max(0, Math.min(100, Math.round(progress.percent))) });
+  });
+  updater.on("update-downloaded", (info) => setUpdate({ status: "ready", version: info.version }));
+  updater.on("error", (error) => {
+    setUpdate({ status: "error", message: error?.message || "The download did not finish." });
+  });
+  return updater;
+}
+
+/** What the About tab is drawing. Pushed on every change, and asked for on open. */
+let update = { status: "idle" };
+
+function setUpdate(next) {
+  update = next;
+  if (win && !win.isDestroyed()) win.webContents.send("kururu:update", next);
+}
+
+/** Whether replacing this application is a thing this window can honestly offer. */
+function updatable() {
+  return PACKAGED && server !== null && connected === LOCAL && loadUpdater() !== null;
+}
+
+async function downloadUpdate() {
+  if (!updatable()) return;
+  // Pressing it twice is not a second download, and a finished one is not
+  // something to start again.
+  if (update.status === "downloading" || update.status === "ready") return;
+
+  setUpdate({ status: "downloading", percent: 0 });
+  try {
+    const found = await loadUpdater().checkForUpdates();
+    /**
+     * The server said there was a newer one and the updater disagrees, which is
+     * a race rather than a fault — a release published between the two asks, or
+     * a feed that has not propagated. Back to idle, so the button is there to
+     * press again, rather than an error about something that is nobody's fault.
+     */
+    if (!found || !found.isUpdateAvailable) {
+      setUpdate({ status: "idle" });
+      return;
+    }
+    await loadUpdater().downloadUpdate();
+  } catch (error) {
+    setUpdate({ status: "error", message: error?.message || "The download did not finish." });
+  }
+}
+
+/**
+ * Restart into the version that was just downloaded.
+ *
+ * This deliberately does not go through `confirmQuit`. That dialog exists to
+ * say that quitting stops the server while the agents carry on below it, which
+ * is a thing worth telling somebody who is leaving — and this is not leaving.
+ * The app comes back in a few seconds, starts its server again and reconnects
+ * to the same pty host, so the agents are not even interrupted. Asking "3
+ * agents are still running" here would be inviting somebody to cancel an
+ * install over a consequence that is not one.
+ *
+ * Which means everything `finishQuit` does has to be done here instead, and the
+ * server especially: it is a child of this process rather than a thing that
+ * dies with it, so leaving it up would have the new version find 7717 already
+ * taken by the old one.
+ */
+function installUpdate() {
+  if (update.status !== "ready") return;
+  quitting = true;
+  stopSweeping();
+  stopWatchingServer();
+  stopVite();
+  stopServer();
+  loadUpdater().quitAndInstall();
+}
+
+ipcMain.handle("kururu:update-state", () => (updatable() ? update : { status: "unavailable" }));
+ipcMain.on("kururu:update-download", () => void downloadUpdate());
+ipcMain.on("kururu:update-install", () => installUpdate());
+
+
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
     // A signal is not somebody choosing, so it is not asked a question.

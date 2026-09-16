@@ -312,7 +312,10 @@ web/         React 19 + Vite. One build; the desktop is what it is shaped for.
     Crash.tsx      What to show instead of a black window when a render throws
     HelpOverlay.tsx  Printed from the keymap, so it cannot document a dead key
 desktop/     Electron main + preload, and the esbuild step that bundles the server.
-  main.js        Finds a server, draws it. Owns a window and nothing else
+  main.js        Finds a server, draws it. Owns a window, and the one thing a
+                 window can do that a served page cannot: replace the app —
+                 the section at the foot of the file, and the only reason this
+                 window has a production dependency at all
   connect.html   The one page kururu draws itself — the address picker
   servers.js     Addresses you have connected to, and what a typed one means
   preload.js     Two bridges in one file, split on `file:` — see the comment
@@ -504,6 +507,19 @@ things does not write into the user's own `~/.config/kururu`.
   whether or not it drew a banner, so a growing `record` count says only that
   delivery works — it cannot tell a presented card from a suppressed one, and
   reading it as though it could is what made the hunt long.
+- **Anything Electron you launch from a shell inside kururu runs as Node.** The
+  server is started with `ELECTRON_RUN_AS_NODE=1` — that is the line in
+  `main.js` that makes the Electron binary run the server bundle — and every pty
+  underneath it inherits the variable, which means every shell, every agent, and
+  everything either of them runs. So `electron .` in a kururu terminal does not
+  start Electron. It starts Node: `require("electron")` returns the *path to the
+  binary* instead of the API, and the first line touching `app` dies with
+  `Cannot read properties of undefined`. A packaged .app launched the same way
+  is worse, because it exits instantly with an empty log and nothing anywhere
+  says why, and `--remote-debugging-port` comes back from Node's own parser as
+  `bad option`. Three different symptoms, one cause, and none of them names it.
+  `env -u ELECTRON_RUN_AS_NODE` is the fix. The tell, when the stack trace is all
+  you have, is that it reports a Node version Electron does not embed.
 - **electron-builder resolves its relative paths from two different places, and
   nothing says which.** `files` and `extraResources` are relative to
   `--projectDir` (`desktop/`), so `../web/dist` is how the web build is reached.
@@ -614,6 +630,26 @@ things does not write into the user's own `~/.config/kururu`.
   application serving it, which is the line `preload.js` already draws at
   `file:`. So the server answers *what is out there* and the doing belongs to the
   window, or to the person.
+- **The window installs, and only for the server it started itself.** The other
+  half of the rule above. `update.ts` says what is out there; `desktop/main.js`
+  is what does something about it, because only the thing that installed kururu
+  knows what installing means. The condition is narrow deliberately: About draws
+  the *server's* version, so the number on that page is this bundle's exactly
+  when the window launched the server out of its own `Resources`. Pointed at a
+  machine in a cupboard — or at a `bun run dev` that answered on 7717 first —
+  replacing this .app would leave the page reporting what it reported before,
+  which reads as an update that silently did not happen. Those cases get the
+  link to the release page, which is also what a browser and the phone get.
+  What a page may say is "fetch it" and "now", and nothing else. The feed is
+  `app-update.yml` inside the bundle, written by electron-builder out of the
+  `publish` block and not addressable from a renderer, and Squirrel then refuses
+  an archive whose signature does not satisfy the running app's designated
+  requirement. That requirement is bundle id, Apple anchor and team
+  (`W4YCRC53PL`) with nothing version-specific in it, so every release signed by
+  the workflow satisfies every earlier one — and an **unsigned** local build
+  satisfies none of them, which is why a `dist:unsigned` app cannot be used to
+  test the install half and fails with `code failed to satisfy specified code
+  requirement(s)`.
 - **`files.ts`: resolve, check, realpath, check again.** The first check catches
   lexical `../`; the second catches a symlink inside the project pointing at
   `~/.ssh`. An escaping path is **refused, never clamped** — a clamped traversal
@@ -1962,10 +1998,30 @@ build machine does: a copy of the DMG was given a `com.apple.quarantine`
 attribute naming Safari, mounted, and `spctl` on the app inside answered
 `accepted, source=Notarized Developer ID`.
 
-**Still owed:** the x64 arch (configured, never built — one more notarization),
-the release workflow, the Homebrew tap, `electron-updater` wired to the About
-tab's *Get it*, and a version in the host handshake, which is the one piece that
-costs a pty host restart and is therefore batched with it.
+**And it updates itself.** Verified against the *packaged* app rather than the
+checkout, in an isolated instance (`KURURU_PORT=7817`,
+`KURURU_HOST_SOCK=/tmp/k2/ptyhost.sock`) driven over CDP — never against the
+user's own server, on the rule that a second real client resizes their agents.
+The bridge is there and answers `idle` rather than `unavailable`, which is the
+gate agreeing that a packaged window showing its own server may install. Pressing
+it against a feed whose newest release *is* the running version reached GitHub,
+found nothing newer and came back to `idle` — rather than fetching 130MB, or
+reporting a fault where there is none. The same build packaged as 0.0.9
+(`-c.extraMetadata.version`) then downloaded the real 0.1.0 zip: 0% to 36% in
+four seconds, so `download-progress` genuinely fires and the bar is not
+decorative. Squirrel then refused the signature, which is *correct* — an unsigned
+build cannot accept a signed update — and that refusal is the one step no local
+build can get past. What stands in for it is the designated requirement, which
+names a bundle id, an anchor and a team and no version at all, so every release
+the workflow signs satisfies every earlier one.
+
+The honest gap, worth saying plainly: **nothing can auto-update *to* 0.1.1**,
+because 0.1.0 shipped with no updater in it. Everybody on 0.1.0 takes the link
+one more time. The first release this path runs for real is 0.1.1 → 0.1.2, which
+is also the first chance anyone has to watch `quitAndInstall` work.
+
+**Still owed:** the Homebrew tap, and a version in the host handshake — the one
+piece that costs a pty host restart and is therefore batched with it.
 
 Next, in order — details in `PLAN.md`:
 

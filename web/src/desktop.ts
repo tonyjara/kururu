@@ -31,6 +31,42 @@ export interface DesktopBridge {
    * an address — stays on the other side of the `file:` split.
    */
   show?(): void;
+  /**
+   * Replacing this application, when this application is one that can be
+   * replaced. Optional so a window older than this bridge simply draws the
+   * link, which is the same thing it drew before the updater existed.
+   */
+  update?: DesktopUpdater;
+}
+
+/**
+ * Where the desktop app has got to in replacing itself.
+ *
+ * `unavailable` is the ordinary case rather than the failure: it is what a
+ * browser gets, what the phone gets, and what the window gets whenever it is
+ * showing a server it did not start — see `desktop/main.js` for why that last
+ * one is a refusal rather than an oversight. Every one of those is answered
+ * with a link to the release page, so nothing here is a dead end.
+ *
+ * `error` is kept separate from `idle` for the reason the sentence under the
+ * *Check for updates* button is: "there is nothing to do" and "I could not do
+ * it" are the same picture and opposite facts.
+ */
+export type UpdateState =
+  | { status: "unavailable" }
+  | { status: "idle" }
+  | { status: "downloading"; percent: number }
+  | { status: "ready"; version: string }
+  | { status: "error"; message: string };
+
+export interface DesktopUpdater {
+  /** What it is doing now, for a page that has just opened. */
+  state(): Promise<UpdateState>;
+  /** Told on every change. Returns the unsubscribe, which a dialog must call. */
+  onState(listener: (state: UpdateState) => void): () => void;
+  download(): void;
+  /** Quit, apply it, come back. Only meaningful from `ready`. */
+  install(): void;
 }
 
 declare global {

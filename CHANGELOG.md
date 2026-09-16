@@ -13,6 +13,21 @@ shows, so it is written once and read in three places — see
 
 ## [Unreleased]
 
+### Added
+
+- **kururu installs its own updates.** The About tab has always been able to
+  tell you a newer release was out; *Get it* now fetches it, shows how far along
+  it is, and restarts into it — no browser, no disk image, nothing to drag. It
+  appears only in the desktop app showing the server it started itself: a
+  browser, the phone, and a window pointed at a machine in a cupboard still get
+  the link to GitHub, because replacing the app on your desk would not change
+  the version any of those are reporting.
+
+### Fixed
+
+- **The disk image lines up.** The app and the Applications shortcut you drag it
+  onto sat thirty pixels above the arrow drawn between them.
+
 ## [0.1.0] - 2026-09-16
 
 ### Added
