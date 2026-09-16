@@ -34,6 +34,7 @@ import {
 } from "../../../shared/keys";
 import { isModifier, keyLabel, keyName, PREFIX_LABEL } from "../keys";
 import * as api from "../session";
+import { Icon } from "./Icon";
 
 export function KeySettings({
   keys,
@@ -125,7 +126,7 @@ export function KeySettings({
                         onClick={() => api.bindKey(key, null)}
                       >
                         {keyLabel(key)}
-                        <span className="key-x">×</span>
+                        <Icon name="close" className="key-x" />
                       </button>
                     ))}
                     {/* An action with nothing bound to it is not an error — it is

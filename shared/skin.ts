@@ -62,12 +62,49 @@
  * pixel chrome that finds no ASCII character reading as "restart" writes `null`
  * there, and the null is the sentence. After the merge every name has a glyph,
  * so nothing downstream has to carry a fallback.
+ *
+ * The glyph is only half of an icon now, and the lesser half. Kururu draws its
+ * own set as vectors (`web/src/icons.ts`), because a character's weight and size
+ * are the font's to decide — `✕` in one face is a hairline and in another is a
+ * blot, and none of them are big enough for a thumb. So the glyphs below are
+ * what a skin *replaces* the vector with, and what the registry's preview prints
+ * where it has no vector to draw. A skin that writes one has asked for text; a
+ * skin that does not gets the drawing.
  */
-export type IconName = "close" | "run" | "restart" | "caret" | "add" | "edit" | "external";
+export type IconName =
+  | "close"
+  | "run"
+  | "restart"
+  | "caret"
+  | "add"
+  | "edit"
+  | "external"
+  | "split-right"
+  | "split-down"
+  | "settings"
+  | "share"
+  | "follow"
+  | "pin"
+  | "panes";
 
 export type IconSet = Record<IconName, string>;
 
-export const ICON_NAMES: readonly IconName[] = ["close", "run", "restart", "caret", "add", "edit", "external"];
+export const ICON_NAMES: readonly IconName[] = [
+  "close",
+  "run",
+  "restart",
+  "caret",
+  "add",
+  "edit",
+  "external",
+  "split-right",
+  "split-down",
+  "settings",
+  "share",
+  "follow",
+  "pin",
+  "panes",
+];
 
 /**
  * The shape tokens, as `styles.css` asks for them.
@@ -202,6 +239,15 @@ export interface Skin {
   tokens: SkinTokens;
   icons: IconSet;
   /**
+   * The icons this skin drew as text on purpose, which the window then draws as
+   * text instead of as kururu's vector. Recorded rather than worked out by
+   * comparing against `BASE_ICONS`, because a pixel skin writing `+` for `add` —
+   * the base's own glyph — has still asked for a `+` in its own face beside its
+   * other ASCII, and a comparison would hand it one smooth vector among them.
+   * Absent is none.
+   */
+  glyphs?: readonly IconName[];
+  /**
    * The faces this skin brought, if it came from the registry. Absent on every
    * built-in, which name faces the machine already has.
    */
@@ -307,6 +353,16 @@ export const BASE_ICONS: IconSet = {
   edit: "✎",
   /** Leaves kururu — a dev server opened in the browser's own tab. */
   external: "↗",
+  "split-right": "◫",
+  "split-down": "⊟",
+  settings: "⚙",
+  /** Getting kururu onto a phone, which is a code to scan. */
+  share: "▦",
+  /** A reader following the editor, as opposed to pinned to one file. */
+  follow: "⇄",
+  pin: "⊙",
+  /** Which of several panes this is, on a screen too narrow to tile them. */
+  panes: "▥",
 };
 
 /**
@@ -328,9 +384,12 @@ function skin(
   icons: Partial<Record<IconName, string | null>> = {},
 ): Skin {
   const merged = { ...BASE_ICONS };
+  const glyphs: IconName[] = [];
   for (const name of ICON_NAMES) {
     const glyph = icons[name];
-    if (typeof glyph === "string") merged[name] = glyph;
+    if (typeof glyph !== "string") continue;
+    merged[name] = glyph;
+    glyphs.push(name);
   }
   return {
     id,
@@ -338,6 +397,7 @@ function skin(
     description,
     tokens: { ...BASE_TOKENS, ...tokens },
     icons: merged,
+    glyphs,
   };
 }
 

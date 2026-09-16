@@ -47,6 +47,7 @@ import { adoptMascot, DEFAULT_MASCOT, defaultMascot, slugSheetName } from "../..
 import { forgetSheet, sheetUrl, useSheet } from "../mascot";
 import * as api from "../session";
 import { Mascot } from "./Status";
+import { Icon } from "./Icon";
 
 /**
  * How wide the picker is allowed to get before it starts scrolling instead.
@@ -559,7 +560,7 @@ function MascotList({
                     api.removeMascot(one.id);
                   }}
                 >
-                  ×
+                  <Icon name="close" />
                 </button>
               )}
             </>

@@ -65,17 +65,32 @@ describe("windowFor", () => {
     expect(windowFor("claude-opus-5[1M]")).toBe(LONG_WINDOW);
   });
 
+  it("knows Opus 5 is long without the suffix, which Claude Code stopped writing", () => {
+    expect(windowFor("claude-opus-5")).toBe(LONG_WINDOW);
+  });
+
   it("sizes everything else, known or not, as standard", () => {
-    expect(windowFor("claude-opus-5")).toBe(STANDARD_WINDOW);
     expect(windowFor("claude-sonnet-5")).toBe(STANDARD_WINDOW);
+    expect(windowFor("claude-opus-5-1")).toBe(STANDARD_WINDOW);
     expect(windowFor("some-model-from-the-future")).toBe(STANDARD_WINDOW);
   });
 });
 
 describe("contextFrom", () => {
   it("adds the prompt, both caches and the reply", () => {
-    const tail = lines([assistantRecord({ input: 2, cc: 310, cr: 188949, out: 116 })]);
+    const tail = lines([assistantRecord({ model: "claude-sonnet-5", input: 2, cc: 310, cr: 188949, out: 116 })]);
     expect(contextFrom("", tail)).toEqual({ used: 189377, window: STANDARD_WINDOW });
+  });
+
+  it("reads a plain Opus 5 session as long, as a post-/clear turn announces it", () => {
+    const head = lines([modelRecord("claude-opus-5")]);
+    const tail = lines([assistantRecord({ cr: 82_800 })]);
+    expect(contextFrom(head, tail)).toEqual({ used: 82_800, window: LONG_WINDOW });
+  });
+
+  it("never reports a window smaller than what has already gone through it", () => {
+    const tail = lines([assistantRecord({ model: "claude-sonnet-5", cr: 250_000 })]);
+    expect(contextFrom("", tail)?.window).toBe(LONG_WINDOW);
   });
 
   it("takes the window from the announcement at the head", () => {
@@ -152,6 +167,36 @@ describe("readContext", () => {
 
   it("says nothing rather than something wrong when there is no file", async () => {
     expect(await readContext("/nonexistent/session.jsonl")).toBeNull();
+  });
+
+  it("reads a whole file with no reply in it as empty, which is what /clear leaves", async () => {
+    const path = transcript([modelRecord("claude-opus-5[1m]"), { type: "user", message: { content: "hi" } }]);
+    expect(await readContext(path)).toEqual({ used: 0, window: LONG_WINDOW });
+  });
+
+  it("does not read a tail with no reply in it as empty", async () => {
+    const filler = { type: "user", message: { content: "x".repeat(300 * 1024) } };
+    const path = transcript([modelRecord("claude-opus-5"), assistantRecord({ input: 5000 }), filler]);
+    expect(await readContext(path)).toBeNull();
+  });
+});
+
+describe("compaction", () => {
+  it("empties the window at a compact boundary after the last reply", () => {
+    const tail = lines([
+      assistantRecord({ model: "claude-opus-5", input: 150_000 }),
+      { type: "system", subtype: "compact_boundary", content: "Conversation compacted" },
+    ]);
+    expect(contextFrom(lines([modelRecord("claude-opus-5[1m]")]), tail)).toEqual({ used: 0, window: LONG_WINDOW });
+  });
+
+  it("counts the reply that came after the boundary", () => {
+    const tail = lines([
+      assistantRecord({ input: 150_000 }),
+      { type: "system", subtype: "compact_boundary" },
+      assistantRecord({ model: "claude-sonnet-5", input: 9_000 }),
+    ]);
+    expect(contextFrom("", tail)).toEqual({ used: 9_000, window: STANDARD_WINDOW });
   });
 });
 

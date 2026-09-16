@@ -27,10 +27,24 @@ import { open, stat } from "node:fs/promises";
 
 import type { ContextUsage } from "../../shared/model";
 
-/** Every current model, unless its id says otherwise. */
+/** Every model not known to be otherwise, unless its id says so. */
 export const STANDARD_WINDOW = 200_000;
-/** What a `[1m]` on the model id buys. */
+/** What a `[1m]` on the model id buys, or a model that has it without asking. */
 export const LONG_WINDOW = 1_000_000;
+
+/**
+ * Models Claude Code runs at the long window with no `[1m]` on the id.
+ *
+ * The suffix used to be the whole story, and then Claude Code started giving
+ * Opus 5 the long window by default and stopped writing it: a session on 2.1.273
+ * announces a plain `claude-opus-5` while `/context` reports a 1M window, and a
+ * 200k guess drew a fresh session at 41% when it was at 8%. Nothing in the
+ * transcript states the window, so this is a list, and a list is only as good as
+ * what has been checked — an id goes in once a real session has shown it, not
+ * because it seems likely. Exact ids rather than prefixes, so that a later
+ * `claude-opus-5-1` is judged when it exists instead of inheriting this.
+ */
+const LONG_BY_DEFAULT = new Set(["claude-opus-5"]);
 
 /**
  * Enough of the end to hold the last assistant record, which carries the whole
@@ -41,13 +55,24 @@ const TAIL_BYTES = 256 * 1024;
 const HEAD_BYTES = 64 * 1024;
 
 /**
- * The window a model id means. Only the `[1m]` suffix moves it: the plain ids
- * are all 200k, and a model we have never heard of is likelier to be one of
- * those than a long-window one — guessing high would quietly report an agent as
- * having five times the room it has.
+ * The window a model id means: the `[1m]` suffix, or a model on the list above.
+ * Anything else is 200k, because a model we have never heard of is likelier to
+ * be one of those than a long-window one — guessing high would quietly report an
+ * agent as having five times the room it has.
  */
 export function windowFor(modelId: string): number {
-  return /\[1m\]/i.test(modelId) ? LONG_WINDOW : STANDARD_WINDOW;
+  if (/\[1m\]/i.test(modelId)) return LONG_WINDOW;
+  return LONG_BY_DEFAULT.has(baseModel(modelId)) ? LONG_WINDOW : STANDARD_WINDOW;
+}
+
+/**
+ * A window can never be smaller than what has already been sent through it. So
+ * a session past 200k is a long one whatever its id said, which is what keeps
+ * the list above from being load-bearing: a model missing from it reads high
+ * while it is small and corrects itself at the point the error would matter.
+ */
+function atLeast(window: number, used: number): number {
+  return used > window ? LONG_WINDOW : window;
 }
 
 /** `claude-opus-5[1m]` and `claude-opus-5` are the same model, differently sized. */
@@ -70,6 +95,14 @@ function tokens(value: unknown): number {
  * Lines that will not parse are skipped rather than fatal — the first one in a
  * tail read is a fragment by definition, and a transcript being appended to as
  * we read can end in a half-written one.
+ *
+ * A `compact_boundary` met on the way back is an answer too, and it is zero.
+ * `/compact` writes one into the same file and carries on, so without it the
+ * last assistant line before the boundary would go on reporting the window the
+ * compaction just emptied until the next reply landed — a ring at 90% on an
+ * agent that has only just been given its room back. Zero is not the exact
+ * figure (the summary costs something), but the next reply corrects it, and an
+ * understatement for one turn is the right way round to be wrong.
  */
 function lastMainUsage(tail: string): { used: number; model: string } | null {
   const lines = tail.split("\n");
@@ -81,6 +114,9 @@ function lastMainUsage(tail: string): { used: number; model: string } | null {
       rec = JSON.parse(line);
     } catch {
       continue;
+    }
+    if (rec.type === "system" && rec.subtype === "compact_boundary" && !rec.isSidechain) {
+      return { used: 0, model: "" };
     }
     if (rec.type !== "assistant" || rec.isSidechain) continue;
     const usage = rec.message?.usage;
@@ -120,26 +156,38 @@ export function contextFrom(head: string, tail: string): ContextUsage | null {
   const usage = lastMainUsage(tail);
   if (!usage) return null;
   const announced = lastModelId(tail) ?? lastModelId(head);
-  const matches = announced && usage.model && baseModel(announced) === baseModel(usage.model);
-  return { used: usage.used, window: windowFor(matches ? announced! : usage.model) };
+  // A reset names no model, so the window is whatever was last announced.
+  if (!usage.model) return { used: 0, window: windowFor(announced ?? "") };
+  const matches = announced && baseModel(announced) === baseModel(usage.model);
+  const window = windowFor(matches ? announced! : usage.model);
+  return { used: usage.used, window: atLeast(window, usage.used) };
 }
 
 /**
  * Read a transcript's two ends and say how full its window is, or null for
- * anything we cannot answer from — no such file, a session that has not had a
- * reply yet, a format that has moved on. Null is a blank column in the sidebar,
- * never a wrong number.
+ * anything we cannot answer from — no such file, a format that has moved on.
+ * Null is "say nothing", and saying nothing leaves the last number standing.
+ *
+ * Which is exactly wrong for one case, and it is the common one: `/clear` starts
+ * a new transcript, the first hook after it reads a file with a prompt in it and
+ * no reply, and the ring went on showing the session that was just thrown away
+ * until the new one had billed something. So a file read *whole* with no reply
+ * in it is a session that has used nothing, and says so. Only when read whole:
+ * a tail with no assistant line in it is a long tool result, not an empty
+ * session, and zero there would be a wrong number rather than a missing one.
  */
 export async function readContext(path: string): Promise<ContextUsage | null> {
   let file;
   try {
     const size = (await stat(path)).size;
-    if (!size) return null;
+    if (!size) return { used: 0, window: STANDARD_WINDOW };
     file = await open(path, "r");
     const tail = await slice(file, Math.max(0, size - TAIL_BYTES), size);
     // A file that fits in one read is its own head: skip the second one.
     const head = size <= TAIL_BYTES ? tail : await slice(file, 0, HEAD_BYTES);
-    return contextFrom(head, tail);
+    const found = contextFrom(head, tail);
+    if (found || size > TAIL_BYTES) return found;
+    return { used: 0, window: windowFor(lastModelId(tail) ?? "") };
   } catch {
     return null;
   } finally {

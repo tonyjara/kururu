@@ -51,7 +51,10 @@
  */
 import { skinFor, type IconName, type Skin, type SkinTokens } from "../../shared/skin";
 import { ICON_NAMES } from "../../shared/skin";
+import { applyIcons } from "./icons";
 import { cssName } from "./theme";
+
+applyIcons();
 
 /**
  * A glyph, as something `content` can safely be handed.
@@ -80,6 +83,14 @@ export function applySkin(skin: Skin): void {
   for (const name of ICON_NAMES) {
     root.style.setProperty(`--icon-${name}`, cssString(skin.icons[name]));
   }
+  /**
+   * Which icons this skin wants as text. One attribute holding a list rather
+   * than a property per icon, because CSS cannot branch on a custom property's
+   * value but can match a word in an attribute — `[data-glyphs~="close"]` — and
+   * that is the whole switch between a drawing and a character.
+   */
+  const glyphs = (skin.glyphs ?? []).join(" ");
+  if (root.dataset.glyphs !== glyphs) root.dataset.glyphs = glyphs;
   /**
    * Named on the element for the same reason `data-theme` is: it is the one
    * hook a skin's own stylesheet has to scope itself with, so that installing

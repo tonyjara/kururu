@@ -1,19 +1,19 @@
 /**
  * The mark that says what an agent is doing, in the two places that draw it.
  *
- * It was a coloured dot for all four states. Two of them still are, and the line
- * between the two halves is not "stopped or going" — it is **whether it wants
- * you**. `blocked` and `done` do: one is waiting on an answer, the other has
- * finished and is holding a result. Those keep their dots, and in a sidebar
- * where everything else is moving a still dot is now the thing that stands out,
- * which is the right way round.
+ * It was a coloured dot for all four states, and then for a while `blocked` and
+ * `done` kept their dots on the theory that a still dot among moving neighbours
+ * would stand out as the states that want you. In practice it read as the mascot
+ * failing to draw: both states last until somebody types into the terminal, and
+ * Claude Code's own "waiting for your input" notice reports `blocked` a minute
+ * after every turn, so an agent that was plainly sitting there showed a dot for
+ * the rest of the afternoon. Wanting you is what the notification is for.
  *
- * `working` and `idle` are the two states an agent spends its time in, and they
- * get the mascot: hopping while it thinks, breathing while it waits. Movement
- * across a shape is read before colour and long before a tooltip, so a glance
- * down the sidebar separates "going" from "stopped" without reading anything —
- * which is the actual job. A mascot with no idle clip leaves idle as the dot it
- * always was.
+ * So the line is now "going or not": `working` hops, and every other state wears
+ * the idle clip. Movement across a shape is read before colour and long before a
+ * tooltip, so a glance down the sidebar separates the two without reading
+ * anything — which is the actual job. A mascot with no idle clip leaves those
+ * states as the dot they always were, and the tooltip still names which one.
  *
  * An idle animation that cannot animate falls back to the dot, and that rule is
  * here rather than in the stylesheet because it is a choice of *element*. Frozen
@@ -46,8 +46,7 @@ export function Status({ agent, mascot }: { agent: AgentSnapshot; mascot: Mascot
   const label = statusLabel(agent);
   const reduced = usePrefersReducedMotion();
   const still = mascot.motion === "never" || (mascot.motion === "system" && reduced);
-  const clip =
-    state === "working" ? mascot.working : state === "idle" && !still ? mascot.idle : null;
+  const clip = state === "working" ? mascot.working : still ? null : mascot.idle;
   return (
     <span className={`status status-${state}`} title={label} aria-label={label} role="img">
       {clip ? <Mascot config={mascot} clip={clip} /> : <span className="status-dot" />}

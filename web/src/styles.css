@@ -143,6 +143,13 @@
   --icon-add: "+";
   --icon-edit: "✎";
   --icon-external: "↗";
+  --icon-split-right: "◫";
+  --icon-split-down: "⊟";
+  --icon-settings: "⚙";
+  --icon-share: "▦";
+  --icon-follow: "⇄";
+  --icon-pin: "⊙";
+  --icon-panes: "▥";
 }
 
 * {
@@ -170,18 +177,71 @@
 /* An icon is a custom property and a pseudo-element, never a component — see
    the header of `web/src/skin.ts`. `::before` rather than the span's own text so
    that nothing has to re-render when the skin changes: the property moves and
-   the glyph follows, with React none the wiser. */
+   the glyph follows, with React none the wiser.
+
+   Two properties per icon now, and the attribute on the root picks between
+   them. `--icon-<name>-svg` is kururu's drawing (`web/src/icons.ts`), painted as
+   a mask over `currentColor` so it takes the colour of the button it is in and
+   follows that colour on hover. `--icon-<name>` is the glyph, and is drawn only
+   for the names a skin listed in `data-glyphs` — a skin that asked for an ASCII
+   `x` gets an `x` in its own face, and every other skin gets the drawing.
+
+   Sized in em, so an icon is as big as the type of the control it sits in and a
+   skin's type ramp moves both together. 1.2em rather than 1em because a stroke
+   drawing inside a 24-unit box leaves two units of air on each side, where a
+   glyph fills its em to the edge. */
 .icon {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
   line-height: 1;
+  vertical-align: middle;
 }
-.icon-close::before { content: var(--icon-close); }
-.icon-run::before { content: var(--icon-run); }
-.icon-restart::before { content: var(--icon-restart); }
-.icon-caret::before { content: var(--icon-caret); }
-.icon-external::before { content: var(--icon-external); }
-.icon-add::before { content: var(--icon-add); }
-.icon-edit::before { content: var(--icon-edit); }
+.icon::before {
+  content: "";
+  display: block;
+  width: 1.2em;
+  height: 1.2em;
+  background-color: currentColor;
+  -webkit-mask: var(--icon-svg) center / contain no-repeat;
+  mask: var(--icon-svg) center / contain no-repeat;
+}
+.icon-close { --icon-svg: var(--icon-close-svg); --icon-glyph: var(--icon-close); }
+.icon-run { --icon-svg: var(--icon-run-svg); --icon-glyph: var(--icon-run); }
+.icon-restart { --icon-svg: var(--icon-restart-svg); --icon-glyph: var(--icon-restart); }
+.icon-caret { --icon-svg: var(--icon-caret-svg); --icon-glyph: var(--icon-caret); }
+.icon-add { --icon-svg: var(--icon-add-svg); --icon-glyph: var(--icon-add); }
+.icon-edit { --icon-svg: var(--icon-edit-svg); --icon-glyph: var(--icon-edit); }
+.icon-external { --icon-svg: var(--icon-external-svg); --icon-glyph: var(--icon-external); }
+.icon-split-right { --icon-svg: var(--icon-split-right-svg); --icon-glyph: var(--icon-split-right); }
+.icon-split-down { --icon-svg: var(--icon-split-down-svg); --icon-glyph: var(--icon-split-down); }
+.icon-settings { --icon-svg: var(--icon-settings-svg); --icon-glyph: var(--icon-settings); }
+.icon-share { --icon-svg: var(--icon-share-svg); --icon-glyph: var(--icon-share); }
+.icon-follow { --icon-svg: var(--icon-follow-svg); --icon-glyph: var(--icon-follow); }
+.icon-pin { --icon-svg: var(--icon-pin-svg); --icon-glyph: var(--icon-pin); }
+.icon-panes { --icon-svg: var(--icon-panes-svg); --icon-glyph: var(--icon-panes); }
+:root[data-glyphs~="close"] .icon-close::before,
+:root[data-glyphs~="run"] .icon-run::before,
+:root[data-glyphs~="restart"] .icon-restart::before,
+:root[data-glyphs~="caret"] .icon-caret::before,
+:root[data-glyphs~="add"] .icon-add::before,
+:root[data-glyphs~="edit"] .icon-edit::before,
+:root[data-glyphs~="external"] .icon-external::before,
+:root[data-glyphs~="split-right"] .icon-split-right::before,
+:root[data-glyphs~="split-down"] .icon-split-down::before,
+:root[data-glyphs~="settings"] .icon-settings::before,
+:root[data-glyphs~="share"] .icon-share::before,
+:root[data-glyphs~="follow"] .icon-follow::before,
+:root[data-glyphs~="pin"] .icon-pin::before,
+:root[data-glyphs~="panes"] .icon-panes::before {
+  content: var(--icon-glyph);
+  width: auto;
+  height: auto;
+  background: none;
+  -webkit-mask: none;
+  mask: none;
+}
 
 /* The effect layer: scanlines, a grain, a vignette. Above the panes, which is
    the only place it can be — the emulator paints into a canvas CSS cannot reach,
@@ -273,13 +333,22 @@ kbd {
 }
 
 .mini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--dimmer);
   font-size: var(--fs-base);
-  padding: 0 5px;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
   line-height: 1;
 }
 .mini:hover {
   color: var(--text);
+  background: var(--chrome-high);
+}
+:root[data-narrow] .mini {
+  padding: 8px;
+  font-size: var(--fs-lg);
 }
 .mini-danger:hover {
   color: var(--danger);
@@ -398,10 +467,11 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   border-radius: var(--radius-lg);
   color: var(--dim);
+  font-size: var(--fs-xl);
 }
 .sidebar-close:hover {
   color: var(--text);
@@ -605,12 +675,12 @@ kbd {
   /* The row reserves its bottom edge for the swatch, so its centre is not the
      name's. Half that reservation puts this on the name's line instead. */
   margin-bottom: 6px;
-  padding: 2px 5px;
+  padding: 3px 5px;
   border: none;
   border-radius: var(--radius-md);
   background: none;
   color: var(--dimmer);
-  font-size: var(--fs-md);
+  font-size: var(--fs-sm);
   line-height: 1;
   cursor: pointer;
 }
@@ -775,7 +845,9 @@ kbd {
   top: 3px;
   right: 2px;
   opacity: 0;
-  padding: 2px 6px;
+  display: inline-flex;
+  padding: 3px;
+  border-radius: var(--radius-sm);
   color: var(--dim);
   font-size: var(--fs-base);
 }
@@ -785,6 +857,7 @@ kbd {
 }
 .agent-kill:hover {
   color: var(--danger);
+  background: var(--chrome-high);
 }
 
 /* The status mark. Whatever is inside it, the box is the same size: a sidebar
@@ -1021,10 +1094,16 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--radius-lg);
   color: var(--dimmer);
+  font-size: var(--fs-lg);
+}
+:root[data-narrow] .cog {
+  width: 40px;
+  height: 40px;
+  font-size: var(--fs-xl);
 }
 .cog:hover {
   color: var(--text);
@@ -1083,12 +1162,17 @@ kbd {
    in the app, and a control nobody can reach is worth nothing at any price. */
 :root[data-narrow] .agent-kill {
   opacity: 1;
+  top: 2px;
+  padding: 8px;
+  font-size: var(--fs-lg);
 }
 :root[data-narrow] .ws-swatch {
   opacity: 0.8;
 }
 :root[data-narrow] .ws-run {
   color: var(--dim);
+  padding: 8px 10px;
+  font-size: var(--fs-md);
 }
 
 /* Every pixel of width is worth more on a phone than the gutter it was spent on.
@@ -1361,21 +1445,44 @@ a.button {
   text-overflow: ellipsis;
 }
 
+/* A target rather than a glyph: the icon sits in a padded, rounded box that
+   lights up under the pointer, so the part you can hit is the part you can see.
+   It was a bare 9px character before, and a close button you have to aim at is
+   one that closes the neighbouring tab instead. The negative margin gives the
+   box back to the tab, so the tab is no wider for having a bigger button. */
 .tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: -2px -4px -2px 0;
+  padding: 3px;
+  border-radius: var(--radius-sm);
   opacity: 0;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-base);
   color: var(--dimmer);
 }
-.tab:hover .tab-close {
+.tab:hover .tab-close,
+.tab-on .tab-close {
   opacity: 1;
 }
 .tab-close:hover {
   color: var(--danger);
+  background: var(--line);
+}
+/* Nothing hovers on a touch screen, so a close button that waits for one is a
+   tab you cannot close. Every tab shows it there, not only the current one. */
+@media (hover: none) {
+  .tab-close {
+    opacity: 1;
+  }
 }
 
 .tab-new {
+  display: flex;
+  align-items: center;
   color: var(--dimmer);
-  padding: 3px 8px;
+  padding: 3px 7px;
+  font-size: var(--fs-md);
 }
 
 .tab-spacer {
@@ -1428,14 +1535,39 @@ a.button {
 }
 
 .pane-btn {
-  color: var(--dimmer);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
   padding: 0 4px;
+  border-radius: var(--radius-md);
+  color: var(--dimmer);
   line-height: 1;
   font-size: var(--fs-md);
   flex: none;
 }
 .pane-btn:hover {
   color: var(--text);
+  background: var(--line);
+}
+
+/* A phone's strip is a row of thumb targets. Apple's floor is 44pt and a tab
+   strip that tall would cost the terminal two rows, so this is the compromise
+   the rest of the narrow layout makes: big enough to hit without looking twice,
+   and the icons drawn big enough to read at arm's length. */
+:root[data-narrow] .tab {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+:root[data-narrow] .tab-close {
+  margin: -6px -6px -6px 0;
+  padding: 6px;
+  font-size: var(--fs-lg);
+}
+:root[data-narrow] .tab-new,
+:root[data-narrow] .pane-btn {
+  min-width: 36px;
+  font-size: var(--fs-xl);
 }
 
 /* The corner of a pane in a window too narrow to tile: which pane this is, out
@@ -2814,8 +2946,11 @@ a.button {
   border: none;
   border-radius: var(--radius-md);
   background: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--dimmer);
-  font-size: var(--fs-lg);
+  font-size: var(--fs-sm);
   line-height: 1;
   opacity: 0;
 }
@@ -3266,6 +3401,34 @@ a.button {
   font-weight: 600;
 }
 
+/* The name of the way in and the way to put its code away, as one centred row.
+   Beside the title rather than under it, because when a code is collapsed the
+   title and this button are the whole of what is left to tell the two ways
+   apart. */
+.reach-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+}
+
+/* A word and not an icon, deliberately: the skin's icon set names jobs the
+   chrome does everywhere — close, run, restart, caret — and a glyph for this
+   would be a token added to `shared/skin.ts`, and therefore to the registry's
+   schema, for one button in one dialog. Dim and borderless until it is pointed
+   at, so it sits beside the title without competing with it. */
+.reach-toggle {
+  padding: 1px 5px;
+  border: var(--border) var(--border-style) transparent;
+  border-radius: var(--radius-md);
+  color: var(--dimmer);
+  font-size: var(--fs-sm);
+}
+.reach-toggle:hover {
+  color: var(--text);
+  border-color: var(--line);
+}
+
 /* White, always, and not a token — this is the quiet zone, and it belongs to
    the code rather than to the window around it. A dark-themed QR code with a
    dark border is one a scanner cannot find the edges of. */
@@ -3538,7 +3701,7 @@ a.button {
    file name is what you read and this is only the promise that it is a door. */
 .tab-caret {
   margin-left: 4px;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   color: var(--dimmer);
 }
 
