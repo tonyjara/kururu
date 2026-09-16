@@ -59,6 +59,13 @@ bun run dev:desktop      # a window onto one
 bun run start            # built, no watching
 ```
 
+Kururu listens on **this machine only** until you say otherwise. Your agents,
+your terminals and the files they can read are all behind that server, so being
+reachable from anywhere else is a decision rather than a default: open the phone
+dialog, press **Share with my devices**, and the QR code the phone scans carries
+a code that everything else on the network has not got. Stop sharing, or mint a
+new code, in the same place.
+
 `dev` starts the pty host if it is not up — a detached daemon on a unix socket
 holding every pty — then a server in front of it. Editing the server restarts it
 and no agent notices.
@@ -230,6 +237,8 @@ In `~/.claude/settings.json`:
 ```json
 {
   "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "async": true,
+      "command": "bun /path/to/kururu/server/src/report-cli.ts >/dev/null 2>&1 || true" }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "async": true,
       "command": "bun /path/to/kururu/server/src/report-cli.ts working >/dev/null 2>&1 || true" }] }],
     "PreToolUse": [{ "hooks": [{ "type": "command", "async": true,
@@ -469,3 +478,12 @@ tools/      run by hand, outputs committed. The icon generator lives here
 
 See [PLAN.md](./PLAN.md) for why it is arranged this way, and
 [CLAUDE.md](./CLAUDE.md) for what will bite you if you work on it.
+
+## Licence
+
+[Apache 2.0](LICENSE). Use it, fork it, ship it — the patent grant and the
+requirement to say what you changed are the whole of what it asks in return.
+
+The sprite sheets under `assets/spritesheets` and the mascots in the styles
+registry are cut from CC0 artwork and carry their own attribution; a skin that
+ships a typeface ships its licence beside it.

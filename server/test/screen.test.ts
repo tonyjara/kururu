@@ -239,9 +239,9 @@ describe("a title a program sets", () => {
 
   it("arrives with the agent's own status glyph taken off", async () => {
     const screen = new Screen();
-    screen.write(osc2("✳ Merge twonary_mercado changes"));
+    screen.write(osc2("✳ Merge pane-drag changes"));
     await settle(screen);
-    expect(screen.title).toBe("Merge twonary_mercado changes");
+    expect(screen.title).toBe("Merge pane-drag changes");
   });
 
   it("says nothing when only the spinner frame moved", async () => {
@@ -249,13 +249,13 @@ describe("a title a program sets", () => {
     const seen: string[] = [];
     screen.onTitle = (title) => seen.push(title);
 
-    screen.write(osc2("✳ Test OOS cancel sequence"));
+    screen.write(osc2("✳ Test backlog replay sequence"));
     for (const frame of ["⠋", "⠙", "⠹", "⠸"]) {
-      screen.write(osc2(`${frame} Test OOS cancel sequence`));
+      screen.write(osc2(`${frame} Test backlog replay sequence`));
     }
     await settle(screen);
 
-    expect(seen).toEqual(["Test OOS cancel sequence"]);
+    expect(seen).toEqual(["Test backlog replay sequence"]);
   });
 
   it("reports the new words when the work actually changes", async () => {

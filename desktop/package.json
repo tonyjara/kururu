@@ -2,12 +2,15 @@
   "name": "@kururu/desktop",
   "version": "0.1.0",
   "private": true,
+  "description": "A GUI for the agents it runs — on the desktop and on your phone.",
+  "author": "tonyjara",
+  "license": "Apache-2.0",
   "type": "commonjs",
   "main": "main.js",
   "scripts": {
     "start": "electron ."
   },
   "devDependencies": {
-    "electron": "^44.3.0"
+    "electron": "44.3.0"
   }
 }

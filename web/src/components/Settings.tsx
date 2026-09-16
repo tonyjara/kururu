@@ -24,6 +24,7 @@ import type { MascotSet, ProfileSummary } from "../../../shared/model";
 import type { NotifySettings as NotifyConfig } from "../../../shared/notify";
 import type { StyleLibrary } from "../../../shared/styles";
 import type { Appearance } from "../../../shared/theme";
+import { AboutSettings } from "./SettingsAbout";
 import { AppearanceSettings } from "./SettingsAppearance";
 import { KeySettings } from "./SettingsKeys";
 import { MascotSettings } from "./SettingsMascot";
@@ -31,7 +32,7 @@ import { NotifySettings } from "./SettingsNotify";
 import { ProfileSettings } from "./SettingsProfiles";
 import { StyleSettings } from "./SettingsStyles";
 
-export type Tab = "appearance" | "styles" | "profiles" | "mascot" | "notify" | "keys";
+export type Tab = "appearance" | "styles" | "profiles" | "mascot" | "notify" | "keys" | "about";
 
 /**
  * Appearance first, and not alphabetically: it is the page somebody opens
@@ -67,6 +68,12 @@ const TABS: ReadonlyArray<readonly [Tab, string, string]> = [
    */
   ["notify", "Notifications", "when kururu interrupts you, and what it sounds like"],
   ["keys", "Keys", "what each key does after the prefix"],
+  /**
+   * Last, and after the one page that is a table, because it is the only page
+   * here that edits nothing — you arrive at it once, to answer a question about
+   * kururu rather than to change it.
+   */
+  ["about", "About", "which kururu this is, and whether there is a newer one"],
 ];
 
 export function Settings({
@@ -149,6 +156,8 @@ export function Settings({
             <MascotSettings mascots={mascots} onEditing={onEditing} />
           ) : tab === "notify" ? (
             <NotifySettings notify={notify} />
+          ) : tab === "about" ? (
+            <AboutSettings />
           ) : (
             <KeySettings keys={keys} onEditing={onEditing} />
           )}

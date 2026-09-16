@@ -38,7 +38,7 @@
  * What all of that answers is *will it launch*, and the answer stayed yes. It is
  * not the only question. macOS's notification service keys authorisation on the
  * **code-signing identifier**, not on `CFBundleIdentifier` — so a bundle stamped
- * `com.twonary.kururu.dev` whose signature still says `Electron` is an app
+ * `io.github.tonyjara.kururu.dev` whose signature still says `Electron` is an app
  * `usernotificationsd` will not authorise. It does not prompt, it does not
  * appear in System Settings → Notifications, and every notification fails with
  * `UNErrorDomain error 1` (*notifications not allowed*), including ones raised
@@ -71,9 +71,9 @@ import { fileURLToPath } from "node:url";
  */
 const ICON = join(dirname(fileURLToPath(import.meta.url)), "icon", "kururu.icns");
 
-/** What the dev shell should call itself. The packaged app takes `com.twonary.kururu`. */
+/** What the dev shell should call itself. The packaged app takes `io.github.tonyjara.kururu`. */
 const IDENTITY = {
-  CFBundleIdentifier: "com.twonary.kururu.dev",
+  CFBundleIdentifier: "io.github.tonyjara.kururu.dev",
   CFBundleName: "Kururu (dev)",
   CFBundleDisplayName: "Kururu (dev)",
 };

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  What the hardened runtime has to be asked to allow, and why each one is here.
+
+  Notarization requires the hardened runtime, and the hardened runtime switches
+  off things Electron and node-pty both need. Every entitlement below is one of
+  those, and there is deliberately nothing else in the file: an entitlement
+  nobody needs is a hole nobody is watching.
+-->
+<plist version="1.0">
+<dict>
+  <!-- V8 compiles JavaScript at runtime, which is writing to memory and then
+       executing it. Without these two, the renderer does not start at all. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+
+  <!-- Kururu's server and pty host are this same binary run as node, which is
+       arranged by setting ELECTRON_RUN_AS_NODE before spawning it. The hardened
+       runtime strips DYLD_* and friends from a child's environment unless this
+       says otherwise, and with it stripped the "server" comes up as a second
+       window instead. -->
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+
+  <!-- node-pty is a native module: a .node loaded at runtime and a small
+       spawn-helper it execs to open the pty. Library validation refuses to load
+       code signed by a different team, and a prebuilt binary is exactly that. -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

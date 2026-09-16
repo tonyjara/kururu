@@ -118,6 +118,80 @@ export interface Reach {
 /** How often the dialog re-asks, so tailscale coming up shows without a reload. */
 export const REACH_POLL_MS = 3000;
 
+/**
+ * Whether this server can be reached from anywhere but the machine it is on, and
+ * the secret that makes that safe — the rest of the answer to `GET /api/reach`.
+ *
+ * Kururu has no accounts and never will; what it has is one token, minted once
+ * and carried in the QR code, so the phone that scanned it is in and the laptop
+ * on the same café Wi-Fi is not. It rides in the `Reach` answer because it is
+ * the same question asked twice — "how do I get to this from my phone" and "is
+ * anybody allowed to" are one sentence to the person in front of the dialog, and
+ * splitting them across two fetches would let the dialog draw a QR code for a
+ * server that is not listening on that address at all.
+ *
+ * The token is deliberately *not* in the snapshot. A snapshot goes to every
+ * client on every change and is written to disk by nothing, but it is also the
+ * thing most likely to end up in a screenshot of a bug report; a secret should
+ * be somewhere it is fetched on purpose, by the one dialog that draws it.
+ */
+export interface Sharing {
+  /** What the socket is doing. False when bound to loopback, which is the default. */
+  shared: boolean;
+  /**
+   * What was *chosen*, which is the same thing except in the window between
+   * pressing the button and the server coming back — the bind address is fixed
+   * when the socket opens. The two differing is the whole of "a restart is
+   * owed", and is why this is a second field rather than a nullable first one.
+   */
+  wanted: boolean;
+  /** The token a client that is not on this machine has to present. */
+  token: string;
+  /**
+   * Whether flipping `shared` will actually take effect by itself. The bind
+   * address is fixed when the socket is opened, so changing it needs the server
+   * started again — which is free, and something a supervisor does, and
+   * therefore something that may not be available. The dialog says which.
+   */
+  restartable: boolean;
+}
+
+/**
+ * What `GET /api/update` answers: whether there is a newer kururu than the one
+ * you are looking at.
+ *
+ * Fetched rather than pushed, on `/api/identity`'s reasoning — this is the
+ * world's state and not kururu's, it changes when somebody publishes a release
+ * rather than when anything here happens, and answering costs a request to
+ * GitHub that should be made when somebody asks and not on a timer.
+ *
+ * `error` and `newer: false` are different answers and the dialog must not
+ * collapse them. "You are up to date" and "I could not find out" are the same
+ * picture and opposite facts, and only one of them means you can stop thinking
+ * about it.
+ */
+export interface UpdateCheck {
+  /** The running server's version, or `0.0.0-dev` for a checkout. */
+  current: string;
+  /** The newest published release, without its leading `v`. Null if unknown. */
+  latest: string | null;
+  newer: boolean;
+  /** The release body — the changelog section for that version, as markdown. */
+  notes: string | null;
+  /**
+   * The same notes as markup. Rendered by the server for the reason everything
+   * else is — `markdown.ts` is server-side so that a phone is handed markup
+   * rather than a parser, and release notes are not the place to make a second
+   * arrangement. Null when there are no notes or when rendering them failed,
+   * which the dialog draws as the raw text rather than as nothing.
+   */
+  notesHtml: string | null;
+  url: string | null;
+  checkedAt: number;
+  /** Why there is no answer, in a sentence a person can read. */
+  error: string | null;
+}
+
 /** A dev server kururu found listening on this machine. */
 export interface DevServer {
   /** Listening port on localhost — the thing the preview points at. */
