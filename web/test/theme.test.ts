@@ -79,6 +79,12 @@ const NOT_THEME = new Set([
   // itself: it exists so those two cannot drift apart, and there is nothing in
   // it for a theme to have an opinion about or for a skin to disagree with.
   "--bar-h",
+  // How far the reader's type has been zoomed on this device, written onto the
+  // root by `web/src/zoom.ts`. A *multiplier* rather than a size, which is what
+  // keeps it out of both lists: it is applied to `--fs-lg`, so the skin still
+  // owns the step and this only says how many times it. Per browser, on the
+  // reasoning `--sidebar-w` sets out.
+  "--reader-zoom",
   // The tab strip's ground, which is a colour and still nobody's to fill in: it
   // is *derived* from `--chrome` and `--bg` rather than picked, so it follows a
   // palette that has never heard of it. A theme answering for it directly would

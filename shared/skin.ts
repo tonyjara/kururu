@@ -58,10 +58,10 @@
  * A skin writes only the ones it means to change, and `null` in what it writes
  * says "keep the base's" — which is not the same as leaving the name out, and
  * the difference is worth the null: leaving it out is silence, writing null is a
- * skin that has *considered* this icon and decided the default was right. The
- * eight-bit skin's `restart` is exactly that case, and its comment is the
- * reasoning. After the merge every name has a glyph, so nothing downstream has
- * to carry a fallback.
+ * skin that has *considered* this icon and decided the default was right. A
+ * pixel chrome that finds no ASCII character reading as "restart" writes `null`
+ * there, and the null is the sentence. After the merge every name has a glyph,
+ * so nothing downstream has to carry a fallback.
  */
 export type IconName = "close" | "run" | "restart" | "caret" | "add" | "edit" | "external";
 
@@ -174,6 +174,26 @@ export interface SkinTokens {
   overlayOpacity: string;
 }
 
+/**
+ * A face a skin brings with it, already pointed at somewhere kururu serves.
+ *
+ * `src` is a URL and it is filled in by the *server*, because the server is the
+ * only thing that knows where an installed style's files ended up — and because
+ * it is the one place that can guarantee the answer is kururu's own origin. A
+ * manifest never contains a URL; it names a file in its own directory, and a
+ * manifest that names `https://…` is refused at install. That rule is not
+ * decoration: a window that fetches a face from somebody else's host tells that
+ * host when its owner is working, and this is a window people leave open all day.
+ */
+export interface SkinFont {
+  family: string;
+  /** Served by kururu. Relative, so it works from the phone as well as the desktop. */
+  src: string;
+  /** A CSS weight, or a range for a variable face: `"400"`, `"400 700"`. */
+  weight: string;
+  style: string;
+}
+
 export interface Skin {
   id: string;
   name: string;
@@ -181,6 +201,36 @@ export interface Skin {
   description: string;
   tokens: SkinTokens;
   icons: IconSet;
+  /**
+   * The faces this skin brought, if it came from the registry. Absent on every
+   * built-in, which name faces the machine already has.
+   */
+  fonts?: readonly SkinFont[];
+  /**
+   * A stylesheet this skin brought, as a URL kururu serves — for the things the
+   * token set genuinely cannot express. Scoped by `[data-skin="<id>"]` at the
+   * source and checked for it at install, so that two installed skins can never
+   * fight over one window. Absent on every built-in, and on every registry skin
+   * that did not need one, which is all of them so far and is the intended
+   * result rather than a coincidence: the token surface was widened until they
+   * did not.
+   */
+  stylesheet?: string;
+}
+
+/**
+ * Whether a string is an id.
+ *
+ * Here rather than in `theme.ts` or `styles.ts` because both axes have ids and
+ * this is the leaf module both of them already import — an id rule spelled twice
+ * is an id rule that will eventually disagree with itself about a dash.
+ *
+ * The same shape `isSheetName` uses, and for the same reasons: an id becomes a
+ * directory under `~/.config/kururu`, a segment in an asset URL, and a key in a
+ * saved decision, and it arrives from a manifest somebody on the internet wrote.
+ */
+export function isStyleId(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9-]{0,63}$/.test(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -208,10 +258,11 @@ const BASE_TOKENS: SkinTokens = {
    * because a 5px radius on a row 20px tall is a quarter of its height and the
    * tab stops looking like a tab.
    *
-   * It is deliberately not zero. Zero is the 8-bit skin's answer and it is a
-   * *statement* — hard edges are what that chrome is about. The base is meant to
-   * be the window you stop noticing, and a hairline corner is how a surface
-   * admits it has an edge without drawing attention to the fact.
+   * It is deliberately not zero. Zero is a *statement* — it is what a skin
+   * says when hard edges are the whole point of it, and the registry has skins
+   * that say it. The base is meant to be the window you stop noticing, and a
+   * hairline corner is how a surface admits it has an edge without drawing
+   * attention to the fact.
    */
   radiusXs: "2px",
   radiusSm: "2px",
@@ -265,8 +316,9 @@ export const BASE_ICONS: IconSet = {
  * in full is a skin that silently keeps the base's answer to a token from the
  * version it was written in, and an eight-bit chrome that quietly reverted one
  * radius to 8px two releases later is a bug nobody would find. Writing only what
- * you mean to change also makes a skin readable as an argument — the NES one
- * below is thirty lines and every one of them is a decision.
+ * you mean to change also makes a skin readable as an argument — the ones in
+ * `../kururu-styles` are a dozen lines each and every one of them is a
+ * decision.
  */
 function skin(
   id: string,
@@ -292,118 +344,38 @@ function skin(
 const SOFT = skin("soft", "Soft", "Rounded corners and hairlines. What kururu has always looked like.", {});
 
 // ---------------------------------------------------------------------------
-// 8-bit
-// ---------------------------------------------------------------------------
-
-/**
- * The first skin that is actually a skin, and the one the token surface was
- * designed against.
- *
- * It is here rather than in the styles registry on purpose, and the reason is
- * the same one that puts a reference implementation in the repo it is a
- * reference for: the only way to find out whether the token surface is wide
- * enough is to try to build something with it that is genuinely not the default,
- * and it is far cheaper to discover a missing token while the skin is in the
- * same tree. What this one found, in order, was the type ramp (a pixel face
- * cannot live at the sans-serif's sizes), the smoothing token (without it the
- * glyphs have grey edges and the illusion collapses), and the frame recipe (a
- * single border is not an eight-bit frame; the depth is the second line).
- *
- * The parts that are *not* a rounding-down of the default are worth naming.
- * Radii are zero because a curve is the single strongest tell that you are
- * looking at a modern compositor — a 2px radius reads as "nearly pixel art",
- * which is worse than either end. Lines are 2px because a one-pixel border on a
- * retina display is a half-pixel line, and a half-pixel line in a skin whose
- * premise is that pixels are visible is a contradiction. The line height is
- * generous because an eight-pixel em with no descender room is a wall.
- *
- * The font is Press Start 2P, which ships in `web/public/fonts` under the SIL
- * Open Font License, subset to latin. Its em is exactly eight pixels, so sizes
- * that are multiples of eight are pixel-exact and everything else is very
- * slightly soft — which is why the ramp below is flatter than the base's. There
- * is less type hierarchy in an eight-bit window than a modern one, and that is
- * honest rather than a limitation.
- */
-const EIGHT_BIT = skin(
-  "8bit",
-  "8-bit",
-  "Hard edges, an eight-pixel em and a scanline. Press Start 2P.",
-  {
-    radiusXs: "0",
-    radiusSm: "0",
-    radiusMd: "0",
-    radiusLg: "0",
-    radiusXl: "0",
-    // The one exception, and it is not an inconsistency: a status dot that is a
-    // square is not a dot, it is a pixel, and it stops being distinguishable
-    // from the squares around it. A circle here is what keeps the one glanceable
-    // thing in the sidebar glanceable.
-    radiusRound: "50%",
-
-    border: "2px",
-    borderThick: "3px",
-
-    ui: `"Press Start 2P", "Courier New", monospace`,
-    fsXs: "6px",
-    fsSm: "7px",
-    fsBase: "8px",
-    fsMd: "8px",
-    fsLg: "10px",
-    fsXl: "12px",
-    uiLineHeight: "1.8",
-    uiLetterSpacing: "0",
-    uiSmoothing: "none",
-
-    // Two lines with the chrome between them: the outer border is the pane's
-    // own, this is the inset that gives it thickness. The classic NES dialog
-    // box is a frame you can see the inside edge of.
-    frame: "inset 0 0 0 2px var(--chrome)",
-    frameOn: "inset 0 0 0 2px var(--chrome-high)",
-    // A hard offset block rather than a blur, because a soft shadow is a
-    // lighting model and an eight-bit window does not have one.
-    elevDialog: "6px 6px 0 var(--shadow)",
-    elevMenu: "4px 4px 0 var(--shadow)",
-
-    overlay: "repeating-linear-gradient(to bottom, rgba(0,0,0,0.22) 0 1px, transparent 1px 3px)",
-    overlayOpacity: "0.55",
-  },
-  {
-    // ASCII, because Press Start 2P is a latin subset and does not contain ✕ or
-    // ▸ — a glyph it lacks falls through to Courier and arrives in the wrong
-    // font, which is far more noticeable on four buttons than a slightly blunt
-    // shape is. `X` and `>` are also simply what an eight-bit interface used.
-    close: "X",
-    run: ">",
-    caret: "v",
-    // Left alone deliberately, and the honest gap in this skin: no ASCII
-    // character reads as "restart" or as "rename", so these two keep ↻ and ✎ and
-    // render them in the fallback face. It is the clearest argument there is for
-    // icons being sprite cells rather than glyphs — a drawn 8×8 arrow has no
-    // such problem — which is the next step and not this one.
-    restart: null,
-    edit: null,
-    /**
-     * Also the base's. The arrow is already a single glyph at any size and the
-     * pixel alternatives are all two characters wide, which would make the dev
-     * row the one place in this skin where an icon changes a row's height.
-     */
-    external: null,
-  },
-);
-
-// ---------------------------------------------------------------------------
 
 /** Every skin, in the order Settings lists them. The default first. */
-export const SKINS: readonly Skin[] = [SOFT, EIGHT_BIT];
+export const SKINS: readonly Skin[] = [SOFT];
 
 export const DEFAULT_SKIN_ID = "soft";
+
+/**
+ * Every skin there is *here*, plus whatever has been installed.
+ *
+ * Installed first, so that a registry skin sharing an id with a built-in wins.
+ * That ordering is deliberate and it is the forgiving answer: the collision can
+ * only happen when kururu later ships a skin under a name somebody already
+ * installed, and having the window quietly change shape under them would be
+ * worse than having their choice keep working.
+ */
+export function allSkins(extra: readonly Skin[] = []): readonly Skin[] {
+  return extra.length === 0 ? SKINS : [...extra, ...SKINS];
+}
 
 /**
  * The skin for an id, falling back rather than refusing — `themeFor`'s call,
  * for `themeFor`'s reason. An id naming nothing is what a downgrade looks like,
  * or a registry skin that has been uninstalled, and the right answer to both is
  * a window with a shape rather than a window with none.
+ *
+ * `extra` is what this server has installed. Every caller that has a snapshot
+ * passes it; the two that do not — a first paint before one has arrived, and
+ * `colors.ts` reading the id back off the root element — get the built-ins,
+ * which is correct for them and is the same answer they got before the registry
+ * existed.
  */
-export function skinFor(id: string | null | undefined): Skin {
-  return SKINS.find((s) => s.id === id) ?? SKINS.find((s) => s.id === DEFAULT_SKIN_ID) ?? SKINS[0]!;
+export function skinFor(id: string | null | undefined, extra: readonly Skin[] = []): Skin {
+  const all = allSkins(extra);
+  return all.find((s) => s.id === id) ?? all.find((s) => s.id === DEFAULT_SKIN_ID) ?? all[0]!;
 }

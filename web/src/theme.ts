@@ -23,9 +23,10 @@
  */
 import { applyTerminalAppearance } from "./terminals";
 import { applySkin } from "./skin";
-import type { Appearance, Theme, UiTokens } from "../../shared/theme";
+import type { Appearance, Theme, UiTokens, WorkspaceColorName } from "../../shared/theme";
 import { themeFor } from "../../shared/theme";
 import { skinFor } from "../../shared/skin";
+import { EMPTY_LIBRARY, type StyleLibrary } from "../../shared/styles";
 
 /**
  * `chromeHigh` → `--chrome-high`. The one mechanical translation in here, and it
@@ -58,6 +59,25 @@ export function applyTheme(theme: Theme): void {
    */
   root.style.colorScheme = theme.appearance;
   root.dataset.theme = theme.id;
+  /**
+   * The eight workspace tags, as properties rather than as a lookup.
+   *
+   * `colors.ts` used to answer for these by reading `data-theme` back off this
+   * element and finding the theme again, which was right while every theme was
+   * in `shared/theme.ts` and became wrong the moment one could be installed: the
+   * id on the element then names a theme that module has never heard of, and the
+   * lookup quietly returns the *default* palette — eight plausible colours from
+   * the wrong theme, which is exactly the class of bug the whole token system
+   * exists to remove.
+   *
+   * Writing them here keeps `colors.ts`'s own argument intact and makes it
+   * stronger: the document is still the single answer to "which theme is on",
+   * and now a tag is `var(--ws-green)` and follows it through the cascade with
+   * nothing to look up at all.
+   */
+  for (const [name, value] of Object.entries(theme.workspace) as [WorkspaceColorName, string][]) {
+    root.style.setProperty(`--ws-${name}`, value);
+  }
 }
 
 /**
@@ -71,8 +91,8 @@ export function applyTheme(theme: Theme): void {
  * bookkeeping: it has to know whether the *font* moved, since only that is worth
  * proposing a new grid over.
  */
-export function applyAppearance(appearance: Appearance): void {
-  const theme = themeFor(appearance.themeId);
+export function applyAppearance(appearance: Appearance, styles: StyleLibrary = EMPTY_LIBRARY): void {
+  const theme = themeFor(appearance.themeId, styles.themes);
   applyTheme(theme);
   /**
    * Before the emulators rather than after, and it matters by exactly one
@@ -82,6 +102,6 @@ export function applyAppearance(appearance: Appearance): void {
    * actually have. The other order measures the old box and corrects a frame
    * later, which is a SIGWINCH nobody needed.
    */
-  applySkin(skinFor(appearance.skinId));
+  applySkin(skinFor(appearance.skinId, styles.skins));
   applyTerminalAppearance(theme.terminal, appearance.terminal);
 }

@@ -38,6 +38,7 @@ import { Dialog, type DialogState } from "./components/Dialog";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Keybar } from "./components/Keybar";
 import { Menu, type MenuAt } from "./components/Menu";
+import { resetZoom, zoomBy } from "./zoom";
 import { Panes } from "./components/Panes";
 import { Reach } from "./components/Reach";
 import { Settings, type Tab as SettingsTab } from "./components/Settings";
@@ -55,6 +56,7 @@ import {
 } from "./keys";
 import { desktop } from "./desktop";
 import { isFileDrag } from "./drop";
+import { announce, primeAudio } from "./notify";
 import { tabLabel } from "./labels";
 import { applyAppearance } from "./theme";
 import { skinFor } from "../../shared/skin";
@@ -264,9 +266,21 @@ export function App() {
    * is actually stable.
    */
   const appearance = snapshot?.appearance;
-  const appearanceKey = appearance ? JSON.stringify(appearance) : null;
+  /**
+   * The installed styles are in the key as well, because the *same* appearance
+   * means a different window once one is installed or removed: the ids in
+   * `appearance` do not move when a theme arrives under one of them, and without
+   * this the palette that was just downloaded would sit there unapplied until
+   * something else changed. Their versions rather than the whole library, on the
+   * reasoning above — a palette stringified several times a second is the cost
+   * this key exists to avoid.
+   */
+  const styles = snapshot?.styles;
+  const appearanceKey = appearance
+    ? JSON.stringify(appearance) + (styles?.installed.map((s) => `${s.kind}/${s.id}@${s.version}`).join() ?? "")
+    : null;
   useEffect(() => {
-    if (appearance) applyAppearance(appearance);
+    if (appearance) applyAppearance(appearance, styles);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appearanceKey]);
 
@@ -358,6 +372,33 @@ export function App() {
   useEffect(() => {
     api.watch(visible);
   }, [visible]);
+
+  /**
+   * Make the noise and draw the card when the server says somebody is wanted.
+   *
+   * Registered once, and the settings are read through a ref rather than
+   * captured, for the reason the appearance effect is keyed on a string: a
+   * snapshot arrives several times a second and is a new object every time, so
+   * a dependency on it would tear this subscription down and rebuild it at that
+   * rate forever. Nothing is lost by reading late — a notification is answered
+   * with whatever the settings are at the moment it arrives, which is the only
+   * sensible reading of them.
+   *
+   * No policy here. Everything that decides *whether* is in `shared/notify.ts`
+   * and has already run on the server; a message that got this far passed.
+   */
+  const notifySettings = snapshot?.notify;
+  const notifyRef = useRef(notifySettings);
+  notifyRef.current = notifySettings;
+  useEffect(() => {
+    // The browser will not let a page make a noise until it has been touched,
+    // and there is no way to ask whether it has — so be there when it happens.
+    primeAudio();
+    return api.onNotify((card) => {
+      const settings = notifyRef.current;
+      if (settings) announce(card, settings);
+    });
+  }, []);
 
   /**
    * And let go of the emulators of terminals that no longer exist.
@@ -702,6 +743,34 @@ export function App() {
         if (isPrefix(event)) {
           take();
           arm();
+          return;
+        }
+        /**
+         * A reader is the one pane with nothing under it that keys belong to, so
+         * the three a document viewer has used since documents had viewers are
+         * free to mean what they mean everywhere else. No prefix, because there
+         * is no pty here to get out of the way of — the prefix exists to settle
+         * a fight over the keyboard and in this pane there is nobody to fight.
+         *
+         * Modifiers are deliberately let through instead: ⌘+ and ⌘0 are
+         * Electron's and zoom the *window*, which is a different and equally
+         * reasonable thing to want, and taking them here would make the two
+         * indistinguishable from the outside.
+         */
+        if (readerFocused(workspace) && !event.metaKey && !event.ctrlKey && !event.altKey) {
+          const key = keyName(event);
+          if (key === "+" || key === "=") {
+            take();
+            return zoomBy(1);
+          }
+          if (key === "-" || key === "_") {
+            take();
+            return zoomBy(-1);
+          }
+          if (key === "0") {
+            take();
+            return resetZoom();
+          }
         }
         // Everything else belongs to the pty, and xterm is downstream of here.
         return;
@@ -916,7 +985,9 @@ export function App() {
       {settings && (
         <Settings
           appearance={snapshot.appearance}
+          styles={snapshot.styles}
           mascots={snapshot.mascots}
+          notify={snapshot.notify}
           keys={snapshot.keys}
           profiles={snapshot.profiles}
           activeProfileId={profile.id}
@@ -954,7 +1025,7 @@ export function App() {
           swallowed a drag is for it not to exist. It reads the skin rather than
           a CSS token because that is the one question CSS cannot answer about
           itself — whether `--overlay` is `none`. */}
-      {skinFor(snapshot.appearance.skinId).tokens.overlay !== "none" && (
+      {skinFor(snapshot.appearance.skinId, snapshot.styles.skins).tokens.overlay !== "none" && (
         <div className="overlay" aria-hidden="true" />
       )}
     </div>
@@ -1101,6 +1172,22 @@ function storedSidebarWidth(): number {
 }
 
 /** The terminal the focused pane is showing, if any. */
+/**
+ * Whether the keyboard is pointed at a reader rather than at a terminal.
+ *
+ * Asked of the *pane* and not of the agent, because "no agent" is also what an
+ * empty pane looks like and an empty pane is a button waiting to open a shell —
+ * claiming its keys for a zoom would be claiming them from the terminal that is
+ * one press away.
+ */
+function readerFocused(
+  workspace: { layout: LayoutNode; focusedPaneId: string } | null,
+): boolean {
+  if (!workspace) return false;
+  const pane = panes(workspace.layout).find((p) => p.id === workspace.focusedPaneId);
+  return Boolean(pane?.reader);
+}
+
 function focusedAgentOf(
   workspace: { layout: LayoutNode; focusedPaneId: string } | null,
 ): string | null {

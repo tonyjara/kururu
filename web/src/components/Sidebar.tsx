@@ -14,6 +14,14 @@
  * the way to get at a terminal that is somewhere you are not currently looking,
  * without having to go there first.
  *
+ * Dropping one on another *row* is the third of those and the only one that
+ * moves nothing: it rearranges the list itself. Spawn order never moves under
+ * you, which is what makes it a good default and a poor arrangement — the two
+ * agents you are alternating between this afternoon started an hour apart, and
+ * the layout cannot put them next to each other because it answers where a
+ * terminal is drawn, not where it is listed. The order is the profile's (see
+ * `Profile.agentOrder`), so a phone and a desktop hold the same one.
+ *
  * A workspace row also answers the two gestures every list of named things
  * answers: double-click renames it in place, and right-click opens the menu of
  * what else can be done to it. Both are second doors onto the prefix keymap
@@ -131,6 +139,17 @@ export function Sidebar({
   const dragging = useDragging();
   /** The workspace row a drop would land on, while something is over it. */
   const [overWorkspace, setOverWorkspace] = useState<string | null>(null);
+  /**
+   * Where a dragged terminal would land in the agent list: the row it is over,
+   * and which side of that row's midpoint the pointer is on.
+   *
+   * A line between two rows rather than a highlight on one, for the reason the
+   * tab strip draws one: a glow on a row says "into this", and a reorder does
+   * not go *into* anything. Held as state because `dataTransfer` cannot be read
+   * on `dragover` — see `web/src/drag.ts` — so what is drawn on the way and what
+   * happens on the drop are worked out twice, from the geometry both times.
+   */
+  const [overAgent, setOverAgent] = useState<{ id: string; after: boolean } | null>(null);
   /** The workspace whose name is being typed, if any. */
   const [renaming, setRenaming] = useState<string | null>(null);
   /** Where a context menu is open, and which row it belongs to. */
@@ -481,19 +500,71 @@ export function Sidebar({
                   : "Nothing running."}
             </li>
           )}
-          {listed.map((agent) => {
+          {listed.map((agent, index) => {
             const at = where.get(agent.id);
             const focused = agent.id === focusedAgentId;
             const bar = at ? tint.get(at.workspaceId) : null;
+            /* Which row a drop here would put the dragged one above. The row
+               below this one when the pointer is past the midpoint, and nothing
+               at all at the bottom of the list — which is the end of it. The
+               list is agents only, so "the next row" is the next one somebody
+               can see; a shell sitting between the two in spawn order is not
+               something this list has ever drawn. */
+            const insertBefore = (after: boolean): string | null =>
+              after ? (listed[index + 1]?.id ?? null) : agent.id;
+            const insert = overAgent?.id === agent.id ? overAgent : null;
             return (
               <li
                 key={agent.id}
-                className={`agent-item ${focused ? "agent-item-on" : ""}`}
+                className={[
+                  "agent-item",
+                  focused ? "agent-item-on" : "",
+                  insert ? (insert.after ? "agent-under" : "agent-over") : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
                 /* The rule down the left is the workspace's colour. It is a
                    variable rather than a border set here so the untagged case
                    still reserves the two pixels: rows that shift sideways when a
                    colour is assigned would make the list jump under the cursor. */
                 style={bar ? ({ "--tag": bar } as React.CSSProperties) : undefined}
+                /* Only a terminal, and never the one in flight: a row dropped on
+                   itself is a drag somebody changed their mind about, and it
+                   should read as nothing happening rather than as a refusal. A
+                   pane or a workspace dropped here means nothing, so the row
+                   does not light up for one. */
+                onDragOver={(event) => {
+                  if (dragging?.kind !== "agent" || dragging.id === agent.id) return;
+                  allowDrop(event);
+                  const box = event.currentTarget.getBoundingClientRect();
+                  const after = event.clientY > box.top + box.height / 2;
+                  setOverAgent((current) =>
+                    current?.id === agent.id && current.after === after
+                      ? current
+                      : { id: agent.id, after },
+                  );
+                }}
+                onDragLeave={(event) => {
+                  // `dragleave` fires when the pointer crosses onto a *child* of
+                  // this row as well as when it leaves it, and the row is a
+                  // button with spans in it — so an unguarded handler blinks the
+                  // line off every time the pointer moves within the row it is
+                  // aimed at, until the next `dragover` puts it back.
+                  if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+                  setOverAgent((current) => (current?.id === agent.id ? null : current));
+                }}
+                onDrop={(event) => {
+                  const dragged = event.dataTransfer.getData(AGENT_MIME);
+                  setOverAgent(null);
+                  if (!dragged || dragged === agent.id) return;
+                  event.preventDefault();
+                  // The sidebar is inside a window that swallows stray file
+                  // drops, and a pane underneath would otherwise be offered a
+                  // drop the list has already dealt with.
+                  event.stopPropagation();
+                  const box = event.currentTarget.getBoundingClientRect();
+                  api.reorderAgent(dragged, insertBefore(event.clientY > box.top + box.height / 2));
+                }}
               >
                 <button
                   className={`agent-row ${agent.exited ? "agent-row-exited" : ""}`}
@@ -503,18 +574,33 @@ export function Sidebar({
                     .join("\n")}
                   draggable
                   onDragStart={(event) => beginDrag(event, "agent", agent.id)}
-                  onDragEnd={endDrag}
+                  /* `dragend` fires wherever the drag finished, including
+                     nowhere, which is why the line is cleared here as well as on
+                     the drop. */
+                  onDragEnd={() => {
+                    setOverAgent(null);
+                    endDrag();
+                  }}
                 >
-                  {/* What it is and where it lives. The two things you need to
-                      find it again, and nothing that changes while you read. */}
+                  {/* Where it lives and what it is. The two things you need to
+                      find it again, and nothing that changes while you read.
+
+                      Where first, because that is what you are scanning for: the
+                      list spans a whole profile and holds several terminals
+                      running the same program, so "claude" is the word that
+                      tells you least about which row this is. The program is
+                      still worth saying — the list runs more than one of them —
+                      so it goes where the workspace used to be, at the end of
+                      the line and dimmer, as the thing you read once you have
+                      found the row rather than the thing you find it by. */}
                   <span className="agent-top">
                     {/* The agent's own workspace, not the one you are looking
                         at: this list spans the whole profile, so two rows of it
                         can legitimately be wearing different mascots. */}
                     <Status agent={agent} mascot={mascotFor(mascots, at?.mascotId ?? null)} />
-                    <span className="agent-name">{agentLabel(agent)}</span>
-                    {agent.unread && <span className="unread" aria-label="new output" />}
                     <span className="agent-ws">{at ? at.workspace : "—"}</span>
+                    {agent.unread && <span className="unread" aria-label="new output" />}
+                    <span className="agent-name">{agentLabel(agent)}</span>
                   </span>
                   {/* What it is doing, what it is costing, and how much room
                       it has left to do it in. All three change constantly, which

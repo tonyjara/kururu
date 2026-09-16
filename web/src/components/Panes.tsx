@@ -39,7 +39,7 @@
  * over the rebuild in the first place. Neither a tab switch nor a layout change
  * rebuilds anything now.
  */
-import { Fragment, useCallback, useRef, useState } from "react";
+import { Fragment, useCallback, useRef, useState, useSyncExternalStore } from "react";
 import {
   activeAgent,
   dividers,
@@ -55,6 +55,7 @@ import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
 import { AGENT_MIME, PANE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
 import { shortenPath, tabLabel } from "../labels";
 import * as api from "../session";
+import { canZoom, DEFAULT_ZOOM, resetZoom, zoomBy, zoomLabel, zoomStore } from "../zoom";
 import { ReaderView } from "./Reader";
 import { Icon } from "./Icon";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
@@ -655,11 +656,19 @@ const EDGES: Record<string, ["row" | "col", boolean]> = {
  * which file you are looking at — two notes both titled "Notes" are a strip that
  * has stopped telling you anything.
  *
- * Two controls, and they are the two ways a reader can be pointed at something.
+ * Two controls say what it is pointed at, and they are the two ways to point it.
  * The toggle is the editor: following is the point of the pane, so that is the
  * default and pinning is the exception — the moment you want to keep reading one
  * file while the editor moves on. The name is the other way, for the window that
  * has no editor to follow, and picking a file there pins it by doing so.
+ *
+ * The zoom is the third, and it is a different kind of thing: it says nothing
+ * about which document, only about how big it is on *this* screen — which is why
+ * it goes nowhere near the server (`web/src/zoom.ts` has the argument) and why
+ * it is in the strip rather than under the cog. Settings is where a decision
+ * about the whole window is made once; this is a knob you reach for in the
+ * middle of reading, on the pane you are reading, and a page you have to leave
+ * the document to resize is one nobody resizes.
  */
 function ReaderStrip({
   pane,
@@ -670,6 +679,7 @@ function ReaderStrip({
   picking: boolean;
   onPick: () => void;
 }) {
+  const zoom = useSyncExternalStore(zoomStore.subscribe, zoomStore.getSnapshot, zoomStore.getSnapshot);
   const reader = pane.reader;
   if (!reader) return null;
   const name = reader.path ? (reader.path.split("/").pop() ?? reader.path) : "reader";
@@ -697,6 +707,31 @@ function ReaderStrip({
         title={following ? "Following the editor — click to pin this file" : "Pinned — click to follow the editor"}
       >
         {following ? "⇄" : "⊙"}
+      </button>
+      <button
+        className="pane-btn"
+        onClick={() => zoomBy(-1)}
+        disabled={!canZoom(zoom, -1)}
+        aria-label="Smaller text"
+        title="Smaller text — or - while this pane has the keyboard"
+      >
+        −
+      </button>
+      {/* Only once there is something to undo, which is also the only time the
+          number is worth reading. See `.reader-zoom` in the stylesheet. */}
+      {zoom !== DEFAULT_ZOOM && (
+        <button className="reader-zoom" onClick={resetZoom} title="Back to 100% — or 0 while this pane has the keyboard">
+          {zoomLabel(zoom)}
+        </button>
+      )}
+      <button
+        className="pane-btn"
+        onClick={() => zoomBy(1)}
+        disabled={!canZoom(zoom, 1)}
+        aria-label="Larger text"
+        title="Larger text — or + while this pane has the keyboard"
+      >
+        +
       </button>
     </>
   );

@@ -28,7 +28,7 @@
  * you run, possibly on a machine with no window on it, and the window is one
  * client of it exactly as the phone is.
  */
-import { closeSync, createReadStream, existsSync, mkdirSync, openSync, statSync } from "node:fs";
+import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { dirname, extname, join } from "node:path";
@@ -36,7 +36,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 import { adoptIdentity, adoptMascot, countsAsAgent, defaultMascot } from "../../shared/model";
 import { bindKey } from "../../shared/keys";
-import type { AgentSnapshot, MascotSet, Profile, PtyKind, SessionSnapshot } from "../../shared/model";
+import type { AgentSnapshot, AgentStatus, MascotSet, Profile, PtyKind, SessionSnapshot } from "../../shared/model";
 import type { ClientMessage, DevServer, ServerMessage } from "../../shared/wire";
 import { DEV_SCAN_MS, SAVE_DEBOUNCE_MS } from "../../shared/wire";
 import { parseReport } from "./agents/report";
@@ -72,7 +72,31 @@ import {
   writeMascots,
 } from "./mascot";
 import { readKeys, writeKeys } from "./keys";
+import { agentLabel, agentSummary, basename } from "../../shared/labels";
+import {
+  adoptNotify,
+  isNotifyEvent,
+  notifyGate,
+  notifyText,
+  NOTIFY_THROTTLE_MS,
+  type NotifyEvent,
+  type NotifySettings,
+} from "../../shared/notify";
+import { readNotify, writeNotify } from "./notify";
+import { soundBytes, sounds } from "./sounds";
 import { readAppearance, writeAppearance } from "./appearance";
+import {
+  annotate as annotateCatalog,
+  assetFile,
+  catalog,
+  install as installStyle,
+  readLibrary,
+  rememberMascotId,
+  preview as previewStyle,
+  remove as removeStyle,
+  stylesHome,
+} from "./styles";
+import type { StyleKind } from "../../shared/styles";
 import { adoptAppearance, themeFor, type Appearance } from "../../shared/theme";
 import { skinFor } from "../../shared/skin";
 import { HostLink, type Port } from "./hostlink";
@@ -82,7 +106,7 @@ import { readSnapshot, writeSnapshot } from "./persist";
 import { closeAllPreviews, closePreview, openPreview, openPreviews } from "./proxy";
 import { reach } from "./reach";
 import { smallestGrid, type Grid } from "./sizing";
-import { Workspaces } from "./workspaces";
+import { orderAgents, Workspaces } from "./workspaces";
 
 const PORT = Number(process.env.KURURU_PORT ?? 7717);
 
@@ -245,7 +269,17 @@ function pushSnapshot(): void {
 adoptLegacySheet();
 let mascots = readMascots();
 let keys = readKeys();
+let notify = readNotify();
 let appearance = readAppearance();
+/**
+ * What has been installed from `../kururu-styles`.
+ *
+ * Held rather than re-read per snapshot, for the reason above: a snapshot goes
+ * out on every status change and this is a directory of files. It is re-read
+ * when it changes, which is when an install or a remove comes back — and on a
+ * server restart, which is also how a style dropped in by hand takes effect.
+ */
+let styles = readLibrary();
 
 /**
  * Every appearance change is the same two steps the mascot's are — write it
@@ -261,6 +295,13 @@ function saveAppearance(next: Appearance): void {
   pushSnapshot();
 }
 
+/** The same two steps, for the same reason. See `saveAppearance`. */
+function saveNotify(next: NotifySettings): void {
+  notify = next;
+  writeNotify(next);
+  pushSnapshot();
+}
+
 /**
  * Every mascot change goes through here, because all five of them are the same
  * two steps — write it down, then tell every client — and a verb that forgot the
@@ -273,12 +314,81 @@ function saveMascots(next: MascotSet): void {
   pushSnapshot();
 }
 
+/**
+ * Fetch a style, put it on disk, and make it the one in use if that is what was
+ * meant.
+ *
+ * The three kinds end in three different places and that asymmetry is real
+ * rather than an inconsistency. A theme and a skin are one id in
+ * `appearance.json`. A **mascot** is not: it becomes a row in the user's mascot
+ * list — the same list Settings edits by dragging cells out of a sheet — because
+ * once it is installed there is no useful difference between a mascot from the
+ * registry and one somebody cut out by hand, and keeping two kinds would mean
+ * every reader downstream learning which it had. A **pack** is three ids and
+ * nothing else, so installing one is installing what it names; it is stored as a
+ * record so that it can be listed and removed, and removing it deliberately
+ * leaves its three parts alone, because a pack is a *reference* and taking away
+ * the recommendation is not taking away the theme.
+ */
+async function installOne(kind: string, id: string, activate: boolean): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = await installStyle(kind, id);
+  if (!result.ok) return result;
+
+  if (result.mascot) {
+    const { name, config, replaces } = result.mascot;
+    const already = replaces ? mascots.list.find((m) => m.id === replaces) : undefined;
+    const mascotId = already?.id ?? freshMascotId(mascots.list);
+    const one = { id: mascotId, name: name.slice(0, 40), ...config };
+    saveMascots({
+      default: activate ? mascotId : mascots.default,
+      list: already ? mascots.list.map((m) => (m.id === mascotId ? one : m)) : [...mascots.list, one],
+    });
+    rememberMascotId(result.record.kind, result.record.id, mascotId);
+  }
+
+  styles = readLibrary();
+
+  if (result.record.kind === "pack") {
+    const pack = (result.manifest ?? {}) as Record<string, unknown>;
+    for (const part of ["theme", "skin", "mascot"] as StyleKind[]) {
+      const partId = pack[part];
+      if (typeof partId !== "string") continue;
+      // A part that fails is reported nowhere and that is deliberate: a pack
+      // whose skin is temporarily unreachable should still leave you with its
+      // theme and its mascot, which is most of the look. Refusing the lot would
+      // make one bad file take three good ones down with it.
+      await installOne(part, partId, activate);
+    }
+    styles = readLibrary();
+  }
+
+  if (activate && result.record.kind === "theme") {
+    saveAppearance({ ...appearance, themeId: themeFor(result.record.id, styles.themes).id });
+  } else if (activate && result.record.kind === "skin") {
+    saveAppearance({ ...appearance, skinId: skinFor(result.record.id, styles.skins).id });
+  } else {
+    pushSnapshot();
+  }
+  return { ok: true };
+}
+
 function snapshot(): SessionSnapshot {
   // Every snapshot is also the moment we learn what is running where, because it
   // is the one function that is called whenever anything about an agent changes.
   rememberAgents();
   const profile = workspaces.active;
   const mine = new Set(workspaces.agentsIn(profile.id));
+  // The host holds its terminals in spawn order, which is the default and is
+  // only the default: the sidebar's list can be dragged into an order of its
+  // own, and that order is the profile's. Applied here rather than in the
+  // client, on the same reasoning as the layout — see `Profile.agentOrder`.
+  const here = host.agents.filter((agent) => mine.has(agent.id));
+  const at = new Map(
+    orderAgents(
+      here.map((agent) => agent.id),
+      profile.agentOrder,
+    ).map((id, index) => [id, index] as const),
+  );
   return {
     session: "kururu",
     profile,
@@ -286,10 +396,12 @@ function snapshot(): SessionSnapshot {
     // Two fields are merged here rather than carried by the host — see `overlay`
     // below, and the fields themselves in `shared/model.ts`, for why they live
     // on this side of the link at all.
-    agents: host.agents.filter((agent) => mine.has(agent.id)).map(overlay),
+    agents: here.sort((a, b) => (at.get(a.id) ?? 0) - (at.get(b.id) ?? 0)).map(overlay),
     mascots,
     keys,
+    notify,
     appearance,
+    styles,
   };
 }
 
@@ -411,6 +523,139 @@ function overlay(agent: AgentSnapshot): AgentSnapshot {
     // terminals it is not streaming to this process.
     ...(fresh ? { unread: true } : {}),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+//
+// The only thing kururu does that reaches somebody who is not looking at it,
+// which is what makes every decision in here about *restraint*. The policy is
+// `shared/notify.ts`, ported from ghosttown so that "needs input" means the same
+// thing in both; what is here is the two things the policy cannot be pure about
+// — noticing that a status moved, and knowing which clients can already see it.
+//
+// It lives in `index.ts` and not in `agents/`, and that is not filing. The host
+// is where a status is *computed*, and it is also the half of kururu that costs
+// the user every running agent to edit — so a feature that will be tuned (and
+// this one will: every threshold in a notification is a matter of taste) belongs
+// on the side that restarts for free. It is the same line `activity` and
+// `unread` are drawn on, and the reason both of those sit here too.
+// ---------------------------------------------------------------------------
+
+/**
+ * What each terminal's status was the last time we looked.
+ *
+ * Notifications are about *transitions* and a snapshot only carries states, so
+ * somebody has to remember. The host cannot: it raises `onAgents` when anything
+ * changes and says nothing about what changed, which is right — a delta is a
+ * thing every reader of this protocol would then have to understand, and the
+ * one reader that wants it can keep four bytes per terminal instead.
+ *
+ * An id that is not in here yet notifies for nothing, which is the whole reason
+ * the absent case is separated from the equal case below. A server restart
+ * relearns every status on the first tick, and without that guard sixteen
+ * terminals sitting at `done` would all announce themselves at once — the same
+ * "a restart forgets it and that is correct" the `activity` map argues for,
+ * except that here forgetting it wrongly is audible.
+ */
+const lastStatus = new Map<string, AgentStatus>();
+
+/** When each terminal was last allowed to interrupt. See `NOTIFY_THROTTLE_MS`. */
+const notifiedAt = new Map<string, number>();
+
+/**
+ * Look for terminals that have just started wanting a human.
+ *
+ * Hung off the same `onAgents` that pushes a snapshot, because it is the same
+ * event — anything about any agent changed — and a second subscription would
+ * only be a second thing to keep in step. It walks every profile's terminals and
+ * not just the active one's: an agent blocked in the profile you left is the
+ * notification most worth having, since it is the one there is no dot on screen
+ * for.
+ */
+function noticeStatuses(): void {
+  const live = new Set<string>();
+  for (const agent of host.agents) {
+    live.add(agent.id);
+    const before = lastStatus.get(agent.id);
+    lastStatus.set(agent.id, agent.status);
+    // Never seen before, or has not moved. See `lastStatus` for why those are
+    // two cases and not one.
+    if (before === undefined || before === agent.status) continue;
+    if (agent.exited) continue;
+    if (!isNotifyEvent(agent.status)) continue;
+    announce(agent, agent.status);
+  }
+  for (const id of [...lastStatus.keys()]) {
+    if (live.has(id)) continue;
+    lastStatus.delete(id);
+    notifiedAt.delete(id);
+  }
+}
+
+/**
+ * Tell whoever should be told, and nobody else.
+ *
+ * The gate is run *per client* rather than once, because the one question it
+ * asks that is not a setting — is this terminal on screen — has a different
+ * answer for the desktop showing the pane and the phone in your pocket. Which is
+ * exactly the shape `unread` already has, and for the same reason: `watching` is
+ * what a human can see, and a warm pooled emulator is nobody looking.
+ *
+ * The throttle is recorded only if something actually went out. A burst of
+ * transitions while you are staring at the pane is not a notification and must
+ * not spend the quiet period a real one four seconds later would need.
+ */
+function announce(agent: AgentSnapshot, event: NotifyEvent): void {
+  const now = Date.now();
+  if (now - (notifiedAt.get(agent.id) ?? 0) < NOTIFY_THROTTLE_MS) return;
+
+  /**
+   * The overlaid snapshot, not the host's. `activity` is what the agent said it
+   * was doing — the permission prompt's own words, when a Claude Code hook is
+   * installed — and it is the single most useful line a card can carry. It is
+   * merged on this side, so the un-overlaid agent would notify with the title
+   * and lose it.
+   */
+  const full = overlay(agent);
+  const place = workspaces.placeOf(agent.id);
+  /**
+   * `agentLabel` answers `starting…` for a terminal opened as an agent whose
+   * program the process scan has not named yet, and that is right where it is
+   * used: a sidebar row corrects itself two seconds later, when the scan lands.
+   * A card does not. It is drawn once and keeps what it was handed, so
+   * `starting… needs input` would sit in Notification Center saying nothing for
+   * the rest of the afternoon — and it is reachable, because a report can arrive
+   * before the first scan and because `procs.ts` does not recognise every agent
+   * anybody runs. The command is the better answer here for the reason the
+   * placeholder is the better answer there: it is the one name a terminal has
+   * that never stops being true.
+   */
+  const label = full.agent || full.titleOverride ? agentLabel(full) : basename(full.command);
+  const text = notifyText({
+    label,
+    summary: agentSummary(full),
+    workspace: place?.workspace,
+    // Only when there is more than one profile to be in. With one, naming it on
+    // every card is a word that never varies and therefore never informs —
+    // ghosttown's rule about its session name, and the same one `labels.ts`
+    // applies to a summary that is merely the label again.
+    profile: workspaces.all().length > 1 ? place?.profile : undefined,
+    event,
+  });
+  const notification = { agentId: agent.id, event, ...text };
+
+  let sent = false;
+  for (const [ws, st] of clients) {
+    const verdict = notifyGate(
+      { event, visible: st.watching.has(agent.id), isAgent: countsAsAgent(full) },
+      notify,
+    );
+    if (!verdict.pass) continue;
+    send(ws, { type: "notify", notification });
+    sent = true;
+  }
+  if (sent) notifiedAt.set(agent.id, now);
 }
 
 /**
@@ -1454,6 +1699,18 @@ function handleMessage(ws: WebSocket, raw: string): void {
       workspaces.moveTabToWorkspace(msg.agentId, msg.workspaceId);
       return;
 
+    case "reorder-agent": {
+      // The base is the host's order, exactly as `snapshot` takes it, because
+      // the list the drop was aimed at was drawn from that and a splice against
+      // any other would land the row above a different neighbour.
+      const profileId = workspaces.profileOf(msg.agentId);
+      if (!profileId) return;
+      const mine = new Set(workspaces.agentsIn(profileId));
+      const ids = host.agents.filter((agent) => mine.has(agent.id)).map((agent) => agent.id);
+      workspaces.reorderAgent(msg.agentId, msg.beforeAgentId, ids);
+      return;
+    }
+
     case "rename-tab":
       host.rename(msg.agentId, msg.name);
       return;
@@ -1738,7 +1995,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
      * an id this version can draw.
      */
     case "set-theme":
-      saveAppearance({ ...appearance, themeId: themeFor(msg.themeId).id });
+      saveAppearance({ ...appearance, themeId: themeFor(msg.themeId, styles.themes).id });
       return;
 
     /**
@@ -1749,7 +2006,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
      * resizes anything, for the reason `set-terminal-appearance` gives below.
      */
     case "set-skin":
-      saveAppearance({ ...appearance, skinId: skinFor(msg.skinId).id });
+      saveAppearance({ ...appearance, skinId: skinFor(msg.skinId, styles.skins).id });
       return;
 
     /**
@@ -1763,6 +2020,21 @@ function handleMessage(ws: WebSocket, raw: string): void {
      * a pane measures its box and proposes, `applySize` decides — so a font
      * change is a client re-measuring, not a server deciding a shape.
      */
+    /**
+     * A notification was clicked. Take them to it — see `Workspaces.reveal` for
+     * why the four moves are one method, and note the one thing this does *not*
+     * do: nothing here raises the window. That is the desktop bridge's, because
+     * only the process that owns a window can raise it, and the phone has no
+     * window to raise.
+     */
+    case "reveal-agent":
+      workspaces.reveal(msg.agentId);
+      return;
+
+    case "set-notify":
+      saveNotify(adoptNotify(msg.notify));
+      return;
+
     case "set-terminal-appearance":
       saveAppearance(adoptAppearance({ ...appearance, terminal: msg.terminal }));
       return;
@@ -1931,6 +2203,9 @@ const CONTENT_TYPES: Record<string, string> = {
   ".mjs": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  // A manifest served as anything else is a manifest Chrome refuses to parse,
+  // and the symptom is the home-screen icon quietly going back to a screenshot.
+  ".webmanifest": "application/manifest+json",
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".jpg": "image/jpeg",
@@ -2186,6 +2461,47 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    * user who overwrites their own sheet sees it after a reload rather than after
    * a restart; the sheets that ship never change, and they are fifteen kilobytes.
    */
+  /**
+   * What there is to be notified *by*: kururu's own sounds and the machine's.
+   *
+   * A fetch rather than a snapshot field, on `/api/styles`' split — the snapshot
+   * carries what somebody *chose*, and this is what there is to choose from. It
+   * is a directory listing of somebody else's files, it changes when they drop a
+   * file into `~/Library/Sounds` rather than when kururu does anything, and the
+   * only thing in the window that cannot be drawn without it is the one tab
+   * asking.
+   */
+  if (url.pathname === "/api/sounds") {
+    json(res, { sounds: sounds() });
+    return;
+  }
+
+  /**
+   * One sound, in something the browser can actually play.
+   *
+   * The transcode is `sounds.ts`' business and the reason it exists; what
+   * belongs here is the caching, and it is a year because a *sound* is
+   * immutable in the way a style asset is: the id names a file on this machine
+   * and the phone should fetch each one once, ever. The case that breaks that —
+   * somebody replacing `~/Library/Sounds/Frog.wav` — is rare enough and
+   * self-inflicted enough that a reload is the right cost, where re-fetching
+   * every notification sound on every page load is not.
+   */
+  if (url.pathname === "/api/sound") {
+    const sound = await soundBytes(url.searchParams.get("id") ?? "");
+    if (!sound) {
+      text(res, "no such sound\n", 404);
+      return;
+    }
+    res.writeHead(200, {
+      "content-type": sound.type,
+      "content-length": sound.bytes.length,
+      "cache-control": "public, max-age=31536000, immutable",
+    });
+    res.end(sound.bytes);
+    return;
+  }
+
   if (url.pathname === "/api/mascot.png") {
     const body = sheetImage(url.searchParams.get("sheet") ?? defaultMascot(mascots).sheet);
     if (!body) {
@@ -2198,6 +2514,140 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       "cache-control": "no-cache",
     });
     res.end(body);
+    return;
+  }
+
+  // --- the styles registry -------------------------------------------------
+  /**
+   * What `../kururu-styles` is offering, and what this machine already has of it.
+   *
+   * A fetch rather than a snapshot field, and the split is the same one
+   * `/api/identity` draws: the snapshot carries what *kururu* owns, and this is
+   * the world's. It changes when somebody merges a pull request in another
+   * repository, answering it means a request over the network, and nothing in
+   * the window can be drawn without it except the one tab that is asking. The
+   * installed half *is* in the snapshot, because a theme you are wearing is not
+   * a catalogue.
+   *
+   * `?refresh=1` is the *Check for updates* button, and it is the only thing
+   * that bypasses the ten-minute cache — which is what makes that button a
+   * button rather than decoration.
+   */
+  if (url.pathname === "/api/styles/catalog") {
+    const { index, stale, error } = await catalog(url.searchParams.get("refresh") === "1");
+    json(res, {
+      entries: index ? annotateCatalog(index, styles.installed) : [],
+      stale,
+      ...(error ? { error } : {}),
+      home: stylesHome(),
+    });
+    return;
+  }
+
+  /**
+   * One file out of an installed style — a font, a stylesheet, a texture.
+   *
+   * An endpoint rather than static serving for `sheetFile`'s reason and one
+   * more. The reason: the name is checked against what the entry actually
+   * recorded rather than pasted into a path, and this is reachable from the
+   * tailnet. The one more: everything a style brings is served from *kururu's
+   * own origin*, which is the entire point of installing rather than linking —
+   * a window that fetched a font from somebody else's host would tell that host
+   * when its owner was working.
+   *
+   * Cached hard, because the URL names an entry whose contents cannot change
+   * without a version bump and a reinstall.
+   */
+  if (url.pathname === "/api/styles/asset") {
+    const path = assetFile(
+      url.searchParams.get("kind") ?? "",
+      url.searchParams.get("id") ?? "",
+      url.searchParams.get("file") ?? "",
+    );
+    if (!path) {
+      text(res, "no such asset\n", 404);
+      return;
+    }
+    let body: Buffer;
+    try {
+      body = readFileSync(path);
+    } catch {
+      text(res, "no such asset\n", 404);
+      return;
+    }
+    res.writeHead(200, {
+      "content-type": CONTENT_TYPES[extname(path).toLowerCase()] ?? "application/octet-stream",
+      "content-length": body.length,
+      "cache-control": "public, max-age=31536000, immutable",
+    });
+    res.end(body);
+    return;
+  }
+
+  /**
+   * The picture for a mascot nobody has installed yet, proxied from the
+   * registry. See `preview` in `server/src/styles.ts` for why this exists at all
+   * and why the browser is not the thing fetching it.
+   */
+  if (url.pathname === "/api/styles/preview") {
+    const shot = await previewStyle(url.searchParams.get("kind") ?? "", url.searchParams.get("id") ?? "");
+    if (!shot) {
+      text(res, "no preview\n", 404);
+      return;
+    }
+    res.writeHead(200, {
+      "content-type": CONTENT_TYPES[extname(shot.file).toLowerCase()] ?? "application/octet-stream",
+      "content-length": shot.bytes.length,
+      // Not `immutable`: the URL names an entry rather than a version, so it is
+      // the one asset URL in kururu whose contents can change under it — a
+      // registry entry updated upstream is exactly that. An hour is long enough
+      // that scrolling the list twice is one request.
+      "cache-control": "public, max-age=3600",
+    });
+    res.end(shot.bytes);
+    return;
+  }
+
+  /**
+   * Install one, and — if that is what the gesture was — wear it.
+   *
+   * `activate` is a parameter rather than something this decides, because the
+   * two callers mean different things by the same download. Picking a theme in
+   * the Styles tab is "I want this one", and an install that did not put it on
+   * would make choosing a two-step gesture for no reason. Pressing *Update* on a
+   * style you are not currently wearing is not a request to start wearing it,
+   * and one that switched the window out from under you would be the kind of
+   * surprise nobody forgives.
+   */
+  if (url.pathname === "/api/styles/install" && req.method === "POST") {
+    const kind = url.searchParams.get("kind") ?? "";
+    const id = url.searchParams.get("id") ?? "";
+    const activate = url.searchParams.get("activate") === "1";
+    const result = await installOne(kind, id, activate);
+    if (!result.ok) {
+      json(res, { error: result.error }, 400);
+      return;
+    }
+    json(res, { ok: true, installed: styles.installed });
+    return;
+  }
+
+  if (url.pathname === "/api/styles/remove" && req.method === "POST") {
+    const result = removeStyle(url.searchParams.get("kind") ?? "", url.searchParams.get("id") ?? "");
+    if (!result.ok) {
+      json(res, { error: result.error }, 400);
+      return;
+    }
+    /**
+     * Nothing here un-picks anything, and that is the point of the design rather
+     * than an omission. `appearance.json` keeps the id of a theme you removed,
+     * `themeFor` falls back to the default while it is gone, and reinstalling it
+     * puts you back where you were — which is only possible because
+     * `adoptAppearance` stopped rewriting ids it could not resolve.
+     */
+    styles = readLibrary();
+    pushSnapshot();
+    json(res, { ok: true, installed: styles.installed });
     return;
   }
 
@@ -2414,7 +2864,14 @@ server.requestTimeout = 0;
  */
 async function attach(port: Port): Promise<void> {
   host = new HostLink(port);
-  host.onAgents = pushSnapshot;
+  host.onAgents = () => {
+    // One event, two readers. Notifications want the *transition* and the
+    // snapshot carries the state, so this has to run wherever the state is
+    // learnt — a second subscription would be a second thing to keep in step
+    // with a status that already only changes in one place.
+    noticeStatuses();
+    pushSnapshot();
+  };
   host.onOutput = onOutput;
 
   const state = await host.hello();

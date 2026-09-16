@@ -21,13 +21,17 @@
 import { useState } from "react";
 import type { KeyOverrides } from "../../../shared/keys";
 import type { MascotSet, ProfileSummary } from "../../../shared/model";
+import type { NotifySettings as NotifyConfig } from "../../../shared/notify";
+import type { StyleLibrary } from "../../../shared/styles";
 import type { Appearance } from "../../../shared/theme";
 import { AppearanceSettings } from "./SettingsAppearance";
 import { KeySettings } from "./SettingsKeys";
 import { MascotSettings } from "./SettingsMascot";
+import { NotifySettings } from "./SettingsNotify";
 import { ProfileSettings } from "./SettingsProfiles";
+import { StyleSettings } from "./SettingsStyles";
 
-export type Tab = "appearance" | "profiles" | "mascot" | "keys";
+export type Tab = "appearance" | "styles" | "profiles" | "mascot" | "notify" | "keys";
 
 /**
  * Appearance first, and not alphabetically: it is the page somebody opens
@@ -43,14 +47,33 @@ export type Tab = "appearance" | "profiles" | "mascot" | "keys";
  */
 const TABS: ReadonlyArray<readonly [Tab, string, string]> = [
   ["appearance", "Appearance", "the theme, and what a terminal is set in"],
+  /**
+   * Second, and beside Appearance rather than inside it. The line between the
+   * two is what you are *wearing* against what there is to *get*: Appearance
+   * lists every theme and skin this machine has, built-in and installed alike,
+   * with no idea where any of them came from, and this is the one that knows.
+   * Somebody changing theme ten times an afternoon should never pass through a
+   * list of downloads to do it.
+   */
+  ["styles", "Styles", "themes, skins and mascots from the kururu-styles registry"],
   ["profiles", "Profiles", "the sessions, and which accounts they open terminals as"],
   ["mascot", "Mascot", "what the badge does while an agent is working"],
+  /**
+   * Beside the Mascot rather than beside Appearance, and the two are the same
+   * subject read one step further out: the badge is how kururu says an agent
+   * wants you while you are looking at the window, and this is how it says so
+   * while you are not. Before Keys, which stays last because it is the one page
+   * that is a table rather than a form.
+   */
+  ["notify", "Notifications", "when kururu interrupts you, and what it sounds like"],
   ["keys", "Keys", "what each key does after the prefix"],
 ];
 
 export function Settings({
   appearance,
+  styles,
   mascots,
+  notify,
   keys,
   profiles,
   activeProfileId,
@@ -59,7 +82,10 @@ export function Settings({
   onEditing,
 }: {
   appearance: Appearance;
+  /** Every theme and skin installed from the registry, and the record of them. */
+  styles: StyleLibrary;
   mascots: MascotSet;
+  notify: NotifyConfig;
   keys: KeyOverrides;
   profiles: ProfileSummary[];
   activeProfileId: string;
@@ -109,7 +135,9 @@ export function Settings({
 
         <div className="set-body">
           {tab === "appearance" ? (
-            <AppearanceSettings appearance={appearance} onEditing={onEditing} />
+            <AppearanceSettings appearance={appearance} styles={styles} onEditing={onEditing} />
+          ) : tab === "styles" ? (
+            <StyleSettings styles={styles} />
           ) : tab === "profiles" ? (
             <ProfileSettings
               profiles={profiles}
@@ -119,6 +147,8 @@ export function Settings({
             />
           ) : tab === "mascot" ? (
             <MascotSettings mascots={mascots} onEditing={onEditing} />
+          ) : tab === "notify" ? (
+            <NotifySettings notify={notify} />
           ) : (
             <KeySettings keys={keys} onEditing={onEditing} />
           )}

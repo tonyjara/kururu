@@ -326,10 +326,26 @@ function createWindow() {
     minWidth: 420,
     backgroundColor: "#0d0f0e",
     titleBarStyle: "hiddenInset",
+    // macOS ignores this and draws the bundle's icon, which `brand.mjs` is what
+    // puts the frog into. Linux and Windows read it off the window instead, so
+    // this is the same picture arriving by the only road those two have.
+    icon: path.join(__dirname, "icon", "icon-1024.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      /**
+       * Let kururu make a notification noise without having been clicked first.
+       *
+       * Chromium's autoplay policy exists for pages that ambush you with sound,
+       * and this window is an application the user launched whose sounds they
+       * chose in its own settings. The web build keeps the general answer — an
+       * `AudioContext` resumed on the first gesture, which is what the phone
+       * gets — and this removes the one case that answer does not cover: a
+       * window relaunched onto agents that were already running, where the
+       * first thing to happen may be a notification rather than a keystroke.
+       */
+      autoplayPolicy: "no-user-gesture-required",
     },
   });
 
@@ -397,6 +413,26 @@ function createWindow() {
 // ---------------------------------------------------------------------------
 
 ipcMain.handle("kururu:server-url", () => connected);
+
+/**
+ * A notification was clicked, so bring the window forward.
+ *
+ * The server has already moved the arrangement — that went over the socket the
+ * renderer was holding — and this is the half only the main process can do.
+ * `show()` before `focus()` because the window may be minimised, in which case
+ * focusing it alone raises nothing; on macOS the app itself may also be behind
+ * everything, which is what `app.focus` with `steal` is for. Together they are
+ * what "take me to the agent" has to mean when the agent is in a window that is
+ * not on screen.
+ */
+ipcMain.on("kururu:show", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  app.focus({ steal: true });
+});
 
 ipcMain.on("picker:ready", () => pushPickerState());
 ipcMain.handle("picker:connect", (_event, address) => connect(address));

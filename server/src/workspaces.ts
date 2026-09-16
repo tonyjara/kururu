@@ -64,6 +64,59 @@ export function nextId(prefix: string): string {
 const id = nextId;
 
 /**
+ * Start the counter above every id an arrangement already contains.
+ *
+ * The comment above was true of one of the two ways a layout comes back and not
+ * of the other, which is the whole bug. `persist.ts` rebuilds a stored tree by
+ * *minting* every id through `nextId` — the file deliberately holds no ids at
+ * all — so after a disk restore the counter is already past everything it made.
+ * The host's blob is the opposite: it is the arrangement exactly as the previous
+ * server left it, ids and all, and it is handed straight to the constructor
+ * because that is the point of it. A new process starts at zero with `w2`, `n1`
+ * and `p1` already live, and the next split mints an id something is using.
+ *
+ * Cheap to miss and expensive to have. Nothing complains, because a duplicate is
+ * a perfectly good string; the symptom is that two panes in one workspace answer
+ * to one id and `findPane` returns whichever comes first, so focusing, closing
+ * or selecting a tab quietly acts on the wrong one. And because a restart is
+ * *free* in kururu — the whole design of the three-process split — this is not a
+ * rare event but one that happens every time the server is saved.
+ *
+ * A high-water mark rather than a set of taken ids, because the four prefixes
+ * share one counter: the largest number in use is the only thing worth knowing,
+ * and stepping past it makes every future id unique whatever it is prefixed
+ * with. Ids this did not mint are left exactly as they are — renaming them would
+ * mean remapping `focusedPaneId`, `activeWorkspaceId` and the rest, which is a
+ * silent rewrite of somebody's live arrangement to repair something that is by
+ * construction only a problem for ids that have not been handed out yet.
+ */
+function adoptSeq(profiles: Profile[]): void {
+  const mark = (value: string): void => {
+    // Trailing digits, so anything a hand-edited blob might hold is ignored
+    // rather than turning the counter into NaN and every id after it into
+    // `nundefined`.
+    const n = Number(/(\d+)$/.exec(value)?.[1]);
+    if (Number.isFinite(n) && n > seq) seq = n;
+  };
+  const walk = (node: LayoutNode): void => {
+    if (node.type === "pane") {
+      mark(node.pane.id);
+      return;
+    }
+    mark(node.id);
+    walk(node.a);
+    walk(node.b);
+  };
+  for (const profile of profiles) {
+    mark(profile.id);
+    for (const workspace of profile.workspaces) {
+      mark(workspace.id);
+      walk(workspace.layout);
+    }
+  }
+}
+
+/**
  * Called after anything here changes. The server pushes a snapshot; `persist.ts`
  * writes the structure. Both are debounced by their own callers — this fires on
  * every mutation and does not care how often that is.
@@ -92,6 +145,13 @@ function adopt(profile: Profile): Profile {
     // has stopped being absolute is a path that would mean a different
     // directory in every pane it opened a terminal in.
     identity: adoptIdentity(profile.identity),
+    // Likewise, and read as defensively as everything else out of a blob: this
+    // one is a list rather than a field, so a hand-edited or older blob could
+    // put anything in it. Anything that is not a string is dropped instead of
+    // being carried as an id that matches no terminal.
+    agentOrder: Array.isArray(profile.agentOrder)
+      ? profile.agentOrder.filter((id): id is string => typeof id === "string")
+      : [],
     workspaces: profile.workspaces.map((workspace) => ({
       ...workspace,
       color: isWorkspaceColor(workspace.color) ? workspace.color : null,
@@ -130,6 +190,40 @@ function adoptDev(value: unknown): WorkspaceDev | null {
   };
 }
 
+/**
+ * A profile's terminals in the order the sidebar draws them.
+ *
+ * `ids` is the list as the pty host holds it, which is spawn order and is the
+ * default; `order` is what somebody has dragged, which is a memory of a gesture
+ * and not a list of what exists. So the two are merged rather than one
+ * replacing the other: remembered positions first, then everything spawned
+ * since, in the order it arrived. An id in `order` that names nothing is simply
+ * skipped — a terminal that has been killed leaves its id behind, and pruning
+ * the list on every snapshot to tidy that up would be a write per status tick
+ * to reach the answer this already gives.
+ *
+ * Pure, and exported for the test, because it is the one decision in here: both
+ * the snapshot and a drop reconcile through it, and a drop that landed against a
+ * different order than the one on screen would put the row somewhere nobody
+ * pointed at.
+ */
+export function orderAgents(ids: string[], order: string[]): string[] {
+  const present = new Set(ids);
+  const placed = new Set<string>();
+  const out: string[] = [];
+  for (const id of order) {
+    if (!present.has(id) || placed.has(id)) continue;
+    out.push(id);
+    placed.add(id);
+  }
+  for (const id of ids) {
+    if (placed.has(id)) continue;
+    out.push(id);
+    placed.add(id);
+  }
+  return out;
+}
+
 export type ChangeHandler = () => void;
 
 export class Workspaces {
@@ -139,6 +233,12 @@ export class Workspaces {
   onChange: ChangeHandler = () => {};
 
   constructor(restored?: Profile[]) {
+    // Before anything is minted, which is the whole of it — `blankProfile` below
+    // is the first thing that would collide. Here rather than in `attach()` so
+    // that every road a restored arrangement can arrive by is covered by
+    // construction, including the disk one, where it is a no-op because
+    // `persist.ts` has already walked the counter past what it made.
+    if (restored?.length) adoptSeq(restored);
     this.profiles = restored?.length ? restored.map(adopt) : [this.blankProfile("main")];
     this.activeId = this.profiles[0]!.id;
   }
@@ -195,6 +295,68 @@ export class Workspaces {
       }
     }
     return null;
+  }
+
+  /**
+   * Where a terminal is, by the names a person would use for it.
+   *
+   * For a notification, which has to say where it came from — "the agent in
+   * `work · api` finished" is a card you can act on and "an agent finished" is
+   * one you have to go looking behind. Names rather than ids because it is read
+   * by a human on a lock screen, and null when nothing holds the agent, which is
+   * the moment between a pty starting and a tab being made for it.
+   */
+  placeOf(agentId: string): { profile: string; workspace: string } | null {
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) {
+        if (paneWithAgent(workspace.layout, agentId)) {
+          return { profile: profile.name, workspace: workspace.name };
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Go to a terminal, wherever in the hierarchy it is: its profile, its
+   * workspace, its pane, its tab.
+   *
+   * One method rather than four calls from `index.ts`, because the four are only
+   * correct in this order and against one state. Switching the profile first is
+   * what makes the three after it mean anything — `focusPane` and `selectTab`
+   * both act on `activeWorkspace`, so a pane focused before the workspace change
+   * would be focused in the workspace being left.
+   *
+   * It is `switchProfile`/`switchWorkspace` rather than anything new, so the
+   * *way back* is recorded exactly as it is for a switch somebody made by hand:
+   * `lastWorkspaceId` is written, and prefix+z after chasing a notification
+   * takes you back to what you were doing. That is not a detail — being taken
+   * somewhere by a card is precisely when you want the way back to still work.
+   *
+   * False when nothing holds that agent, which the caller wants: it is a
+   * notification clicked after the terminal it was about has been closed, and
+   * the honest answer is to do nothing rather than to move somebody somewhere
+   * arbitrary.
+   */
+  reveal(agentId: string): boolean {
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) {
+        const pane = paneWithAgent(workspace.layout, agentId);
+        if (!pane) continue;
+        this.switchProfile(profile.id);
+        this.switchWorkspace(workspace.id);
+        this.focusPane(pane.id);
+        const index = pane.agentIds.indexOf(agentId);
+        if (index >= 0) this.selectTab(pane.id, index);
+        // Every one of those four returns early when it is already true, so a
+        // card clicked for the tab you are looking at would change nothing and
+        // announce nothing. Said once here instead: `pushSnapshot` coalesces on a
+        // microtask, so the four that did fire and this one are still one message.
+        this.onChange();
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -503,6 +665,36 @@ export class Workspaces {
       layout: addTab(w.layout, w.focusedPaneId, agentId),
     }));
     if (from) this.pruneEmptied(from.id, undefined);
+  }
+
+  /**
+   * Put a terminal somewhere else in the sidebar's list: immediately before
+   * `beforeAgentId`, or last when that is null.
+   *
+   * It moves nothing. The list spans a whole profile while the layout is a tree
+   * per workspace, so a row dropped between two rows of another workspace is
+   * still in the workspace it was in — which is what its own row goes on saying.
+   * Dragging one onto a *pane* or a *workspace row* is the gesture that moves it,
+   * and those already exist.
+   *
+   * `ids` is the profile's terminals as the host holds them, passed in because
+   * only the host knows that order and because the list on screen was drawn from
+   * the same answer. See `orderAgents`.
+   */
+  reorderAgent(agentId: string, beforeAgentId: string | null, ids: string[]): void {
+    if (agentId === beforeAgentId) return;
+    const profileId = this.profileOf(agentId);
+    const profile = profileId ? this.profiles.find((p) => p.id === profileId) : undefined;
+    if (!profile) return;
+    const current = orderAgents(ids, profile.agentOrder);
+    if (!current.includes(agentId)) return;
+    const next = current.filter((id) => id !== agentId);
+    // A neighbour that is not in the list is the drop landing on a row that has
+    // gone in the meantime, and the end is the honest answer: there is nothing
+    // left to be above.
+    const at = beforeAgentId ? next.indexOf(beforeAgentId) : -1;
+    next.splice(at === -1 ? next.length : at, 0, agentId);
+    this.replaceProfile(profile.id, (p) => ({ ...p, agentOrder: next }));
   }
 
   /**
@@ -947,6 +1139,8 @@ export class Workspaces {
       // reasoning as a new workspace's null colour: a default copied at
       // creation is a default that stops following the machine.
       identity: blankIdentity(),
+      // Nothing has been dragged yet, which is spawn order — see `orderAgents`.
+      agentOrder: [],
     };
   }
 
