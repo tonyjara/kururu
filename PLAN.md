@@ -609,5 +609,16 @@ answered and which has been replaced with what is actually open now.
   host with adopt-on-launch and a CLI to manage sessions, which is most of a
   multiplexer, and ghosttown is already that. Worth revisiting only if quitting
   turns out to hurt in practice — restarting was the part that actually did.
-- **No auth, by design.** Tailnet-only. If kururu is ever reachable off a
-  tailnet, that assumption has to be revisited before anything else is.
+- **~~No auth, by design.~~ Answered, because shipping is what this line said
+  would force it.** The assumption was tailnet-only, and it held exactly as long
+  as kururu was a thing you ran out of a checkout — a downloadable app is one
+  double-click away from a stranger's laptop, and a server on `0.0.0.0` with no
+  gate hands them a shell with your accounts signed into it. So the socket binds
+  loopback and being reachable is a decision made in the Share dialog, which
+  mints a token the QR code carries; and the `Origin` header is checked on every
+  request, because a WebSocket is exempt from the same-origin policy and without
+  that check any page in any tab could drive a kururu nobody had shared at all.
+  `server/src/access.ts` is the whole of it. What is still owed is the *next*
+  question, which is a kururu on the open internet rather than on a tailnet: one
+  token and no accounts is the right shape for one person's machine and not for
+  anything else.

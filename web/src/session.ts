@@ -35,6 +35,7 @@ import type { ClientMessage, DevServer, Notification, ServerMessage } from "../.
 import type { NotifySettings } from "../../shared/notify";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { Grid } from "./grid";
+import { claimAccess } from "./access";
 
 export interface KururuState {
   /** The websocket to the kururu server is open. */
@@ -256,7 +257,13 @@ function connect(): void {
   ws.onerror = () => ws.close();
 }
 
-connect();
+/**
+ * A token in the address is exchanged for a cookie before the socket is opened,
+ * because the handshake is one of the things that cookie authorises — see
+ * `access.ts`. It costs a microtask when there is no token, which is every load
+ * except the first on a phone that has just scanned the code.
+ */
+void claimAccess().then(connect);
 
 // ---------------------------------------------------------------------------
 // Actions

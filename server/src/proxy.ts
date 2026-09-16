@@ -27,6 +27,7 @@
  * bytes keeps the body and the headers describing it in agreement by
  * construction, and streams without buffering as a side effect.
  */
+import { bindAddress } from "./access";
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocket as UpstreamSocket, WebSocketServer, type RawData } from "ws";
@@ -277,7 +278,15 @@ export function openPreview(devPort: number): number {
   });
 
   // The tailnet interface, not just loopback — the phone is the point.
-  server.listen(proxyPort, "0.0.0.0");
+  /**
+   * The same address the kururu server itself is bound to, and never a wider
+   * one. A preview is somebody's dev app served off this machine; a kururu that
+   * is listening on loopback only while its previews are open to the network
+   * would be a door left open beside a locked one. There is no token on these —
+   * the app being proxied writes its own URLs and knows nothing about kururu —
+   * so the bind address is the whole of the answer here.
+   */
+  server.listen(proxyPort, bindAddress());
 
   previews.set(devPort, { devPort, proxyPort, server, sockets });
   return proxyPort;

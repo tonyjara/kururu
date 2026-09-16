@@ -1,0 +1,124 @@
+# What a downloadable kururu is made of.
+#
+# The shape follows the architecture rather than electron-builder's defaults. The
+# three processes do not change when kururu is packaged — the window still finds
+# a server and draws it, the server still spawns a detached pty host — so what a
+# bundle has to do is put all three where each can find the others, and nothing
+# more clever than that.
+#
+# The server and the host are NOT in the asar. They are spawned as separate
+# processes by path, which an asar can serve but only through Electron's patched
+# fs; running them out of `Resources/server` keeps the spawn an ordinary one and
+# keeps their sourcemaps readable when somebody sends a stack trace. `web/dist`
+# and `assets` are beside them for the same reason: the server already resolves
+# both from environment variables, and the window sets those at spawn.
+#
+# node-pty and ws are copied in whole. They are `external` in the esbuild bundle
+# — node-pty because it is native and cannot be inlined, ws alongside it so the
+# two are found the same way — so the packaged server resolves them by walking up
+# from `Resources/server/server.mjs` to `Resources/node_modules`, which is
+# ordinary Node resolution and needs nothing special from us.
+appId: io.github.tonyjara.kururu
+productName: Kururu
+copyright: Copyright 2026 tonyjara
+
+directories:
+  output: ../release
+
+# node-pty ships N-API prebuilds, which load unchanged in both Node 24 and
+# Electron 44 — so there is nothing to rebuild, and a rebuild step here would be
+# the "fix" `CLAUDE.md` warns against for a spawn failure whose real cause is an
+# executable bit.
+npmRebuild: false
+
+# Everything the *window* is. The three processes below it travel as resources.
+files:
+  - main.js
+  - preload.js
+  - connect.html
+  - servers.js
+  - icon/icon-1024.png
+
+extraResources:
+  - from: dist
+    to: server
+  - from: ../web/dist
+    to: web
+  - from: ../assets
+    to: assets
+  # node-pty is 62MB on disk and 58MB of that is Windows: two `conpty` builds and
+  # their `OpenConsole.exe`, which kururu has no use for and which codesign would
+  # otherwise be asked to sign — a Windows binary inside a notarized Mac app, for
+  # nothing. Only the loader and the two darwin prebuilds travel. `lib/utils.js`
+  # looks in `build/Release`, `build/Debug` and then
+  # `prebuilds/<platform>-<arch>`, so this is exactly what it will go looking for.
+  - from: ../node_modules/node-pty
+    to: node_modules/node-pty
+    filter:
+      - package.json
+      - LICENSE
+      - lib/**
+      - prebuilds/darwin-arm64/**
+      - prebuilds/darwin-x64/**
+  - from: ../node_modules/ws
+    to: node_modules/ws
+
+mac:
+  category: public.app-category.developer-tools
+  icon: icon/kururu.icns
+  # Two DMGs rather than one universal binary. A universal Electron is both
+  # copies of everything and about twice the download, paid by every arm64 user
+  # to spare an Intel one a choice of two links — and a Homebrew cask picks the
+  # right one by architecture anyway.
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    # The zip is not a second download offered to anybody. Squirrel.Mac — what
+    # electron-updater drives — can only apply an update from a zip, so this is
+    # the artifact the in-app updater fetches and the DMG is the one people click.
+    - target: zip
+      arch: [arm64, x64]
+  hardenedRuntime: true
+  # Relative to the workspace root, like `afterSign` below and unlike `files` and
+  # `extraResources` above, which are relative to `--projectDir`. The path is not
+  # resolved by electron-builder at all — it is handed to codesign as written,
+  # and codesign resolves it against its own working directory. A wrong one fails
+  # as `cannot read entitlement data`, which names the plist and not the path.
+  entitlements: desktop/entitlements.mac.plist
+  entitlementsInherit: desktop/entitlements.mac.plist
+  # No `identity` here on purpose, and it was tried the other way first. Naming
+  # one pins nothing useful — electron-builder resolves whatever it is given back
+  # to the certificate's *name* before handing it to codesign, so a fingerprint
+  # does not survive the trip and codesign still refuses an ambiguous match
+  # between two certificates called the same thing. It also overrides
+  # `CSC_IDENTITY_AUTO_DISCOVERY=false`, which is how an unsigned build is asked
+  # for. So the keychain is expected to hold exactly one Developer ID
+  # Application certificate, and auto-discovery finds it.
+  # Gatekeeper cannot assess an app that has not been notarized yet, and it is
+  # notarized in the hook below — asking here would fail every build.
+  gatekeeperAssess: false
+  # Done by `notarize.mjs` instead, because the credentials live in a keychain
+  # profile on this machine and electron-builder's own path only reads them from
+  # the environment. The hook takes either.
+  notarize: false
+
+dmg:
+  # The window it opens in: the app on the left, Applications on the right, which
+  # is the gesture every Mac user already knows.
+  contents:
+    - x: 140
+      y: 190
+      type: file
+    - x: 400
+      y: 190
+      type: link
+      path: /Applications
+
+# Relative to the *workspace root* rather than to `--projectDir`, which is where
+# electron-builder resolves a hook from once it has detected a monorepo.
+afterSign: desktop/notarize.mjs
+
+publish:
+  provider: github
+  owner: tonyjara
+  repo: kururu

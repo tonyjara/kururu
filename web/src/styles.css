@@ -1160,6 +1160,12 @@ kbd {
   opacity: 0.4;
   cursor: default;
 }
+/* A link wearing the button's clothes still carries the UA's underline, which
+   is the one thing that gives it away as not being one. */
+a.button {
+  text-decoration: none;
+  text-align: center;
+}
 .button-quiet {
   background: var(--chrome-high);
   color: var(--text);
@@ -2350,6 +2356,89 @@ kbd {
 }
 
 /* --------------------------------------------------------------------------
+   About
+
+   The one page in Settings that edits nothing, so it is laid out as a thing to
+   read rather than as a form: a name, a number, a button, and whatever the
+   release had to say for itself. The notes are the server's markup and are
+   therefore styled by `.markdown` like any other document kururu renders —
+   which is the point of rendering them there and not here.
+   -------------------------------------------------------------------------- */
+.about-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+/* The version is the answer to the question this page exists for, so it is set
+   in the terminal's face: it is a value to be read exactly, the same class of
+   fragment as a pid or a path, and `--mono` is nobody's skin by design. */
+.about-version {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  color: var(--dim);
+}
+
+.about-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* `.button` is `flex: 1` because the dialogs it was written for are rows of
+   two or three buttons sharing a width. These rows are not that: each is one
+   action with a sentence beside it, and a button stretched across the dialog
+   reads as the page's purpose rather than as a thing you may press. */
+.about-check .button,
+.about-release-head .button,
+.reach-share-actions .button {
+  flex: 0 0 auto;
+}
+
+.about-release {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: var(--border) var(--border-style) var(--line);
+}
+
+.about-release-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.about-release-title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+/* Bounded, because a release with a long changelog would otherwise push the
+   dialog's Done button off a laptop screen — and this is a thing you skim. */
+.about-notes {
+  max-height: 46vh;
+  overflow: auto;
+}
+
+/* What is drawn when the server could not render the markdown. It is a
+   changelog, so the source is perfectly readable; wrapped rather than scrolled
+   sideways, because the one thing worse than unrendered notes is unrendered
+   notes you have to drag to read. */
+.about-notes-raw {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+
+/* --------------------------------------------------------------------------
    Themes
 
    Each option is drawn in its own colours rather than named in the window's,
@@ -3115,6 +3204,44 @@ kbd {
    feature fails silently. */
 .reach-dialog {
   width: min(520px, 94vw);
+}
+
+/* Whether anybody but this machine is allowed in — above the two codes, because
+   it is the question that decides whether either of them means anything. Drawn
+   as a notice with a button under it rather than as a switch in a row: the
+   loopback-only state is not a setting somebody forgot to turn on, it is the
+   safe answer, and the sentence saying so is most of what this is for. */
+.reach-share {
+  margin: 12px 0 2px;
+  padding: 10px 12px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--chrome);
+  color: var(--dim);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.reach-share p {
+  margin: 0;
+}
+
+.reach-share strong {
+  color: var(--text);
+}
+
+/* Marked rather than warned about. Being shared is not a mistake — it is the
+   half of the feature the phone exists for — but it is the half where somebody
+   else is a possibility, and a border is how the dialog says which half you are
+   looking at without a colour that reads as an error. */
+.reach-share-on {
+  border-color: var(--working);
+}
+
+.reach-share-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .reach-pair {

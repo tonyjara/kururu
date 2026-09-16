@@ -22,12 +22,22 @@
  * is a thing the phone cannot.
  */
 const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = require("electron");
-const { spawn } = require("node:child_process");
-const { existsSync } = require("node:fs");
+const { execFileSync, spawn } = require("node:child_process");
+const { existsSync, mkdirSync, openSync, closeSync } = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { candidates, forget, normalize, remember } = require("./servers");
 
 const DEV = process.env.KURURU_DEV === "1";
+/**
+ * Whether this is a downloaded kururu or a checkout with `electron .` pointed at
+ * it. The difference is one thing only and it is the whole of what packaging
+ * changed: an installed kururu has a server inside it and is expected to start
+ * one, while a checkout has `bun run dev` next door and must never fight it.
+ */
+const PACKAGED = app.isPackaged;
+const PORT = Number(process.env.KURURU_PORT || 7717);
+const LOCAL = `http://127.0.0.1:${PORT}`;
 const VITE_URL = `http://localhost:${process.env.KURURU_VITE_PORT || 5173}`;
 const PICKER = path.join(__dirname, "connect.html");
 
@@ -46,6 +56,219 @@ function bunPath() {
 let win = null;
 /** The server the window is showing, as an origin. Null while the picker is up. */
 let connected = null;
+
+// ---------------------------------------------------------------------------
+// The server, when this is the thing that has to start one
+// ---------------------------------------------------------------------------
+
+/**
+ * A downloaded kururu starts its own server; a checkout never does.
+ *
+ * This is the one thing packaging changed about the architecture, and it changed
+ * less than it looks. The three processes are the same three: the window finds a
+ * server and draws it, the server connects to a detached pty host, and the host
+ * outlives both. What an installed kururu adds is somebody to *begin* that, which
+ * in a checkout is a person typing `bun run dev` and in a .app is nobody at all —
+ * a downloaded application that opened onto an address picker would be asking a
+ * question only its author could answer.
+ *
+ * So the rule is: if something already answers on 7717, use it and start nothing.
+ * That is not politeness, it is the one case that would otherwise be broken —
+ * open the app on a machine where you are already running `bun run dev` and a
+ * second server would take `EADDRINUSE` and die, or worse, take the port first
+ * and leave the one you were working in homeless.
+ *
+ * The server is a child and dies with us, which is the shape you asked for and is
+ * also the honest one: quit means quit. Nothing is lost by it — the ptys are in
+ * the host below, which is detached and is nobody's child, so reopening kururu
+ * finds every agent still working. What does stop is the phone, until you open
+ * the window again.
+ */
+
+/** Kept in step with `RESTART_EXIT_CODE` in `server/src/index.ts`, which sends it. */
+const RESTART_EXIT_CODE = 75;
+
+/**
+ * The pty host's socket, spelled exactly as `server/src/hostsock.ts` spells it.
+ * Duplicated rather than imported because that file is TypeScript on the other
+ * side of a process boundary, and the alternative — bundling a second copy of
+ * the server's code into the window — is a much worse kind of duplication.
+ */
+function hostSocket() {
+  if (process.env.KURURU_HOST_SOCK) return process.env.KURURU_HOST_SOCK;
+  const state = process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state");
+  return path.join(state, "kururu", "ptyhost.sock");
+}
+
+/**
+ * The PATH a login shell would have, which is not the one a double-clicked app
+ * has.
+ *
+ * launchd hands a GUI application `/usr/bin:/bin:/usr/sbin:/sbin` and nothing
+ * else, so `claude`, `gh` and anything else installed by a version manager or by
+ * Homebrew is simply not there. The *agents* are fine either way — every pty is
+ * spawned under `zsh -l`, so the user's own profile builds their PATH inside it
+ * — but the server also shells out on its own account, to ask who a profile is
+ * signed in as, and those lookups would all come back "not installed" in a
+ * packaged build while working perfectly in a checkout. That is the worst shape
+ * a bug can have.
+ *
+ * Asked once, from the user's own shell, with a marker so that whatever an
+ * interactive profile prints on the way up is not mistaken for the answer.
+ */
+let cachedPath = null;
+
+function loginPath() {
+  if (cachedPath !== null) return cachedPath;
+  cachedPath = process.env.PATH || "";
+  // A checkout was launched from a terminal, which already has the real one.
+  if (!PACKAGED) return cachedPath;
+
+  const marker = "__kururu_path__";
+  try {
+    const said = execFileSync(process.env.SHELL || "/bin/zsh", ["-ilc", `printf '%s%s' ${marker} "$PATH"`], {
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const at = said.lastIndexOf(marker);
+    const found = at === -1 ? "" : said.slice(at + marker.length).trim();
+    if (found) cachedPath = found;
+  } catch {
+    // A shell that will not start, or one that took five seconds to say hello.
+    // The default PATH is worse and is not nothing.
+  }
+  return cachedPath;
+}
+
+let server = null;
+/** Set while we are ending it on purpose, so the exit is not read as a crash. */
+let serverStopping = false;
+
+function startServer() {
+  const entry = path.join(process.resourcesPath, "server", "server.mjs");
+  if (!existsSync(entry)) {
+    console.error(`kururu: no server bundled at ${entry}`);
+    return;
+  }
+
+  /**
+   * Its output goes to a file beside the host's, because a packaged app has no
+   * stdout anybody will ever see — and a server whose logs go nowhere is one
+   * nobody can debug from a bug report.
+   */
+  const dir = path.dirname(hostSocket());
+  mkdirSync(dir, { recursive: true });
+  const log = openSync(path.join(dir, "server.log"), "a");
+
+  server = spawn(process.execPath, [entry], {
+    stdio: ["ignore", log, log],
+    env: {
+      ...process.env,
+      // This binary is Electron; that is what makes it node instead.
+      ELECTRON_RUN_AS_NODE: "1",
+      // How the server knows that asking to be restarted will get it restarted,
+      // which is what `prefix+B` and the Share toggle both depend on.
+      KURURU_SUPERVISED: "1",
+      PATH: loginPath(),
+      KURURU_WEB_DIST: path.join(process.resourcesPath, "web"),
+      KURURU_ASSETS: path.join(process.resourcesPath, "assets", "spritesheets"),
+      KURURU_SOUNDS: path.join(process.resourcesPath, "assets", "sounds"),
+      KURURU_PTYHOSTD: path.join(process.resourcesPath, "server", "ptyhostd.mjs"),
+    },
+  });
+  closeSync(log);
+
+  server.on("error", (err) => console.error("kururu: could not start the server —", err.message));
+  server.on("exit", (code) => {
+    server = null;
+    if (serverStopping) return;
+    if (code === RESTART_EXIT_CODE) {
+      startServer();
+      return;
+    }
+    /**
+     * Anything else is left down, on `run.mjs`'s reasoning: a supervisor that
+     * resurrects a server which cannot start is a loop, and the error in the log
+     * is the useful part.
+     */
+    console.error(`kururu: the server exited (${code}); not restarting it`);
+  });
+}
+
+function stopServer() {
+  if (!server) return;
+  serverStopping = true;
+  server.kill();
+  server = null;
+}
+
+/**
+ * The server this window is responsible for, if it is responsible for one.
+ *
+ * Null means "go to the picker", which is what a checkout always gets and what a
+ * packaged build gets when its own server could not be started — in which case
+ * the sweep is still running and will find it if it turns up late.
+ */
+async function ownServer() {
+  if (!PACKAGED) return null;
+  // Somebody else's, and theirs to manage. Very often `bun run dev`.
+  if (await reachable(LOCAL)) return LOCAL;
+
+  startServer();
+  for (let attempt = 0; attempt < 60; attempt++) {
+    if (await reachable(LOCAL)) return LOCAL;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  console.error("kururu: the bundled server did not come up");
+  return null;
+}
+
+/**
+ * End every agent on this machine, by stopping the pty host.
+ *
+ * Found by its socket and never by its name, for the reason `server/kill-hosts.mjs`
+ * gives at length: `pkill -f ptyhostd` was observed matching two scratch hosts
+ * while consistently skipping the real one, and a pkill that silently matches
+ * nothing reads exactly like it worked. A listening socket has one holder by
+ * construction. SIGTERM rather than SIGKILL because the host reaps its ptys and
+ * unlinks the socket on the way out, and a corpse left behind is the next
+ * server's problem.
+ */
+function endAgents() {
+  const name = path.basename(hostSocket());
+  let listed = "";
+  try {
+    listed = execFileSync("lsof", ["-U"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  } catch {
+    return;
+  }
+
+  const pids = new Set();
+  for (const line of listed.split("\n")) {
+    const fields = line.trim().split(/\s+/);
+    const socket = fields.at(-1);
+    const pid = Number(fields[1]);
+    if (!socket || !pid || path.basename(socket) !== name) continue;
+    // The guard, not the search: something else holding a file of that name is
+    // not a thing to send signals to.
+    try {
+      const command = execFileSync("ps", ["-ww", "-o", "command=", "-p", String(pid)], { encoding: "utf8" });
+      if (!command.includes("ptyhost")) continue;
+    } catch {
+      continue;
+    }
+    pids.add(pid);
+  }
+
+  for (const pid of pids) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      // Already gone, which is the outcome being asked for.
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Finding a server
@@ -459,7 +682,15 @@ app.whenReady().then(async () => {
 
   buildMenu();
   createWindow();
-  showPicker();
+
+  /**
+   * A packaged kururu opens onto its own agents; a checkout opens onto the
+   * picker, exactly as it did. The picker is still the answer when the bundled
+   * server could not be started, and is still how you point this window at a
+   * machine that is not this one.
+   */
+  const mine = await ownServer();
+  if (!mine || !(await connect(mine)).ok) showPicker();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -493,17 +724,79 @@ app.on("window-all-closed", () => {
   app.quit();
 });
 
-// Vite is ours and nothing else is; the server and the pty host are deliberately
-// not this process's to stop.
-app.on("before-quit", () => {
+/**
+ * Quitting, and the one question worth asking on the way out.
+ *
+ * Vite is ours, and so is the server when this is a packaged build that started
+ * one — but the pty host is nobody's, and that is the distinction the dialog
+ * exists to make legible. Quitting stops a server; it does not stop work. People
+ * should be told that in the moment rather than discover it later, in either
+ * direction: somebody who assumed their agents died would not come back for
+ * them, and somebody who assumed they were safe would be right, which is the
+ * whole point of having built it this way.
+ *
+ * So the prompt offers both, and the destructive one is never the default. It is
+ * only raised when this window is the thing holding the server *and* there is
+ * something running — pointed at a machine in a cupboard, quitting is a window
+ * closing and has nothing to ask about.
+ */
+let quitting = false;
+
+app.on("before-quit", (event) => {
   stopSweeping();
   stopWatchingServer();
   stopVite();
+
+  if (quitting || !server) return;
+  event.preventDefault();
+  void confirmQuit();
 });
+
+async function confirmQuit() {
+  let live = 0;
+  try {
+    const response = await fetch(`${LOCAL}/api/health`, { signal: AbortSignal.timeout(1500) });
+    if (response.ok) live = Number((await response.json()).liveAgents) || 0;
+  } catch {
+    // A server that cannot answer has nothing running that we can name, and
+    // holding the app open to say so would be worse than letting it go.
+  }
+
+  if (live === 0) {
+    finishQuit(false);
+    return;
+  }
+
+  const parent = win && !win.isDestroyed() ? win : null;
+  if (!parent) app.focus({ steal: true });
+
+  const { response } = await dialog.showMessageBox(parent, {
+    type: "question",
+    buttons: ["Quit", "Quit and end them", "Cancel"],
+    defaultId: 0,
+    cancelId: 2,
+    message: live === 1 ? "One agent is still running." : `${live} agents are still running.`,
+    detail:
+      "Quitting stops kururu's server. The agents themselves are in a process below it and keep working — they are still there when you open kururu again, with their screens and their scrollback. What stops until then is the phone, which has nothing to connect to.\n\nEnding them stops every terminal on this machine, and that cannot be undone.",
+  });
+
+  if (response === 2) return;
+  finishQuit(response === 1);
+}
+
+function finishQuit(alsoAgents) {
+  quitting = true;
+  if (alsoAgents) endAgents();
+  stopServer();
+  app.quit();
+}
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
+    // A signal is not somebody choosing, so it is not asked a question.
+    quitting = true;
     stopVite();
+    stopServer();
     app.quit();
   });
 }

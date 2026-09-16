@@ -186,7 +186,7 @@ export interface AgentSnapshot {
  * taken off the front.
  *
  * Agents lead their own title with a status glyph and animate it: claude sits
- * at `✳ Merge twonary_mercado changes` and spins a braille frame in place of
+ * at `✳ Merge pane-drag changes` and spins a braille frame in place of
  * the ✳ while it works. Two reasons that prefix comes off, and the second is
  * why this is a function and not a CSS rule. The dot beside the label is
  * already saying working, in a vocabulary the rest of the window shares. And a

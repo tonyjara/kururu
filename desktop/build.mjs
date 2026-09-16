@@ -26,12 +26,24 @@
  * to spawn.
  */
 import { build } from "esbuild";
-import { chmodSync, existsSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
+
+/**
+ * The version, stamped into both bundles as a constant.
+ *
+ * Read from the root manifest because that is the one `/release` bumps first and
+ * the one the four workspaces are kept equal to. It is a *define* rather than a
+ * runtime read for the reason `server/src/version.ts` gives: a packaged app's
+ * manifests are inside an asar at a path that depends on how it was packaged, so
+ * a read that works in the checkout is exactly the kind that fails in the thing
+ * you shipped.
+ */
+const VERSION = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
 
 /** Both halves are built the same way; only the entry and the name differ. */
 async function bundle(entry, outfile) {
@@ -44,6 +56,7 @@ async function bundle(entry, outfile) {
     // Electron 44 ships Node 24; there is no older runtime to be kind to.
     target: "node22",
     sourcemap: true,
+    define: { KURURU_VERSION: JSON.stringify(VERSION) },
     // Native, and resolved at runtime. `ws` could be bundled but is left external
     // alongside it so the two are found the same way.
     external: ["node-pty", "ws"],

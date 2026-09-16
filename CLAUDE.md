@@ -120,7 +120,11 @@ server that is mid-flight. **Check whether a server is running before you start
   `report`, `status`, `files`, `workspaces` (which holds a tree and touches no
   pty), `sizing` (a fold over some numbers, which is the whole size policy),
   `hostsock` (two ports over a socket, no pty anywhere), `notify` (the gate, the
-  words and what a hand-edited settings file can say), `sounds` (the catalogue
+  words and what a hand-edited settings file can say), `access` (the gate that
+  decides whether a request is allowed at all — the token from each of the three
+  places one can arrive, and the cross-origin refusal, which is the case that
+  works against a kururu nobody shared), `update` (which of two versions is newer,
+  including the prerelease rule and the one where 0.10 is not smaller than 0.9), `sounds` (the catalogue
   against a temp directory — an id resolves by lookup, so there is nothing to
   traverse), `cursor` (DECSCUSR and OSC 12 in both directions, every
   spelling of a colour, a sequence cut in half by a read boundary, and that the
@@ -194,6 +198,14 @@ server/      Node (not Bun — it was Electron's once and the bundles stayed). T
   nvim.ts        The editor inside a pane, found by its socket and asked to say
                  what it is showing. An autocmd, not a poll; needs no user config
   reach.ts       Which addresses this machine answers to, for the phone's QR
+  access.ts      Who is allowed to talk to this server. The bind address, the one
+                 token, and the Origin check — the last of which is not about the
+                 network at all: a WebSocket is exempt from the same-origin policy
+  version.ts     What version this is, stamped in by the bundler. Three things
+                 need it and one of them is the pty host being older than you
+  update.ts      Whether there is a newer kururu, off the GitHub releases API.
+                 A check, never an install: what installing means depends on how
+                 kururu got here, and only the installer knows which
   workspaces.ts  Profiles, workspaces, focus. The arrangement lives HERE, not in web/
   persist.ts     The arrangement on disk. Structure only — never respawns anything
   mascot.ts      Which sheets the badge can animate, which parts, and which one.
@@ -257,6 +269,8 @@ web/         React 19 + Vite. One build; the desktop is what it is shaped for.
                  already is. Pure; tested
   qr.ts          A QR code, encoded here — one short URL is the smallest job the
                  format has. Pure; tested
+  access.ts      The token in the address, exchanged once for a cookie. Five
+                 lines, so that nothing else in the client has to carry it
   zoom.ts        How big the reader's type is, per device. Not the server's: two
                  windows of two shapes would overwrite each other
   main.tsx       The root, wrapped in Crash
@@ -279,6 +293,8 @@ web/         React 19 + Vite. One build; the desktop is what it is shaped for.
                    noises, and it is also where the autoplay unlock happens
     SettingsAppearance.tsx  The theme list, drawn in the themes, and the terminal's
                    font and cursor. The tab Settings opens on
+    SettingsAbout.tsx   Which kururu this is, and whether there is a newer one.
+                   The only page in there that edits nothing
     SettingsStyles.tsx  The registry: what there is, what you have, what has a
                    newer version. Picking is installing — see the header
     StatusBar.tsx  Where you are, and the PREFIX badge
@@ -300,16 +316,37 @@ desktop/     Electron main + preload, and the esbuild step that bundles the serv
   connect.html   The one page kururu draws itself — the address picker
   servers.js     Addresses you have connected to, and what a typed one means
   preload.js     Two bridges in one file, split on `file:` — see the comment
-  build.mjs      server/src → dist/{server,ptyhostd}.mjs (ESM, node-pty external)
+  build.mjs      server/src → dist/{server,ptyhostd}.mjs (ESM, node-pty external),
+                 and the version stamped into both as a define
+  electron-builder.yml  What a downloadable kururu is made of. The server, the
+                 host, web/dist and assets travel as *resources*, not in the asar,
+                 so spawning them stays an ordinary spawn
+  entitlements.mac.plist  The four things the hardened runtime has to be asked
+                 for, and nothing else: JIT, unsigned executable memory, DYLD
+                 variables (that is how the server is started) and library
+                 validation off (node-pty)
+  notarize.mjs   afterSign: zip, submit, wait, staple. Before the DMG and the zip
+                 are built from the app, because the zip is what the updater takes
   brand.mjs      postinstall: stamps kururu's id, name and icon into the Electron
                  copy in node_modules, which `electron .` otherwise runs as itself
   icon/          Generated. kururu.icns for the bundle, icon-1024.png for the
                  platforms that read a window's icon rather than an app's
-tools/       Run by hand, never by a build. Outputs are committed.
+CHANGELOG.md One section per release, and that section is also the GitHub
+             release body and the *What's new* the About tab draws. Written once.
+.claude/skills/release/  How to draft that section and how to cut a version.
+             `/release` refreshes Unreleased; `/release 0.2.0` stamps it and tags
+tools/       Run by hand, and one of them by the release workflow.
   icon.mjs       The frog as every icon: one cell of the sheet, scaled by whole
                  numbers onto a plate, written as an .icns and three PNGs. The
                  cell is named in the file and is deliberately NOT the user's
-                 mascot — an identity that followed a setting is not an identity
+                 mascot — an identity that followed a setting is not an identity.
+                 By hand; its outputs are committed
+  release-notes.mjs  One version's section out of CHANGELOG.md, so the release
+                 body and the file cannot drift. Refuses rather than falls back:
+                 an empty release body ships and cannot be taken back
+.github/workflows/release.yml  What a tag sets off — typecheck, test, build both
+             architectures in ONE invocation (two would leave `latest-mac.yml`
+             naming whichever ran last), sign, notarize, publish
 assets/      Artwork, served at runtime. Found the way web/dist is; KURURU_ASSETS
   sounds/        The croak a notification makes by default, because kururu is a
                  frog. KURURU_SOUNDS overrides, the way KURURU_ASSETS does
@@ -370,6 +407,8 @@ bun run build:server   # esbuild only; run.mjs does this for you
 bun run icon           # regenerate the icons from the sprite sheet. By hand
 bun run typecheck      # root tsconfig + web tsconfig
 bun test               # pure-function tests only
+bun run dist           # the signed, notarized DMG + zip. Needs the certificate
+bun run dist:unsigned  # the same bundle with nobody's name on it, for testing
 ```
 
 **Two commands, not one, and that is the shape now.** `dev` is the half that
@@ -407,7 +446,7 @@ things does not write into the user's own `~/.config/kururu`.
   cares about the executable. That answers *will it launch*, which was the only
   question being asked at the time. macOS's notification service asks a different
   one: it keys authorisation on the **code-signing identifier**, not on
-  `CFBundleIdentifier`. A bundle stamped `com.twonary.kururu.dev` whose signature
+  `CFBundleIdentifier`. A bundle stamped `io.github.tonyjara.kururu.dev` whose signature
   still says `Electron` is one `usernotificationsd` will not authorise — it never
   prompts, it never appears in System Settings → Notifications, and every
   notification fails with `UNErrorDomain error 1`, from the main process as well
@@ -436,7 +475,7 @@ things does not write into the user's own `~/.config/kururu`.
   one is enough to keep notifications dead.** Stamping `CFBundleIdentifier` and
   setting the code-signing identifier are two acts at two times, and macOS
   records each, so the dump comes back with one entry reading
-  `codeInfoID: Electron` and another reading `codeInfoID: com.twonary.kururu.dev`
+  `codeInfoID: Electron` and another reading `codeInfoID: io.github.tonyjara.kururu.dev`
   for the same .app — with nothing about the bundle on disk looking wrong.
   `lsregister -u <app>` then `lsregister -f <app>` clears it, from
   `/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister`,
@@ -444,7 +483,7 @@ things does not write into the user's own `~/.config/kururu`.
 - **Do not diagnose a missing banner from `com.apple.ncprefs` or the `usernoted`
   database.** Both read exactly like "this app was never authorised" when they
   are simply not where the answer lives on this macOS: a card was raised,
-  displayed and clicked while `com.twonary.kururu.dev` was absent from both, and
+  displayed and clicked while `io.github.tonyjara.kururu.dev` was absent from both, and
   absent again afterwards while System Settings → Notifications was listing it as
   allowed. `log show` for `usernotificationsd` answers nothing from a Claude Code
   shell either. The one probe that cannot mislead is an Electron `Notification`
@@ -465,6 +504,28 @@ things does not write into the user's own `~/.config/kururu`.
   whether or not it drew a banner, so a growing `record` count says only that
   delivery works — it cannot tell a presented card from a suppressed one, and
   reading it as though it could is what made the hunt long.
+- **electron-builder resolves its relative paths from two different places, and
+  nothing says which.** `files` and `extraResources` are relative to
+  `--projectDir` (`desktop/`), so `../web/dist` is how the web build is reached.
+  `afterSign` and `entitlements` are relative to the **workspace root**, which
+  the tool detects from the lockfile — the first fails as `Cannot find module
+  '/…/kururu/notarize.mjs'` and names a path nobody wrote, and the second fails
+  as `entitlements.mac.plist: cannot read entitlement data`, which names the
+  plist and never the path, so it reads as a malformed plist. Entitlements are
+  not resolved by electron-builder at all: the string is handed to codesign,
+  which resolves it against its own working directory.
+- **A `mac.identity` in the config overrides `CSC_IDENTITY_AUTO_DISCOVERY=false`**,
+  so a build that names one can never be asked for unsigned. And naming it by
+  *fingerprint* disambiguates nothing — electron-builder resolves whatever it is
+  given back to the certificate's name before shelling out, so two Developer ID
+  certificates with the same name stay ambiguous and codesign refuses rather than
+  choosing. The keychain is expected to hold exactly one.
+- **node-pty ships 58MB of Windows.** Two `conpty` builds and their
+  `OpenConsole.exe`, out of 62MB total. Unfiltered they are copied into the app
+  and handed to codesign, which is a Windows binary being signed with a Developer
+  ID for no reason and then notarized. The `filter` in `electron-builder.yml`
+  takes `lib/**` and the two darwin prebuilds and nothing else, which is exactly
+  what `lib/utils.js` goes looking for.
 - **node-pty needs no `@electron/rebuild`.** Its prebuilds are N-API, so the
   same binary loads in Node 24 (ABI 137) and Electron 44 (ABI 149). Do not add a
   rebuild step to "fix" a spawn failure — check the executable bit first.
@@ -498,6 +559,61 @@ things does not write into the user's own `~/.config/kururu`.
 
 ## Invariants in the code
 
+- **The socket binds loopback, and being reachable is a decision.** `PLAN.md`
+  used to say *no auth, by design, tailnet-only*, and that was right for as long
+  as kururu was a thing you ran out of a checkout. A downloadable app is one
+  double-click away from somebody else's laptop, and a server on `0.0.0.0` with
+  nothing in front of it hands every device on the café Wi-Fi a shell with your
+  accounts signed into it. So `access.ts` binds `127.0.0.1` and the Share dialog
+  is what moves it — the same argument that keeps `tailscale` commands out of
+  kururu: putting a port on somebody's network is their call, never a side
+  effect. Three things follow and each has bitten something else that tried it:
+  the bind address is read **once** and held, because between pressing the button
+  and the restart the file says one thing and the kernel another, and answering
+  from the file would draw a QR code for an address nothing is listening on
+  (hence `shared` *and* `wanted` on the wire); loopback is exempt from the token,
+  since anything that can connect from there can already start a shell; and the
+  **preview proxies bind the same address**, or kururu would be locked while the
+  dev app beside it was not.
+- **The `Origin` header is checked, and that one is not about the network.** A
+  WebSocket is exempt from the same-origin policy and sends no preflight, so
+  without it any page in any tab could open one to a *loopback-bound* kururu,
+  read the snapshot and spawn a pty — remote code execution reached by clicking a
+  link, against the configuration that looks safest. Absent means not a browser
+  and is allowed. Present has to be one of ours, and the allowances are every
+  arrangement kururu is actually run in rather than every arrangement that could
+  exist: same origin, loopback (vite forwards the browser's `Origin` untouched
+  while rewriting `Host`, so the two cannot be compared in development), this
+  machine's own addresses, and `*.ts.net` for the phone pointed at vite over the
+  tailnet. It is checked **before** the token, because a foreign page holding a
+  token it got hold of is precisely the case where the first check is the only
+  one left.
+- **The token is exchanged for a cookie, once, by the client.** It arrives as
+  `?k=` because that is what a QR code can carry, and `web/src/access.ts` hands
+  it to `/api/access` before the socket is opened. After that the browser
+  attaches it to every fetch *and to the handshake* with nothing in the client
+  having to remember to — the alternative is a header at eleven call sites, one
+  of which would be missed, and the one that was missed would be an `<img>`. It
+  is taken out of the address bar only when the exchange worked: a failure is
+  nearly always the server restarting, which is exactly what turning sharing on
+  does, and a phone left holding an address with no token in it cannot retry by
+  reloading.
+- **The version is stamped in by the bundler, never read off disk.** A packaged
+  app's `package.json` is inside an asar at a path that depends on how it was
+  packaged, so a runtime read is the kind of thing that works in the checkout and
+  fails in the thing you shipped. `desktop/build.mjs` defines `KURURU_VERSION`
+  and `server/src/version.ts` falls back to `0.0.0-dev`, which the update check
+  reports as *"running from a checkout"* rather than as up to date — the two are
+  the same picture and opposite facts, and only one of them means you can stop
+  thinking about it. The same rule holds the whole way down that page: `error`
+  and `newer: false` are never collapsed.
+- **`update.ts` checks and never installs.** What installing means depends on how
+  kururu got onto the machine — a DMG has an updater, a cask has `brew upgrade`,
+  a checkout has `git pull` — and only the thing that did the installing knows
+  which. A page served over HTTP is also the wrong thing to be able to swap the
+  application serving it, which is the line `preload.js` already draws at
+  `file:`. So the server answers *what is out there* and the doing belongs to the
+  window, or to the person.
 - **`files.ts`: resolve, check, realpath, check again.** The first check catches
   lexical `../`; the second catches a symlink inside the project pointing at
   `~/.ssh`. An escaping path is **refused, never clamped** — a clamped traversal
@@ -728,9 +844,12 @@ things does not write into the user's own `~/.config/kururu`.
   sizes is not a mascot, it is two mascots. The trim especially is shared and
   measured across every frame of both, or a sitting frog and a jumping one would
   be scaled to the same badge and the sprite would change size the moment its
-  agent stopped. `idle` is nullable and null is the dot. Only those two states
-  animate: `blocked` and `done` are the two that *want a human*, and a still dot
-  among moving neighbours is what makes them stand out.
+  agent stopped. `idle` is nullable and null is the dot. `working` wears the
+  working clip and **every other state wears the idle one** — `blocked` and
+  `done` kept their dots once, and since both last until somebody types (and
+  Claude Code's idle notice reports `blocked` a minute after every turn) that
+  read as the mascot failing to draw. The notification is what says an agent
+  wants you; the badge only says whether it is going.
 - **An idle animation that cannot animate becomes the dot again.** Under
   `motion: never` — or `system` on a machine asking for less motion — a frozen
   idle sprite and a frozen working one are the same picture, so idle would cost
@@ -1792,6 +1911,61 @@ a per-mode colour is for.
 nvim in a pty was watched directly first, to see what it actually sends: `CSI 2
 SP q` with `OSC 12;#f4dbd6` for normal, `6` with `#787878` for insert, `#9745be`
 for visual, and `CSI 0 SP q` with `OSC 112` on the way out.
+
+**The gate is built and verified against the live server**, which is also the
+one change in here that has already cost the user something: the default moved
+and their phone stopped being able to reach kururu until they pressed the button.
+Checked end to end from the LAN address, so the requests genuinely arrived from a
+non-loopback peer: with no token a 403, with a wrong token a 403, with the right
+one a 200; `/api/access` returned a `Set-Cookie` that then worked on its own; a
+request carrying a valid token but an `Origin` of `https://evil.example` was
+refused as cross-origin; and loopback needed nothing throughout. Turning sharing
+on came back `shared: false, wanted: true` — the restart-owed state — and `lsof`
+showed `*:7717` once the supervisor had brought it back.
+
+Beside it, the release machinery: `CHANGELOG.md` exists with an Unreleased
+section, `.claude/skills/release/SKILL.md` is how it is drafted and cut,
+`/api/health` and `/api/update` both report a version that the bundler stamps in,
+and Settings has an About tab that draws the release notes through the server's
+own markdown renderer. `/api/update` currently answers `GitHub answered 404`,
+which is correct and will stay correct until the first release is published.
+
+**Packaging is built and the bundle is proven**, which was the part with the
+real risk in it — a native module inside an app that has to notarize. An unsigned
+arm64 DMG builds (128MB; node-pty is trimmed to its two darwin prebuilds, since
+58MB of the 62MB it ships is Windows), and the packaged app was run in an
+isolated instance (`KURURU_PORT=7817`, `KURURU_HOST_SOCK=/tmp/k2/ptyhost.sock`)
+rather than against the user's own server, on the rule that a second real client
+would resize their live agents. From inside the `.app`: the window started the
+bundled server, the server spawned a **detached** pty host whose parent is pid 1,
+node-pty opened a real login shell, `web/dist` and `assets` resolved out of
+`Resources`, `Frog.aiff` came back transcoded to WAV, and the renderer held an
+established socket to its own server rather than sitting on the picker. SIGTERM
+to the window took the server with it and left the host running, which is the
+quit contract exactly.
+
+Three things were learnt the expensive way and are worth not relearning. A
+`mac.identity` naming a certificate **overrides `CSC_IDENTITY_AUTO_DISCOVERY=false`**,
+so an unsigned build has to leave it unset. Pinning that identity by *fingerprint*
+does not disambiguate anything, because electron-builder resolves it back to the
+certificate's name before handing it to codesign — two Developer ID certificates
+with the same name are still ambiguous and codesign refuses rather than choosing.
+And an `afterSign` hook path resolves against the **workspace root**, not against
+`--projectDir`.
+
+**And it is signed and notarized.** `Kururu-0.1.0-arm64.dmg`, 128MB, built by
+`bun run dist`: `Identifier=io.github.tonyjara.kururu`, `flags=0x10000(runtime)`,
+all four entitlements present, timestamped, signed by `Developer ID Application:
+Antonio Jara (W4YCRC53PL)`. Apple's notary service answered *Accepted* and the
+ticket is stapled. Checked the way a stranger's Mac will rather than the way the
+build machine does: a copy of the DMG was given a `com.apple.quarantine`
+attribute naming Safari, mounted, and `spctl` on the app inside answered
+`accepted, source=Notarized Developer ID`.
+
+**Still owed:** the x64 arch (configured, never built — one more notarization),
+the release workflow, the Homebrew tap, `electron-updater` wired to the About
+tab's *Get it*, and a version in the host handshake, which is the one piece that
+costs a pty host restart and is therefore batched with it.
 
 Next, in order — details in `PLAN.md`:
 

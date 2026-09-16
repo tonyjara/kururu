@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "A GUI for the agents it runs — on the desktop and on your phone.",
+  "license": "Apache-2.0",
   "type": "module",
   "workspaces": [
     "server",
@@ -21,12 +22,15 @@
     "host": "bun run build:server && node desktop/dist/ptyhostd.mjs",
     "status": "node server/status.mjs",
     "kill-ptyhosts": "node server/kill-hosts.mjs",
+    "dist": "bun run build && electron-builder --projectDir desktop --mac",
+    "dist:unsigned": "bun run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --projectDir desktop --mac",
     "typecheck": "tsc --noEmit -p tsconfig.json && bun run --cwd web typecheck",
     "test": "bun test",
     "postinstall": "node desktop/brand.mjs"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
     "typescript": "^5.8.0"
   }

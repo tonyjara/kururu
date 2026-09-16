@@ -39,6 +39,17 @@ import { bindKey } from "../../shared/keys";
 import type { AgentSnapshot, AgentStatus, MascotSet, Profile, PtyKind, SessionSnapshot } from "../../shared/model";
 import type { ClientMessage, DevServer, ServerMessage } from "../../shared/wire";
 import { DEV_SCAN_MS, SAVE_DEBOUNCE_MS } from "../../shared/wire";
+import {
+  bindAddress,
+  cookieHeader,
+  hasToken,
+  isShared,
+  rotateToken,
+  setShare,
+  sharing,
+  token,
+  verdict,
+} from "./access";
 import { parseReport } from "./agents/report";
 import { dump as dumpRecording, forget as forgetRecording, recordBacklog, recordInput, recordNote, recordOutput } from "./record";
 import { processCwd } from "./cwd";
@@ -106,6 +117,8 @@ import { readSnapshot, writeSnapshot } from "./persist";
 import { closeAllPreviews, closePreview, openPreview, openPreviews } from "./proxy";
 import { reach } from "./reach";
 import { smallestGrid, type Grid } from "./sizing";
+import { checkForUpdate } from "./update";
+import { VERSION } from "./version";
 import { orderAgents, Workspaces } from "./workspaces";
 
 const PORT = Number(process.env.KURURU_PORT ?? 7717);
@@ -2333,13 +2346,95 @@ function serveStatic(res: ServerResponse, rel: string): void {
 async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
 
+  /**
+   * Everything below this line is behind the gate, and that is deliberate rather
+   * than tidy: a list of protected paths is a list somebody adds a route to
+   * without noticing, and the route they forget will be the one that reads a
+   * file. See `access.ts` for what is actually being decided. The two answers
+   * are told apart on purpose — a page from somewhere else is a bug or an attack
+   * and is worth saying so about, while a missing token is a phone that has not
+   * scanned the QR code yet and is an instruction, not an error.
+   */
+  const allowed = verdict(req, url);
+  if (allowed !== "ok") {
+    text(
+      res,
+      allowed === "cross-origin"
+        ? "kururu: refused — this page is not one kururu serves."
+        : "kururu: this server is shared, so it wants the token from its Share dialog. Scan the QR code again.",
+      403,
+    );
+    return;
+  }
+
+  /**
+   * One scanned QR code, turned into a device that keeps working.
+   *
+   * The token arrives as `?k=` on the address the phone opened, and the page
+   * hands it straight back here so it can be exchanged for a cookie — which the
+   * browser then attaches to every fetch *and to the WebSocket handshake*, which
+   * is the whole reason this is a cookie and not something the client would have
+   * to remember to add in eleven places. It also works identically in
+   * development, where the page comes from vite and only the proxied requests
+   * ever reach this process, so there is no second arrangement to keep in step.
+   *
+   * Reachable without a token by construction — the gate above has already
+   * accepted this request, and on a shared server accepting it is what having
+   * presented a valid one *means*.
+   */
+  if (url.pathname === "/api/access") {
+    if (!isShared()) {
+      json(res, { ok: true, shared: false });
+      return;
+    }
+    if (!hasToken(req, url)) {
+      text(res, "kururu: that token is not this server's.", 403);
+      return;
+    }
+    res.writeHead(200, {
+      "content-type": "application/json; charset=utf-8",
+      "set-cookie": cookieHeader(token()),
+    });
+    res.end(JSON.stringify({ ok: true, shared: true }));
+    return;
+  }
+
   if (url.pathname === "/api/health") {
     json(res, {
       ok: true,
+      // The one field something outside kururu reads to tell two builds apart —
+      // a window against a server in a cupboard, or the updater against either.
+      version: VERSION,
       agents: host.agents.length,
       liveAgents: host.agents.filter(countsAsAgent).length,
       devServers: state.devServers.length,
     });
+    return;
+  }
+
+  /**
+   * Whether there is a newer kururu. A `force` is somebody pressing the button a
+   * second time, which is the one case that should skip the cache — see
+   * `update.ts` for why there is one.
+   */
+  if (url.pathname === "/api/update") {
+    const check = await checkForUpdate(url.searchParams.has("force"));
+    /**
+     * The notes are rendered here rather than in `update.ts` because this is
+     * where the theme is — release notes are code blocks as often as not, and
+     * highlighting them against a palette the window is not wearing is worse
+     * than not highlighting them. A failure falls back to the markdown source,
+     * which is perfectly readable and is what a changelog is written as anyway.
+     */
+    let notesHtml: string | null = null;
+    if (check.notes) {
+      try {
+        notesHtml = (await renderMarkdown(check.notes, "", "release-notes.md", appearance.themeId)).html;
+      } catch {
+        notesHtml = null;
+      }
+    }
+    json(res, { ...check, notesHtml });
     return;
   }
 
@@ -2382,7 +2477,43 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    * a timer earning nothing. See `reach.ts`.
    */
   if (url.pathname === "/api/reach") {
-    json(res, reach(PORT));
+    json(res, { ...reach(PORT), ...sharing() });
+    return;
+  }
+
+  /**
+   * Turning sharing on or off, and minting a new token.
+   *
+   * A POST rather than a message on the socket, because it is answered with the
+   * new state and the dialog needs that answer — a snapshot cannot carry it, for
+   * the reason `wire.ts` gives beside `Sharing`: the token has no business going
+   * to every client on every change. Restarting is the caller's, and only when
+   * the bind address actually has to move: turning sharing off while already
+   * loopback-bound changes nothing about the socket.
+   */
+  if (url.pathname === "/api/share" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const wanted = (body as { share?: unknown } | null)?.share;
+    const rotate = (body as { rotate?: unknown } | null)?.rotate === true;
+
+    let next = rotate ? rotateToken() : sharing();
+    if (typeof wanted === "boolean") {
+      next = setShare(wanted);
+      json(res, next);
+      /**
+       * Restarted only when the *socket* disagrees with what was just chosen,
+       * which is not the same test as "the decision changed": somebody who
+       * turns sharing on and immediately off again has changed the file twice
+       * and the socket never needed to move at all. Sent after the answer has
+       * gone out, or the dialog is told nothing and is left looking at a
+       * connection that dropped for no reason it could explain.
+       */
+      if (wanted !== isShared() && next.restartable) {
+        setTimeout(() => process.exit(RESTART_EXIT_CODE), 250);
+      }
+      return;
+    }
+    json(res, next);
     return;
   }
 
@@ -2852,6 +2983,20 @@ server.on("upgrade", (req, socket, head) => {
     socket.destroy();
     return;
   }
+  /**
+   * The same gate the HTTP side is behind, and the case it exists for most.
+   *
+   * A WebSocket is not subject to the same-origin policy and sends no preflight,
+   * so without this any page in any tab could open one to a *loopback-bound*
+   * kururu and drive it — read the snapshot, spawn a pty, type into it. The
+   * refusal is a closed socket rather than a status, because there is no
+   * handshake to put one in yet and a client that is not ours has nothing to be
+   * told.
+   */
+  if (verdict(req, url) !== "ok") {
+    socket.destroy();
+    return;
+  }
   wss.handleUpgrade(req, socket, head, (ws) => {
     clients.set(ws, {
       watching: new Set(),
@@ -2961,11 +3106,16 @@ async function attach(port: Port): Promise<void> {
    */
   if (!profiles && state.agents.length === 0) fillPane(workspaces.focusedPaneId);
 
-  server.listen(PORT, "0.0.0.0", () => {
+  server.listen(PORT, bindAddress(), () => {
     const built = existsSync(join(WEB_DIST, "index.html"));
-    console.log(`kururu server  http://localhost:${PORT}`);
+    console.log(`kururu server  http://localhost:${PORT}  (v${VERSION})`);
     console.log(`  agents       ${state.agents.length} held by the pty host`);
     console.log(`  web app      ${built ? WEB_DIST : "not built — bun run build"}`);
+    // Said every time, because which of the two a server is in is the one thing
+    // about it somebody could be wrong about in a way that matters.
+    console.log(
+      `  reachable    ${isShared() ? "from other machines, with the token from the Share dialog" : "from this machine only"}`,
+    );
   });
 }
 
