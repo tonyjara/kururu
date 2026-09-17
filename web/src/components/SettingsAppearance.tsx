@@ -254,7 +254,19 @@ function FontRow({
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"
-            autoFocus
+            /**
+             * Focused when picking `Custom…` is what opened this box, and not
+             * when it is merely here because *this device* cannot find the font
+             * that is set. Two mounts that were one, and the second is the
+             * ordinary condition of a phone looking at a desktop's session: the
+             * face is a patched Nerd Font installed on the machine the agents
+             * are on, no probe in a mobile browser will ever find it, so the box
+             * renders — and autofocusing it slid a soft keyboard over Settings
+             * every single time Settings was opened. `typing` is null on that
+             * mount and a string on the other, which is the whole distinction,
+             * and it is why this is a value rather than the bare attribute.
+             */
+            autoFocus={typing !== null}
             value={typing ?? value}
             onChange={(event) => onTyping(event.target.value)}
             onFocus={() => onTyping(typing ?? value)}

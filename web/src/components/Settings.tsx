@@ -18,7 +18,7 @@
  * snapshot, which is the rule the layout follows and the reason a second window
  * sees a rebinding, or a renamed profile, without being told.
  */
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { KeyOverrides } from "../../../shared/keys";
 import type { MascotSet, ProfileSummary } from "../../../shared/model";
 import type { NotifySettings as NotifyConfig } from "../../../shared/notify";
@@ -116,6 +116,23 @@ export function Settings({
   const [tab, setTab] = useState<Tab>(initialTab);
   const note = TABS.find(([id]) => id === tab)?.[2];
 
+  /**
+   * Keep the tab you are on inside the strip, which only ever moves anything on
+   * a window too narrow to hold seven of them — a phone. Two cases and they are
+   * the same line of code: Settings opened on a tab somebody else chose
+   * (`initialTab` is Profiles when the sidebar's name opens it, and Profiles is
+   * off the right edge at 390px), and a tab tapped when half of it was showing.
+   *
+   * A callback ref rather than an effect because the node *is* the event: it is
+   * called when the selected tab changes, which is exactly when there is
+   * something to scroll, and never on the renders in between. `nearest` on both
+   * axes so a tab already in view moves nothing at all, and so that the vertical
+   * half can never scroll the page under the dialog.
+   */
+  const onTab = useCallback((node: HTMLButtonElement | null) => {
+    node?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, []);
+
   return (
     <div className="scrim" onPointerDown={onClose}>
       <div
@@ -125,18 +142,21 @@ export function Settings({
         aria-modal
         aria-label="Settings"
       >
-        <div className="set-tabs" role="tablist" aria-label="Settings">
-          {TABS.map(([id, label]) => (
-            <button
-              key={id}
-              role="tab"
-              aria-selected={tab === id}
-              className={`set-tab ${tab === id ? "set-tab-on" : ""}`}
-              onClick={() => setTab(id)}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="set-tabbar">
+          <div className="set-tabs" role="tablist" aria-label="Settings">
+            {TABS.map(([id, label]) => (
+              <button
+                key={id}
+                role="tab"
+                aria-selected={tab === id}
+                ref={tab === id ? onTab : undefined}
+                className={`set-tab ${tab === id ? "set-tab-on" : ""}`}
+                onClick={() => setTab(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <span className="set-note set-tabs-note">{note}</span>
         </div>
 

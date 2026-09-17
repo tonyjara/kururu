@@ -2291,21 +2291,58 @@ a.button {
 
 /* Two jobs, one of which you are doing. Underlined rather than boxed: these sit
    directly on the dialog and a boxed tab needs a surface to sit on that this
-   does not have. */
-.set-tabs {
+   does not have.
+
+   The rule belongs to the bar and the tabs scroll along it, which is the phone's
+   doing. Seven tabs are wider than a dialog 390px across, and a flex row that
+   overflows one with `overflow: hidden` on it is not three tabs sitting off the
+   edge — it is three tabs that cannot be reached at all, on the one device with
+   no keyboard to tab onto them with instead. The note is outside the scroller
+   for the same reason it used to sit at the end of the strip: in there, a
+   sentence about the page would be most of the distance a swipe had to cover. */
+.set-tabbar {
   display: flex;
   align-items: baseline;
-  gap: 4px;
+  gap: 8px;
   margin-bottom: 12px;
   border-bottom: var(--border) var(--border-style) var(--line);
 }
 
+.set-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  overflow-x: auto;
+  /* The strip hangs a hairline below the bar's own content, so that the underline
+     of the tab you are on lands on the bar's rule and covers it. The tabs did
+     that for themselves until they were in a scroller, and cannot now: a scroll
+     container clips at its padding box, which is exactly where a margin like
+     that puts the line. */
+  margin-bottom: calc(-1 * var(--border));
+  /* Nothing here is worth a scrollbar. On a desktop there is no overflow to
+     report and the bar would be chrome for a thing that is not happening, and
+     the phone this exists for draws none of its own until a finger is moving. */
+  scrollbar-width: none;
+  /* A swipe that runs out of tabs stops, rather than becoming the browser's back
+     gesture with a dialog open on top of it. */
+  overscroll-behavior-x: contain;
+}
+.set-tabs::-webkit-scrollbar {
+  display: none;
+}
+
 .set-tab {
+  /* Never squeezed and never wrapped: a strip that can scroll has somewhere to
+     put a tab that does not fit, so "Notifications" over two lines is a shape
+     nothing needs any more. */
+  flex: none;
+  white-space: nowrap;
   padding: 6px 10px;
   background: none;
   border: none;
   border-bottom: var(--border-thick) var(--border-style) transparent;
-  margin-bottom: -1px;
   color: var(--dim);
   font-size: var(--fs-md);
   font-weight: 600;
@@ -2319,10 +2356,20 @@ a.button {
 }
 
 /* The note travels with the tab rather than heading the page under it, so the
-   page itself starts with the thing you came to change. */
+   page itself starts with the thing you came to change.
+
+   It is gone at a phone's width, where it is the one thing on the bar that can
+   be spared: three lines of wrapped prose beside the tabs would take the height
+   a 78vh dialog has least of, and every page in here already opens with its own
+   note under its own heading. */
 .set-tabs-note {
-  margin-left: auto;
+  flex: 0 1 auto;
   padding-bottom: 6px;
+}
+@media (max-width: 560px) {
+  .set-tabs-note {
+    display: none;
+  }
 }
 
 .set-head {
