@@ -25,12 +25,20 @@
  * you get is a window that is almost eight-bit with one rounded corner in it.
  * That reads as a rendering glitch rather than as a missing token, which is
  * exactly the kind of bug that gets lived with rather than reported.
+ *
+ * And then a third question, at the foot of the file, which the two above can
+ * both answer yes to while the window is unreadable: every token is spelled
+ * right, every rule is asking for one, and the label is dark grey on dark grey.
+ * `shared/contrast.ts` is the arithmetic and the argument; what is down there is
+ * the sweep — every pair the stylesheet states, against every theme, against a
+ * recorded list of what is already under its floor. It found three in Latte.
  */
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_THEME_ID, THEMES, themeFor } from "../../shared/theme";
-import { DEFAULT_SKIN_ID, ICON_NAMES, SKINS, skinFor } from "../../shared/skin";
+import { DEFAULT_THEME_ID, THEMES, themeFor, type UiTokens } from "../../shared/theme";
+import { DEFAULT_SKIN_ID, ICON_NAMES, partVars, SKINS, skinFor } from "../../shared/skin";
+import { auditPairs, describeFinding, type Pair } from "../../shared/contrast";
 
 const css = readFileSync(join(import.meta.dir, "../src/styles.css"), "utf8");
 
@@ -67,6 +75,11 @@ const NOT_THEME = new Set([
   ...ICON_NAMES.map((name) => `--icon-${name}-svg`),
   "--icon-svg",
   "--icon-glyph",
+  // Which cell of an icon strip this icon is, set per class in the stylesheet
+  // in `ICON_NAMES` order, and how many cells there are. Constants of the
+  // stylesheet, like `--bar-h`; a skin brings the strip and never the count.
+  "--icon-i",
+  "--icon-n",
   "--ui",
   "--mono",
   "--status-size",
@@ -100,10 +113,15 @@ const NOT_THEME = new Set([
   "--strip",
 ]);
 
-/** What a skin fills in: its tokens, plus one per icon it may override. */
+/**
+ * What a skin fills in: its tokens, one per icon it may override, the three
+ * per part it may paint, and the icon strip.
+ */
 const SKIN_TOKENS = new Set([
   ...Object.keys(SKINS[0]!.tokens).map(cssName),
   ...ICON_NAMES.map((name) => `--icon-${name}`),
+  ...Object.keys(partVars(SKINS[0]!.parts)),
+  "--icon-sheet",
 ]);
 
 const asked = new Set(Array.from(css.matchAll(/var\((--[a-z0-9-]+)/g), (m) => m[1]!));
@@ -197,6 +215,29 @@ describe("the stylesheet and the themes", () => {
         `--icon-${name}: "${skin.icons[name]}"`,
       );
     }
+    /**
+     * And the parts, which is the check that matters most here: a `:root`
+     * default of `none` where `partVars` says `var(--p-pane-frame)` is a
+     * focused pane that loses its bezel for the frame before the snapshot
+     * lands and gets it back after, which is a flash of the wrong frame on
+     * every reload.
+     */
+    for (const [name, value] of Object.entries(partVars(skin.parts))) {
+      expect(`${name}: ${declared.get(name)}`).toBe(`${name}: ${value}`);
+    }
+    expect(declared.get("--icon-sheet")).toBe("none");
+  });
+
+  /**
+   * The strip is cut by a count the stylesheet states and the skin format
+   * defines, and the two are held together by nothing but this. An icon added
+   * to `ICON_NAMES` without this moving puts every cell one place off.
+   */
+  it("cuts an icon strip into exactly as many cells as there are icons, in their order", () => {
+    expect(rootBlock().get("--icon-n")).toBe(String(ICON_NAMES.length));
+    for (const [i, name] of ICON_NAMES.entries()) {
+      expect(css).toContain(`.icon-${name} { --icon-svg: var(--icon-${name}-svg); --icon-glyph: var(--icon-${name}); --icon-i: ${i}; }`);
+    }
   });
 
   /**
@@ -224,4 +265,151 @@ describe("the stylesheet and the themes", () => {
       .filter((value) => value !== "#fff");
     expect(strays).toEqual([]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// And that a theme can be read
+// ---------------------------------------------------------------------------
+
+/**
+ * Every pair of tokens the stylesheet draws on top of each other, as it states
+ * them.
+ *
+ * A rule that names both a `color` and a `background` has written down a pair,
+ * and that is the only place in kururu where a pair is written down at all: the
+ * other 167 rules that name a colour inherit their ground from whatever they sit
+ * inside, which needs the cascade and therefore a live window. So this sees
+ * about a third of the window, and every pair it does see is exact.
+ *
+ * Extracted rather than listed here for the reason the whole file exists — a
+ * hand-kept list of pairs is one more thing kept in step with the stylesheet by
+ * hand, and this file is the evidence that those drift. A token renamed out of
+ * existence silently drops its pairs from the sweep, which would be a hole if
+ * the orphan check above did not already fail on exactly that.
+ */
+function statedPairs(): Pair[] {
+  const byCss = new Map(
+    Object.keys(THEMES[0]!.ui).map((t) => [cssName(t), t as keyof UiTokens]),
+  );
+  const pairs: Pair[] = [];
+  const seen = new Set<string>();
+  for (const [, , body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    // Anchored the way the stray-hex check is: this stylesheet writes short
+    // rules on one line, so a declaration is found after a `{` or a `;` as
+    // readily as at the start of one.
+    const ink = /(?:^|[;{\s])color:\s*var\((--[a-z0-9-]+)\)/.exec(body!);
+    const ground = /background(?:-color)?:\s*var\((--[a-z0-9-]+)\)/.exec(body!);
+    if (!ink || !ground) continue;
+    const a = byCss.get(ink[1]!);
+    const b = byCss.get(ground[1]!);
+    // A skin token or `--strip` on either side: not a colour any theme answers
+    // for, so not a pair a theme can be judged on.
+    if (!a || !b) continue;
+    const key = `${a}|${b}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pairs.push({ ink: a, ground: b });
+  }
+  return pairs;
+}
+
+/**
+ * The pairs that are under their floor today, per theme, with the ratio each one
+ * had when it was written down.
+ *
+ * **This is a record of the shipped state, not an approval of it.** Every line
+ * is a place where a label is harder to read than it should be, and Latte owning
+ * eleven of them is the finding rather than the noise — a light theme built by
+ * inverting a dark one is exactly where "on a bright fill" stops meaning what it
+ * meant, which is why `onAccent` is 2.31:1 on its `blocked` badge.
+ *
+ * The recorded number is what makes this a ratchet rather than a blanket. A pair
+ * that slips *further* under fails, so a palette cannot degrade under cover of
+ * its own exemption; and a pair that climbs back over its floor fails as a stale
+ * line, so fixing one forces it out of here rather than leaving a note about a
+ * bug that no longer exists.
+ */
+const CONTRAST_KNOWN: Record<string, Record<string, number>> = {
+  "catppuccin-mocha": {
+    "danger on line": 3.94,
+  },
+  "catppuccin-macchiato": {
+    "danger on line": 3.36,
+  },
+  "catppuccin-frappe": {
+    "danger on chrome-high": 3.57,
+    "danger on line": 2.7,
+    "dim on chrome-high": 4.26,
+    "dimmer on bg": 2.87,
+  },
+  "catppuccin-latte": {
+    "accent on chrome-high": 2.17,
+    "danger on chrome-high": 3.52,
+    "on-accent on accent": 2.96,
+    "danger on line": 2.99,
+    "text on line": 4.39,
+    "dim on chrome": 4.06,
+    "on-accent on blocked": 2.31,
+    "on-accent on done": 4.34,
+    "dim on chrome-high": 3.2,
+    "dim on bg": 4.37,
+    "dimmer on bg": 2.3,
+  },
+  kururu: {
+    "dim on chrome-high": 4.34,
+    "dimmer on bg": 2.88,
+  },
+};
+
+describe("whether a theme can be read", () => {
+  const pairs = statedPairs();
+
+  /**
+   * That there are pairs at all. If the extraction above ever stops matching —
+   * a formatter that puts every declaration on its own line differently, a
+   * rewrite of the stylesheet — every theme below would pass with nothing
+   * checked, which is the one way this whole block could fail silently.
+   */
+  it("finds the pairs the stylesheet states", () => {
+    expect(pairs.length).toBeGreaterThan(12);
+    expect(pairs).toContainEqual({ ink: "onAccent", ground: "accent" });
+    expect(pairs).toContainEqual({ ink: "text", ground: "bg" });
+  });
+
+  /**
+   * A translucent ground cannot be judged against two colours and a ratio, and
+   * this asserts none of the stated pairs has one — so the skip path stays a
+   * safeguard rather than a quiet way for a pair to leave the sweep.
+   */
+  it("judges every pair it found", () => {
+    for (const theme of THEMES) {
+      const skipped = auditPairs(theme.ui, pairs).filter((f) => f.skipped);
+      expect(skipped.map((f) => `${theme.id}: ${describeFinding(f)}`)).toEqual([]);
+    }
+  });
+
+  for (const theme of THEMES) {
+    it(`has nothing newly unreadable in ${theme.id}`, () => {
+      const known = CONTRAST_KNOWN[theme.id] ?? {};
+      const found = new Map(
+        auditPairs(theme.ui, pairs).map((f) => [describeFinding(f).split(" ").slice(0, 3).join(" "), f]),
+      );
+
+      // Something under its floor that nobody wrote down, or that has slid
+      // further under than the number beside it. A hundredth of slack, because
+      // the recorded numbers are rounded to two places.
+      const news: string[] = [];
+      for (const [where, f] of found) {
+        const was = known[where];
+        if (was === undefined) news.push(`${describeFinding(f)} — new`);
+        else if (f.ratio! < was - 0.005) news.push(`${describeFinding(f)} — was ${was}`);
+      }
+      expect(news).toEqual([]);
+
+      // And a line here for a pair that now passes: the fix landed and the note
+      // about it did not.
+      const stale = Object.keys(known).filter((where) => !found.has(where));
+      expect(stale.map((where) => `${where} — fixed, drop it from CONTRAST_KNOWN`)).toEqual([]);
+    });
+  }
 });

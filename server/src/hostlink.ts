@@ -39,14 +39,7 @@ export interface Port {
 export type ToHost =
   /** Asks for everything a freshly-started server needs: the agents, and the blob. */
   | { type: "hello"; id: number }
-  /**
-   * `env` is an overlay on the host's own environment, not a replacement for it:
-   * a handful of variables that say which accounts this pty belongs to (see
-   * `server/src/identity.ts`). It travels as a bare map because that is all the
-   * host should ever know about it — the moment the host learns what a *profile*
-   * is, changing what a profile is costs somebody their agents.
-   */
-  | { type: "create"; id: number; cwd?: string; command?: string; kind?: PtyKind; env?: Record<string, string> }
+  | { type: "create"; id: number; cwd?: string; command?: string; kind?: PtyKind }
   | { type: "kill"; agentId: string }
   | { type: "write"; agentId: string; data: string }
   | { type: "resize"; agentId: string; cols: number; rows: number }
@@ -171,12 +164,7 @@ export class HostLink {
    * its emulator built and thrown away in the same breath, and came back black
    * — until it was switched away from and back, which borrowed a second one.
    */
-  async create(options: {
-    cwd?: string;
-    command?: string;
-    kind?: PtyKind;
-    env?: Record<string, string>;
-  }): Promise<AgentSnapshot> {
+  async create(options: { cwd?: string; command?: string; kind?: PtyKind }): Promise<AgentSnapshot> {
     const agent = await this.request<AgentSnapshot>((id) => ({ type: "create", id, ...options }));
     // Appended rather than spliced in anywhere: the host lists oldest first and
     // this is the newest, which is what `cwdForNewTab` reads the order for.

@@ -101,6 +101,35 @@ let palette: TerminalTokens = themeFor(null).terminal;
 let type: TerminalAppearance = DEFAULT_APPEARANCE.terminal;
 
 /**
+ * Whether `palette` has ever been set from a snapshot, as opposed to being the
+ * default it is declared as.
+ *
+ * It exists to keep the reload below from being a loop. The first snapshot of a
+ * session almost always moves the palette — the declaration above is Mocha and
+ * the user is on something else — and reloading for that would land on a fresh
+ * window whose palette is Mocha again, which would move again, forever. The
+ * first application is therefore never a change; it is the window learning what
+ * it was always meant to be wearing, and in practice it happens before any
+ * emulator exists, since `create` builds its `Terminal` behind the wasm's
+ * `init` promise and a websocket beats a WebAssembly compile every time.
+ */
+let dressed = false;
+
+/**
+ * Whether two palettes are the same in every one of their twenty-one tokens.
+ *
+ * All of them, with no shortcut for "the background is the one that shows":
+ * every token is a colour ghostty-vt has already baked into cells, so a theme
+ * that moved only `brightBlack` has still left the screen wrong in the places
+ * that used it.
+ */
+function samePalette(a: TerminalTokens, b: TerminalTokens): boolean {
+  const tokens = Object.keys(a) as (keyof TerminalTokens)[];
+  if (tokens.length !== Object.keys(b).length) return false;
+  return tokens.every((token) => a[token] === b[token]);
+}
+
+/**
  * The cursor style an unfocused pane is given, which is not one of the three.
  *
  * ghostty-web has no idea what focus is. `renderCursor` fills a rectangle in
@@ -1093,14 +1122,20 @@ function create(agentId: string): Pooled {
      * Colours go straight to the renderer rather than through `em.options.theme`.
      *
      * Setting that option is the documented route and it warns that "theme
-     * changes after open() are not yet fully supported", which is true of the
-     * half it cannot reach: the palette is also handed to the WASM terminal when
-     * it is built, and nothing updates it there. That half only answers colour
-     * *queries* — a program asking what the background is — and it is right
-     * again the moment this emulator is rebuilt, whereas the renderer's copy is
-     * what every cell on screen is actually drawn from. So the renderer is set
-     * directly, the warning is not earned, and the one thing left stale is a
-     * question almost nothing asks.
+     * changes after open() are not yet fully supported". **The warning is
+     * earned, and by more than it admits.** This once said the stale half was
+     * the WASM terminal's copy and that it "only answers colour queries", which
+     * was wrong twice over: ghostty-vt answers no colour query at all — write it
+     * an `OSC 11;?` and it returns nothing, where a `DSR 6` comes straight back
+     * — and its copy is not a sideline but *the* palette, because it resolves
+     * every cell to literal RGB channels as it parses. What `setTheme` reaches
+     * is the selection and the cursor. It does not reach a cell, and no repaint
+     * will make it.
+     *
+     * It is called anyway, because those two are worth having and cost nothing.
+     * The palette proper moves only when the window is reloaded and the wasm
+     * terminal is built again — see `applyTerminalAppearance`, which is where
+     * that is decided.
      *
      * The repaint afterwards is not optional, and finding that out is what this
      * comment is for. The render loop is self-rescheduling, so it was tempting
@@ -1335,20 +1370,54 @@ export function retain(liveIds: ReadonlySet<string>): void {
  * the server writes it down and pushes a snapshot, and every client restyles
  * because its snapshot changed. Nothing here knows a dialog exists.
  *
- * It restyles rather than rebuilding, and that is the whole reason this is three
- * lines instead of a page. A rebuild would be correct and ruinous — every
- * visible terminal would ask for a backlog, every warm one would lose its
- * scrollback and its scroll position, and the pool exists precisely so that the
- * things which look like they ought to rebuild an emulator do not.
+ * The font and the cursor it can do in place. **The palette it cannot**, and
+ * saying so is the point of this comment, because the code reads as though it
+ * can: `restyle` calls `setTheme` and forces a repaint, and none of it reaches
+ * a single cell.
  *
- * A re-measure is asked for only when the *font* moved. Colours do not change
- * the cell, so a theme swap must not propose anything: a proposal is a pty
- * resize and a SIGWINCH into every agent, and paying that to go from Mocha to
- * Macchiato would make choosing a colour scheme repaint everybody's work.
+ * ghostty-vt resolves colour inside the wasm, at the moment a byte is written.
+ * A cell crosses back as `fg_r/fg_g/fg_b` — literal channels — and the binding
+ * says as much: `getFgColorMode()` is `return -1`, unconditionally, because
+ * there is no index left to report. `SGR 31` became this theme's red while it
+ * was being parsed, and the palette that decided it is the one handed to
+ * `ghostty_terminal_new_with_config`, which has no setter. So `setTheme` writes
+ * a `palette` array on the JS renderer that the cell path never reads, and the
+ * forced repaint below redraws every row in exactly the colours it already had.
+ * This held for *indexed* content too, which is the part that surprises: it was
+ * never "truecolor programs don't follow" — nothing followed.
+ *
+ * The only way to recolour a screen is to build a new wasm terminal and feed it
+ * the backlog again, and the only way to do that to a whole window is to reload
+ * it. So this reports the palette moving rather than acting on it, and `App`
+ * answers. A reload is affordable here for the reason the docs give for ⌘R: it
+ * is the client, and the client is the process that owns nothing. The ptys are
+ * the host's and the arrangement is the server's, so the window comes back with
+ * every agent still running and every pane where it was. What it costs is a
+ * backlog refetch per visible pane and the scroll position, once, on a
+ * deliberate act — which is a better trade than a theme that silently does not
+ * apply.
+ *
+ * A re-measure is still asked for only when the *font* moved. Colours do not
+ * change the cell, so a palette swap must not propose anything: a proposal is a
+ * pty resize and a SIGWINCH into every agent, and paying that to go from Mocha
+ * to Macchiato would make choosing a colour scheme repaint everybody's work.
+ * The reload does not propose either — the window comes back into the same
+ * boxes and measures the same grid.
+ *
+ * @returns whether the palette moved, and the emulators are therefore stale.
  */
-export function applyTerminalAppearance(tokens: TerminalTokens, next: TerminalAppearance): void {
+export function applyTerminalAppearance(tokens: TerminalTokens, next: TerminalAppearance): boolean {
+  const stale = dressed && !samePalette(tokens, palette);
   const remeasure = next.fontFamily !== type.fontFamily || next.fontSize !== type.fontSize;
   palette = tokens;
   type = next;
+  dressed = true;
+  /**
+   * Still restyled on the way out, even when the caller is about to reload.
+   * The font and the cursor are real work that this can do, and a palette that
+   * moved alongside a font size should not leave the type wrong for the frames
+   * the reload takes to come back.
+   */
   for (const entry of pool.values()) entry.restyle(remeasure);
+  return stale;
 }

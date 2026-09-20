@@ -25,7 +25,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Profile, Workspace } from "../../shared/model";
-import { adoptIdentity, isWorkspaceColor } from "../../shared/model";
+import { isWorkspaceColor } from "../../shared/model";
 import type { LayoutNode } from "../../shared/layout";
 import { nextId } from "./workspaces";
 
@@ -55,15 +55,6 @@ interface StoredWorkspace {
   /** Likewise: a session written before a workspace could pick a mascot. */
   mascotId?: string | null;
   /**
-   * The profile whose accounts this workspace borrows, as an index into the
-   * list above — `activeWorkspace`'s trick, and for its reason: profile ids are
-   * regenerated on the way back in, so an id written here would name nothing
-   * the moment it was read. A name would survive a reorder that an index does
-   * not, and would not survive two profiles being called the same thing, which
-   * is the likelier of the two accidents.
-   */
-  identityProfile?: number | null;
-  /**
    * The last dev command this workspace had serving, and where it ran. Two
    * strings and no process — which is what makes it the one thing on a restored
    * layout that can bring an app back up, and why it is safe to keep when
@@ -76,15 +67,6 @@ interface StoredProfile {
   workspaces: StoredWorkspace[];
   /** Index rather than id: ids are regenerated on the way back in. */
   activeWorkspace: number;
-  /**
-   * Which accounts this profile opens terminals as. Kept, where every other
-   * live thing here is stripped, because it is not a live thing: three paths a
-   * person chose, which the rule against restoring processes has nothing to say
-   * about. They are also the one part of a restored profile that still works
-   * with no pty host in sight — an empty pane opened tomorrow gets the right
-   * account without anybody being asked again.
-   */
-  identity?: unknown;
 }
 interface StoredSession {
   version: number;
@@ -122,24 +104,11 @@ function strip(node: LayoutNode): StoredNode {
 }
 
 export function writeSnapshot(profiles: Profile[], activeProfileId: string): void {
-  /**
-   * A borrowed profile, as the file names one. Null for a workspace that has
-   * borrowed nobody and also for one pointing at a profile that has since been
-   * deleted — the live side reads that as "my own profile" already, so this is
-   * where the dead pointer stops being written down rather than a repair.
-   */
-  const profileIndexOf = (profileId: string | null): number | null => {
-    if (!profileId) return null;
-    const at = profiles.findIndex((p) => p.id === profileId);
-    return at === -1 ? null : at;
-  };
-
   const session: StoredSession = {
     version: VERSION,
     activeProfile: Math.max(0, profiles.findIndex((p) => p.id === activeProfileId)),
     profiles: profiles.map((profile) => ({
       name: profile.name,
-      identity: profile.identity,
       activeWorkspace: Math.max(
         0,
         profile.workspaces.findIndex((w) => w.id === profile.activeWorkspaceId),
@@ -148,7 +117,6 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
         name: workspace.name,
         color: workspace.color,
         mascotId: workspace.mascotId,
-        identityProfile: profileIndexOf(workspace.identityProfileId),
         // The terminal it ran in is deliberately dropped: agent ids belong to a
         // pty host that will not be there next launch, and a button that reused
         // a recycled id would type a command into a stranger.
@@ -220,17 +188,7 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
   if (session?.version !== VERSION || !Array.isArray(session.profiles)) return null;
 
   const profiles: Profile[] = [];
-  /**
-   * Which restored profile each *stored* index turned out to be. Not the same
-   * as the position in `profiles`, because a stored profile with nothing
-   * readable in it is skipped — so the borrowed-identity pointers below are
-   * resolved through this rather than by counting, and a skip shifts nobody's
-   * accounts onto the wrong profile.
-   */
-  const byStored = new Map<number, string>();
-  /** Workspaces whose pointer names a profile the loop has not reached yet. */
-  const borrowing: { workspace: Workspace; profile: number }[] = [];
-  for (const [storedAt, stored] of session.profiles.entries()) {
+  for (const stored of session.profiles) {
     if (!stored || typeof stored.name !== "string" || !Array.isArray(stored.workspaces)) continue;
     const workspaces: Workspace[] = [];
     for (const w of stored.workspaces) {
@@ -261,44 +219,28 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
         lastPaneId: null,
         color,
         mascotId,
-        // Filled in below, once every profile has an id again. It cannot be
-        // resolved here: the profile this points at may be one the loop has
-        // not built yet, and on a first run through it is usually exactly that.
-        identityProfileId: null,
         dev,
       };
-      if (typeof w.identityProfile === "number") {
-        borrowing.push({ workspace, profile: w.identityProfile });
-      }
       workspaces.push(workspace);
     }
     if (workspaces.length === 0) continue;
     const at = Math.min(Math.max(0, stored.activeWorkspace ?? 0), workspaces.length - 1);
-    const profileId = nextId("p");
-    byStored.set(storedAt, profileId);
     profiles.push({
-      id: profileId,
+      id: nextId("p"),
       name: stored.name,
       workspaces,
       activeWorkspaceId: workspaces[at]!.id,
       lastWorkspaceId: null,
-      // Read as defensively as the colour above: a file written before this
-      // version has no identity at all, and one with a path that is no longer
-      // absolute comes back as untagged rather than as a directory that would
-      // resolve differently in every pane.
-      identity: adoptIdentity(stored.identity),
       // Empty, and not because the file is old: the order is a list of agent
       // ids, agent ids are processes, and this file restores structure and
       // never processes. A cold start has nothing to put in an order.
       agentOrder: [],
+      // Likewise, and for the same reason: a row put away is a memory about a
+      // process, and a cold start has none to remember.
+      hiddenAgents: [],
     });
   }
   if (profiles.length === 0) return null;
-  // A pointer at a profile that did not survive the read is left as null, which
-  // is the workspace's own profile — the same answer a deleted one gives.
-  for (const { workspace, profile } of borrowing) {
-    workspace.identityProfileId = byStored.get(profile) ?? null;
-  }
   const at = Math.min(Math.max(0, session.activeProfile ?? 0), profiles.length - 1);
   return { profiles, activeProfileId: profiles[at]!.id };
 }

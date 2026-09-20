@@ -24,8 +24,8 @@
  * profile, it always has at least one workspace, that workspace always has at
  * least one pane, and the focused pane always exists.
  */
-import type { Profile, ProfileIdentity, ProfileSummary, Workspace, WorkspaceDev } from "../../shared/model";
-import { adoptIdentity, blankIdentity, isWorkspaceColor } from "../../shared/model";
+import type { Profile, ProfileSummary, Workspace, WorkspaceColor, WorkspaceDev } from "../../shared/model";
+import { isWorkspaceColor, WORKSPACE_COLORS } from "../../shared/model";
 import {
   addTab,
   closePane,
@@ -134,18 +134,17 @@ function adoptSeq(profiles: Profile[]): void {
 function adopt(profile: Profile): Profile {
   return {
     ...profile,
-    // Three paths a blob written before this version simply does not have, and
-    // an absent identity is the same answer as an empty one: every tool as the
-    // machine has it. Adopted rather than spread through, because a path that
-    // has stopped being absolute is a path that would mean a different
-    // directory in every pane it opened a terminal in.
-    identity: adoptIdentity(profile.identity),
-    // Likewise, and read as defensively as everything else out of a blob: this
-    // one is a list rather than a field, so a hand-edited or older blob could
+    // Read as defensively as everything else out of a blob: this one is a list
+    // rather than a field, so a hand-edited or older blob could
     // put anything in it. Anything that is not a string is dropped instead of
     // being carried as an id that matches no terminal.
     agentOrder: Array.isArray(profile.agentOrder)
       ? profile.agentOrder.filter((id): id is string => typeof id === "string")
+      : [],
+    // The same reading, for the same reason: a list out of a blob an older
+    // server wrote, where absent is the normal case rather than the odd one.
+    hiddenAgents: Array.isArray(profile.hiddenAgents)
+      ? profile.hiddenAgents.filter((id): id is string => typeof id === "string")
       : [],
     workspaces: profile.workspaces.map((workspace) => ({
       ...workspace,
@@ -159,12 +158,6 @@ function adopt(profile: Profile): Profile {
       // compares against null and gets a different answer than it did a restart
       // ago — which is the whole reason this function exists.
       mascotId: typeof workspace.mascotId === "string" ? workspace.mascotId : null,
-      // Likewise, and nothing checks that the profile it names still exists:
-      // `identityForWorkspace` falls back to the workspace's own profile for an
-      // id that resolves to nothing, so a check here would buy a refusal where
-      // the fallback is already the same answer.
-      identityProfileId:
-        typeof workspace.identityProfileId === "string" ? workspace.identityProfileId : null,
       // Likewise. The agent id inside it is *not* repaired against the host's
       // list here: index.ts already drops tabs pointing at terminals that are
       // gone, and a stale one costs nothing — `runDev` checks the terminal is
@@ -202,6 +195,38 @@ function adoptDev(value: unknown): WorkspaceDev | null {
  * different order than the one on screen would put the row somewhere nobody
  * pointed at.
  */
+/**
+ * A colour for a workspace that is about to exist, given the ones its profile is
+ * already wearing.
+ *
+ * Random, but not blind: it counts what is taken and draws from the colours that
+ * are used least, so the first fourteen workspaces in a profile are fourteen
+ * different colours and the fifteenth is the first repeat. Blind random is the
+ * version that was obviously right and is obviously wrong the moment you look at
+ * it — with fourteen colours and four workspaces it collides about a third of
+ * the time, and two rows the same colour is worse than two rows with no colour
+ * at all, because the second says nothing and the first says something false.
+ *
+ * Random *within* the least-used set rather than the next one along, because the
+ * alternative is an order: make four workspaces and they are green, amber, sand,
+ * coral in every profile on every machine, which reads as a sequence rather than
+ * as a tag and invites somebody to look for a meaning in it.
+ *
+ * Untagged workspaces are counted as nothing at all rather than as a colour, so
+ * a profile of workspaces somebody deliberately cleared does not push the next
+ * one anywhere in particular.
+ */
+export function nextColor(taken: Iterable<WorkspaceColor | null>): WorkspaceColor {
+  const used = new Map<WorkspaceColor, number>(WORKSPACE_COLORS.map((c) => [c, 0]));
+  for (const color of taken) {
+    if (color === null) continue;
+    used.set(color, (used.get(color) ?? 0) + 1);
+  }
+  const fewest = Math.min(...used.values());
+  const free = WORKSPACE_COLORS.filter((c) => used.get(c) === fewest);
+  return free[Math.floor(Math.random() * free.length)] ?? WORKSPACE_COLORS[0];
+}
+
 export function orderAgents(ids: string[], order: string[]): string[] {
   const present = new Set(ids);
   const placed = new Set<string>();
@@ -267,7 +292,6 @@ export class Workspaces {
       name: profile.name,
       workspaces: profile.workspaces.length,
       agents: liveAgents(profile.id),
-      identity: profile.identity,
     }));
   }
 
@@ -732,6 +756,35 @@ export class Workspaces {
   }
 
   /**
+   * Put a terminal away in the sidebar's list, or bring it back.
+   *
+   * It touches nothing but the list: no pty, no tab, no pane. The row goes into
+   * the drawer at the foot of the list and everything else about that terminal
+   * carries on, which is the whole of what makes this different from the ✕ it
+   * sits beside.
+   *
+   * The profile is the one that *holds* the terminal rather than the active one,
+   * so a row put away from a phone looking at another profile — which the list
+   * cannot currently do, and nothing here should depend on it not doing — lands
+   * in the right drawer.
+   *
+   * An id already in the list is not added twice and one that is not in it is
+   * not an error to remove: both are what a second client's message looks like
+   * arriving after the first one won, and neither is worth a refusal.
+   */
+  setAgentHidden(agentId: string, hidden: boolean): void {
+    const profileId = this.profileOf(agentId);
+    const profile = profileId ? this.profiles.find((p) => p.id === profileId) : undefined;
+    if (!profile) return;
+    const has = profile.hiddenAgents.includes(agentId);
+    if (has === hidden) return;
+    const next = hidden
+      ? [...profile.hiddenAgents, agentId]
+      : profile.hiddenAgents.filter((id) => id !== agentId);
+    this.replaceProfile(profile.id, (p) => ({ ...p, hiddenAgents: next }));
+  }
+
+  /**
    * Close a pane a move has just emptied. Never the one that was dropped into,
    * and never the last pane in the workspace — an empty workspace has nothing to
    * focus and nothing to aim an action at.
@@ -892,7 +945,7 @@ export class Workspaces {
 
   newWorkspace(name?: string): string {
     const profile = this.active;
-    const workspace = this.blankWorkspace(name ?? `ws${profile.workspaces.length + 1}`);
+    const workspace = this.blankWorkspace(name ?? `ws${profile.workspaces.length + 1}`, profile.workspaces);
     this.replaceProfile(profile.id, (p) => ({
       ...p,
       workspaces: [...p.workspaces, workspace],
@@ -1017,37 +1070,6 @@ export class Workspaces {
     this.mutate(this.activeId, workspaceId, (w) => ({ ...w, mascotId: id }));
   }
 
-  /**
-   * Borrow another profile's accounts for this workspace, or null to hand it
-   * back to the profile it lives in.
-   *
-   * The one check is that the profile exists *now*, and it is not the check the
-   * fallback relies on — a profile deleted afterwards leaves an id that resolves
-   * to nothing and reads as null, which is the same answer. It is here because
-   * an id that named nothing on arrival is a client with a stale list, and
-   * storing it would draw a badge in the sidebar for a profile that is gone.
-   */
-  setWorkspaceIdentity(workspaceId: string, profileId: string | null): void {
-    if (profileId !== null && !this.profiles.some((p) => p.id === profileId)) return;
-    this.mutate(this.activeId, workspaceId, (w) => ({ ...w, identityProfileId: profileId }));
-  }
-
-  /**
-   * Whose accounts a terminal opened in this workspace belongs to.
-   *
-   * The active profile's, unless the workspace has borrowed somebody else's —
-   * which is the whole of the mixing feature, and it is one lookup because the
-   * override is a pointer rather than a copy. Both fallbacks land on the same
-   * place: a workspace nobody has heard of and one naming a profile that has
-   * since been deleted are both "the profile you are in", which is what kururu
-   * did before any of this existed.
-   */
-  identityForWorkspace(workspaceId: string): ProfileIdentity {
-    const borrowed = this.workspaceById(workspaceId)?.identityProfileId;
-    if (!borrowed) return this.active.identity;
-    return this.profiles.find((p) => p.id === borrowed)?.identity ?? this.active.identity;
-  }
-
   /** Deletes it and says what was inside. The last workspace cannot be deleted. */
   deleteWorkspace(workspaceId: string): string[] {
     const profile = this.active;
@@ -1104,30 +1126,6 @@ export class Workspaces {
   }
 
   /**
-   * Point a profile's terminals at a different set of accounts.
-   *
-   * Any profile, not just the active one — Settings shows them all at once, and
-   * having to switch profile to describe one would make filling in a form a
-   * thing you do by standing somewhere. It touches nothing that is running:
-   * `ProfileIdentity` is read when a pty is spawned, so this is a statement
-   * about the next terminal.
-   */
-  setProfileIdentity(profileId: string, identity: ProfileIdentity): void {
-    if (!this.profiles.some((p) => p.id === profileId)) return;
-    this.profiles = this.profiles.map((p) => (p.id === profileId ? { ...p, identity } : p));
-    this.onChange();
-  }
-
-  /**
-   * Who a profile is, for the endpoint that asks the tools about it. Blank for
-   * an id nobody has: an unknown profile and one that has claimed nobody are the
-   * same answer, which is the machine exactly as it stands.
-   */
-  identityOf(profileId: string): ProfileIdentity {
-    return this.profiles.find((p) => p.id === profileId)?.identity ?? blankIdentity();
-  }
-
-  /**
    * Delete a profile and say what it was running. The last one cannot go — there
    * is always somewhere to be.
    */
@@ -1146,7 +1144,14 @@ export class Workspaces {
   // Internals
   // -------------------------------------------------------------------------
 
-  private blankWorkspace(name: string): Workspace {
+  /**
+   * `taken` is the profile the workspace is being made in, for the colour. It is
+   * a parameter rather than being read off `this.active` because the one caller
+   * that cannot use the active profile is `blankProfile`, which is making the
+   * profile that would be read — and a fresh profile has no workspaces, so the
+   * honest argument there is an empty list rather than somebody else's palette.
+   */
+  private blankWorkspace(name: string, taken: readonly Workspace[]): Workspace {
     const pane = makePane(id("n"));
     return {
       id: id("w"),
@@ -1154,27 +1159,24 @@ export class Workspaces {
       layout: pane,
       focusedPaneId: pane.pane.id,
       lastPaneId: null,
-      color: null,
+      color: nextColor(taken.map((w) => w.color)),
       mascotId: null,
-      identityProfileId: null,
       dev: null,
     };
   }
 
   private blankProfile(name: string): Profile {
-    const workspace = this.blankWorkspace("main");
+    const workspace = this.blankWorkspace("main", []);
     return {
       id: id("p"),
       name,
       workspaces: [workspace],
       activeWorkspaceId: workspace.id,
       lastWorkspaceId: null,
-      // Nobody in particular. A new profile inherits nothing, on the same
-      // reasoning as a new workspace's null colour: a default copied at
-      // creation is a default that stops following the machine.
-      identity: blankIdentity(),
       // Nothing has been dragged yet, which is spawn order — see `orderAgents`.
       agentOrder: [],
+      // And nothing has been put away, because nothing is running in it yet.
+      hiddenAgents: [],
     };
   }
 

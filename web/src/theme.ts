@@ -89,9 +89,15 @@ export function applyTheme(theme: Theme): void {
  * that would then have two ideas of what is on screen. `applyTerminalAppearance`
  * does keep one, but for a reason that is about the pty rather than about
  * bookkeeping: it has to know whether the *font* moved, since only that is worth
- * proposing a new grid over.
+ * proposing a new grid over — and now also whether the *palette* moved, which
+ * it cannot act on and has to hand back.
+ *
+ * @returns whether the terminals are now wearing a palette they cannot be
+ * talked out of, and the window has to be reloaded to shift them. The reason is
+ * in `applyTerminalAppearance`; the answer is in `App`, which is the only place
+ * that knows what a reload would interrupt.
  */
-export function applyAppearance(appearance: Appearance, styles: StyleLibrary = EMPTY_LIBRARY): void {
+export function applyAppearance(appearance: Appearance, styles: StyleLibrary = EMPTY_LIBRARY): boolean {
   const theme = themeFor(appearance.themeId, styles.themes);
   applyTheme(theme);
   /**
@@ -103,5 +109,5 @@ export function applyAppearance(appearance: Appearance, styles: StyleLibrary = E
    * later, which is a SIGWINCH nobody needed.
    */
   applySkin(skinFor(appearance.skinId, styles.skins));
-  applyTerminalAppearance(theme.terminal, appearance.terminal);
+  return applyTerminalAppearance(theme.terminal, appearance.terminal);
 }

@@ -31,8 +31,9 @@ import { MascotSettings } from "./SettingsMascot";
 import { NotifySettings } from "./SettingsNotify";
 import { ProfileSettings } from "./SettingsProfiles";
 import { StyleSettings } from "./SettingsStyles";
+import { StudioSettings } from "./SettingsStudio";
 
-export type Tab = "appearance" | "styles" | "profiles" | "mascot" | "notify" | "keys" | "about";
+export type Tab = "appearance" | "styles" | "studio" | "profiles" | "mascot" | "notify" | "keys" | "about";
 
 /**
  * Appearance first, and not alphabetically: it is the page somebody opens
@@ -46,8 +47,8 @@ export type Tab = "appearance" | "styles" | "profiles" | "mascot" | "notify" | "
  * Which is also why `tab` is a prop here — where Settings opens is the caller's
  * to say, even though where it goes next is not.
  */
-const TABS: ReadonlyArray<readonly [Tab, string, string]> = [
-  ["appearance", "Appearance", "the theme, and what a terminal is set in"],
+const TABS: ReadonlyArray<readonly [Tab, string]> = [
+  ["appearance", "Appearance"],
   /**
    * Second, and beside Appearance rather than inside it. The line between the
    * two is what you are *wearing* against what there is to *get*: Appearance
@@ -56,9 +57,16 @@ const TABS: ReadonlyArray<readonly [Tab, string, string]> = [
    * Somebody changing theme ten times an afternoon should never pass through a
    * list of downloads to do it.
    */
-  ["styles", "Styles", "themes, skins and mascots from the kururu-styles registry"],
-  ["profiles", "Profiles", "the sessions, and which accounts they open terminals as"],
-  ["mascot", "Mascot", "what the badge does while an agent is working"],
+  ["styles", "Styles"],
+  /**
+   * Third, after the shop, because it is the shop's other door: what you could
+   * not find there, you make here, and what you make here is one pull request
+   * from being there. It edits a skin *live* — the window behind the dialog is
+   * the preview — which is the second reason it sits near Appearance.
+   */
+  ["studio", "Skin studio"],
+  ["profiles", "Profiles"],
+  ["mascot", "Mascot"],
   /**
    * Beside the Mascot rather than beside Appearance, and the two are the same
    * subject read one step further out: the badge is how kururu says an agent
@@ -66,15 +74,23 @@ const TABS: ReadonlyArray<readonly [Tab, string, string]> = [
    * while you are not. Before Keys, which stays last because it is the one page
    * that is a table rather than a form.
    */
-  ["notify", "Notifications", "when kururu interrupts you, and what it sounds like"],
-  ["keys", "Keys", "what each key does after the prefix"],
+  ["notify", "Notifications"],
+  ["keys", "Keys"],
   /**
    * Last, and after the one page that is a table, because it is the only page
    * here that edits nothing — you arrive at it once, to answer a question about
    * kururu rather than to change it.
    */
-  ["about", "About", "which kururu this is, and whether there is a newer one"],
+  ["about", "About"],
 ];
+
+/**
+ * The tab names alone, derived rather than typed out a second time, for the
+ * reason `ICON_NAMES` is one list: `App` has to check a name that came back out
+ * of storage against something at runtime, and a hand-written copy of this is a
+ * copy that loses a page the day one is added here.
+ */
+export const TAB_NAMES: readonly Tab[] = TABS.map(([name]) => name);
 
 export function Settings({
   appearance,
@@ -114,7 +130,6 @@ export function Settings({
   onEditing: (on: boolean) => void;
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
-  const note = TABS.find(([id]) => id === tab)?.[2];
 
   /**
    * Keep the tab you are on inside the strip, which only ever moves anything on
@@ -157,20 +172,20 @@ export function Settings({
               </button>
             ))}
           </div>
-          <span className="set-note set-tabs-note">{note}</span>
         </div>
 
         <div className="set-body">
           {tab === "appearance" ? (
             <AppearanceSettings appearance={appearance} styles={styles} onEditing={onEditing} />
           ) : tab === "styles" ? (
-            <StyleSettings styles={styles} />
+            <StyleSettings styles={styles} volume={notify.volume} onEditing={onEditing} />
+          ) : tab === "studio" ? (
+            <StudioSettings styles={styles} appearance={appearance} onEditing={onEditing} />
           ) : tab === "profiles" ? (
             <ProfileSettings
               profiles={profiles}
               activeProfileId={activeProfileId}
               onEditing={onEditing}
-              onClose={onClose}
             />
           ) : tab === "mascot" ? (
             <MascotSettings mascots={mascots} onEditing={onEditing} />

@@ -130,9 +130,7 @@ export class AgentHost {
    * mechanism — same pty, same emulator, same teardown — and the only thing
    * `kind` decides in here is whether quitting counts it as an agent.
    */
-  create(
-    options: { cwd?: string; command?: string; kind?: PtyKind; env?: Record<string, string> } = {},
-  ): AgentSnapshot {
+  create(options: { cwd?: string; command?: string; kind?: PtyKind } = {}): AgentSnapshot {
     const cwd = options.cwd || defaultCwd();
     const kind = options.kind ?? "agent";
     const shell = loginShell();
@@ -150,16 +148,6 @@ export class AgentHost {
       cwd,
       env: {
         ...process.env,
-        /**
-         * Whatever the server says this pty belongs to — in practice the
-         * handful of `*_CONFIG_DIR` variables that decide which Claude account
-         * and which github account a terminal is opened as. An overlay, and an
-         * opaque one: the host is told a map, never a profile, for the same
-         * reason it holds the arrangement as a blob it cannot read. It is
-         * applied before the three below so that nothing a client can name can
-         * take `KURURU_AGENT_ID` away from the hook that reports on it.
-         */
-        ...options.env,
         TERM: "xterm-256color",
         /**
          * So a hook running inside this agent can report back about *itself*

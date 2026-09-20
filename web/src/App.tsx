@@ -41,7 +41,7 @@ import { Menu, type MenuAt } from "./components/Menu";
 import { resetZoom, zoomBy } from "./zoom";
 import { Panes } from "./components/Panes";
 import { Reach } from "./components/Reach";
-import { Settings, type Tab as SettingsTab } from "./components/Settings";
+import { Settings, TAB_NAMES as SETTINGS_TABS, type Tab as SettingsTab } from "./components/Settings";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import {
@@ -123,6 +123,49 @@ const NARROW = "(max-width: 720px)";
  */
 const KEYBOARD_MIN = 120;
 
+/**
+ * Where Settings was, across the one reload kururu does to itself.
+ *
+ * Picking a theme reloads the window (see the effect below), and a reload takes
+ * the dialog with it because whether Settings is open is `useState` and nothing
+ * more — deliberately, since it is this window's business and not the server's.
+ * That is right in every case but this one: browsing themes is a compare, and a
+ * picker that closes on every pick makes the second comparison cost four
+ * clicks.
+ *
+ * `sessionStorage`, not `localStorage`, and the difference is the whole design:
+ * it is scoped to this tab and this run of it, so a window opened fresh
+ * tomorrow does not come up holding a dialog somebody closed by reloading
+ * months ago. Read once and cleared, so a hand-typed ⌘R after the fact is a
+ * plain reload and not a second reopening.
+ */
+const SETTINGS_KEY = "kururu.settings.resume";
+
+function keepSettings(tab: SettingsTab | null): void {
+  if (!tab) return;
+  try {
+    sessionStorage.setItem(SETTINGS_KEY, tab);
+  } catch {
+    // Storage that refuses is a dialog that closes. The theme still lands.
+  }
+}
+
+/**
+ * Trusted no further than a string: this is storage a person can edit, and the
+ * value ends up choosing a page. An unknown one opens nothing, which is the
+ * same answer as never having written it.
+ */
+function resumeSettings(): SettingsTab | null {
+  let saved: string | null = null;
+  try {
+    saved = sessionStorage.getItem(SETTINGS_KEY);
+    sessionStorage.removeItem(SETTINGS_KEY);
+  } catch {
+    return null;
+  }
+  return saved && (SETTINGS_TABS as readonly string[]).includes(saved) ? (saved as SettingsTab) : null;
+}
+
 export function App() {
   const { snapshot, connected } = useKururu();
 
@@ -175,7 +218,7 @@ export function App() {
    * and the profile name opens the page about profiles. Only the opening — where
    * the dialog goes next is its own business.
    */
-  const [settings, setSettings] = useState<SettingsTab | null>(null);
+  const [settings, setSettings] = useState<SettingsTab | null>(resumeSettings);
   /**
    * The profile menu, and the button it hangs under.
    *
@@ -280,7 +323,24 @@ export function App() {
     ? JSON.stringify(appearance) + (styles?.installed.map((s) => `${s.kind}/${s.id}@${s.version}`).join() ?? "")
     : null;
   useEffect(() => {
-    if (appearance) applyAppearance(appearance, styles);
+    if (!appearance) return;
+    /**
+     * A palette the emulators cannot be talked out of — see
+     * `applyTerminalAppearance`, which explains why a colour is settled inside
+     * the wasm and why nothing short of new terminals moves one. Reloading is
+     * the only lever, and this is the layer that should pull it: the dialog
+     * somebody picked the theme in is this component's state and nobody else's.
+     *
+     * Safe to do the instant it is reported, because the appearance arrives on
+     * a *snapshot*. The server has already written it down, so the window that
+     * comes back reads the new theme as the one it was always on — which is
+     * also why this cannot loop: the reload lands on a first application, and a
+     * first application is never a change.
+     */
+    if (applyAppearance(appearance, styles)) {
+      keepSettings(settings);
+      location.reload();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appearanceKey]);
 
@@ -465,6 +525,36 @@ export function App() {
   );
 
   /**
+   * The database button. Asked about in both directions, which is not the usual
+   * rule — kururu confirms destruction and nothing else — and the exception is
+   * earned by what these two cost.
+   *
+   * Stopping is the obvious one: a local Supabase is holding somebody's
+   * afternoon of seeded data behind an app that is probably mid-request, and it
+   * is one tap away from a button that is also on the row. Starting is the less
+   * obvious one and is why this is not "confirm the dangerous half": it is a
+   * minute of Docker, and a minute of Docker begun by accident on a laptop is a
+   * minute of fans and a tab you did not open. So both, and the dialog names
+   * which one it is — the server is told `on` explicitly for the same reason.
+   */
+  const confirmSupabase = useCallback(
+    (workspaceId: string, on: boolean) => {
+      const workspace = profile?.workspaces.find((w) => w.id === workspaceId);
+      if (!workspace) return;
+      setDialog({
+        kind: "confirm",
+        title: on ? `Start the database in \u201c${workspace.name}\u201d?` : `Stop the database in \u201c${workspace.name}\u201d?`,
+        hint: on
+          ? "It runs in a terminal in that workspace, and takes about a minute."
+          : "Anything talking to it stops being able to. Your data stays where it is.",
+        confirmLabel: on ? "Start" : "Stop",
+        onConfirm: () => api.supabasePower(workspaceId, on),
+      });
+    },
+    [profile],
+  );
+
+  /**
    * Everything the keyboard can do, by name. Kept in one table so the keymap,
    * the help overlay and the buttons in the chrome cannot drift apart — a button
    * and its shortcut running different code is how they end up behaving
@@ -579,13 +669,12 @@ export function App() {
          * The profile menu, under the sidebar's profile name.
          *
          * This has been all three things a switcher can be, and the split it
-         * landed on is the useful one. It was a pick dialog; then a profile grew
-         * an identity, which is a form, and a dialog that picks beside a page
-         * that edits is two places that disagree about what a profile is — so it
-         * all moved into Settings. That overcorrected. *Switching* never stopped
-         * being navigation: it is the thing you do ten times an afternoon, and
-         * routing it through a modal with a "Switch to" button on every row put
-         * three clicks and a dialog in front of a move between two rooms.
+         * landed on is the useful one. It was a pick dialog; then renaming and
+         * deleting moved into Settings and the picking went with them. That
+         * overcorrected. *Switching* never stopped being navigation: it is the
+         * thing you do ten times an afternoon, and routing it through a modal
+         * with a "Switch to" button on every row put three clicks and a dialog
+         * in front of a move between two rooms.
          *
          * So: the menu is the switcher, Settings is the editor, and the menu's
          * last item is the door between them. Each is the shape of its own job,
@@ -887,10 +976,6 @@ export function App() {
       {sidebarOpen && !zen && (
         <Sidebar
           profile={profile}
-          /* For the one row that says it opens as somebody else: a workspace
-             borrowing another profile's accounts stores a pointer, and only the
-             list of profiles has the name on the other end of it. */
-          profiles={snapshot.profiles}
           profileRef={profileButton}
           agents={agents}
           connected={connected}
@@ -901,6 +986,7 @@ export function App() {
           focusedAgentId={focusedAgentOf(workspace)}
           onRun={run}
           onDeleteWorkspace={confirmDeleteWorkspace}
+          onSupabase={confirmSupabase}
           onEditing={setEditing}
           onSettings={() => setSettings("appearance")}
           onReach={() => setReach(true)}
@@ -936,6 +1022,9 @@ export function App() {
             focusedPaneId={workspace.focusedPaneId}
             agents={agents}
             mascot={mascot}
+            /* For the key hints in a pane's menu — the same merged map the help
+               overlay prints, so the two never disagree about where a split is. */
+            keymap={keymap}
             zen={zen}
             /* One pane at a time once there is no room to tile — the same
                number that turns the sidebar into a screen, for the same

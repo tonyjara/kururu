@@ -6,8 +6,8 @@
  * question in practice, and the second half of it wants somewhere to put a
  * paragraph of release notes — which a menu item has not got.
  *
- * It asks rather than being told, on `/api/identity`'s reasoning: this is the
- * world's state and not kururu's. It changes when somebody publishes a release,
+ * It asks rather than being told, because this is the world's state and not
+ * kururu's. It changes when somebody publishes a release,
  * which is not an event this server can be notified of, so putting it in the
  * snapshot would mean polling GitHub forever to keep a value that is drawn by a
  * page almost nobody has open. So the fetch happens when the page opens, and

@@ -29,37 +29,31 @@
  * prefix+W does — and they exist because a keymap is worth nothing until it has
  * been learnt, and a row has no room to print five buttons.
  */
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { panes } from "../../../shared/layout";
 import type {
   AgentSnapshot,
   ContextUsage,
   MascotSet,
   Profile,
-  ProfileSummary,
   WorkspaceColor,
 } from "../../../shared/model";
 import { defaultMascot, mascotFor, WORKSPACE_COLORS } from "../../../shared/model";
 import { colorValue, colorValues } from "../colors";
 import { AGENT_MIME, WORKSPACE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
+import type { SupabaseDb } from "../../../shared/wire";
 import type { Action } from "../keys";
 import { agentLabel, agentSummary, shortenPath } from "../labels";
 import { previewLabel, previewUrl } from "../preview";
 import * as api from "../session";
 import { useKururu } from "../session";
+import { limitLabel, limitTitle, resetIn, staleTitle } from "../usage";
 import { Menu, Popover } from "./Menu";
 import { Icon } from "./Icon";
 import { Mascot, Status } from "./Status";
 
 interface Props {
   profile: Profile;
-  /**
-   * Every profile, which this list needs for one thing only: a workspace can
-   * borrow another profile's accounts, and a pointer draws nothing without the
-   * name on the other end of it. The summaries are already in the snapshot for
-   * the switcher, so this costs a prop rather than a request.
-   */
-  profiles: ProfileSummary[];
   agents: AgentSnapshot[];
   connected: boolean;
   /** What the working badge animates; drawn here, owned by the server. */
@@ -88,6 +82,13 @@ interface Props {
    * to the app rather than to this list — it is the same dialog prefix+X puts up.
    */
   onDeleteWorkspace: (workspaceId: string) => void;
+  /**
+   * Starting or stopping a workspace's local Supabase. Asked about rather than
+   * done, and the dialog is the app's for `onDeleteWorkspace`'s reason: this
+   * list draws rows, and a modal that owns the keyboard is not a thing a row
+   * should be able to put up on its own.
+   */
+  onSupabase: (workspaceId: string, on: boolean) => void;
   /**
    * Say when a name is being typed in here, because the prefix has to stand
    * down for it: ctrl+a is select-all in a text field, and an armed prefix would
@@ -120,7 +121,6 @@ interface Props {
 
 export function Sidebar({
   profile,
-  profiles,
   agents,
   connected,
   mascots,
@@ -128,6 +128,7 @@ export function Sidebar({
   onRun,
   profileRef,
   onDeleteWorkspace,
+  onSupabase,
   onEditing,
   onSettings,
   onReach,
@@ -137,6 +138,17 @@ export function Sidebar({
   onResetWidth,
 }: Props) {
   const dragging = useDragging();
+  /**
+   * The local databases the server has found, by the workspace they belong to.
+   *
+   * Read from the store here rather than threaded down as a prop, on the same
+   * call `DevServers` below makes: this is a fact about the machine that only
+   * the sidebar draws, and passing it through the app would mean two components
+   * knowing about it so that one of them could forget.
+   */
+  const { supabase, branches } = useKururu();
+  const dbs = new Map(supabase.map((db) => [db.workspaceId, db] as const));
+  const heads = new Map(branches.map((head) => [head.workspaceId, head] as const));
   /** The workspace row a drop would land on, while something is over it. */
   const [overWorkspace, setOverWorkspace] = useState<string | null>(null);
   /**
@@ -150,6 +162,16 @@ export function Sidebar({
    * happens on the drop are worked out twice, from the geometry both times.
    */
   const [overAgent, setOverAgent] = useState<{ id: string; after: boolean } | null>(null);
+  /**
+   * Whether the drawer of put-away agents is open.
+   *
+   * The one piece of the list that is *not* the server's, and deliberately: a
+   * disclosure is a thing you do with your eyes for as long as you are looking,
+   * not an arrangement two clients have to agree about. A phone opening the
+   * drawer to find something and leaving it open would otherwise be a phone
+   * that reached over and undid the tidying on the desktop.
+   */
+  const [drawer, setDrawer] = useState(false);
   /** The workspace whose name is being typed, if any. */
   const [renaming, setRenaming] = useState<string | null>(null);
   /** Where a context menu is open, and which row it belongs to. */
@@ -161,40 +183,12 @@ export function Sidebar({
   const [mascotPicker, setMascotPicker] = useState<{ workspaceId: string; x: number; y: number } | null>(
     null,
   );
-  /** And for the profile a workspace borrows its accounts from. */
-  const [identityMenu, setIdentityMenu] = useState<{
-    workspaceId: string;
-    x: number;
-    y: number;
-  } | null>(null);
   /**
    * Escape cancels a rename by blurring the field, which is also how enter and
    * clicking away commit one — so the commit lives in `blur` and this is what
    * tells it which of the three just happened.
    */
   const cancelled = useRef(false);
-
-  /**
-   * The profile each workspace's terminals open as, for the ones not opening as
-   * the profile they live in. Absent is by far the common case and draws
-   * nothing: a badge on every row would say only "these are your accounts",
-   * which is what the profile name at the top of the sidebar already says.
-   *
-   * A pointer at a profile that has gone is absent too, because that is what the
-   * server does with it — see `identityForWorkspace`. The sidebar agrees rather
-   * than reporting it; a row is not where you would want to find that out.
-   *
-   * A map built once rather than a lookup per row, for the reason `mascotId` is
-   * carried on `where` above: the answer is a search through every profile, and
-   * the badge, its tooltip and the menu item all ask for it.
-   */
-  const borrowed = new Map<string, ProfileSummary>();
-  for (const workspace of profile.workspaces) {
-    const id = workspace.identityProfileId;
-    if (!id || id === profile.id) continue;
-    const lender = profiles.find((p) => p.id === id);
-    if (lender) borrowed.set(workspace.id, lender);
-  }
 
   useEffect(() => {
     onEditing(renaming !== null);
@@ -259,6 +253,23 @@ export function Sidebar({
   const listed = agents.filter((agent) => agent.agent || agent.lastAgent);
 
   /**
+   * And of those, the ones the list is currently showing.
+   *
+   * Put away is not closed and not killed: the pty is running, its tab is where
+   * it was, prefix+a still finds it, and a notification it earns is still
+   * delivered. What it is out of is this list — which is the one thing in kururu
+   * that spans a whole profile, and therefore the one thing that gets long
+   * enough to want a drawer.
+   *
+   * Filtered here against what is actually running rather than pruned when a
+   * terminal ends, on `orderAgents`' bargain: an id naming nothing costs one
+   * `has` per row, and tidying it away would cost a write per snapshot.
+   */
+  const away = new Set(profile.hiddenAgents);
+  const shown = listed.filter((agent) => !away.has(agent.id));
+  const hidden = listed.filter((agent) => away.has(agent.id));
+
+  /**
    * Which colour each workspace is wearing, so an agent row can rule a line in
    * the colour of the workspace it lives in without walking the tree again.
    */
@@ -288,6 +299,172 @@ export function Sidebar({
     api.focusPane(at.paneId);
     api.selectTab(at.paneId, at.index);
     navigated();
+  };
+
+  /**
+   * One row of the agent list, drawn the same whichever of the two lists it is
+   * in: the list proper, and the drawer of the ones put away. One function
+   * rather than two, because a row in the drawer is the same row — the same
+   * status mark, the same activity line, the same drag onto a pane — and a
+   * second copy would be the copy that stopped saying what the first one says.
+   *
+   * What differs is `reorderable`, which is also what says which list this is.
+   * The drawer is a drawer and not an arrangement, so it takes no drop of its
+   * own: dragging a row *out* of it still moves that terminal, because that is
+   * a gesture about a pane and not about a list.
+   */
+  const agentRow = (
+    agent: AgentSnapshot,
+    list: AgentSnapshot[],
+    index: number,
+    reorderable: boolean,
+  ) => {
+    const hiddenHere = !reorderable;
+    const at = where.get(agent.id);
+    const focused = agent.id === focusedAgentId;
+    const bar = at ? tint.get(at.workspaceId) : null;
+    /* Which row a drop here would put the dragged one above. The row below this one when
+       the pointer is past the midpoint, and nothing at all at the bottom of the list —
+       which is the end of it. The list is agents only, so "the next row" is the next one
+       somebody can see; a shell sitting between the two in spawn order is not something
+       this list has ever drawn. */
+    const insertBefore = (after: boolean): string | null =>
+      after ? (list[index + 1]?.id ?? null) : agent.id;
+    const insert = overAgent?.id === agent.id ? overAgent : null;
+    return (
+      <li
+        key={agent.id}
+        className={[
+          "agent-item",
+          focused ? "agent-item-on" : "",
+          insert ? (insert.after ? "agent-under" : "agent-over") : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        /* The rule down the left is the workspace's colour. It is a variable rather than
+           a border set here so the untagged case still reserves the two pixels: rows that
+           shift sideways when a colour is assigned would make the list jump under the
+           cursor. */
+        style={bar ? ({ "--tag": bar } as React.CSSProperties) : undefined}
+        /* Only a terminal, and never the one in flight: a row dropped on itself is a drag
+           somebody changed their mind about, and it should read as nothing happening
+           rather than as a refusal. A pane or a workspace dropped here means nothing, so
+           the row does not light up for one. */
+        onDragOver={(event) => {
+          if (!reorderable || dragging?.kind !== "agent" || dragging.id === agent.id) return;
+          allowDrop(event);
+          const box = event.currentTarget.getBoundingClientRect();
+          const after = event.clientY > box.top + box.height / 2;
+          setOverAgent((current) =>
+            current?.id === agent.id && current.after === after
+              ? current
+              : { id: agent.id, after },
+          );
+        }}
+        onDragLeave={(event) => {
+          // `dragleave` fires when the pointer crosses onto a *child* of this row as well
+          // as when it leaves it, and the row is a button with spans in it — so an
+          // unguarded handler blinks the line off every time the pointer moves within the
+          // row it is aimed at, until the next `dragover` puts it back.
+          if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+          setOverAgent((current) => (current?.id === agent.id ? null : current));
+        }}
+        onDrop={(event) => {
+          if (!reorderable) return;
+          const dragged = event.dataTransfer.getData(AGENT_MIME);
+          setOverAgent(null);
+          if (!dragged || dragged === agent.id) return;
+          event.preventDefault();
+          // The sidebar is inside a window that swallows stray file drops, and a pane
+          // underneath would otherwise be offered a drop the list has already dealt with.
+          event.stopPropagation();
+          const box = event.currentTarget.getBoundingClientRect();
+          api.reorderAgent(dragged, insertBefore(event.clientY > box.top + box.height / 2));
+        }}
+      >
+        <button
+          className={`agent-row ${agent.exited ? "agent-row-exited" : ""}`}
+          onClick={() => show(agent.id)}
+          title={[agentLabel(agent), agentSummary(agent), agent.command, agent.cwd]
+            .filter(Boolean)
+            .join("\n")}
+          draggable
+          onDragStart={(event) => beginDrag(event, "agent", agent.id)}
+          /* `dragend` fires wherever the drag finished, including nowhere, which is why
+             the line is cleared here as well as on the drop. */
+          onDragEnd={() => {
+            setOverAgent(null);
+            endDrag();
+          }}
+        >
+          {/* Where it lives and what it is. The two things you need to find it again, and
+              nothing that changes while you read.
+
+              Where first, because that is what you are scanning for: the list spans a
+              whole profile and holds several terminals running the same program, so
+              "claude" is the word that tells you least about which row this is. The
+              program is still worth saying — the list runs more than one of them — so it
+              goes where the workspace used to be, at the end of the line and dimmer, as
+              the thing you read once you have found the row rather than the thing you
+              find it by. */}
+          <span className="agent-top">
+            {/* The agent's own workspace, not the one you are looking at: this list spans
+                the whole profile, so two rows of it can legitimately be wearing different
+                mascots. */}
+            <Status agent={agent} mascot={mascotFor(mascots, at?.mascotId ?? null)} />
+            <span className="agent-ws">{at ? at.workspace : "—"}</span>
+            {/* Not "new output" any more, which it was and which lit nine rows in ten:
+                this is the turn that ended, or the question that was asked, while you
+                were not looking at it. The server decides it — see its `unread`. */}
+            {agent.unread && <span className="unread" aria-label="waiting for you" />}
+            <span className="agent-name">{agentLabel(agent)}</span>
+          </span>
+          {/* What it is doing, what it is costing, and how much room it has left to do it
+              in. All three change constantly, which is why they are on their own line:
+              a row whose top half is stable is a row you can find something in without
+              re-reading it.
+
+              The cwd stands in only when nothing has said anything at all — no hook has
+              reported and the program has not named its own window. An unreported agent
+              would otherwise have a blank line under it saying nothing, and where it is
+              working is the next most useful thing we know for certain. */}
+          <span className="agent-bottom">
+            <span className="agent-activity">
+              {agentSummary(agent) || shortenPath(agent.cwd)}
+            </span>
+            {agent.rss ? <Memory bytes={agent.rss} /> : null}
+            {agent.contextUsage && <ContextRing usage={agent.contextUsage} />}
+          </span>
+        </button>
+        {/* The two things you can do to a row without going and looking at it, in the
+            corner, in the order of what they cost. Putting one away is a decision about
+            this list; the ✕ beside it ends a process. They are one flex box rather than
+            two absolutely-placed corners, so that adding the first did not mean knowing
+            how wide the second is under every skin. */}
+        <span className="agent-tools">
+          <button
+            className="agent-tool agent-away"
+            onClick={() => api.hideAgent(agent.id, !hiddenHere)}
+            title={
+              hiddenHere
+                ? "Put back in the list"
+                : "Hide this row — the agent keeps running"
+            }
+            aria-label={hiddenHere ? "Show" : "Hide"}
+          >
+            <Icon name="hide" />
+          </button>
+          <button
+            className="agent-tool agent-kill"
+            onClick={() => api.closeTab(agent.id)}
+            title={agent.exited ? "Remove this tab" : "End this agent and close its tab"}
+            aria-label={agent.exited ? "Dismiss" : "Kill"}
+          >
+            <Icon name="close" />
+          </button>
+        </span>
+      </li>
+    );
   };
 
   return (
@@ -349,10 +526,24 @@ export function Sidebar({
           </button>
         </h2>
         <ul className="ws-list">
-          {profile.workspaces.map((workspace, index) => (
+          {profile.workspaces.map((workspace, index) => {
+            const db = dbs.get(workspace.id);
+            const head = heads.get(workspace.id);
+            return (
             <li
               key={workspace.id}
-              className={overWorkspace === workspace.id ? "ws-over" : ""}
+              className={`ws-item ${workspace.id === profile.activeWorkspaceId ? "ws-item-on" : ""} ${
+                overWorkspace === workspace.id ? "ws-over" : ""
+              }`}
+              /* The rail down the left edge, in this workspace's colour — the
+                 same `--tag` every agent living in here wears, so the sidebar
+                 says which agents belong to which workspace by lining them up
+                 rather than by making anybody read two lists. */
+              style={
+                colorValue(workspace.color)
+                  ? ({ "--tag": colorValue(workspace.color)! } as CSSProperties)
+                  : undefined
+              }
               onContextMenu={(event) => {
                 event.preventDefault();
                 setMenu({ workspaceId: workspace.id, x: event.clientX, y: event.clientY });
@@ -407,234 +598,201 @@ export function Sidebar({
                   aria-label="Workspace name"
                 />
               ) : (
-                <button
-                  className={`ws-row ${workspace.id === profile.activeWorkspaceId ? "ws-row-on" : ""}`}
-                  onClick={() => {
-                    api.switchWorkspace(workspace.id);
-                    navigated();
-                  }}
-                  onDoubleClick={() => setRenaming(workspace.id)}
-                  title={index < 9 ? `C-a ${index + 1} · double-click to rename` : "Double-click to rename"}
-                  draggable
-                  onDragStart={(event) => beginDrag(event, "workspace", workspace.id)}
-                  onDragEnd={() => {
-                    endDrag();
-                    setOverWorkspace(null);
-                  }}
-                >
-                  <span className="ws-index">{index < 9 ? index + 1 : "·"}</span>
-                  <span className="ws-name">{workspace.name}</span>
-                  {/* Whose accounts the next terminal in here opens as, when it
-                      is not this profile's. Drawn inside the row rather than
-                      beside it because it is a fact *about* the workspace and
-                      not a control — the thing that changes it is the menu, and
-                      a second clickable target on a row this size would be one
-                      you hit by accident on a phone. */}
-                  {borrowed.has(workspace.id) && (
-                    <span
-                      className="ws-identity"
-                      title={`Opens terminals as ${borrowed.get(workspace.id)!.name}`}
-                    >
-                      {borrowed.get(workspace.id)!.name}
-                    </span>
-                  )}
-                </button>
-              )}
-              {/* The dev server, if this workspace has ever had one. Outside the
-                  row's button for the same reason the swatch is — a button
-                  inside a button is not a thing the platform will give you, and
-                  pressing this one must not also switch workspace. */}
-              {renaming !== workspace.id && (workspace.dev || serving.has(workspace.id)) && (
-                <button
-                  className="ws-run"
-                  onClick={() => api.runDev(workspace.id)}
-                  /* The command is not printed on the row — it is the same `npm
-                     run dev` in most workspaces and it cost the name half its
-                     width — so the tooltip is where it goes. Either condition
-                     draws the button, because the two arrive a moment apart: a
-                     server is noticed before the directory it is running in has
-                     been read, and a button that appeared a second after the ↻
-                     it belongs to would read as arriving late. */
-                  title={
-                    serving.has(workspace.id)
-                      ? `Restart ${workspace.dev?.command ?? "the dev server"}`
-                      : `Run ${workspace.dev?.command ?? "the dev server"}`
-                  }
-                  aria-label={`${serving.has(workspace.id) ? "Restart" : "Run"} the dev server`}
-                >
-                  <Icon name={serving.has(workspace.id) ? "restart" : "run"} />
-                </button>
-              )}
-              {/* Under the number, and outside the row's own button rather than
-                  inside it: a button within a button is not a thing the platform
-                  will give you, and this one has to be clickable on its own —
-                  hitting it must open the picker, not switch workspace. Drawn
-                  even when untagged, as an empty outline, because a control that
-                  only appears once it has been used is one nobody finds. */}
-              {renaming !== workspace.id && (
-                <button
-                  className={`ws-swatch ${workspace.color ? "" : "ws-swatch-off"}`}
-                  style={colorValue(workspace.color) ? { background: colorValue(workspace.color)! } : undefined}
-                  onClick={(event) => {
-                    const box = event.currentTarget.getBoundingClientRect();
-                    setPicker({ workspaceId: workspace.id, x: box.left, y: box.bottom + 4 });
-                  }}
-                  title={workspace.color ? `Colour: ${workspace.color}` : "Set a colour"}
-                  aria-label={workspace.color ? `Colour: ${workspace.color}` : "Set a colour"}
-                />
+                <>
+                  <button
+                    className={`ws-row ${workspace.id === profile.activeWorkspaceId ? "ws-row-on" : ""}`}
+                    onClick={() => {
+                      api.switchWorkspace(workspace.id);
+                      navigated();
+                    }}
+                    onDoubleClick={() => setRenaming(workspace.id)}
+                    title={index < 9 ? `C-a ${index + 1} \u00b7 double-click to rename` : "Double-click to rename"}
+                    draggable
+                    onDragStart={(event) => beginDrag(event, "workspace", workspace.id)}
+                    onDragEnd={() => {
+                      endDrag();
+                      setOverWorkspace(null);
+                    }}
+                  >
+                    <span className="ws-index">{index < 9 ? index + 1 : "\u00b7"}</span>
+                    <span className="ws-name">{workspace.name}</span>
+                  </button>
+
+                  {/* The second line: what this workspace *runs*, under what it
+                      is called.
+
+                      They were on the name's line, at its right edge, and that
+                      was two mistakes at once. The name is the thing you read
+                      and it was being clipped by controls growing in from the
+                      end of it; and a button sharing a line with a button that
+                      switches workspace is a button you press by aiming at the
+                      wrong half of a row. A line of their own costs eleven
+                      pixels per workspace and buys back the full width for the
+                      name and a target that is only ever one thing.
+
+                      Outside the row's own button rather than inside it, which
+                      is the constraint that has not changed: a button inside a
+                      button is not a thing the platform will give you. */}
+                  <div className="ws-tools">
+                    {/* The dev server, if this workspace has ever had one. */}
+                    {(workspace.dev || serving.has(workspace.id)) && (
+                      <button
+                        className="ws-tool ws-run"
+                        onClick={() => api.runDev(workspace.id)}
+                        /* The command is not printed on the row — it is the same
+                           `npm run dev` in most workspaces — so the tooltip is
+                           where it goes. Either condition draws the button,
+                           because the two arrive a moment apart: a server is
+                           noticed before the directory it is running in has been
+                           read, and a button that appeared a second after the \u21bb
+                           it belongs to would read as arriving late. */
+                        title={
+                          serving.has(workspace.id)
+                            ? `Restart ${workspace.dev?.command ?? "the dev server"}`
+                            : `Run ${workspace.dev?.command ?? "the dev server"}`
+                        }
+                        aria-label={`${serving.has(workspace.id) ? "Restart" : "Run"} the dev server`}
+                      >
+                        <Icon name={serving.has(workspace.id) ? "restart" : "run"} />
+                      </button>
+                    )}
+
+                    {/* The local Supabase, if there is one at or above this
+                        workspace's directory. Dim when it is down and lit when
+                        it is up, which is the whole of what the button says —
+                        there is no separate light, because a light beside a
+                        button that means the same thing is one of them lying the
+                        moment they disagree.
+
+                        Nothing at all when the workspace has no `supabase/` over
+                        it, on the \u25b8 button's rule: a control for a thing that
+                        does not exist is a question every row asks and only two
+                        rows can answer. */}
+                    {db && (
+                      <button
+                        className={`ws-tool ws-db ${db.up ? "ws-db-on" : ""} ${db.busy ? "ws-db-busy" : ""}`}
+                        onClick={() => onSupabase(workspace.id, !db.up)}
+                        disabled={db.busy}
+                        title={supabaseTitle(db)}
+                        aria-label={supabaseTitle(db)}
+                      >
+                        <Icon name="database" />
+                      </button>
+                    )}
+
+                    {/* What is checked out where this workspace works.
+
+                        Text rather than a button, because there is nothing
+                        useful to do to it from here — switching branch under a
+                        running agent is a thing to do in the terminal, where you
+                        can see what it says. In the row's mono face for the
+                        reason a shell prompt uses one: it makes a word that
+                        could be anything read as a ref.
+
+                        It takes the slack between the buttons and the chip and
+                        clips rather than wrapping, because branch names are
+                        somebody else's length — `feature/the-whole-sentence` is
+                        a real branch, and a row that grew to fit one would make
+                        the list ragged for the one workspace on it. */}
+                    {head && (
+                      <span
+                        className={`ws-branch ${head.detached ? "ws-branch-off" : ""}`}
+                        title={
+                          head.detached
+                            ? `Detached at ${head.branch}\n${head.root}`
+                            : `Branch: ${head.branch}\n${head.root}`
+                        }
+                      >
+                        {head.branch}
+                      </span>
+                    )}
+
+                    {/* The colour, as a control. What the colour *is* is said by
+                        the rail down the left of the row — the same two pixels
+                        every agent in this workspace wears, which is the thing
+                        that makes the connection. This is the way to change it,
+                        and it is drawn even when untagged, as an empty ring,
+                        because a control that only appears once it has been used
+                        is one nobody finds. */}
+                    <button
+                      className={`ws-tool ws-swatch ${workspace.color ? "" : "ws-swatch-off"}`}
+                      style={
+                        colorValue(workspace.color)
+                          ? { background: colorValue(workspace.color)! }
+                          : undefined
+                      }
+                      onClick={(event) => {
+                        const box = event.currentTarget.getBoundingClientRect();
+                        setPicker({ workspaceId: workspace.id, x: box.left, y: box.bottom + 4 });
+                      }}
+                      title={workspace.color ? `Colour: ${workspace.color}` : "Set a colour"}
+                      aria-label={workspace.color ? `Colour: ${workspace.color}` : "Set a colour"}
+                    />
+                  </div>
+                </>
               )}
             </li>
-          ))}
+            );
+          })}
         </ul>
       </section>
 
       <section className="side-section side-agents">
         <h2>Agents</h2>
         <ul className="agent-list">
-          {listed.length === 0 && (
+          {shown.length === 0 && (
             <li className="muted sidebar-empty">
               {!connected
                 ? "Reconnecting…"
-                : agents.length > 0
-                  ? "No agents yet — run one in a terminal."
-                  : "Nothing running."}
+                : /* An empty list with a full drawer is the one case that must
+                     not say "nothing running": everything is running, and the
+                     line under this one is where it went. */
+                  hidden.length > 0
+                  ? "All of them are put away."
+                  : agents.length > 0
+                    ? "No agents yet — run one in a terminal."
+                    : "Nothing running."}
             </li>
           )}
-          {listed.map((agent, index) => {
-            const at = where.get(agent.id);
-            const focused = agent.id === focusedAgentId;
-            const bar = at ? tint.get(at.workspaceId) : null;
-            /* Which row a drop here would put the dragged one above. The row
-               below this one when the pointer is past the midpoint, and nothing
-               at all at the bottom of the list — which is the end of it. The
-               list is agents only, so "the next row" is the next one somebody
-               can see; a shell sitting between the two in spawn order is not
-               something this list has ever drawn. */
-            const insertBefore = (after: boolean): string | null =>
-              after ? (listed[index + 1]?.id ?? null) : agent.id;
-            const insert = overAgent?.id === agent.id ? overAgent : null;
-            return (
-              <li
-                key={agent.id}
-                className={[
-                  "agent-item",
-                  focused ? "agent-item-on" : "",
-                  insert ? (insert.after ? "agent-under" : "agent-over") : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                /* The rule down the left is the workspace's colour. It is a
-                   variable rather than a border set here so the untagged case
-                   still reserves the two pixels: rows that shift sideways when a
-                   colour is assigned would make the list jump under the cursor. */
-                style={bar ? ({ "--tag": bar } as React.CSSProperties) : undefined}
-                /* Only a terminal, and never the one in flight: a row dropped on
-                   itself is a drag somebody changed their mind about, and it
-                   should read as nothing happening rather than as a refusal. A
-                   pane or a workspace dropped here means nothing, so the row
-                   does not light up for one. */
-                onDragOver={(event) => {
-                  if (dragging?.kind !== "agent" || dragging.id === agent.id) return;
-                  allowDrop(event);
-                  const box = event.currentTarget.getBoundingClientRect();
-                  const after = event.clientY > box.top + box.height / 2;
-                  setOverAgent((current) =>
-                    current?.id === agent.id && current.after === after
-                      ? current
-                      : { id: agent.id, after },
-                  );
-                }}
-                onDragLeave={(event) => {
-                  // `dragleave` fires when the pointer crosses onto a *child* of
-                  // this row as well as when it leaves it, and the row is a
-                  // button with spans in it — so an unguarded handler blinks the
-                  // line off every time the pointer moves within the row it is
-                  // aimed at, until the next `dragover` puts it back.
-                  if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-                  setOverAgent((current) => (current?.id === agent.id ? null : current));
-                }}
-                onDrop={(event) => {
-                  const dragged = event.dataTransfer.getData(AGENT_MIME);
-                  setOverAgent(null);
-                  if (!dragged || dragged === agent.id) return;
-                  event.preventDefault();
-                  // The sidebar is inside a window that swallows stray file
-                  // drops, and a pane underneath would otherwise be offered a
-                  // drop the list has already dealt with.
-                  event.stopPropagation();
-                  const box = event.currentTarget.getBoundingClientRect();
-                  api.reorderAgent(dragged, insertBefore(event.clientY > box.top + box.height / 2));
-                }}
-              >
-                <button
-                  className={`agent-row ${agent.exited ? "agent-row-exited" : ""}`}
-                  onClick={() => show(agent.id)}
-                  title={[agentLabel(agent), agentSummary(agent), agent.command, agent.cwd]
-                    .filter(Boolean)
-                    .join("\n")}
-                  draggable
-                  onDragStart={(event) => beginDrag(event, "agent", agent.id)}
-                  /* `dragend` fires wherever the drag finished, including
-                     nowhere, which is why the line is cleared here as well as on
-                     the drop. */
-                  onDragEnd={() => {
-                    setOverAgent(null);
-                    endDrag();
-                  }}
-                >
-                  {/* Where it lives and what it is. The two things you need to
-                      find it again, and nothing that changes while you read.
-
-                      Where first, because that is what you are scanning for: the
-                      list spans a whole profile and holds several terminals
-                      running the same program, so "claude" is the word that
-                      tells you least about which row this is. The program is
-                      still worth saying — the list runs more than one of them —
-                      so it goes where the workspace used to be, at the end of
-                      the line and dimmer, as the thing you read once you have
-                      found the row rather than the thing you find it by. */}
-                  <span className="agent-top">
-                    {/* The agent's own workspace, not the one you are looking
-                        at: this list spans the whole profile, so two rows of it
-                        can legitimately be wearing different mascots. */}
-                    <Status agent={agent} mascot={mascotFor(mascots, at?.mascotId ?? null)} />
-                    <span className="agent-ws">{at ? at.workspace : "—"}</span>
-                    {agent.unread && <span className="unread" aria-label="new output" />}
-                    <span className="agent-name">{agentLabel(agent)}</span>
-                  </span>
-                  {/* What it is doing, what it is costing, and how much room
-                      it has left to do it in. All three change constantly, which
-                      is why they are on their own line: a row whose top half is
-                      stable is a row you can find something in without
-                      re-reading it.
-
-                      The cwd stands in only when nothing has said anything at
-                      all — no hook has reported and the program has not named
-                      its own window. An unreported agent would otherwise have a
-                      blank line under it saying nothing, and where it is working
-                      is the next most useful thing we know for certain. */}
-                  <span className="agent-bottom">
-                    <span className="agent-activity">
-                      {agentSummary(agent) || shortenPath(agent.cwd)}
-                    </span>
-                    {agent.rss ? <Memory bytes={agent.rss} /> : null}
-                    {agent.contextUsage && <ContextRing usage={agent.contextUsage} />}
-                  </span>
-                </button>
-                <button
-                  className="agent-kill"
-                  onClick={() => api.closeTab(agent.id)}
-                  title={agent.exited ? "Remove this tab" : "End this agent and close its tab"}
-                  aria-label={agent.exited ? "Dismiss" : "Kill"}
-                >
-                  <Icon name="close" />
-                </button>
-              </li>
-            );
-          })}
+          {shown.map((agent, index) => agentRow(agent, shown, index, true))}
         </ul>
+
+        {/* The drawer. Drawn only when there is something in it, because a
+            permanent "Hidden (0)" would be a row of chrome saying that a
+            feature exists — and the way this one is found is by having used
+            the button on a row, which is the only place it can be used from.
+
+            The count is on the closed drawer for the reason a folder shows
+            one: what is put away is still yours, and a drawer that said only
+            "Hidden" would need opening to answer how much. The unread mark is
+            there for the sharper version of the same thing — an agent that has
+            said something since you put it away is the one case where the
+            drawer has to be able to get your attention while shut. */}
+        {hidden.length > 0 && (
+          <div className="agent-drawer">
+            <button
+              className="agent-drawer-head"
+              onClick={() => setDrawer((open) => !open)}
+              aria-expanded={drawer}
+              title={drawer ? "Close the drawer" : "Show the agents you have put away"}
+            >
+              <Icon name="caret" className={drawer ? "" : "drawer-caret-shut"} />
+              <span>Hidden</span>
+              <span className="agent-drawer-n">{hidden.length}</span>
+              {hidden.some((agent) => agent.unread) && (
+                <span className="unread" aria-label="new output" />
+              )}
+            </button>
+            {drawer && (
+              <ul className="agent-list agent-list-drawer">
+                {hidden.map((agent, index) => agentRow(agent, hidden, index, false))}
+              </ul>
+            )}
+          </div>
+        )}
       </section>
 
+      <Usage />
       <DevServers />
 
       {/* A new terminal used to be a button down here and is not one any more:
@@ -681,14 +839,6 @@ export function Sidebar({
               run: () => setMascotPicker({ workspaceId: menuWorkspace.id, x: menu.x, y: menu.y }),
             },
             {
-              // The accounts, named by the profile that holds them. It says who
-              // it is currently opening as rather than only offering to change
-              // it, because the badge on the row is deliberately absent for the
-              // ordinary case and this is then the only place that answers it.
-              label: `Accounts: ${borrowed.get(menuWorkspace.id)?.name ?? profile.name}…`,
-              run: () => setIdentityMenu({ workspaceId: menuWorkspace.id, x: menu.x, y: menu.y }),
-            },
-            {
               label: "Move up",
               disabled: menuAt === 0,
               run: () => api.moveWorkspace(menuWorkspace.id, menuAt - 1),
@@ -708,35 +858,6 @@ export function Sidebar({
               run: () => onDeleteWorkspace(menuWorkspace.id),
             },
           ]}
-        />
-      )}
-
-      {/* Whose accounts this workspace's terminals open as: a list of profiles,
-          with the one it is using marked. A list rather than a form, because
-          what is being picked is one of the identities Settings already holds —
-          three paths have one home and this points at it, so an account
-          re-pointed there follows every workspace borrowing it.
-
-          Nothing that is already running moves: the environment reaches a pty
-          at spawn and at no other time, which is the same thing the profile's
-          own identity says about itself and the reason neither needs an "are
-          you sure". The next terminal in here is the one that changes. */}
-      {identityMenu && (
-        <Menu
-          at={identityMenu}
-          onClose={() => setIdentityMenu(null)}
-          items={profiles.map((p) => ({
-            label: p.id === profile.id ? `${p.name} (this profile)` : p.name,
-            // Null for the profile the workspace lives in, rather than its id:
-            // "I have not chosen" and "I chose the one I am in" are different
-            // states, and only the first follows the workspace anywhere.
-            mark: p.id === (borrowed.get(identityMenu.workspaceId)?.id ?? profile.id),
-            run: () =>
-              api.setWorkspaceIdentity(
-                identityMenu.workspaceId,
-                p.id === profile.id ? null : p.id,
-              ),
-          }))}
         />
       )}
 
@@ -771,7 +892,22 @@ export function Sidebar({
 }
 
 /**
- * Eight swatches and a way back out of them.
+ * What the database button says it will do, which is also the only place the
+ * project and its port are written down.
+ *
+ * The port is here rather than on the row because it is the answer to a question
+ * you ask twice a month — "which one is this project on" — and the row is read
+ * every time you look at the sidebar. A tooltip is exactly the right place for a
+ * fact with that ratio.
+ */
+function supabaseTitle(db: SupabaseDb): string {
+  const where = `${db.project} \u00b7 :${db.port}`;
+  if (db.busy) return `${where}\nWorking\u2026`;
+  return db.up ? `Stop the database\n${where}` : `Start the database\n${where}`;
+}
+
+/**
+ * Fourteen swatches and a way back out of them.
  *
  * A grid rather than a list of colour names, because nobody picks "coral" — they
  * pick the one that is not the one the workspace above is wearing, and that is a
@@ -1010,6 +1146,92 @@ function ContextRing({ usage }: { usage: ContextUsage }) {
 /** `189377` → `189k`. A token count is a magnitude, never an exact figure. */
 function format(tokens: number): string {
   return tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : String(tokens);
+}
+
+/**
+ * How much of this profile's Claude allowance is gone, as a bar per limit.
+ *
+ * It fills rather than drains, which is the one decision in here worth arguing
+ * because it went the other way first. Every other measure in this window
+ * climbs — the context ring on an agent row, and the figure `/usage` prints in
+ * the terminal directly above this bar — and the two are read one after the
+ * other. A reader who has just parsed a ring at 80% as "nearly out" should not
+ * have to invert the next gauge to learn it means the same thing, and the
+ * half-second that inversion takes is the whole of the glance this section is
+ * for.
+ *
+ * The case for draining was that "how much have I got left before it stops" is
+ * the question somebody actually asks, which is true and is why the figure
+ * beside the bar and the tooltip on it both still answer it in words. Words can
+ * carry the question; the shape carries the comparison.
+ *
+ * The colour is the *account's* severity, not a threshold kururu picked. Three
+ * bands invented here would be three bands that disagree with the warning Claude
+ * Code prints in the terminal directly above this bar.
+ */
+function Usage() {
+  const { usage } = useKururu();
+  /**
+   * A tick, only so the countdowns move. The numbers themselves arrive on their
+   * own push once a minute; what goes stale between pushes is the *sentence*
+   * next to them — "resets in 2h 14m" is wrong thirty seconds later, and a
+   * reader who catches it disagreeing with the clock stops trusting the bar.
+   * Local to this component so the agent list does not re-render for it.
+   */
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => tick((n) => n + 1), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const account = usage;
+  // Nothing known, or no login on this machine. Both draw nothing: a machine
+  // with no readable Claude login is not in an error state, it is one with
+  // nothing to say, and a row explaining that would be noise on every window.
+  if (!account || account.signedOut || account.limits.length === 0) return null;
+
+  return (
+    <section className="side-section side-usage">
+      <h2>
+        Usage
+        {/* The staleness mark, which is the whole of the offline handling. The
+            bars keep their last numbers — see `AccountUsage.stale` for why
+            blanking them is worse — and this is the one thing that says those
+            numbers are not from now. */}
+        {account.stale && <span className="usage-stale" title={staleTitle(account.at)}>·</span>}
+      </h2>
+      <ul className="usage-list">
+        {account.limits.map((limit) => (
+          <li key={`${limit.kind}:${limit.scope ?? ""}`} className="usage-item">
+            <span className="usage-head">
+              <span className="usage-name">{limitLabel(limit)}</span>
+              {/* "97%" alone is read as 97% *left* about as often as not, and
+                  the two readings are three percent apart at one end of the bar
+                  and ninety-four at the other. The word is four characters and
+                  removes the question. */}
+              <span className="usage-used">{Math.round(limit.percent)}% used</span>
+            </span>
+            <span
+              className="usage-bar"
+              role="meter"
+              aria-label={`${limitLabel(limit)} used`}
+              aria-valuenow={Math.round(limit.percent)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              title={limitTitle(limit)}
+            >
+              <span
+                className="usage-fill"
+                data-severity={limit.severity}
+                style={{ width: `${limit.percent}%` }}
+              />
+            </span>
+            {limit.resetsAt && <span className="usage-reset">{resetIn(limit.resetsAt)}</span>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 /**

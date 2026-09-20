@@ -40,6 +40,7 @@
  * rebuilds anything now.
  */
 import { Fragment, useCallback, useRef, useState, useSyncExternalStore } from "react";
+import { keysByAction, type Action } from "../../../shared/keys";
 import {
   activeAgent,
   dividers,
@@ -53,6 +54,7 @@ import {
 } from "../../../shared/layout";
 import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
 import { AGENT_MIME, PANE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
+import { keyLabel, PREFIX_LABEL } from "../keys";
 import { shortenPath, tabLabel } from "../labels";
 import * as api from "../session";
 import { canZoom, DEFAULT_ZOOM, resetZoom, zoomBy, zoomLabel, zoomStore } from "../zoom";
@@ -68,6 +70,12 @@ interface Props {
   agents: AgentSnapshot[];
   /** What the working badge animates; drawn here, owned by the server. */
   mascot: MascotConfig;
+  /**
+   * The keys as they actually are, for the hints in a pane's menu. Handed down
+   * rather than read from the defaults here, because they are rebindable and a
+   * printed key that is not the key is worse than no key printed at all.
+   */
+  keymap: Record<string, Action>;
   /** Zen: the focused pane takes the window and the rest are held out of sight. */
   zen: boolean;
   /**
@@ -101,11 +109,21 @@ function place(rect: Rect): React.CSSProperties {
 
 const FULL: React.CSSProperties = { left: 0, top: 0, width: "100%", height: "100%" };
 
-export function Panes({ node, focusedPaneId, agents, mascot, zen, solo, keyboard }: Props) {
+export function Panes({ node, focusedPaneId, agents, mascot, keymap, zen, solo, keyboard }: Props) {
   const area = useRef<HTMLDivElement>(null);
   const [resizing, setResizing] = useState(false);
-  /** Where the pane switcher hangs, or null while it is shut. */
-  const [switcher, setSwitcher] = useState<MenuAt | null>(null);
+  /**
+   * Whose menu is open and where it hangs, or null while none is.
+   *
+   * The pane is carried beside the point rather than read off the focus,
+   * because the button is in a pane's own corner and pressing it is not a
+   * gesture about the focused pane — on a tiled window you open the menu of the
+   * pane you are pointing at, and every action in it names the pane it came
+   * from. One menu for the whole stage rather than one per pane: it is drawn
+   * over everything anyway (`.menu-backdrop` is fixed), and two panes with a
+   * menu open at once is not a state worth being able to reach.
+   */
+  const [menu, setMenu] = useState<{ at: MenuAt; paneId: string } | null>(null);
   const boxes = rects(node);
   const all = panes(node);
 
@@ -165,7 +183,8 @@ export function Panes({ node, focusedPaneId, agents, mascot, zen, solo, keyboard
                  costs is a ring round the only pane on screen, which says nothing
                  and is cheaper than a second meaning for the flag. */
               focused={focused}
-              solo={solo ? { index: all.indexOf(pane), count: all.length, open: setSwitcher } : null}
+              solo={solo ? { index: all.indexOf(pane), count: all.length } : null}
+              onMenu={(at) => setMenu({ at, paneId: pane.id })}
               keyboard={keyboard}
               agents={agents}
               mascot={mascot}
@@ -178,39 +197,20 @@ export function Panes({ node, focusedPaneId, agents, mascot, zen, solo, keyboard
         <DividerBar key={divider.id} divider={divider} area={area} onResizing={setResizing} />
       ))}
 
-      {/* The switcher. A list of places rather than a list of actions, which is
-          what `mark` is for — and the way back to a pane whose only other door,
-          on a window this narrow, is a keybind on a keyboard that is not there.
-          Selecting one *focuses* it: there is no second notion of "the pane this
-          phone is showing" to keep in step, and there could not usefully be one,
-          since the keybar and every prefix action type into the focused pane and
-          a phone showing a pane it was not typing into would be the worse bug. */}
-      {switcher && (
+      {menu && (
         <Menu
-          at={switcher}
-          onClose={() => setSwitcher(null)}
-          items={[
-            ...all.map((pane, index): MenuItem => ({
-              label: paneLabel(pane, agents),
-              hint: `${index + 1}${pane.agentIds.length > 1 ? ` · ${pane.agentIds.length}` : ""}`,
-              mark: pane.id === shown?.id,
-              /* Every tab in there, not only the one it would open on: what the
-                 dot is for is deciding whether a pane is worth going to. */
-              unread: pane.agentIds.some((id) => agents.find((a) => a.id === id)?.unread),
-              run: () => api.focusPane(pane.id),
-            })),
-            /* Making one, since the corner this button took over is where that
-               used to live. It belongs in the same menu rather than beside it:
-               a split is how the list above grows, and on a window that shows
-               one pane at a time the two are the same subject. */
-            { label: "Split right", sep: true, run: () => api.splitPane("row", shown?.id) },
-            { label: "Split down", run: () => api.splitPane("col", shown?.id) },
-            /* The reader's only other door is prefix+M, which is a keyboard this
-               window does not have — and on a phone it is the whole reason for
-               reading anything here at all. It asks for the focus as well, since
-               a pane you cannot see is one that did not open. */
-            { label: "Open a document", run: () => api.openReader(shown?.id, undefined, true) },
-          ]}
+          at={menu.at}
+          onClose={() => setMenu(null)}
+          items={paneMenu({
+            paneId: menu.paneId,
+            all,
+            agents,
+            keymap,
+            /* Zen and solo are different states and the same fact here: what
+               this says is "a pane made now would be made off screen", and both
+               of them hide every pane but one. */
+            alone: solo || zen,
+          })}
         />
       )}
     </div>
@@ -218,7 +218,111 @@ export function Panes({ node, focusedPaneId, agents, mascot, zen, solo, keyboard
 }
 
 /**
- * What the switcher calls a pane.
+ * A pane's menu: where you can go from here, and what this pane can do.
+ *
+ * This was the phone's switcher, and it is the whole corner now. The split
+ * buttons that used to sit in a tiled window's strip are two of the rows below,
+ * which costs a click and buys three things: the reader — whose only other door
+ * was prefix+M, a key you have to already know — is reachable with a mouse on
+ * the desktop and not only on a phone; the corner is one shape on both, so
+ * there is one thing to learn and one thing to style; and every pane action can
+ * be in here whether or not there is room in a strip for a button, which is the
+ * constraint that kept the list short in the first place.
+ *
+ * It is a list of *places* and then a list of *actions*, in that order, with a
+ * rule between them. The places come first because they are what a menu opened
+ * by mistake should be safe to read — and they are dropped entirely when this is
+ * the only pane, since a one-row list of where you already are is a row that
+ * says nothing. Selecting one *focuses* it: there is no second notion of "the
+ * pane this window is showing" to keep in step, and there could not usefully be
+ * one, since the keybar and every prefix action type into the focused pane.
+ *
+ * Every action names `paneId` rather than letting the server fall back to the
+ * focused pane. Opening the menu does not move the focus — the backdrop
+ * swallows the click — so on a tiled window the pane you pointed at and the
+ * pane holding the keyboard are routinely not the same one, and a split that
+ * landed next to a different pane than the one you opened would be the kind of
+ * bug nobody reports because they assume they misclicked.
+ *
+ * The hints are read out of the live keymap rather than written here, for
+ * `HelpOverlay`'s reason: the keys are rebindable, and a menu that prints
+ * `C-a |` next to an action somebody has moved is a menu that lies in the one
+ * place a person went looking for the truth.
+ */
+function paneMenu({
+  paneId,
+  all,
+  agents,
+  keymap,
+  alone,
+}: {
+  paneId: string;
+  all: PaneState[];
+  agents: AgentSnapshot[];
+  keymap: Record<string, Action>;
+  /** The window draws one pane at a time, so anything new opens out of sight. */
+  alone: boolean;
+}): MenuItem[] {
+  const bound = keysByAction(keymap);
+  const key = (action: Action): string | undefined => {
+    const first = bound[action]?.[0];
+    return first ? `${PREFIX_LABEL} ${keyLabel(first)}` : undefined;
+  };
+  const pane = all.find((p) => p.id === paneId);
+  const places: MenuItem[] =
+    all.length > 1
+      ? all.map((p, index) => ({
+          label: paneLabel(p, agents),
+          hint: `${index + 1}${p.agentIds.length > 1 ? ` · ${p.agentIds.length}` : ""}`,
+          mark: p.id === paneId,
+          /* Every tab in there, not only the one it would open on: what the dot
+             is for is deciding whether a pane is worth going to — and a pane is
+             worth going to if anything behind it is waiting for you. */
+          unread: p.agentIds.some((id) => agents.find((a) => a.id === id)?.unread),
+          run: () => api.focusPane(p.id),
+        }))
+      : [];
+  return [
+    ...places,
+    {
+      label: "Split right",
+      hint: key("split-right"),
+      sep: places.length > 0,
+      run: () => api.splitPane("row", paneId),
+    },
+    { label: "Split down", hint: key("split-down"), run: () => api.splitPane("col", paneId) },
+    /* Not on a reader, which already has a picker where its name is: a second
+       door onto the same dialog, three rows below the first, is a menu padded
+       out to look complete. The keybind there means "follow the editor again",
+       which is what the pin button in that strip says in a word. */
+    ...(pane?.reader
+      ? []
+      : [
+          {
+            label: "Open a document",
+            hint: key("open-reader"),
+            sep: true,
+            /* It asks for the focus when there is no room to tile, since a pane
+               you cannot see is one that did not open. On a tiled window it
+               deliberately does not: the reader arrives beside the terminal you
+               were typing into, and taking the keyboard away from that terminal
+               to give it to a document is the opposite of what reading one
+               beside your work is for. */
+            run: () => api.openReader(paneId, undefined, alone),
+          },
+        ]),
+    {
+      label: "Close this pane",
+      hint: key("close-pane"),
+      sep: true,
+      danger: true,
+      run: () => api.closePane(paneId),
+    },
+  ];
+}
+
+/**
+ * What the menu calls a pane.
  *
  * The tab that is showing, by the name the strip would give it, because a list
  * of panes people recognise is a list of the things they were last looking at —
@@ -307,23 +411,25 @@ function DividerBar({
 
 /**
  * What a pane in a solo window needs to know about the others: where it stands
- * in the list, how long the list is, and where to hang the menu that shows it.
+ * in the list, and how long the list is.
  *
  * Null on a window wide enough to tile, rather than a boolean beside two numbers
  * that mean nothing when it is false — the same shape `keybarOpen` argues for in
  * `StatusBar`: "there is no such thing here" and "here it is" should not be
- * possible to confuse.
+ * possible to confuse. Since the menu moved into every pane's corner, this is
+ * only what the button *prints*; where the menu hangs is `onMenu`, which every
+ * pane has.
  */
 interface SoloAt {
   index: number;
   count: number;
-  open: (at: MenuAt) => void;
 }
 
 function Pane({
   pane,
   focused,
   solo,
+  onMenu,
   keyboard,
   agents,
   mascot,
@@ -331,6 +437,7 @@ function Pane({
   pane: PaneState;
   focused: boolean;
   solo: SoloAt | null;
+  onMenu: (at: MenuAt) => void;
   keyboard: boolean;
   agents: AgentSnapshot[];
   mascot: MascotConfig;
@@ -435,7 +542,7 @@ function Pane({
               >
                 <Status agent={agent} mascot={mascot} />
                 <span className="tab-label">{tabLabel(agent)}</span>
-                {agent.unread && <span className="unread" aria-label="new output" />}
+                {agent.unread && <span className="unread" aria-label="waiting for you" />}
                 <span
                   className="tab-close"
                   role="button"
@@ -469,36 +576,18 @@ function Pane({
         <span className="tab-spacer" />
         {/* The pane's own controls, as one block, because the block is what
             stays put: the strip scrolls sideways once the tabs outgrow it, and
-            these used to scroll away with them. On a phone that is the switcher
-            gone — two tabs is enough to lose it — and the switcher is the only
-            way to the other panes there. It is pinned in the stylesheet rather
-            than here; what this grouping does is give it something to pin. */}
+            these used to scroll away with them. On a phone that is the menu
+            gone — two tabs is enough to lose it — and the menu is the only way
+            to the other panes there. It is pinned in the stylesheet rather than
+            here; what this grouping does is give it something to pin.
+
+            Two buttons, the same two at every width: the menu, and the one
+            thing that should never be behind a menu. There were four here for a
+            while — two splits, the switcher and close — and a corner that holds
+            every control a pane will ever grow is a corner that runs out of
+            room; `paneMenu` is the list that does not. */}
         <span className="tab-actions">
-          {/* Splitting is a two-handed gesture for a window with room to split
-              into, so on a phone the corner is spent on the one control that is
-              *only* reachable here — the other panes. The keys still do it, and
-              a split made on the desktop is a row in the switcher on the phone. */}
-          {!solo && (
-            <>
-              <button
-                className="pane-btn"
-                onClick={() => api.splitPane("row", pane.id)}
-                title="Split right (C-a |)"
-                aria-label="Split right"
-              >
-                <Icon name="split-right" />
-              </button>
-              <button
-                className="pane-btn"
-                onClick={() => api.splitPane("col", pane.id)}
-                title="Split down (C-a -)"
-                aria-label="Split down"
-              >
-                <Icon name="split-down" />
-              </button>
-            </>
-          )}
-          {solo && <PaneSwitch solo={solo} />}
+          <PaneMenuButton solo={solo} onOpen={onMenu} />
           <button
             className="pane-btn"
             onClick={() => api.closePane(pane.id)}
@@ -536,15 +625,21 @@ function Pane({
 }
 
 /**
- * The corner button a narrow window gets instead of the split controls.
+ * The corner button, and everything a pane can do behind it.
  *
- * It says which pane this is and how many there are — `2/3` — because a button
- * that only opened a menu would leave a phone with nothing on screen saying the
- * other panes exist at all, and "there is more of this window somewhere" is most
- * of what it is for. The glyph is drawn here rather than taken from the skin's
- * icon set, on `StatusBar`'s reasoning: the set names the glyphs a skin is
- * expected to restyle, and a fourth entry every future skin has to answer for
- * would buy nothing — two rectangles mean two panes in any chrome.
+ * The count — `2/3` — is printed only where the other panes are off screen,
+ * which is the whole of what it was ever for: a button that only opened a menu
+ * would leave a phone with nothing on screen saying the other panes exist at
+ * all, and "there is more of this window somewhere" is most of the work it does.
+ * On a tiled window they are right there in their own boxes, so the number would
+ * be a label for something the eye has already counted, and the corner spends
+ * the width on the terminal instead.
+ *
+ * The `panes` glyph for both, and not a hamburger or an ellipsis: what is behind
+ * it is *this pane and its neighbours*, which is a subject rather than a
+ * category, and the set already has a drawing that means exactly that. A skin
+ * that restyles `panes` restyles the corner on both platforms at once — one
+ * icon, one meaning, and nothing new for a future skin to answer for.
  *
  * The menu is anchored to the button's *left* edge and allowed to run off the
  * side, because `Popover` already clamps it back inside the window — which at
@@ -552,22 +647,24 @@ function Pane({
  * edge. Naming the corner here instead would be a second thing to keep in step
  * with the first.
  */
-function PaneSwitch({ solo }: { solo: SoloAt }) {
+function PaneMenuButton({ solo, onOpen }: { solo: SoloAt | null; onOpen: (at: MenuAt) => void }) {
   return (
     <button
-      className="pane-btn pane-switch"
-      title="The other panes in this workspace"
-      aria-label={`Pane ${solo.index + 1} of ${solo.count}. Switch panes`}
+      className={`pane-btn ${solo ? "pane-switch" : ""}`}
+      title="This pane: split it, open a document, go to another"
+      aria-label={solo ? `Pane ${solo.index + 1} of ${solo.count}. Pane menu` : "Pane menu"}
       aria-haspopup="menu"
       onClick={(event) => {
         const box = event.currentTarget.getBoundingClientRect();
-        solo.open({ x: box.left, y: box.bottom + 4 });
+        onOpen({ x: box.left, y: box.bottom + 4 });
       }}
     >
       <Icon name="panes" />
-      <span className="pane-switch-count">
-        {solo.index + 1}/{solo.count}
-      </span>
+      {solo && (
+        <span className="pane-switch-count">
+          {solo.index + 1}/{solo.count}
+        </span>
+      )}
     </button>
   );
 }

@@ -35,63 +35,9 @@
  */
 import type { Direction } from "./layout";
 import type { Action } from "./keys";
-import type { MascotConfig, ProfileIdentity, PtyKind, SessionSnapshot } from "./model";
+import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
 import type { NotifyEvent, NotifySettings } from "./notify";
 import type { TerminalAppearance } from "./theme";
-
-/**
- * Who a profile's terminals open as: what `claude` and `gh` and `git` say when
- * they are asked with that profile's environment. The reply to `/api/identity`.
- *
- * A fetch rather than part of the snapshot, because unlike everything else a
- * profile holds this is not kururu's state — it is the world's. It changes when
- * somebody logs in inside a terminal the server is only watching, and answering
- * it means running three CLIs. Null for a tool that could not be asked at all,
- * which covers not-installed and timed-out alike: both mean the page cannot say.
- */
-export interface IdentityWho {
-  claude: { loggedIn: boolean; email: string | null; org: string | null; plan: string | null } | null;
-  gh: GhAccount | null;
-  git: { name: string | null; email: string | null } | null;
-}
-
-/** One github account as gh describes it. `active` is true of one per directory. */
-export interface GhAccount {
-  host: string;
-  login: string;
-  /** gh's own word for whether the token still works; "success" when it does. */
-  state: string | null;
-  gitProtocol: string | null;
-  active: boolean;
-}
-
-/**
- * What there is to pick between — the reply to `/api/identity/known`.
- *
- * Accounts, not directories, because an account is the thing somebody has in
- * mind and a directory is only how kururu stores the choice. The asymmetry
- * between the two lists is the tools': gh knows a login before any directory
- * exists, so an account can be named and its directory written when it is
- * picked; a Claude account has no name until somebody has logged into a
- * directory, so there the directory comes first and the email is what is found
- * in it. `dir: null` is the machine's own `~/.claude`.
- */
-export interface KnownAccounts {
-  claude: { dir: string | null; email: string | null; org: string | null }[];
-  gh: KnownGhAccount[];
-}
-
-/**
- * A github account, plus where a profile gets pointed to use it.
- *
- * The directory is named after the account and written on first use, which is
- * what lets the client tell which option is selected by comparing strings rather
- * than waiting to be told — and what makes two profiles picking one account
- * share one directory instead of accumulating copies.
- */
-export interface KnownGhAccount extends GhAccount {
-  dir: string;
-}
 
 /**
  * How to reach this server from a device that is not this machine — the answer
@@ -160,10 +106,10 @@ export interface Sharing {
  * What `GET /api/update` answers: whether there is a newer kururu than the one
  * you are looking at.
  *
- * Fetched rather than pushed, on `/api/identity`'s reasoning — this is the
- * world's state and not kururu's, it changes when somebody publishes a release
- * rather than when anything here happens, and answering costs a request to
- * GitHub that should be made when somebody asks and not on a timer.
+ * Fetched rather than pushed, because this is the world's state and not
+ * kururu's: it changes when somebody publishes a release rather than when
+ * anything here happens, and answering costs a request to GitHub that should be
+ * made when somebody asks and not on a timer.
  *
  * `error` and `newer: false` are different answers and the dialog must not
  * collapse them. "You are up to date" and "I could not find out" are the same
@@ -212,6 +158,111 @@ export interface DevServer {
 }
 
 /**
+ * The branch a workspace is on.
+ *
+ * Live and per-workspace, like `SupabaseDb` and for the same reasons: it is
+ * learnt by looking at the disk rather than decided by anything kururu owns, it
+ * changes without kururu being told, and nothing about it is worth remembering
+ * across a restart. Two workspaces open on one checkout get one entry each
+ * saying the same thing, which is correct — they are both on that branch.
+ *
+ * Absent rather than empty when a workspace is not in a repository, so the row
+ * draws nothing instead of drawing a blank where a branch goes.
+ */
+export interface WorkspaceBranch {
+  workspaceId: string;
+  /** The working tree's root — the directory holding `.git`. */
+  root: string;
+  /** The branch, or a short sha when `detached`. */
+  branch: string;
+  /** HEAD names a commit rather than a branch: a tag, a sha, or a rebase. */
+  detached: boolean;
+}
+
+/**
+ * A workspace's local Supabase, found on disk and probed.
+ *
+ * Keyed by workspace rather than by directory, because the sidebar draws
+ * workspaces and the question "is my database up" is asked *of* the thing you
+ * are working in. Two workspaces open on one project get one entry each, saying
+ * the same thing, which is correct: they are both up, and neither row should be
+ * the one that has to know about the other.
+ *
+ * Live, and therefore not on `Workspace`. Nothing here survives a server
+ * restart and nothing should — it is all re-derived in the first three seconds,
+ * and a remembered "up" from before a restart would be a claim about Docker that
+ * this process has no standing to make. That is the difference from
+ * `Workspace.dev`, which is remembered precisely because it is a thing somebody
+ * typed rather than a thing that is true.
+ */
+export interface SupabaseDb {
+  workspaceId: string;
+  /** The directory holding `supabase/` — where the command has to run. */
+  root: string;
+  /** `project_id` from the config. A label, and what the CLI names containers. */
+  project: string;
+  /** The local Postgres port, from the project's own config. */
+  port: number;
+  /** Something is accepting connections on that port. */
+  up: boolean;
+  /** A start or a stop has been asked for and has not finished arriving. */
+  busy: boolean;
+}
+
+/**
+ * One allowance, as the account itself reports it.
+ *
+ * Deliberately the shape the API states rather than three named fields, because
+ * the set of limits is the account's business and changes without asking us: a
+ * plan with a per-model weekly cap sends a third entry, one without sends two,
+ * and a version of this that read `session` and `weekly` out of named keys would
+ * silently stop drawing the cap that was actually about to bite. So the client
+ * draws the list it is handed, whatever is in it.
+ *
+ * `severity` is the account's judgement and not a threshold kururu picked. That
+ * matters more than it looks: "80% is amber" is a rule we would have invented,
+ * and it would disagree with the warning Claude Code itself prints at exactly
+ * the moment the two are on screen together.
+ */
+export interface UsageLimit {
+  /** `session`, `weekly_all`, `weekly_scoped` — and whatever is added next. */
+  kind: string;
+  /** Which clock it is on, so the client can group without parsing `kind`. */
+  group: string;
+  /** How much is spent, 0–100. The bar draws it as it stands. */
+  percent: number;
+  /** `normal` | `warning` | `critical`, straight from the account. */
+  severity: string;
+  /** ISO 8601, or null for a limit with no clock of its own. */
+  resetsAt: string | null;
+  /** The model a scoped limit is scoped to — "Opus", "Fable". Null when it is not. */
+  scope: string | null;
+}
+
+/**
+ * What the machine's Claude account has spent.
+ *
+ * One account and not one per profile. A profile is a drawer of workspaces and
+ * nothing else — it has no login of its own to be measured against — so there is
+ * exactly one allowance here, the one belonging to the credential Claude Code
+ * itself wrote.
+ *
+ * `stale` rather than dropping the reading on a failed poll. A bar that empties
+ * because the wifi dropped is worse than a bar that admits it is a minute old:
+ * the number it was showing is still the best thing known, and the one thing it
+ * must not do is look current when it is not.
+ */
+export interface AccountUsage {
+  limits: UsageLimit[];
+  /** When this reading was actually taken, not when it was sent. */
+  at: number;
+  /** The last fetch failed; these are the numbers from before it. */
+  stale: boolean;
+  /** No usable login on this machine — nothing to show and nothing wrong. */
+  signedOut: boolean;
+}
+
+/**
  * One notification, composed by the server and ready to draw.
  *
  * The text is composed *there* and not here, and it is worth saying why, since
@@ -236,6 +287,25 @@ export type ServerMessage =
   | { type: "snapshot"; snapshot: SessionSnapshot }
   /** Sent on connect and whenever the set of listening dev servers changes. */
   | { type: "dev-servers"; servers: DevServer[] }
+  /**
+   * Sent on connect and whenever a workspace's local Supabase appears, goes, or
+   * changes state. A list rather than a delta for the snapshot's reason: there
+   * are never more than a handful, and a client that has just reconnected must
+   * not have to reason about what it missed.
+   */
+  | { type: "supabase"; dbs: SupabaseDb[] }
+  /**
+   * Sent on connect and whenever any workspace's branch changes. A whole list
+   * for `supabase`'s reason: there are never more than a handful, and a client
+   * that has just reconnected must not have to work out what it missed.
+   */
+  | { type: "branches"; branches: WorkspaceBranch[] }
+  /**
+   * Sent on connect and whenever the allowance moves. Null while nothing has
+   * ever been read successfully — which is not the same as `signedOut`, and the
+   * sidebar draws neither.
+   */
+  | { type: "usage"; usage: AccountUsage | null }
   /** Raw pty output, exactly as it arrived, for a terminal this client is watching. */
   | { type: "output"; agentId: string; data: string }
   /**
@@ -341,6 +411,19 @@ export type ClientMessage =
    * The two verbs above are the ones that move it.
    */
   | { type: "reorder-agent"; agentId: string; beforeAgentId: string | null }
+  /**
+   * Put a terminal away in the sidebar's list, or bring it back.
+   *
+   * The state and not a toggle, because two clients are the normal case here:
+   * a phone and a desktop drawing the same list, and a toggle arriving from one
+   * while the other was mid-tap is a row that ends up in whichever state the
+   * race decided. The button knows which state it is asking for; asking for it
+   * is free and cannot disagree with itself.
+   *
+   * It hides a *row*. The pty is untouched, the tab is untouched, and
+   * `close-tab` above remains the only verb in here that ends anything.
+   */
+  | { type: "hide-agent"; agentId: string; hidden: boolean }
   /** Name a tab. An empty name hands it back to what it would be called anyway. */
   | { type: "rename-tab"; agentId: string; name: string }
   /**
@@ -462,22 +545,6 @@ export type ClientMessage =
    */
   | { type: "set-workspace-mascot"; workspaceId: string; mascotId: string | null }
   /**
-   * Open this workspace's terminals as another profile's accounts, or `null` to
-   * hand it back to the profile it lives in.
-   *
-   * A profile id and not an identity, which is the whole of why this is safe to
-   * accept from a client: the three paths still live on a profile and are still
-   * only ever edited in Settings, so what arrives here is a choice between the
-   * environments the server already holds rather than a new one. A client that
-   * could name its own would be a client that could name any, and this one is
-   * reachable from the tailnet — the same argument `use-gh-account` makes about
-   * sending a name rather than a path. An id naming no profile is dropped.
-   *
-   * Read at spawn like the profile's own identity, so it changes the next
-   * terminal in this workspace and none of the ones already open in it.
-   */
-  | { type: "set-workspace-identity"; workspaceId: string; profileId: string | null }
-  /**
    * The ▸ / ↻ on a workspace row: get this workspace's dev server serving fresh.
    *
    * One verb rather than a start and a restart, because it is one intention and
@@ -492,6 +559,26 @@ export type ClientMessage =
    * is not a reason to be taken there.
    */
   | { type: "run-dev"; workspaceId: string }
+  /**
+   * The database button on a workspace row: bring this workspace's local
+   * Supabase up, or take it down.
+   *
+   * Explicit rather than one verb the way `run-dev` is, and the difference is
+   * worth stating because the two buttons look alike. `run-dev` is one intention
+   * with two faces — "get my app serving fresh" — and the client cannot tell
+   * which face applies, so it does not try. This is two intentions: starting a
+   * database and stopping one are opposite acts, the second is the one that can
+   * interrupt somebody's work, and the client has already put a confirmation in
+   * front of whichever one it is asking for. Sending "toggle" would mean the
+   * dialog said *stop* and the server did *start* whenever the three-second
+   * probe was stale, which is the one outcome a confirmation must not have.
+   *
+   * It does not switch workspace, open a pane you are looking at, or focus
+   * anything, for `run-dev`'s reason. It does need a terminal — the command is
+   * typed into one, in the project's directory — and it will open one in that
+   * workspace if there is none it can use.
+   */
+  | { type: "supabase-power"; workspaceId: string; on: boolean }
   /** Deletes it and ends everything in it. The last workspace cannot go. */
   | { type: "delete-workspace"; workspaceId: string }
   /** Dragged up or down the sidebar list. An absolute position, not a step. */
@@ -503,39 +590,6 @@ export type ClientMessage =
   | { type: "switch-profile"; profileId: string }
   | { type: "rename-profile"; profileId: string; name: string }
   | { type: "delete-profile"; profileId: string }
-  /**
-   * Which accounts this profile's terminals are opened as — see
-   * `ProfileIdentity`, which is three paths and deliberately not three secrets.
-   *
-   * The whole identity rather than one field at a time, for the reason
-   * `set-terminal-appearance` gives: they are edited together on one page and a
-   * per-field verb would make that page send three messages to describe one
-   * decision. Adopted rather than trusted on arrival — a path that is not
-   * absolute is dropped rather than resolved, because a relative one would mean
-   * a different directory in every pane.
-   *
-   * It reaches the pty at spawn and at no other time, so this changes the next
-   * terminal in the profile and none of the ones already in it.
-   */
-  | { type: "set-profile-identity"; profileId: string; identity: ProfileIdentity }
-  /**
-   * Use a github account that already exists, named rather than located.
-   *
-   * The server writes the five lines of config that make a directory mean that
-   * account and points the profile at it, which is the half a client cannot do
-   * — and should not: a client that sent a path would be a client that could
-   * send any path, and this one is reachable from the tailnet. Null hands the
-   * profile back to whatever gh itself is set to.
-   */
-  | { type: "use-gh-account"; profileId: string; account: { host: string; login: string } | null }
-  /**
-   * Sign in to a new account for this profile, which is not something a dialog
-   * can do: both flows are a browser, a code to paste and a few questions. So it
-   * is done the way the dev-server button does its job — by opening a terminal
-   * and typing the line a person would type — in the profile it is about, so
-   * that what happens next is on screen rather than in a pane somewhere else.
-   */
-  | { type: "sign-in"; profileId: string; tool: "claude" | "gh" }
 
   /**
    * Put the server back on current source. It owns no ptys, so this costs a
@@ -747,3 +801,35 @@ export const SAVE_DEBOUNCE_MS = 1000;
 export const AGENT_SCAN_MS = 2000;
 /** How often it re-scans for listening dev servers. Slowest: it shells out twice. */
 export const DEV_SCAN_MS = 3000;
+/**
+ * How often each workspace's local Supabase is looked for and probed.
+ *
+ * Slower than the dev scan and deliberately out of step with it. A database is
+ * not a thing that comes and goes while you watch — `supabase start` takes the
+ * better part of a minute — so five seconds is already faster than the fact
+ * changes, and the two polls landing on different ticks keeps a machine with
+ * several workspaces from doing all of its looking in the same instant.
+ */
+export const SUPABASE_SCAN_MS = 5000;
+/**
+ * How often each workspace's `.git/HEAD` is re-read.
+ *
+ * Faster than the other two because it is by far the cheapest — one small file
+ * read per workspace, no subprocess and no socket — and because it is the one
+ * of the three that a person changes *deliberately* and then immediately looks
+ * at. A branch that took five seconds to catch up would be caught out every
+ * time somebody checked out and glanced at the sidebar to confirm it.
+ */
+export const GIT_SCAN_MS = 4000;
+/**
+ * How often each profile's allowance is asked for. Slowest of the lot by two
+ * orders of magnitude, and the only poll in kururu that leaves the machine.
+ *
+ * A minute is not a compromise between freshness and politeness — it is the
+ * resolution of the thing being measured. The session window is five hours and
+ * the weekly one is seven days, so a percentage that is sixty seconds old is
+ * indistinguishable from a current one at every width this bar is ever drawn.
+ * Polling faster would buy a number nobody could see change, against somebody
+ * else's API.
+ */
+export const USAGE_POLL_MS = 60_000;

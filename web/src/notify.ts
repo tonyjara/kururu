@@ -130,13 +130,30 @@ function load(url: string): Promise<AudioBuffer | null> {
  */
 export async function playSound(id: string, volume: number): Promise<void> {
   if (!id) return; // Silent is a choice; see `NotifySettings.sound`.
+  await playUrl(soundUrl(id), volume);
+}
+
+/**
+ * The same noise, from a URL rather than an id — which is the Styles tab
+ * auditioning a sound nobody has installed.
+ *
+ * Split out rather than given an `id` that means two things, because the two
+ * URLs answer different questions: `/api/sound` is *what this machine has* and
+ * `/api/styles/preview` is *what the registry is offering*, and a sound in the
+ * second is by definition not in the first yet. It is the same decode cache,
+ * keyed by url, and the same one context — so a sound auditioned before
+ * installing and then chosen afterwards is two entries for one noise, which is
+ * a few kilobytes and is worth not conflating two ids over.
+ */
+export async function playUrl(url: string, volume: number): Promise<void> {
+  if (!url) return;
   const a = audio();
   if (!a) return;
   // A gesture may be what is driving this — picking a sound in Settings — in
   // which case the context can be resumed right now whether or not the latch
   // above has fired yet.
   if (a.ctx.state === "suspended") await a.ctx.resume().catch(() => {});
-  const buffer = await load(soundUrl(id));
+  const buffer = await load(url);
   if (!buffer) return;
   a.gain.gain.value = Math.min(1, Math.max(0, volume));
   const source = a.ctx.createBufferSource();

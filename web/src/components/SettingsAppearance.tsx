@@ -22,8 +22,8 @@
  * anything written out beside it.
  */
 import { useEffect, useMemo, useState } from "react";
-import { allSkins, type Skin } from "../../../shared/skin";
-import { EMPTY_LIBRARY, type StyleLibrary } from "../../../shared/styles";
+import { allSkins, partVarNames, partVars, type Skin } from "../../../shared/skin";
+import { EMPTY_LIBRARY, type InstalledStyle, type StyleLibrary } from "../../../shared/styles";
 import {
   allThemes,
   CURSOR_STYLES,
@@ -69,17 +69,78 @@ export function AppearanceSettings({
   const [typing, setTyping] = useState<string | null>(null);
   useEffect(() => onEditing(typing !== null), [typing, onEditing]);
 
+  /**
+   * Which pack is being put on, and what went wrong if one would not go.
+   *
+   * The only local state on this page besides the font box, and it is here for
+   * the same reason: everything else is a control whose answer is the next
+   * snapshot, and this is the gap before one arrives. A pack is up to five
+   * settings across three files, so it is the one gesture on this page slow
+   * enough to need a word said about it.
+   */
+  const [wearing, setWearing] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  const packs = styles.installed
+    .filter((record) => record.kind === "pack")
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const wear = async (pack: InstalledStyle) => {
+    if (wearing) return;
+    setWearing(pack.id);
+    setFailed(null);
+    try {
+      const res = await fetch(`/api/styles/wear?kind=pack&id=${encodeURIComponent(pack.id)}`, {
+        method: "POST",
+      });
+      const body = (await res.json()) as { error?: string };
+      if (!res.ok) setFailed(body.error ?? `could not put ${pack.name} on`);
+    } catch {
+      setFailed(`could not put ${pack.name} on — is the server up?`);
+    } finally {
+      setWearing(null);
+    }
+  };
+
   const set = (patch: Partial<typeof terminal>) =>
     api.setTerminalAppearance({ ...terminal, ...patch });
 
   return (
     <div className="set-page">
+      {/* First, because it is the widest gesture on the page: everything below
+          is one axis and this is all of them at once. Absent entirely when
+          nothing is installed rather than sitting there empty — an installed
+          pack is the only thing this section can be about, and the Styles tab
+          is where you would go to get one. */}
+      {packs.length > 0 && (
+        <section className="set-section">
+          <h3 className="set-h">Pack</h3>
+          <p className="set-note">
+            Theme, skin, mascot, sound and font, back on together. Nothing is downloaded.
+          </p>
+          <div className="pack-list">
+            {packs.map((pack) => (
+              <button
+                key={pack.id}
+                className="button button-quiet"
+                disabled={wearing !== null}
+                onClick={() => void wear(pack)}
+                title={`Put ${pack.name} back on`}
+              >
+                {wearing === pack.id ? "Putting it on…" : pack.name}
+              </button>
+            ))}
+          </div>
+          {failed && (
+            <p className="set-note set-note-under set-note-bad" role="alert">
+              {failed}
+            </p>
+          )}
+        </section>
+      )}
+
       <section className="set-section">
         <h3 className="set-h">Theme</h3>
-        <p className="set-note">
-          What the window and the terminals are painted in — one palette, so an agent's output and
-          the chrome around it are the same set of colours.
-        </p>
         <div className="theme-list" role="radiogroup" aria-label="Theme">
           {allThemes(styles.themes).map((theme) => (
             <ThemeOption
@@ -95,9 +156,8 @@ export function AppearanceSettings({
       <section className="set-section">
         <h3 className="set-h">Skin</h3>
         <p className="set-note">
-          What shape the window is, which is a separate question from what colour — every skin works
-          in every theme. This one does reach an agent: a heavier border and a different typeface
-          change the box a pane holds, so the terminals in it are resized to match.
+          Shape, not colour — every skin works in every theme. A heavier border resizes the
+          terminals inside it.
         </p>
         <div className="skin-list" role="radiogroup" aria-label="Skin">
           {allSkins(styles.skins).map((skin) => (
@@ -113,10 +173,6 @@ export function AppearanceSettings({
 
       <section className="set-section">
         <h3 className="set-h">Terminal</h3>
-        <p className="set-note">
-          The size is the one setting here that reaches an agent: it decides the cell, the cell
-          decides how many columns a pane holds, and the pty is resized to match.
-        </p>
 
         <FontRow
           value={terminal.fontFamily}
@@ -125,9 +181,8 @@ export function AppearanceSettings({
           onPick={(fontFamily) => set({ fontFamily })}
         />
         <p className="set-note set-note-under">
-          A face to put in front of the built-in stack, not instead of it — the patched Nerd Font
-          faces stay behind whatever you name, so an agent's devicons keep working. The list is what
-          this device can draw, which on a phone is not what the desktop has.
+          Goes in front of the built-in stack, so an agent's devicons keep working. The list is
+          what this device can draw.
         </p>
 
         <label className="set-row">
@@ -167,9 +222,7 @@ export function AppearanceSettings({
           </label>
         </label>
         <p className="set-note set-note-under">
-          The default, not the rule. A program that has an opinion about its own cursor gets it —
-          nvim drawing a bar in insert mode and a block in normal is the usual one — and this is
-          what a terminal wears before anything has asked, and again the moment it stops asking.
+          The default, not the rule: a program with its own opinion about the cursor gets it.
         </p>
       </section>
     </div>
@@ -298,9 +351,9 @@ const CUSTOM = "<custom>";
  * One skin, drawn in itself — `ThemeOption`'s argument, about the other axis.
  *
  * A row of names would make you pick a skin to find out what it is and then pick
- * again, and for shape that is worse than it is for colour: "Blueprint" tells
- * you roughly what the palette would have been, but nothing about how thin a
- * border gets or how much smaller the type becomes. So the card wears its own tokens —
+ * again, and for shape that is worse than it is for colour: "Ironclad" tells
+ * you roughly what the palette would have been, but nothing about how thick a
+ * border gets or how much smaller the terminal becomes. So the card wears its own tokens —
  * its own radius, its own border weight, its own face — and the little pane
  * inside it carries the frame recipe, which is the one thing you cannot infer
  * from a label at all.
@@ -312,6 +365,14 @@ const CUSTOM = "<custom>";
  */
 function SkinOption({ skin, on, onPick }: { skin: Skin; on: boolean; onPick: () => void }) {
   const t = skin.tokens;
+  /**
+   * A skin that painted its pane shows that picture here, compiled exactly as
+   * the window compiles it — a card drawn from the same `partVars` cannot
+   * disagree with the pane it is previewing. One that painted nothing shows the
+   * frame recipe, as before.
+   */
+  const pane = skin.parts.pane ? partVars({ pane: skin.parts.pane }) : null;
+  const pv = partVarNames("pane");
   return (
     <button
       role="radio"
@@ -325,7 +386,14 @@ function SkinOption({ skin, on, onPick }: { skin: Skin; on: boolean; onPick: () 
         fontFamily: t.ui,
       }}
     >
-      <span className="skin-opt-preview" style={{ borderRadius: t.radiusLg, borderWidth: t.border, borderStyle: t.borderStyle, boxShadow: t.frame }}>
+      <span
+        className="skin-opt-preview"
+        style={
+          pane
+            ? { borderRadius: t.radiusLg, borderImage: pane[pv.frame], borderWidth: pane[pv.w], borderStyle: "solid", borderColor: "transparent", background: `${pane[pv.bg]}, var(--bg)`, imageRendering: "pixelated" }
+            : { borderRadius: t.radiusLg, borderWidth: t.border, borderStyle: t.borderStyle, boxShadow: t.frame }
+        }
+      >
         <span className="skin-opt-bar" style={{ fontSize: t.fsXs, letterSpacing: t.uiLetterSpacing }}>
           {skin.icons.run}
         </span>
