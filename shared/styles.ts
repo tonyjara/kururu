@@ -60,17 +60,34 @@
  * out while it paints tells whoever answers when its owner is working.
  */
 import { adoptMascot, type MascotConfig } from "./model";
-import { BASE_ICONS, ICON_NAMES, isStyleId, type IconName, type Skin, type SkinFont, type SkinTokens } from "./skin";
+import {
+  BASE_ICONS,
+  ICON_NAMES,
+  isPartName,
+  isStyleId,
+  PAINT_MODES,
+  PAINT_REPEATS,
+  PART_NAMES,
+  type IconName,
+  type IconSheet,
+  type PaintMode,
+  type PaintRepeat,
+  type PartName,
+  type PartPaint,
+  type Skin,
+  type SkinFont,
+  type SkinTokens,
+} from "./skin";
 import { skinFor } from "./skin";
 import type { Theme, TerminalTokens, UiTokens, WorkspaceColorName } from "./theme";
-import { themeFor } from "./theme";
+import { adoptFontFamily, themeFor } from "./theme";
 
 /** The schema this version of kururu speaks. An index declaring another is not for us. */
 export const STYLES_SCHEMA = 1;
 
-export type StyleKind = "theme" | "skin" | "mascot" | "pack";
+export type StyleKind = "theme" | "skin" | "mascot" | "sound" | "pack";
 
-export const STYLE_KINDS: readonly StyleKind[] = ["theme", "skin", "mascot", "pack"];
+export const STYLE_KINDS: readonly StyleKind[] = ["theme", "skin", "mascot", "sound", "pack"];
 
 export function isStyleKind(value: unknown): value is StyleKind {
   return STYLE_KINDS.includes(value as StyleKind);
@@ -268,6 +285,15 @@ export interface InstalledStyle {
   files: string[];
   sheet?: string;
   mascotId?: string;
+  /**
+   * Made here, in the studio, rather than fetched from the registry. The one
+   * distinction the rest of kururu is allowed to draw between the two: the
+   * catalogue does not offer to update it, `install` refuses to overwrite it,
+   * and the studio lists it. Everything else — serving, wearing, removing —
+   * treats it as any other installed skin, which is the point of storing it
+   * as one.
+   */
+  local?: boolean;
 }
 
 export function adoptInstalled(value: unknown): InstalledStyle[] {
@@ -287,6 +313,7 @@ export function adoptInstalled(value: unknown): InstalledStyle[] {
       files: Array.isArray(raw.files) ? raw.files.filter(isAssetName) : [],
       ...(isStyleId(raw.sheet) ? { sheet: raw.sheet } : {}),
       ...(typeof raw.mascotId === "string" ? { mascotId: raw.mascotId } : {}),
+      ...(raw.local === true ? { local: true } : {}),
     });
   }
   return out;
@@ -415,11 +442,30 @@ function colour(value: unknown): string | null {
  * `asset` turns a file name into a URL kururu serves. It is passed in rather
  * than built here because only the server knows whether a file is actually
  * installed, and a skin naming a font it did not ship should get no `@font-face`
- * rather than a 404 on every paint.
+ * rather than a 404 on every paint. `measure` is the same question about a
+ * picture — how big is it — which a tile needs answered to be drawn at its
+ * scale, and which only the side with the file can answer. Absent, a tile is
+ * drawn at its natural size, which is right for one drawn at screen resolution
+ * and merely small for pixel art.
+ *
+ * The parts, the colours and the icon strip are checked the way the tokens are:
+ * a value that is not what it claims to be is dropped and the base's answer
+ * stands, never the whole manifest refused. The exception is a file name —
+ * a part naming a picture the entry did not ship is a part not painted, on the
+ * font's reasoning.
  */
 export function adoptSkinManifest(
   value: unknown,
   asset: (file: string) => string | null,
+  measure: (file: string) => [number, number] | null = () => null,
+  /**
+   * Keep a skin that moves nothing. Only the studio asks for this, and only
+   * for a skin of yours: a new one is the base under your name until you
+   * touch something, and the studio has to be able to wear it to show you
+   * what touching something does. A registry entry that moves nothing is
+   * still refused, since offering it is offering a choice with one outcome.
+   */
+  lenient = false,
 ): Skin | null {
   const raw = (value ?? {}) as Record<string, unknown>;
   if (!isStyleId(raw.id)) return null;
@@ -435,9 +481,6 @@ export function adoptSkinManifest(
     tokens[token] = v;
     moved++;
   }
-  // A skin that moved nothing is the default under another name, and offering it
-  // is offering a choice with one outcome.
-  if (moved === 0) return null;
 
   const icons = { ...BASE_ICONS };
   const glyphs: IconName[] = [];
@@ -453,6 +496,26 @@ export function adoptSkinManifest(
     icons[name] = trimmed;
     glyphs.push(name);
   }
+
+  const parts: Partial<Record<PartName, PartPaint>> = {};
+  const givenParts = (raw.parts ?? {}) as Record<string, unknown>;
+  for (const name of PART_NAMES) {
+    const paint = adoptPaint(givenParts[name], asset, measure);
+    if (!paint) continue;
+    parts[name] = paint;
+    moved++;
+  }
+
+  const colors = adoptColors(raw.colors);
+  if (colors) moved++;
+
+  const iconSheet = adoptIconSheet(raw.iconSheet, asset, measure);
+  if (iconSheet) moved++;
+
+  // A skin that moved nothing is the default under another name, and offering it
+  // is offering a choice with one outcome. A glyph alone counts as nothing moved
+  // on purpose: it was never a skin, and it still is not.
+  if (moved === 0 && !lenient) return null;
 
   const fonts: SkinFont[] = [];
   for (const one of Array.isArray(raw.fonts) ? raw.fonts : []) {
@@ -479,9 +542,101 @@ export function adoptSkinManifest(
     tokens,
     icons,
     glyphs,
+    parts,
+    ...(colors ? { colors } : {}),
+    ...(iconSheet ? { iconSheet } : {}),
     ...(fonts.length ? { fonts } : {}),
     ...(sheet ? { stylesheet: sheet } : {}),
   };
+}
+
+/**
+ * One part's picture, or null if there is nothing to paint.
+ *
+ * Every number is clamped rather than refused, on the mascot's reasoning: a
+ * slice one pixel wider than the picture is a slider dragged too far, and the
+ * nearest legal value is the right answer. The file name is the one field that
+ * falls back instead of bending, because a name has no nearest legal value —
+ * and it is checked twice, as a name and as a file the entry actually has.
+ *
+ * A slice may be written as one number for all four sides, which is what most
+ * bezels are, or as four.
+ */
+export function adoptPaint(
+  value: unknown,
+  asset: (file: string) => string | null,
+  measure: (file: string) => [number, number] | null,
+): PartPaint | null {
+  const raw = (value ?? {}) as Record<string, unknown>;
+  if (!isAssetName(raw.image)) return null;
+  const image = asset(raw.image);
+  if (!image) return null;
+  const mode: PaintMode = PAINT_MODES.includes(raw.mode as PaintMode) ? (raw.mode as PaintMode) : "nine";
+  const repeat: PaintRepeat = PAINT_REPEATS.includes(raw.repeat as PaintRepeat) ? (raw.repeat as PaintRepeat) : "stretch";
+  const scale = clampInt(raw.scale, 1, 1, 8);
+  const size = mode === "tile" ? (measure(raw.image) ?? undefined) : undefined;
+  const paint: PartPaint = { image, mode, slice: adoptSlice(raw.slice), scale, repeat };
+  if (size) paint.size = size;
+  return paint;
+}
+
+function adoptSlice(value: unknown): [number, number, number, number] {
+  if (typeof value === "number") {
+    const n = clampInt(value, 0, 0, 512);
+    return [n, n, n, n];
+  }
+  if (Array.isArray(value) && value.length === 4) {
+    return [clampInt(value[0], 0, 0, 512), clampInt(value[1], 0, 0, 512), clampInt(value[2], 0, 0, 512), clampInt(value[3], 0, 0, 512)];
+  }
+  return [0, 0, 0, 0];
+}
+
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+  const n = typeof value === "number" && Number.isFinite(value) ? Math.round(value) : fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+/**
+ * The chrome colours a skin overrides, or null if it overrides none.
+ *
+ * Only `UiTokens` — the keys are taken from the default theme's `ui` block, so
+ * a manifest cannot smuggle a terminal colour in here under a `ui` name and
+ * cannot invent a token. Each is checked as a colour, since it lands on the
+ * root element as the value of a property the whole window reads.
+ */
+export function adoptColors(value: unknown): Partial<UiTokens> | null {
+  const raw = (value ?? {}) as Record<string, unknown>;
+  if (!raw || typeof raw !== "object") return null;
+  const out: Partial<UiTokens> = {};
+  let any = false;
+  for (const token of Object.keys(themeFor(null).ui) as (keyof UiTokens)[]) {
+    const c = colour(raw[token]);
+    if (c === null) continue;
+    out[token] = c;
+    any = true;
+  }
+  return any ? out : null;
+}
+
+/**
+ * The icon strip, or null. Fourteen cells across and one tall — the count is
+ * `ICON_NAMES.length` and the stylesheet cuts the strip by it, so a picture of
+ * any other proportion would put the wrong drawing on every button. Measured
+ * where it can be; where it cannot, the shape is the author's problem and the
+ * studio shows them.
+ */
+export function adoptIconSheet(
+  value: unknown,
+  asset: (file: string) => string | null,
+  measure: (file: string) => [number, number] | null,
+): IconSheet | null {
+  const raw = (value ?? {}) as Record<string, unknown>;
+  if (!isAssetName(raw.image)) return null;
+  const src = asset(raw.image);
+  if (!src) return null;
+  const size = measure(raw.image);
+  if (size && size[0] !== size[1] * ICON_NAMES.length) return null;
+  return { src, mode: raw.mode === "image" ? "image" : "mask" };
 }
 
 /**
@@ -498,4 +653,120 @@ export function adoptSkinManifest(
 export function adoptMascotManifest(value: unknown, sheet: string): MascotConfig {
   const raw = (value ?? {}) as Record<string, unknown>;
   return adoptMascot({ ...raw, sheet });
+}
+
+// ---------------------------------------------------------------------------
+// Sounds
+// ---------------------------------------------------------------------------
+
+/**
+ * The audio formats a style may ship.
+ *
+ * Narrower than what `server/src/sounds.ts` will *play*, and narrower on
+ * purpose. That module's job is to offer whatever is already on the machine,
+ * including the AIFF every macOS alert sound is, which it transcodes on the way
+ * out with `afconvert`. A registry entry is the opposite case: it is a file
+ * chosen by its author, downloaded to every machine kururu runs on, and played
+ * by a phone as often as by the desktop. So it must be something every browser
+ * decodes *without help* — a Linux box has no `afconvert`, and a format that
+ * needed one would be an entry that is silence on half the machines that
+ * installed it, which is the exact failure `sounds.ts` exists to prevent
+ * arriving by another door.
+ *
+ * Three rather than the whole playable list: Ogg and Opus are refused because
+ * `decodeAudioData` on iOS is not reliable about them, and the phone is the
+ * client this feature is most for.
+ */
+export const SOUND_FORMATS: readonly string[] = [".wav", ".mp3", ".m4a"];
+
+export function isSoundFile(value: unknown): value is string {
+  return isAssetName(value) && SOUND_FORMATS.includes(value.slice(value.lastIndexOf(".")).toLowerCase());
+}
+
+/**
+ * A sound manifest: an id, a name, and the one file it is.
+ *
+ * The thinnest of the five adopters, and it has nothing to merge or fall back
+ * to because a sound is not a set of tokens — it is a file, and a file either
+ * arrived or did not. What it does have is the same two-sided name check every
+ * other asset gets: the manifest names a file, `install` records what actually
+ * landed, and `server/src/sounds.ts` resolves the id against that record rather
+ * than pasting it into a path.
+ *
+ * Deliberately *not* returned as anything playable. A theme becomes a `Theme`
+ * and a skin becomes a `Skin` because the client draws them; a sound is bytes
+ * the client fetches by id, so the only thing worth adopting is which file the
+ * id means.
+ */
+export function adoptSoundManifest(value: unknown): { id: string; name: string; file: string } | null {
+  const raw = (value ?? {}) as Record<string, unknown>;
+  if (!isStyleId(raw.id)) return null;
+  if (!isSoundFile(raw.file)) return null;
+  return { id: raw.id, name: line(raw.name) || raw.id, file: raw.file };
+}
+
+// ---------------------------------------------------------------------------
+// Packs
+// ---------------------------------------------------------------------------
+
+/**
+ * The parts a pack names, in the order they are installed and worn.
+ *
+ * A list rather than four fields spelled out at each call site, because there
+ * are three of those — installing the parts, wearing them, and drawing the row
+ * of thumbnails on the pack's card — and the one time they disagreed about
+ * whether a pack had a sound was the day sounds landed.
+ *
+ * `theme` first and `sound` last is not arbitrary either: it is loudest to
+ * quietest, so a pack half-installed over a bad connection has left you with the
+ * colours rather than with a notification noise and nothing to look at.
+ */
+export type PackPart = "theme" | "skin" | "mascot" | "sound";
+
+export const PACK_PARTS: readonly PackPart[] = ["theme", "skin", "mascot", "sound"];
+
+/**
+ * A pack, adopted: four ids and a face.
+ *
+ * Every part is optional — `null` for one a pack does not name — because a pack
+ * is a *recommendation*, and one that only has an opinion about the palette and
+ * the noise is a legitimate pack. `PACK_PARTS` predates sounds, so every pack
+ * published before them has a null there and nothing downstream may assume
+ * otherwise.
+ *
+ * ## Why the font is here and is not a part
+ *
+ * Because it is not an entry in the registry and cannot be: kururu does not
+ * install fonts and should not — a typeface is a licence and a hundred kilobytes
+ * per weight, and the one place it has to exist is the machine that draws the
+ * glyphs, which on a phone over Tailscale is not the machine the agents are on.
+ * So a pack *names* a face and that is all. A machine that has it wears it; a
+ * machine that does not keeps the font it had, which is the same thing that
+ * happens when somebody types a name into the box in Settings and is the reason
+ * `web/src/fonts.ts` offers a list rather than validating one.
+ *
+ * It goes through `adoptFontFamily` rather than `line()` because the string ends
+ * up in a CSS `font-family` on a window reachable from the tailnet, and a
+ * manifest is exactly the untrusted file that adopter was written against.
+ */
+export interface PackManifest extends Record<PackPart, string | null> {
+  id: string;
+  name: string;
+  /** A single family name, or `""` for a pack with no opinion about type. */
+  font: string;
+}
+
+export function adoptPackManifest(value: unknown): PackManifest | null {
+  const raw = (value ?? {}) as Record<string, unknown>;
+  if (!isStyleId(raw.id)) return null;
+  const part = (name: PackPart) => (isStyleId(raw[name]) ? (raw[name] as string) : null);
+  return {
+    id: raw.id,
+    name: line(raw.name) || raw.id,
+    theme: part("theme"),
+    skin: part("skin"),
+    mascot: part("mascot"),
+    sound: part("sound"),
+    font: adoptFontFamily(raw.font),
+  };
 }

@@ -29,16 +29,16 @@
  * client of it exactly as the phone is.
  */
 import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, statSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
-import { adoptIdentity, adoptMascot, countsAsAgent, defaultMascot } from "../../shared/model";
+import { adoptMascot, countsAsAgent, defaultMascot } from "../../shared/model";
 import { bindKey } from "../../shared/keys";
-import type { AgentSnapshot, AgentStatus, MascotSet, Profile, PtyKind, SessionSnapshot } from "../../shared/model";
-import type { ClientMessage, DevServer, ServerMessage } from "../../shared/wire";
-import { DEV_SCAN_MS, SAVE_DEBOUNCE_MS } from "../../shared/wire";
+import type { AgentSnapshot, AgentStatus, MascotSet, Profile, PtyKind, SessionSnapshot, Workspace } from "../../shared/model";
+import type { ClientMessage, DevServer, ServerMessage, SupabaseDb, WorkspaceBranch } from "../../shared/wire";
+import { DEV_SCAN_MS, GIT_SCAN_MS, SAVE_DEBOUNCE_MS, SUPABASE_SCAN_MS, USAGE_POLL_MS } from "../../shared/wire";
 import {
   bindAddress,
   cookieHeader,
@@ -54,18 +54,10 @@ import { parseReport } from "./agents/report";
 import { dump as dumpRecording, forget as forgetRecording, recordBacklog, recordInput, recordNote, recordOutput } from "./record";
 import { processCwd } from "./cwd";
 import { scanDevServers, stopDev, type DevProc } from "./devservers";
+import { findSupabase, probe, supabaseCommand, type SupabaseFound } from "./supabase";
+import { readHead, repoAt } from "./git";
+import { pollUsage, usageSnapshot } from "./usage";
 import { allowedRoots, allowRoot, findDocs, listDir, readBytes, readFile, resolveInRoot } from "./files";
-import {
-  describeIdentity,
-  ensureClaudeDir,
-  ensureGhConfig,
-  expandHome,
-  ghIn,
-  identityEnv,
-  knownAccounts,
-  shellQuote,
-  tildify,
-} from "./identity";
 import { renderMarkdown } from "./markdown";
 import { scanMemory } from "./memory";
 import { attach as attachEditor, findNvim } from "./nvim";
@@ -101,15 +93,24 @@ import {
   assetFile,
   catalog,
   install as installStyle,
+  installedPack,
   readLibrary,
   rememberMascotId,
   preview as previewStyle,
   remove as removeStyle,
   stylesHome,
 } from "./styles";
-import type { StyleKind } from "../../shared/styles";
+import { isStyleKind, PACK_PARTS, type InstalledStyle, type PackManifest, type StyleKind } from "../../shared/styles";
+import {
+  createLocalSkin,
+  localDir,
+  putLocalAsset,
+  readLocalManifest,
+  removeLocalAsset,
+  writeLocalManifest,
+} from "./studio";
 import { adoptAppearance, themeFor, type Appearance } from "../../shared/theme";
-import { skinFor } from "../../shared/skin";
+import { isStyleId, skinFor } from "../../shared/skin";
 import { HostLink, type Port } from "./hostlink";
 import { connectToHost, hostSocketPath, type SocketPort } from "./hostsock";
 import { MouseEncoding } from "./mouseencoding";
@@ -222,6 +223,8 @@ const clients = new Map<WebSocket, ClientState>();
 
 const state = {
   devServers: [] as DevServer[],
+  supabase: [] as SupabaseDb[],
+  branches: [] as WorkspaceBranch[],
 };
 
 function send(ws: WebSocket, msg: ServerMessage): void {
@@ -321,17 +324,20 @@ function saveMascots(next: MascotSet): void {
  * Fetch a style, put it on disk, and make it the one in use if that is what was
  * meant.
  *
- * The three kinds end in three different places and that asymmetry is real
- * rather than an inconsistency. A theme and a skin are one id in
- * `appearance.json`. A **mascot** is not: it becomes a row in the user's mascot
- * list — the same list Settings edits by dragging cells out of a sheet — because
- * once it is installed there is no useful difference between a mascot from the
- * registry and one somebody cut out by hand, and keeping two kinds would mean
- * every reader downstream learning which it had. A **pack** is three ids and
- * nothing else, so installing one is installing what it names; it is stored as a
- * record so that it can be listed and removed, and removing it deliberately
- * leaves its three parts alone, because a pack is a *reference* and taking away
- * the recommendation is not taking away the theme.
+ * The four kinds end in four different places and that asymmetry is real rather
+ * than an inconsistency. A theme and a skin are one id in `appearance.json`. A
+ * **mascot** is not: it becomes a row in the user's mascot list — the same list
+ * Settings edits by dragging cells out of a sheet — because once it is installed
+ * there is no useful difference between a mascot from the registry and one
+ * somebody cut out by hand, and keeping two kinds would mean every reader
+ * downstream learning which it had. A **sound** lands in a fourth place again,
+ * `notify.json`, and that is the one worth defending: a noise is not a look, so
+ * it does not belong in `appearance.json` — the same sentence `server/src/notify.ts`
+ * already makes about why that file exists at all. A **pack** is a handful of
+ * ids and nothing else, so installing one is installing what it names; it is
+ * stored as a record so that it can be listed and removed, and removing it
+ * deliberately leaves its parts alone, because a pack is a *reference* and
+ * taking away the recommendation is not taking away the theme.
  */
 async function installOne(kind: string, id: string, activate: boolean): Promise<{ ok: true } | { ok: false; error: string }> {
   const result = await installStyle(kind, id);
@@ -342,8 +348,11 @@ async function installOne(kind: string, id: string, activate: boolean): Promise<
     const already = replaces ? mascots.list.find((m) => m.id === replaces) : undefined;
     const mascotId = already?.id ?? freshMascotId(mascots.list);
     const one = { id: mascotId, name: name.slice(0, 40), ...config };
+    // The default is left alone even when this is being worn: `wear` below is
+    // the one place that decides, and it needs the id `rememberMascotId` is
+    // about to write down.
     saveMascots({
-      default: activate ? mascotId : mascots.default,
+      default: mascots.default,
       list: already ? mascots.list.map((m) => (m.id === mascotId ? one : m)) : [...mascots.list, one],
     });
     rememberMascotId(result.record.kind, result.record.id, mascotId);
@@ -353,26 +362,165 @@ async function installOne(kind: string, id: string, activate: boolean): Promise<
 
   if (result.record.kind === "pack") {
     const pack = (result.manifest ?? {}) as Record<string, unknown>;
-    for (const part of ["theme", "skin", "mascot"] as StyleKind[]) {
+    for (const part of PACK_PARTS) {
       const partId = pack[part];
       if (typeof partId !== "string") continue;
       // A part that fails is reported nowhere and that is deliberate: a pack
       // whose skin is temporarily unreachable should still leave you with its
-      // theme and its mascot, which is most of the look. Refusing the lot would
-      // make one bad file take three good ones down with it.
-      await installOne(part, partId, activate);
+      // theme, its mascot and its sound, which is most of the look. Refusing the
+      // lot would make one bad file take three good ones down with it.
+      //
+      // Never activated on the way past, even when the pack is being worn. What
+      // a pack *means* is one answer and `wear` below is where it is given; a
+      // part that put itself on here would be a second, arrived at by a
+      // different route, and the two would drift the first time a pack learned
+      // to name something new. It also saves three writes of `appearance.json`
+      // for one click.
+      await installOne(part, partId, false);
     }
     styles = readLibrary();
   }
 
-  if (activate && result.record.kind === "theme") {
-    saveAppearance({ ...appearance, themeId: themeFor(result.record.id, styles.themes).id });
-  } else if (activate && result.record.kind === "skin") {
-    saveAppearance({ ...appearance, skinId: skinFor(result.record.id, styles.skins).id });
-  } else {
-    pushSnapshot();
-  }
+  if (activate) wear(result.record.kind, result.record.id);
+  else pushSnapshot();
   return { ok: true };
+}
+
+/**
+ * The three files a style can land in, gathered up so that wearing a pack writes
+ * each of them at most once.
+ *
+ * A pack is the reason this exists. Every other style is one decision in one
+ * file and `saveAppearance` is the whole story; a pack is up to five — a theme,
+ * a skin, a mascot, a sound and a face — spread across `appearance.json`,
+ * `mascots.json` and `notify.json`, and doing them one saver at a time would
+ * push three snapshots for one click and repaint the window three times on the
+ * way to the look somebody asked for. So the parts are folded into a `Look`
+ * first and written afterwards.
+ */
+interface Look {
+  appearance: Appearance;
+  mascots: MascotSet;
+  notify: NotifySettings;
+}
+
+/**
+ * One installed style, folded into a look.
+ *
+ * The four kinds land in the four places `installOne`'s comment argues for, and
+ * the ids are resolved through `themeFor` and `skinFor` for the reason those
+ * exist: what is being worn has to be something this version can draw, and the
+ * fallback belongs at the moment of wearing rather than in the file.
+ *
+ * A mascot is the one that can silently decline. It is worn by *its row in the
+ * user's list*, not by its registry id — see `installOne` — so a record from
+ * before `mascotId` was written down, or one whose row somebody has since
+ * deleted in Settings, has nothing to point at. Leaving the current mascot up is
+ * the right answer there: the alternative is a badge that goes blank because a
+ * pack mentioned a sprite that is not on the machine any more.
+ */
+function put(look: Look, record: InstalledStyle): Look {
+  switch (record.kind) {
+    case "theme":
+      return { ...look, appearance: { ...look.appearance, themeId: themeFor(record.id, styles.themes).id } };
+    case "skin":
+      return { ...look, appearance: { ...look.appearance, skinId: skinFor(record.id, styles.skins).id } };
+    case "mascot":
+      if (!record.mascotId || !look.mascots.list.some((m) => m.id === record.mascotId)) return look;
+      return { ...look, mascots: { ...look.mascots, default: record.mascotId } };
+    /**
+     * Picking the sound, and not also turning notifications on.
+     *
+     * `enabled` and `events` are a decision about being interrupted and this is
+     * a decision about what the interruption sounds like — so a pack worn by
+     * somebody who has notifications switched off is a pack whose sound is
+     * waiting for them when they switch them back on, rather than a style
+     * choice that quietly started interrupting them.
+     */
+    case "sound":
+      return { ...look, notify: { ...look.notify, sound: record.id } };
+    default:
+      return look;
+  }
+}
+
+/** Write whichever of the three actually moved, then tell every client once. */
+function saveLook(next: Look): void {
+  if (next.appearance !== appearance) {
+    appearance = next.appearance;
+    writeAppearance(next.appearance);
+  }
+  if (next.mascots !== mascots) {
+    mascots = next.mascots;
+    writeMascots(next.mascots);
+  }
+  if (next.notify !== notify) {
+    notify = next.notify;
+    writeNotify(next.notify);
+  }
+  pushSnapshot();
+}
+
+/**
+ * Put on something that is already on the machine.
+ *
+ * Split out of `installOne` because wearing and installing stopped being the
+ * same gesture. They were, for as long as the only way to arrive at a style was
+ * to press its row in the registry — and then a pack is five decisions somebody
+ * made once, in an order they cannot get back to afterwards: change the skin,
+ * try a different mascot, and there is no longer any way to say *put the pack
+ * back on* short of removing it and installing it again over the network. So
+ * this takes an id and nothing else, touches no network, and is what both the
+ * Appearance tab's pack picker and an installed row in the Styles tab call.
+ *
+ * A pack fans out here rather than in the caller, which is the whole point: what
+ * it means to wear one is written down once.
+ */
+function wear(kind: StyleKind, id: string): { ok: true } | { ok: false; error: string } {
+  const record = styles.installed.find((r) => r.kind === kind && r.id === id);
+  if (!record) return { ok: false, error: "that style is not installed" };
+  let look: Look = { appearance, mascots, notify };
+  if (kind === "pack") {
+    const pack = installedPack(id);
+    if (!pack) return { ok: false, error: `${record.name} is installed but its manifest is unreadable` };
+    for (const part of PACK_PARTS) {
+      const partId = pack[part];
+      // A part the pack names but the machine does not have is skipped rather
+      // than refused, which is `installOne`'s rule for a part that would not
+      // download, arriving at the same conclusion from the other end: most of a
+      // pack is most of the look, and nothing here is worth losing the rest of
+      // it over.
+      const partRecord = partId ? styles.installed.find((r) => r.kind === part && r.id === partId) : undefined;
+      if (partRecord) look = put(look, partRecord);
+    }
+    look = wearFont(look, pack);
+  } else {
+    look = put(look, record);
+  }
+  saveLook(look);
+  return { ok: true };
+}
+
+/**
+ * The face a pack asks for, if it asks for one.
+ *
+ * Kururu installs no fonts and never should — see `adoptPackManifest` — so this
+ * writes a *name* into the same field the box in Settings writes, and a machine
+ * without that face keeps the one it had. Which is the honest behaviour and not
+ * a silent failure: naming a font nobody has is what typing one character wrong
+ * into that box already does, and `web/src/fonts.ts` exists because of it.
+ *
+ * A pack with no `font` leaves the setting alone rather than clearing it. The
+ * empty string means "kururu's own stack" and writing it would make wearing a
+ * pack quietly undo a font somebody chose for themselves, which is a decision
+ * about type that the pack declined to have an opinion about.
+ */
+function wearFont(look: Look, pack: PackManifest): Look {
+  if (!pack.font || pack.font === look.appearance.terminal.fontFamily) return look;
+  return {
+    ...look,
+    appearance: { ...look.appearance, terminal: { ...look.appearance.terminal, fontFamily: pack.font } },
+  };
 }
 
 /**
@@ -454,24 +602,52 @@ const activity = new Map<string, string>();
 const MAX_ACTIVITY = 200;
 
 /**
- * Terminals that have said something while nobody had them on screen.
+ * Terminals that finished a turn, or asked a question, while nobody was looking.
  *
- * This used to be the host's, and it was right there for as long as "watched"
- * and "visible" were the same set. They are not any more: a client pools
- * emulators and the host is told to stream the union, so the host now clears its
- * own mark for every terminal a client is merely keeping warm — which is every
- * terminal you might want the mark for.
+ * It used to mean "bytes arrived off screen", and that is what made it useless:
+ * a spinner, a dev server's request log and an agent thinking out loud all emit
+ * continuously, so every row that was not the one visible tab lit within a
+ * second and stayed lit until you opened that exact tab. A mark that is on for
+ * nine rows out of ten is not a mark, and the thing it was standing in for —
+ * *this one wants you and you were not there* — was never what it measured.
  *
- * So the *answer* moves here, for the same reason `activity` lives here: it is
- * learnt from something only this side knows, and losing it on a restart costs
- * a dot that the next byte of output puts back. What stays on the host is the
- * case this side cannot see at all — a terminal in neither set is never streamed
- * to this process, so its output never reaches `onOutput` and only the host can
- * notice it. `overlay` therefore *ors* the two rather than replacing one with
- * the other: the host answers for what it is not streaming, this answers for
- * what it is.
+ * So it is the same event a notification is, seen by somebody who was not at the
+ * screen when it happened: a transition into `blocked` or `done` (`NOTIFY_EVENTS`
+ * — the two states `status.ts` calls "wants a human") for a terminal no client
+ * has visible. `noticeStatuses` is where both are decided, together, because a
+ * card and a dot that disagreed about what deserves attention would be two
+ * policies to tune instead of one.
+ *
+ * Two consequences worth stating, because neither is a bug:
+ *
+ * A transition *off* those states clears it. The dot says a terminal is waiting
+ * for you now, not that it once was, and an agent poked from the phone must not
+ * leave a dot on the desktop for work that has since resumed.
+ *
+ * A restart forgets the set, and that is correct for the reason `lastStatus`
+ * argues at length: statuses are relearnt on the first tick and raise no
+ * transitions, so nothing is marked and nothing is announced. The alternative is
+ * sixteen terminals sitting at `done` all claiming to be news at once.
+ *
+ * The host keeps a flag of this name too and it is now genuinely vestigial —
+ * byte-derived, and unreachable from here because `agents/host.ts` costs the
+ * user every running agent to edit. `overlay` *replaces* it rather than oring
+ * it in, which is the whole of what that costs us.
  */
 const unread = new Set<string>();
+
+/**
+ * Whether anybody can actually see that terminal right now.
+ *
+ * Visible, never merely warm: a pooled emulator in a workspace you are not in is
+ * being kept current, not being read. Asked across every client because the
+ * question the mark answers is "was anyone there", and the desktop showing the
+ * pane answers it for the phone in your pocket.
+ */
+function onScreenAnywhere(agentId: string): boolean {
+  for (const st of clients.values()) if (st.watching.has(agentId)) return true;
+  return false;
+}
 
 /**
  * Whether this client's emulators want that terminal's bytes — on screen or
@@ -512,12 +688,18 @@ function mouseEncodingOf(agentId: string): MouseEncoding {
 }
 
 /**
- * What the pty host cannot say about an agent, added on the way out.
+ * What the pty host cannot say about an agent, added on the way out — and the
+ * one thing it says that this side has to overrule.
  *
- * Both of these are things the server knows and the host does not, and both are
- * cheap to lose: one arrives from the agent by a different road, the other is
- * relearnt by the next poll. Which is the point — neither is worth a field in
- * the half of kururu you cannot restart.
+ * Everything merged in here is something the server knows and the host does not,
+ * and all of it is cheap to lose: one line arrives from the agent by a different
+ * road, the rest are relearnt by the next poll. Which is the point — none of it
+ * is worth a field in the half of kururu you cannot restart.
+ *
+ * `unread` is the odd one and is *overwritten*, not merged. The host derives it
+ * from bytes, this side derives it from a turn ending where nobody could see it,
+ * and the host's file is the one that costs the user every running agent to
+ * edit — so the correction is made here, on the way past. See `unread`.
  */
 function overlay(agent: AgentSnapshot): AgentSnapshot {
   const said = activity.get(agent.id);
@@ -525,16 +707,18 @@ function overlay(agent: AgentSnapshot): AgentSnapshot {
   const serving = devRunning.get(agent.id);
   const fresh = unread.has(agent.id);
   const held = memory.get(agent.id);
-  if (!said && !was && !serving && !fresh && !held) return agent;
+  if (!said && !was && !serving && !held && fresh === agent.unread) return agent;
   return {
     ...agent,
     ...(said ? { activity: said } : {}),
     ...(was ? { lastAgent: was } : {}),
     ...(serving ? { dev: serving.program } : {}),
     ...(held ? { rss: held } : {}),
-    // Only ever set, never cleared: see `unread`. The host still answers for the
-    // terminals it is not streaming to this process.
-    ...(fresh ? { unread: true } : {}),
+    // Replaced rather than ored, which is the one line that stops the host's
+    // byte-derived flag from lighting every row again behind this one's back.
+    // See `unread`: the two are not two halves of an answer any more, they are
+    // two different questions and only this one is asked here.
+    unread: fresh,
   };
 }
 
@@ -577,14 +761,27 @@ const lastStatus = new Map<string, AgentStatus>();
 const notifiedAt = new Map<string, number>();
 
 /**
- * Look for terminals that have just started wanting a human.
+ * Look for terminals that have just started wanting a human, and answer it twice
+ * — with a card for whoever is reachable now, and with a mark for whoever is
+ * not.
  *
  * Hung off the same `onAgents` that pushes a snapshot, because it is the same
  * event — anything about any agent changed — and a second subscription would
- * only be a second thing to keep in step. It walks every profile's terminals and
- * not just the active one's: an agent blocked in the profile you left is the
- * notification most worth having, since it is the one there is no dot on screen
- * for.
+ * only be a second thing to keep in step. That is also why nothing in here
+ * pushes: `onAgents` calls this and then pushes, so a mark set on this pass is
+ * already in the snapshot that pass sends.
+ *
+ * It walks every profile's terminals and not just the active one's: an agent
+ * blocked in the profile you left is the notification most worth having, since
+ * it is the one there is no dot on screen for.
+ *
+ * The card and the mark share this loop deliberately. They are the same
+ * judgement — *this wants a human* — asked of two different audiences, and
+ * deciding them apart is how a dot ends up lit for reasons no notification
+ * would ever have fired on. What differs is only the audience: `announce` runs
+ * the gate per client and is throttled, because interrupting somebody twice is
+ * worse than not at all; the mark is for the client that was not there to be
+ * interrupted, so it is neither throttled nor per client.
  */
 function noticeStatuses(): void {
   const live = new Set<string>();
@@ -596,7 +793,18 @@ function noticeStatuses(): void {
     // two cases and not one.
     if (before === undefined || before === agent.status) continue;
     if (agent.exited) continue;
-    if (!isNotifyEvent(agent.status)) continue;
+    if (!isNotifyEvent(agent.status)) {
+      // It has stopped wanting anybody — it was typed into, or it went back to
+      // work — so the dot has nothing left to be about. `forget` covers the
+      // terminal going away; this covers the terminal carrying on.
+      unread.delete(agent.id);
+      continue;
+    }
+    // Nobody saw it happen, so leave something that says it did. Checked at the
+    // moment of the transition and never again: walking in on a terminal that
+    // was already `done` before you left is not news, which is the same reason
+    // `announce` fires on the edge rather than on the state.
+    if (!onScreenAnywhere(agent.id)) unread.add(agent.id);
     announce(agent, agent.status);
   }
   for (const id of [...lastStatus.keys()]) {
@@ -729,89 +937,6 @@ async function followCwd(agentId: string): Promise<string | undefined> {
 }
 
 /**
- * Sign a profile in to an account, by opening a terminal and typing the line a
- * person would type.
- *
- * Neither flow can happen in a dialog: both are a browser, a code to paste and a
- * few questions, and the only thing kururu could add by wrapping them is a place
- * for them to go wrong silently. So this is the dev-server button's approach for
- * the same reason it was right there — the useful part is the setup around the
- * command, not the command — and it happens in the profile it is about, switched
- * to first, so that what comes next is on screen rather than in a pane somewhere
- * else. A new tab rather than a live one, because the one thing worse than a
- * login prompt you cannot find is a login prompt typed into a waiting agent.
- *
- * The two tools want opposite things and that is the whole of the difference
- * here. A Claude account *is* a config directory, so this makes sure the profile
- * has one of its own before anything is typed — signing in with nothing set
- * would put the new account in `~/.claude` and replace the one the machine had.
- * A github account is a name gh holds in its keyring, so the login belongs in
- * gh's own config where it is registered once and pickable from every profile;
- * hence `env -u`, undoing this profile's override for the length of one command
- * rather than adding a second account to a directory named after the first.
- *
- * **Both lines name their own environment rather than relying on the pty's, and
- * that is not belt and braces.** The overlay is applied by the pty host, which is
- * the one process in kururu that does not restart when you edit it — so there is
- * a window, every time this feature changes, where the server sends an `env` the
- * running host is too old to understand and drops. A terminal that quietly opens
- * as the wrong account is a bad afternoon; a *login* that quietly goes to the
- * wrong directory replaces an account somebody had. It cost exactly that once,
- * with the profile's directory left empty and the default written instead. A
- * command that states its target works on any host and, being on screen, says
- * where it is going while it goes there.
- */
-async function signIn(profileId: string, tool: "claude" | "gh"): Promise<void> {
-  workspaces.switchProfile(profileId);
-  const profile = workspaces.active;
-  if (profile.id !== profileId) return;
-
-  let command = "env -u GH_CONFIG_DIR gh auth login";
-  if (tool === "claude") {
-    let dir = profile.identity.claudeConfigDir;
-    if (!dir) {
-      dir = tildify(ensureClaudeDir(profile.name));
-      workspaces.setProfileIdentity(profileId, { ...profile.identity, claudeConfigDir: dir });
-    }
-    command = `CLAUDE_CONFIG_DIR=${shellQuote(expandHome(dir))} claude auth login`;
-  }
-
-  const agent = await openTerminal(workspaces.focusedPaneId);
-  await settle(DEV_SPAWN_SETTLE_MS);
-  if (!host.isLive(agent.id)) return;
-  typeCommand(agent.id, command, "sign-in");
-}
-
-/**
- * Which accounts the pty about to be spawned belongs to.
- *
- * The active profile's, unless the workspace it is landing in has borrowed
- * somebody else's — which is the one thing a profile could not express, because
- * a profile is one set of accounts and a workspace is one piece of work, and the
- * afternoon those disagree is the afternoon a repository of your own turns up in
- * your work profile.
- *
- * It is still read here rather than carried on the message, for the same reason
- * the layout is the server's: what a client sends is a *pointer* at a profile it
- * can already see, never three paths of its own. A client that named its own
- * environment would be a client that could name any environment, and this one is
- * reachable from the tailnet.
- *
- * The workspace defaults to the active one because that is where every gesture
- * that reaches a spawn happens — a split, a new tab, a new workspace — with one
- * exception that is the whole reason this takes an argument at all: ▸ on a
- * workspace row deliberately starts a dev server somewhere you are not looking,
- * and it must start it as that workspace's accounts rather than as the ones
- * belonging to the workspace you happen to be standing in.
- *
- * Undefined when nobody has been claimed, which is the common case and means the
- * host spawns exactly as it always did.
- */
-function spawnEnv(workspaceId = workspaces.activeWorkspace.id): Record<string, string> | undefined {
-  return identityEnv(workspaces.identityForWorkspace(workspaceId));
-}
-
-/**
  * Open a terminal in a pane.
  *
  * Everything that *makes* a pane comes through here — a split, a new workspace,
@@ -833,7 +958,6 @@ async function openTerminal(
   const agent = await host.create({
     cwd: options.cwd ?? (await cwdForNewTab(options.from ?? paneId)),
     command: options.command,
-    env: spawnEnv(),
     /**
      * A terminal unless the client insists otherwise. The window stopped
      * offering "start me an agent" as a separate thing to click: it is one
@@ -949,8 +1073,10 @@ function reapExited(): void {
  * emulator for. The union, because a pooled emulator that stops being fed is one
  * that has to be reconstructed — see `ClientState.warm`.
  *
- * The host reads its watched set as "somebody is looking at this" and clears
- * `unread` for all of it, which is why that mark is answered on this side now.
+ * The host reads its watched set as "somebody is looking at this" and keeps a
+ * mark of its own off the back of it. That mark is not used — see `unread` and
+ * `overlay` — and it is left alone because `agents/host.ts` costs the user every
+ * running agent to edit.
  */
 function syncWatched(): void {
   const watched = new Set<string>();
@@ -1083,24 +1209,19 @@ function dropClient(ws: WebSocket): void {
  * the flood is on its side of the link and a message per pty write would cross
  * the process boundary as well as the socket. What is left here is fan-out: the
  * same chunk to every client watching that terminal.
+ *
+ * It used to decide `unread` here as well, on the theory that bytes off screen
+ * are news. They are not — see `unread` — and a function on the hot path that
+ * also carried a policy was the shape that made that easy to miss.
  */
 function onOutput(agentId: string, data: string): void {
   recordOutput(agentId, data);
   mouseEncodingOf(agentId).read(data);
-  let onScreen = false;
   for (const [ws, st] of clients) {
-    if (st.watching.has(agentId)) onScreen = true;
     if (!sees(st, agentId)) continue;
     const pending = st.awaiting.get(agentId);
     if (pending) pending.queued.push(data);
     else send(ws, { type: "output", agentId, data });
-  }
-  // Output nobody is looking at is the definition of unread — and "looking at"
-  // is the visible set, never the warm one. A pooled emulator in a workspace you
-  // are not in is being kept current, not being read.
-  if (!onScreen && !unread.has(agentId)) {
-    unread.add(agentId);
-    pushSnapshot();
   }
 }
 
@@ -1378,14 +1499,14 @@ function canTypeInto(agentId: string | null | undefined): agentId is string {
 }
 
 /**
- * Type a command and press return, the way a person would. The tag is what the
- * tape calls it (`record.ts`), and it is a parameter because two features now
- * do this: the dev-server button, and signing a profile in to an account.
+ * Type a command and press return, the way a person would. `dev` is what the
+ * tape calls it (`record.ts`) — kururu typing on its own account rather than a
+ * person typing, which is the distinction the tape is there to preserve.
  */
-function typeCommand(agentId: string, command: string, tag: "dev" | "sign-in" = "dev"): void {
+function typeCommand(agentId: string, command: string): void {
   const line = `${command}\r`;
   recordInput(agentId, line);
-  recordNote(agentId, tag, `running ${command}`);
+  recordNote(agentId, "dev", `running ${command}`);
   host.write(agentId, line);
 }
 
@@ -1425,11 +1546,7 @@ async function runDev(workspaceId: string): Promise<void> {
     return;
   }
 
-  const agent = await host.create({
-    cwd: memory.cwd || undefined,
-    kind: "shell",
-    env: spawnEnv(workspaceId),
-  });
+  const agent = await host.create({ cwd: memory.cwd || undefined, kind: "shell" });
   workspaces.addTabTo(workspaceId, agent.id, agent.cwd);
   allowRoot(agent.cwd);
   devBusy.add(agent.id);
@@ -1480,6 +1597,276 @@ async function restartDevIn(agentId: string): Promise<void> {
  */
 function pollSoon(): Promise<void> {
   return settle(DEV_RESTART_SETTLE_MS * 2).then(() => pollDevServers());
+}
+
+// ---------------------------------------------------------------------------
+// Supabase
+// ---------------------------------------------------------------------------
+
+/**
+ * Workspaces with a start or a stop in flight.
+ *
+ * `devBusy`'s job for the same reason, and with a longer fuse: `supabase start`
+ * pulls and boots a dozen containers, so the port stays shut for the better part
+ * of a minute after the button has been pressed. Without this the row would sit
+ * at "off" for that whole minute and read as a button that did nothing, which is
+ * the state in which somebody presses it again.
+ *
+ * Cleared by the probe rather than by a timer: the answer arriving *is* the end
+ * of the wait, and a timeout that fired first would hand the row back to the
+ * probe mid-boot and undo the thing this exists for. The timer below is only the
+ * floor under a command that fails outright — a `supabase` that is not installed
+ * prints its error in the terminal and never changes the port, and a row stuck
+ * on "working" forever would be worse than one that goes back to off and lets
+ * you read what it said.
+ */
+const supabaseBusy = new Map<string, NodeJS.Timeout>();
+
+/**
+ * How long a start or a stop may be in flight before the row stops waiting for
+ * it. Long, because `supabase start` on a cold machine pulls images.
+ */
+const SUPABASE_BUSY_MS = 180_000;
+
+/**
+ * What was found at a directory, so the walk up the tree is not redone every
+ * three seconds for every workspace.
+ *
+ * Expiring rather than permanent, and both halves of that matter. A project
+ * appears when somebody runs `supabase init` and disappears when a directory is
+ * renamed, so a cache with no expiry would need invalidating from places that
+ * have no business knowing this exists; a minute is short enough that nobody
+ * notices and long enough that the common case — the same four directories,
+ * twenty times a minute — costs nothing.
+ */
+const supabaseSeen = new Map<string, { at: number; found: SupabaseFound | null }>();
+const SUPABASE_CACHE_MS = 60_000;
+
+async function lookFor(dir: string): Promise<SupabaseFound | null> {
+  const had = supabaseSeen.get(dir);
+  if (had && Date.now() - had.at < SUPABASE_CACHE_MS) return had.found;
+  const found = await findSupabase(dir);
+  supabaseSeen.set(dir, { at: Date.now(), found });
+  return found;
+}
+
+/**
+ * Every directory this workspace could be said to be *in*, best first.
+ *
+ * A workspace has no directory of its own — it is an arrangement, not a project
+ * — so this asks the three things that do have one, in the order of how much
+ * they know. A live terminal's cwd is where somebody actually is. A pane's
+ * remembered cwd is where its terminals were, and is the only one of the three
+ * that survives a restart with the panes empty — which is exactly the state in
+ * which you want the button, because there is nothing running and the database
+ * is probably down. The dev server's directory is last and is usually one of the
+ * other two.
+ */
+function workspaceDirs(workspace: Workspace): string[] {
+  const dirs: string[] = [];
+  const add = (dir: string | undefined | null) => {
+    if (dir && !dirs.includes(dir)) dirs.push(dir);
+  };
+  for (const pane of panes(workspace.layout)) {
+    for (const agentId of pane.agentIds) add(host.find(agentId)?.cwd);
+    add(pane.cwd);
+  }
+  add(workspace.dev?.cwd);
+  return dirs;
+}
+
+let lastSupabaseJson = "";
+
+/**
+ * Which of the active profile's workspaces have a local Supabase, and whether it
+ * is answering.
+ *
+ * The active profile only. Every other profile's workspaces are not on anybody's
+ * screen — the snapshot itself carries one profile for the same reason — and a
+ * probe is a connection attempt rather than a read of a table somebody else is
+ * making anyway, so there is nothing to be gained by asking about rows nobody
+ * can see.
+ */
+async function pollSupabase(): Promise<void> {
+  if (!host || !workspaces) return;
+  const dbs: SupabaseDb[] = [];
+  for (const workspace of workspaces.active.workspaces) {
+    let found: SupabaseFound | null = null;
+    for (const dir of workspaceDirs(workspace)) {
+      found = await lookFor(dir);
+      if (found) break;
+    }
+    if (!found) continue;
+    const busy = supabaseBusy.has(workspace.id);
+    const up = await probe(found.port);
+    /**
+     * The probe agreeing with what was asked for is what ends the wait. Which
+     * way round it has to agree is not knowable from here — a stop makes the
+     * port shut and a start makes it open — so the rule is simply "it changed":
+     * whatever the button asked for, the port was in the other state when it was
+     * pressed, because that is what the button was offering.
+     */
+    const before = state.supabase.find((db) => db.workspaceId === workspace.id);
+    if (busy && before && before.up !== up) clearBusy(workspace.id);
+    dbs.push({
+      workspaceId: workspace.id,
+      root: found.root,
+      project: found.project,
+      port: found.port,
+      up,
+      busy: supabaseBusy.has(workspace.id),
+    });
+  }
+  const json = JSON.stringify(dbs);
+  if (json === lastSupabaseJson) return;
+  lastSupabaseJson = json;
+  state.supabase = dbs;
+  broadcast({ type: "supabase", dbs });
+}
+
+function markBusy(workspaceId: string): void {
+  clearBusy(workspaceId);
+  supabaseBusy.set(
+    workspaceId,
+    setTimeout(() => supabaseBusy.delete(workspaceId), SUPABASE_BUSY_MS),
+  );
+}
+
+function clearBusy(workspaceId: string): void {
+  const timer = supabaseBusy.get(workspaceId);
+  if (timer) clearTimeout(timer);
+  supabaseBusy.delete(workspaceId);
+}
+
+/**
+ * The database button: type `supabase start` or `supabase stop` into a terminal
+ * in this workspace.
+ *
+ * Typed rather than spawned, and this is the decision the whole feature rests
+ * on. `supabase start` is a minute of Docker output, prompts when an image has
+ * to be pulled, and an error report worth reading when it fails — and it ends by
+ * printing the anon key and the studio URL, which is the thing people go looking
+ * for afterwards. Run behind the scenes, all of that is lost and the button is a
+ * light that goes on or does not. Run in a terminal, it is exactly what the
+ * person would have typed, in a tab they can scroll, interrupt with ^C, and read
+ * the keys out of. It is the same bargain ▸ makes, for the same reason.
+ *
+ * The terminal is chosen the way `runDev` chooses one: an idle shell in this
+ * workspace with no agent in it, or a new tab in the project's directory. It
+ * must not be an agent's — typing `supabase stop` at a waiting Claude Code sends
+ * it as a prompt.
+ */
+async function runSupabase(workspaceId: string, on: boolean): Promise<void> {
+  const workspace = workspaces.workspaceById(workspaceId);
+  if (!workspace) return;
+  const db = state.supabase.find((entry) => entry.workspaceId === workspaceId);
+  if (!db) return;
+
+  const command = await supabaseCommand(db.root, on ? "start" : "stop");
+  markBusy(workspaceId);
+  pushSnapshotSupabase();
+
+  /**
+   * An idle shell *standing in the project*, which is a stricter test than the
+   * one `runDev` makes and has to be. `runDev` re-types a command into the
+   * terminal it watched that command run in, so the directory is right by
+   * construction. This has no such history: the first thing it finds might be a
+   * shell somebody opened in `~` to read their mail in, and `npm run db:start`
+   * typed there is a script-not-found in the wrong directory — which the row
+   * would then sit and wait a full three minutes for.
+   *
+   * `startsWith` on the root plus a separator, not on the root: `/tmp/k2/fake`
+   * must not match `/tmp/k2/faketown`, and prefix tests that forget the
+   * separator are how a directory check quietly becomes a substring check.
+   */
+  const reuse = workspaces.agentsInWorkspace(workspaceId).find((agentId) => {
+    if (!canTypeInto(agentId) || devRunning.has(agentId)) return false;
+    const cwd = host.find(agentId)?.cwd ?? "";
+    return cwd === db.root || cwd.startsWith(`${db.root}/`);
+  });
+  if (reuse) {
+    typeCommand(reuse, command);
+    return;
+  }
+
+  const agent = await host.create({ cwd: db.root, kind: "shell" });
+  workspaces.addTabTo(workspaceId, agent.id, agent.cwd);
+  allowRoot(agent.cwd);
+  await settle(DEV_SPAWN_SETTLE_MS);
+  if (!host.isLive(agent.id)) return;
+  typeCommand(agent.id, command);
+}
+
+/**
+ * Say the row is working *now*, rather than at the next tick.
+ *
+ * `supabase start` changes nothing observable for the better part of a minute,
+ * so without this the button would be pressed and the row would sit exactly as
+ * it was until the containers came up. Pressing it again in that gap is the
+ * obvious thing to do and the expensive one.
+ */
+function pushSnapshotSupabase(): void {
+  state.supabase = state.supabase.map((db) =>
+    db.busy === supabaseBusy.has(db.workspaceId) ? db : { ...db, busy: supabaseBusy.has(db.workspaceId) },
+  );
+  lastSupabaseJson = JSON.stringify(state.supabase);
+  broadcast({ type: "supabase", dbs: state.supabase });
+}
+
+// ---------------------------------------------------------------------------
+// Git
+// ---------------------------------------------------------------------------
+
+/**
+ * Where the repository is for a given directory, so the walk up the tree is not
+ * redone every four seconds.
+ *
+ * Only the *walk* is remembered, never the branch. That split is the whole
+ * design: where `.git` lives changes about as often as somebody moves a project,
+ * and what is in `HEAD` changes every time they check something out — which is
+ * the fact the row exists to show. Caching the second would make the row a
+ * picture of a branch from a minute ago, which is worse than no row.
+ */
+const repoSeen = new Map<string, { at: number; found: { root: string; git: string } | null }>();
+const REPO_CACHE_MS = 60_000;
+
+async function repoFor(dir: string): Promise<{ root: string; git: string } | null> {
+  const had = repoSeen.get(dir);
+  if (had && Date.now() - had.at < REPO_CACHE_MS) return had.found;
+  const found = await repoAt(dir);
+  repoSeen.set(dir, { at: Date.now(), found });
+  return found;
+}
+
+let lastBranchJson = "";
+
+/**
+ * What every workspace of the active profile has checked out.
+ *
+ * The active profile only, on `pollSupabase`'s reasoning: the snapshot carries
+ * one profile, so the rows this could describe are the rows nobody can see.
+ */
+async function pollBranches(): Promise<void> {
+  if (!host || !workspaces) return;
+  const branches: WorkspaceBranch[] = [];
+  for (const workspace of workspaces.active.workspaces) {
+    for (const dir of workspaceDirs(workspace)) {
+      const repo = await repoFor(dir);
+      if (!repo) continue;
+      const head = await readHead(repo);
+      // A repository whose HEAD could not be read is still the answer to "which
+      // repository is this workspace in", so the walk stops here either way —
+      // trying the next directory up would find the *parent* repo and report a
+      // branch from a project this workspace is not in.
+      if (head) branches.push({ workspaceId: workspace.id, ...head });
+      break;
+    }
+  }
+  const json = JSON.stringify(branches);
+  if (json === lastBranchJson) return;
+  lastBranchJson = json;
+  state.branches = branches;
+  broadcast({ type: "branches", branches });
 }
 
 // ---------------------------------------------------------------------------
@@ -1668,18 +2055,44 @@ async function pollMemory(): Promise<void> {
 }
 
 /**
+ * Ask the account where it stands against its limits.
+ *
+ * Skipped entirely when nobody is connected, which none of the other polls
+ * bother with and this one must. The others read this machine — a `ps`, an
+ * `lsof` — and running them for nobody wastes a few milliseconds of our own CPU.
+ * This one is a request to somebody else's API carrying somebody's credential,
+ * and making it on a schedule for a window that is not open is the kind of thing
+ * that should never have been written. A client connecting gets the last reading
+ * immediately and a fresh one within the minute.
+ */
+async function pollAccountUsage(): Promise<void> {
+  if (clients.size === 0) return;
+  if (await pollUsage()) broadcast({ type: "usage", usage: usageSnapshot() });
+}
+
+/**
  * The timers left in this process, and what they have in common: each one asks
  * the *machine* a question no pty can raise an event about. The status heuristic
  * and the agent scan went with the ptys, because those are questions about a
  * process kururu owns and the host is where those live now.
+ *
+ * The usage poll is the exception to the sentence above and the only one of
+ * these that leaves the machine at all. It is out here with the rest because it
+ * is the same shape — a question with no event behind it — and a minute apart
+ * rather than seconds because it is measuring a five-hour window.
  */
 const timers = [
   setInterval(() => void pollDevServers(), DEV_SCAN_MS),
+  setInterval(() => void pollSupabase(), SUPABASE_SCAN_MS),
+  setInterval(() => void pollBranches(), GIT_SCAN_MS),
   setInterval(() => void pollEditors(), NVIM_SCAN_MS),
   setInterval(() => void pollMemory(), MEM_SCAN_MS),
+  setInterval(() => void pollAccountUsage(), USAGE_POLL_MS),
 ];
 
 void pollDevServers();
+void pollSupabase();
+void pollBranches();
 
 // ---------------------------------------------------------------------------
 // WebSocket
@@ -1762,6 +2175,13 @@ function handleMessage(ws: WebSocket, raw: string): void {
       return;
     }
 
+    case "hide-agent":
+      // No id check of its own: `setAgentHidden` finds the profile the terminal
+      // is in and does nothing when there isn't one, which is the same answer a
+      // guard here would give one line earlier.
+      workspaces.setAgentHidden(msg.agentId, msg.hidden === true);
+      return;
+
     case "rename-tab":
       host.rename(msg.agentId, msg.name);
       return;
@@ -1825,9 +2245,10 @@ function handleMessage(ws: WebSocket, raw: string): void {
       let seen = false;
       for (const id of opened) {
         recordNote(id, "watch", "a client opened this terminal");
-        // Somebody is looking at it now, which is the only thing that clears the
-        // mark. The host clears its own for the whole union, warm included,
-        // which is exactly why this side keeps an answer of its own.
+        // Somebody is looking at it now, so whatever it wanted has been seen.
+        // Opened, not merely warm: an emulator kept current in a workspace you
+        // are not in is nobody reading it. The other way the mark comes off is
+        // the terminal going back to work — see `noticeStatuses`.
         if (unread.delete(id)) seen = true;
       }
       if (seen) pushSnapshot();
@@ -1929,10 +2350,6 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "set-workspace-color":
       workspaces.setWorkspaceColor(msg.workspaceId, msg.color);
-      return;
-
-    case "set-workspace-identity":
-      workspaces.setWorkspaceIdentity(msg.workspaceId, msg.profileId);
       return;
 
     case "set-workspace-mascot":
@@ -2107,6 +2524,14 @@ function handleMessage(ws: WebSocket, raw: string): void {
       });
       return;
 
+    case "supabase-power":
+      // As above, and more so: this one takes a minute, and what reports it is
+      // the terminal the command was typed into.
+      void runSupabase(msg.workspaceId, msg.on === true).catch((err) => {
+        console.error("kururu: could not reach the database:", err instanceof Error ? err.message : err);
+      });
+      return;
+
     // --- profiles ----------------------------------------------------------
 
     case "new-profile":
@@ -2124,56 +2549,6 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "delete-profile":
       killAll(workspaces.deleteProfile(msg.profileId));
-      return;
-
-    /**
-     * Adopted rather than trusted, like the mascot and the workspace colour, and
-     * refused rather than repaired: a path that is not absolute is dropped,
-     * because there is no nearest legal value for a path and a relative one
-     * would resolve against whatever directory each terminal happened to open
-     * in. Nothing running is touched — the overlay is read at spawn.
-     */
-    case "set-profile-identity":
-      workspaces.setProfileIdentity(msg.profileId, adoptIdentity(msg.identity));
-      return;
-
-    /**
-     * A github account picked by name. The directory that means it is written
-     * here rather than named by the client, which is the point of the verb: a
-     * client that sent a path would be a client that could send any path, and
-     * a config directory is a thing kururu creates in the user's home.
-     *
-     * `git_protocol` is carried over from wherever gh already knows the account,
-     * so a profile that picks it does not quietly go back to https on an account
-     * set up for ssh. Nothing else is copied: gh owns that file afterwards.
-     */
-    case "use-gh-account": {
-      const account = msg.account;
-      const before = workspaces.identityOf(msg.profileId);
-      if (!account) {
-        workspaces.setProfileIdentity(msg.profileId, { ...before, ghConfigDir: null });
-        return;
-      }
-      void (async () => {
-        const known = (await ghIn(null)) ?? [];
-        const match = known.find((a) => a.host === account.host && a.login === account.login);
-        const dir = ensureGhConfig(account.host, account.login, match?.gitProtocol ?? undefined);
-        workspaces.setProfileIdentity(msg.profileId, {
-          ...workspaces.identityOf(msg.profileId),
-          ghConfigDir: tildify(dir),
-        });
-      })().catch((err) => {
-        console.error("kururu: could not use that github account:", err instanceof Error ? err.message : err);
-      });
-      return;
-    }
-
-    case "sign-in":
-      // Nothing to reply to: what says it worked is a terminal appearing with a
-      // login prompt in it, which is also the thing the user has to go and do.
-      void signIn(msg.profileId, msg.tool).catch((err) => {
-        console.error("kururu: could not start a sign-in:", err instanceof Error ? err.message : err);
-      });
       return;
 
     case "restart-server":
@@ -2257,6 +2632,13 @@ const CONTENT_TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
   ".map": "application/json; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
+  // What a `sound` style may ship — `SOUND_FORMATS`, and nothing wider. These
+  // reach a browser through `/api/styles/asset` and `/api/styles/preview`,
+  // which serve whatever an entry recorded; a type guessed as
+  // `application/octet-stream` is one Safari will not decode.
+  ".wav": "audio/wav",
+  ".mp3": "audio/mpeg",
+  ".m4a": "audio/mp4",
 };
 
 function json(res: ServerResponse, body: unknown, status = 200): void {
@@ -2518,41 +2900,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   }
 
   /**
-   * What there is to pick between. Separate from `/api/identity` because it is a
-   * different question with a different shape — that one is "who is this
-   * profile", this one is "who could it be" — and because it spans every profile
-   * at once, where that one is about a single identity.
-   */
-  if (url.pathname === "/api/identity/known") {
-    knownAccounts(workspaces.all().map((profile) => profile.identity)).then(
-      (known) => json(res, known),
-      () => json(res, { claude: [], gh: [] }),
-    );
-    return;
-  }
-
-  /**
-   * Who a profile's terminals would open as — the answer `claude` and `gh` give
-   * when asked with that profile's environment.
-   *
-   * A fetch rather than a field in the snapshot, and that is the interesting
-   * decision here. Everything else Settings edits is server state that changes
-   * when somebody changes it; this is the *world's* state, it changes when a
-   * person logs in inside a terminal kururu is only watching, and answering it
-   * means running two CLIs. Putting it in the snapshot would mean either running
-   * them on every status tick or pushing an answer that is quietly hours old. So
-   * it is asked for by the one page that draws it, at the moment it is drawn.
-   */
-  if (url.pathname === "/api/identity") {
-    const profileId = url.searchParams.get("profile") ?? "";
-    describeIdentity(workspaces.identityOf(profileId)).then(
-      (who) => json(res, who),
-      () => json(res, { claude: null, gh: null, git: null }),
-    );
-    return;
-  }
-
-  /**
    * How an agent tells kururu what it is doing. The only source of `blocked`
    * and of context usage; see agents/report.ts for why neither is inferable.
    */
@@ -2679,9 +3026,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   /**
    * What `../kururu-styles` is offering, and what this machine already has of it.
    *
-   * A fetch rather than a snapshot field, and the split is the same one
-   * `/api/identity` draws: the snapshot carries what *kururu* owns, and this is
-   * the world's. It changes when somebody merges a pull request in another
+   * A fetch rather than a snapshot field, and the split is the one the update
+   * check draws: the snapshot carries what *kururu* owns, and this is the
+   * world's. It changes when somebody merges a pull request in another
    * repository, answering it means a request over the network, and nothing in
    * the window can be drawn without it except the one tab that is asking. The
    * installed half *is* in the snapshot, because a theme you are wearing is not
@@ -2743,12 +3090,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   }
 
   /**
-   * The picture for a mascot nobody has installed yet, proxied from the
-   * registry. See `preview` in `server/src/styles.ts` for why this exists at all
-   * and why the browser is not the thing fetching it.
+   * The picture for a mascot, or the noise for a sound, that nobody has
+   * installed yet — proxied from the registry. See `preview` in
+   * `server/src/styles.ts` for why this exists at all and why the browser is not
+   * the thing fetching it.
    */
   if (url.pathname === "/api/styles/preview") {
-    const shot = await previewStyle(url.searchParams.get("kind") ?? "", url.searchParams.get("id") ?? "");
+    const shot = await previewStyle(url.searchParams.get("kind") ?? "", url.searchParams.get("id") ?? "", url.searchParams.get("file"));
     if (!shot) {
       text(res, "no preview\n", 404);
       return;
@@ -2782,6 +3130,32 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     const id = url.searchParams.get("id") ?? "";
     const activate = url.searchParams.get("activate") === "1";
     const result = await installOne(kind, id, activate);
+    if (!result.ok) {
+      json(res, { error: result.error }, 400);
+      return;
+    }
+    json(res, { ok: true, installed: styles.installed });
+    return;
+  }
+
+  /**
+   * Wear one that is already here. No network, no download, no version.
+   *
+   * A separate verb from `install` rather than `install?activate=1` on a style
+   * that is already on disk, and the difference is the network: this has to work
+   * on a plane. Installing checks the registry for the entry, which is right for
+   * a download and absurd for "put the pack I have back on" — and it is the
+   * gesture somebody makes most, because a pack is five decisions and changing
+   * one of them by hand is how you end up wanting the other four back.
+   */
+  if (url.pathname === "/api/styles/wear" && req.method === "POST") {
+    const kind = url.searchParams.get("kind") ?? "";
+    const id = url.searchParams.get("id") ?? "";
+    if (!isStyleKind(kind) || !isStyleId(id)) {
+      json(res, { error: "that is not a style" }, 400);
+      return;
+    }
+    const result = wear(kind, id);
     if (!result.ok) {
       json(res, { error: result.error }, 400);
       return;
@@ -2864,6 +3238,134 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return;
     }
     json(res, { name: result.name, builtin: builtinSheets(), imported: importedSheets(), dir: sheetsDir() });
+    return;
+  }
+
+  // --- the skin studio ------------------------------------------------------
+  /**
+   * A skin of yours, being made. See `server/src/studio.ts` for what one is —
+   * an ordinary installed skin with `local` on its record — and why that is the
+   * whole design. What is here is the four verbs and one rule they share: every
+   * one of them ends in `styles = readLibrary()` and a snapshot, because the
+   * point of the studio is that the window you are looking at *is* the preview,
+   * and so is the phone's.
+   *
+   * Wearing follows editing. Creating a skin puts it on, and so does the first
+   * edit to one you are not wearing, on the reasoning the Styles tab gives for
+   * picking being installing: nobody opens a skin to edit it and then wonders
+   * whether to look at it. It is the studio's one act of switching, and it is
+   * the reason the response is the manifest rather than a bare `ok` — the
+   * page needs the file names back to draw its thumbnails from.
+   */
+  if (url.pathname === "/api/studio/skin") {
+    const id = url.searchParams.get("id") ?? "";
+    if (req.method === "GET") {
+      const manifest = readLocalManifest(id);
+      if (!manifest) {
+        json(res, { error: "that is not a skin of yours" }, 404);
+        return;
+      }
+      const record = styles.installed.find((r) => r.kind === "skin" && r.id === id && r.local);
+      json(res, { manifest, files: record?.files ?? [], dir: localDir(id) });
+      return;
+    }
+    if (req.method === "POST") {
+      const result = createLocalSkin(id, url.searchParams.get("name") ?? "", url.searchParams.get("from"), styles);
+      if (!result.ok) {
+        json(res, { error: result.error }, 400);
+        return;
+      }
+      styles = readLibrary();
+      saveAppearance({ ...appearance, skinId: id });
+      json(res, { ok: true, manifest: result.manifest, files: styles.installed.find((r) => r.kind === "skin" && r.id === id)?.files ?? [], dir: localDir(id) });
+      return;
+    }
+    if (req.method === "PUT") {
+      let body: unknown;
+      try {
+        body = await readJsonBody(req, 256 * 1024);
+      } catch {
+        json(res, { error: "that manifest could not be read" }, 400);
+        return;
+      }
+      const result = writeLocalManifest(id, body);
+      if (!result.ok) {
+        json(res, { error: result.error }, 400);
+        return;
+      }
+      styles = readLibrary();
+      if (appearance.skinId !== id) saveAppearance({ ...appearance, skinId: id });
+      else pushSnapshot();
+      json(res, { ok: true, manifest: result.manifest });
+      return;
+    }
+    text(res, "GET, POST or PUT", 405);
+    return;
+  }
+
+  /**
+   * A picture or a font, into a skin of yours. The body is the file, on the
+   * mascot import's reasoning — one file to one place, and the name in the
+   * query so the bytes can stay the bytes. Every check is in `putLocalAsset`,
+   * beside the write.
+   */
+  if (url.pathname === "/api/studio/asset") {
+    const id = url.searchParams.get("id") ?? "";
+    const file = url.searchParams.get("file") ?? "";
+    if (req.method === "DELETE") {
+      const result = removeLocalAsset(id, file);
+      if (!result.ok) {
+        json(res, { error: result.error }, 400);
+        return;
+      }
+      styles = readLibrary();
+      pushSnapshot();
+      json(res, { ok: true, files: result.files });
+      return;
+    }
+    if (req.method !== "POST") {
+      text(res, "POST or DELETE", 405);
+      return;
+    }
+    let bytes: Buffer;
+    try {
+      bytes = await readBody(req, IMPORT_LIMIT);
+    } catch (err) {
+      json(res, { error: err instanceof Error ? err.message : "could not read that file" }, 413);
+      return;
+    }
+    const result = putLocalAsset(id, file, bytes);
+    if (!result.ok) {
+      json(res, { error: result.error }, 400);
+      return;
+    }
+    styles = readLibrary();
+    pushSnapshot();
+    json(res, { ok: true, file: result.file, files: result.files, width: result.width, height: result.height, stamp: Date.now() });
+    return;
+  }
+
+  /**
+   * Show the skin's directory in the file manager — of the machine the server
+   * is on, which is the only machine that has it. From the phone this opens a
+   * Finder window on the desktop, which is odd and correct: the files are
+   * there, and "where did my skin go" has one answer. The path is the server's
+   * own, built from an id it checked; nothing from the client reaches the
+   * command line.
+   */
+  if (url.pathname === "/api/studio/reveal" && req.method === "POST") {
+    const id = url.searchParams.get("id") ?? "";
+    if (!readLocalManifest(id)) {
+      json(res, { error: "that is not a skin of yours" }, 404);
+      return;
+    }
+    const dir = localDir(id);
+    const [cmd, args] = process.platform === "darwin" ? ["open", [dir]] : ["xdg-open", [dir]];
+    execFile(cmd, args, () => {
+      // A machine with no file manager is a machine where the path in the
+      // dialog is the answer, and it is already on screen.
+    });
+    json(res, { ok: true, dir });
     return;
   }
 
@@ -3006,6 +3508,13 @@ server.on("upgrade", (req, socket, head) => {
     });
     send(ws, { type: "snapshot", snapshot: snapshot() });
     send(ws, { type: "dev-servers", servers: state.devServers });
+    send(ws, { type: "supabase", dbs: state.supabase });
+    send(ws, { type: "branches", branches: state.branches });
+    send(ws, { type: "usage", usage: usageSnapshot() });
+    // The first client through the door is also what starts the usage poll: it
+    // is skipped while nothing is connected, so without this a freshly started
+    // server would draw no bar for a minute.
+    void pollAccountUsage();
 
     ws.on("message", (data) => handleMessage(ws, data.toString()));
     ws.on("close", () => dropClient(ws));

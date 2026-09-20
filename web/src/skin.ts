@@ -33,6 +33,21 @@
  * `files.ts` are both built around. `cssString` below is that check, written now
  * rather than when it is load-bearing.
  *
+ * ## The pictures go the same way, and so do the colours
+ *
+ * A part a skin painted is three more custom properties — `partVars` in
+ * `shared/skin.ts` makes them, this writes them, and the stylesheet's *Parts*
+ * block reads them. Nothing about a bezel is a component either: `.pane` asks
+ * for `var(--p-pane-frame)` and gets a picture or `none`.
+ *
+ * The chrome colours a skin insists on are written *over* the theme's, and the
+ * ordering is the only subtle thing in this file: `applyAppearance` calls
+ * `applyTheme` first and then this, on every snapshot, so a skin that overrides
+ * `--text` wins while it is on and the theme's `--text` comes back the moment a
+ * skin without an override goes on — because the theme rewrites it every time
+ * and this then has nothing to say. No memo of "what the theme said" is kept
+ * anywhere, which is what makes that correct rather than lucky.
+ *
  * ## Why nothing here re-measures a terminal
  *
  * A skin moves the line weight and the type ramp, so it genuinely does change
@@ -49,8 +64,9 @@
  * rots. The same is true of the web font landing a moment after the first paint:
  * the metrics move, the boxes move, the observer notices.
  */
-import { skinFor, type IconName, type Skin, type SkinTokens } from "../../shared/skin";
+import { partVars, type Skin, type SkinTokens } from "../../shared/skin";
 import { ICON_NAMES } from "../../shared/skin";
+import type { UiTokens } from "../../shared/theme";
 import { applyIcons } from "./icons";
 import { cssName } from "./theme";
 
@@ -82,6 +98,24 @@ export function applySkin(skin: Skin): void {
   }
   for (const name of ICON_NAMES) {
     root.style.setProperty(`--icon-${name}`, cssString(skin.icons[name]));
+  }
+  for (const [token, value] of Object.entries(skin.colors ?? {}) as [keyof UiTokens, string][]) {
+    root.style.setProperty(cssName(token), value);
+  }
+  for (const [name, value] of Object.entries(partVars(skin.parts))) {
+    root.style.setProperty(name, value);
+  }
+  /**
+   * The icon strip, and which way it is drawn. The URL comes from the server
+   * and is kururu's own origin, like a font's; the mode is an attribute for the
+   * reason `data-glyphs` is — CSS can match a word on the root and cannot
+   * branch on a property's value.
+   */
+  root.style.setProperty("--icon-sheet", skin.iconSheet ? `url(${JSON.stringify(skin.iconSheet.src)})` : "none");
+  if (skin.iconSheet) {
+    if (root.dataset.iconSheet !== skin.iconSheet.mode) root.dataset.iconSheet = skin.iconSheet.mode;
+  } else if ("iconSheet" in root.dataset) {
+    delete root.dataset.iconSheet;
   }
   /**
    * Which icons this skin wants as text. One attribute holding a list rather

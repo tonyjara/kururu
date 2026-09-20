@@ -128,21 +128,43 @@ export interface TerminalTokens {
 }
 
 /**
- * The eight workspace tags, which are in the theme for the reason
- * `web/src/colors.ts` gives for existing at all: these sit on `--chrome` at a
- * few pixels wide, so they are chosen *against the chrome* rather than against
- * each other — and a palette chosen against one chrome is wrong on another. The
- * first two are `accent` and `done` exactly in every theme, so a tagged
- * workspace never introduces a colour the window did not already have.
+ * The fourteen workspace tags, which are in the theme for the reason
+ * `web/src/colors.ts` gives for existing at all: these sit on `--chrome`, so
+ * they are chosen *against the chrome* rather than against each other — and a
+ * palette chosen against one chrome is wrong on another. `green` and `blue` are
+ * `accent` and `done` exactly in every theme, so a tagged workspace never
+ * introduces a colour the window did not already have.
+ *
+ * There were eight, and eight was the number a workspace tag could be chosen
+ * from when choosing was a deliberate act. It is not one any more — every new
+ * workspace is born with a colour (see `blankWorkspace` in `workspaces.ts`) —
+ * and a palette that has to *allocate* wants more room than a palette that only
+ * has to offer: eight colours across a dozen workspaces is a list where half the
+ * tags are somebody else's too, which is the one thing a tag must not be.
+ *
+ * Fourteen rather than sixteen because that is what the flavour has. Catppuccin
+ * publishes exactly fourteen accents and each name below takes one of them,
+ * once — so the set is the palette's rather than something invented beside it,
+ * and nothing here is two neighbours of one hue pretending to be two colours.
+ *
+ * The order is the picker's, and it is a spectrum: warm through to cool, so
+ * "one that is not like its neighbours" is a decision you make by looking
+ * rather than by reading fourteen names.
  */
 export type WorkspaceColorName =
   | "green"
-  | "blue"
   | "amber"
+  | "sand"
   | "coral"
-  | "violet"
-  | "cyan"
+  | "red"
+  | "brick"
+  | "blush"
   | "rose"
+  | "violet"
+  | "lavender"
+  | "azure"
+  | "blue"
+  | "cyan"
   | "lime";
 
 export interface Theme {
@@ -405,19 +427,33 @@ function catppuccin(id: string, name: string, p: Catppuccin, appearance: "dark" 
       brightWhite: p.subtext0,
     },
     workspace: {
-      // `accent` and `done` exactly, then six more that are already in the
-      // flavour rather than chosen beside it. The names are wire slots — the
-      // server stores one of `WORKSPACE_COLORS` and nothing else — so each takes
-      // the nearest published accent. `lime` is the one that bends furthest,
-      // because Catppuccin publishes no yellow-green and inventing one would
-      // make this a palette that is nearly the thing on the tin.
+      // The flavour's fourteen accents, each used once. The names are wire slots
+      // — the server stores one of `WORKSPACE_COLORS` and nothing else — so each
+      // takes the published accent nearest to it and nothing is invented beside
+      // them. That one-to-one is worth more than any individual match: a tag
+      // that is a mix of two accents is a colour the flavour never shipped, and
+      // a window that is Catppuccin everywhere except down the left edge of the
+      // sidebar is not the thing on the tin.
+      //
+      // `lime` is the name that bends furthest, and it is the reason to say this
+      // out loud rather than leave it to be noticed: Catppuccin publishes no
+      // yellow-green, so lime holds `teal` here and sits beside `cyan` in the
+      // order above because that is where the colour it actually draws belongs.
+      // It is kept under the wrong name because the name is on disk in
+      // everybody's session, and a rename would cost them the tag to fix a word.
       green: p.green,
-      blue: p.blue,
       amber: p.yellow,
+      sand: p.rosewater,
       coral: p.peach,
-      violet: p.mauve,
-      cyan: p.sky,
+      red: p.red,
+      brick: p.maroon,
+      blush: p.flamingo,
       rose: p.pink,
+      violet: p.mauve,
+      lavender: p.lavender,
+      azure: p.sapphire,
+      blue: p.blue,
+      cyan: p.sky,
       lime: p.teal,
     },
   };
@@ -486,13 +522,24 @@ const KURURU: Theme = {
     brightWhite: "#f0f3f1",
   },
   workspace: {
+    // The eight this theme shipped with, and six more mixed to sit beside them
+    // rather than ported from anywhere: kururu's own palette is desaturated and
+    // a Catppuccin accent dropped into it reads as a colour from another window.
+    // `lime` here is an actual yellow-green, which the Catppuccin flavours
+    // cannot be — see the note beside theirs.
     green: "#7fd6a2",
-    blue: "#7aa6da",
     amber: "#e3c46a",
+    sand: "#d8c39a",
     coral: "#e08f7a",
-    violet: "#b49ae0",
-    cyan: "#74c7c4",
+    red: "#e06c6c",
+    brick: "#a8604f",
+    blush: "#edaebb",
     rose: "#dd8fae",
+    violet: "#b49ae0",
+    lavender: "#a8b4e8",
+    azure: "#6fb4e0",
+    blue: "#7aa6da",
+    cyan: "#74c7c4",
     lime: "#b5cf7a",
   },
 };
@@ -675,7 +722,16 @@ function clampFontSize(value: unknown): number {
   return Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, n));
 }
 
-function adoptFontFamily(value: unknown): string {
+/**
+ * A face somebody named, made safe to put in a `font-family`.
+ *
+ * Exported because a **pack** names one too — see `adoptPackManifest` — and a
+ * manifest from the registry is exactly the hostile string this was written
+ * against. One adopter for both, so the answer to "what may end up in that
+ * declaration" is in one place rather than drifting between a settings box and
+ * a file somebody on the internet wrote.
+ */
+export function adoptFontFamily(value: unknown): string {
   if (typeof value !== "string") return "";
   // `;` and `}` are the two that could close this declaration and open a rule of
   // somebody else's choosing; quotes go because the name is quoted on the way

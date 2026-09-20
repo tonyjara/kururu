@@ -70,7 +70,7 @@ export function Menu({ at, items, onClose }: { at: MenuAt; items: MenuItem[]; on
             {item.mark ? "•" : ""}
           </span>
           <span className="menu-label">{item.label}</span>
-          {item.unread && <span className="unread" aria-label="new output" />}
+          {item.unread && <span className="unread" aria-label="waiting for you" />}
           {item.hint && <span className="menu-hint">{item.hint}</span>}
         </button>
       ))}

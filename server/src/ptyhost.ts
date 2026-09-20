@@ -143,12 +143,12 @@ export function createPtyHost(): PtyHost {
        * Everything but the framing, handed straight through.
        *
        * This listed the fields once — `{ cwd, command, kind }` — and that cost a
-       * restart nobody had budgeted for. `env` was added to the protocol, to
-       * `HostLink.create` and to `AgentHost.create`, and dropped here, one line
-       * before it would have been used: passing fewer properties than an
-       * optional parameter accepts is perfectly good TypeScript, so nothing
-       * said a word. The symptom was a profile whose terminals kept opening as
-       * the wrong account, with correct code on both sides of this line.
+       * restart nobody had budgeted for. A fourth field was added to the
+       * protocol, to `HostLink.create` and to `AgentHost.create`, and dropped
+       * here, one line before it would have been used: passing fewer properties
+       * than an optional parameter accepts is perfectly good TypeScript, so
+       * nothing said a word. The symptom was terminals that quietly ignored it,
+       * with correct code on both sides of this line.
        *
        * So the relay no longer names them. `type` and `id` are the envelope and
        * everything else is the request, which means the next field added to a

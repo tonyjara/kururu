@@ -19,6 +19,7 @@
     "build:web": "bun run --cwd web build",
     "build:server": "node desktop/build.mjs",
     "icon": "node tools/icon.mjs",
+    "schema": "bun tools/schema.mjs",
     "host": "bun run build:server && node desktop/dist/ptyhostd.mjs",
     "status": "node server/status.mjs",
     "kill-ptyhosts": "node server/kill-hosts.mjs",

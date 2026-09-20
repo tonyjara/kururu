@@ -95,6 +95,8 @@ export function MascotSettings({
   const [catalogue, setCatalogue] = useState<Catalogue | null>(null);
   /** Why the last import or removal did not happen. Cleared by the next attempt. */
   const [note, setNote] = useState<string | null>(null);
+  /** Which of the two is under way, so the button says so and cannot be pressed twice. */
+  const [working, setWorking] = useState<null | "import" | "remove">(null);
   /** Removing a sheet asks once, in the button itself. */
   const [confirming, setConfirming] = useState(false);
   const file = useRef<HTMLInputElement>(null);
@@ -164,7 +166,9 @@ export function MascotSettings({
    * `sheet.png` is not an error message.
    */
   const importSheet = async (chosen: File) => {
+    if (working) return;
     setNote(null);
+    setWorking("import");
     const list = new Set([...(catalogue?.builtin ?? []), ...(catalogue?.imported ?? [])]);
     const base = slugSheetName(chosen.name);
     let name = base;
@@ -188,12 +192,16 @@ export function MascotSettings({
       change({ sheet: answer.name });
     } catch {
       setNote("that file could not be imported");
+    } finally {
+      setWorking(null);
     }
   };
 
   const removeSheet = async (name: string) => {
+    if (working) return;
     setNote(null);
     setConfirming(false);
+    setWorking("remove");
     try {
       const response = await fetch(`/api/mascot/sheets?name=${encodeURIComponent(name)}`, {
         method: "DELETE",
@@ -210,6 +218,8 @@ export function MascotSettings({
       change({ sheet: DEFAULT_MASCOT.sheet });
     } catch {
       setNote("could not remove that sheet");
+    } finally {
+      setWorking(null);
     }
   };
 
@@ -270,13 +280,17 @@ export function MascotSettings({
               if (chosen) void importSheet(chosen);
             }}
           />
-          <button className="set-choice" onClick={() => file.current?.click()}>
-            Import…
+          <button className="set-choice" onClick={() => file.current?.click()} disabled={working !== null}>
+            {working === "import" ? "Importing…" : "Import…"}
           </button>
           {/* Asked once, in the button, rather than through a dialog: Settings is
               already modal, and a confirm over a confirm is a stack. */}
           {mine &&
-            (confirming ? (
+            (working === "remove" ? (
+              <button className="set-choice" disabled>
+                Removing…
+              </button>
+            ) : confirming ? (
               <button
                 className="set-choice set-choice-warn"
                 onClick={() => void removeSheet(mascot.sheet)}
@@ -284,7 +298,7 @@ export function MascotSettings({
                 Remove {mascot.sheet}?
               </button>
             ) : (
-              <button className="set-choice" onClick={() => setConfirming(true)}>
+              <button className="set-choice" onClick={() => setConfirming(true)} disabled={working !== null}>
                 Remove
               </button>
             ))}
@@ -307,11 +321,9 @@ export function MascotSettings({
         {note && <p className="set-hint key-note">{note}</p>}
 
         <p className="set-hint">
-          PNG only — the trim is measured off the alpha channel, so the format has to have one.
-          From Aseprite that is <em>File → Export Sprite Sheet</em>, which produces exactly the grid
-          this picker wants. Any grid of frames will do; a plain strip is a sheet one row tall.
-          Imports land in <code>{catalogue?.dir || "~/.config/kururu/sheets"}</code>, and a PNG
-          dropped in there by hand shows up the same way.
+          PNG only — the trim is measured off the alpha channel. Any grid of frames will do; a
+          plain strip is a sheet one row tall. Imports land in{" "}
+          <code>{catalogue?.dir || "~/.config/kururu/sheets"}</code>.
         </p>
 
         {/* The two animations, as two tabs rather than two pickers side by side:
@@ -353,9 +365,8 @@ export function MascotSettings({
                the only place that reads as deliberate rather than as missing. */
             <div className="sheet-col set-empty">
               <p className="set-hint">
-                Idle is a dot. Give it an animation and the badge will breathe while the agent
-                waits — blocked and done keep their dots either way, because those are the two
-                states that want you.
+                Idle is a dot. Animate it and the badge breathes while the agent waits; blocked
+                and done keep their dots either way.
               </p>
               <button className="set-choice" onClick={addIdle}>
                 Animate idle
@@ -439,9 +450,7 @@ export function MascotSettings({
         </div>
         {mascot.motion === "system" && (
           <p className="set-hint">
-            Follows <code>prefers-reduced-motion</code>. With Reduce Motion switched on in macOS the
-            mascot holds still — which says no more than the dot it replaced, so “Always” is the
-            default.
+            Follows <code>prefers-reduced-motion</code>, so Reduce Motion holds the mascot still.
           </p>
         )}
       </div>

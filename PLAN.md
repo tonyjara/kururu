@@ -419,6 +419,29 @@ marks what it is streaming and cannot see, the host marks what it is not
 streaming and this side cannot see. Between them every terminal is covered, and
 `agents/host.ts` is still untouched.
 
+**Second correction, found by using it.** Both of the above answer the wrong
+question, and the ored pair merely answered it twice. *Bytes arrived off screen*
+is true of a spinner, of a dev server's request log and of an agent thinking out
+loud, so within a second of looking away every row but the visible one was lit
+and stayed lit until that exact tab was opened. A mark that is on for nine rows
+in ten is not a mark.
+
+What the dot was always standing in for is the notification you were not there
+to receive — so it is now the same edge `announce` fires on, a transition into
+`blocked` or `done` for a terminal no client has *visible*, decided beside the
+card in `noticeStatuses` because a dot and a card that disagreed about what
+deserves attention would be two policies to tune instead of one. It comes off
+when you look at the terminal, and also when the terminal goes back to work: the
+dot says something is waiting for you *now*, and an agent poked from the phone
+must not leave one on the desktop for work that has since resumed.
+
+Which makes the host's flag genuinely vestigial this time, and for a reason the
+first correction did not have available: a *status* reaches `index.ts` for every
+terminal whether or not it is being streamed, so there is no case left that only
+the host can see. It is not deleted — `agents/host.ts` costs the user every
+running agent to edit — so `overlay` replaces it rather than oring it in, which
+is one line and the whole of what leaving it there costs.
+
 **Rendering cost to measure, not assume.** ghostty-web runs a
 `requestAnimationFrame` loop per terminal and exposes no way to pause it, so a
 dozen pooled terminals are a dozen loops drawing to detached canvases. Measure

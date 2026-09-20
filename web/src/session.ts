@@ -24,14 +24,16 @@
 import { useSyncExternalStore } from "react";
 import type { Direction } from "../../shared/layout";
 import type { Action } from "../../shared/keys";
+import type { MascotConfig, PtyKind, SessionSnapshot, WorkspaceColor } from "../../shared/model";
 import type {
-  MascotConfig,
-  ProfileIdentity,
-  PtyKind,
-  SessionSnapshot,
-  WorkspaceColor,
-} from "../../shared/model";
-import type { ClientMessage, DevServer, Notification, ServerMessage } from "../../shared/wire";
+  AccountUsage,
+  ClientMessage,
+  DevServer,
+  Notification,
+  ServerMessage,
+  SupabaseDb,
+  WorkspaceBranch,
+} from "../../shared/wire";
 import type { NotifySettings } from "../../shared/notify";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { Grid } from "./grid";
@@ -47,11 +49,41 @@ export interface KururuState {
    * will want them is PLAN.md item 5.
    */
   devServers: DevServer[];
+  /**
+   * The workspaces with a local Supabase behind them, and whether it is up.
+   *
+   * Beside `devServers` rather than in the snapshot for the same reason that one
+   * is: it is discovered by polling the machine rather than decided by anything
+   * kururu owns, it changes on its own clock, and a client that reconnects gets
+   * the whole list rather than having to catch up.
+   */
+  supabase: SupabaseDb[];
+  /**
+   * The branch each workspace is on, for the workspaces that are in a repo.
+   *
+   * Beside the two above and for their reasons. It is the fastest-moving of the
+   * three and the one a person changes on purpose, which is why it is polled
+   * more often rather than folded into either of them.
+   */
+  branches: WorkspaceBranch[];
+  /**
+   * What this machine's Claude account has spent. Null until a reading has
+   * landed, which is not the same as a reading that says signed out — the
+   * sidebar draws neither, and only one of them is an answer.
+   */
+  usage: AccountUsage | null;
 }
 
 const RETRY_MS = [200, 500, 1000, 2000, 4000];
 
-let state: KururuState = { connected: false, snapshot: null, devServers: [] };
+let state: KururuState = {
+  connected: false,
+  snapshot: null,
+  devServers: [],
+  supabase: [],
+  branches: [],
+  usage: null,
+};
 
 const listeners = new Set<() => void>();
 let socket: WebSocket | null = null;
@@ -201,6 +233,15 @@ function connect(): void {
         break;
       case "dev-servers":
         set({ devServers: msg.servers });
+        break;
+      case "supabase":
+        set({ supabase: msg.dbs });
+        break;
+      case "branches":
+        set({ branches: msg.branches });
+        break;
+      case "usage":
+        set({ usage: msg.usage });
         break;
       case "output":
         for (const sink of sinks.get(msg.agentId) ?? []) deliver(() => sink.write(msg.data));
@@ -464,6 +505,14 @@ export function reorderAgent(agentId: string, beforeAgentId: string | null): voi
   send({ type: "reorder-agent", agentId, beforeAgentId });
 }
 
+/**
+ * Put a terminal away in the sidebar's list, or bring it back. The state rather
+ * than a toggle — see `hide-agent` in `shared/wire.ts`.
+ */
+export function hideAgent(agentId: string, hidden: boolean): void {
+  send({ type: "hide-agent", agentId, hidden });
+}
+
 export function renameTab(agentId: string, name: string): void {
   send({ type: "rename-tab", agentId, name });
 }
@@ -551,21 +600,21 @@ export function setWorkspaceColor(workspaceId: string, color: WorkspaceColor | n
 }
 
 /**
- * Open this workspace's next terminals as another profile's accounts, or `null`
- * to hand it back to the profile it lives in. A profile id and not an identity:
- * the paths stay the server's, and this only points at one of them.
- */
-export function setWorkspaceIdentity(workspaceId: string, profileId: string | null): void {
-  send({ type: "set-workspace-identity", workspaceId, profileId });
-}
-
-/**
  * The ▸ / ↻ on a workspace row. One verb for both faces of it: the server knows
  * better than this window whether anything is actually serving, since what the
  * button is drawn from is a scan up to three seconds old.
  */
 export function runDev(workspaceId: string): void {
   send({ type: "run-dev", workspaceId });
+}
+
+/**
+ * The database button on a workspace row. Which way it goes is stated rather
+ * than toggled, because the window has just put a confirmation in front of
+ * somebody naming one of the two — see `supabase-power` in `shared/wire.ts`.
+ */
+export function supabasePower(workspaceId: string, on: boolean): void {
+  send({ type: "supabase-power", workspaceId, on });
 }
 
 export function deleteWorkspace(workspaceId: string): void {
@@ -590,32 +639,6 @@ export function renameProfile(profileId: string, name: string): void {
 
 export function deleteProfile(profileId: string): void {
   send({ type: "delete-profile", profileId });
-}
-
-/**
- * Which accounts this profile opens terminals as. Sent whole rather than a field
- * at a time — the three are one decision and are edited on one page — and it
- * reaches the next pty rather than the ones already running.
- */
-export function setProfileIdentity(profileId: string, identity: ProfileIdentity): void {
-  send({ type: "set-profile-identity", profileId, identity });
-}
-
-/**
- * Use a github account by name. The server writes the config directory that
- * means it — a path is not the client's to invent — and points the profile at
- * it. Null hands the profile back to whatever gh itself is set to.
- */
-export function useGhAccount(profileId: string, account: { host: string; login: string } | null): void {
-  send({ type: "use-gh-account", profileId, account });
-}
-
-/**
- * Start a login for a profile. There is no reply and there is no dialog: what
- * happens is a terminal opening in that profile with the login prompt in it.
- */
-export function signIn(profileId: string, tool: "claude" | "gh"): void {
-  send({ type: "sign-in", profileId, tool });
 }
 
 /**

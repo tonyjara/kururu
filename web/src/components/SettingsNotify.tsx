@@ -93,10 +93,7 @@ export function NotifySettings({ notify }: { notify: NotifySettings }) {
       <section className="set-section">
         <h3 className="set-h">Notifications</h3>
         <p className="set-note">
-          An agent that wants you is the one thing kururu has to say while you are looking at
-          something else. It notifies for the terminals you cannot see — the other workspace, the
-          other profile, the window behind this one — and clicking the card takes you straight to
-          the agent that sent it.
+          For the terminals you cannot see. Clicking the card goes to the agent that sent it.
         </p>
 
         <label className="set-check set-check-row">
@@ -133,9 +130,7 @@ export function NotifySettings({ notify }: { notify: NotifySettings }) {
           Also for a terminal already on screen
         </label>
         <p className="set-note set-note-under">
-          Off, a pane you are looking at never interrupts you — the dot and the badge have said it
-          already. It is answered per device, so the desktop showing an agent does not stop the
-          phone in your pocket from being the thing that buzzes.
+          Answered per device: the desktop showing an agent does not silence the phone.
         </p>
       </fieldset>
 
@@ -179,8 +174,7 @@ export function NotifySettings({ notify }: { notify: NotifySettings }) {
         <p className="set-note set-note-under">
           {sounds === null
             ? "Looking for sounds…"
-            : "Picking one plays it. The machine's own alert sounds are listed too — they are the " +
-              "server's, converted on the way out, so the phone gets the same noise as the desktop."}
+            : "Picking one plays it. The machine's own alert sounds are in here too."}
         </p>
 
         <label className="set-row">
@@ -271,11 +265,8 @@ function Tried({ outcome }: { outcome: CardOutcome | "trying" | null }) {
   if (outcome.ok) {
     return (
       <p className="set-note set-note-under">
-        Sent, and the browser says it drew it. If no banner appeared, it was stopped after that
-        point — by the system rather than by kururu. On macOS: check that kururu is allowed in
-        System Settings → Notifications with its style set to Banners or Alerts rather than None,
-        and that no Focus is switched on. The sound is unaffected by either, which is why you can
-        hear this one and not see it.
+        Sent, and the browser says it drew it. If no banner appeared, the system stopped it after
+        that point — on macOS, check System Settings → Notifications and that no Focus is on.
       </p>
     );
   }

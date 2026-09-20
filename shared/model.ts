@@ -540,12 +540,18 @@ function clamp(value: unknown, low: number, high: number, fallback: number): num
  */
 export const WORKSPACE_COLORS = [
   "green",
-  "blue",
   "amber",
+  "sand",
   "coral",
-  "violet",
-  "cyan",
+  "red",
+  "brick",
+  "blush",
   "rose",
+  "violet",
+  "lavender",
+  "azure",
+  "blue",
+  "cyan",
   "lime",
 ] as const;
 
@@ -578,12 +584,24 @@ export interface Workspace {
    */
   lastPaneId: string | null;
   /**
-   * A tag, not a theme: it marks the workspace's number in the sidebar and rules
-   * a line down the left of every agent living in it, so "which of these is the
-   * one I have the browser open for" is answered by glancing rather than by
-   * reading. Null is the default and stays untagged rather than being assigned a
-   * colour automatically — a palette where everything is coloured says nothing,
-   * and the point of the mark is that you chose it.
+   * A tag, not a theme: it rules a line down the left of the workspace's row and
+   * down the left of every agent living in it, so "which of these is the one I
+   * have the browser open for" is answered by glancing rather than by reading.
+   *
+   * It used to be null by default, on the argument that a palette where
+   * everything is coloured says nothing and the point of the mark is that you
+   * chose it. That argument was wrong about which thing is scarce. Nobody
+   * chooses: a workspace is made in the middle of doing something else, and the
+   * colour picker is two gestures away from a list that is already legible at
+   * three rows — so the tags got set on the day somebody had six workspaces and
+   * needed them, which is the day *after* the one where they would have helped.
+   * `blankWorkspace` assigns one now, spreading across the palette rather than
+   * picking blind, and choosing stays exactly as available as it was.
+   *
+   * Null survives, and is still what the picker's "No colour" writes. It also
+   * remains what every workspace restored from a session written before this
+   * reads as — retagging those on load would be a version change rearranging a
+   * palette somebody had already arranged by hand.
    */
   color: WorkspaceColor | null;
   /**
@@ -596,31 +614,6 @@ export interface Workspace {
    * why nothing has to be cleaned up when one goes.
    */
   mascotId: string | null;
-  /**
-   * Whose accounts a terminal opened in here belongs to, or null for the
-   * profile the workspace lives in.
-   *
-   * A profile is one set of accounts across every workspace in it, which is
-   * right until the afternoon you are in your work profile and one of the
-   * repositories on screen is your own. The alternative was a second profile
-   * holding a copy of the workspace, and a copy is where the two start
-   * disagreeing: same project, same dev server, same colour, different window.
-   * So the override is per workspace and it names a *profile* rather than three
-   * paths — an identity has one home (`Profile.identity`, edited in Settings)
-   * and this is a pointer at it, so an account re-pointed there follows every
-   * workspace borrowing it.
-   *
-   * Null rather than a copy of the owning profile's id, for the reason `color`
-   * and `mascotId` are nullable: "I have not chosen" and "I chose the one I am
-   * already in" stay different, and only the first follows the workspace if it
-   * is ever moved. An id naming a profile that has since been deleted reads as
-   * null, which is why deleting one has nothing to clean up here.
-   *
-   * Like the profile's own identity, it reaches a pty at spawn and at no other
-   * time: changing it is a statement about the next terminal in this workspace,
-   * never about the ones already running in it.
-   */
-  identityProfileId: string | null;
   /**
    * The last dev server this workspace had serving, so it can be started again.
    * Null until one has been seen running in here.
@@ -658,80 +651,6 @@ export interface WorkspaceDev {
   agentId: string | null;
 }
 
-/**
- * Who a profile is, as pointers to the files that already hold the answer.
- *
- * Each of these is the environment variable the tool itself reads, and between
- * them they are what "my work account" means in practice. `CLAUDE_CONFIG_DIR`
- * scopes a Claude Code login completely — a directory that has not been logged
- * in to comes up logged out, so two of them are two accounts signed in at once
- * rather than a switch with global state. `GH_CONFIG_DIR` decides which of the
- * accounts already in gh's keyring is the active one, so no profile has to log
- * in again for an account another profile has added. `GIT_CONFIG_GLOBAL` is the
- * name a commit ends up with.
- *
- * Pointers rather than values, and that is the whole shape of this type. A
- * profile travels in every snapshot and is written to `session.json`, and kururu
- * is reachable from the tailnet, so a free-form environment map on here would be
- * a credential store that every client can read and that lands in plain text on
- * disk. A path is not a secret. The secrets stay where the tools already keep
- * them — the login keychain, and files the OS is already protecting — and kururu
- * never learns one; a profile that needs an API key names an `apiKeyHelper` in
- * the settings file the first of these paths points at.
- *
- * Null is "the machine's default", which is deliberately not the same as naming
- * the default directory: it follows `~/.claude` wherever that moves, the way a
- * workspace's null `mascotId` follows the default mascot rather than freezing a
- * copy of whatever was default the day it was chosen.
- */
-export interface ProfileIdentity {
-  /** CLAUDE_CONFIG_DIR: a whole Claude Code config directory, login included. */
-  claudeConfigDir: string | null;
-  /** GH_CONFIG_DIR: a `hosts.yml` naming which github account is active. */
-  ghConfigDir: string | null;
-  /** GIT_CONFIG_GLOBAL: the `.gitconfig` a commit takes its author from. */
-  gitConfigGlobal: string | null;
-}
-
-/** Nobody in particular — every tool as the machine has it. */
-export function blankIdentity(): ProfileIdentity {
-  return { claudeConfigDir: null, ghConfigDir: null, gitConfigGlobal: null };
-}
-
-/**
- * One path out of a client, or out of a blob an older server wrote.
- *
- * Refused rather than repaired, which is `set-workspace-color`'s rule and is
- * here for a plainer reason: there is no nearest legal value for a path. A
- * relative one is the only shape worth singling out — it would resolve against
- * whatever directory the terminal happened to open in, so `.config` would mean
- * a different account in every pane, which is precisely the bug this feature
- * exists to stop. `~` is left unexpanded because that is what a person types;
- * `server/src/identity.ts` expands it at spawn, where there is a home directory
- * to expand it against.
- */
-function adoptPath(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const path = value.trim();
-  if (!path) return null;
-  return path.startsWith("/") || path.startsWith("~/") || path === "~" ? path : null;
-}
-
-/** An identity out of a client or a restored blob, with the junk taken out. */
-export function adoptIdentity(value: unknown): ProfileIdentity {
-  const raw = (value ?? {}) as Record<string, unknown>;
-  return {
-    claudeConfigDir: adoptPath(raw.claudeConfigDir),
-    ghConfigDir: adoptPath(raw.ghConfigDir),
-    gitConfigGlobal: adoptPath(raw.gitConfigGlobal),
-  };
-}
-
-/** Whether anything has been chosen at all — what decides if a row says so. */
-export function hasIdentity(identity: ProfileIdentity): boolean {
-  return Boolean(identity.claudeConfigDir || identity.ghConfigDir || identity.gitConfigGlobal);
-}
-
 /** A named session: a list of workspaces, and which of them you are in. */
 export interface Profile {
   id: string;
@@ -744,13 +663,6 @@ export interface Profile {
    * rather than a walk through the list.
    */
   lastWorkspaceId: string | null;
-  /**
-   * Which accounts a terminal opened in here belongs to. Read at spawn and
-   * nowhere else, so changing it is a statement about the next terminal rather
-   * than about the five already running — the same way `Workspace.dev` is a
-   * memory of a command rather than a command.
-   */
-  identity: ProfileIdentity;
   /**
    * The order somebody dragged the sidebar's agent list into, by id.
    *
@@ -769,6 +681,29 @@ export interface Profile {
    * give the same list, and only one of them costs a write per snapshot.
    */
   agentOrder: string[];
+  /**
+   * The terminals the sidebar's list has been told to put away, by id.
+   *
+   * Hiding one is a statement about the *list* and about nothing else: the pty
+   * runs on, its tab is where it was, `prefix+a` still finds it by name, and a
+   * notification it earns is still delivered. The list is the one place in
+   * kururu that spans a whole profile, which is exactly what makes it the place
+   * that gets long — six agents you are working with and the four from this
+   * morning you have not got round to killing are the same list, and the second
+   * four are the ones you scroll past.
+   *
+   * Not a kill and not a close, which is the point: the row that offered only
+   * those two made "I am done looking at this" cost either a scroll or a turn.
+   *
+   * Ids of processes rather than structure, so it lives exactly where
+   * `agentOrder` lives and for the same reasons — in the host's blob, which
+   * survives a server restart alongside the terminals it names, and out of
+   * `persist.ts`, because a cold start has no agents to have put away. Ids that
+   * name nothing are ignored where they are read rather than pruned on the way
+   * in, which is the other half of that file's bargain: pruning would be a write
+   * per snapshot to reach the answer a filter already gives.
+   */
+  hiddenAgents: string[];
 }
 
 /** A profile you are not in, as much of it as a switcher needs to draw. */
@@ -778,13 +713,6 @@ export interface ProfileSummary {
   workspaces: number;
   /** Live ptys inside it. The reason switching away is not the same as closing. */
   agents: number;
-  /**
-   * Carried here as well as on the profile, which is the one thing a summary
-   * holds that a switcher does not need. Settings edits every profile on one
-   * page, and a page that could only reach the active one would have you visit
-   * a profile in order to describe it — filling in a form by standing in it.
-   */
-  identity: ProfileIdentity;
 }
 
 /**

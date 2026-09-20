@@ -33,8 +33,6 @@ building. Kururu is the other half.
 - **Rearranges by dragging**, a tab or a whole pane. Nothing is stopped by being
   moved.
 - **Organises.** Profiles hold workspaces, workspaces hold panes, panes hold tabs.
-- **Opens terminals as the right account** — a profile carries which Claude login
-  and which github account it spawns with.
 - **Is driven from a prefix**, `C-a` then a key, tmux-style.
 - **Shows status** — idle / working / blocked / done, unread marks, context rings.
 - **Is yours to dress:** themes, skins and mascots, with a registry of each.
@@ -147,7 +145,7 @@ Twice sends it through.
 | `C` / `N` `P` / `z` | new workspace / next, previous / last |
 | `W` `X` | rename / delete workspace |
 | `w` `a` | find workspace / agent |
-| `s` `S` | profiles — switch, rename, accounts / new profile |
+| `s` `S` | profiles — switch, rename / new profile |
 | `r` | resize mode — then `hjkl`, `esc` to leave |
 | `m` `b` | zen mode / toggle sidebar |
 | `g` | settings |
@@ -264,7 +262,7 @@ change reaches a second window and the phone without being told.
 |---|---|
 | **Appearance** | the theme, the skin, and what a terminal is set in |
 | **Styles** | themes, skins and mascots from the registry |
-| **Profiles** | the sessions, and which accounts they open terminals as |
+| **Profiles** | the sessions, and the workspaces in each of them |
 | **Mascot** | what the badge does while an agent is working |
 | **Keys** | what each key does after the prefix |
 
@@ -300,29 +298,18 @@ from kururu's own origin.
 
 ### Profiles
 
-Profiles are named sessions — a set of workspaces with their own layouts. The
-sidebar's profile name switches between them; this page renames, deletes, and
-gives them an **identity**: which accounts their terminals open as. Underneath it
-is three paths — `CLAUDE_CONFIG_DIR`, `GH_CONFIG_DIR`, `GIT_CONFIG_GLOBAL` — but
-the page offers the accounts the tools already know about, and a path appears only
-in the line underneath and behind `Custom…`.
+Profiles are named sessions — a set of workspaces with their own layouts, and
+nothing else. The sidebar's profile name switches between them; this page renames
+and deletes them.
 
-`CLAUDE_CONFIG_DIR` scopes a Claude Code login completely, so two profiles are two
-accounts signed in at once rather than a switch with global state.
+Switching away does not stop anything. One server owns every profile's ptys, so
+the agents in the profile you left are still running when you come back — which
+is the whole reason a profile is worth having rather than a second window.
 
-**Signing in is a terminal, not a dialog.** The button does the setup, then opens
-a new tab in the profile it is about and types the line you would have typed.
-
-**A profile is a pointer, never a secret** — three paths, not a free-form
-environment map, because a profile travels in every snapshot and kururu is
-reachable from the tailnet. Secrets stay in the keychain.
-
-A **workspace** can borrow another profile's accounts (right-click → **Accounts**)
-for the afternoon a repository of your own turns up in your work profile. It
-stores a pointer, so re-pointing the account follows every workspace borrowing it.
-
-The identity reaches a pty at spawn and at no other time: changing it is a
-statement about the next terminal, not the five already running.
+Profiles carried accounts for a version — a Claude config directory, a gh config
+directory, a gitconfig and an ssh key, applied to every terminal they spawned.
+That is gone. Having two accounts on one machine is a problem the tools own, and
+kururu's copy of it was a second place for a login to go wrong quietly.
 
 ### The mascot
 
@@ -467,8 +454,8 @@ window      finds a server and draws it — exactly as the phone does
 shared/     protocol types: the model, the split tree, the wire, the keymap,
             the themes and the skins. No runtime deps; imported by everything
 server/     Node. The pty host and its daemon, the arrangement and its snapshot,
-            markdown and highlighting, the styles registry, identities,
-            dev-server discovery, the preview proxy, the file API
+            markdown and highlighting, the styles registry, the plan-usage
+            reading, dev-server discovery, the preview proxy, the file API
 web/        React + Vite. Draws the server's layout; owns no state worth keeping
 desktop/    Electron main + preload, the address picker, the esbuild step for
             the server, and the branding stamped into the dev shell

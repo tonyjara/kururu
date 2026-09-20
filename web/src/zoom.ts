@@ -12,7 +12,7 @@
  *
  * What is stored is a **multiplier on the skin's type step**, never a pixel size.
  * `--fs-lg` is what the reader is set in and a skin is entitled to move it —
- * Teletype from the registry sets it to 12px where the default sets 13, and a
+ * a monospace chrome might set it to 12px where the default sets 13, and a
  * pixel chrome would go further — so a saved px would be a zoom that quietly
  * undid a skin. It is applied as one custom property
  * on the root element, which is `--sidebar-w`'s trick: the whole document is laid

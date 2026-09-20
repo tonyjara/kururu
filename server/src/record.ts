@@ -38,15 +38,12 @@ const BUDGET = 128 * 1024;
 const ON = process.env.KURURU_RECORD !== "0";
 
 /**
- * `dev` and `sign-in` are kururu typing into a terminal on its own account — the
- * workspace row's ▸ and ↻, and the button that starts a login for a profile.
- * Each is a note beside the `in` that carries the bytes rather than a kind of
- * its own for them, because a tape read after the fact cannot otherwise tell a
- * line somebody typed from one a button did. Two names rather than one because
- * the tape is read when something went wrong and *which* button did it is the
- * first thing you want to know.
+ * `dev` is kururu typing into a terminal on its own account — the workspace
+ * row's ▸ and ↻. It is a note beside the `in` that carries the bytes rather
+ * than a kind of its own, because a tape read after the fact cannot otherwise
+ * tell a line somebody typed from one a button did.
  */
-type Kind = "out" | "in" | "resize" | "watch" | "backlog" | "replayed" | "dev" | "sign-in";
+type Kind = "out" | "in" | "resize" | "watch" | "backlog" | "replayed" | "dev";
 
 interface Entry {
   at: number;

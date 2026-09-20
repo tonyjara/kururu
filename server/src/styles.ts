@@ -50,14 +50,19 @@ import {
   adoptIndex,
   adoptInstalled,
   adoptMascotManifest,
+  adoptPackManifest,
   adoptSkinManifest,
+  adoptSoundManifest,
   adoptThemeManifest,
   ASSET_PATH,
   compareVersions,
   EMPTY_LIBRARY,
   isAssetName,
   isStyleKind,
+  SOUND_FORMATS,
+  STYLE_KINDS,
   type InstalledStyle,
+  type PackManifest,
   type StyleEntry,
   type StyleIndex,
   type StyleKind,
@@ -83,7 +88,7 @@ export function stylesDir(): string {
   return configPath("styles");
 }
 
-function entryDir(kind: StyleKind, id: string): string {
+export function entryDir(kind: StyleKind, id: string): string {
   return join(stylesDir(), `${kind}s`, id);
 }
 
@@ -108,7 +113,7 @@ const FETCH_TIMEOUT = 12_000;
 // What is installed
 // ---------------------------------------------------------------------------
 
-function readRecords(): InstalledStyle[] {
+export function readRecords(): InstalledStyle[] {
   try {
     return adoptInstalled(JSON.parse(readFileSync(configPath(INSTALLED), "utf8")));
   } catch {
@@ -116,7 +121,7 @@ function readRecords(): InstalledStyle[] {
   }
 }
 
-function writeRecords(list: InstalledStyle[]): void {
+export function writeRecords(list: InstalledStyle[]): void {
   const path = configPath(INSTALLED);
   try {
     mkdirSync(stylesDir(), { recursive: true });
@@ -156,13 +161,92 @@ export function readLibrary(): StyleLibrary {
       if (theme && theme.id === record.id) themes.push(theme);
     }
     if (record.kind === "skin") {
-      const skin = adoptSkinManifest(rewriteAssets(manifest, record), (file) =>
-        record.files.includes(file) ? assetUrl("skin", record.id, file) : null,
+      const skin = adoptSkinManifest(
+        rewriteAssets(manifest, record),
+        (file) => (record.files.includes(file) ? assetUrl("skin", record.id, file) : null),
+        (file) => (record.files.includes(file) ? measureImage(join(entryDir("skin", record.id), file)) : null),
+        // A skin of yours is kept even before it moves anything — see the
+        // parameter, and `studio.ts` for why an empty one has to be wearable.
+        record.local === true,
       );
       if (skin && skin.id === record.id) skins.push(skin);
     }
   }
   return { themes, skins, installed: records };
+}
+
+/**
+ * The sounds installed from the registry, as the picker needs them.
+ *
+ * Not part of `StyleLibrary`, and the omission is the point. That structure is
+ * *resolved* styles — a `Theme` and a `Skin` the client can draw from the
+ * snapshot — and a sound is not drawable: it is bytes fetched by id, on demand,
+ * by whichever client is about to make a noise. So it is a lookup the sound
+ * catalogue does when somebody opens a dropdown, rather than a field on every
+ * snapshot that no window would read.
+ *
+ * The absolute path is resolved here rather than handed out as a name for
+ * `sounds.ts` to join, which is the same rule `assetFile` follows for the same
+ * reason: an id off the wire is matched against a list of things that exist,
+ * and there is no concatenation for a `..` to survive.
+ */
+export function installedSounds(): { id: string; name: string; path: string }[] {
+  const out: { id: string; name: string; path: string }[] = [];
+  for (const record of readRecords()) {
+    if (record.kind !== "sound") continue;
+    const sound = adoptSoundManifest(readManifest("sound", record.id));
+    // A record whose manifest disagrees with it about its own id is the same
+    // case `readLibrary` skips: not offered, and reinstalling fixes it.
+    if (!sound || sound.id !== record.id || !record.files.includes(sound.file)) continue;
+    const path = join(entryDir("sound", record.id), sound.file);
+    if (!existsSync(path)) continue;
+    // The record's name, not the manifest's: it is the one the Styles tab
+    // listed and therefore the one somebody thinks they installed.
+    out.push({ id: record.id, name: record.name || sound.name, path });
+  }
+  return out;
+}
+
+/**
+ * What a pack on disk says it is, or null.
+ *
+ * Here rather than read through `InstallResult.manifest` because the interesting
+ * moment is no longer the install. A pack is *worn*, and wearing one is
+ * something somebody does months later from Settings → Appearance, with no
+ * network and nothing downloaded — so what it names has to be readable from the
+ * copy on the machine, which is the same promise the rest of the registry makes.
+ *
+ * The record is checked for existing first, so a `pack.json` sitting in an
+ * orphaned directory that `installed.json` does not know about is not wearable.
+ * That is `readLibrary`'s rule and `orphans()` explains why such directories are
+ * a thing that happens.
+ */
+export function installedPack(id: string): PackManifest | null {
+  if (!isStyleId(id)) return null;
+  const record = readRecords().find((r) => r.kind === "pack" && r.id === id);
+  if (!record) return null;
+  const pack = adoptPackManifest(readManifest("pack", id));
+  return pack && pack.id === id ? { ...pack, name: record.name || pack.name } : null;
+}
+
+export const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/**
+ * A PNG's width and height off its IHDR — twenty-four bytes, no image library.
+ * The one measurement the skin format needs: a tile is drawn at `scale` times
+ * its own size, and the manifest cannot say what that size is because it is a
+ * fact about the file rather than a decision about the skin.
+ */
+export function measureImage(path: string): [number, number] | null {
+  try {
+    const b = readFileSync(path);
+    if (b.length < 24 || !b.subarray(0, 8).equals(PNG_MAGIC)) return null;
+    const w = b.readUInt32BE(16);
+    const h = b.readUInt32BE(20);
+    return w > 0 && h > 0 ? [w, h] : null;
+  } catch {
+    return null;
+  }
 }
 
 function readManifest(kind: StyleKind, id: string): unknown {
@@ -290,7 +374,10 @@ export interface CatalogEntry extends StyleEntry {
 }
 
 export function annotate(index: StyleIndex, installed: InstalledStyle[]): CatalogEntry[] {
-  const have = new Map(installed.map((r) => [`${r.kind}/${r.id}`, r]));
+  // A skin of yours under a registry entry's id is not that entry installed,
+  // and offering to "update" it would be offering to replace your work with a
+  // stranger's — which `install` refuses, so the row must not offer it either.
+  const have = new Map(installed.filter((r) => !r.local).map((r) => [`${r.kind}/${r.id}`, r]));
   return index.entries.map((entry) => {
     const mine = have.get(`${entry.kind}/${entry.id}`);
     return {
@@ -327,14 +414,47 @@ export function annotate(index: StyleIndex, installed: InstalledStyle[]): Catalo
 const previews = new Map<string, Buffer>();
 const PREVIEW_CACHE = 24;
 
-export async function preview(kind: string, id: string): Promise<{ bytes: Buffer; file: string } | null> {
+/**
+ * What may be proxied: a picture, or a noise.
+ *
+ * The audio half is the same argument the mascot's sheet makes, and
+ * `docs/notifications.md` already made it about the Notifications tab — *a list
+ * of words is not a list of noises*. A sound described rather than played is a
+ * sound you have to install to find out about, and then uninstall, which is a
+ * worse version of the problem the picker was built to solve. The formats are
+ * `SOUND_FORMATS`' three, so nothing reaches a browser that the browser cannot
+ * decode on its own.
+ */
+const PREVIEWABLE = new RegExp(`\\.(png|webp|gif|jpe?g|${SOUND_FORMATS.map((e) => e.slice(1)).join("|")})$`, "i");
+
+export async function preview(kind: string, id: string, name: string | null = null): Promise<{ bytes: Buffer; file: string } | null> {
   if (!isStyleKind(kind) || !isStyleId(id)) return null;
-  const { index } = await catalog();
+  if (name !== null && !isAssetName(name)) return null;
+
+  // Against the catalogue as cached first, and against a fresh one if that
+  // does not work out. The registry moves on under the ten-minute cache — a
+  // merge rebuilds `index.json` and every digest in it — and GitHub's own CDN
+  // holds the index and the files for a few minutes each, not necessarily the
+  // same few. So a picture that is not the one the cached index promises is
+  // the ordinary state of affairs for a while after every publish, and the
+  // right reading of it is "look again", not "the registry is lying". Only a
+  // picture that still fails against a catalogue fetched just now is refused.
+  const first = await lookup(kind, id, name, false);
+  if (first) return first;
+  return lookup(kind, id, name, true);
+}
+
+async function lookup(kind: StyleKind, id: string, name: string | null, fresh: boolean): Promise<{ bytes: Buffer; file: string } | null> {
+  const { index } = await catalog(fresh);
   if (!index) return null;
   const entry = index.entries.find((e) => e.kind === kind && e.id === id);
   if (!entry) return null;
-  const file = entry.files.find((f) => /\.(png|webp|gif|jpe?g)$/i.test(f.name));
-  if (!file) return null;
+  // A particular file when asked — a skin's `shot.png` — and otherwise the
+  // first previewable one, which for a mascot is its sheet and for a sound is
+  // the sound. Either way it is a name checked against the entry's own list,
+  // never a path.
+  const file = entry.files.find((f) => (name ? f.name === name : PREVIEWABLE.test(f.name)));
+  if (!file || !PREVIEWABLE.test(file.name)) return null;
 
   const key = `${kind}/${id}/${file.digest}`;
   const already = previews.get(key);
@@ -414,6 +534,9 @@ export async function install(kind: string, id: string): Promise<InstallResult> 
 
   const total = entry.files.reduce((n, f) => n + f.size, 0);
   if (total > ENTRY_LIMIT) return { ok: false, error: "that style is larger than kururu will install" };
+  if (readRecords().some((r) => r.kind === kind && r.id === id && r.local)) {
+    return { ok: false, error: `there is a ${kind} of yours called ${id} — rename or remove it first` };
+  }
 
   const bytes = new Map<string, Buffer>();
   for (const file of entry.files) {
@@ -540,7 +663,7 @@ export function remove(kind: string, id: string): RemoveResult {
 export function orphans(): string[] {
   const known = new Set(readRecords().map((r) => `${r.kind}s/${r.id}`));
   const out: string[] = [];
-  for (const kind of ["theme", "skin", "mascot", "pack"] as StyleKind[]) {
+  for (const kind of STYLE_KINDS) {
     const dir = join(stylesDir(), `${kind}s`);
     try {
       for (const name of readdirSync(dir)) {

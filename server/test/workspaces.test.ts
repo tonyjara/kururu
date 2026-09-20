@@ -9,7 +9,8 @@
  */
 import { describe, expect, it } from "bun:test";
 import { panes } from "../../shared/layout";
-import { Workspaces, nextId, orderAgents } from "../src/workspaces";
+import { Workspaces, nextColor, nextId, orderAgents } from "../src/workspaces";
+import { WORKSPACE_COLORS } from "../../shared/model";
 
 describe("split", () => {
   it("returns the pane it made, and it is in the tree", () => {
@@ -56,7 +57,6 @@ describe("setWorkspaceColor", () => {
   it("tags a workspace, and unsets it with null", () => {
     const workspaces = new Workspaces();
     const id = workspaces.activeWorkspace.id;
-    expect(workspaces.activeWorkspace.color).toBeNull();
 
     workspaces.setWorkspaceColor(id, "violet");
     expect(workspaces.activeWorkspace.color).toBe("violet");
@@ -70,7 +70,10 @@ describe("setWorkspaceColor", () => {
     const id = workspaces.activeWorkspace.id;
     workspaces.setWorkspaceColor(id, "violet");
 
-    for (const junk of ["red", "#ff0000", "url(javascript:0)", "", 7, {}, undefined]) {
+    // `crimson` rather than `red`, which this list used to carry and which is a
+    // real tag now. The point of the case is a CSS colour word the palette does
+    // not name, and the palette grew into the old example.
+    for (const junk of ["crimson", "#ff0000", "url(javascript:0)", "", 7, {}, undefined]) {
       workspaces.setWorkspaceColor(id, junk);
       expect(workspaces.activeWorkspace.color).toBe("violet");
     }
@@ -78,127 +81,54 @@ describe("setWorkspaceColor", () => {
 
   it("does nothing at all for a workspace that is not there", () => {
     const workspaces = new Workspaces();
+    const had = workspaces.activeWorkspace.color;
     workspaces.setWorkspaceColor("w-nope", "cyan");
-    expect(workspaces.activeWorkspace.color).toBeNull();
+    expect(workspaces.activeWorkspace.color).toBe(had);
   });
+});
 
-  it("gives a new workspace no colour rather than one off the shelf", () => {
+/**
+ * The colour a new workspace is born with.
+ *
+ * The interesting property is not which colour comes out — it is random on
+ * purpose — but that it does not repeat while there is anything left to repeat
+ * with. That is the whole reason this is a function rather than one line inside
+ * `blankWorkspace`, and it is the one part of it a test can hold.
+ */
+describe("nextColor", () => {
+  it("gives a new workspace a colour rather than leaving it blank", () => {
     const workspaces = new Workspaces();
     const id = workspaces.newWorkspace("second");
-    expect(workspaces.active.workspaces.find((w) => w.id === id)?.color).toBeNull();
-  });
-});
-
-describe("setProfileIdentity", () => {
-  it("lands on the profile named, not on the one you are standing in", () => {
-    const workspaces = new Workspaces();
-    const here = workspaces.active.id;
-    const there = workspaces.newProfile("work");
-    workspaces.switchProfile(here);
-
-    workspaces.setProfileIdentity(there, {
-      claudeConfigDir: "/w/claude",
-      ghConfigDir: null,
-      gitConfigGlobal: null,
-    });
-
-    expect(workspaces.active.id).toBe(here);
-    expect(workspaces.identityOf(there).claudeConfigDir).toBe("/w/claude");
-    expect(workspaces.identityOf(here).claudeConfigDir).toBeNull();
+    const color = workspaces.active.workspaces.find((w) => w.id === id)?.color;
+    expect(WORKSPACE_COLORS).toContain(color!);
   });
 
-  it("is carried on the summaries, which is how Settings can edit all of them", () => {
+  it("never repeats while the palette has anything left", () => {
     const workspaces = new Workspaces();
-    const id = workspaces.active.id;
-    workspaces.setProfileIdentity(id, {
-      claudeConfigDir: null,
-      ghConfigDir: "/w/gh",
-      gitConfigGlobal: null,
-    });
-    expect(workspaces.summaries(() => 0)[0]?.identity.ghConfigDir).toBe("/w/gh");
+    for (let i = 0; i < WORKSPACE_COLORS.length - 1; i++) workspaces.newWorkspace(`ws${i}`);
+    const worn = workspaces.active.workspaces.map((w) => w.color);
+    expect(worn.length).toBe(WORKSPACE_COLORS.length);
+    expect(new Set(worn).size).toBe(WORKSPACE_COLORS.length);
   });
 
-  it("ignores a profile that is not there rather than inventing one", () => {
-    const workspaces = new Workspaces();
-    workspaces.setProfileIdentity("nope", {
-      claudeConfigDir: "/w/claude",
-      ghConfigDir: null,
-      gitConfigGlobal: null,
-    });
-    expect(workspaces.all()).toHaveLength(1);
-    expect(workspaces.identityOf("nope").claudeConfigDir).toBeNull();
-  });
-});
-
-describe("setWorkspaceIdentity", () => {
-  /** A profile with somebody claimed, so borrowing it has something to show. */
-  function withAccounts(workspaces: Workspaces, name: string, claude: string): string {
-    const here = workspaces.active.id;
-    const id = workspaces.newProfile(name);
-    workspaces.setProfileIdentity(id, {
-      claudeConfigDir: claude,
-      ghConfigDir: null,
-      gitConfigGlobal: null,
-    });
-    workspaces.switchProfile(here);
-    return id;
-  }
-
-  it("opens a borrowing workspace's terminals as the profile it points at", () => {
-    const workspaces = new Workspaces();
-    const work = withAccounts(workspaces, "work", "/w/claude");
-    const mixed = workspaces.newWorkspace("theirs");
-
-    workspaces.setWorkspaceIdentity(mixed, work);
-
-    expect(workspaces.identityForWorkspace(mixed).claudeConfigDir).toBe("/w/claude");
+  it("takes the one colour left when every other is taken", () => {
+    const taken = WORKSPACE_COLORS.filter((c) => c !== "blush");
+    expect(nextColor(taken)).toBe("blush");
   });
 
-  it("leaves every other workspace on the profile it lives in", () => {
-    const workspaces = new Workspaces();
-    const work = withAccounts(workspaces, "work", "/w/claude");
-    const own = workspaces.activeWorkspace.id;
-    const mixed = workspaces.newWorkspace("theirs");
-    workspaces.setWorkspaceIdentity(mixed, work);
-
-    expect(workspaces.identityForWorkspace(own).claudeConfigDir).toBeNull();
+  /**
+   * Past the end of the palette it starts again rather than giving up, and it
+   * starts with the colours used once rather than with the ones used twice.
+   */
+  it("spreads the second time round too", () => {
+    const twice = [...WORKSPACE_COLORS, ...WORKSPACE_COLORS.filter((c) => c !== "cyan")];
+    expect(nextColor(twice)).toBe("cyan");
   });
 
-  it("hands a workspace back with null rather than by naming its own profile", () => {
-    const workspaces = new Workspaces();
-    const work = withAccounts(workspaces, "work", "/w/claude");
-    const mixed = workspaces.activeWorkspace.id;
-    workspaces.setWorkspaceIdentity(mixed, work);
-
-    workspaces.setWorkspaceIdentity(mixed, null);
-
-    expect(workspaces.workspaceById(mixed)?.identityProfileId).toBeNull();
-    expect(workspaces.identityForWorkspace(mixed).claudeConfigDir).toBeNull();
-  });
-
-  it("refuses a profile that is not there rather than storing a dead pointer", () => {
-    const workspaces = new Workspaces();
-    const mixed = workspaces.activeWorkspace.id;
-    workspaces.setWorkspaceIdentity(mixed, "nope");
-    expect(workspaces.workspaceById(mixed)?.identityProfileId).toBeNull();
-  });
-
-  it("falls back to the profile you are in once the borrowed one is deleted", () => {
-    // The pointer is deliberately not cleaned up when a profile goes — the
-    // fallback is the same answer a cleanup would have produced, which is why
-    // deleting a profile has nothing to chase.
-    const workspaces = new Workspaces();
-    const work = withAccounts(workspaces, "work", "/w/claude");
-    const mixed = workspaces.activeWorkspace.id;
-    workspaces.setWorkspaceIdentity(mixed, work);
-    workspaces.deleteProfile(work);
-
-    expect(workspaces.identityForWorkspace(mixed).claudeConfigDir).toBeNull();
-  });
-
-  it("is a statement about the next terminal, so an unknown workspace is not an error", () => {
-    const workspaces = new Workspaces();
-    expect(workspaces.identityForWorkspace("nope").claudeConfigDir).toBeNull();
+  /** An untagged workspace is not a colour and does not push the next one. */
+  it("ignores the ones nobody tagged", () => {
+    const taken = [...WORKSPACE_COLORS.filter((c) => c !== "sand"), null, null, null];
+    expect(nextColor(taken)).toBe("sand");
   });
 });
 
@@ -323,49 +253,6 @@ describe("adopting a restored profile", () => {
 
     const after = new Workspaces(stale);
     expect(after.activeWorkspace.color).toBeNull();
-  });
-
-  it("fills in an identity a previous version of the server never wrote", () => {
-    // A blob from before profiles had one at all: the field is simply absent,
-    // and an `undefined` where the type promises three nulls is the class of
-    // bug `adopt` exists for.
-    const before = new Workspaces();
-    const stale = JSON.parse(JSON.stringify(before.all()), (key, value) =>
-      key === "identity" ? undefined : value,
-    );
-    expect(stale[0]).not.toHaveProperty("identity");
-
-    const after = new Workspaces(stale);
-    expect(after.active.identity).toEqual({
-      claudeConfigDir: null,
-      ghConfigDir: null,
-      gitConfigGlobal: null,
-    });
-  });
-
-  it("fills in a borrowed profile a previous version of the server never wrote", () => {
-    const before = new Workspaces();
-    const stale = JSON.parse(JSON.stringify(before.all()), (key, value) =>
-      key === "identityProfileId" ? undefined : value,
-    );
-    expect(stale[0].workspaces[0]).not.toHaveProperty("identityProfileId");
-
-    const after = new Workspaces(stale);
-    expect(after.activeWorkspace.identityProfileId).toBeNull();
-  });
-
-  it("drops a stored path that has stopped being absolute", () => {
-    const before = new Workspaces();
-    before.setProfileIdentity(before.active.id, {
-      claudeConfigDir: "/w/claude",
-      ghConfigDir: null,
-      gitConfigGlobal: null,
-    });
-    const stale = JSON.parse(JSON.stringify(before.all()));
-    stale[0].identity.claudeConfigDir = "relative/claude";
-
-    const after = new Workspaces(stale);
-    expect(after.active.identity.claudeConfigDir).toBeNull();
   });
 });
 
@@ -587,5 +474,54 @@ describe("reorderAgent", () => {
     const { workspaces, ids } = three();
     workspaces.reorderAgent("nobody", "a1", ids);
     expect(orderAgents(ids, workspaces.active.agentOrder)).toEqual(ids);
+  });
+});
+
+/**
+ * Putting a row away, which is the one verb in here that is about the sidebar's
+ * list and about nothing else. So the tests that matter are the ones that check
+ * it is about nothing else: the tab is where it was, and the second client's
+ * message arriving after the first one won is not an error.
+ */
+describe("setAgentHidden", () => {
+  const three = (): { workspaces: Workspaces; ids: string[] } => {
+    const workspaces = new Workspaces();
+    const ids = ["a1", "a2", "a3"];
+    for (const id of ids) workspaces.addTab(id, "/home/you/project");
+    return { workspaces, ids };
+  };
+
+  it("puts a terminal away and brings it back", () => {
+    const { workspaces } = three();
+    workspaces.setAgentHidden("a2", true);
+    expect(workspaces.active.hiddenAgents).toEqual(["a2"]);
+    workspaces.setAgentHidden("a2", false);
+    expect(workspaces.active.hiddenAgents).toEqual([]);
+  });
+
+  it("holds a terminal in the list once, however many clients ask", () => {
+    const { workspaces } = three();
+    workspaces.setAgentHidden("a2", true);
+    workspaces.setAgentHidden("a2", true);
+    expect(workspaces.active.hiddenAgents).toEqual(["a2"]);
+  });
+
+  it("is not an error to show one that was never put away", () => {
+    const { workspaces } = three();
+    workspaces.setAgentHidden("a1", false);
+    expect(workspaces.active.hiddenAgents).toEqual([]);
+  });
+
+  it("moves nothing: the tab is in the pane it was in", () => {
+    const { workspaces, ids } = three();
+    const pane = workspaces.focusedPaneId;
+    workspaces.setAgentHidden("a2", true);
+    expect(panes(workspaces.activeWorkspace.layout).find((p) => p.id === pane)?.agentIds).toEqual(ids);
+  });
+
+  it("ignores a terminal this profile does not hold", () => {
+    const { workspaces } = three();
+    workspaces.setAgentHidden("nobody", true);
+    expect(workspaces.active.hiddenAgents).toEqual([]);
   });
 });

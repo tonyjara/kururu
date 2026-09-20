@@ -9,6 +9,14 @@
  * kururu wrote, and a picker with nothing in it but our own frog is a picker that
  * makes the setting look decorative.
  *
+ * **And a third source, which is the only one anybody chose: the styles
+ * registry.** A `sound` entry is a style like a theme is, so a pack can name the
+ * noise its window makes along with its palette and its sprite — the coin a
+ * brick-and-sky pack wants is not in `/System/Library/Sounds` and never will be.
+ * It arrives through `server/src/styles.ts` rather than a `readdir` here, which
+ * is why it is the one source in this file whose path was verified against
+ * `installed.json` before it was offered.
+ *
  * **Every one of those system sounds is AIFF, and Chromium cannot decode AIFF.**
  * Measured rather than assumed — `canPlayType("audio/aiff")` returns the empty
  * string in Electron 44 and `decodeAudioData` throws — so serving the file as it
@@ -35,6 +43,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, extname, join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { installedSounds } from "./styles";
 
 const run = promisify(execFile);
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -82,12 +91,17 @@ const PLAYABLE: Record<string, string> = {
 /** Apple's own formats, which no browser decodes. See the header. */
 const CONVERTIBLE = new Set([".aiff", ".aif", ".aifc", ".caf"]);
 
-export type SoundKind = "kururu" | "system";
+export type SoundKind = "kururu" | "style" | "system";
 
 /** One row of the dropdown. */
 export interface SoundInfo {
   id: string;
-  /** What to show. The id, which for these files is already the name. */
+  /**
+   * What to show. For a file on the machine that is the id, which for these is
+   * already the name; for a style it is the name the registry gave it, because
+   * the row in the Styles tab said *Coin* and the dropdown saying `coin` would
+   * be kururu using two words for one thing.
+   */
   name: string;
   kind: SoundKind;
 }
@@ -138,8 +152,10 @@ function existsFile(path: string): boolean {
  * frame, and re-reading is what makes a file dropped into `~/Library/Sounds`
  * appear without a restart.
  *
- * First wins a tie — kururu's own, then the user's, then the system's — and the
- * whole file is ordered so that "first" means "most deliberately chosen".
+ * First wins a tie — kururu's own, then what somebody installed, then the user's
+ * own files, then the system's — and the whole file is ordered so that "first"
+ * means "most deliberately chosen", with the one deliberate exception argued
+ * for below.
  */
 function catalogue(): Entry[] {
   const found = new Map<string, Entry>();
@@ -159,16 +175,37 @@ function catalogue(): Entry[] {
     }
   };
   take(ASSETS, "kururu");
+  /**
+   * A sound installed from the styles registry — the noise a pack makes.
+   *
+   * Between the two, and the position is an argument rather than an accident.
+   * It is *after* kururu's own because these ids come from the registry and
+   * kururu's default sound must not be shadowable by an entry somebody merged:
+   * `notify.json` says `croak` and it has to keep meaning the croak. It is
+   * *before* the machine's because installing one is a deliberate act and
+   * `/System/Library/Sounds` is merely what the OS happens to contain — which
+   * is the ordering rule the rest of this file already follows.
+   *
+   * It is also the one source whose path does not come from a `readdir` here:
+   * `installedSounds` resolves it against `installed.json`, so the two-sided
+   * name check that every other style asset gets applies to this one too.
+   */
+  for (const sound of installedSounds()) {
+    const ext = extname(sound.path).toLowerCase();
+    if (!PLAYABLE[ext]) continue;
+    if (found.has(sound.id)) continue;
+    found.set(sound.id, { id: sound.id, name: sound.name, kind: "style", path: sound.path, ext });
+  }
   for (const dir of systemDirs()) take(dir, "system");
   return [...found.values()];
 }
 
-/** What the picker draws. Ours first, then the machine's, each alphabetical. */
+/** What the picker draws, in the order the catalogue was built. */
 export function sounds(): SoundInfo[] {
   const all = catalogue();
   const order = (kind: SoundKind) =>
     all.filter((entry) => entry.kind === kind).map(({ id, name, kind: k }) => ({ id, name, kind: k }));
-  return [...order("kururu"), ...order("system")];
+  return [...order("kururu"), ...order("style"), ...order("system")];
 }
 
 /**

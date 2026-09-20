@@ -23,15 +23,21 @@
  */
 import { describe, expect, it } from "bun:test";
 import {
+  adoptColors,
+  adoptIconSheet,
   adoptIndex,
+  adoptPackManifest,
+  adoptPaint,
   adoptSkinManifest,
+  adoptSoundManifest,
+  isSoundFile,
   adoptThemeManifest,
   compareVersions,
   cssValue,
   isAssetName,
   isVersion,
 } from "../../shared/styles";
-import { skinFor } from "../../shared/skin";
+import { ICON_NAMES, skinFor } from "../../shared/skin";
 import { themeFor } from "../../shared/theme";
 
 describe("compareVersions", () => {
@@ -281,5 +287,246 @@ describe("adoptSkinManifest", () => {
       asset,
     );
     expect(skin?.fonts).toBeUndefined();
+  });
+});
+
+/**
+ * The parts, the colours and the icon strip — the half of a skin that arrived
+ * with the studio. Each is somebody else's file name or number on its way to a
+ * property the whole window reads, and each gets the mascot's treatment: a
+ * number bends to the nearest legal value, a name that is not a file the entry
+ * shipped falls back to nothing painted.
+ */
+describe("adoptSkinManifest, the pictures", () => {
+  const asset = (file: string) => (["bezel.png", "tile.png", "icons.png", "wide.png"].includes(file) ? `/api/styles/asset?file=${file}` : null);
+  const measure = (file: string): [number, number] | null =>
+    file === "tile.png" ? [16, 16] : file === "icons.png" ? [ICON_NAMES.length * 12, 12] : file === "wide.png" ? [100, 12] : null;
+
+  it("takes a part that names a shipped picture, and drops one that does not", () => {
+    const skin = adoptSkinManifest(
+      {
+        id: "bezelled",
+        parts: {
+          pane: { image: "bezel.png", mode: "nine", slice: 8, scale: 3, repeat: "repeat" },
+          sidebar: { image: "missing.png", mode: "tile" },
+        },
+      },
+      asset,
+      measure,
+    );
+    expect(skin?.parts.pane).toEqual({
+      image: "/api/styles/asset?file=bezel.png",
+      mode: "nine",
+      slice: [8, 8, 8, 8],
+      scale: 3,
+      repeat: "repeat",
+    });
+    expect(skin?.parts.sidebar).toBeUndefined();
+  });
+
+  it("measures a tile and leaves a nine unmeasured", () => {
+    const skin = adoptSkinManifest(
+      { id: "t", parts: { sidebar: { image: "tile.png", mode: "tile", scale: 2 }, pane: { image: "bezel.png", mode: "nine", slice: 4 } } },
+      asset,
+      measure,
+    );
+    expect(skin?.parts.sidebar?.size).toEqual([16, 16]);
+    expect(skin?.parts.pane?.size).toBeUndefined();
+  });
+
+  it("clamps the numbers rather than refusing the part", () => {
+    const paint = adoptPaint({ image: "bezel.png", mode: "nine", slice: [1, 2, 3, 9999], scale: 40 }, asset, measure);
+    expect(paint?.slice).toEqual([1, 2, 3, 512]);
+    expect(paint?.scale).toBe(8);
+    expect(adoptPaint({ image: "bezel.png", mode: "nonsense", repeat: "nonsense", slice: "x" }, asset, measure)).toEqual({
+      image: "/api/styles/asset?file=bezel.png",
+      mode: "nine",
+      slice: [0, 0, 0, 0],
+      scale: 1,
+      repeat: "stretch",
+    });
+  });
+
+  it("never takes a part that is a path or a URL", () => {
+    expect(adoptPaint({ image: "../../etc/passwd" }, asset, measure)).toBeNull();
+    expect(adoptPaint({ image: "https://x/y.png" }, asset, measure)).toBeNull();
+    expect(adoptPaint({ image: "bezel.png" }, () => null, measure)).toBeNull();
+  });
+
+  it("is a skin on the strength of a picture alone", () => {
+    const skin = adoptSkinManifest({ id: "pictures", parts: { pane: { image: "bezel.png", slice: 4 } } }, asset, measure);
+    expect(skin).not.toBeNull();
+    expect(skin?.tokens).toEqual(skinFor(null).tokens);
+  });
+
+  it("takes chrome colours and only chrome colours", () => {
+    expect(adoptColors({ text: "#ffffff", background: "#000000", red: "#ff0000", nonsense: "#123456" })).toEqual({ text: "#ffffff" });
+    expect(adoptColors({ text: "url(https://x)" })).toBeNull();
+    expect(adoptColors({})).toBeNull();
+    const skin = adoptSkinManifest({ id: "c", colors: { chrome: "#222222" } }, asset, measure);
+    expect(skin?.colors).toEqual({ chrome: "#222222" });
+  });
+
+  it("takes an icon strip that is one cell tall and as many wide as there are icons", () => {
+    expect(adoptIconSheet({ image: "icons.png", mode: "image" }, asset, measure)).toEqual({ src: "/api/styles/asset?file=icons.png", mode: "image" });
+    expect(adoptIconSheet({ image: "icons.png" }, asset, measure)?.mode).toBe("mask");
+    expect(adoptIconSheet({ image: "wide.png" }, asset, measure)).toBeNull();
+    // Unmeasured, the shape is the author's problem rather than a refusal.
+    expect(adoptIconSheet({ image: "bezel.png" }, asset, measure)).not.toBeNull();
+  });
+
+  it("keeps an empty skin of yours only when asked to", () => {
+    expect(adoptSkinManifest({ id: "blank" }, asset, measure)).toBeNull();
+    expect(adoptSkinManifest({ id: "blank" }, asset, measure, true)?.id).toBe("blank");
+  });
+});
+
+/**
+ * A sound manifest, which is the thinnest of the five and is interesting for
+ * exactly one reason: it is the only kind whose whole content is a file name,
+ * and a file name from a stranger is the thing `isAssetName` exists for.
+ *
+ * The format list is the other half, and the failure it prevents is the one
+ * `sounds.ts` was written around, arriving from the registry instead of from
+ * the machine: an entry in a format the browser cannot decode is a row in the
+ * dropdown that is silence, and it would be silence on every Linux machine that
+ * installed it while working perfectly on the Mac that contributed it.
+ */
+describe("a sound manifest", () => {
+  it("takes an id, a name and the one file it is", () => {
+    expect(adoptSoundManifest({ id: "coin", name: "Coin", file: "coin.wav" })).toEqual({
+      id: "coin",
+      name: "Coin",
+      file: "coin.wav",
+    });
+  });
+
+  it("falls back to the id when there is no name, like every other kind", () => {
+    expect(adoptSoundManifest({ id: "coin", file: "coin.wav" })?.name).toBe("coin");
+  });
+
+  it("refuses a format kururu would have to transcode", () => {
+    for (const file of ["coin.aiff", "coin.caf", "coin.ogg", "coin.opus", "coin.flac", "coin.txt", "coin"]) {
+      expect(adoptSoundManifest({ id: "coin", file })).toBeNull();
+    }
+    for (const file of ["coin.wav", "coin.WAV", "coin.mp3", "coin.m4a"]) {
+      expect(adoptSoundManifest({ id: "coin", file })?.file).toBe(file);
+    }
+  });
+
+  /**
+   * A name, never a path. It is joined onto a directory on the way to the disk,
+   * and this endpoint is reachable from the tailnet — so the check is the one
+   * `files.ts` argues for, applied to the one field this kind has.
+   */
+  it("refuses a file that is a path", () => {
+    for (const file of ["../../notify.json", "/etc/passwd.wav", "a/b.wav", "..wav", ".wav"]) {
+      expect(adoptSoundManifest({ id: "coin", file })).toBeNull();
+    }
+    expect(isSoundFile("../x.wav")).toBe(false);
+    expect(isSoundFile("x.wav")).toBe(true);
+  });
+
+  it("refuses one that is not a sound at all", () => {
+    expect(adoptSoundManifest(null)).toBeNull();
+    expect(adoptSoundManifest({ file: "coin.wav" })).toBeNull();
+    expect(adoptSoundManifest({ id: "Coin!", file: "coin.wav" })).toBeNull();
+    expect(adoptSoundManifest({ id: "coin" })).toBeNull();
+  });
+});
+
+/** The kind is part of the wire format, so a registry that grows one must not surprise an older kururu. */
+describe("the sound kind", () => {
+  it("is one an index may carry", () => {
+    const index = adoptIndex({
+      schema: 1,
+      entries: [
+        {
+          kind: "sound",
+          id: "coin",
+          name: "Coin",
+          version: "1.0.0",
+          description: "a blip",
+          author: "kururu-styles",
+          licence: "CC0-1.0",
+          digest: `sha256-${"a".repeat(64)}`,
+          files: [{ name: "coin.wav", size: 18566, digest: `sha256-${"b".repeat(64)}` }],
+          preview: { file: "coin.wav", ms: 420 },
+        },
+      ],
+    });
+    expect(index?.entries).toHaveLength(1);
+    // Rebuilt from the kind and the id rather than taken, like every other kind.
+    expect(index?.entries[0]).toMatchObject({ path: "sounds/coin", manifest: "sound.json" });
+  });
+});
+
+/**
+ * A pack is the one manifest that names other people's work, and now names one
+ * thing that is not in the registry at all.
+ *
+ * The parts are all optional here although the repository requires three of
+ * them, and that difference is deliberate: what the registry will *publish* is
+ * its own rule and can tighten, and what kururu will *read* has to keep working
+ * on a pack installed two versions of this file ago.
+ */
+describe("a pack manifest", () => {
+  it("is four ids and a face", () => {
+    expect(
+      adoptPackManifest({
+        id: "world-1-1",
+        name: "World 1-1",
+        theme: "underground",
+        skin: "world-1-1",
+        mascot: "plumber",
+        sound: "coin",
+        font: "Andale Mono",
+      }),
+    ).toEqual({
+      id: "world-1-1",
+      name: "World 1-1",
+      theme: "underground",
+      skin: "world-1-1",
+      mascot: "plumber",
+      sound: "coin",
+      font: "Andale Mono",
+    });
+  });
+
+  it("leaves out what a pack has no opinion about", () => {
+    expect(adoptPackManifest({ id: "quiet", theme: "nord" })).toEqual({
+      id: "quiet",
+      name: "quiet",
+      theme: "nord",
+      skin: null,
+      mascot: null,
+      sound: null,
+      font: "",
+    });
+  });
+
+  it("drops a part that is not an id, rather than refusing the pack", () => {
+    // Most of a pack is most of the look: a field somebody typed wrong should
+    // cost that field and nothing else. `server/src/index.ts` skips a part that
+    // is not installed for the same reason.
+    const pack = adoptPackManifest({ id: "p", theme: "../../etc", skin: "world-1-1", mascot: 7, sound: "" });
+    expect(pack).toMatchObject({ theme: null, skin: "world-1-1", mascot: null, sound: null });
+  });
+
+  it("puts the font through the adopter the settings box uses", () => {
+    // The string ends up in a CSS `font-family` on a window reachable from the
+    // tailnet, so the characters that could end that declaration and begin
+    // another go, whoever wrote the manifest.
+    expect(adoptPackManifest({ id: "p", font: '  Menlo"; } body { display:none ' })?.font).toBe(
+      "Menlo  body { display:none",
+    );
+    expect(adoptPackManifest({ id: "p", font: 42 })?.font).toBe("");
+    expect(adoptPackManifest({ id: "p", font: "x".repeat(400) })?.font).toHaveLength(120);
+  });
+
+  it("refuses one that is not a pack at all", () => {
+    expect(adoptPackManifest(null)).toBeNull();
+    expect(adoptPackManifest({ theme: "nord" })).toBeNull();
+    expect(adoptPackManifest({ id: "Not An Id" })).toBeNull();
   });
 });

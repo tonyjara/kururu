@@ -10,7 +10,7 @@
  *
  * These are Lucide's (ISC — the notice is `web/src/icons.LICENSE`), vendored as
  * the inner markup of each 24×24 drawing rather than installed. A dependency
- * would bring fifteen hundred icons to use fourteen, and would also be one more
+ * would bring fifteen hundred icons to use fifteen, and would also be one more
  * `bun install`, which on this project strips the executable bit off node-pty's
  * spawn helper under a running host. To add one, copy the children of its
  * `<svg>` from lucide-static and give it a name in `shared/skin.ts` first.
@@ -39,6 +39,8 @@ const VECTORS: Record<IconName, string> = {
   follow: /* arrow-left-right */ `<path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>`,
   pin: /* pin */ `<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>`,
   panes: /* layout-panel-left */ `<rect width="7" height="18" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/>`,
+  hide: /* eye-off */ `<path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><path d="m2 2 20 20"/>`,
+  database: /* database */ `<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/>`,
 };
 
 /**

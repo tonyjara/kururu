@@ -13,20 +13,42 @@
  * `afconvert` and is skipped elsewhere, because a test that asserted the
  * conversion on a machine with no converter would be asserting the fallback.
  *
- * `KURURU_SOUNDS` is set before the import, which is why this file imports
- * dynamically: the module reads it once, at load.
+ * There is a third source and it is the reason this file also writes a config
+ * directory: a `sound` entry installed from the styles registry. It is the one
+ * source whose path does not come from a `readdir` — `installedSounds` resolves
+ * it against `installed.json` — so a record that disagrees with what is on disk
+ * has to drop out of the list rather than reach the dropdown as a name that
+ * 404s.
+ *
+ * `KURURU_SOUNDS` and `XDG_CONFIG_HOME` are both set before the import, which is
+ * why this file imports dynamically: the first is read once at load, and the
+ * second must not be the user's real config directory — this test would
+ * otherwise pass or fail depending on what they happen to have installed.
  */
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 let dir: string;
+let config: string;
 let sounds: typeof import("../src/sounds").sounds;
 let soundBytes: typeof import("../src/sounds").soundBytes;
 
+/** One installed style entry, written the way `install` writes it. */
+function installSound(id: string, file: string, bytes: string, manifest?: Record<string, unknown>): void {
+  const entry = join(config, "kururu", "styles", "sounds", id);
+  mkdirSync(entry, { recursive: true });
+  writeFileSync(join(entry, file), bytes);
+  writeFileSync(
+    join(entry, "sound.json"),
+    JSON.stringify(manifest ?? { schema: 1, kind: "sound", id, name: id.toUpperCase(), file }),
+  );
+}
+
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "kururu-sounds-test-"));
+  config = mkdtempSync(join(tmpdir(), "kururu-sounds-config-"));
   // Not real audio: nothing here decodes it, and the listing is by extension.
   writeFileSync(join(dir, "croak.mp3"), "not really an mp3");
   writeFileSync(join(dir, "bell.wav"), "not really a wav");
@@ -34,13 +56,42 @@ beforeAll(async () => {
   // failure this module exists to prevent is a name in the dropdown that is
   // silence when you pick it.
   writeFileSync(join(dir, "notes.txt"), "text");
+
   process.env.KURURU_SOUNDS = dir;
+  process.env.XDG_CONFIG_HOME = config;
+
+  installSound("coin", "coin.wav", "not really a wav either");
+  // A record whose directory was emptied by hand: still in `installed.json`,
+  // nothing on disk. It must not be offered.
+  installSound("ghost", "ghost.wav", "x");
+  rmSync(join(config, "kururu", "styles", "sounds", "ghost", "ghost.wav"));
+  // And one whose id kururu's own sound already answers to, which must lose.
+  installSound("croak", "croak.wav", "an impostor");
+
+  mkdirSync(join(config, "kururu", "styles"), { recursive: true });
+  writeFileSync(
+    join(config, "kururu", "styles", "installed.json"),
+    JSON.stringify(
+      ["coin", "ghost", "croak"].map((id) => ({
+        kind: "sound",
+        id,
+        name: id === "coin" ? "Coin" : id,
+        version: "1.0.0",
+        digest: `sha256-${"0".repeat(64)}`,
+        installedAt: "2026-01-01T00:00:00.000Z",
+        files: [`${id}.wav`, "sound.json"],
+      })),
+    ),
+  );
+
   ({ sounds, soundBytes } = await import("../src/sounds"));
 });
 
 afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
+  rmSync(config, { recursive: true, force: true });
   delete process.env.KURURU_SOUNDS;
+  delete process.env.XDG_CONFIG_HOME;
 });
 
 describe("the catalogue", () => {
@@ -56,6 +107,48 @@ describe("the catalogue", () => {
     expect(kinds.lastIndexOf("kururu")).toBeLessThan(
       kinds.includes("system") ? kinds.indexOf("system") : Infinity,
     );
+  });
+});
+
+/**
+ * The third source. The ordering claim here is the load-bearing one and it is
+ * the opposite way round from what "most deliberately chosen wins" would
+ * suggest: an installed entry sits *after* kururu's own, so that a registry
+ * entry called `croak` cannot take over the sound `notify.json` already names.
+ */
+describe("sounds a style installed", () => {
+  it("offers one, under the name the Styles tab listed", () => {
+    const coin = sounds().find((sound) => sound.id === "coin");
+    expect(coin).toEqual({ id: "coin", name: "Coin", kind: "style" });
+  });
+
+  it("serves its bytes by id", async () => {
+    const sound = await soundBytes("coin");
+    expect(sound?.type).toBe("audio/wav");
+    expect(sound?.bytes.toString()).toBe("not really a wav either");
+  });
+
+  it("drops a record whose file is no longer there", async () => {
+    expect(sounds().some((sound) => sound.id === "ghost")).toBe(false);
+    expect(await soundBytes("ghost")).toBeNull();
+  });
+
+  /**
+   * An installed entry may not shadow kururu's own. The failure this prevents is
+   * quiet and permanent: `croak` is the default in `DEFAULT_NOTIFY`, so an entry
+   * that won this tie would change what every existing `notify.json` means.
+   */
+  it("cannot take an id kururu already answers to", async () => {
+    const croak = sounds().filter((sound) => sound.id === "croak");
+    expect(croak).toHaveLength(1);
+    expect(croak[0]!.kind).toBe("kururu");
+    expect((await soundBytes("croak"))?.bytes.toString()).toBe("not really an mp3");
+  });
+
+  it("comes after kururu's own and before the machine's", () => {
+    const kinds = sounds().map((sound) => sound.kind);
+    expect(kinds.lastIndexOf("kururu")).toBeLessThan(kinds.indexOf("style"));
+    if (kinds.includes("system")) expect(kinds.lastIndexOf("style")).toBeLessThan(kinds.indexOf("system"));
   });
 });
 
