@@ -13,6 +13,7 @@ in this folder.
 | `keys.ts` | Every action, ghosttown's defaults, and a user's overrides |
 | `labels.ts` | What to call a terminal and what to say it is doing — three places must agree |
 | `notify.ts` | When kururu may interrupt you, and the words. Ported policy |
+| `launchers.ts` | The agents and models the new-tab menu offers. Hand-kept; `/update-models` refreshes it |
 | `cursor.ts` | DECSCUSR + OSC 12 in both directions. One parser over one stream |
 | `theme.ts` | Every theme: the chrome's tokens and the emulator's ANSI palette |
 | `skin.ts` | The shape tokens, the icon glyphs, and the twelve paintable parts |
@@ -48,9 +49,9 @@ in this folder.
 | `src/memory.ts` | What each terminal costs the machine, off `ps`. Rounded first |
 | `src/record.ts` | Rolling raw-stream tape per agent, for bugs you can't reproduce |
 | `src/transcript.ts` | How full a Claude Code window is, off its transcript. Ported |
-| `src/usage.ts` | The plan allowance, off the machine's Claude credential. Read, never written |
+| `src/usage.ts` | The plan allowance, off a Claude credential — the machine's or the profile's. Read, never written |
 | `src/report-cli.ts` | What a Claude Code hook runs. Not in `agents/` on purpose |
-| `src/devservers.ts` | lsof + ps discovery from both ends; stopping one |
+| `src/devservers.ts` | lsof + ps discovery of what is listening, and what started it |
 | `src/proxy.ts` | Per-dev-server reverse proxy (HTTP + WS) for phone access |
 | `src/files.ts` | Traversal-safe file listing and reading |
 | `src/markdown.ts` | Markdown → markup with Shiki. `html: false` IS the sanitizer |
@@ -66,6 +67,8 @@ in this folder.
 | `src/appearance.ts` | Theme id and terminal font. Persistence only |
 | `src/keys.ts` | The keymap a user has amended. Persistence only |
 | `src/notify.ts` | When to interrupt somebody, as they left it. Persistence only |
+| `src/launch.ts` | Which agents the new-tab menu leaves out. Persistence only |
+| `src/logins.ts` | Where a profile's logins live, and the two env vars. Makes, never deletes |
 | `run.mjs` | Builds, spawns and re-spawns the server. What `C-a B` reaches |
 | `status.mjs` | The daemon has no face; this is it. Socket + `/api/agents` |
 | `kill-hosts.mjs` | Finds hosts by socket, asks, SIGTERMs |

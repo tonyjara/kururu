@@ -36,6 +36,7 @@
 import type { Direction } from "./layout";
 import type { Action } from "./keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
+import type { LaunchSettings } from "./launchers";
 import type { NotifyEvent, NotifySettings } from "./notify";
 import type { TerminalAppearance } from "./theme";
 
@@ -160,10 +161,9 @@ export interface DevServer {
 /**
  * The branch a workspace is on.
  *
- * Live and per-workspace, like `SupabaseDb` and for the same reasons: it is
- * learnt by looking at the disk rather than decided by anything kururu owns, it
- * changes without kururu being told, and nothing about it is worth remembering
- * across a restart. Two workspaces open on one checkout get one entry each
+ * Live and per-workspace: it is learnt by looking at the disk rather than
+ * decided by anything kururu owns, it changes without kururu being told, and
+ * nothing about it is worth remembering across a restart. Two workspaces open on one checkout get one entry each
  * saying the same thing, which is correct — they are both on that branch.
  *
  * Absent rather than empty when a workspace is not in a repository, so the row
@@ -177,36 +177,6 @@ export interface WorkspaceBranch {
   branch: string;
   /** HEAD names a commit rather than a branch: a tag, a sha, or a rebase. */
   detached: boolean;
-}
-
-/**
- * A workspace's local Supabase, found on disk and probed.
- *
- * Keyed by workspace rather than by directory, because the sidebar draws
- * workspaces and the question "is my database up" is asked *of* the thing you
- * are working in. Two workspaces open on one project get one entry each, saying
- * the same thing, which is correct: they are both up, and neither row should be
- * the one that has to know about the other.
- *
- * Live, and therefore not on `Workspace`. Nothing here survives a server
- * restart and nothing should — it is all re-derived in the first three seconds,
- * and a remembered "up" from before a restart would be a claim about Docker that
- * this process has no standing to make. That is the difference from
- * `Workspace.dev`, which is remembered precisely because it is a thing somebody
- * typed rather than a thing that is true.
- */
-export interface SupabaseDb {
-  workspaceId: string;
-  /** The directory holding `supabase/` — where the command has to run. */
-  root: string;
-  /** `project_id` from the config. A label, and what the CLI names containers. */
-  project: string;
-  /** The local Postgres port, from the project's own config. */
-  port: number;
-  /** Something is accepting connections on that port. */
-  up: boolean;
-  /** A start or a stop has been asked for and has not finished arriving. */
-  busy: boolean;
 }
 
 /**
@@ -244,8 +214,10 @@ export interface UsageLimit {
  *
  * One account and not one per profile. A profile is a drawer of workspaces and
  * nothing else — it has no login of its own to be measured against — so there is
- * exactly one allowance here, the one belonging to the credential Claude Code
- * itself wrote.
+ * exactly one allowance here. A machine can still hold several Claude logins, one
+ * per `CLAUDE_CONFIG_DIR`, and the one measured is whichever was signed into
+ * last; `email` is there so the bar can say whose it is, because two accounts'
+ * percentages look exactly alike.
  *
  * `stale` rather than dropping the reading on a failed poll. A bar that empties
  * because the wifi dropped is worse than a bar that admits it is a minute old:
@@ -260,6 +232,8 @@ export interface AccountUsage {
   stale: boolean;
   /** No usable login on this machine — nothing to show and nothing wrong. */
   signedOut: boolean;
+  /** Whose allowance this is, as Claude Code recorded it, or null if it did not. */
+  email: string | null;
 }
 
 /**
@@ -288,16 +262,10 @@ export type ServerMessage =
   /** Sent on connect and whenever the set of listening dev servers changes. */
   | { type: "dev-servers"; servers: DevServer[] }
   /**
-   * Sent on connect and whenever a workspace's local Supabase appears, goes, or
-   * changes state. A list rather than a delta for the snapshot's reason: there
-   * are never more than a handful, and a client that has just reconnected must
-   * not have to reason about what it missed.
-   */
-  | { type: "supabase"; dbs: SupabaseDb[] }
-  /**
    * Sent on connect and whenever any workspace's branch changes. A whole list
-   * for `supabase`'s reason: there are never more than a handful, and a client
-   * that has just reconnected must not have to work out what it missed.
+   * rather than a delta for the snapshot's reason: there are never more than a
+   * handful, and a client that has just reconnected must not have to work out
+   * what it missed.
    */
   | { type: "branches"; branches: WorkspaceBranch[] }
   /**
@@ -380,8 +348,20 @@ export type ClientMessage =
   /**
    * Start a terminal and put it in a pane as a new tab. Every field defaults:
    * the focused pane, that pane's project, an agent rather than a shell.
+   *
+   * `launcher` is an id from `shared/launchers.ts` — an agent on a model, picked
+   * from the new-tab menu — and the server turns it into the command. It wins
+   * over `command` and `kind` when both are sent.
    */
-  | { type: "new-tab"; id: number; kind?: PtyKind; cwd?: string; command?: string; paneId?: string }
+  | {
+      type: "new-tab";
+      id: number;
+      kind?: PtyKind;
+      cwd?: string;
+      command?: string;
+      launcher?: string;
+      paneId?: string;
+    }
   /**
    * End a terminal and take its tab with it. Defaults to the focused tab.
    *
@@ -472,6 +452,33 @@ export type ClientMessage =
    */
   | { type: "watch"; agentIds: string[]; warm?: string[] }
   /**
+   * Whether anybody is in front of this client at all.
+   *
+   * `watch` says which terminals are on screen; this says whether the screen
+   * is. They are not the same question and the second has no answer in the
+   * first: a phone locked in a pocket has exactly the panes it had a moment
+   * ago and a human reading none of them, and it goes on saying so for as long
+   * as its socket lives — which is a long time, because a sleeping phone is
+   * deliberately never hung up on and nothing here pings.
+   *
+   * What that cost was the desktop. The size policy is a minimum over the
+   * clients that can see a terminal, so a phone that had been looking at one
+   * held every other client down to phone width until its socket eventually
+   * died — and walking back to the window did not undo it, because nothing
+   * there had moved and a pane only proposes when its box does.
+   *
+   * So it gates the vote and nothing else. The proposals are *kept* rather
+   * than withdrawn: a page that goes away and comes back has the same panes at
+   * the same sizes, and a client that had to be re-measured before it could
+   * speak again would spend the first frame of every return at somebody else's
+   * shape. Deliberately not folded into `watch`, which would be the
+   * one-message answer and is the wrong one — `watching` also decides the
+   * unread mark and suppresses a notification card, and a frozen page cannot
+   * draw a card, it queues them and raises the lot on unlock. Reaching a phone
+   * with its screen off is push's job, not this one's.
+   */
+  | { type: "looking"; looking: boolean }
+  /**
    * Rebuild this terminal. The only thing that produces a `backlog`.
    *
    * It used to name a size, and to carry an `epoch` so that an answer could be
@@ -544,41 +551,6 @@ export type ClientMessage =
    * default, which is what makes deleting a mascot need no cleanup.
    */
   | { type: "set-workspace-mascot"; workspaceId: string; mascotId: string | null }
-  /**
-   * The ▸ / ↻ on a workspace row: get this workspace's dev server serving fresh.
-   *
-   * One verb rather than a start and a restart, because it is one intention and
-   * the client is the wrong side to decide between them — the button's face
-   * comes from a scan that is up to three seconds old, and a server that came up
-   * in the meantime should be restarted rather than started twice. So the client
-   * says what it wants and the server looks: something serving is interrupted
-   * and re-run, nothing serving is started from what the workspace remembers,
-   * and a workspace that has never had one does nothing (and draws no button).
-   *
-   * It deliberately does not switch workspace. Starting your app somewhere else
-   * is not a reason to be taken there.
-   */
-  | { type: "run-dev"; workspaceId: string }
-  /**
-   * The database button on a workspace row: bring this workspace's local
-   * Supabase up, or take it down.
-   *
-   * Explicit rather than one verb the way `run-dev` is, and the difference is
-   * worth stating because the two buttons look alike. `run-dev` is one intention
-   * with two faces — "get my app serving fresh" — and the client cannot tell
-   * which face applies, so it does not try. This is two intentions: starting a
-   * database and stopping one are opposite acts, the second is the one that can
-   * interrupt somebody's work, and the client has already put a confirmation in
-   * front of whichever one it is asking for. Sending "toggle" would mean the
-   * dialog said *stop* and the server did *start* whenever the three-second
-   * probe was stale, which is the one outcome a confirmation must not have.
-   *
-   * It does not switch workspace, open a pane you are looking at, or focus
-   * anything, for `run-dev`'s reason. It does need a terminal — the command is
-   * typed into one, in the project's directory — and it will open one in that
-   * workspace if there is none it can use.
-   */
-  | { type: "supabase-power"; workspaceId: string; on: boolean }
   /** Deletes it and ends everything in it. The last workspace cannot go. */
   | { type: "delete-workspace"; workspaceId: string }
   /** Dragged up or down the sidebar list. An absolute position, not a step. */
@@ -590,6 +562,18 @@ export type ClientMessage =
   | { type: "switch-profile"; profileId: string }
   | { type: "rename-profile"; profileId: string; name: string }
   | { type: "delete-profile"; profileId: string }
+  /**
+   * Point a profile at one of the logins kururu holds — a key out of
+   * `SessionSnapshot.logins`, which is the only place one may come from — or,
+   * with null, at a fresh directory of its own that nobody is signed into. Two
+   * profiles on one key share the directory and everything in it, and that is
+   * the feature: the same account, the same settings, the same memory.
+   *
+   * Only terminals opened afterwards are affected. A running pty was spawned
+   * with its directories in its environment and keeps them; nothing here can
+   * or should reach into it.
+   */
+  | { type: "set-profile-login"; profileId: string; loginKey: string | null }
 
   /**
    * Put the server back on current source. It owns no ptys, so this costs a
@@ -778,7 +762,12 @@ export type ClientMessage =
    * and gets the sound anyway, because it fetches the bytes from `/api/sound`
    * like it fetches everything else.
    */
-  | { type: "set-notify"; notify: NotifySettings };
+  | { type: "set-notify"; notify: NotifySettings }
+  /**
+   * Which agents and models the new-tab menu offers. Server-owned like the rest
+   * of Settings, so the phone's menu is the desktop's menu.
+   */
+  | { type: "set-launch"; launch: LaunchSettings };
 
 /**
  * How often the status heuristic is asked to notice that work has stopped.
@@ -801,16 +790,6 @@ export const SAVE_DEBOUNCE_MS = 1000;
 export const AGENT_SCAN_MS = 2000;
 /** How often it re-scans for listening dev servers. Slowest: it shells out twice. */
 export const DEV_SCAN_MS = 3000;
-/**
- * How often each workspace's local Supabase is looked for and probed.
- *
- * Slower than the dev scan and deliberately out of step with it. A database is
- * not a thing that comes and goes while you watch — `supabase start` takes the
- * better part of a minute — so five seconds is already faster than the fact
- * changes, and the two polls landing on different ticks keeps a machine with
- * several workspaces from doing all of its looking in the same instant.
- */
-export const SUPABASE_SCAN_MS = 5000;
 /**
  * How often each workspace's `.git/HEAD` is re-read.
  *

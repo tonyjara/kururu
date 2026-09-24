@@ -28,10 +28,11 @@
  * happens to be in, and takes the link for an answer.
  */
 import { useCallback, useEffect, useState } from "react";
+import type { HostInfo } from "../../../shared/model";
 import type { UpdateCheck } from "../../../shared/wire";
 import { desktop, type UpdateState } from "../desktop";
 
-export function AboutSettings() {
+export function AboutSettings({ host }: { host: HostInfo }) {
   const [check, setCheck] = useState<UpdateCheck | null>(null);
   const [asking, setAsking] = useState(false);
 
@@ -65,6 +66,16 @@ export function AboutSettings() {
         <h3 className="set-h">kururu</h3>
         <p className="about-version">{check ? check.current : "…"}</p>
       </header>
+      {/* The other half of the version question. The pty host is a process
+          apart and keeps the bundle it started with, so it can be older than
+          what is drawing this page — silently, unless somebody says so here.
+          From the snapshot rather than the fetch above, because the server
+          learnt it when it connected and nothing about it changes until the
+          host is restarted. */}
+      <p className="set-note">
+        pty host {host.version ?? "of an older build"}
+        {host.current ? "" : " — behind this server. Restart it to update, which ends every agent."}
+      </p>
 
       <div className="about-check">
         <button className="button" onClick={() => void ask(true)} disabled={asking}>

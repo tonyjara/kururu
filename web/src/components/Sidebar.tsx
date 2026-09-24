@@ -41,7 +41,6 @@ import type {
 import { defaultMascot, mascotFor, WORKSPACE_COLORS } from "../../../shared/model";
 import { colorValue, colorValues } from "../colors";
 import { AGENT_MIME, WORKSPACE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
-import type { SupabaseDb } from "../../../shared/wire";
 import type { Action } from "../keys";
 import { agentLabel, agentSummary, shortenPath } from "../labels";
 import { previewLabel, previewUrl } from "../preview";
@@ -51,6 +50,26 @@ import { limitLabel, limitTitle, resetIn, staleTitle } from "../usage";
 import { Menu, Popover } from "./Menu";
 import { Icon } from "./Icon";
 import { Mascot, Status } from "./Status";
+
+/**
+ * How far the pointer may travel between `dragstart` and `dragend` for the
+ * gesture to still count as a click, in pixels.
+ *
+ * It exists because of one thing the platform does and will not be talked out
+ * of: a `draggable` element starts a drag after about three pixels of movement
+ * with the button down, and **once a drag has started no `click` is dispatched
+ * at all**. A workspace row is draggable, because dragging one reorders the
+ * list — so a press that wobbled, which on a trackpad is most of them, silently
+ * did nothing whatsoever. It is not even a drag that went somewhere: a row
+ * dropped on itself is refused as a target (see the `dragover` below), so the
+ * whole gesture ends in `dragend` with nothing done and nothing said.
+ *
+ * So the drag that went nowhere is read back as what it was. Comfortably larger
+ * than the platform's own threshold, because the failure it is catching is a
+ * hand that did not mean to move at all, and well under the distance to the
+ * next row — which is the only gesture on the other side of it.
+ */
+const CLICK_SLOP = 12;
 
 interface Props {
   profile: Profile;
@@ -82,13 +101,6 @@ interface Props {
    * to the app rather than to this list — it is the same dialog prefix+X puts up.
    */
   onDeleteWorkspace: (workspaceId: string) => void;
-  /**
-   * Starting or stopping a workspace's local Supabase. Asked about rather than
-   * done, and the dialog is the app's for `onDeleteWorkspace`'s reason: this
-   * list draws rows, and a modal that owns the keyboard is not a thing a row
-   * should be able to put up on its own.
-   */
-  onSupabase: (workspaceId: string, on: boolean) => void;
   /**
    * Say when a name is being typed in here, because the prefix has to stand
    * down for it: ctrl+a is select-all in a text field, and an armed prefix would
@@ -128,7 +140,6 @@ export function Sidebar({
   onRun,
   profileRef,
   onDeleteWorkspace,
-  onSupabase,
   onEditing,
   onSettings,
   onReach,
@@ -139,15 +150,14 @@ export function Sidebar({
 }: Props) {
   const dragging = useDragging();
   /**
-   * The local databases the server has found, by the workspace they belong to.
+   * What each workspace has checked out.
    *
    * Read from the store here rather than threaded down as a prop, on the same
    * call `DevServers` below makes: this is a fact about the machine that only
    * the sidebar draws, and passing it through the app would mean two components
    * knowing about it so that one of them could forget.
    */
-  const { supabase, branches } = useKururu();
-  const dbs = new Map(supabase.map((db) => [db.workspaceId, db] as const));
+  const { branches } = useKururu();
   const heads = new Map(branches.map((head) => [head.workspaceId, head] as const));
   /** The workspace row a drop would land on, while something is over it. */
   const [overWorkspace, setOverWorkspace] = useState<string | null>(null);
@@ -189,6 +199,11 @@ export function Sidebar({
    * tells it which of the three just happened.
    */
   const cancelled = useRef(false);
+  /**
+   * Where a workspace drag started, so `dragend` can tell a reorder from a
+   * click the platform turned into a drag. See `CLICK_SLOP`.
+   */
+  const dragFrom = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     onEditing(renaming !== null);
@@ -217,21 +232,6 @@ export function Sidebar({
         });
       });
     }
-  }
-
-  /**
-   * Which workspaces have something serving right now — the difference between
-   * the row's ↻ and its ▸.
-   *
-   * Derived here rather than sent as a field of its own. The snapshot already
-   * says which terminals hold a dev server and the map above already says which
-   * workspace each terminal is in; a second field stating the conclusion is a
-   * second field that can disagree with the two it was drawn from.
-   */
-  const serving = new Set<string>();
-  for (const agent of agents) {
-    const at = agent.dev ? where.get(agent.id) : undefined;
-    if (at) serving.add(at.workspaceId);
   }
 
   /**
@@ -290,6 +290,18 @@ export function Sidebar({
    */
   const navigated = () => {
     if (overlay) onClose();
+  };
+
+  /**
+   * Go to a workspace, from whichever of the two gestures it was.
+   *
+   * Two, because a row is clicked and a row is also dragged, and the platform
+   * decides which of those happened on a threshold no design can see — see
+   * `CLICK_SLOP`.
+   */
+  const goTo = (workspaceId: string) => {
+    api.switchWorkspace(workspaceId);
+    navigated();
   };
 
   const show = (agentId: string) => {
@@ -527,7 +539,6 @@ export function Sidebar({
         </h2>
         <ul className="ws-list">
           {profile.workspaces.map((workspace, index) => {
-            const db = dbs.get(workspace.id);
             const head = heads.get(workspace.id);
             return (
             <li
@@ -544,6 +555,23 @@ export function Sidebar({
                   ? ({ "--tag": colorValue(workspace.color)! } as CSSProperties)
                   : undefined
               }
+              /* The whole row, both lines of it, and not the name's button.
+                 The button was the target for as long as a row *was* the name;
+                 splitting the second line out left a strip along the bottom of
+                 every row that lit up on hover like the rest of it and did
+                 nothing when pressed — the branch, and the gap either side of
+                 it, are a third of the height of a row you are aiming at.
+
+                 A click that landed on the swatch is not this: it means
+                 something else, and a workspace switch riding along behind it
+                 would be a side effect nobody asked for. The name's button is the
+                 exception rather than being listed, because it *is* this
+                 gesture — which also keeps it working from the keyboard, where
+                 Enter on the focused button produces exactly this click. */
+              onClick={(event) => {
+                if ((event.target as HTMLElement).closest("button:not(.ws-row), input")) return;
+                goTo(workspace.id);
+              }}
               onContextMenu={(event) => {
                 event.preventDefault();
                 setMenu({ workspaceId: workspace.id, x: event.clientX, y: event.clientY });
@@ -601,134 +629,84 @@ export function Sidebar({
                 <>
                   <button
                     className={`ws-row ${workspace.id === profile.activeWorkspaceId ? "ws-row-on" : ""}`}
-                    onClick={() => {
-                      api.switchWorkspace(workspace.id);
-                      navigated();
-                    }}
                     onDoubleClick={() => setRenaming(workspace.id)}
                     title={index < 9 ? `C-a ${index + 1} \u00b7 double-click to rename` : "Double-click to rename"}
                     draggable
-                    onDragStart={(event) => beginDrag(event, "workspace", workspace.id)}
-                    onDragEnd={() => {
+                    onDragStart={(event) => {
+                      dragFrom.current = { x: event.clientX, y: event.clientY };
+                      beginDrag(event, "workspace", workspace.id);
+                    }}
+                    /* A drag that ended where it began was a click the platform
+                       took off us, so it is handed back — see `CLICK_SLOP`.
+                       Only when the drag did nothing: `dropEffect` is "move"
+                       when a row accepted it, and switching to a workspace
+                       somebody had just finished dragging somewhere else would
+                       be answering a gesture with a different one. */
+                    onDragEnd={(event) => {
+                      const from = dragFrom.current;
+                      dragFrom.current = null;
                       endDrag();
                       setOverWorkspace(null);
+                      if (!from || event.dataTransfer.dropEffect !== "none") return;
+                      const moved = Math.hypot(event.clientX - from.x, event.clientY - from.y);
+                      if (moved <= CLICK_SLOP) goTo(workspace.id);
                     }}
                   >
                     <span className="ws-index">{index < 9 ? index + 1 : "\u00b7"}</span>
                     <span className="ws-name">{workspace.name}</span>
                   </button>
 
-                  {/* The second line: what this workspace *runs*, under what it
-                      is called.
+                  {/* The colour, as a control, at the end of the name's line.
+                      What the colour *is* is said by the rail down the left of
+                      the row — the same two pixels every agent in this
+                      workspace wears, which is the thing that makes the
+                      connection. This is the way to change it, and it is drawn
+                      even when untagged, as an empty ring, because a control
+                      that only appears once it has been used is one nobody
+                      finds.
 
-                      They were on the name's line, at its right edge, and that
-                      was two mistakes at once. The name is the thing you read
-                      and it was being clipped by controls growing in from the
-                      end of it; and a button sharing a line with a button that
-                      switches workspace is a button you press by aiming at the
-                      wrong half of a row. A line of their own costs eleven
-                      pixels per workspace and buys back the full width for the
-                      name and a target that is only ever one thing.
+                      Outside the row's own button rather than inside it: a
+                      button inside a button is not a thing the platform will
+                      give you. */}
+                  <button
+                    className={`ws-swatch ${workspace.color ? "" : "ws-swatch-off"}`}
+                    style={
+                      colorValue(workspace.color)
+                        ? { background: colorValue(workspace.color)! }
+                        : undefined
+                    }
+                    onClick={(event) => {
+                      const box = event.currentTarget.getBoundingClientRect();
+                      setPicker({ workspaceId: workspace.id, x: box.left, y: box.bottom + 4 });
+                    }}
+                    title={workspace.color ? `Colour: ${workspace.color}` : "Set a colour"}
+                    aria-label={workspace.color ? `Colour: ${workspace.color}` : "Set a colour"}
+                  />
 
-                      Outside the row's own button rather than inside it, which
-                      is the constraint that has not changed: a button inside a
-                      button is not a thing the platform will give you. */}
-                  <div className="ws-tools">
-                    {/* The dev server, if this workspace has ever had one. */}
-                    {(workspace.dev || serving.has(workspace.id)) && (
-                      <button
-                        className="ws-tool ws-run"
-                        onClick={() => api.runDev(workspace.id)}
-                        /* The command is not printed on the row — it is the same
-                           `npm run dev` in most workspaces — so the tooltip is
-                           where it goes. Either condition draws the button,
-                           because the two arrive a moment apart: a server is
-                           noticed before the directory it is running in has been
-                           read, and a button that appeared a second after the \u21bb
-                           it belongs to would read as arriving late. */
-                        title={
-                          serving.has(workspace.id)
-                            ? `Restart ${workspace.dev?.command ?? "the dev server"}`
-                            : `Run ${workspace.dev?.command ?? "the dev server"}`
-                        }
-                        aria-label={`${serving.has(workspace.id) ? "Restart" : "Run"} the dev server`}
-                      >
-                        <Icon name={serving.has(workspace.id) ? "restart" : "run"} />
-                      </button>
-                    )}
+                  {/* What is checked out where this workspace works, on a line
+                      of its own under the name — and only when there is one, so
+                      a workspace outside a repository is a single line rather
+                      than a name with a blank under it.
 
-                    {/* The local Supabase, if there is one at or above this
-                        workspace's directory. Dim when it is down and lit when
-                        it is up, which is the whole of what the button says —
-                        there is no separate light, because a light beside a
-                        button that means the same thing is one of them lying the
-                        moment they disagree.
-
-                        Nothing at all when the workspace has no `supabase/` over
-                        it, on the \u25b8 button's rule: a control for a thing that
-                        does not exist is a question every row asks and only two
-                        rows can answer. */}
-                    {db && (
-                      <button
-                        className={`ws-tool ws-db ${db.up ? "ws-db-on" : ""} ${db.busy ? "ws-db-busy" : ""}`}
-                        onClick={() => onSupabase(workspace.id, !db.up)}
-                        disabled={db.busy}
-                        title={supabaseTitle(db)}
-                        aria-label={supabaseTitle(db)}
-                      >
-                        <Icon name="database" />
-                      </button>
-                    )}
-
-                    {/* What is checked out where this workspace works.
-
-                        Text rather than a button, because there is nothing
-                        useful to do to it from here — switching branch under a
-                        running agent is a thing to do in the terminal, where you
-                        can see what it says. In the row's mono face for the
-                        reason a shell prompt uses one: it makes a word that
-                        could be anything read as a ref.
-
-                        It takes the slack between the buttons and the chip and
-                        clips rather than wrapping, because branch names are
-                        somebody else's length — `feature/the-whole-sentence` is
-                        a real branch, and a row that grew to fit one would make
-                        the list ragged for the one workspace on it. */}
-                    {head && (
-                      <span
-                        className={`ws-branch ${head.detached ? "ws-branch-off" : ""}`}
-                        title={
-                          head.detached
-                            ? `Detached at ${head.branch}\n${head.root}`
-                            : `Branch: ${head.branch}\n${head.root}`
-                        }
-                      >
-                        {head.branch}
-                      </span>
-                    )}
-
-                    {/* The colour, as a control. What the colour *is* is said by
-                        the rail down the left of the row — the same two pixels
-                        every agent in this workspace wears, which is the thing
-                        that makes the connection. This is the way to change it,
-                        and it is drawn even when untagged, as an empty ring,
-                        because a control that only appears once it has been used
-                        is one nobody finds. */}
-                    <button
-                      className={`ws-tool ws-swatch ${workspace.color ? "" : "ws-swatch-off"}`}
-                      style={
-                        colorValue(workspace.color)
-                          ? { background: colorValue(workspace.color)! }
-                          : undefined
+                      Text rather than a button, because there is nothing
+                      useful to do to it from here — switching branch under a
+                      running agent is a thing to do in the terminal, where you
+                      can see what it says. In the mono face for the reason a
+                      shell prompt uses one: it makes a word that could be
+                      anything read as a ref. It clips rather than wrapping,
+                      because branch names are somebody else's length. */}
+                  {head && (
+                    <span
+                      className={`ws-branch ${head.detached ? "ws-branch-off" : ""}`}
+                      title={
+                        head.detached
+                          ? `Detached at ${head.branch}\n${head.root}`
+                          : `Branch: ${head.branch}\n${head.root}`
                       }
-                      onClick={(event) => {
-                        const box = event.currentTarget.getBoundingClientRect();
-                        setPicker({ workspaceId: workspace.id, x: box.left, y: box.bottom + 4 });
-                      }}
-                      title={workspace.color ? `Colour: ${workspace.color}` : "Set a colour"}
-                      aria-label={workspace.color ? `Colour: ${workspace.color}` : "Set a colour"}
-                    />
-                  </div>
+                    >
+                      {head.branch}
+                    </span>
+                  )}
                 </>
               )}
             </li>
@@ -889,21 +867,6 @@ export function Sidebar({
       )}
     </aside>
   );
-}
-
-/**
- * What the database button says it will do, which is also the only place the
- * project and its port are written down.
- *
- * The port is here rather than on the row because it is the answer to a question
- * you ask twice a month — "which one is this project on" — and the row is read
- * every time you look at the sidebar. A tooltip is exactly the right place for a
- * fact with that ratio.
- */
-function supabaseTitle(db: SupabaseDb): string {
-  const where = `${db.project} \u00b7 :${db.port}`;
-  if (db.busy) return `${where}\nWorking\u2026`;
-  return db.up ? `Stop the database\n${where}` : `Start the database\n${where}`;
 }
 
 /**
@@ -1184,24 +1147,39 @@ function Usage() {
     return () => clearInterval(timer);
   }, []);
 
+  const [open, toggle] = useDisclosure("kururu.sidebar.usage", false);
+
   const account = usage;
   // Nothing known, or no login on this machine. Both draw nothing: a machine
   // with no readable Claude login is not in an error state, it is one with
   // nothing to say, and a row explaining that would be noise on every window.
   if (!account || account.signedOut || account.limits.length === 0) return null;
 
+  /**
+   * Shut, the one bar that moves while you watch: the session's. The weekly
+   * limits move by a percent an afternoon and are worth a look now and then,
+   * not a third of the sidebar's foot all day. An account that reports no
+   * session limit shows whichever it reports first rather than nothing, on
+   * `limitLabel`'s argument — the limit nobody expected is the one about to
+   * bite.
+   */
+  const shown = open
+    ? account.limits
+    : [account.limits.find((limit) => limit.kind === "session") ?? account.limits[0]!];
+
   return (
     <section className="side-section side-usage">
       <h2>
-        Usage
-        {/* The staleness mark, which is the whole of the offline handling. The
-            bars keep their last numbers — see `AccountUsage.stale` for why
-            blanking them is worse — and this is the one thing that says those
-            numbers are not from now. */}
-        {account.stale && <span className="usage-stale" title={staleTitle(account.at)}>·</span>}
+        <SectionToggle open={open} onToggle={toggle} label="Usage">
+          {/* The staleness mark, which is the whole of the offline handling.
+              The bars keep their last numbers — see `AccountUsage.stale` for
+              why blanking them is worse — and this is the one thing that says
+              those numbers are not from now. */}
+          {account.stale && <span className="usage-stale" title={staleTitle(account.at)}>·</span>}
+        </SectionToggle>
       </h2>
       <ul className="usage-list">
-        {account.limits.map((limit) => (
+        {shown.map((limit) => (
           <li key={`${limit.kind}:${limit.scope ?? ""}`} className="usage-item">
             <span className="usage-head">
               <span className="usage-name">{limitLabel(limit)}</span>
@@ -1230,6 +1208,15 @@ function Usage() {
           </li>
         ))}
       </ul>
+      {/* Whose allowance this is. With more than one Claude login on the
+          machine the bars are for whichever was signed into last — or, with
+          logins kept per profile, for the profile on screen — and two
+          accounts' percentages are otherwise indistinguishable. */}
+      {open && account.email && (
+        <p className="usage-account" title={account.email}>
+          {account.email}
+        </p>
+      )}
     </section>
   );
 }
@@ -1267,45 +1254,113 @@ function Usage() {
  */
 function DevServers() {
   const { devServers } = useKururu();
+  /* Shut by default. The list is the phone's way in and is a thing you go and
+     get, not a thing you watch — so the count is what the heading carries, and
+     the rows are one press away. */
+  const [open, toggle] = useDisclosure("kururu.sidebar.dev", false);
   if (devServers.length === 0) return null;
 
   return (
     <section className="side-section side-dev">
-      <h2>Dev servers</h2>
-      <ul className="dev-list">
-        {devServers.map((dev) => {
-          const url = previewUrl(window.location, dev);
-          return (
-            <li key={dev.port} className="dev-item">
-              {url ? (
-                <a
-                  className="dev-row"
-                  href={url}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  title={[previewLabel(dev), dev.command, dev.cwd, `→ ${url}`]
-                    .filter(Boolean)
-                    .join("\n")}
-                >
-                  <span className="dev-name">{previewLabel(dev)}</span>
-                  <span className="dev-port">:{dev.port}</span>
-                  <Icon name="external" />
-                </a>
-              ) : (
-                /* No proxy yet — the scan has found the server but this client
-                   is not on the machine, so there is no address that would
-                   work. Drawn as a row anyway, because "it is running and not
-                   reachable from here yet" is worth more than a gap, and the
-                   next scan is a second away. */
-                <span className="dev-row dev-row-off" title={`${dev.command}\nNo preview yet`}>
-                  <span className="dev-name">{previewLabel(dev)}</span>
-                  <span className="dev-port">:{dev.port}</span>
-                </span>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+      <h2>
+        <SectionToggle open={open} onToggle={toggle} label="Dev servers">
+          <span className="side-toggle-n">{devServers.length}</span>
+        </SectionToggle>
+      </h2>
+      {open && (
+        <ul className="dev-list">
+          {devServers.map((dev) => {
+            const url = previewUrl(window.location, dev);
+            return (
+              <li key={dev.port} className="dev-item">
+                {url ? (
+                  <a
+                    className="dev-row"
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    title={[previewLabel(dev), dev.command, dev.cwd, `→ ${url}`]
+                      .filter(Boolean)
+                      .join("\n")}
+                  >
+                    <span className="dev-name">{previewLabel(dev)}</span>
+                    <span className="dev-port">:{dev.port}</span>
+                    <Icon name="external" />
+                  </a>
+                ) : (
+                  /* No proxy yet — the scan has found the server but this client
+                     is not on the machine, so there is no address that would
+                     work. Drawn as a row anyway, because "it is running and not
+                     reachable from here yet" is worth more than a gap, and the
+                     next scan is a second away. */
+                  <span className="dev-row dev-row-off" title={`${dev.command}\nNo preview yet`}>
+                    <span className="dev-name">{previewLabel(dev)}</span>
+                    <span className="dev-port">:{dev.port}</span>
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </section>
+  );
+}
+
+/**
+ * Whether one of the sidebar's foot sections is open, remembered per device.
+ *
+ * Local rather than the server's, on the drawer's argument above: a disclosure
+ * is a thing you do with your eyes, and a phone opening the dev servers to tap
+ * one must not reach over and open them on the desktop. Remembered at all
+ * because the sidebar is unmounted every time a phone puts it away, and a
+ * section that shut itself each time would have to be opened each time.
+ *
+ * Storage can throw — a private window, blocked site data — and when it does
+ * the section simply starts at its default.
+ */
+function useDisclosure(key: string, initial: boolean): [boolean, () => void] {
+  const [open, setOpen] = useState(() => {
+    try {
+      const saved = localStorage.getItem(key);
+      return saved === null ? initial : saved === "1";
+    } catch {
+      return initial;
+    }
+  });
+  const toggle = () =>
+    setOpen((was) => {
+      try {
+        localStorage.setItem(key, was ? "0" : "1");
+      } catch {
+        // Not remembered; still toggled.
+      }
+      return !was;
+    });
+  return [open, toggle];
+}
+
+/**
+ * A section heading that is also its disclosure. The whole heading is the
+ * target, and the caret is the drawer's — rotated shut rather than swapped —
+ * so the two ways the sidebar folds something away look like one.
+ */
+function SectionToggle({
+  open,
+  onToggle,
+  label,
+  children,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  label: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <button className="side-toggle" onClick={onToggle} aria-expanded={open}>
+      <Icon name="caret" className={open ? "" : "drawer-caret-shut"} />
+      <span>{label}</span>
+      {children}
+    </button>
   );
 }

@@ -55,7 +55,7 @@ import { installBoxDrawing } from "./boxdraw";
 import { type CursorRenderer, installCursorText } from "./cursortext";
 import { usableGrid } from "./grid";
 import { BUTTON_NONE, encodeMouse, type MouseModes, mouseModes, WHEEL_DOWN, WHEEL_UP } from "./mouse";
-import { input, proposeSize, rebuild, subscribeOutput, warm } from "./session";
+import { input, looking, proposeSize, rebuild, subscribeOutput, warm } from "./session";
 
 /**
  * How many emulators are kept.
@@ -714,6 +714,37 @@ function announce(): void {
   warm(pool.keys());
 }
 
+/**
+ * Nobody is in front of this window, so nothing here is worth resizing a pty
+ * for — and when somebody comes back, say the shapes again.
+ *
+ * The pool is what proposes sizes, so the pool is what says when its proposals
+ * mean nothing. A locked phone is the case: it keeps its panes, keeps its
+ * socket — a sleeping one is deliberately never hung up on — and so went on
+ * holding every other client watching that agent down to phone width from a
+ * pocket. `session.ts` sends it; the server stops counting this client's
+ * proposals rather than dropping them, so coming back costs one message.
+ *
+ * The re-measure on the way back is the other half, and the half that was
+ * missing when this was only the server's problem. Returning to a window
+ * changes nothing about its boxes, so the `ResizeObserver` has nothing to say
+ * and the emulators would sit at whatever shape was settled on while they were
+ * away, waiting for a divider to be dragged. Every attached one therefore
+ * proposes again — the same debounce the observer's measurements take, since a
+ * proposal still ends at a SIGWINCH.
+ *
+ * Visibility, not focus: a window sitting behind another app is one somebody
+ * can read, and a terminal that reshaped itself every time you clicked away
+ * would be worse than the bug. `visibilitychange` is minimised, another Space,
+ * an occluded window, and a phone whose screen went off.
+ */
+document.addEventListener("visibilitychange", () => {
+  const visible = document.visibilityState === "visible";
+  looking(visible);
+  if (!visible) return;
+  for (const entry of pool.values()) if (entry.attached) entry.measure();
+});
+
 function create(agentId: string): Pooled {
   const element = document.createElement("div");
   element.className = "term";
@@ -851,6 +882,41 @@ function create(agentId: string): Pooled {
     em.loadAddon(fit);
     em.open(element);
     terminal = em;
+
+    /**
+     * Option+letter, which without this reaches the pty as nothing at all.
+     *
+     * macOS composes option+h into "˙", and ghostty-web takes the text it
+     * encodes from `event.key`, keeping it only while it is ASCII:
+     *
+     *     A.key.length === 1 && A.key.charCodeAt(0) < 128 ? A.key.toLowerCase() : void 0
+     *
+     * "˙" is U+02D9, so the text is dropped and the encoder is handed a key with
+     * nothing to encode. It answers with zero bytes — and `handleKeyDown` has
+     * called `preventDefault` and `stopPropagation` before it asks, then
+     * forwards only a non-empty answer. The keystroke falls between the two:
+     * the browser is told it was handled and the pty is never told anything, so
+     * every option binding in every program in the pane is dead, not just the
+     * ones in vim. The encoder can produce the right bytes, with the text put
+     * back and DEC 1036 set; it is never given either.
+     *
+     * `event.code` is the physical key and survives the compose, so the letter
+     * is still there to be read off. What goes down the pty is the ESC prefix —
+     * DEC 1036, which is what `macos-option-as-alt` sends in Ghostty proper and
+     * what vim reads as <M-h>. Returning true is how ghostty-web is told the
+     * key is spoken for.
+     *
+     * The cost is macOS dead keys inside a pane: option+n is Alt+n here, not
+     * the first half of "ñ". That is the same trade `macos-option-as-alt = true`
+     * makes, and the same one every terminal that sends Alt has to make.
+     */
+    em.attachCustomKeyEventHandler((event) => {
+      if (!event.altKey || event.ctrlKey || event.metaKey) return false;
+      const letter = /^Key([A-Z])$/.exec(event.code)?.[1];
+      if (!letter) return false;
+      input(agentId, `\x1b${event.shiftKey ? letter : letter.toLowerCase()}`);
+      return true;
+    });
     // Has to come after `open`, which is where the renderer and its canvas are
     // built; there is nothing to point at before that.
     if (em.renderer) {

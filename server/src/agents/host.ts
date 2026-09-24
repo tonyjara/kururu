@@ -76,6 +76,22 @@ function groupAlive(pid: number): boolean {
   }
 }
 
+/**
+ * The caller's environment, as much of it as is one. Strings under names a
+ * shell would accept, and nothing else: a value that is not a string is not an
+ * environment variable, and node-pty refuses the whole spawn over one rather
+ * than the one entry. Dropped, not coerced — the server built this, and a
+ * field it got wrong is a bug to see, not a value to repair.
+ */
+function overlay(env: Record<string, string> | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!env || typeof env !== "object") return out;
+  for (const [key, value] of Object.entries(env)) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && typeof value === "string") out[key] = value;
+  }
+  return out;
+}
+
 interface Agent {
   id: string;
   kind: PtyKind;
@@ -130,7 +146,7 @@ export class AgentHost {
    * mechanism — same pty, same emulator, same teardown — and the only thing
    * `kind` decides in here is whether quitting counts it as an agent.
    */
-  create(options: { cwd?: string; command?: string; kind?: PtyKind } = {}): AgentSnapshot {
+  create(options: { cwd?: string; command?: string; kind?: PtyKind; env?: Record<string, string> } = {}): AgentSnapshot {
     const cwd = options.cwd || defaultCwd();
     const kind = options.kind ?? "agent";
     const shell = loginShell();
@@ -148,6 +164,14 @@ export class AgentHost {
       cwd,
       env: {
         ...process.env,
+        /**
+         * What the server asked for on top of our own — a profile's login
+         * directories, today. Before the fixed ones below rather than after,
+         * so that nothing arriving over the link can rename this pty to a
+         * hook or point it at another server: those are facts about *this*
+         * terminal and are not the caller's to set.
+         */
+        ...overlay(options.env),
         TERM: "xterm-256color",
         /**
          * So a hook running inside this agent can report back about *itself*

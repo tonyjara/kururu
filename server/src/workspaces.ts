@@ -24,8 +24,8 @@
  * profile, it always has at least one workspace, that workspace always has at
  * least one pane, and the focused pane always exists.
  */
-import type { Profile, ProfileSummary, Workspace, WorkspaceColor, WorkspaceDev } from "../../shared/model";
-import { isWorkspaceColor, WORKSPACE_COLORS } from "../../shared/model";
+import type { Profile, ProfileSummary, Workspace, WorkspaceColor } from "../../shared/model";
+import { isLoginKey, isWorkspaceColor, mintLoginKey, WORKSPACE_COLORS } from "../../shared/model";
 import {
   addTab,
   closePane,
@@ -134,6 +134,11 @@ function adoptSeq(profiles: Profile[]): void {
 function adopt(profile: Profile): Profile {
   return {
     ...profile,
+    // The one field in here that is minted rather than nulled when it is
+    // missing, and the reason is in `Profile.loginKey`: a profile from before
+    // it existed has no logins of its own yet, and a fresh key says exactly
+    // that. Checked rather than trusted, because it becomes a path.
+    loginKey: isLoginKey(profile.loginKey) ? profile.loginKey : mintLoginKey(),
     // Read as defensively as everything else out of a blob: this one is a list
     // rather than a field, so a hand-edited or older blob could
     // put anything in it. Anything that is not a string is dropped instead of
@@ -146,7 +151,10 @@ function adopt(profile: Profile): Profile {
     hiddenAgents: Array.isArray(profile.hiddenAgents)
       ? profile.hiddenAgents.filter((id): id is string => typeof id === "string")
       : [],
-    workspaces: profile.workspaces.map((workspace) => ({
+    // `dev` is taken off rather than carried: a blob written while workspaces
+    // remembered a dev command still has one, and a field the type no longer
+    // names would ride along into every snapshot and back out to disk.
+    workspaces: profile.workspaces.map(({ dev: _dev, ...workspace }: Workspace & { dev?: unknown }) => ({
       ...workspace,
       color: isWorkspaceColor(workspace.color) ? workspace.color : null,
       // A field this version has and the blob may not, like the three below.
@@ -158,23 +166,7 @@ function adopt(profile: Profile): Profile {
       // compares against null and gets a different answer than it did a restart
       // ago — which is the whole reason this function exists.
       mascotId: typeof workspace.mascotId === "string" ? workspace.mascotId : null,
-      // Likewise. The agent id inside it is *not* repaired against the host's
-      // list here: index.ts already drops tabs pointing at terminals that are
-      // gone, and a stale one costs nothing — `runDev` checks the terminal is
-      // still there and still idle before it types into it.
-      dev: adoptDev(workspace.dev),
     })),
-  };
-}
-
-/** A remembered dev command out of a blob an older server wrote, or nothing. */
-function adoptDev(value: unknown): WorkspaceDev | null {
-  const raw = (value ?? {}) as Record<string, unknown>;
-  if (typeof raw.command !== "string" || !raw.command.trim()) return null;
-  return {
-    command: raw.command,
-    cwd: typeof raw.cwd === "string" ? raw.cwd : "",
-    agentId: typeof raw.agentId === "string" ? raw.agentId : null,
   };
 }
 
@@ -285,13 +277,22 @@ export class Workspaces {
     return this.profiles;
   }
 
-  /** For the switcher: every profile, with enough to draw a row. */
-  summaries(liveAgents: (profileId: string) => number): ProfileSummary[] {
+  /**
+   * For the switcher: every profile, with enough to draw a row. Both answers
+   * are the caller's — how many ptys are live is the host's to say, and where a
+   * login directory is depends on a config path this file does not know.
+   */
+  summaries(
+    liveAgents: (profileId: string) => number,
+    loginDir: (loginKey: string) => string,
+  ): ProfileSummary[] {
     return this.profiles.map((profile) => ({
       id: profile.id,
       name: profile.name,
       workspaces: profile.workspaces.length,
       agents: liveAgents(profile.id),
+      loginDir: loginDir(profile.loginKey),
+      loginKey: profile.loginKey,
     }));
   }
 
@@ -1004,58 +1005,6 @@ export class Workspaces {
   }
 
   /**
-   * A workspace of the active profile, by id. For the verbs that act on a row
-   * of the sidebar rather than on wherever the focus is.
-   */
-  workspaceById(workspaceId: string): Workspace | null {
-    return this.active.workspaces.find((w) => w.id === workspaceId) ?? null;
-  }
-
-  /** Every terminal in a named workspace of the active profile. */
-  agentsInWorkspace(workspaceId: string): string[] {
-    const workspace = this.workspaceById(workspaceId);
-    return workspace ? panes(workspace.layout).flatMap((pane) => pane.agentIds) : [];
-  }
-
-  /**
-   * Put a terminal in a named workspace, in whatever pane has focus there —
-   * `moveTabToWorkspace` without the moving, for a tab that has just been
-   * opened. It does not switch workspace: this is how a dev server comes back up
-   * somewhere you are not looking.
-   */
-  addTabTo(workspaceId: string, agentId: string, cwd: string): void {
-    const profile = this.active;
-    if (!profile.workspaces.some((w) => w.id === workspaceId)) return;
-    this.mutate(profile.id, workspaceId, (w) => ({
-      ...w,
-      layout: addTab(w.layout, w.focusedPaneId, agentId, cwd),
-    }));
-  }
-
-  /**
-   * Note what a terminal is serving, on the workspace it is in — wherever that
-   * is, including a profile nobody is looking at.
-   *
-   * Called from the dev-server scan, which runs every three seconds, so it
-   * compares before it writes: every mutation here pushes a snapshot to every
-   * client and schedules a write to disk, and re-noting the same command twenty
-   * times a minute would do both for nothing.
-   */
-  rememberDev(agentId: string, dev: WorkspaceDev): void {
-    for (const profile of this.profiles) {
-      for (const workspace of profile.workspaces) {
-        if (!paneWithAgent(workspace.layout, agentId)) continue;
-        const had = workspace.dev;
-        if (had && had.command === dev.command && had.cwd === dev.cwd && had.agentId === dev.agentId) {
-          return;
-        }
-        this.mutate(profile.id, workspace.id, (w) => ({ ...w, dev }));
-        return;
-      }
-    }
-  }
-
-  /**
    * Point a workspace at one of the saved mascots, or at nothing, which means
    * the default.
    *
@@ -1126,6 +1075,22 @@ export class Workspaces {
   }
 
   /**
+   * Point a profile at a login: another key, or with null a fresh one nobody is
+   * signed into. Which keys may be named is the caller's to decide, because it
+   * takes a look at the disk to know — this only holds the key to its shape,
+   * the way everything that becomes a path is. The directory the profile was
+   * pointed at before stays where it is, like every login directory does, and
+   * stays in the list for as long as somebody is signed into it.
+   */
+  setProfileLogin(profileId: string, loginKey: string | null): void {
+    const key = loginKey === null ? mintLoginKey() : loginKey;
+    if (!isLoginKey(key)) return;
+    const profile = this.profiles.find((p) => p.id === profileId);
+    if (!profile || profile.loginKey === key) return;
+    this.replaceProfile(profileId, (p) => ({ ...p, loginKey: key }));
+  }
+
+  /**
    * Delete a profile and say what it was running. The last one cannot go — there
    * is always somewhere to be.
    */
@@ -1161,7 +1126,6 @@ export class Workspaces {
       lastPaneId: null,
       color: nextColor(taken.map((w) => w.color)),
       mascotId: null,
-      dev: null,
     };
   }
 
@@ -1170,6 +1134,7 @@ export class Workspaces {
     return {
       id: id("p"),
       name,
+      loginKey: mintLoginKey(),
       workspaces: [workspace],
       activeWorkspaceId: workspace.id,
       lastWorkspaceId: null,

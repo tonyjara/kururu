@@ -25,7 +25,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Profile, Workspace } from "../../shared/model";
-import { isWorkspaceColor } from "../../shared/model";
+import { isLoginKey, isWorkspaceColor, mintLoginKey } from "../../shared/model";
 import type { LayoutNode } from "../../shared/layout";
 import { nextId } from "./workspaces";
 
@@ -54,16 +54,18 @@ interface StoredWorkspace {
   color?: string | null;
   /** Likewise: a session written before a workspace could pick a mascot. */
   mascotId?: string | null;
-  /**
-   * The last dev command this workspace had serving, and where it ran. Two
-   * strings and no process — which is what makes it the one thing on a restored
-   * layout that can bring an app back up, and why it is safe to keep when
-   * nothing else about a running terminal is.
-   */
-  dev?: { command: string; cwd: string } | null;
 }
 interface StoredProfile {
   name: string;
+  /**
+   * The key its login directory is named by — the one thing about a profile
+   * that is kept *as is* across a cold start, because it names something on
+   * disk rather than something in this process. Optional because sessions
+   * written before profiles kept their own logins have none, and the read
+   * mints one: a fresh key is a profile that has not signed in yet, which is
+   * true of it.
+   */
+  loginKey?: string;
   workspaces: StoredWorkspace[];
   /** Index rather than id: ids are regenerated on the way back in. */
   activeWorkspace: number;
@@ -109,6 +111,7 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
     activeProfile: Math.max(0, profiles.findIndex((p) => p.id === activeProfileId)),
     profiles: profiles.map((profile) => ({
       name: profile.name,
+      loginKey: profile.loginKey,
       activeWorkspace: Math.max(
         0,
         profile.workspaces.findIndex((w) => w.id === profile.activeWorkspaceId),
@@ -117,10 +120,6 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
         name: workspace.name,
         color: workspace.color,
         mascotId: workspace.mascotId,
-        // The terminal it ran in is deliberately dropped: agent ids belong to a
-        // pty host that will not be there next launch, and a button that reused
-        // a recycled id would type a command into a stranger.
-        dev: workspace.dev ? { command: workspace.dev.command, cwd: workspace.dev.cwd } : null,
         layout: strip(workspace.layout),
       })),
     })),
@@ -202,12 +201,6 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
       // that names nothing draws the default, so a file naming a mascot since
       // deleted needs no repair.
       const mascotId = typeof w.mascotId === "string" ? w.mascotId : null;
-      // Read as defensively as the rest, and with no terminal attached: the
-      // panes come back empty, so the first press of ▸ opens a tab for it.
-      const dev =
-        w.dev && typeof w.dev.command === "string" && w.dev.command.trim()
-          ? { command: w.dev.command, cwd: typeof w.dev.cwd === "string" ? w.dev.cwd : "", agentId: null }
-          : null;
       const workspace: Workspace = {
         id: nextId("w"),
         name: w.name,
@@ -219,7 +212,6 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
         lastPaneId: null,
         color,
         mascotId,
-        dev,
       };
       workspaces.push(workspace);
     }
@@ -228,6 +220,8 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
     profiles.push({
       id: nextId("p"),
       name: stored.name,
+      // Checked rather than trusted, because it becomes a path: see `logins.ts`.
+      loginKey: isLoginKey(stored.loginKey) ? stored.loginKey : mintLoginKey(),
       workspaces,
       activeWorkspaceId: workspaces[at]!.id,
       lastWorkspaceId: null,

@@ -149,7 +149,7 @@
   --strip: color-mix(in srgb, var(--chrome) 60%, var(--bg));
 
   --icon-close: "✕";
-  --icon-run: "▸";
+  --icon-run: "↯";
   --icon-restart: "↻";
   --icon-caret: "▾";
   --icon-add: "+";
@@ -164,13 +164,15 @@
   --icon-panes: "▥";
   --icon-hide: "⊘";
   --icon-database: "▤";
+  --icon-stop: "■";
+  --icon-play: "▸";
 
   /* The icon strip a skin may bring instead of glyphs — every icon as one
      picture of `--icon-n` cells. `none` is the drawing. `--icon-n` is a
      constant the stylesheet needs for the arithmetic and is not a skin's to
      move: it is `ICON_NAMES.length`, and the test holds the two together. */
   --icon-sheet: none;
-  --icon-n: 16;
+  --icon-n: 18;
 
   /* ----------------------------------------------------------------------
      The parts: what a skin *paints*, three properties per region.
@@ -295,6 +297,8 @@
 .icon-panes { --icon-svg: var(--icon-panes-svg); --icon-glyph: var(--icon-panes); --icon-i: 13; }
 .icon-hide { --icon-svg: var(--icon-hide-svg); --icon-glyph: var(--icon-hide); --icon-i: 14; }
 .icon-database { --icon-svg: var(--icon-database-svg); --icon-glyph: var(--icon-database); --icon-i: 15; }
+.icon-stop { --icon-svg: var(--icon-stop-svg); --icon-glyph: var(--icon-stop); --icon-i: 16; }
+.icon-play { --icon-svg: var(--icon-play-svg); --icon-glyph: var(--icon-play); --icon-i: 17; }
 /* An icon strip, when a skin brought one: every icon is one cell of a single
    picture, `--icon-n` cells across, and `--icon-i` on each class says which.
    The strip is scaled so one cell is exactly the icon's box — which is what
@@ -328,7 +332,9 @@
 :root[data-glyphs~="pin"] .icon-pin::before,
 :root[data-glyphs~="panes"] .icon-panes::before,
 :root[data-glyphs~="hide"] .icon-hide::before,
-:root[data-glyphs~="database"] .icon-database::before {
+:root[data-glyphs~="database"] .icon-database::before,
+:root[data-glyphs~="stop"] .icon-stop::before,
+:root[data-glyphs~="play"] .icon-play::before {
   content: var(--icon-glyph);
   width: auto;
   height: auto;
@@ -487,6 +493,22 @@ kbd {
   flex-direction: column;
   background: var(--chrome);
   min-height: 0;
+  /* The last resort, and it should never be reached: the sections below share
+     out a short window between them, and everything here is sized so that the
+     chrome fits a phone held either way up. Under about 550px of height it
+     stops fitting — a phone on its side is 390 — and the question becomes which
+     way it fails. Scrolling keeps the settings cog reachable; the alternative
+     was the foot of the sidebar quietly below the bottom of the screen.
+
+     `clip` on the other axis rather than letting it become `auto` with it: the
+     resize grip hangs four pixels past this edge on purpose, and those four
+     pixels are scrollable overflow as far as the box is concerned — a sidebar
+     that could be dragged sideways by the width of a hair. The grip's line is
+     drawn inside the edge and is unaffected; what is clipped is the outer half
+     of somewhere to grab it, which is a pointer target and does not exist on
+     the screens this rule is for. */
+  overflow-y: auto;
+  overflow-x: clip;
 }
 
 /**
@@ -617,13 +639,55 @@ kbd {
   background: var(--blocked);
 }
 
+/**
+ * A section is a column, and `overflow: hidden` is the promise that whatever
+ * happens to its height, it happens *inside* it.
+ *
+ * Which is not a tidiness rule, it is the fix for the thing a phone did. The
+ * sidebar is a fixed screen there rather than a column in a window that can run
+ * off the bottom, so a short viewport has to take the difference out of the
+ * sections — and a section shrunk by the flex algorithm does not take its
+ * contents down with it. A heading and a column of usage bars have minimum
+ * sizes of their own, so what came out was a twenty-pixel box with a hundred
+ * and fifty pixels hanging out of the bottom of it, drawn over the top of
+ * whatever section came next: DEV SERVERS printed across the last usage bar,
+ * two lists in the same place.
+ *
+ * Clipping is the *last* of the three rules here and should never be the one
+ * that acts — the two below hand the squeeze to the lists, which scroll. It is
+ * here because a window can always be made shorter than the chrome in it, and
+ * the honest failure at that size is a section that runs out of room, not one
+ * that borrows somebody else's.
+ */
 .side-section {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
+/**
+ * The agent list takes the spare room, and — the half that was missing — it is
+ * never squeezed out of existence.
+ *
+ * `flex: 1` alone means a zero basis, which is right for the growing and is
+ * exactly nothing on the way down: a window too short for the rest of its
+ * chrome hands this section no pixels at all, and what was left was a sidebar
+ * whose whole subject had vanished, heading and all. The floor is a fraction of
+ * the window rather than a count of rows, in the same idiom and for the same
+ * reason as the cap on `.dev-list` below: it is a share of a screen nobody has
+ * measured, and it does not drift when a skin changes the size of a row.
+ */
 .side-agents {
   flex: 1;
+  min-height: 25vh;
+}
+/* And the two boxes under it are pinned, which is what every comment about them
+   already says they are. They are small and fixed — three bars and a handful of
+   links — so when the window is short they are the wrong place to find room;
+   the list of agents is. */
+.side-usage,
+.side-dev {
+  flex: none;
 }
 
 .side-section h2 {
@@ -639,6 +703,60 @@ kbd {
   color: var(--dimmer);
 }
 
+/* A heading that folds its section away: the Usage and Dev servers headings.
+   It is the heading, typography and all, with the drawer's caret in front — so
+   the only thing that says it can be pressed is the caret and the hover, which
+   is as much as a heading should say. Pulled out by the h2's own inset so the
+   hover's ground runs to the same edges the rows below it do. */
+.side-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 -6px;
+  padding: 3px 6px;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: none;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: var(--cursor-pointer);
+}
+.side-toggle:hover,
+.side-toggle:focus-visible {
+  background: var(--chrome-high);
+  color: var(--dim);
+  outline: none;
+}
+.side-toggle-n {
+  margin-left: auto;
+  font-family: var(--mono);
+  letter-spacing: 0;
+}
+
+/**
+ * The + in a heading stands *over* the column of colour chips below it, not
+ * merely at the same inset as their right-hand edge.
+ *
+ * Which is what it was doing, and the difference is five pixels and very
+ * visible: a heading button is an icon in a box twice the chip's width, so two
+ * things ending at the same x have centres nowhere near each other, and the +
+ * read as hung off the end of the heading rather than as the top of the list's
+ * last column.
+ *
+ * Shifted by half of *itself* rather than by a measured amount, which is the
+ * only form of this that survives a skin with a bigger type ramp: the button's
+ * own width cancels, and what is left is the chip's half-width — 5.5px of an
+ * 11px dot — against the gutter the two already share.
+ */
+.side-section h2 .mini {
+  transform: translateX(calc(50% - 5.5px));
+}
+
 .ws-list,
 .agent-list {
   list-style: none;
@@ -651,6 +769,21 @@ kbd {
   min-height: 0;
 }
 
+/**
+ * The workspace list is one grid and every row is a slice of it: the name in
+ * the first column, the colour in the second, so the swatches stand in one
+ * column down the list whatever the names are.
+ *
+ * `minmax(0, 1fr)` on the name's track rather than `1fr`, because an `fr`
+ * floors at its content: one `feature/the-whole-sentence` on the branch line
+ * would push the grid wider than the sidebar instead of being clipped by it,
+ * and it is the whole list that would widen rather than the one row.
+ */
+.ws-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-content: start;
+}
 .ws-list li,
 .agent-list li {
   display: flex;
@@ -662,8 +795,7 @@ kbd {
   background: var(--chrome-high);
 }
 
-/* Two lines — the name, and what the workspace runs — so the row is a column.
-   And it wears the workspace's colour as a rail down its left edge: the same
+/* One line, or two when there is a branch to show under the name. And it wears the workspace's colour as a rail down its left edge: the same
    two pixels `.agent-item` wears, set from the same `--tag`, which is the whole
    of how the sidebar says which agents belong to which workspace. It replaced a
    10×3px mark tucked under the number, which was a tag you had to already know
@@ -671,65 +803,44 @@ kbd {
    that can be read without reading. */
 .ws-list .ws-item {
   position: relative;
-  flex-direction: column;
-  align-items: stretch;
+  /* The whole row switches workspace, not just the name's line — see the
+     `onClick` on the `li` in `Sidebar.tsx`. Said here too, because a row that
+     highlights under the pointer and does not change the cursor is a row that
+     has told you two different things about whether it can be pressed. */
+  cursor: var(--cursor-pointer);
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
   border-left: var(--border-thick) var(--border-style) var(--tag, transparent);
   border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
 }
 
 .ws-row {
   min-width: 0;
+  grid-column: 1;
+  grid-row: 1;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px 3px;
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
   text-align: left;
   color: var(--dim);
 }
 
-/* The second line. Its buttons are pushed to the left edge under the name
-   rather than to the right, so the column of ▸ down a list of workspaces lines
-   up — a row of controls that starts wherever the previous one ended is a row
-   you have to aim at afresh every time. */
-.ws-tools {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 0 6px 4px 6px;
-}
-
-.ws-tool {
-  flex: none;
-  padding: 3px 5px;
-  border: none;
-  border-radius: var(--radius-md);
-  background: none;
-  color: var(--dimmer);
-  font-size: var(--fs-sm);
-  line-height: 1;
-  cursor: var(--cursor-pointer);
-}
-.ws-list li:hover .ws-tool {
-  color: var(--dim);
-}
-.ws-tool:hover,
-.ws-tool:focus-visible {
-  color: var(--accent);
-  background: var(--chrome-high);
-  outline: none;
-}
-
-/* The branch, in the gap the buttons leave. `min-width: 0` is what makes the
-   ellipsis work at all — a flex child will not shrink below its content without
-   it, so a long branch name would push the colour chip off the row instead of
-   being clipped. The left margin only applies when something is to its left:
-   the buttons are conditional, and a branch on a workspace with neither of them
-   should start where the name does. */
+/* The branch, under the name and starting where the name starts — past the
+   number, so the number stays the only thing in its column. The 26px is the
+   row's own padding, the number's width and the gap after it. `min-width: 0` is
+   what makes the ellipsis work at all: a grid item will not shrink below its
+   content without it, and a long name would be clipped by the window rather
+   than by its own column. */
 .ws-branch {
-  flex: 1;
+  grid-column: 1 / -1;
+  grid-row: 2;
   min-width: 0;
-  margin: 0 6px 0 2px;
+  margin-top: -4px;
+  padding: 0 8px 5px 26px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -754,14 +865,19 @@ kbd {
    display. A filled dot, because that is what a colour looks like when it is a
    thing you press; untagged it is an empty ring, present enough to be found and
    quiet enough that a list of untagged workspaces does not read as a list of
-   empty fields. Last in the row and pushed to the end, because it is the one
-   button here that is about the row rather than about what the row runs. */
+   empty fields. */
 .ws-swatch {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  flex: none;
   width: 11px;
   height: 11px;
-  margin-left: auto;
+  margin-right: 6px;
   padding: 0;
+  border: none;
   border-radius: 50%;
+  cursor: var(--cursor-pointer);
   background: var(--dimmer);
   opacity: 0.85;
 }
@@ -811,56 +927,10 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* The dev server's button: ▸ while nothing is serving, ↻ while something is.
-   Which one you see *is* the status, so there is nothing else on the row saying
-   it — and a workspace that has never had a dev server draws no button at all.
-   Quiet until the row is under the cursor: a list of these at full strength
-   would read as the sidebar's main event, and it is not. It takes its colours
-   from `.ws-tool` above and needs nothing of its own. */
-
-/* The local database. Unlike ▸ this one is *lit* rather than swapped: there is
-   one drawing of a database and two things it can be, so the state is carried
-   by the colour of it. Down is the same grey as the rest of the row's tools, up
-   is the accent — which means a sidebar of workspaces answers "which of these
-   has its database running" at a glance, and that is the whole feature.
-
-   `--done` for the lit state rather than `--accent`, and the reason is that
-   this row already has an accent on it: the workspace you are in prints its
-   number in it. Two different meanings in one colour on one row is how you end
-   up reading the highlight as the selection. `--done` is the theme's other
-   settled-and-fine colour and is not spoken for here. */
-.ws-db-on {
-  color: var(--done);
-}
-.ws-list li:hover .ws-db-on {
-  color: var(--done);
-}
-.ws-db-on:hover,
-.ws-db-on:focus-visible {
-  color: var(--done);
-  background: var(--chrome-high);
-}
-/* While a start or a stop is in flight. `supabase start` is a minute of Docker
-   and the port says nothing for all of it, so the row has to say something
-   itself — otherwise the button reads as one that did not work, which is the
-   state in which somebody presses it again. */
-.ws-db-busy,
-.ws-db-busy:hover,
-.ws-list li:hover .ws-db-busy {
-  color: var(--working);
-  background: none;
-  cursor: default;
-  animation: ws-db-pulse 1.4s ease-in-out infinite;
-}
-@keyframes ws-db-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-
 /* Renaming in place: the field stands where the row does, so the name does not
    move under the cursor between reading it and typing over it. */
 .ws-edit {
-  flex: 1;
+  grid-column: 1 / -1;
   min-width: 0;
   margin: 1px 0;
   padding: 4px 8px;
@@ -1362,6 +1432,18 @@ kbd {
   color: var(--dimmer);
 }
 
+/* The account under the bars, as quiet as the reset line: it answers "whose?"
+   once, and after that it is read only when it changes. */
+.usage-account {
+  margin: 0;
+  padding: 0 12px 6px;
+  font-size: var(--fs-xs);
+  color: var(--dimmer);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* The staleness dot in the heading. Deliberately tiny and unlabelled: it is a
    caveat on numbers that are still the best ones known, not an error, and a
    sentence here would be louder than the thing it is qualifying. */
@@ -1440,6 +1522,11 @@ kbd {
 }
 
 .sidebar-foot {
+  /* Not somewhere to find room either — same argument as `.side-usage` above,
+     and here the thing squeezed out is the only door to Settings. `--bar-h` is
+     a floor for a bar with nothing in it and is shorter than a button a thumb
+     can hit, so on a phone the row was clipping its own cog by a pixel. */
+  flex: none;
   padding: 6px 8px;
   min-height: var(--bar-h);
   display: flex;
@@ -1540,14 +1627,12 @@ kbd {
 :root[data-narrow] .agent-name {
   padding-right: 76px;
 }
-:root[data-narrow] .ws-tool {
-  color: var(--dim);
-  padding: 8px 10px;
-  font-size: var(--fs-md);
+/* The phone's chip is 14px and its list sits in a 10px gutter rather than a 6px
+   one, so the line the + has to stand on is four pixels further in. Same
+   arithmetic as the rule above, that list's numbers. */
+:root[data-narrow] .side-section h2 .mini {
+  transform: translateX(calc(50% - 9px));
 }
-/* The dot grows with the buttons beside it, but only to a dot a thumb can hit —
-   its padding is what does the hitting, so the colour itself stays small enough
-   to read as a tag rather than as a third button. */
 :root[data-narrow] .ws-swatch {
   width: 14px;
   height: 14px;
@@ -3242,6 +3327,34 @@ a.button {
   color: var(--dimmer);
   font-variant-numeric: tabular-nums;
 }
+/* Where the profile's logins live, when it keeps its own. A path, so mono and
+   dim, and cut with an ellipsis rather than wrapped: the tail is a key nobody
+   reads and the head is what says it is the same place as the row above. */
+.prof-dir {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--dimmer);
+}
+/* Which login the profile uses: a word and a picker on one line, the picker
+   taking the width because an email and the profiles sharing it are long and
+   the word is not. */
+.prof-login {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.prof-login-label {
+  flex: none;
+  font-size: var(--fs-base);
+  color: var(--dimmer);
+}
+
 /* Not a button, and shaped so it cannot be mistaken for the one beside it: the
    thing you press is "switch to", and the profile you are already in has
    nothing to press. */
@@ -5053,7 +5166,6 @@ a.button {
 .cog,
 .sb-bars,
 .sb-panes,
-.ws-tool,
 .agent-tool,
 .style-remove,
 .sidebar-close {

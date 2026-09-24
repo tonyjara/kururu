@@ -36,9 +36,19 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 import { adoptMascot, countsAsAgent, defaultMascot } from "../../shared/model";
 import { bindKey } from "../../shared/keys";
-import type { AgentSnapshot, AgentStatus, MascotSet, Profile, PtyKind, SessionSnapshot, Workspace } from "../../shared/model";
-import type { ClientMessage, DevServer, ServerMessage, SupabaseDb, WorkspaceBranch } from "../../shared/wire";
-import { DEV_SCAN_MS, GIT_SCAN_MS, SAVE_DEBOUNCE_MS, SUPABASE_SCAN_MS, USAGE_POLL_MS } from "../../shared/wire";
+import type {
+  AgentSnapshot,
+  AgentStatus,
+  HostInfo,
+  LoginSummary,
+  MascotSet,
+  Profile,
+  PtyKind,
+  SessionSnapshot,
+  Workspace,
+} from "../../shared/model";
+import type { ClientMessage, DevServer, ServerMessage, WorkspaceBranch } from "../../shared/wire";
+import { DEV_SCAN_MS, GIT_SCAN_MS, SAVE_DEBOUNCE_MS, USAGE_POLL_MS } from "../../shared/wire";
 import {
   bindAddress,
   cookieHeader,
@@ -53,15 +63,14 @@ import {
 import { parseReport } from "./agents/report";
 import { dump as dumpRecording, forget as forgetRecording, recordBacklog, recordInput, recordNote, recordOutput } from "./record";
 import { processCwd } from "./cwd";
-import { scanDevServers, stopDev, type DevProc } from "./devservers";
-import { findSupabase, probe, supabaseCommand, type SupabaseFound } from "./supabase";
+import { scanDevServers } from "./devservers";
 import { readHead, repoAt } from "./git";
 import { pollUsage, usageSnapshot } from "./usage";
 import { allowedRoots, allowRoot, findDocs, listDir, readBytes, readFile, resolveInRoot } from "./files";
 import { renderMarkdown } from "./markdown";
 import { scanMemory } from "./memory";
 import { attach as attachEditor, findNvim } from "./nvim";
-import { panes } from "../../shared/layout";
+import { findPane, panes } from "../../shared/layout";
 import {
   adoptLegacySheet,
   builtinSheets,
@@ -86,6 +95,10 @@ import {
   type NotifySettings,
 } from "../../shared/notify";
 import { readNotify, writeNotify } from "./notify";
+import { readLaunch, writeLaunch } from "./launch";
+import { hookSettingsFlag } from "./hooks";
+import { claudeDirFor, loginDir, loginEnv, scanLogins } from "./logins";
+import { adoptLaunch, findLauncher, launcherCommand, type LaunchSettings } from "../../shared/launchers";
 import { soundBytes, sounds } from "./sounds";
 import { readAppearance, writeAppearance } from "./appearance";
 import {
@@ -111,7 +124,7 @@ import {
 } from "./studio";
 import { adoptAppearance, themeFor, type Appearance } from "../../shared/theme";
 import { isStyleId, skinFor } from "../../shared/skin";
-import { HostLink, type Port } from "./hostlink";
+import { HOST_PROTOCOL, HostLink, type Port } from "./hostlink";
 import { connectToHost, hostSocketPath, type SocketPort } from "./hostsock";
 import { MouseEncoding } from "./mouseencoding";
 import { readSnapshot, writeSnapshot } from "./persist";
@@ -187,6 +200,25 @@ interface ClientState {
    */
   proposals: Map<string, Grid>;
   /**
+   * Somebody is in front of this client — the page is not in a pocket.
+   *
+   * It gates the proposals above and reaches nothing else. A socket says
+   * nothing about a screen: a phone that locks keeps every pane it had, goes on
+   * claiming to see them for as long as the connection lives, and the
+   * connection is deliberately never hung up on. The minimum is over the
+   * clients that can *see* a terminal, so that claim was the desktop being held
+   * at phone width by a phone on a table in another room.
+   *
+   * False does not withdraw the proposals, it stops counting them. A page that
+   * comes back has the same panes at the same sizes and can vote again in the
+   * message that says so, rather than in whatever frame its emulators get round
+   * to measuring in.
+   *
+   * True until a client says otherwise, which is also what an older client that
+   * never sends `looking` means.
+   */
+  looking: boolean;
+  /**
    * Terminals whose backlog is still being prepared, holding the live output
    * that arrived in the meantime.
    *
@@ -223,7 +255,6 @@ const clients = new Map<WebSocket, ClientState>();
 
 const state = {
   devServers: [] as DevServer[],
-  supabase: [] as SupabaseDb[],
   branches: [] as WorkspaceBranch[],
 };
 
@@ -276,6 +307,74 @@ adoptLegacySheet();
 let mascots = readMascots();
 let keys = readKeys();
 let notify = readNotify();
+let launch = readLaunch();
+
+/**
+ * What the pty host said about itself when this server arrived — see
+ * `HOST_PROTOCOL` — or, until it has, what a host from before the handshake
+ * says: nothing, which is read as the oldest protocol there is.
+ */
+let hostInfo: HostInfo = { version: null, current: false };
+let hostProtocol = 1;
+
+/**
+ * Whether terminals open with their profile's own logins right now.
+ *
+ * The setting and the host, together. The switch is the person's; the host is
+ * what applies the `env` that makes it real, and an old one would drop that
+ * field on the floor and open the terminal as the machine's own account with
+ * nothing to say so — the one failure this feature must not have. So with the
+ * switch on and the host behind, everything that reads this behaves as though
+ * the switch were off, and the Profiles page says why.
+ */
+function loginsActive(): boolean {
+  return launch.loginsPerProfile && hostInfo.current;
+}
+
+/**
+ * The environment a terminal opened in the active profile gets on top of the
+ * server's own: the profile's login directories, or nothing at all. Absent
+ * rather than empty, which keeps the common case off the wire.
+ */
+function spawnEnv(): Record<string, string> | undefined {
+  return loginsActive() ? loginEnv(workspaces.active.loginKey) : undefined;
+}
+
+/**
+ * The logins on this machine as the Profiles page last saw them, and the only
+ * keys `set-profile-login` will accept.
+ *
+ * A copy rather than a read, because it goes into every snapshot and a snapshot
+ * is sent whenever anything about an agent changes — a directory listing and a
+ * file read per profile on each of those is not a price to pay for a list that
+ * changes when somebody types `/login`. `refreshLogins` brings it up to date on
+ * the usage poll's schedule and on every verb that touches a profile, and
+ * pushes a snapshot when it finds a difference, so a login made in a terminal
+ * appears on the page within the minute without the page asking.
+ *
+ * Every key a profile holds is in the list whether or not the disk has heard
+ * of it yet: a key is minted before its directory is made, and the page has to
+ * be able to draw "not signed in yet" for a profile nobody has opened a
+ * terminal in.
+ */
+let logins: LoginSummary[] = [];
+
+async function refreshLogins(): Promise<void> {
+  const found = new Map((await scanLogins()).map((login) => [login.key, login] as const));
+  for (const profile of workspaces.all()) {
+    if (!found.has(profile.loginKey)) found.set(profile.loginKey, { key: profile.loginKey, email: null });
+  }
+  const held = new Set(workspaces.all().map((p) => p.loginKey));
+  // A directory nobody uses and nobody signed into is an empty folder, and
+  // listing it would offer a choice that means nothing.
+  const next = [...found.values()]
+    .filter((login) => login.email !== null || held.has(login.key))
+    .sort((a, b) => a.key.localeCompare(b.key));
+  if (JSON.stringify(next) === JSON.stringify(logins)) return;
+  logins = next;
+  pushSnapshot();
+}
+
 let appearance = readAppearance();
 /**
  * What has been installed from `../kururu-styles`.
@@ -305,6 +404,13 @@ function saveAppearance(next: Appearance): void {
 function saveNotify(next: NotifySettings): void {
   notify = next;
   writeNotify(next);
+  pushSnapshot();
+}
+
+/** And again, for the new-tab menu. */
+function saveLaunch(next: LaunchSettings): void {
+  launch = next;
+  writeLaunch(next);
   pushSnapshot();
 }
 
@@ -553,7 +659,12 @@ function snapshot(): SessionSnapshot {
   return {
     session: "kururu",
     profile,
-    profiles: workspaces.summaries((id) => workspaces.agentsIn(id).filter((a) => host.isLive(a)).length),
+    profiles: workspaces.summaries(
+      (id) => workspaces.agentsIn(id).filter((a) => host.isLive(a)).length,
+      loginDir,
+    ),
+    logins,
+    host: hostInfo,
     // Two fields are merged here rather than carried by the host — see `overlay`
     // below, and the fields themselves in `shared/model.ts`, for why they live
     // on this side of the link at all.
@@ -561,6 +672,7 @@ function snapshot(): SessionSnapshot {
     mascots,
     keys,
     notify,
+    launch,
     appearance,
     styles,
   };
@@ -704,15 +816,13 @@ function mouseEncodingOf(agentId: string): MouseEncoding {
 function overlay(agent: AgentSnapshot): AgentSnapshot {
   const said = activity.get(agent.id);
   const was = lastAgent.get(agent.id);
-  const serving = devRunning.get(agent.id);
   const fresh = unread.has(agent.id);
   const held = memory.get(agent.id);
-  if (!said && !was && !serving && !held && fresh === agent.unread) return agent;
+  if (!said && !was && !held && fresh === agent.unread) return agent;
   return {
     ...agent,
     ...(said ? { activity: said } : {}),
     ...(was ? { lastAgent: was } : {}),
-    ...(serving ? { dev: serving.program } : {}),
     ...(held ? { rss: held } : {}),
     // Replaced rather than ored, which is the one line that stops the host's
     // byte-derived flag from lighting every row again behind this one's back.
@@ -958,6 +1068,7 @@ async function openTerminal(
   const agent = await host.create({
     cwd: options.cwd ?? (await cwdForNewTab(options.from ?? paneId)),
     command: options.command,
+    env: spawnEnv(),
     /**
      * A terminal unless the client insists otherwise. The window stopped
      * offering "start me an agent" as a separate thing to click: it is one
@@ -1156,10 +1267,17 @@ function ownedGrid(agentId: string): Grid {
  * a proposal counts from the moment it arrives, and `watch` is what takes it
  * away again — which is also what keeps a warm client, whose detached emulator
  * cannot measure a box and so never proposes anyway, out of the minimum.
+ *
+ * The one test here is `looking`, and it is a different question from either of
+ * those: not which panes a client has, but whether anybody is in front of it.
+ * A phone that locks keeps its panes and its socket and would otherwise go on
+ * holding the desktop at phone width from a pocket, which is the bug this
+ * inherited when the policy stopped being last-writer-wins. See `ClientState`.
  */
 function applySize(agentId: string): void {
   const proposals: Grid[] = [];
   for (const st of clients.values()) {
+    if (!st.looking) continue;
     const proposed = st.proposals.get(agentId);
     if (proposed) proposals.push(proposed);
   }
@@ -1305,62 +1423,8 @@ async function sendBacklog(ws: WebSocket, agentId: string): Promise<void> {
 
 let lastDevJson = "";
 
-/**
- * Which terminal is serving what, right now — the live half of the pair whose
- * other half is `Workspace.dev`.
- *
- * Server-side for the same reason `activity` is: it is learnt from a process
- * scan this side already runs, so the pty host never has to hear about dev
- * servers at all and this whole feature costs nobody a running agent to change.
- * A restart empties it and the next poll, three seconds later, fills it in.
- */
-const devRunning = new Map<string, DevProc>();
-
-/**
- * The pid each terminal's dev server was last seen as, so the directory it is
- * running in is read once rather than every three seconds. `processCwd` is an
- * `lsof` per call on macOS, and the answer cannot change without the process
- * changing with it.
- */
-const devPids = new Map<string, number>();
-
-/**
- * Terminals with a run or a restart in flight.
- *
- * The scan must leave these alone. A restart interrupts the server and then
- * waits before typing the command again, and a poll landing in that window
- * would see an empty tab, drop the row's ↻ for a ▸, and — worse — forget
- * nothing but confuse everyone looking at it. Held by agent id rather than by
- * workspace because that is what the poll is keyed on.
- */
-const devBusy = new Set<string>();
-
-/**
- * Which pid to walk down from for each terminal: the pty's own process.
- *
- * Exited terminals are left out (there is nothing under a dead pty), and so are
- * the ones with an agent running in them. That second one is ghosttown's rule
- * and it is worth keeping: a tab in two roles is a tab you act on twice by
- * accident, and the accident here is the expensive kind — the ↻ types a line
- * into the terminal it found the server in, and typing `npm run dev` at a
- * waiting Claude Code sends it as a prompt.
- */
-function devRoots(): Array<[string, number]> {
-  const roots: Array<[string, number]> = [];
-  // The first scan is kicked off at module load, which is before the main
-  // process has handed us a port and `attach` has filled these in. There is
-  // nothing to attribute yet; the machine-wide half of the scan still runs.
-  if (!host) return roots;
-  for (const agent of host.agents) {
-    if (agent.exited || !agent.pid || agent.agent) continue;
-    if (devBusy.has(agent.id)) continue;
-    roots.push([agent.id, agent.pid]);
-  }
-  return roots;
-}
-
 async function pollDevServers(): Promise<void> {
-  const { servers, running } = await scanDevServers(devRoots());
+  const servers = await scanDevServers();
   for (const server of servers) allowRoot(server.cwd);
   /**
    * Every dev server gets a proxy, whether or not anything has asked for one.
@@ -1412,7 +1476,6 @@ async function pollDevServers(): Promise<void> {
   for (const devPort of proxied.keys()) {
     if (!live.has(devPort)) closePreview(devPort);
   }
-  noteDevRunning(running);
   const json = JSON.stringify(servers);
   if (json === lastDevJson) return;
   lastDevJson = json;
@@ -1421,246 +1484,13 @@ async function pollDevServers(): Promise<void> {
 }
 
 /**
- * Take in what the scan found: update the live map, and note on each workspace
- * what it is serving so the button survives the server stopping.
- *
- * A terminal with a run in flight keeps whatever it had. Its root was withheld
- * from the scan, so the scan has nothing to say about it — and dropping it here
- * would be reading "I did not ask" as "there is nothing there", which is exactly
- * the flicker the busy set exists to prevent.
- */
-function noteDevRunning(found: Map<string, DevProc>): void {
-  let changed = false;
-  for (const [agentId, dev] of found) {
-    const had = devRunning.get(agentId);
-    if (!had || had.pid !== dev.pid || had.command !== dev.command) changed = true;
-    devRunning.set(agentId, dev);
-  }
-  for (const agentId of [...devRunning.keys()]) {
-    if (found.has(agentId) || devBusy.has(agentId)) continue;
-    devRunning.delete(agentId);
-    devPids.delete(agentId);
-    changed = true;
-  }
-  if (changed) pushSnapshot();
-
-  // The directory is asked for only when the process is new to us; see devPids.
-  for (const [agentId, dev] of found) {
-    if (devPids.get(agentId) === dev.pid) continue;
-    devPids.set(agentId, dev.pid);
-    void rememberDev(agentId, dev);
-  }
-}
-
-/** Where this server is actually running, and then: note it on its workspace. */
-async function rememberDev(agentId: string, dev: DevProc): Promise<void> {
-  const cwd = (await processCwd(dev.pid)) ?? host.find(agentId)?.cwd ?? "";
-  workspaces.rememberDev(agentId, { command: dev.command, cwd, agentId });
-}
-
-/**
- * How long to wait after a dev server is gone before typing its command again.
- *
- * The shell has to get the foreground back and print a prompt; a line typed into
- * the gap lands inside whatever the old server wrote on its way out, which is
- * not wrong so much as unreadable.
- */
-const DEV_RESTART_SETTLE_MS = 400;
-
-/**
- * The same, for a tab that has just been opened for it — longer, because a login
- * shell has a whole rc file to get through first.
- *
- * It is a wait rather than a handshake, and it is worth saying why: output from
- * an unwatched terminal never reaches this process (that is the invariant that
- * keeps a pty nobody is looking at off the socket), so there is no prompt to see
- * arrive. The bytes themselves are safe either way — the tty buffers what is
- * written before the shell reads it — so this is only about the command landing
- * somewhere a person can read it.
- */
-const DEV_SPAWN_SETTLE_MS = 900;
-
-function settle(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Whether a line may be typed into this terminal.
- *
- * Live, and with no agent running in it. The second check is the one that
- * matters: kururu's agents are real and typing at a waiting Claude Code submits
- * a prompt, so a remembered tab that has since had `claude` started in it is
- * passed over and a new one is opened instead.
- */
-function canTypeInto(agentId: string | null | undefined): agentId is string {
-  if (!agentId) return false;
-  const agent = host.find(agentId);
-  return Boolean(agent && !agent.exited && !agent.agent);
-}
-
-/**
- * Type a command and press return, the way a person would. `dev` is what the
- * tape calls it (`record.ts`) — kururu typing on its own account rather than a
- * person typing, which is the distinction the tape is there to preserve.
- */
-function typeCommand(agentId: string, command: string): void {
-  const line = `${command}\r`;
-  recordInput(agentId, line);
-  recordNote(agentId, "dev", `running ${command}`);
-  host.write(agentId, line);
-}
-
-/**
- * ▸ / ↻ on a workspace row: get that workspace serving fresh.
- *
- * One entry point for both faces of the button, because the client is the wrong
- * side to tell them apart — see `run-dev` in `shared/wire.ts`. What is actually
- * up is whatever the last scan found in this workspace's terminals, and a
- * workspace holding two servers restarts both: "restart my app" means all of it.
- *
- * Nothing about this switches workspace, opens a pane, or focuses anything. The
- * app comes back up where it was.
- */
-async function runDev(workspaceId: string): Promise<void> {
-  const workspace = workspaces.workspaceById(workspaceId);
-  if (!workspace) return;
-
-  const serving = workspaces
-    .agentsInWorkspace(workspaceId)
-    .filter((agentId) => devRunning.has(agentId) && !devBusy.has(agentId));
-
-  if (serving.length > 0) {
-    await Promise.all(serving.map((agentId) => restartDevIn(agentId)));
-    return;
-  }
-
-  const memory = workspace.dev;
-  if (!memory) return;
-
-  // The tab it last ran in, if it is still there and still a shell. Otherwise a
-  // new one, in the directory the server was running in — which is the case a
-  // restored layout is always in, its panes having come back empty on purpose.
-  if (canTypeInto(memory.agentId)) {
-    typeCommand(memory.agentId, memory.command);
-    void pollSoon();
-    return;
-  }
-
-  const agent = await host.create({ cwd: memory.cwd || undefined, kind: "shell" });
-  workspaces.addTabTo(workspaceId, agent.id, agent.cwd);
-  allowRoot(agent.cwd);
-  devBusy.add(agent.id);
-  try {
-    await settle(DEV_SPAWN_SETTLE_MS);
-    if (!host.isLive(agent.id)) return;
-    typeCommand(agent.id, memory.command);
-    workspaces.rememberDev(agent.id, { ...memory, agentId: agent.id });
-  } finally {
-    devBusy.delete(agent.id);
-  }
-  void pollSoon();
-}
-
-/**
- * Exactly the ^C and the re-typed line you would do by hand, which is why it
- * needs no memory of how the tab was set up and works for a server kururu never
- * started.
- *
- * The terminal is held out of the scan for the duration. Without that the poll
- * would land between the interrupt and the retype, find nothing, and report the
- * workspace stopped — and the row would blink through ▸ on its way back to ↻ for
- * no reason a person could act on.
- */
-async function restartDevIn(agentId: string): Promise<void> {
-  const dev = devRunning.get(agentId);
-  if (!dev) return;
-  devBusy.add(agentId);
-  try {
-    await stopDev(dev.pid);
-    // Say so now rather than at the next poll: a button that takes three seconds
-    // to show it did anything reads as a button that missed.
-    devRunning.delete(agentId);
-    devPids.delete(agentId);
-    pushSnapshot();
-    await settle(DEV_RESTART_SETTLE_MS);
-    if (!canTypeInto(agentId)) return;
-    typeCommand(agentId, dev.command);
-  } finally {
-    devBusy.delete(agentId);
-  }
-  void pollSoon();
-}
-
-/**
- * Put the row back without waiting for the next tick. Three seconds of ▸ after
- * pressing ▸ is the button appearing not to have worked.
- */
-function pollSoon(): Promise<void> {
-  return settle(DEV_RESTART_SETTLE_MS * 2).then(() => pollDevServers());
-}
-
-// ---------------------------------------------------------------------------
-// Supabase
-// ---------------------------------------------------------------------------
-
-/**
- * Workspaces with a start or a stop in flight.
- *
- * `devBusy`'s job for the same reason, and with a longer fuse: `supabase start`
- * pulls and boots a dozen containers, so the port stays shut for the better part
- * of a minute after the button has been pressed. Without this the row would sit
- * at "off" for that whole minute and read as a button that did nothing, which is
- * the state in which somebody presses it again.
- *
- * Cleared by the probe rather than by a timer: the answer arriving *is* the end
- * of the wait, and a timeout that fired first would hand the row back to the
- * probe mid-boot and undo the thing this exists for. The timer below is only the
- * floor under a command that fails outright — a `supabase` that is not installed
- * prints its error in the terminal and never changes the port, and a row stuck
- * on "working" forever would be worse than one that goes back to off and lets
- * you read what it said.
- */
-const supabaseBusy = new Map<string, NodeJS.Timeout>();
-
-/**
- * How long a start or a stop may be in flight before the row stops waiting for
- * it. Long, because `supabase start` on a cold machine pulls images.
- */
-const SUPABASE_BUSY_MS = 180_000;
-
-/**
- * What was found at a directory, so the walk up the tree is not redone every
- * three seconds for every workspace.
- *
- * Expiring rather than permanent, and both halves of that matter. A project
- * appears when somebody runs `supabase init` and disappears when a directory is
- * renamed, so a cache with no expiry would need invalidating from places that
- * have no business knowing this exists; a minute is short enough that nobody
- * notices and long enough that the common case — the same four directories,
- * twenty times a minute — costs nothing.
- */
-const supabaseSeen = new Map<string, { at: number; found: SupabaseFound | null }>();
-const SUPABASE_CACHE_MS = 60_000;
-
-async function lookFor(dir: string): Promise<SupabaseFound | null> {
-  const had = supabaseSeen.get(dir);
-  if (had && Date.now() - had.at < SUPABASE_CACHE_MS) return had.found;
-  const found = await findSupabase(dir);
-  supabaseSeen.set(dir, { at: Date.now(), found });
-  return found;
-}
-
-/**
  * Every directory this workspace could be said to be *in*, best first.
  *
  * A workspace has no directory of its own — it is an arrangement, not a project
- * — so this asks the three things that do have one, in the order of how much
- * they know. A live terminal's cwd is where somebody actually is. A pane's
- * remembered cwd is where its terminals were, and is the only one of the three
- * that survives a restart with the panes empty — which is exactly the state in
- * which you want the button, because there is nothing running and the database
- * is probably down. The dev server's directory is last and is usually one of the
- * other two.
+ * — so this asks the two things that do have one, in the order of how much they
+ * know. A live terminal's cwd is where somebody actually is. A pane's remembered
+ * cwd is where its terminals were, and is the only one of the two that survives
+ * a restart with the panes empty.
  */
 function workspaceDirs(workspace: Workspace): string[] {
   const dirs: string[] = [];
@@ -1671,146 +1501,41 @@ function workspaceDirs(workspace: Workspace): string[] {
     for (const agentId of pane.agentIds) add(host.find(agentId)?.cwd);
     add(pane.cwd);
   }
-  add(workspace.dev?.cwd);
   return dirs;
 }
 
-let lastSupabaseJson = "";
-
 /**
- * Which of the active profile's workspaces have a local Supabase, and whether it
- * is answering.
+ * The same directories, with the one you are *looking at* first.
  *
- * The active profile only. Every other profile's workspaces are not on anybody's
- * screen — the snapshot itself carries one profile for the same reason — and a
- * probe is a connection attempt rather than a read of a table somebody else is
- * making anyway, so there is nothing to be gained by asking about rows nobody
- * can see.
+ * `workspaceDirs` answers in tree order, which is the wrong answer for the
+ * branch: a workspace holding two checkouts reported whichever pane happened to
+ * be first in the tree, so a row named after the project could sit there
+ * showing a sibling repository's branch and never move while you checked things
+ * out all afternoon. That is not a stale row — it is a
+ * row faithfully reporting a repository nobody asked about, which is worse,
+ * because it looks exactly like the poll being broken.
+ *
+ * Focus is what breaks the tie, and it is the tie-break that costs nothing to
+ * be wrong about: it is one line of text, the tooltip already says which
+ * working tree it came from, and the pane you last touched is the one you just
+ * ran `git switch` in. The tab showing inside that pane goes first for the same
+ * reason one pane goes before another.
+ *
+ * Only a reordering. Every directory `workspaceDirs` would have offered is
+ * still offered, in its own order, behind these — so a focused pane with no
+ * repository under it falls through to exactly the old answer.
  */
-async function pollSupabase(): Promise<void> {
-  if (!host || !workspaces) return;
-  const dbs: SupabaseDb[] = [];
-  for (const workspace of workspaces.active.workspaces) {
-    let found: SupabaseFound | null = null;
-    for (const dir of workspaceDirs(workspace)) {
-      found = await lookFor(dir);
-      if (found) break;
-    }
-    if (!found) continue;
-    const busy = supabaseBusy.has(workspace.id);
-    const up = await probe(found.port);
-    /**
-     * The probe agreeing with what was asked for is what ends the wait. Which
-     * way round it has to agree is not knowable from here — a stop makes the
-     * port shut and a start makes it open — so the rule is simply "it changed":
-     * whatever the button asked for, the port was in the other state when it was
-     * pressed, because that is what the button was offering.
-     */
-    const before = state.supabase.find((db) => db.workspaceId === workspace.id);
-    if (busy && before && before.up !== up) clearBusy(workspace.id);
-    dbs.push({
-      workspaceId: workspace.id,
-      root: found.root,
-      project: found.project,
-      port: found.port,
-      up,
-      busy: supabaseBusy.has(workspace.id),
-    });
+function focusedDirs(workspace: Workspace): string[] {
+  const pane = findPane(workspace.layout, workspace.focusedPaneId);
+  const front: (string | undefined)[] = [];
+  if (pane) {
+    const showing = pane.agentIds[pane.activeIdx];
+    if (showing) front.push(host.find(showing)?.cwd);
+    for (const agentId of pane.agentIds) front.push(host.find(agentId)?.cwd);
+    front.push(pane.cwd);
   }
-  const json = JSON.stringify(dbs);
-  if (json === lastSupabaseJson) return;
-  lastSupabaseJson = json;
-  state.supabase = dbs;
-  broadcast({ type: "supabase", dbs });
-}
-
-function markBusy(workspaceId: string): void {
-  clearBusy(workspaceId);
-  supabaseBusy.set(
-    workspaceId,
-    setTimeout(() => supabaseBusy.delete(workspaceId), SUPABASE_BUSY_MS),
-  );
-}
-
-function clearBusy(workspaceId: string): void {
-  const timer = supabaseBusy.get(workspaceId);
-  if (timer) clearTimeout(timer);
-  supabaseBusy.delete(workspaceId);
-}
-
-/**
- * The database button: type `supabase start` or `supabase stop` into a terminal
- * in this workspace.
- *
- * Typed rather than spawned, and this is the decision the whole feature rests
- * on. `supabase start` is a minute of Docker output, prompts when an image has
- * to be pulled, and an error report worth reading when it fails — and it ends by
- * printing the anon key and the studio URL, which is the thing people go looking
- * for afterwards. Run behind the scenes, all of that is lost and the button is a
- * light that goes on or does not. Run in a terminal, it is exactly what the
- * person would have typed, in a tab they can scroll, interrupt with ^C, and read
- * the keys out of. It is the same bargain ▸ makes, for the same reason.
- *
- * The terminal is chosen the way `runDev` chooses one: an idle shell in this
- * workspace with no agent in it, or a new tab in the project's directory. It
- * must not be an agent's — typing `supabase stop` at a waiting Claude Code sends
- * it as a prompt.
- */
-async function runSupabase(workspaceId: string, on: boolean): Promise<void> {
-  const workspace = workspaces.workspaceById(workspaceId);
-  if (!workspace) return;
-  const db = state.supabase.find((entry) => entry.workspaceId === workspaceId);
-  if (!db) return;
-
-  const command = await supabaseCommand(db.root, on ? "start" : "stop");
-  markBusy(workspaceId);
-  pushSnapshotSupabase();
-
-  /**
-   * An idle shell *standing in the project*, which is a stricter test than the
-   * one `runDev` makes and has to be. `runDev` re-types a command into the
-   * terminal it watched that command run in, so the directory is right by
-   * construction. This has no such history: the first thing it finds might be a
-   * shell somebody opened in `~` to read their mail in, and `npm run db:start`
-   * typed there is a script-not-found in the wrong directory — which the row
-   * would then sit and wait a full three minutes for.
-   *
-   * `startsWith` on the root plus a separator, not on the root: `/tmp/k2/fake`
-   * must not match `/tmp/k2/faketown`, and prefix tests that forget the
-   * separator are how a directory check quietly becomes a substring check.
-   */
-  const reuse = workspaces.agentsInWorkspace(workspaceId).find((agentId) => {
-    if (!canTypeInto(agentId) || devRunning.has(agentId)) return false;
-    const cwd = host.find(agentId)?.cwd ?? "";
-    return cwd === db.root || cwd.startsWith(`${db.root}/`);
-  });
-  if (reuse) {
-    typeCommand(reuse, command);
-    return;
-  }
-
-  const agent = await host.create({ cwd: db.root, kind: "shell" });
-  workspaces.addTabTo(workspaceId, agent.id, agent.cwd);
-  allowRoot(agent.cwd);
-  await settle(DEV_SPAWN_SETTLE_MS);
-  if (!host.isLive(agent.id)) return;
-  typeCommand(agent.id, command);
-}
-
-/**
- * Say the row is working *now*, rather than at the next tick.
- *
- * `supabase start` changes nothing observable for the better part of a minute,
- * so without this the button would be pressed and the row would sit exactly as
- * it was until the containers came up. Pressing it again in that gap is the
- * obvious thing to do and the expensive one.
- */
-function pushSnapshotSupabase(): void {
-  state.supabase = state.supabase.map((db) =>
-    db.busy === supabaseBusy.has(db.workspaceId) ? db : { ...db, busy: supabaseBusy.has(db.workspaceId) },
-  );
-  lastSupabaseJson = JSON.stringify(state.supabase);
-  broadcast({ type: "supabase", dbs: state.supabase });
+  const first = front.filter((dir): dir is string => Boolean(dir));
+  return [...new Set([...first, ...workspaceDirs(workspace)])];
 }
 
 // ---------------------------------------------------------------------------
@@ -1843,14 +1568,15 @@ let lastBranchJson = "";
 /**
  * What every workspace of the active profile has checked out.
  *
- * The active profile only, on `pollSupabase`'s reasoning: the snapshot carries
- * one profile, so the rows this could describe are the rows nobody can see.
+ * The active profile only. Every other profile's workspaces are not on
+ * anybody's screen — the snapshot itself carries one profile for the same
+ * reason — so the rows this could describe are the rows nobody can see.
  */
 async function pollBranches(): Promise<void> {
   if (!host || !workspaces) return;
   const branches: WorkspaceBranch[] = [];
   for (const workspace of workspaces.active.workspaces) {
-    for (const dir of workspaceDirs(workspace)) {
+    for (const dir of focusedDirs(workspace)) {
       const repo = await repoFor(dir);
       if (!repo) continue;
       const head = await readHead(repo);
@@ -2066,8 +1792,16 @@ async function pollMemory(): Promise<void> {
  * immediately and a fresh one within the minute.
  */
 async function pollAccountUsage(): Promise<void> {
+  // The login list first and regardless of who is connected: it reads this
+  // machine and nothing else, like the other polls, and it is on this schedule
+  // because a `/login` is the one thing that changes both.
+  await refreshLogins();
   if (clients.size === 0) return;
-  if (await pollUsage()) broadcast({ type: "usage", usage: usageSnapshot() });
+  // The profile's own login when profiles keep them, because that is the
+  // account its terminals are spending; otherwise whichever this machine was
+  // signed into last, as before.
+  const scope = loginsActive() ? claudeDirFor(workspaces.active.loginKey) : null;
+  if (await pollUsage(scope)) broadcast({ type: "usage", usage: usageSnapshot() });
 }
 
 /**
@@ -2083,7 +1817,6 @@ async function pollAccountUsage(): Promise<void> {
  */
 const timers = [
   setInterval(() => void pollDevServers(), DEV_SCAN_MS),
-  setInterval(() => void pollSupabase(), SUPABASE_SCAN_MS),
   setInterval(() => void pollBranches(), GIT_SCAN_MS),
   setInterval(() => void pollEditors(), NVIM_SCAN_MS),
   setInterval(() => void pollMemory(), MEM_SCAN_MS),
@@ -2091,7 +1824,6 @@ const timers = [
 ];
 
 void pollDevServers();
-void pollSupabase();
 void pollBranches();
 
 // ---------------------------------------------------------------------------
@@ -2131,9 +1863,21 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "new-tab": {
       const paneId = msg.paneId ?? workspaces.focusedPaneId;
-      void replyAsync(ws, msg.id, () =>
-        openTerminal(paneId, { cwd: msg.cwd, command: msg.command, kind: msg.kind }),
-      );
+      void replyAsync(ws, msg.id, () => {
+        if (msg.launcher === undefined) {
+          return openTerminal(paneId, { cwd: msg.cwd, command: msg.command, kind: msg.kind });
+        }
+        // Looked up, never built: the id is the only thing taken off the wire.
+        // Switched-off rows are not refused — the setting trims a menu, and a
+        // second client with a stale one is still asking for a real agent.
+        const launcher = typeof msg.launcher === "string" ? findLauncher(msg.launcher) : undefined;
+        if (!launcher) throw new Error(`no such agent: ${String(msg.launcher)}`);
+        // A profile's own login directory has none of the hooks the machine's
+        // does, so a Claude started into one is handed kururu's. See `hooks.ts`.
+        const hooks = launcher.cli === "claude" && loginsActive() ? hookSettingsFlag() : "";
+        const command = launcherCommand(launcher, launch) + hooks;
+        return openTerminal(paneId, { cwd: msg.cwd, command, kind: "agent" });
+      });
       return;
     }
 
@@ -2205,6 +1949,21 @@ function handleMessage(ws: WebSocket, raw: string): void {
       if (cols < 2 || rows < 2) return;
       st.proposals.set(agentId, { cols, rows });
       applySize(agentId);
+      return;
+    }
+
+    case "looking": {
+      /**
+       * Somebody arrived at this screen, or left it. The proposals are kept
+       * either way and merely stop counting — see `ClientState.looking` — so
+       * this is one recount over the terminals this client has an opinion
+       * about, and a window coming back off another Space votes with the boxes
+       * it already had rather than waiting to measure them again.
+       */
+      const looking = msg.looking !== false;
+      if (looking === st.looking) return;
+      st.looking = looking;
+      for (const agentId of st.proposals.keys()) applySize(agentId);
       return;
     }
 
@@ -2488,6 +2247,12 @@ function handleMessage(ws: WebSocket, raw: string): void {
       workspaces.reveal(msg.agentId);
       return;
 
+    case "set-launch":
+      saveLaunch(adoptLaunch(msg.launch));
+      // Which login the bar reads may just have changed hands.
+      void pollAccountUsage();
+      return;
+
     case "set-notify":
       saveNotify(adoptNotify(msg.notify));
       return;
@@ -2515,40 +2280,43 @@ function handleMessage(ws: WebSocket, raw: string): void {
       workspaces.moveWorkspace(msg.workspaceId, msg.index);
       return;
 
-    case "run-dev":
-      // Nothing to reply to and nothing to wait for: a spawn or a restart takes
-      // a second or two, and what says it happened is the snapshot the scan
-      // pushes when the row changes.
-      void runDev(msg.workspaceId).catch((err) => {
-        console.error("kururu: could not run the dev server:", err instanceof Error ? err.message : err);
-      });
-      return;
-
-    case "supabase-power":
-      // As above, and more so: this one takes a minute, and what reports it is
-      // the terminal the command was typed into.
-      void runSupabase(msg.workspaceId, msg.on === true).catch((err) => {
-        console.error("kururu: could not reach the database:", err instanceof Error ? err.message : err);
-      });
-      return;
-
     // --- profiles ----------------------------------------------------------
 
+    // The three that change which profile is on screen also ask the account
+    // again straight away: with logins per profile the bar is that profile's,
+    // and a minute of the previous one's numbers under a new name is a minute
+    // of the bar lying.
     case "new-profile":
       workspaces.newProfile(msg.name);
       fillPane(workspaces.focusedPaneId);
+      void pollAccountUsage();
       return;
 
     case "switch-profile":
       workspaces.switchProfile(msg.profileId);
+      void pollAccountUsage();
       return;
 
     case "rename-profile":
       workspaces.renameProfile(msg.profileId, msg.name);
       return;
 
+    // A key off the wire is held to two things: its shape, in `setProfileLogin`,
+    // and membership of the list this server last offered. The second is the
+    // one that matters — a well-formed key naming a directory kururu never made
+    // would be pointed at anyway, and refusing it here is what makes the list
+    // the whole of what can be chosen. The account may just have changed hands,
+    // so the bar is asked again as the other three do.
+    case "set-profile-login":
+      if (typeof msg.profileId !== "string") return;
+      if (msg.loginKey !== null && !logins.some((login) => login.key === msg.loginKey)) return;
+      workspaces.setProfileLogin(msg.profileId, msg.loginKey);
+      void pollAccountUsage();
+      return;
+
     case "delete-profile":
       killAll(workspaces.deleteProfile(msg.profileId));
+      void pollAccountUsage();
       return;
 
     case "restart-server":
@@ -2787,6 +2555,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       // The one field something outside kururu reads to tell two builds apart —
       // a window against a server in a cupboard, or the updater against either.
       version: VERSION,
+      // And the host's, which can be older: it does not pick up a new bundle
+      // until it is restarted. `current` is whether that restart is owed.
+      host: { version: hostInfo.version, protocol: hostProtocol, current: hostInfo.current },
       agents: host.agents.length,
       liveAgents: host.agents.filter(countsAsAgent).length,
       devServers: state.devServers.length,
@@ -3504,11 +3275,11 @@ server.on("upgrade", (req, socket, head) => {
       watching: new Set(),
       warm: new Set(),
       proposals: new Map(),
+      looking: true,
       awaiting: new Map(),
     });
     send(ws, { type: "snapshot", snapshot: snapshot() });
     send(ws, { type: "dev-servers", servers: state.devServers });
-    send(ws, { type: "supabase", dbs: state.supabase });
     send(ws, { type: "branches", branches: state.branches });
     send(ws, { type: "usage", usage: usageSnapshot() });
     // The first client through the door is also what starts the usage poll: it
@@ -3559,6 +3330,15 @@ async function attach(port: Port): Promise<void> {
   host.onOutput = onOutput;
 
   const state = await host.hello();
+  hostInfo = { version: state.version, current: state.protocol >= HOST_PROTOCOL };
+  hostProtocol = state.protocol;
+  if (!hostInfo.current) {
+    // Said once, here, because the host's log is the only other place it could
+    // be said and nobody is reading that until something has gone wrong.
+    console.warn(
+      `kururu: the pty host speaks protocol ${state.protocol} and this server ${HOST_PROTOCOL} — restart the host to pick up its new code, which ends every agent`,
+    );
+  }
   const live = new Set(state.agents.filter((agent) => !agent.exited).map((agent) => agent.id));
 
   let profiles: Profile[] | undefined;
@@ -3604,6 +3384,11 @@ async function attach(port: Port): Promise<void> {
     pushSnapshot();
     queueSave();
   };
+  // Written back at once rather than on the next change, because adopting may
+  // have minted what was not there — a login key for a profile from before
+  // they existed — and a key that lived only in this process would be minted
+  // again by the next one, with a fresh directory and nobody signed into it.
+  queueSave();
   for (const agent of state.agents) allowRoot(agent.cwd);
 
   /**

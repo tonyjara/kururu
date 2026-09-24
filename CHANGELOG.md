@@ -15,6 +15,40 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **Each profile can keep its own logins.** Settings → Profiles has one switch,
+  off by default: on, every terminal a profile opens starts Claude Code and
+  Codex on directories of that profile's own, under
+  `~/.config/kururu/profiles/`, so `/login` inside a profile signs in that
+  profile alone and it stays signed in as whoever you logged into there last —
+  a terminal opened in *work* is your work account, and one opened in *home*
+  is not. Nothing is chosen and nothing is configured, which is the difference
+  from the accounts that went: a profile is born with the name of its
+  directory and keeps it through renames and restarts. Each profile starts as
+  a fresh install of both tools — sign in, and set them up as you like;
+  `~/.claude` and `~/.codex` are not touched, and switching it off goes back to
+  them. The usage bar follows the profile you are in. It needs a pty host from
+  this version: with an older one still running the switch waits, says so, and
+  terminals keep opening as before rather than as the wrong account.
+- **A profile can use another profile's login.** Each card on Settings →
+  Profiles says which login it uses, in a picker labelled by the account
+  signed into each — *tony@work*, *not signed in yet*, and which other
+  profiles share it. Point two profiles at the same one and they are the same
+  account, settings and memory included; pick *a new login* to start a profile
+  as nobody and sign in there. The picker offers the logins kururu already
+  holds and nothing else, so there is no path to type and no way to land on
+  an account you did not expect. Only terminals opened afterwards change — an
+  agent already running keeps the account it started with.
+- **Settings → About says which pty host is running.** The host keeps the code
+  it started with until it is restarted, so it can be older than the app
+  drawing the page; the page, `/api/health` and `bun run status` now say when
+  it is behind.
+- **Start an agent on a particular model from the +.** The new-tab button on a
+  tab strip opens a menu now: a terminal, as before, then Claude and Codex —
+  each on its default model or on a specific one, such as Claude Opus 5.5 or
+  Codex GPT-5.6-Sol. The tab opens in the pane's project. C-a T still opens a
+  plain terminal. Settings → *Agents* chooses which of them the menu shows,
+  per model or a whole CLI at a time, and the phone's menu follows the
+  desktop's.
 - **Put an agent away without killing it.** The sidebar's rows have a second
   button beside the ✕: it takes the row out of the list and drops it into a
   *Hidden* drawer at the foot of it. Nothing else happens — the agent keeps
@@ -86,16 +120,7 @@ shows, so it is written once and read in three places — see
   PT Mono, Handheld in Monaco — and the row in the Styles tab prints the name in
   that face, so you can see whether you have it before you press anything.
   Kururu installs no fonts: a machine without the face keeps the one it had.
-- **A database button on the workspace row.** A workspace with a local Supabase
-  under it — a `supabase/config.toml` at or above one of its terminals — gets a
-  ▤ beside the ▸. Grey when the database is down, lit when it is up, so a
-  sidebar of workspaces answers "which of these has its database running"
-  without leaving the window. Press it and kururu asks, then types `supabase
-  start` or `supabase stop` into a terminal in that workspace, in that project —
-  your own `db:start` script if you have one, so it is the line you would have
-  typed and the output, the anon key and the studio URL land where you can read
-  them. It waits, visibly, for the minute Docker takes.
-- **The branch each workspace is on**, under its name. Read straight out of
+- **The branch each workspace is on**, on a line under its name. Read straight out of
   `.git/HEAD` a few seconds after you switch, so the row is never a checkout
   behind. Works from anywhere inside the repo and inside a `git worktree`. A
   detached HEAD says so, in amber, with the short sha — because that is the
@@ -111,9 +136,11 @@ shows, so it is written once and read in three places — see
   under the number — the same two pixels every agent living in that workspace
   already wears, so the two line up. The colour chip is now how you change it
   rather than how you see it.
-- **▸ and ↻ moved to a second line under the workspace's name**, with the colour
-  chip. They were at the right-hand end of the name, clipping it, one aim away
-  from the button that switches workspace.
+- **The sidebar is quieter.** A workspace row is its number, its name and its
+  colour chip, with the branch under it when there is one. **Usage** folds: shut,
+  it is the one bar for the current session; open, every limit and the account.
+  **Dev servers** folds too, shut by default, with a count in the heading. Both
+  remember whether you left them open, per device.
 - **A pane's corner is one menu.** The two split buttons in the top right are
   gone, and in their place is the button the phone has had all along. Behind it:
   the other panes in the workspace, split right, split down, close this pane —
@@ -126,6 +153,29 @@ shows, so it is written once and read in three places — see
 
 ### Fixed
 
+- **A phone you put down kept the desktop at phone width.** Two clients watching
+  one agent both get a screen they can draw, which means the smaller of them
+  decides — and a phone that locks keeps its panes and its connection, so it went
+  on deciding from your pocket. Coming back to the window did not help: nothing
+  in the window had moved, so nothing re-asked, and the terminal stayed narrow
+  until you dragged a divider or switched screens. A client whose screen is off
+  now stops voting on the size, and a window you come back to says its shapes
+  again. It only touches the size — unread marks and notification cards still go
+  by what is on screen.
+- **Clicking a workspace sometimes did nothing.** Two reasons, both fixed. A
+  workspace row can be dragged to reorder the list, and the moment a drag starts
+  the browser stops sending the click — so a press that wobbled by three pixels,
+  which on a trackpad is most of them, switched nothing and said nothing. A drag
+  that ends where it began is now read back as the click it was. And since the
+  row grew a second line, only the name's line was switching: the branch and the
+  space around it lit up under the pointer like the rest of the row and did
+  nothing when pressed. The whole row is the target now, minus its colour chip.
+- **The branch on a workspace holding two checkouts was the wrong one.** The row
+  reported whichever repository came first in its panes, so a workspace named
+  after a project but with a sibling checkout beside it showed the sibling's
+  branch — and went on showing it however much you checked out, which looks
+  exactly like the row being broken. It now follows the pane you are looking at.
+  Hovering it still names the working tree it came from.
 - Pressing Use or Update on several styles in a row lost track of all but the
   last: the tab kept one "working" id, so the second press overwrote the first
   and the first finishing cleared the second, which went on installing behind a
@@ -143,6 +193,11 @@ shows, so it is written once and read in three places — see
 
 ### Removed
 
+- **The dev-server and database buttons on a workspace row.** ↯ to run what the
+  workspace last had serving, ↻ to restart it, ■ to stop it, and ▤ to start or
+  stop a local Supabase are all gone, along with the workspace's memory of its
+  dev command. Dev servers are still found and still listed, as links, under the
+  agents; starting and stopping one is back to being a line in a terminal.
 - **Profiles no longer carry accounts.** A profile could name a Claude login, a
   GitHub account, a gitconfig and an SSH key, and opened every terminal in it
   with those set; a workspace could borrow another profile's. All of it is gone,
@@ -153,8 +208,9 @@ shows, so it is written once and read in three places — see
   `~/.config/kururu/identities`, the logins inside them are still logins, and
   the keys are still in `~/.ssh` and still registered with GitHub — terminals
   simply open with your machine's own accounts now, as they did before any of
-  this existed. If you were relying on a second Claude account, set
-  `CLAUDE_CONFIG_DIR` in the terminal that wants it.
+  this existed. If you were relying on a second Claude account, switch on
+  *Each profile keeps its own logins* in Settings → Profiles — see above — or
+  set `CLAUDE_CONFIG_DIR` in the terminal that wants it.
 
   It went because it was a second place for a login to go wrong quietly, and
   what it cost when it did was a terminal opened as somebody you did not expect

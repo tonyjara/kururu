@@ -319,7 +319,7 @@ function statedPairs(): Pair[] {
  *
  * **This is a record of the shipped state, not an approval of it.** Every line
  * is a place where a label is harder to read than it should be, and Latte owning
- * eleven of them is the finding rather than the noise — a light theme built by
+ * ten of them is the finding rather than the noise — a light theme built by
  * inverting a dark one is exactly where "on a bright fill" stops meaning what it
  * meant, which is why `onAccent` is 2.31:1 on its `blocked` badge.
  *
@@ -343,7 +343,6 @@ const CONTRAST_KNOWN: Record<string, Record<string, number>> = {
     "dimmer on bg": 2.87,
   },
   "catppuccin-latte": {
-    "accent on chrome-high": 2.17,
     "danger on chrome-high": 3.52,
     "on-accent on accent": 2.96,
     "danger on line": 2.99,

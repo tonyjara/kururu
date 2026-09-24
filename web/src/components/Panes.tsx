@@ -52,6 +52,7 @@ import {
   type PaneState,
   type Rect,
 } from "../../../shared/layout";
+import { visibleLaunchers, type Launcher, type LaunchSettings } from "../../../shared/launchers";
 import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
 import { AGENT_MIME, PANE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
 import { keyLabel, PREFIX_LABEL } from "../keys";
@@ -76,6 +77,8 @@ interface Props {
    * printed key that is not the key is worse than no key printed at all.
    */
   keymap: Record<string, Action>;
+  /** Which agents the new-tab button offers besides a terminal. */
+  launch: LaunchSettings;
   /** Zen: the focused pane takes the window and the rest are held out of sight. */
   zen: boolean;
   /**
@@ -109,7 +112,7 @@ function place(rect: Rect): React.CSSProperties {
 
 const FULL: React.CSSProperties = { left: 0, top: 0, width: "100%", height: "100%" };
 
-export function Panes({ node, focusedPaneId, agents, mascot, keymap, zen, solo, keyboard }: Props) {
+export function Panes({ node, focusedPaneId, agents, mascot, keymap, launch, zen, solo, keyboard }: Props) {
   const area = useRef<HTMLDivElement>(null);
   const [resizing, setResizing] = useState(false);
   /**
@@ -123,7 +126,8 @@ export function Panes({ node, focusedPaneId, agents, mascot, keymap, zen, solo, 
    * over everything anyway (`.menu-backdrop` is fixed), and two panes with a
    * menu open at once is not a state worth being able to reach.
    */
-  const [menu, setMenu] = useState<{ at: MenuAt; paneId: string } | null>(null);
+  const [menu, setMenu] = useState<{ at: MenuAt; paneId: string; of: "pane" | "new" } | null>(null);
+  const launchers = visibleLaunchers(launch);
   const boxes = rects(node);
   const all = panes(node);
 
@@ -184,7 +188,11 @@ export function Panes({ node, focusedPaneId, agents, mascot, keymap, zen, solo, 
                  and is cheaper than a second meaning for the flag. */
               focused={focused}
               solo={solo ? { index: all.indexOf(pane), count: all.length } : null}
-              onMenu={(at) => setMenu({ at, paneId: pane.id })}
+              onMenu={(at) => setMenu({ at, paneId: pane.id, of: "pane" })}
+              /* With every agent switched off the menu would be one row, and a
+                 menu of one is a step rather than a choice — so the button goes
+                 back to opening the terminal straight away. */
+              onNew={launchers.length ? (at) => setMenu({ at, paneId: pane.id, of: "new" }) : null}
               keyboard={keyboard}
               agents={agents}
               mascot={mascot}
@@ -201,16 +209,20 @@ export function Panes({ node, focusedPaneId, agents, mascot, keymap, zen, solo, 
         <Menu
           at={menu.at}
           onClose={() => setMenu(null)}
-          items={paneMenu({
-            paneId: menu.paneId,
-            all,
-            agents,
-            keymap,
-            /* Zen and solo are different states and the same fact here: what
-               this says is "a pane made now would be made off screen", and both
-               of them hide every pane but one. */
-            alone: solo || zen,
-          })}
+          items={
+            menu.of === "new"
+              ? newTabMenu(menu.paneId, launchers, keymap)
+              : paneMenu({
+                  paneId: menu.paneId,
+                  all,
+                  agents,
+                  keymap,
+                  /* Zen and solo are different states and the same fact here: what
+                     this says is "a pane made now would be made off screen", and both
+                     of them hide every pane but one. */
+                  alone: solo || zen,
+                })
+          }
         />
       )}
     </div>
@@ -318,6 +330,31 @@ function paneMenu({
       danger: true,
       run: () => api.closePane(paneId),
     },
+  ];
+}
+
+/**
+ * The new-tab button's menu: a terminal, then an agent on a model.
+ *
+ * The terminal stays first and keeps its key, because it is still what C-a T
+ * opens and what a pane with nothing in it opens when clicked — the menu adds
+ * choices to the button without changing what the other two doors do. The
+ * agents are grouped by CLI with a rule between them, in `LAUNCHERS` order.
+ */
+function newTabMenu(paneId: string, launchers: Launcher[], keymap: Record<string, Action>): MenuItem[] {
+  const first = keysByAction(keymap)["new-tab"]?.[0];
+  return [
+    {
+      label: "Terminal",
+      hint: first ? `${PREFIX_LABEL} ${keyLabel(first)}` : undefined,
+      run: () => void api.newTab({ paneId }),
+    },
+    ...launchers.map((launcher, index) => ({
+      label: launcher.label,
+      hint: launcher.model ? undefined : "default model",
+      sep: index === 0 || launchers[index - 1]?.cli !== launcher.cli,
+      run: () => void api.newTab({ paneId, launcher: launcher.id }),
+    })),
   ];
 }
 
@@ -430,6 +467,7 @@ function Pane({
   focused,
   solo,
   onMenu,
+  onNew,
   keyboard,
   agents,
   mascot,
@@ -438,6 +476,8 @@ function Pane({
   focused: boolean;
   solo: SoloAt | null;
   onMenu: (at: MenuAt) => void;
+  /** Open the new-tab menu here, or null to open a terminal without asking. */
+  onNew: ((at: MenuAt) => void) | null;
   keyboard: boolean;
   agents: AgentSnapshot[];
   mascot: MascotConfig;
@@ -565,9 +605,14 @@ function Pane({
         {!pane.reader && (
           <button
             className="tab tab-new"
-            onClick={() => void api.newTab({ paneId: pane.id })}
-            title="New terminal here (C-a T)"
+            onClick={(event) => {
+              if (!onNew) return void api.newTab({ paneId: pane.id });
+              const box = event.currentTarget.getBoundingClientRect();
+              onNew({ x: box.left, y: box.bottom + 4 });
+            }}
+            title={onNew ? "New tab here: a terminal or an agent" : "New terminal here (C-a T)"}
             aria-label="New tab"
+            aria-haspopup={onNew ? "menu" : undefined}
           >
             <Icon name="add" />
           </button>

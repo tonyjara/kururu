@@ -28,6 +28,27 @@
  */
 import type { AgentReport, AgentSnapshot, PtyKind } from "../../shared/model";
 
+/**
+ * Which host this server can be fully understood by.
+ *
+ * The host does not pick up a new bundle until it is restarted, and restarting
+ * it ends every agent, so it is routinely older than the server talking to it.
+ * Most of the time that is fine: the relay in `ptyhost.ts` hands every field of
+ * a `create` through, and a host that ignores one it does not know about does
+ * so silently — which is exactly the problem. A terminal opened with an `env`
+ * an old host dropped is a terminal opened as somebody you did not expect.
+ *
+ * So the host says which protocol it speaks in its `hello`, and this is the
+ * number it is compared against. Bumped when — and only when — the host has to
+ * be restarted for something the server now sends to take effect. A version
+ * string cannot do this job: in a checkout both halves are `0.0.0-dev` however
+ * far apart their code is.
+ *
+ *   1  everything before the handshake carried one
+ *   2  `create` takes `env`; `hello` answers with `version` and `protocol`
+ */
+export const HOST_PROTOCOL = 2;
+
 /** Anything with `postMessage`/`on("message")` — a MessagePortMain, in practice. */
 export interface Port {
   postMessage(message: unknown): void;
@@ -39,7 +60,12 @@ export interface Port {
 export type ToHost =
   /** Asks for everything a freshly-started server needs: the agents, and the blob. */
   | { type: "hello"; id: number }
-  | { type: "create"; id: number; cwd?: string; command?: string; kind?: PtyKind }
+  /**
+   * `env` goes on top of the host's own environment — a profile's login
+   * directories, today. Protocol 2: a host from before it drops the field and
+   * says nothing, which is why the server checks `protocol` before sending one.
+   */
+  | { type: "create"; id: number; cwd?: string; command?: string; kind?: PtyKind; env?: Record<string, string> }
   | { type: "kill"; agentId: string }
   | { type: "write"; agentId: string; data: string }
   | { type: "resize"; agentId: string; cols: number; rows: number }
@@ -69,6 +95,10 @@ export interface HostState {
   agents: AgentSnapshot[];
   /** What the last server left behind, or null on a cold start. */
   blob: string | null;
+  /** The host's build, or null for one from before the handshake carried it. */
+  version: string | null;
+  /** The protocol it speaks — see `HOST_PROTOCOL`. A host that says nothing is at 1. */
+  protocol: number;
 }
 
 /**
@@ -141,9 +171,17 @@ export class HostLink {
    * correct in shape and empty of contents, which is worse than either.
    */
   async hello(): Promise<HostState> {
-    const state = await this.request<HostState>((id) => ({ type: "hello", id }));
-    this.agents = state.agents;
-    return state;
+    const state = await this.request<Partial<HostState>>((id) => ({ type: "hello", id }));
+    this.agents = state.agents ?? [];
+    return {
+      agents: this.agents,
+      blob: typeof state.blob === "string" ? state.blob : null,
+      // Read as anything off the link is. A host from before the handshake
+      // carried these sends neither, and that absence is the whole reading: it
+      // speaks the first protocol, whatever build it is.
+      version: typeof state.version === "string" ? state.version : null,
+      protocol: Number.isInteger(state.protocol) && (state.protocol as number) >= 1 ? (state.protocol as number) : 1,
+    };
   }
 
   /**
@@ -164,7 +202,12 @@ export class HostLink {
    * its emulator built and thrown away in the same breath, and came back black
    * — until it was switched away from and back, which borrowed a second one.
    */
-  async create(options: { cwd?: string; command?: string; kind?: PtyKind }): Promise<AgentSnapshot> {
+  async create(options: {
+    cwd?: string;
+    command?: string;
+    kind?: PtyKind;
+    env?: Record<string, string>;
+  }): Promise<AgentSnapshot> {
     const agent = await this.request<AgentSnapshot>((id) => ({ type: "create", id, ...options }));
     // Appended rather than spliced in anywhere: the host lists oldest first and
     // this is the newest, which is what `cwdForNewTab` reads the order for.

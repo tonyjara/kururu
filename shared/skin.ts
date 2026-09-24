@@ -138,7 +138,9 @@ export type IconName =
   | "pin"
   | "panes"
   | "hide"
-  | "database";
+  | "database"
+  | "stop"
+  | "play";
 
 export type IconSet = Record<IconName, string>;
 
@@ -164,6 +166,15 @@ export const ICON_NAMES: readonly IconName[] = [
   "hide",
   /** A workspace's local Supabase, up or down. */
   "database",
+  /** Ending a dev server, as against the ↻ beside it that brings one back. */
+  "stop",
+  /**
+   * A sound, played to hear it. Not `run`, which is a dev server and is drawn
+   * as one: a bolt on the button that previews a notification noise would be a
+   * button about electricity, and a triangle on the one that starts a server
+   * would be the media player this pair spent a version being mistaken for.
+   */
+  "play",
 ];
 
 /**
@@ -682,7 +693,8 @@ const BASE_TOKENS: SkinTokens = {
 /** Kururu's own, and the floor every skin's icons are merged onto. */
 export const BASE_ICONS: IconSet = {
   close: "✕",
-  run: "▸",
+  /** Starting a dev server. A bolt rather than a triangle: see `play`. */
+  run: "↯",
   restart: "↻",
   caret: "▾",
   add: "+",
@@ -703,6 +715,10 @@ export const BASE_ICONS: IconSet = {
   hide: "⊘",
   /** The local database behind a workspace. A cylinder is what everybody draws. */
   database: "▤",
+  /** The end of a dev server. A square, which is what stopping looks like. */
+  stop: "■",
+  /** Hearing a sound before installing it, and the only player kururu has. */
+  play: "▸",
 };
 
 /**

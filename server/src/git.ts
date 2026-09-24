@@ -90,9 +90,9 @@ async function gitDir(at: string): Promise<string | null> {
 /**
  * The nearest repository at or above `dir`, and what it has checked out.
  *
- * Upwards, like `findSupabase`, and stopping at the home directory for the same
- * reason: a dotfiles repo in `$HOME` would put a branch on every workspace on
- * the machine, which is not a fact about any of them.
+ * Upwards, and stopping at the home directory: a dotfiles repo in `$HOME` would
+ * put a branch on every workspace on the machine, which is not a fact about any
+ * of them.
  */
 export async function headAt(dir: string): Promise<GitHead | null> {
   const found = await repoAt(dir);

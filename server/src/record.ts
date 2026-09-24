@@ -39,7 +39,7 @@ const ON = process.env.KURURU_RECORD !== "0";
 
 /**
  * `dev` is kururu typing into a terminal on its own account — the workspace
- * row's ▸ and ↻. It is a note beside the `in` that carries the bytes rather
+ * row's ↯ and ↻. It is a note beside the `in` that carries the bytes rather
  * than a kind of its own, because a tape read after the fact cannot otherwise
  * tell a line somebody typed from one a button did.
  */

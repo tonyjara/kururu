@@ -102,6 +102,16 @@ if (!health) {
 }
 
 row("server", up("up"), `${server}${remote ? "" : ` · dev servers ${health.devServers}`}`);
+// The host keeps the bundle it started with, so a server can be ahead of it —
+// silently, unless the handshake said so and somebody prints it. Only when it
+// is behind: a current host is the normal state and not worth a line.
+if (health.host && !health.host.current) {
+  row(
+    "host build",
+    down("behind"),
+    `speaks protocol ${health.host.protocol}, older than this server — restart the host to update it, which ends every agent`,
+  );
+}
 
 const listed = await ask("/api/agents");
 const agents = listed?.agents ?? [];

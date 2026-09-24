@@ -66,6 +66,9 @@ async function bundle(entry, outfile) {
 
 await bundle("server/src/ptyhostd.ts", "dist/ptyhostd.mjs");
 await bundle("server/src/index.ts", "dist/server.mjs");
+// What a Claude Code hook runs. Beside the server so `hooks.ts` can find it, and
+// bundled so the packaged app can run it with no checkout and no `bun`.
+await bundle("server/src/report-cli.ts", "dist/report.mjs");
 
 /**
  * node-pty spawns a small helper binary rather than forking the host process,

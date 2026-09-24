@@ -53,7 +53,7 @@ sees is exact. A hand-kept list would be one more thing kept in step with the
 stylesheet by hand, which is the failure this whole test file exists to catch.
 
 **`CONTRAST_KNOWN` is a record of the shipped state, not an approval of it.**
-Nineteen pairs are under their floor today and **Latte owns eleven** — a light
+Eighteen pairs are under their floor today and **Latte owns ten** — a light
 theme built by inverting a dark one is exactly where "text on a bright fill"
 stops meaning what it meant, which is why `onAccent` is 2.31:1 on its `blocked`
 badge and `accent` is 2.17:1 as text on raised chrome. Each line carries the
