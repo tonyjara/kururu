@@ -31,9 +31,9 @@ import type {
   DevServer,
   Notification,
   ServerMessage,
-  SupabaseDb,
   WorkspaceBranch,
 } from "../../shared/wire";
+import type { LaunchSettings } from "../../shared/launchers";
 import type { NotifySettings } from "../../shared/notify";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { Grid } from "./grid";
@@ -44,26 +44,17 @@ export interface KururuState {
   connected: boolean;
   snapshot: SessionSnapshot | null;
   /**
-   * Dev servers kururu found on this machine. Nothing draws them since the UI
-   * became terminals-only; the server still finds them, and the preview that
-   * will want them is PLAN.md item 5.
+   * Dev servers kururu found on this machine, which the sidebar lists as links
+   * — and which the preview pane, PLAN.md item 5, will want as well.
    */
   devServers: DevServer[];
   /**
-   * The workspaces with a local Supabase behind them, and whether it is up.
-   *
-   * Beside `devServers` rather than in the snapshot for the same reason that one
-   * is: it is discovered by polling the machine rather than decided by anything
-   * kururu owns, it changes on its own clock, and a client that reconnects gets
-   * the whole list rather than having to catch up.
-   */
-  supabase: SupabaseDb[];
-  /**
    * The branch each workspace is on, for the workspaces that are in a repo.
    *
-   * Beside the two above and for their reasons. It is the fastest-moving of the
-   * three and the one a person changes on purpose, which is why it is polled
-   * more often rather than folded into either of them.
+   * Beside `devServers` rather than in the snapshot, for the same reason that
+   * one is: it is discovered by polling the machine rather than decided by
+   * anything kururu owns, it changes on its own clock, and a client that
+   * reconnects gets the whole list rather than having to catch up.
    */
   branches: WorkspaceBranch[];
   /**
@@ -80,7 +71,6 @@ let state: KururuState = {
   connected: false,
   snapshot: null,
   devServers: [],
-  supabase: [],
   branches: [],
   usage: null,
 };
@@ -214,6 +204,7 @@ function connect(): void {
      * and waits to be borrowed, because a terminal nobody can see must not
      * reach through a reconnect and reshape itself.
      */
+    if (!atScreen) send({ type: "looking", looking: false });
     if (watched.size > 0 || warmed.size > 0) sendWatch();
     for (const open of sinks.values()) {
       for (const sink of open) deliver(() => sink.stale());
@@ -233,9 +224,6 @@ function connect(): void {
         break;
       case "dev-servers":
         set({ devServers: msg.servers });
-        break;
-      case "supabase":
-        set({ supabase: msg.dbs });
         break;
       case "branches":
         set({ branches: msg.branches });
@@ -377,6 +365,34 @@ export function warm(agentIds: Iterable<string>): void {
 }
 
 /**
+ * Say whether anybody is in front of this screen.
+ *
+ * The size policy is a minimum over the clients that can see a terminal, and a
+ * socket is a poor witness to that: a phone that locks keeps its panes, keeps
+ * its connection — the server deliberately never hangs up on a sleeping one —
+ * and goes on voting for a grid nobody is reading. The desktop was then held at
+ * phone width by a phone in another room, and walking back to the window did
+ * not fix it, because nothing in the window had moved and a pane proposes when
+ * its box changes.
+ *
+ * It says nothing about *which* terminals are on screen; `watch` is still the
+ * only thing that answers that, and still the only thing the unread mark and
+ * the notification gate consult. `terminals.ts` owns the one listener, because
+ * the vote this gates is the pool's.
+ *
+ * Deduped, and re-sent on a reconnect from `onopen`: the server keeps no memory
+ * of a socket that went away, and a phone that reconnects while still in a
+ * pocket must not come back with a vote.
+ */
+let atScreen = true;
+
+export function looking(present: boolean): void {
+  if (present === atScreen) return;
+  atScreen = present;
+  send({ type: "looking", looking: present });
+}
+
+/**
  * Say what shape this pane could draw the terminal at, then ask for its history
  * — in that order, and from one function so it cannot be in any other.
  *
@@ -456,7 +472,7 @@ export function proposeSize(agentId: string, cols: number, rows: number): void {
  * not explain.
  */
 export function newTab(
-  options: { kind?: PtyKind; cwd?: string; command?: string; paneId?: string } = {},
+  options: { kind?: PtyKind; cwd?: string; command?: string; launcher?: string; paneId?: string } = {},
 ): Promise<string> {
   return request((id) => ({ type: "new-tab", id, ...options })).then(
     (result) => (result as { id: string }).id,
@@ -599,24 +615,6 @@ export function setWorkspaceColor(workspaceId: string, color: WorkspaceColor | n
   send({ type: "set-workspace-color", workspaceId, color });
 }
 
-/**
- * The ▸ / ↻ on a workspace row. One verb for both faces of it: the server knows
- * better than this window whether anything is actually serving, since what the
- * button is drawn from is a scan up to three seconds old.
- */
-export function runDev(workspaceId: string): void {
-  send({ type: "run-dev", workspaceId });
-}
-
-/**
- * The database button on a workspace row. Which way it goes is stated rather
- * than toggled, because the window has just put a confirmation in front of
- * somebody naming one of the two — see `supabase-power` in `shared/wire.ts`.
- */
-export function supabasePower(workspaceId: string, on: boolean): void {
-  send({ type: "supabase-power", workspaceId, on });
-}
-
 export function deleteWorkspace(workspaceId: string): void {
   send({ type: "delete-workspace", workspaceId });
 }
@@ -639,6 +637,11 @@ export function renameProfile(profileId: string, name: string): void {
 
 export function deleteProfile(profileId: string): void {
   send({ type: "delete-profile", profileId });
+}
+
+/** A key out of the snapshot's `logins`, or null for a fresh directory of the profile's own. */
+export function setProfileLogin(profileId: string, loginKey: string | null): void {
+  send({ type: "set-profile-login", profileId, loginKey });
 }
 
 /**
@@ -745,6 +748,11 @@ export function setTerminalAppearance(terminal: TerminalAppearance): void {
 /** When kururu may interrupt you, and what it sounds like. All five at once. */
 export function setNotify(notify: NotifySettings): void {
   send({ type: "set-notify", notify });
+}
+
+/** Which agents and models the new-tab menu offers. */
+export function setLaunch(launch: LaunchSettings): void {
+  send({ type: "set-launch", launch });
 }
 
 /**

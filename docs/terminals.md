@@ -64,6 +64,24 @@ A proposal is withdrawn by a `watch` that stops listing the terminal as visible 
 the same message that already says what a human can see — so a warm client never
 has a vote and a terminal nobody can see keeps its shape.
 
+**A socket is not a screen, and `looking` is the difference.** A phone that locks
+keeps every pane it had and keeps its connection — a sleeping one is deliberately
+never hung up on, and nothing pings — so it went on voting for a grid in a
+pocket, and the desktop stayed at phone width until that socket happened to die.
+Walking back to the window did not undo it either: nothing there had moved, so no
+`ResizeObserver` fired and no pane proposed anything. `visibilitychange` now says
+so in both directions (`web/src/terminals.ts` owns the listener, because the vote
+it gates is the pool's). Going away stops this client's proposals *counting* —
+they are kept, so coming back is one message and not a round of re-measuring —
+and coming back also re-proposes every attached emulator, which is the half a
+returning window cannot get from its boxes. Visibility rather than focus: a
+window behind another app is one somebody can read.
+
+It stops at the size. `watching` is still the only thing the unread mark and the
+notification gate consult, because a frozen page cannot draw a card — it would
+queue them and raise the lot on unlock. Reaching a phone with its screen off is
+push's job ([notifications](notifications.md)).
+
 Never clamp a pane to a fixed grid: the program inside genuinely redraws at the
 size of the box it is in, and that is the whole difference between a terminal and
 a picture of one.

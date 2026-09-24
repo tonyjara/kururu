@@ -41,7 +41,8 @@ somebody else wrote.
   terminal is the same thing. `g` opens Settings — a key ghosttown leaves unbound,
   which is the same licence `]` and `[` were added under.
 - **The hierarchy**, word for word: profiles → workspaces → panes → tabs.
-- **The dev-server pair** on a workspace row: ▸ to run what it last had serving, ↻
-  to restart it — including the shape, where which button you see *is* the status.
+- **What counts as a dev server** — `DEV_COMMANDS` mirrors ghosttown's
+  `[dev_servers]` defaults. Its dev-server buttons on a workspace row were ported
+  too, and have since been taken out: the sidebar lists the servers instead.
 - **The restart contract.** Ghosttown's config says the same thing about its
   daemon in the same words: a live pty cannot be handed to a replacement process.

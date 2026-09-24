@@ -100,5 +100,6 @@ release body ships and cannot be taken back.
 `.claude/skills/release/` is how a section is drafted and a version cut:
 `/release` refreshes Unreleased, `/release 0.2.0` stamps it and tags.
 
-**Still owed:** the Homebrew tap, and a version in the host handshake — the one
-piece that costs a pty host restart and is therefore batched with it.
+**Still owed:** the Homebrew tap. The host handshake carries a version and a
+protocol now — `HOST_PROTOCOL` in `hostlink.ts` — and was batched with the host
+change that gave profiles their own logins.

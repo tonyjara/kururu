@@ -148,13 +148,57 @@ written as `not.toBeNaN()` passes for a pane holding the string `"x"`.
 
 ## Profiles
 
-**A profile is a drawer of workspaces and nothing else.** It carried accounts for
-a version — a Claude config directory, a gh config directory, a gitconfig and an
-ssh key, applied as an env overlay to every pty it spawned — and that is gone.
-Two accounts on one machine is a problem the tools own; kururu's copy of it was a
-second place for a login to go wrong quietly, and what it cost when it did was a
-terminal opened as somebody you did not expect. So a profile is a name, a list of
-workspaces, and which of them you are in.
+**A profile is a drawer of workspaces — and, with one switch on, a login of its
+own.** It carried *accounts* for a version — a Claude config directory, a gh
+config directory, a gitconfig and an ssh key, each chosen per profile and applied
+as an env overlay to every pty it spawned — and the choosing is what went. A path
+typed into a box was a second place for a login to go wrong quietly, and what it
+cost when it did was a terminal opened as somebody you did not expect.
+
+What is back is the half with nothing to choose. `Profile.loginKey` is twelve
+random hex digits minted when the profile is made; `~/.config/kururu/profiles/
+<loginKey>/claude` and `…/codex` are the directories; `server/src/logins.ts`
+turns them into `CLAUDE_CONFIG_DIR` and `CODEX_HOME` on every pty the profile
+opens, shells included, so `claude` typed into a terminal is the profile's
+account too. Whoever you `/login` as inside a profile is who it is from then on.
+**The key is neither the id nor the name.** `persist.ts` regenerates ids on a
+cold start and they are counters a later profile would reuse, so an id-keyed
+login would come back as somebody else's; a name follows a rename, and moving a
+login because a tab strip was retitled is the other accident. A blob or file from
+before the key existed is given a fresh one on the way in — `adopt()` and
+`readSnapshot` both — which reads as "not signed in yet" and never as somebody
+else, and `attach()` saves straight away so a minted key outlives the process
+that minted it.
+
+The directories start empty and are never deleted. Deleting a profile leaves its
+logins on disk, because removing a login is a thing a person does with `rm`.
+Empty is a decision: a config directory is settings, plugins, hooks and memory as
+well as a credential, and which of those a second account should share is not
+kururu's to answer — seeding a copy carries plugin state into a directory with no
+plugins, and linking shares until the first tool that writes through a rename.
+**A profile may point at another's login.** That is choosing again, and it is
+allowed because of what is chosen from. `scanLogins()` in `logins.ts` lists the
+directories under `profiles/` whose names are keys, each labelled by the email in
+the account record Claude Code wrote there; `index.ts` keeps that list — plus
+every key a profile currently holds, so a fresh profile reads as *not signed in
+yet* — as `SessionSnapshot.logins`, refreshed on the usage poll's minute and on
+every profile verb, and pushes a snapshot when it changes. The Profiles page
+draws a picker over that list and nothing else; `set-profile-login` carries a
+key back, and the server refuses any key that is not in the list it last
+offered. Two profiles on one key share the directory and everything in it,
+which is the meaning of "same account". Null mints a fresh key. The directory a
+profile leaves behind is not deleted and stays in the list for as long as
+somebody is signed into it, so a switch back is a switch and not a re-login.
+**Only terminals opened afterwards change:** a pty was spawned with its
+directories in its environment and keeps them, and the page says so.
+
+The switch is `LaunchSettings.loginsPerProfile`, off by default, and it is one
+switch rather than a field per profile because the only thing per profile to set
+is which of kururu's own directories it uses. **It waits for the host.** An old pty host drops the `env` on the floor and
+opens the terminal as the machine's own account with nothing to say so — the one
+failure this must not have — so `loginsActive()` in `index.ts` is the switch
+*and* `HostInfo.current`, the usage bar follows the same answer, and the Profiles
+page says when it is on and not yet in force.
 
 **Switching a profile is a menu; editing one is a page.** This has been all three
 things a switcher can be. It was a pick dialog; then renaming and deleting moved
@@ -222,27 +266,38 @@ of the workspace's row, in the same `--tag` every agent living in that workspace
 wears. The round chip on the row's second line is how you *change* it. Those are
 different jobs and they used to be one 10×3px mark doing neither well.
 
-## Dev buttons
+## The workspace row
 
-**The dev buttons never type into a terminal with an agent in it.** A tab in two
-roles is a tab you act on twice by accident, and here the accident is expensive:
-`npm run dev` arriving at a waiting Claude Code is a *prompt*. So a terminal
-`procs.ts` reports an agent in is held out of the scan, and the remembered tab is
-passed over in favour of opening a new one.
+One line — the number, the name, and the colour chip at the end of it — and a
+second under the name only when the workspace is in a repository, holding its
+branch. Nothing on the row runs anything. It used to carry a dev server's ↯, ↻
+and ■ and a Supabase ▤ as well, and they went because a row read every time you
+look at the sidebar is the wrong place for buttons pressed twice a day: the dev
+servers are listed under the agents, and starting one is a line in a terminal.
 
-The row is deliberately not derived from the port scan at all: a dev server that
-is still compiling holds no port, and the button would sit on ▸ for the ten
-seconds it takes to come up. Which button you see *is* the status, and a
-workspace that has never had a dev server draws none.
+**The whole row switches workspace, both lines of it, and the name's button does
+not.** A branch line under the name's button is a strip along the bottom of the
+row that lights up on hover exactly like the rest, and would do nothing when
+pressed if the button were the target. The handler is on the `li`; a click that
+landed on the colour chip is let through to it, and the name's button is the one exception because it *is*
+this gesture, which is also what keeps Enter working on a focused row.
 
-They live on a second line under the name, with the colour chip. They were at the
-right-hand end of the name's line, which clipped the name and put a button that
-runs something next to a button that switches workspace — two targets one aim
-apart.
+**And a row that is dragged is a row that cannot be clicked.** A `draggable`
+element starts a drag after about three pixels of movement and the platform then
+dispatches no `click` at all — so a press that wobbled, which on a trackpad is
+most of them, did nothing at all: a row dropped on itself is refused as a target,
+so the gesture ended in `dragend` with nothing done and nothing said. `dragend`
+is where it is read back: a drag whose `dropEffect` is still `none` and which
+finished within `CLICK_SLOP` of where it started was a click, and is handed back
+as one.
+
+`.ws-list` is one grid and every row a `subgrid` slice of it — the name's track
+and the chip's — so the chips stand in one column down the list whatever the
+names are.
 
 ## The branch on the row
 
-Under the name, beside ▸, because the sidebar names a workspace after the work
+Under the name, because the sidebar names a workspace after the work
 rather than after the repository — which is right, and leaves out the one fact
 that changes under you with nothing on screen moving. An agent that has been
 running for twenty minutes is on whatever branch you were on when you started it.
@@ -260,47 +315,27 @@ exactly the state in which somebody commits work and then cannot find it.
 a normal way to have two branches open at once, so this is not an edge case; the
 relative half is the one that silently returns nothing when it is forgotten.
 
+**Which repository, when a workspace holds two.** The row has one line for one
+branch, so something has to choose, and tree order is the wrong chooser: a
+workspace named after a project but holding a sibling checkout in its first pane
+reported the sibling's branch and sat there not moving while you checked things
+out all afternoon. That is not a stale row — it is a row faithfully answering
+about a repository nobody asked about, which is worse, because it is
+indistinguishable from the poll being broken. The tie is broken by **focus**: the
+pane you are looking at, and the tab showing inside it, go first, and everything
+`workspaceDirs` would have offered follows behind in its own order. The tooltip
+names the working tree, which is the row's own way of saying which one it picked.
+
+Focus is a safe tie-break here because the branch is only ever read: being wrong
+about it costs one line of text until the next poll. A button that *acted* on a
+directory chosen this way would do something different every time the focus
+moved, which is the reason not to reuse it for one.
+
 Only the **walk** that finds the repository is cached, never the branch. Where
 `.git` lives changes about as often as somebody moves a project; what is in
 `HEAD` changes every time they check something out, which is the fact the row
 exists to show.
 
-The poll is faster than the other two — four seconds against five — because it
-is the cheapest of the three and the only one a person changes deliberately and
-then immediately looks at.
-
-## The database button
-
-Beside ▸, and only on a workspace with a `supabase/config.toml` at or above one
-of its directories — the same thing `supabase start` itself looks for, so kururu
-finding a project and the CLI finding one cannot disagree. `server/src/supabase.ts`
-walks up from each live terminal's cwd, then each pane's remembered cwd (which is
-what a restored layout has, and is exactly when you want the button), then the dev
-server's.
-
-**Up is asked of the port, not of the CLI.** `supabase status` shells out to
-Docker and takes seconds; the local Postgres port either accepts a connection or
-it does not, and that is the fact the app in the next pane cares about. The port
-comes out of the project's own `[db]` section rather than being assumed to be
-54322, because two projects on one machine cannot both be on 54322. `[db.pooler]`
-has a `port` too, which is why the reader compares section names whole.
-
-**Starting and stopping is a line typed into a terminal**, the way ▸ is, and for
-a sharper version of the same reason: `supabase start` is a minute of Docker
-output, prompts when it has to pull, and ends by printing the anon key and the
-studio URL. Run behind the scenes, all of that is lost and the button is a light
-that goes on or does not. The line itself is discovered rather than assumed — the
-CLI is a devDependency in most projects and is not on anybody's PATH, so
-`supabaseCommand` prefers the project's own script (matched on what it *runs*,
-since the name varies and the body does not), then `npx supabase`, then the bare
-command. The terminal it types into has to be standing *in* the project; unlike
-▸, this one has no history saying the directory is right.
-
-Both directions are confirmed, which is not kururu's usual rule. Stopping is
-obvious. Starting is a minute of Docker begun by accident, which is why the
-client states `on` rather than sending a toggle: a toggle would mean the dialog
-said *stop* and the server did *start* whenever the five-second probe was stale.
-
-A start or a stop marks the workspace **busy** until the port changes, because
-the port says nothing for the whole minute a start takes and a button that looks
-unpressed is one somebody presses again.
+The poll is every four seconds, faster than the dev-server scan, because it is
+cheap and it is the one fact a person changes deliberately and then immediately
+looks at.

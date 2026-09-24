@@ -525,36 +525,6 @@ export function App() {
   );
 
   /**
-   * The database button. Asked about in both directions, which is not the usual
-   * rule — kururu confirms destruction and nothing else — and the exception is
-   * earned by what these two cost.
-   *
-   * Stopping is the obvious one: a local Supabase is holding somebody's
-   * afternoon of seeded data behind an app that is probably mid-request, and it
-   * is one tap away from a button that is also on the row. Starting is the less
-   * obvious one and is why this is not "confirm the dangerous half": it is a
-   * minute of Docker, and a minute of Docker begun by accident on a laptop is a
-   * minute of fans and a tab you did not open. So both, and the dialog names
-   * which one it is — the server is told `on` explicitly for the same reason.
-   */
-  const confirmSupabase = useCallback(
-    (workspaceId: string, on: boolean) => {
-      const workspace = profile?.workspaces.find((w) => w.id === workspaceId);
-      if (!workspace) return;
-      setDialog({
-        kind: "confirm",
-        title: on ? `Start the database in \u201c${workspace.name}\u201d?` : `Stop the database in \u201c${workspace.name}\u201d?`,
-        hint: on
-          ? "It runs in a terminal in that workspace, and takes about a minute."
-          : "Anything talking to it stops being able to. Your data stays where it is.",
-        confirmLabel: on ? "Start" : "Stop",
-        onConfirm: () => api.supabasePower(workspaceId, on),
-      });
-    },
-    [profile],
-  );
-
-  /**
    * Everything the keyboard can do, by name. Kept in one table so the keymap,
    * the help overlay and the buttons in the chrome cannot drift apart — a button
    * and its shortcut running different code is how they end up behaving
@@ -986,7 +956,6 @@ export function App() {
           focusedAgentId={focusedAgentOf(workspace)}
           onRun={run}
           onDeleteWorkspace={confirmDeleteWorkspace}
-          onSupabase={confirmSupabase}
           onEditing={setEditing}
           onSettings={() => setSettings("appearance")}
           onReach={() => setReach(true)}
@@ -1025,6 +994,7 @@ export function App() {
             /* For the key hints in a pane's menu — the same merged map the help
                overlay prints, so the two never disagree about where a split is. */
             keymap={keymap}
+            launch={snapshot.launch}
             zen={zen}
             /* One pane at a time once there is no room to tile — the same
                number that turns the sidebar into a screen, for the same
@@ -1084,8 +1054,11 @@ export function App() {
           styles={snapshot.styles}
           mascots={snapshot.mascots}
           notify={snapshot.notify}
+          launch={snapshot.launch}
+          host={snapshot.host}
           keys={snapshot.keys}
           profiles={snapshot.profiles}
+          logins={snapshot.logins}
           activeProfileId={profile.id}
           initialTab={settings}
           onClose={() => setSettings(null)}

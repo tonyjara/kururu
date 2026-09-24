@@ -27,6 +27,7 @@
  */
 import type { KeyOverrides } from "./keys";
 import type { LayoutNode } from "./layout";
+import type { LaunchSettings } from "./launchers";
 import type { NotifySettings } from "./notify";
 import type { StyleLibrary } from "./styles";
 import type { Appearance } from "./theme";
@@ -140,20 +141,6 @@ export interface AgentSnapshot {
    * everything still running.
    */
   lastAgent?: string | null;
-  /**
-   * The dev server running in this terminal, by the name that matched — "vite",
-   * "npm run dev" — or null for the overwhelming majority of terminals, which
-   * are not serving anything.
-   *
-   * Server-side like `activity` and `lastAgent`, and for the same reason twice
-   * over. It is found by walking the process table, which the server already
-   * does for dev-server discovery, so learning it costs the pty host no edit and
-   * therefore costs nobody their agents. And it is the *live* half of a pair
-   * whose other half is `Workspace.dev`: this says a server is up right now,
-   * that says what to run to get one back. A sidebar row needs both to know
-   * whether to draw ↻ or ▸.
-   */
-  dev?: string | null;
   /**
    * How much memory this terminal is holding, in bytes: the resident set of the
    * pty's own process and everything under it, added up. Null for a terminal
@@ -614,47 +601,30 @@ export interface Workspace {
    * why nothing has to be cleaned up when one goes.
    */
   mascotId: string | null;
-  /**
-   * The last dev server this workspace had serving, so it can be started again.
-   * Null until one has been seen running in here.
-   */
-  dev: WorkspaceDev | null;
-}
-
-/**
- * What a workspace last had serving, and where.
- *
- * Written by *watching* rather than by being told: the process scan sees a dev
- * server inside one of the workspace's terminals, so the workspace notes the
- * line that started it. Nothing has to be configured, and it works the same for
- * a server kururu opened a tab for and one you started by hand an hour ago.
- *
- * It is only ever replaced, never cleared, which is the whole point of keeping
- * it. A stopped server is exactly when the memory is worth something — and a
- * layout restored from disk comes back with fresh panes that know nothing, so
- * this is the only thing left that can bring the server back.
- *
- * `command` is what a person typed (`npm run dev`), not what ended up holding
- * the port (`node .../vite/bin/vite.js`); see `findDevUnder` for why those are
- * different and which one is worth re-typing.
- */
-export interface WorkspaceDev {
-  command: string;
-  /** Where it ran — what a replacement tab has to open in. */
-  cwd: string;
-  /**
-   * The terminal it last ran in, so the button re-uses that tab rather than
-   * piling up a new one every time. A live hint and nothing more: it is dropped
-   * on the way to disk along with every other process, and a tab that has since
-   * closed (or has an agent in it now) is simply not used.
-   */
-  agentId: string | null;
 }
 
 /** A named session: a list of workspaces, and which of them you are in. */
 export interface Profile {
   id: string;
   name: string;
+  /**
+   * The name of the directory this profile's logins live in, when profiles
+   * keep their own — `~/.config/kururu/profiles/<loginKey>/`, with a Claude
+   * config directory and a Codex home inside it. See `server/src/logins.ts`.
+   *
+   * Minted at random when the profile is made and never changed, and that is
+   * the whole reason it is neither the id nor the name. `persist.ts`
+   * regenerates ids on a cold start, and they are counters that a profile made
+   * after another was deleted would reuse — so a login keyed by id would come
+   * back as the wrong person's after a restart, which is the exact accident
+   * this exists to rule out. A name follows a rename, and moving a directory
+   * somebody's login lives in because they retitled a tab strip is the other
+   * accident. A random key does neither: it is written to disk with the
+   * profile, restored with it, and a blob or file from before it existed is
+   * given a fresh one on the way in — which reads as "not signed in yet", and
+   * never as somebody else.
+   */
+  loginKey: string;
   workspaces: Workspace[];
   activeWorkspaceId: string;
   /**
@@ -706,6 +676,25 @@ export interface Profile {
   hiddenAgents: string[];
 }
 
+/** What a login key may be: the hex `mintLoginKey` makes, and nothing that could be a path. */
+export const LOGIN_KEY = /^[0-9a-f]{12}$/;
+
+export function isLoginKey(value: unknown): value is string {
+  return typeof value === "string" && LOGIN_KEY.test(value);
+}
+
+/**
+ * A fresh key: twelve hex digits from the platform's random source, which both
+ * halves have as `globalThis.crypto`. Only the server ever mints one, but the
+ * check above is what a key is held to wherever it is read, and the two are
+ * one rule kept in one place.
+ */
+export function mintLoginKey(): string {
+  const bytes = new Uint8Array(6);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 /** A profile you are not in, as much of it as a switcher needs to draw. */
 export interface ProfileSummary {
   id: string;
@@ -713,6 +702,57 @@ export interface ProfileSummary {
   workspaces: number;
   /** Live ptys inside it. The reason switching away is not the same as closing. */
   agents: number;
+  /**
+   * Where this profile's logins live when profiles keep their own — the
+   * directory in full, because it is the one thing on the Profiles page
+   * somebody will want to `cd` into or copy a settings file across to. Sent
+   * whether or not the setting is on: it is a fact about the profile either
+   * way, and the page decides what to draw.
+   */
+  loginDir: string;
+  /**
+   * Which login that is, so the page can tell two profiles pointed at the same
+   * one apart from two that merely look alike, and mark the picker. The key
+   * and not just the directory because the picker sends the key back.
+   */
+  loginKey: string;
+}
+
+/**
+ * One login kururu holds: a directory under `profiles/` and who is signed into
+ * it, as far as Claude Code has written down.
+ *
+ * This is what a profile *chooses from*, and it is the whole of what may be
+ * chosen: directories kururu made, listed by looking at the disk, labelled by
+ * an account record the tool wrote. Nothing is typed. A login that some profile
+ * uses is in the list whether or not anybody has signed into it yet — that is
+ * the "not signed in yet" row — and a directory nobody uses and nobody signed
+ * into is not, because it is an empty folder and there is nothing to say about
+ * it. The Codex login rides along in the same directory and is not described:
+ * its account record carries no email to read, and the list is labelled by the
+ * one that does.
+ */
+export interface LoginSummary {
+  key: string;
+  /** The Claude account signed into it, or null for a directory nobody has signed into. */
+  email: string | null;
+}
+
+/**
+ * The pty host, as it introduced itself when this server connected.
+ *
+ * The host outlives every server and does not pick up a new bundle until it is
+ * restarted, so it is routinely older than the server talking to it — and a
+ * field the server puts on a spawn that an old host does not know about is
+ * dropped on the floor with correct code on both sides. `HOST_PROTOCOL` in
+ * `server/src/hostlink.ts` is the number that changes when that would matter,
+ * and `current` is whether the running host has it.
+ */
+export interface HostInfo {
+  /** Its build, or null for a host from before the handshake carried one. */
+  version: string | null;
+  /** It applies everything this server sends. False means a restart is owed, and every agent with it. */
+  current: boolean;
 }
 
 /**
@@ -729,6 +769,13 @@ export interface SessionSnapshot {
   profile: Profile;
   /** Every profile including the active one, in creation order. */
   profiles: ProfileSummary[];
+  /**
+   * Every login on this machine that a profile could be pointed at, whether or
+   * not the switch is on — see `LoginSummary`. Read off the disk, so a `/login`
+   * typed into a terminal shows up here within a poll and never has to be
+   * declared.
+   */
+  logins: LoginSummary[];
   /**
    * Every agent in the active profile, in the order the sidebar lists them:
    * creation order, rearranged by whatever has been dragged. Ordered here rather
@@ -777,6 +824,19 @@ export interface SessionSnapshot {
    * anything.
    */
   notify: NotifySettings;
+  /**
+   * Which agents and models the new-tab button offers. The catalogue itself is
+   * in `shared/launchers.ts` and both halves import it; what travels is only
+   * which rows somebody switched off.
+   */
+  launch: LaunchSettings;
+  /**
+   * Whether the pty host is one that every request of this server's reaches.
+   * In the snapshot because the one setting whose effect depends on it —
+   * profiles keeping their own logins — is drawn by a page that has to say so
+   * when it is switched on and not yet in force.
+   */
+  host: HostInfo;
   /**
    * The themes and skins installed from `../kururu-styles`, resolved.
    *

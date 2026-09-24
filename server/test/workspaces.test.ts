@@ -10,7 +10,7 @@
 import { describe, expect, it } from "bun:test";
 import { panes } from "../../shared/layout";
 import { Workspaces, nextColor, nextId, orderAgents } from "../src/workspaces";
-import { WORKSPACE_COLORS } from "../../shared/model";
+import { LOGIN_KEY, WORKSPACE_COLORS, type Profile } from "../../shared/model";
 
 describe("split", () => {
   it("returns the pane it made, and it is in the tree", () => {
@@ -523,5 +523,66 @@ describe("setAgentHidden", () => {
     const { workspaces } = three();
     workspaces.setAgentHidden("nobody", true);
     expect(workspaces.active.hiddenAgents).toEqual([]);
+  });
+});
+
+
+describe("loginKey", () => {
+  it("is minted for a new profile, and for one that arrived without", () => {
+    const workspaces = new Workspaces();
+    expect(workspaces.active.loginKey).toMatch(LOGIN_KEY);
+    const bare = { ...workspaces.active, loginKey: undefined } as unknown as Profile;
+    const restored = new Workspaces([bare]);
+    expect(restored.active.loginKey).toMatch(LOGIN_KEY);
+    expect(restored.active.loginKey).not.toBe(workspaces.active.loginKey);
+  });
+
+  it("keeps the one a blob carries and replaces one that is not a key", () => {
+    const base = new Workspaces().active;
+    expect(new Workspaces([{ ...base, loginKey: "0123456789ab" }]).active.loginKey).toBe("0123456789ab");
+    const swapped = new Workspaces([{ ...base, loginKey: "../../etc" }]).active.loginKey;
+    expect(swapped).toMatch(LOGIN_KEY);
+  });
+
+  it("is what summaries hand to the directory lookup, and carry themselves", () => {
+    const workspaces = new Workspaces();
+    const [summary] = workspaces.summaries(() => 0, (key) => `/profiles/${key}`);
+    expect(summary!.loginDir).toBe(`/profiles/${workspaces.active.loginKey}`);
+    expect(summary!.loginKey).toBe(workspaces.active.loginKey);
+  });
+});
+
+describe("setProfileLogin", () => {
+  it("points a profile at another's key, so the two share a directory", () => {
+    const workspaces = new Workspaces();
+    const a = workspaces.active.id;
+    const b = workspaces.newProfile("b");
+    const shared = workspaces.all().find((p) => p.id === a)!.loginKey;
+    workspaces.setProfileLogin(b, shared);
+    expect(workspaces.all().map((p) => p.loginKey)).toEqual([shared, shared]);
+  });
+
+  it("mints a fresh key for null, and leaves the old directory's key behind", () => {
+    const workspaces = new Workspaces();
+    const before = workspaces.active.loginKey;
+    workspaces.setProfileLogin(workspaces.active.id, null);
+    expect(workspaces.active.loginKey).toMatch(LOGIN_KEY);
+    expect(workspaces.active.loginKey).not.toBe(before);
+  });
+
+  it("refuses a key that is not one, and an unknown profile", () => {
+    const workspaces = new Workspaces();
+    const before = workspaces.active.loginKey;
+    workspaces.setProfileLogin(workspaces.active.id, "../../etc");
+    workspaces.setProfileLogin("p999", "0123456789ab");
+    expect(workspaces.active.loginKey).toBe(before);
+  });
+
+  it("is not a change when the key is the one already held", () => {
+    const workspaces = new Workspaces();
+    let changes = 0;
+    workspaces.onChange = () => changes++;
+    workspaces.setProfileLogin(workspaces.active.id, workspaces.active.loginKey);
+    expect(changes).toBe(0);
   });
 });

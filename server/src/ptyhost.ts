@@ -35,7 +35,8 @@
 import type { AgentReport, AgentSnapshot } from "../../shared/model";
 import { AGENT_SCAN_MS, OUTPUT_FLUSH_MS, STATUS_TICK_MS } from "../../shared/wire";
 import { AgentHost } from "./agents/host";
-import type { FromHost, Port, ToHost } from "./hostlink";
+import { HOST_PROTOCOL, type FromHost, type Port, type ToHost } from "./hostlink";
+import { VERSION } from "./version";
 
 export interface PtyHost {
   /** Give it the server's end of the link. A second call replaces the first —
@@ -135,8 +136,10 @@ export function createPtyHost(): PtyHost {
     switch (msg.type) {
       case "hello":
         // A server has come up — this one, or the one that replaced it. Either way
-        // it knows nothing yet, so it gets both halves of what survived.
-        reply(msg.id, () => ({ agents: host.list(), blob }));
+        // it knows nothing yet, so it gets both halves of what survived — and
+        // which build and protocol this is, so that a server newer than this
+        // process can tell rather than guess. See `HOST_PROTOCOL`.
+        reply(msg.id, () => ({ agents: host.list(), blob, version: VERSION, protocol: HOST_PROTOCOL }));
         return;
 
       /**

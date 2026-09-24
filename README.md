@@ -115,7 +115,7 @@ runs `tailscale` for you.
 │ ● main    │ [claude ●][zsh][+]            ⊟ ⊞ ✕        │
 │           │ > running the tests…                        │
 │ WORKSPACES│                                             │
-│ 1 main  ▸3│                    │                        │
+│ 1 main   ●│                    │                        │
 │ 2 review 1├────────────────────┴────────────────────────┤
 │           │ [zsh ●][build][+]             ⊟ ⊞ ✕        │
 │ AGENTS    │ $ git status                                │
@@ -209,14 +209,13 @@ reaches the server.
 
 ### Dev servers
 
-A workspace row grows a **▸** the first time kururu sees a dev server inside one of
-its terminals, and **↻** while one is up. Which button you see is the status.
+Anything listening on this machine that looks like a dev server — `npm run dev`,
+`vite`, `next dev` and the rest — is listed under the agents, each one a link that
+works from the phone too. The section is folded by default; its heading says how
+many there are.
 
-Nothing is configured: the scan notices `npm run dev` in a pty, the workspace
-remembers the line and directory, and ▸ types it again in a fresh tab. The memory
-is never cleared — a stopped server is when it is worth something. The buttons
-never type into a terminal with an agent in it, since `npm run dev` arriving at a
-waiting Claude Code is a prompt.
+The usage bars above it fold the same way: shut, you see the session's bar; open,
+every limit the account reports and whose account it is.
 
 ## Telling kururu what an agent is doing
 
@@ -306,10 +305,27 @@ Switching away does not stop anything. One server owns every profile's ptys, so
 the agents in the profile you left are still running when you come back — which
 is the whole reason a profile is worth having rather than a second window.
 
-Profiles carried accounts for a version — a Claude config directory, a gh config
-directory, a gitconfig and an ssh key, applied to every terminal they spawned.
-That is gone. Having two accounts on one machine is a problem the tools own, and
-kururu's copy of it was a second place for a login to go wrong quietly.
+**A profile can keep its own logins.** Settings → Profiles has one switch, off
+by default. On, every terminal a profile opens — an agent from the +, or a plain
+shell you type `claude` into — starts Claude Code and Codex on directories of
+that profile's own, under `~/.config/kururu/profiles/`, so `/login` inside a
+profile signs in that profile alone and it stays signed in as whoever you logged
+into there last. Nothing is chosen: a profile is born with the name of its
+directory and keeps it through renames and restarts. Each profile starts as a
+fresh install of both tools — sign in, and set them up as you like; your
+`~/.claude` and `~/.codex` are never touched, and switching it off goes back to
+them. The usage bar follows the profile you are in. Deleting a profile leaves its
+directory where it is.
+
+The switch needs a pty host from this version. With an older one still running it
+waits and says so, and terminals keep opening as before rather than as the wrong
+account. Restarting the host ends every agent, which is why kururu never does it
+for you: `bun run kill-ptyhosts` ends it, and the next start brings up a new one.
+
+Profiles carried *chosen* accounts for a version — a Claude config directory, a
+gh config directory, a gitconfig and an ssh key, each picked per profile — and
+the picking is what went: a path typed into a box was a second place for a login
+to go wrong quietly.
 
 ### The mascot
 

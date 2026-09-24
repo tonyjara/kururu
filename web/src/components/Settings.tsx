@@ -20,11 +20,13 @@
  */
 import { useCallback, useState } from "react";
 import type { KeyOverrides } from "../../../shared/keys";
-import type { MascotSet, ProfileSummary } from "../../../shared/model";
+import type { LaunchSettings } from "../../../shared/launchers";
+import type { HostInfo, LoginSummary, MascotSet, ProfileSummary } from "../../../shared/model";
 import type { NotifySettings as NotifyConfig } from "../../../shared/notify";
 import type { StyleLibrary } from "../../../shared/styles";
 import type { Appearance } from "../../../shared/theme";
 import { AboutSettings } from "./SettingsAbout";
+import { AgentSettings } from "./SettingsAgents";
 import { AppearanceSettings } from "./SettingsAppearance";
 import { KeySettings } from "./SettingsKeys";
 import { MascotSettings } from "./SettingsMascot";
@@ -33,7 +35,16 @@ import { ProfileSettings } from "./SettingsProfiles";
 import { StyleSettings } from "./SettingsStyles";
 import { StudioSettings } from "./SettingsStudio";
 
-export type Tab = "appearance" | "styles" | "studio" | "profiles" | "mascot" | "notify" | "keys" | "about";
+export type Tab =
+  | "appearance"
+  | "styles"
+  | "studio"
+  | "profiles"
+  | "agents"
+  | "mascot"
+  | "notify"
+  | "keys"
+  | "about";
 
 /**
  * Appearance first, and not alphabetically: it is the page somebody opens
@@ -66,6 +77,12 @@ const TABS: ReadonlyArray<readonly [Tab, string]> = [
    */
   ["studio", "Skin studio"],
   ["profiles", "Profiles"],
+  /**
+   * Beside Profiles because both are about what you work *in* rather than what
+   * it looks like: a profile is where the terminals are, and this is what the
+   * new-tab button will put in one.
+   */
+  ["agents", "Agents"],
   ["mascot", "Mascot"],
   /**
    * Beside the Mascot rather than beside Appearance, and the two are the same
@@ -97,8 +114,11 @@ export function Settings({
   styles,
   mascots,
   notify,
+  launch,
+  host,
   keys,
   profiles,
+  logins,
   activeProfileId,
   initialTab,
   onClose,
@@ -109,8 +129,13 @@ export function Settings({
   styles: StyleLibrary;
   mascots: MascotSet;
   notify: NotifyConfig;
+  /** Which agents the new-tab button offers. */
+  launch: LaunchSettings;
+  /** The pty host as it introduced itself: whether a setting that needs a newer one is in force. */
+  host: HostInfo;
   keys: KeyOverrides;
   profiles: ProfileSummary[];
+  logins: LoginSummary[];
   activeProfileId: string;
   /**
    * Which page this opening is about. Only the opening: the tab you move to
@@ -184,15 +209,20 @@ export function Settings({
           ) : tab === "profiles" ? (
             <ProfileSettings
               profiles={profiles}
+              logins={logins}
               activeProfileId={activeProfileId}
+              launch={launch}
+              host={host}
               onEditing={onEditing}
             />
+          ) : tab === "agents" ? (
+            <AgentSettings launch={launch} />
           ) : tab === "mascot" ? (
             <MascotSettings mascots={mascots} onEditing={onEditing} />
           ) : tab === "notify" ? (
             <NotifySettings notify={notify} />
           ) : tab === "about" ? (
-            <AboutSettings />
+            <AboutSettings host={host} />
           ) : (
             <KeySettings keys={keys} onEditing={onEditing} />
           )}

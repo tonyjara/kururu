@@ -635,7 +635,7 @@ function StylePreviewCard({ entry, volume }: { entry: CatalogEntry; volume: numb
           );
         }}
       >
-        <Icon name="run" />
+        <Icon name="play" />
       </button>
     );
   }

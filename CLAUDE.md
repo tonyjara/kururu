@@ -52,7 +52,11 @@ agents.** Quitting the window does not. Restarting the server does not.
 
 So batch changes to the host, and say so before asking for one to be restarted. A
 live pty cannot be handed to a replacement process, and that irreducible fact is
-the only thing in kururu that ends an agent by accident.
+the only thing in kururu that ends an agent by accident. **A host that is behind
+says so:** `hello` carries its version and `HOST_PROTOCOL`, and `/api/health`,
+`bun run status` and Settings → About report a server ahead of its host. Bump
+the protocol when a host change must be restarted into, and gate the feature on
+`HostInfo.current` rather than letting an old host drop the field in silence.
 
 **The trap, which has already cost a session:** a running `bun run dev` watches
 `server/src` and `shared`, so editing those restarts the user's server *while you
@@ -116,7 +120,7 @@ The load-bearing invariants, one line each, with the argument behind the link:
 - **A token has a floor, and the pairs are read out of the stylesheet.** Right
   tokens and unreadable text is a thing a palette can be; `shared/contrast.ts`
   says what each one is held to as ink and `CONTRAST_KNOWN` records — not
-  approves — the nineteen pairs already under it. → [styles](docs/styles.md)
+  approves — the eighteen pairs already under it. → [styles](docs/styles.md)
 - **Changing a theme must never resize a pty; changing a skin does**, and that is
   intended. → [styles](docs/styles.md#one-palette-and-a-theme-names-both-halves)
 - **`files.ts`: resolve, check, realpath, check again — refuse, never clamp.**
@@ -129,12 +133,18 @@ The load-bearing invariants, one line each, with the argument behind the link:
   [layout](docs/layout.md#numbers-off-the-wire)
 - **Notification policy runs once, on the server, per client.** →
   [notifications](docs/notifications.md)
-- **A profile is a drawer of workspaces and nothing else.** It carried accounts
-  for a version — four env vars applied at spawn — and that is gone; `server/src/
-  identity.ts` no longer exists and the pty host takes no `env`. →
-  [layout](docs/layout.md#profiles)
-- **The usage bar reads the machine's Claude credential and never writes one.**
-  It is the only thing in kururu that leaves the machine on the user's behalf:
+- **A profile is a drawer of workspaces, plus — one switch, off by default — a
+  login of its own.** It carried *chosen* accounts for a version and that is
+  gone; what is back is a choice among directories kururu itself made.
+  `Profile.loginKey` names a directory under `~/.config/kururu/profiles/`,
+  `logins.ts` points `CLAUDE_CONFIG_DIR` and `CODEX_HOME` into it on every pty
+  the profile opens, and the pty host takes an `env` again — which is why
+  `HOST_PROTOCOL` exists. A profile may be pointed at another's key, from a
+  list the server reads off the disk and refuses anything outside of; no path
+  ever comes from a client. → [layout](docs/layout.md#profiles)
+- **The usage bar reads a Claude credential and never writes one** — the
+  machine's, or the active profile's when profiles keep their own logins. It is
+  the only thing in kururu that leaves the machine on the user's behalf:
   read at the moment of the fetch, never held, never logged, never on the wire —
   and no token refresh, because writing that store could log out a running agent
   to draw a bar. `server/src/usage.ts` is the only file that has seen it.
@@ -168,10 +178,9 @@ Open, roughly in order — the argument for each is in `PLAN.md`:
 5. **The element picker** injected by the proxy: long-press an element, send the
    selector and source location to the agent. Waits on the preview pane.
 
-Smaller things owed: the Homebrew tap; a version in the host handshake (costs a
-host restart, so batch it); and attributing a discovered dev server to the
-workspace that owns it — the machine-wide port scan still says nothing about who
-owns a listener.
+Smaller things owed: the Homebrew tap, and attributing a discovered dev server
+to the workspace that owns it — the machine-wide port scan still says nothing
+about who owns a listener.
 
 `PLAN.md`'s own "Where it is" list is stale: it has the reader and highlighting
 as upcoming when both shipped in 0.1.0.

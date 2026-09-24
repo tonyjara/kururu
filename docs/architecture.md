@@ -70,6 +70,13 @@ Anything that would make `ptyhost.ts` need editing belongs on the server side.
   previous *version*, so a field added since is simply not there. `undefined`
   where the type promises `null` is invisible until something compares against
   null.
+- **The host says which protocol it speaks, and the server believes it.**
+  `hello` answers with the host's `version` and `HOST_PROTOCOL`; a host that
+  says neither is at protocol 1. A server ahead of its host warns once, reports
+  it in `/api/health` and the snapshot's `host`, and holds back anything the old
+  host would silently drop — a `create` with an `env`, which is how profiles
+  keep their own logins. Bump the number when a host change must be restarted
+  into, and only then.
 - **`adoptSeq` tells the id counter what a restored arrangement already holds.**
   `persist.ts` mints ids as it rebuilds, so the disk path walks the counter past
   its own work for free. The host's blob is the opposite: it carries ids, so a
@@ -184,14 +191,7 @@ argument that keeps `tailscale` commands out of kururu.
   `npm run dev` names no port, and `vite --port 3001` lies the moment 3001 is
   taken. The process holding the port is often not the one that names the server
   (`bun run dev` → `bun run serve.ts`), so `resolveDevCommand` walks **up** the
-  process tree. It also looks **down** from a pty (`findDevUnder`) and the two
-  answers differ: up comes the port and the process holding it, down comes the
-  line somebody typed and the process to interrupt. The preview wants the first;
-  the workspace row's ▸/↻ wants the second.
-- **Stopping a dev server signals its process *tree*, not its group** — the one
-  place in kururu that does not signal the group, and the exception proves the
-  rule: the group here is the pty's and its leader is the shell, so signalling it
-  would close the tab the restart is about to type into.
+  process tree.
 - **`proxy.ts`: a port per preview, never a path prefix.** Dev servers emit
   absolute URLs (`/@vite/client`), so `/preview/<id>/` breaks on the first asset.
   The extra hop rewrites `Host` to the upstream's own — which is why no project
