@@ -28,6 +28,7 @@
  * you run, possibly on a machine with no window on it, and the window is one
  * client of it exactly as the phone is.
  */
+import { randomUUID } from "node:crypto";
 import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, statSync } from "node:fs";
 import { execFile, spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -112,9 +113,18 @@ import {
 import { adoptProject, projectSettingsFor, type WorktreeOutcome, type WorktreeStatus } from "../../shared/projects";
 import { hookSettingsFlag } from "./hooks";
 import { claudeDirFor, loginDir, loginEnv, scanLogins } from "./logins";
-import { adoptLaunch, findLauncher, launcherCommand, withPrompt, type Launcher, type LaunchSettings } from "../../shared/launchers";
+import {
+  adoptLaunch,
+  findLauncher,
+  launcherCommand,
+  resumeCommand,
+  withPrompt,
+  type Launcher,
+  type LaunchSettings,
+} from "../../shared/launchers";
 import {
   addCard,
+  canResume,
   cardPrompt,
   editCard,
   mintCardId,
@@ -1161,8 +1171,11 @@ function fillPane(paneId: string, from?: string): void {
  * a Claude started into one is handed kururu's. See `hooks.ts`.
  */
 function agentCommand(launcher: Launcher): string {
-  const hooks = launcher.cli === "claude" && loginsActive() ? hookSettingsFlag() : "";
-  return launcherCommand(launcher, launch) + hooks;
+  return launcherCommand(launcher, launch) + hooksFor(launcher);
+}
+
+function hooksFor(launcher: Launcher): string {
+  return launcher.cli === "claude" && loginsActive() ? hookSettingsFlag() : "";
 }
 
 /**
@@ -1199,7 +1212,14 @@ async function runCard(workspaceId: string, cardId: string, launcherId: string):
    */
   const from = await cwdForNewTab(target);
   const checkout = await checkoutFor(found.card, from);
-  let command = withPrompt(agentCommand(launcher), cardPrompt(found.card));
+  /*
+   * A Claude run is told its session id rather than left to pick one, because
+   * the id is the only road back to the conversation once the terminal has
+   * gone — `resume-card` is `--resume` with it. Codex takes no such flag.
+   */
+  const sessionId = launcher.cli === "claude" ? randomUUID() : null;
+  const cwd = checkout?.worktree.path ?? from;
+  let command = withPrompt(agentCommand(launcher) + (sessionId ? ` --session-id ${sessionId}` : ""), cardPrompt(found.card));
   /*
    * The setup line runs in the agent's own terminal, ahead of it, rather than
    * as a subprocess of the server's: an install takes a minute, its output is
@@ -1207,11 +1227,7 @@ async function runCard(workspaceId: string, cardId: string, launcherId: string):
    * started into a checkout the setup gave up on.
    */
   if (checkout?.fresh && checkout.setup) command = `${checkout.setup} && ${command}`;
-  const agent = await openTerminal(target, {
-    cwd: checkout?.worktree.path ?? from,
-    command,
-    kind: "agent",
-  });
+  const agent = await openTerminal(target, { cwd, command, kind: "agent" });
   /*
    * Named after the card, as if somebody had typed it into rename-tab. Without
    * it the sidebar row says `starting…` and then whatever the agent titles its
@@ -1226,10 +1242,67 @@ async function runCard(workspaceId: string, cardId: string, launcherId: string):
       launcher: launcher.id,
       label: launcher.label,
       startedAt: Date.now(),
+      sessionId,
+      cwd: cwd ?? null,
     }),
   );
   if (boardPane && workspaces.hasPane(boardPane)) workspaces.focusPane(boardPane);
   return { agentId: agent.id };
+}
+
+/**
+ * Pick a card's last conversation back up, in a terminal beside the board —
+ * the robot's other row, for a card whose agent has gone.
+ *
+ * It starts where the run started, because that is where the CLI filed the
+ * transcript. A card that went through Done has had that directory taken
+ * down with its worktree, and there the main checkout is the nearest thing:
+ * the work was merged into it, and Claude Code is still handed the id. Its
+ * transcript is filed under the old path, so whether it finds it from the new
+ * one is Claude's call, and the terminal is where it says so. The card goes
+ * back to In progress, the same as any run, because it is being worked on.
+ */
+async function resumeCard(workspaceId: string, cardId: string): Promise<{ agentId: string }> {
+  if (workspaceId !== workspaces.activeWorkspace.id) throw new Error("that board is not on screen");
+  const found = workspaces.findCard(workspaceId, cardId);
+  if (!found) throw new Error("no such card");
+  const run = found.card.run;
+  const open = run?.agentId != null && host.agents.some((a) => a.id === run.agentId && !a.exited);
+  if (!run || !canResume(run, open)) {
+    throw new Error(open ? "its agent is still open" : "there is no conversation on this card to resume");
+  }
+  const launcher = findLauncher(run.launcher);
+  if (!launcher) throw new Error(`no such agent: ${run.launcher}`);
+
+  const boardPane = paneWithAgent(workspaces.activeWorkspace.layout, BOARD_TAB)?.id;
+  const target = workspaces.paneBesideBoard();
+  if (!target) throw new Error("nowhere to put the agent");
+  const there = run.cwd && isDirectory(run.cwd) ? run.cwd : null;
+  const cwd = there ?? found.card.worktree?.root ?? (await cwdForNewTab(target));
+  const command = resumeCommand(launcher, launch, run.sessionId, there === null);
+  if (!command) throw new Error("there is no conversation on this card to resume");
+  const agent = await openTerminal(target, { cwd, command: command + hooksFor(launcher), kind: "agent" });
+  host.rename(agent.id, found.card.title.slice(0, 80));
+  workspaces.editBoard(workspaceId, (board) =>
+    startRun(board, cardId, {
+      agentId: agent.id,
+      launcher: launcher.id,
+      label: launcher.label,
+      startedAt: Date.now(),
+      sessionId: run.sessionId,
+      cwd: cwd ?? null,
+    }),
+  );
+  if (boardPane && workspaces.hasPane(boardPane)) workspaces.focusPane(boardPane);
+  return { agentId: agent.id };
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -2767,6 +2840,10 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "run-card":
       void replyAsync(ws, msg.id, () => runCard(msg.workspaceId, msg.cardId, msg.launcher));
+      return;
+
+    case "resume-card":
+      void replyAsync(ws, msg.id, () => resumeCard(msg.workspaceId, msg.cardId));
       return;
 
     case "worktree-status":

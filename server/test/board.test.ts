@@ -10,6 +10,7 @@ import { spawnSync } from "node:child_process";
 import {
   addCard,
   adoptBoard,
+  canResume,
   columnCards,
   editCard,
   emptyBoard,
@@ -20,7 +21,7 @@ import {
   storedBoard,
   type Board,
 } from "../../shared/board";
-import { withPrompt } from "../../shared/launchers";
+import { findLauncher, resumeCommand, withPrompt } from "../../shared/launchers";
 import { BOARD_TAB, findPane, isBoardTab, panes, visibleAgents } from "../../shared/layout";
 import type { Profile } from "../../shared/model";
 import { Workspaces } from "../src/workspaces";
@@ -119,6 +120,14 @@ describe("on disk and in the blob", () => {
   it("keeps a blob's run as it was", () => {
     const b = startRun(board("a"), "c0", { agentId: "a1", launcher: "claude", label: "Claude", startedAt: 0 });
     expect(adoptBoard(JSON.parse(JSON.stringify(b)))).toEqual(b);
+  });
+
+  it("keeps a session id and cwd across a cold start, and drops ones that could not be", () => {
+    const id = "0b6c2f1e-8d7a-4c3b-9e2f-1a2b3c4d5e6f";
+    const b = startRun(board("a"), "c0", { agentId: "a1", launcher: "claude", label: "Claude", startedAt: 0, sessionId: id, cwd: "/w" });
+    expect(adoptBoard(JSON.parse(JSON.stringify(storedBoard(b))))!.cards[0]!.run).toMatchObject({ sessionId: id, cwd: "/w" });
+    const bad = adoptBoard({ cards: [{ id: "k", title: "t", run: { launcher: "claude", sessionId: "x; rm -rf ~", cwd: "rel" } }] });
+    expect(bad!.cards[0]!.run).toMatchObject({ sessionId: null, cwd: null });
   });
 
   it("drops what is not a card, and has no board for nothing", () => {
@@ -241,5 +250,29 @@ describe("the board as a tab", () => {
     const restored = panes(back.activeWorkspace.layout)[0]!;
     expect(restored.agentIds).toEqual([BOARD_TAB]);
     expect("board" in restored).toBe(false);
+  });
+});
+
+describe("resuming a card", () => {
+  const id = "0b6c2f1e-8d7a-4c3b-9e2f-1a2b3c4d5e6f";
+  const run = (launcher: string, sessionId: string | null) =>
+    startRun(board("a"), "c0", { agentId: null, launcher, label: launcher, startedAt: 0, sessionId }).cards[0]!.run;
+
+  it("needs the agent gone, and a conversation it can find", () => {
+    expect(canResume(run("claude", id), false)).toBe(true);
+    expect(canResume(run("claude", id), true)).toBe(false);
+    expect(canResume(run("claude", null), false)).toBe(false);
+    expect(canResume(run("codex", null), false)).toBe(true);
+    expect(canResume(null, false)).toBe(false);
+  });
+
+  it("hands Claude its id and Codex its picker", () => {
+    const settings = { offClis: [], offLaunchers: [], bypassClis: ["claude" as const], loginsPerProfile: false };
+    expect(resumeCommand(findLauncher("claude:claude-opus-5-5")!, settings, id, false)).toBe(
+      `claude --model claude-opus-5-5 --dangerously-skip-permissions --resume ${id}`,
+    );
+    expect(resumeCommand(findLauncher("claude")!, settings, "not-a-uuid", false)).toBeNull();
+    expect(resumeCommand(findLauncher("codex")!, settings, null, false)).toBe("codex resume");
+    expect(resumeCommand(findLauncher("codex:gpt-5.5")!, settings, null, true)).toBe("codex resume --all --model gpt-5.5");
   });
 });

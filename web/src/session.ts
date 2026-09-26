@@ -710,6 +710,11 @@ export function runCard(workspaceId: string, cardId: string, launcher: string): 
     (result) => (result as { agentId: string }).agentId,
   );
 }
+export function resumeCard(workspaceId: string, cardId: string): Promise<string> {
+  return request((id) => ({ type: "resume-card", id, workspaceId, cardId })).then(
+    (result) => (result as { agentId: string }).agentId,
+  );
+}
 
 /**
  * The git on a card's worktree, from its menu. All of them wait, because each

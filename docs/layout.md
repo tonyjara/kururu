@@ -173,6 +173,28 @@ while anything is uncommitted; the hint says "commit first". What each action
 came to is a line on the card until clicked away. Every verb names the card and
 the server finds the worktree on it; no path crosses the wire.
 
+**Done means merged.** Moving a card with a worktree into Done — by drag or by
+the menu's "Move to Done" — does not move it; it asks on the card, saying how
+many commits go into the base, whether anything uncommitted will be committed
+first, and that the worktree, the branch and a running agent go with it. Yes is
+`merge-card` (preceded by the commit row's commit when the tree is dirty), and
+the server puts the card in Done only once the merge has held. **Just move**
+moves it and leaves the worktree standing, for a merge that cannot happen yet;
+a refusal from git is the card's error and the card stays where it was.
+A card with no worktree but an agent still open asks too: **Move and end
+agent**, or **Just move**, which leaves the terminal.
+
+**A card's conversation outlives its agent.** A Claude run is started with
+`--session-id` and a UUID the server minted, and the id and the directory it ran
+in are kept on the run — to disk, unlike `agentId`, because they name a
+transcript and not a process. Once the agent's terminal has gone the robot's
+menu leads with **Resume conversation**: `claude --resume <id>` in that
+directory, or in the main checkout when a merge took the worktree down (Claude
+files transcripts by directory, so from there finding it is Claude's call).
+Codex picks its own ids and never says them, so its row opens `codex resume`'s
+picker instead, with `--all` when the directory is gone. Runs from before this
+have no id and no row.
+
 **Switching worktrees off retires the ones standing, and asks first.** The
 switch in Settings → Workspaces is the one control on that page that does
 anything to the disk: with worktrees still standing for the repository, it

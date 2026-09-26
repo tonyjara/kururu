@@ -22,6 +22,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   BOARD_COLUMNS,
+  canResume,
   columnCards,
   COLUMN_LABELS,
   runLive,
@@ -86,7 +87,7 @@ export function BoardView({
    * where the consequence — worktree gone, agent ended, column changed — is
    * going to show.
    */
-  const [ask, setAsk] = useState<{ cardId: string; text: string; run: () => void } | null>(null);
+  const [ask, setAsk] = useState<Ask | null>(null);
 
   const said = (cardId: string, text: string) => {
     setErrors(({ [cardId]: _, ...rest }) => rest);
@@ -106,16 +107,50 @@ export function BoardView({
     });
   };
 
-  const robotMenu = (card: Card, at: MenuAt) =>
+  /**
+   * Whether the card's agent still has a terminal — which is not `runLive`: a
+   * run that finished its turn is not live, but its terminal is still open, and
+   * that is the agent a move to Done would leave running and a resume would
+   * start a second copy of.
+   */
+  const agentOpen = (card: Card) => {
+    const agentId = card.run?.agentId;
+    return agentId != null && agents.some((a) => a.id === agentId && !a.exited);
+  };
+
+  /**
+   * The robot's menu: the launchers, and above them — when the card's last
+   * agent has gone and its conversation can be found again — the way back
+   * into it. A new launcher on a card that has run starts a fresh
+   * conversation with the card as its prompt; resume is the one that
+   * remembers what was said.
+   */
+  const robotMenu = (card: Card, at: MenuAt) => {
+    const resume: MenuItem[] = canResume(card.run, agentOpen(card))
+      ? [
+          {
+            label: "Resume conversation",
+            hint: card.run?.sessionId ? card.run.label : `${card.run?.label ?? "Codex"} · pick a session`,
+            run: () => {
+              setErrors(({ [card.id]: _, ...rest }) => rest);
+              api.resumeCard(workspaceId, card.id).catch(failed(card.id));
+            },
+          },
+        ]
+      : [];
     setMenu({
       at,
-      items: launchers.map((launcher, index) => ({
-        label: launcher.label,
-        hint: launcher.model ? undefined : "default model",
-        sep: index > 0 && launchers[index - 1]?.cli !== launcher.cli,
-        run: () => run(card, launcher),
-      })),
+      items: [
+        ...resume,
+        ...launchers.map((launcher, index) => ({
+          label: launcher.label,
+          hint: launcher.model ? undefined : "default model",
+          sep: (index === 0 && resume.length > 0) || (index > 0 && launchers[index - 1]?.cli !== launcher.cli),
+          run: () => run(card, launcher),
+        })),
+      ],
     });
+  };
 
   /**
    * The git a card's worktree needs, as menu rows: commit, set aside, merge,
@@ -125,11 +160,80 @@ export function BoardView({
    * later. "Set aside" is `git stash`, and says so in its hint, because it is
    * the row somebody looks for as "discard" and it is deliberately not one.
    */
+  const merge = (card: Card, tree: CardWorktree, commitFirst: boolean) =>
+    (commitFirst ? api.commitCard(workspaceId, card.id) : Promise.resolve(null))
+      .then(() => api.mergeCard(workspaceId, card.id))
+      .then(({ commits }) =>
+        said(card.id, `Merged ${commits} ${commits === 1 ? "commit" : "commits"} into ${tree.base}; worktree removed`),
+      )
+      .catch(failed(card.id));
+
+  /**
+   * Every road into a column, the drag and the menu row alike. Done is the one
+   * that is not just a move for a card with a worktree: on a board that runs
+   * cards in worktrees, done means merged — so the card asks, in place, with
+   * what the merge will cost, and a yes is `merge-card`, which rebases, fast-
+   * forwards the base, takes the worktree down, ends the agent and lands the
+   * card in Done itself. Uncommitted work is offered a commit first rather
+   * than a refusal, because the card is its message and the person dragging
+   * it to Done has already said the work is finished. "Just move" is there
+   * for the card whose merge cannot happen yet — a rebase that conflicts, a
+   * base that is somewhere else — and leaves the worktree standing.
+   */
+  const move = (card: Card, column: BoardColumn, index?: number) => {
+    const tree = card.worktree;
+    const running = agentOpen(card);
+    if (column !== "done" || card.column === "done" || (!tree && !running)) {
+      api.moveCard(workspaceId, card.id, column, index);
+      return;
+    }
+    /*
+     * No worktree, but an agent still open on the card: the work was merged
+     * however it was merged, and the terminal is what is left. Done asks
+     * whether that goes too rather than ending it — the agent may be the one
+     * that did the merge and still have something to say — and "Just move"
+     * leaves it, the way a merge that cannot happen yet leaves a worktree.
+     */
+    if (!tree) {
+      const agentId = card.run?.agentId;
+      setErrors(({ [card.id]: _, ...rest }) => rest);
+      setAsk({
+        cardId: card.id,
+        text: `Its agent is still open. End it too?${
+          canResume(card.run, false) ? " The conversation can be picked up again from the robot." : ""
+        }`,
+        yes: "Move and end agent",
+        run: () => {
+          api.moveCard(workspaceId, card.id, column, index);
+          if (agentId) api.closeTab(agentId);
+        },
+        alt: { label: "Just move", run: () => api.moveCard(workspaceId, card.id, column, index) },
+      });
+      return;
+    }
+    api.worktreeStatus(workspaceId, card.id).then((status) => {
+      const changes = status.changes.length;
+      const commits = `${status.ahead} ${status.ahead === 1 ? "commit" : "commits"}`;
+      const dirty = changes ? ` ${changes} uncommitted ${changes === 1 ? "file is" : "files are"} committed first as “${card.title}”.` : "";
+      const nothing = !changes && status.ahead === 0 ? " Nothing on the branch is new." : "";
+      setErrors(({ [card.id]: _, ...rest }) => rest);
+      setAsk({
+        cardId: card.id,
+        text:
+          `Done means merged: ${commits} into ${tree.base}.${dirty}${nothing} ` +
+          `The worktree is removed${running ? ", its agent is ended" : ""} and branch ${tree.branch} deleted.`,
+        yes: changes ? "Commit and merge" : "Merge",
+        run: () => merge(card, tree, changes > 0),
+        alt: { label: "Just move", run: () => api.moveCard(workspaceId, card.id, column, index) },
+      });
+    }, failed(card.id));
+  };
+
   const gitItems = (card: Card, tree: CardWorktree, status: WorktreeStatus | null): MenuItem[] => {
     const changes = status?.changes.length ?? 0;
     const files = status ? (changes ? `${changes} ${changes === 1 ? "file" : "files"}` : "nothing to commit") : "…";
     const gone = status !== null && !status.present;
-    const running = runLive(card.run);
+    const running = agentOpen(card);
     return [
       {
         label: "Commit changes",
@@ -166,13 +270,8 @@ export function BoardView({
           setAsk({
             cardId: card.id,
             text: `Merge ${status?.ahead ?? 0} ${status?.ahead === 1 ? "commit" : "commits"} into ${tree.base}? The worktree is removed${running ? ", its agent is ended" : ""} and the card goes to Done.`,
-            run: () =>
-              api
-                .mergeCard(workspaceId, card.id)
-                .then(({ commits }) =>
-                  said(card.id, `Merged ${commits} ${commits === 1 ? "commit" : "commits"} into ${tree.base}; worktree removed`),
-                )
-                .catch(failed(card.id)),
+            yes: "Merge",
+            run: () => merge(card, tree, false),
           }),
       },
       {
@@ -188,7 +287,7 @@ export function BoardView({
     const items = (status: WorktreeStatus | null): MenuItem[] => [
       ...BOARD_COLUMNS.filter((column) => column !== card.column).map((column) => ({
         label: `Move to ${COLUMN_LABELS[column]}`,
-        run: () => api.moveCard(workspaceId, card.id, column),
+        run: () => move(card, column),
       })),
       ...(card.worktree ? gitItems(card, card.worktree, status) : []),
       { label: "Edit", sep: true, run: () => setEditing(card.id) },
@@ -226,7 +325,9 @@ export function BoardView({
     setDropAt(null);
     if (!cardId) return;
     event.preventDefault();
-    api.moveCard(workspaceId, cardId, column, index);
+    const card = board.cards.find((c) => c.id === cardId);
+    if (card) move(card, column, index);
+    else api.moveCard(workspaceId, cardId, column, index);
   };
 
   return (
@@ -292,10 +393,11 @@ export function BoardView({
                     note={notes[card.id]}
                     onNoteClick={() => setNotes(({ [card.id]: _, ...rest }) => rest)}
                     ask={ask?.cardId === card.id ? ask : null}
-                    onAsk={(yes) => {
+                    onAsk={(choice) => {
                       const pending = ask;
                       setAsk(null);
-                      if (yes) pending?.run();
+                      if (choice === "yes") pending?.run();
+                      else if (choice === "alt") pending?.alt?.run();
                     }}
                     insertBefore={dropAt?.column === column && dropAt.index === index}
                     canRun={launchers.length > 0}
@@ -344,6 +446,15 @@ export function BoardView({
   );
 }
 
+/** A question a card is asking in place: what it says, and what yes and the other way out do. */
+interface Ask {
+  cardId: string;
+  text: string;
+  yes: string;
+  run: () => void;
+  alt?: { label: string; run: () => void };
+}
+
 function CardView({
   card,
   agent,
@@ -368,8 +479,8 @@ function CardView({
   note: string | undefined;
   onNoteClick: () => void;
   /** A merge waiting for its second click, or null. */
-  ask: { text: string } | null;
-  onAsk: (yes: boolean) => void;
+  ask: Ask | null;
+  onAsk: (choice: "yes" | "alt" | "no") => void;
   insertBefore: boolean;
   canRun: boolean;
   onRobot: (at: MenuAt) => void;
@@ -433,14 +544,19 @@ function CardView({
           </p>
         )}
         {ask && (
-          <div className="board-card-ask" role="alertdialog" aria-label="Merge this card">
+          <div className="board-card-ask" role="alertdialog" aria-label="Confirm">
             <p className="board-card-ask-text">{ask.text}</p>
             <div className="board-card-ask-actions">
-              <button className="button button-quiet" onClick={() => onAsk(false)}>
+              <button className="button button-quiet" onClick={() => onAsk("no")}>
                 Cancel
               </button>
-              <button className="button" onClick={() => onAsk(true)}>
-                Merge
+              {ask.alt && (
+                <button className="button button-quiet" onClick={() => onAsk("alt")}>
+                  {ask.alt.label}
+                </button>
+              )}
+              <button className="button" onClick={() => onAsk("yes")}>
+                {ask.yes}
               </button>
             </div>
           </div>
