@@ -112,6 +112,26 @@ export interface CardWorktree {
   base: string;
 }
 
+/**
+ * The dev server a card's worktree is being served by — a terminal kururu
+ * opened for it, running the project's dev line with a `PORT` the kernel
+ * handed out.
+ *
+ * Its own field rather than a second run, because it is not work anybody is
+ * waiting on: it has no status worth a dot, it never finishes a turn, and a
+ * card with its agent ended still wants its preview. Tracked at all so that
+ * the card can restart the one terminal that is its server and end it when
+ * the card goes to Done — without it the server is one more tab nobody can
+ * tell from the others. `port` is what it was *offered*; the address the card
+ * links to is whichever the dev-server scan finds listening in the worktree,
+ * since a server that ignores `PORT` (vite does) picks its own.
+ */
+export interface CardDev {
+  /** A process id, dropped on the way to disk like `CardRun.agentId`. */
+  agentId: string | null;
+  port: number;
+}
+
 export interface Card {
   /** Random rather than from `nextId`, whose counter only knows about panes. */
   id: string;
@@ -121,6 +141,7 @@ export interface Card {
   createdAt: number;
   run: CardRun | null;
   worktree: CardWorktree | null;
+  dev: CardDev | null;
 }
 
 export interface Board {
@@ -159,6 +180,7 @@ export function addCard(board: Board, fields: { title: unknown; body?: unknown; 
     createdAt: now,
     run: null,
     worktree: null,
+    dev: null,
   };
   return { cards: [...board.cards, card] };
 }
@@ -240,6 +262,11 @@ export function startRun(
  */
 export function setWorktree(board: Board, cardId: string, worktree: CardWorktree | null): Board {
   return { cards: board.cards.map((card) => (card.id === cardId ? { ...card, worktree } : card)) };
+}
+
+/** Remember the terminal serving a card's worktree, or forget it once it has been ended. */
+export function setDev(board: Board, cardId: string, dev: CardDev | null): Board {
+  return { cards: board.cards.map((card) => (card.id === cardId ? { ...card, dev } : card)) };
 }
 
 /**
@@ -325,6 +352,7 @@ export function adoptBoard(value: unknown): Board | null {
       createdAt: Number.isFinite(item.createdAt) ? (item.createdAt as number) : 0,
       run: adoptRun(item.run),
       worktree: adoptWorktree(item.worktree),
+      dev: adoptDev(item.dev),
     });
   }
   return { cards };
@@ -341,6 +369,18 @@ function adoptWorktree(value: unknown): CardWorktree | null {
   if (typeof root !== "string" || typeof path !== "string" || typeof branch !== "string" || typeof base !== "string") return null;
   if (!root.startsWith("/") || !path.startsWith("/") || !branch || !base) return null;
   return { root, path, branch, base };
+}
+
+/**
+ * A port the kernel could have handed out, or nothing. The terminal id is kept
+ * when there is one, since this is also how the board crosses a server restart
+ * with its terminals still running; `storedBoard` is what drops it.
+ */
+function adoptDev(value: unknown): CardDev | null {
+  if (!value || typeof value !== "object") return null;
+  const { agentId, port } = value as Record<string, unknown>;
+  if (!Number.isInteger(port) || (port as number) < 1 || (port as number) > 65535) return null;
+  return { agentId: typeof agentId === "string" ? agentId : null, port: port as number };
 }
 
 const RUN_STATES: readonly RunState[] = ["starting", "working", "blocked", "finished", "ended"];
@@ -377,9 +417,13 @@ export function canResume(run: CardRun | null, open: boolean): boolean {
   return run !== null && !open && (run.sessionId !== null || run.launcher.startsWith("codex"));
 }
 
-/** The board as `persist.ts` writes it: every card, and no process ids. */
+/**
+ * The board as `persist.ts` writes it: every card, and no process ids. A dev
+ * server is nothing *but* a process, so it goes entirely — a cold start has
+ * no terminal to point at, and the next robot press starts a fresh one.
+ */
 export function storedBoard(board: Board): Board {
   return {
-    cards: board.cards.map((card) => ({ ...card, run: card.run ? { ...card.run, agentId: null } : null })),
+    cards: board.cards.map((card) => ({ ...card, run: card.run ? { ...card.run, agentId: null } : null, dev: null })),
   };
 }

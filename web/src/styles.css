@@ -4936,6 +4936,19 @@ a.button {
   background: var(--line);
 }
 
+/* The card's dev server, under its branch. "open" is an anchor rather than a
+   button, for the sidebar row's reason — a real href is what a phone can
+   long-press — so it is told to look like its neighbours. */
+a.board-run-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  text-decoration: none;
+}
+.board-dev-ended .board-run-words {
+  color: var(--dimmer);
+}
+
 /* The checkout a card's work is in. Mono like the sidebar's branch line, and
    the same fact seen from the card: which branch the agent's afternoon lands
    on. The base is dimmer because it is context for the branch, not a second

@@ -29,12 +29,15 @@ import {
   type Board,
   type BoardColumn,
   type Card,
+  type CardDev,
   type CardRun,
   type CardWorktree,
 } from "../../../shared/board";
 import type { Launcher } from "../../../shared/launchers";
 import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
 import type { WorktreeStatus } from "../../../shared/projects";
+import type { DevServer } from "../../../shared/wire";
+import { isLoopback, previewUrl, serverIn } from "../preview";
 import * as api from "../session";
 import { Icon } from "./Icon";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
@@ -97,6 +100,7 @@ export function BoardView({
     setNotes(({ [cardId]: _, ...rest }) => rest);
     setErrors((all) => ({ ...all, [cardId]: err instanceof Error ? err.message : String(err) }));
   };
+  const { devServers } = api.useKururu();
   /** Where a dragged card would land: a column and a place among its cards. */
   const [dropAt, setDropAt] = useState<{ column: BoardColumn; index: number } | null>(null);
 
@@ -116,6 +120,20 @@ export function BoardView({
   const agentOpen = (card: Card) => {
     const agentId = card.run?.agentId;
     return agentId != null && agents.some((a) => a.id === agentId && !a.exited);
+  };
+
+  /** Whether the card's dev server still has a tab, whether or not its process is still up. */
+  const devOpen = (card: Card) => {
+    const agentId = card.dev?.agentId;
+    return agentId != null && agents.some((a) => a.id === agentId);
+  };
+  const restartDev = (card: Card) => {
+    setErrors(({ [card.id]: _, ...rest }) => rest);
+    api.restartCardDev(workspaceId, card.id).catch(failed(card.id));
+  };
+  const stopDev = (card: Card) => {
+    setErrors(({ [card.id]: _, ...rest }) => rest);
+    api.stopCardDev(workspaceId, card.id).catch(failed(card.id));
   };
 
   /**
@@ -221,7 +239,7 @@ export function BoardView({
         cardId: card.id,
         text:
           `Done means merged: ${commits} into ${tree.base}.${dirty}${nothing} ` +
-          `The worktree is removed${running ? ", its agent is ended" : ""} and branch ${tree.branch} deleted.`,
+          `The worktree is removed${running ? ", its agent is ended" : ""}${devOpen(card) ? ", its dev server stopped" : ""} and branch ${tree.branch} deleted.`,
         yes: changes ? "Commit and merge" : "Merge",
         run: () => merge(card, tree, changes > 0),
         alt: { label: "Just move", run: () => api.moveCard(workspaceId, card.id, column, index) },
@@ -280,6 +298,15 @@ export function BoardView({
         disabled: gone,
         run: () => api.openWorktree(workspaceId, card.id).catch(failed(card.id)),
       },
+      {
+        label: devOpen(card) ? "Restart the dev server" : "Start the dev server",
+        hint: gone ? "worktree gone" : card.dev ? `offered :${card.dev.port}` : "the project's dev line",
+        disabled: gone,
+        run: () => restartDev(card),
+      },
+      ...(devOpen(card)
+        ? [{ label: "Stop the dev server", hint: "and close its tab", run: () => stopDev(card) }]
+        : []),
     ];
   };
 
@@ -388,6 +415,10 @@ export function BoardView({
                     key={card.id}
                     card={card}
                     agent={card.run?.agentId ? agents.find((a) => a.id === card.run?.agentId) : undefined}
+                    server={card.dev?.agentId ? agents.find((a) => a.id === card.dev?.agentId) : undefined}
+                    devServers={devServers}
+                    onRestartDev={() => restartDev(card)}
+                    onStopDev={() => stopDev(card)}
                     mascot={mascot}
                     error={errors[card.id]}
                     note={notes[card.id]}
@@ -478,6 +509,10 @@ interface Ask {
 function CardView({
   card,
   agent,
+  server,
+  devServers,
+  onRestartDev,
+  onStopDev,
   mascot,
   error,
   note,
@@ -493,6 +528,11 @@ function CardView({
 }: {
   card: Card;
   agent: AgentSnapshot | undefined;
+  /** The terminal the card's dev server runs in, while it has one. */
+  server: AgentSnapshot | undefined;
+  devServers: DevServer[];
+  onRestartDev: () => void;
+  onStopDev: () => void;
   mascot: MascotConfig;
   error: string | undefined;
   /** What the last git action came to, until clicked away. */
@@ -556,6 +596,16 @@ function CardView({
         </div>
         {card.body && <p className="board-card-body">{card.body}</p>}
         {card.worktree && <TreeLine worktree={card.worktree} />}
+        {card.worktree && card.dev && server && (
+          <DevLine
+            dev={card.dev}
+            worktree={card.worktree}
+            terminal={server}
+            servers={devServers}
+            onRestart={onRestartDev}
+            onStop={onStopDev}
+          />
+        )}
         {card.run && <RunLine run={card.run} agent={agent} mascot={mascot} />}
         {error && <p className="board-card-error">{error}</p>}
         {note && (
@@ -624,6 +674,65 @@ function TreeLine({ worktree }: { worktree: CardWorktree }) {
     <div className="board-tree" title={`${worktree.path}\ncut from ${worktree.base}`}>
       <span className="board-tree-branch">{worktree.branch}</span>
       <span className="board-tree-base">from {worktree.base}</span>
+    </div>
+  );
+}
+
+/**
+ * The card's dev server: where it is listening and the way there, with ↻ and ■
+ * beside it. The link is the scan's, not the offered port's — see `serverIn` —
+ * except on this machine while the scan has not found it yet, where the
+ * offered port is the best guess going and a wrong one costs a refused tab.
+ * A remote client gets no link until the scan has found it and the proxy is
+ * open, for `previewUrl`'s reason.
+ */
+function DevLine({
+  dev,
+  worktree,
+  terminal,
+  servers,
+  onRestart,
+  onStop,
+}: {
+  dev: CardDev;
+  worktree: CardWorktree;
+  terminal: AgentSnapshot;
+  servers: DevServer[];
+  onRestart: () => void;
+  onStop: () => void;
+}) {
+  const found = serverIn(servers, worktree.path, dev.port);
+  const url = terminal.exited
+    ? null
+    : found
+      ? previewUrl(window.location, found)
+      : isLoopback(window.location.hostname)
+        ? `http://localhost:${dev.port}/`
+        : null;
+  const words = terminal.exited
+    ? `dev server ended${terminal.exitCode != null ? ` (${terminal.exitCode})` : ""}`
+    : found
+      ? `dev · :${found.port}`
+      : `dev · starting on :${dev.port}…`;
+  return (
+    <div className={`board-run board-dev ${terminal.exited ? "board-dev-ended" : ""}`}>
+      <span className="board-run-words" title={worktree.path}>
+        {words}
+      </span>
+      {url && (
+        <a className="board-run-open" href={url} target="_blank" rel="noreferrer noopener" title={`Open ${url}`}>
+          open <Icon name="external" />
+        </a>
+      )}
+      <button className="board-run-open" onClick={() => api.revealAgent(terminal.id)} title="Go to the dev server's terminal">
+        log
+      </button>
+      <button className="pane-btn" onClick={onRestart} title="Restart the dev server" aria-label="Restart the dev server">
+        <Icon name="restart" />
+      </button>
+      <button className="pane-btn" onClick={onStop} title="Stop the dev server and close its tab" aria-label="Stop the dev server">
+        <Icon name="stop" />
+      </button>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { DevServer } from "../../shared/wire";
-import { isLoopback, previewLabel, previewUrl } from "../src/preview";
+import { isLoopback, previewLabel, previewUrl, serverIn } from "../src/preview";
 
 const dev = (over: Partial<DevServer> = {}): DevServer => ({
   port: 5173,
@@ -50,5 +50,18 @@ describe("previewLabel", () => {
     expect(previewLabel(dev({ cwd: "/Users/n/Desktop/Nyto/kururu" }))).toBe("kururu · vite");
     expect(previewLabel(dev({ cwd: "/Users/n/Desktop/Nyto/kururu/" }))).toBe("kururu · vite");
     expect(previewLabel(dev())).toBe("vite");
+  });
+});
+
+describe("serverIn", () => {
+  const tree = "/r.worktrees/fix-c1";
+  test("only a server in the worktree, or under it", () => {
+    expect(serverIn([dev({ cwd: "/r" }), dev({ cwd: "/r.worktrees/fix-c1-other" })], tree, 5173)).toBeNull();
+    expect(serverIn([dev({ cwd: `${tree}/web`, port: 5174 })], tree, 4000)?.port).toBe(5174);
+  });
+  test("the offered port breaks a tie, else the first (lowest) one", () => {
+    const two = [dev({ cwd: tree, port: 5173 }), dev({ cwd: tree, port: 7717 })];
+    expect(serverIn(two, tree, 7717)?.port).toBe(7717);
+    expect(serverIn(two, tree, 9000)?.port).toBe(5173);
   });
 });

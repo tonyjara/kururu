@@ -269,8 +269,9 @@ function RepositorySettings({
         />
       </div>
       <p className="set-note set-note-under">
-        What starts the project's dev server, for the ▶ on a card. It is given a free port in{" "}
-        <span className="set-mono">PORT</span>; the one it actually takes is read off the machine.
+        Started in a tab of its own whenever a card gets a worktree, and ended when the card goes to
+        Done. It is given a free port in <span className="set-mono">PORT</span>; the one it actually
+        takes is read off the machine, and the card links to it.
       </p>
     </section>
   );

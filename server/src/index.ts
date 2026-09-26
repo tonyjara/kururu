@@ -32,6 +32,8 @@ import { randomUUID } from "node:crypto";
 import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, statSync } from "node:fs";
 import { execFile, spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer as createNetServer } from "node:net";
+import { tmpdir } from "node:os";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -148,6 +150,7 @@ import {
   moveCard,
   removeCard,
   runLive,
+  setDev,
   setWorktree,
   startRun,
   type Card,
@@ -1238,12 +1241,37 @@ async function runCard(workspaceId: string, cardId: string, launcherId: string):
   const cwd = checkout?.worktree.path ?? from;
   let command = withPrompt(agentCommand(launcher) + (sessionId ? ` --session-id ${sessionId}` : ""), cardPrompt(found.card));
   /*
+   * The dev server starts with the worktree, when the project has a dev line —
+   * so that the card's work can be looked at without anybody having to ask.
+   * Only for a worktree: in the main checkout the dev server is the one the
+   * person already runs, and a second on another port would be serving the
+   * same files. A fresh checkout's server has to wait for the setup line, which
+   * runs in the agent's terminal below; the marker is how the two terminals
+   * agree that it has, and it lives outside the worktree because a file in
+   * there is an uncommitted change that would hold up the merge.
+   */
+  const serve = checkout && checkout.dev && !devOpen(found.card) ? { ...checkout, dev: checkout.dev } : null;
+  const ready = serve?.fresh && serve.setup ? join(tmpdir(), `kururu-setup-${cardId}-${Date.now()}`) : null;
+  /*
    * The setup line runs in the agent's own terminal, ahead of it, rather than
    * as a subprocess of the server's: an install takes a minute, its output is
    * the only explanation when it fails, and `&&` means an agent is never
    * started into a checkout the setup gave up on.
    */
-  if (checkout?.fresh && checkout.setup) command = `${checkout.setup} && ${command}`;
+  if (checkout?.fresh && checkout.setup) {
+    command = `${checkout.setup} && ${ready ? `touch ${shellQuote(ready)} && ` : ""}${command}`;
+  }
+  /*
+   * The server's terminal is opened before the agent's, so that when both land
+   * in one pane it is the agent that is left showing. A server that cannot be
+   * started is not a reason to withhold the agent; it is a line in the log and
+   * a card with no link, and the card's menu can try again.
+   */
+  if (serve) {
+    await startDev(workspaceId, found.card, serve.worktree, serve.dev, ready).catch((err: unknown) => {
+      console.error("kururu: could not start the card's dev server:", err instanceof Error ? err.message : err);
+    });
+  }
   const agent = await openTerminal(target, { cwd, command, kind: "agent" });
   /*
    * Named after the card, as if somebody had typed it into rename-tab. Without
@@ -1335,8 +1363,10 @@ function isDirectory(path: string): boolean {
 async function checkoutFor(
   card: Card,
   from: string | undefined,
-): Promise<{ worktree: CardWorktree; fresh: boolean; setup: string } | null> {
-  if (card.worktree && worktreePresent(card.worktree.path)) return { worktree: card.worktree, fresh: false, setup: "" };
+): Promise<{ worktree: CardWorktree; fresh: boolean; setup: string; dev: string } | null> {
+  if (card.worktree && worktreePresent(card.worktree.path)) {
+    return { worktree: card.worktree, fresh: false, setup: "", dev: projectSettingsFor(projects, card.worktree.root).dev };
+  }
   if (!from) return null;
   const repo = await repoFor(from);
   if (!repo) return null;
@@ -1350,7 +1380,7 @@ async function checkoutFor(
   const settings = projectSettingsFor(projects, root);
   if (!settings.worktrees) return null;
   const made = await ensureWorktree(root, card);
-  return { ...made, setup: settings.setup };
+  return { ...made, setup: settings.setup, dev: settings.dev };
 }
 
 /**
@@ -1400,6 +1430,8 @@ async function retireCard(workspaceId: string, card: Card, worktree: CardWorktre
   if (changes.length) throw uncommittedError(changes);
   const agentId = card.run?.agentId;
   if (agentId && host.agents.some((agent) => agent.id === agentId && !agent.exited)) killAll([agentId]);
+  // Its server goes before its directory does, for the same reason.
+  stopDev(workspaceId, card.id);
   const { commits } = await retireWorktree(worktree);
   workspaces.editBoard(workspaceId, (board) => setWorktree(board, card.id, null));
   return commits;
@@ -1456,6 +1488,116 @@ async function openWorktree(workspaceId: string, cardId: string): Promise<{ agen
   if (!target) throw new Error("nowhere to put the terminal");
   const agent = await openTerminal(target, { cwd: worktree.path });
   return { agentId: agent.id };
+}
+
+/**
+ * A port nothing is listening on, from the kernel: bind port 0, read what it
+ * gave, let it go. There is a window between the close and the dev server's
+ * own bind, and it is the same window every "find me a free port" has; the
+ * alternative — counting up from 3000 — is a guess about the machine, and
+ * `devservers.ts` states the rule against those.
+ */
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = createNetServer();
+    probe.unref();
+    probe.on("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      probe.close(() => (port ? resolve(port) : reject(new Error("the kernel gave no port"))));
+    });
+  });
+}
+
+/** Whether the card's dev server still has a terminal open — running or ended, it is still a tab. */
+function devOpen(card: Card): boolean {
+  const agentId = card.dev?.agentId;
+  return agentId != null && host.agents.some((agent) => agent.id === agentId);
+}
+
+/**
+ * Where a card's dev server goes: the pane the last one went to, so that the
+ * servers line up as tabs of one pane instead of scattering — and, before
+ * there has been one, the pane of the newest terminal in the workspace. Never
+ * the board's own pane, since a new tab is shown and the board would be taken
+ * away from somebody who pressed a robot on it; `paneBesideBoard` otherwise.
+ */
+function devPane(): string | null {
+  const workspace = workspaces.activeWorkspace;
+  const layout = workspace.layout;
+  const board = paneWithAgent(layout, BOARD_TAB);
+  const servers = new Set((workspace.board?.cards ?? []).flatMap((card) => (card.dev?.agentId ? [card.dev.agentId] : [])));
+  const here = new Set(workspaces.agentsHere());
+  const newest = (ids: Set<string>) => host.agents.filter((agent) => ids.has(agent.id)).at(-1)?.id;
+  for (const agentId of [newest(servers), newest(here)]) {
+    const pane = agentId ? paneWithAgent(layout, agentId) : null;
+    if (pane && pane.id !== board?.id && !pane.reader) return pane.id;
+  }
+  return workspaces.paneBesideBoard();
+}
+
+/**
+ * Open the card's dev server: the project's dev line in the worktree, in a
+ * terminal of its own, with a free port in `PORT`. `export` rather than the
+ * pty's environment because the host would have to be taught a new variable
+ * to pass, and restarting the host ends every agent; the login shell's line
+ * does the same job. `ready` is the setup marker `runCard` explains — the
+ * server waits for it, and says so, rather than starting against a checkout
+ * with no dependencies in it. `pane` is where a restart puts it back.
+ */
+async function startDev(
+  workspaceId: string,
+  card: Card,
+  worktree: CardWorktree,
+  dev: string,
+  ready: string | null,
+  pane?: string,
+): Promise<{ agentId: string; port: number }> {
+  const target = pane && workspaces.hasPane(pane) ? pane : devPane();
+  if (!target) throw new Error("nowhere to put the dev server");
+  const port = await freePort();
+  const wait = ready
+    ? `echo 'waiting for the setup line in the agent’s terminal…'; until [ -e ${shellQuote(ready)} ]; do sleep 1; done; rm -f ${shellQuote(ready)}; `
+    : "";
+  const agent = await openTerminal(target, {
+    cwd: worktree.path,
+    command: `${wait}export PORT=${port}; ${dev}`,
+    kind: "shell",
+  });
+  host.rename(agent.id, `dev · ${card.title}`.slice(0, 80));
+  workspaces.editBoard(workspaceId, (board) => setDev(board, card.id, { agentId: agent.id, port }));
+  return { agentId: agent.id, port };
+}
+
+/** End the card's dev server and close its tab, if it has one. */
+function stopDev(workspaceId: string, cardId: string): void {
+  const found = workspaces.findCard(workspaceId, cardId);
+  const agentId = found?.card.dev?.agentId;
+  if (agentId && host.agents.some((agent) => agent.id === agentId)) killAll([agentId]);
+  if (found?.card.dev) workspaces.editBoard(workspaceId, (board) => setDev(board, cardId, null));
+}
+
+/**
+ * The card's ↻: end its dev server and start it again, in the pane it was in —
+ * or start one for the first time, which is the same button on a card whose
+ * server was never started or has been stopped. Only the workspace on screen,
+ * for `runCard`'s reason, and only a card with a worktree and a project with
+ * a dev line; the focus goes back to the board.
+ */
+async function restartDev(workspaceId: string, cardId: string): Promise<{ agentId: string; port: number }> {
+  if (workspaceId !== workspaces.activeWorkspace.id) throw new Error("that board is not on screen");
+  const { card, worktree } = worktreeOf(workspaceId, cardId);
+  if (!worktreePresent(worktree.path)) throw new Error("the worktree is not there any more");
+  const dev = projectSettingsFor(projects, worktree.root).dev;
+  if (!dev) throw new Error("this project has no dev server line — Settings → Workspaces");
+  const old = card.dev?.agentId;
+  const pane = old ? paneWithAgent(workspaces.activeWorkspace.layout, old)?.id : undefined;
+  stopDev(workspaceId, cardId);
+  const boardPane = paneWithAgent(workspaces.activeWorkspace.layout, BOARD_TAB)?.id;
+  const started = await startDev(workspaceId, card, worktree, dev, null, pane);
+  if (boardPane && workspaces.hasPane(boardPane)) workspaces.focusPane(boardPane);
+  return started;
 }
 
 /** The newest terminal in this workspace, preferring one that is still running. */
@@ -3003,6 +3145,9 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "move-card":
       workspaces.editBoard(msg.workspaceId, (board) => moveCard(board, msg.cardId, msg.column, msg.index));
+      // A finished card is not being looked at: its server goes, whichever
+      // road it took to Done — the merge, or "Just move".
+      if (msg.column === "done") stopDev(msg.workspaceId, msg.cardId);
       return;
 
     /*
@@ -3037,6 +3182,12 @@ function handleMessage(ws: WebSocket, raw: string): void {
       return;
     case "open-worktree":
       void replyAsync(ws, msg.id, () => openWorktree(msg.workspaceId, msg.cardId));
+      return;
+    case "restart-card-dev":
+      void replyAsync(ws, msg.id, () => restartDev(msg.workspaceId, msg.cardId));
+      return;
+    case "stop-card-dev":
+      void replyAsync(ws, msg.id, async () => stopDev(msg.workspaceId, msg.cardId));
       return;
 
     case "workspace-git": {

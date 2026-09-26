@@ -134,7 +134,7 @@ describe("on disk and in the blob", () => {
     expect(adoptBoard(undefined)).toBeNull();
     expect(adoptBoard(null)).toBeNull();
     const back = adoptBoard({ cards: [null, { id: 1, title: "x" }, { id: "k", title: "ok", column: 7, run: "no" }] });
-    expect(back!.cards).toEqual([{ id: "k", title: "ok", body: "", column: "todo", createdAt: 0, run: null, worktree: null }]);
+    expect(back!.cards).toEqual([{ id: "k", title: "ok", body: "", column: "todo", createdAt: 0, run: null, worktree: null, dev: null }]);
   });
 
   /**

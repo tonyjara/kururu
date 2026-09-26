@@ -73,3 +73,16 @@ export function previewLabel(dev: DevServer): string {
   const project = dev.cwd ? dev.cwd.split("/").filter(Boolean).pop() : undefined;
   return project ? `${project} · ${dev.program}` : dev.program;
 }
+
+/**
+ * The dev server a card's worktree is being served on, of those the scan found:
+ * one whose directory is the worktree or under it, and of those the one on the
+ * port it was offered, else the lowest. By directory rather than by port
+ * because the port offered is a suggestion — vite ignores `PORT` and takes the
+ * next free one after its own — and a project whose dev line starts two
+ * servers has both in the worktree; the offered port is only the tie-break.
+ */
+export function serverIn(servers: DevServer[], path: string, offered: number): DevServer | null {
+  const inside = servers.filter((dev) => dev.cwd === path || dev.cwd?.startsWith(`${path}/`));
+  return inside.find((dev) => dev.port === offered) ?? inside[0] ?? null;
+}

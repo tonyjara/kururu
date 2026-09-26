@@ -762,6 +762,15 @@ export function openWorktree(workspaceId: string, cardId: string): Promise<strin
   );
 }
 
+/** The card's dev server: started afresh in the pane it was in, or started for the first time. */
+export function restartCardDev(workspaceId: string, cardId: string): Promise<unknown> {
+  return request((id) => ({ type: "restart-card-dev", id, workspaceId, cardId }));
+}
+/** The card's dev server ended and its tab closed. */
+export function stopCardDev(workspaceId: string, cardId: string): Promise<unknown> {
+  return request((id) => ({ type: "stop-card-dev", id, workspaceId, cardId }));
+}
+
 /** Stop following the editor, or start again. */
 export function pinReader(paneId: string, follow: boolean): void {
   send({ type: "pin-reader", paneId, follow });
