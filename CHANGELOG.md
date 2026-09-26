@@ -15,6 +15,20 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **A board for each workspace, and a robot on every card.** `C-a K`,
+  **Open the board** in a pane's menu or a workspace's right-click menu, or
+  **Board** in the `+` menu opens the workspace's board — To do, In progress,
+  Review and Done. Nothing exists until you open it. The board is a tab: drag
+  it along a strip, into another pane, or onto an edge, with terminals beside
+  it; closing it puts the cards away and ends nothing. Press the robot on a card, pick a model, and an agent
+  starts in a terminal next to the board with the card as its prompt, named
+  after the card. The card follows it: it goes to In progress, shows the
+  agent's live status, and moves to **Review** when the agent finishes its turn
+  — never to Done, because an agent that has stopped talking may be asking
+  you something. Cards drag between columns on the desktop and move from their
+  menu on the phone, and they survive a restart; which agent was on them does
+  not.
+
 - **The reader has tabs, one per document, and they drag like terminal tabs.**
   Markdown opened from the tree or by the editor it follows opens as a new tab
   rather than replacing the one you were reading. Drag a tab to reorder it, onto

@@ -113,6 +113,27 @@ export function launcherCommand(launcher: Launcher, settings?: LaunchSettings): 
 }
 
 /**
+ * A launcher's command with a prompt on the end — how a card becomes an agent.
+ *
+ * Both CLIs take a first message as a positional argument and start an
+ * interactive session on it, which is what a card wants: the agent begins
+ * work at once and stays in its terminal to be answered, rather than printing
+ * one reply and exiting the way `-p` would.
+ *
+ * This is the one place a string somebody typed reaches `sh -c`, so it is
+ * single-quoted whole, with each `'` closed, escaped and reopened — the
+ * spelling sh, bash, zsh and fish all read the same way. Control characters
+ * other than newline and tab are dropped: a card is text, and a stray escape
+ * sequence has no business in a process's argv. A prompt that starts with a
+ * dash is given a leading space so neither CLI reads it as a flag.
+ */
+export function withPrompt(command: string, prompt: string): string {
+  let clean = prompt.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
+  if (clean.startsWith("-")) clean = ` ${clean}`;
+  return `${command} '${clean.replaceAll("'", `'\\''`)}'`;
+}
+
+/**
  * Which rows the menu leaves out.
  *
  * Recorded as what is *off*, not what is on, so that a model the skill adds next

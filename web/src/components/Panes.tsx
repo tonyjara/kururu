@@ -43,6 +43,8 @@ import { Fragment, useCallback, useRef, useState } from "react";
 import { keysByAction, type Action } from "../../../shared/keys";
 import {
   activeAgent,
+  BOARD_TAB,
+  isBoardTab,
   dividers,
   panes,
   rects,
@@ -53,6 +55,7 @@ import {
   type Rect,
 } from "../../../shared/layout";
 import { basename } from "../../../shared/labels";
+import { emptyBoard, type Board } from "../../../shared/board";
 import { visibleLaunchers, type Launcher, type LaunchSettings } from "../../../shared/launchers";
 import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
 import { AGENT_MIME, DOC_MIME, PANE_MIME, allowDrop, beginDrag, docId, endDrag, parseDocId, useDragging } from "../drag";
@@ -60,6 +63,7 @@ import { keyLabel, PREFIX_LABEL } from "../keys";
 import { shortenPath, tabLabel } from "../labels";
 import * as api from "../session";
 import { ReaderView } from "./Reader";
+import { BoardView } from "./Board";
 import { Icon } from "./Icon";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
 import { Status } from "./Status";
@@ -67,6 +71,9 @@ import { TerminalView } from "./Terminal";
 
 interface Props {
   node: LayoutNode;
+  workspaceId: string;
+  /** The workspace's board, or null while it has never been opened. */
+  board: Board | null;
   focusedPaneId: string;
   agents: AgentSnapshot[];
   /** What the working badge animates; drawn here, owned by the server. */
@@ -117,6 +124,8 @@ const FULL: React.CSSProperties = { left: 0, top: 0, width: "100%", height: "100
 
 export function Panes({
   node,
+  workspaceId,
+  board,
   focusedPaneId,
   agents,
   mascot,
@@ -206,14 +215,16 @@ export function Panes({
               focused={focused}
               solo={solo ? { index: all.indexOf(pane), count: all.length } : null}
               onMenu={(at) => setMenu({ at, paneId: pane.id, of: "pane" })}
-              /* With every agent switched off the menu would be one row, and a
-                 menu of one is a step rather than a choice — so the button goes
-                 back to opening the terminal straight away. */
-              onNew={launchers.length ? (at) => setMenu({ at, paneId: pane.id, of: "new" }) : null}
+              /* Always a menu now: with every agent switched off it is still a
+                 terminal or the board, which is a choice and not a step. */
+              onNew={(at) => setMenu({ at, paneId: pane.id, of: "new" })}
               keyboard={keyboard}
               agents={agents}
               mascot={mascot}
               readers={readers}
+              workspaceId={workspaceId}
+              board={board}
+              launchers={launchers}
             />
           </div>
         );
@@ -356,6 +367,17 @@ function paneMenu({
             run: () => api.openReader(paneId, undefined, alone),
           },
         ]),
+    /* Shows the board where it is, or makes one beside this pane. The new-tab
+       menu's row is the other meaning — put it *in* this pane. */
+    ...(pane && isBoardTab(activeAgent(pane))
+      ? []
+      : [
+          {
+            label: "Open the board",
+            hint: key("open-board"),
+            run: () => api.openBoard(paneId),
+          },
+        ]),
     {
       label: "Close this pane",
       hint: key("close-pane"),
@@ -376,12 +398,17 @@ function paneMenu({
  */
 function newTabMenu(paneId: string, launchers: Launcher[], keymap: Record<string, Action>): MenuItem[] {
   const first = keysByAction(keymap)["new-tab"]?.[0];
+  const boardKey = keysByAction(keymap)["open-board"]?.[0];
   return [
     {
       label: "Terminal",
       hint: first ? `${PREFIX_LABEL} ${keyLabel(first)}` : undefined,
       run: () => void api.newTab({ paneId }),
     },
+    /* A tab here, moved from wherever it was if the workspace already has one:
+       there is one board per workspace, so "a board in this pane" means this
+       one. */
+    { label: "Board", hint: boardKey ? `${PREFIX_LABEL} ${keyLabel(boardKey)}` : undefined, run: () => api.openBoard(paneId, true) },
     ...launchers.map((launcher, index) => ({
       label: launcher.label,
       hint: launcher.model ? undefined : "default model",
@@ -402,6 +429,7 @@ function newTabMenu(paneId: string, launchers: Launcher[], keymap: Record<string
  * load.
  */
 function paneLabel(pane: PaneState, agents: AgentSnapshot[]): string {
+  if (isBoardTab(activeAgent(pane))) return "board";
   if (pane.reader) {
     return pane.reader.path ? (pane.reader.path.split("/").pop() ?? "reader") : "reader";
   }
@@ -505,6 +533,9 @@ function Pane({
   agents,
   mascot,
   readers,
+  workspaceId,
+  board,
+  launchers,
 }: {
   pane: PaneState;
   focused: boolean;
@@ -516,6 +547,10 @@ function Pane({
   agents: AgentSnapshot[];
   mascot: MascotConfig;
   readers: Set<string>;
+  workspaceId: string;
+  /** The workspace's board, for a board pane to draw. */
+  board: Board | null;
+  launchers: Launcher[];
 }) {
   const showing = activeAgent(pane);
   const dragging = useDragging();
@@ -606,6 +641,20 @@ function Pane({
         ) : null}
         {!pane.reader &&
           pane.agentIds.map((agentId, index) => {
+          if (isBoardTab(agentId)) {
+            return (
+              <Fragment key={agentId}>
+                {dropAt === index && <span className="tab-insert" aria-hidden="true" />}
+                <BoardTab
+                  on={index === pane.activeIdx}
+                  onSelect={() => api.selectTab(pane.id, index)}
+                  onDragOver={(event) => overTab(event, index)}
+                  onDrop={dropOnStrip}
+                  onDragEnd={() => setDropAt(null)}
+                />
+              </Fragment>
+            );
+          }
           const agent = agents.find((a) => a.id === agentId);
           if (!agent) return null;
           return (
@@ -692,7 +741,15 @@ function Pane({
       </header>
 
       <div className="pane-body">
-        {pane.reader ? (
+        {isBoardTab(showing) ? (
+          <BoardView
+            workspaceId={workspaceId}
+            board={board ?? emptyBoard()}
+            agents={agents}
+            mascot={mascot}
+            launchers={launchers}
+          />
+        ) : pane.reader ? (
           <ReaderView paneId={pane.id} reader={pane.reader} />
         ) : showing ? (
           /* Deliberately unkeyed. A key here would rebuild this on every tab
@@ -772,6 +829,59 @@ function PaneMenuButton({ solo, onOpen }: { solo: SoloAt | null; onOpen: (at: Me
  * is. They exist only while a drag does, so nothing is ever laid over a terminal
  * you are trying to use.
  */
+/**
+ * The board's tab. A tab like any terminal's — it drags, reorders, splits off
+ * onto an edge and closes — carrying the same drag payload, because the layout
+ * holds it as one more id in the pane's list (`BOARD_TAB`). What it lacks is a
+ * status: the board is not a process. Closing it puts the cards away and ends
+ * nothing, which the tooltip says, since the ✕ beside every other tab does.
+ */
+function BoardTab({
+  on,
+  onSelect,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+}: {
+  on: boolean;
+  onSelect: () => void;
+  onDragOver: (event: React.DragEvent) => void;
+  onDrop: (event: React.DragEvent) => void;
+  onDragEnd: () => void;
+}) {
+  return (
+    <button
+      className={`tab tab-board ${on ? "tab-on" : ""}`}
+      onClick={onSelect}
+      title="This workspace's board"
+      draggable
+      onDragStart={(event) => beginDrag(event, "agent", BOARD_TAB)}
+      onDragEnd={() => {
+        endDrag();
+        onDragEnd();
+      }}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
+      <Icon name="bot" />
+      <span className="tab-label">board</span>
+      <span
+        className="tab-close"
+        role="button"
+        tabIndex={-1}
+        aria-label="Close tab"
+        title="Put the board away — the cards stay"
+        onClick={(event) => {
+          event.stopPropagation();
+          api.closeTab(BOARD_TAB);
+        }}
+      >
+        <Icon name="close" />
+      </span>
+    </button>
+  );
+}
+
 function DropZones({ paneId, reader }: { paneId: string; reader: boolean }) {
   const dragging = useDragging();
   const [over, setOver] = useState<string | null>(null);

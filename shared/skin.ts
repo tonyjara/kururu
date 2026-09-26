@@ -140,7 +140,8 @@ export type IconName =
   | "hide"
   | "database"
   | "stop"
-  | "play";
+  | "play"
+  | "bot";
 
 export type IconSet = Record<IconName, string>;
 
@@ -175,6 +176,8 @@ export const ICON_NAMES: readonly IconName[] = [
    * would be the media player this pair spent a version being mistaken for.
    */
   "play",
+  /** Handing a board's card to an agent. */
+  "bot",
 ];
 
 /**
@@ -719,6 +722,8 @@ export const BASE_ICONS: IconSet = {
   stop: "■",
   /** Hearing a sound before installing it, and the only player kururu has. */
   play: "▸",
+  /** Handing a card to an agent. A cog, since no font a skin can count on has a robot. */
+  bot: "⚙",
 };
 
 /**

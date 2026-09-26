@@ -71,7 +71,7 @@ import { renderMarkdown } from "./markdown";
 import { scanMemory } from "./memory";
 import { attach as attachEditor, findNvim, openFile } from "./nvim";
 import { readProcTable } from "./agents/procs";
-import { findPane, panes, paneWithAgent } from "../../shared/layout";
+import { activeAgent, BOARD_TAB, findPane, isBoardTab, panes, paneWithAgent, terminalsOf } from "../../shared/layout";
 import {
   adoptLegacySheet,
   builtinSheets,
@@ -99,7 +99,8 @@ import { readNotify, writeNotify } from "./notify";
 import { readLaunch, writeLaunch } from "./launch";
 import { hookSettingsFlag } from "./hooks";
 import { claudeDirFor, loginDir, loginEnv, scanLogins } from "./logins";
-import { adoptLaunch, findLauncher, launcherCommand, type LaunchSettings } from "../../shared/launchers";
+import { adoptLaunch, findLauncher, launcherCommand, withPrompt, type Launcher, type LaunchSettings } from "../../shared/launchers";
+import { addCard, cardPrompt, editCard, mintCardId, moveCard, removeCard, runLive, startRun } from "../../shared/board";
 import { soundBytes, sounds } from "./sounds";
 import { readAppearance, writeAppearance } from "./appearance";
 import {
@@ -899,6 +900,10 @@ function noticeStatuses(): void {
   const live = new Set<string>();
   for (const agent of host.agents) {
     live.add(agent.id);
+    // Level-triggered on purpose, unlike everything below: a board compares
+    // against the state it recorded, so a server restart that forgot
+    // `lastStatus` still catches a run up. A no-op when nothing moved.
+    workspaces.noteRun(agent.id, agent.status, agent.exited);
     const before = lastStatus.get(agent.id);
     lastStatus.set(agent.id, agent.status);
     // Never seen before, or has not moved. See `lastStatus` for why those are
@@ -1106,6 +1111,60 @@ function fillPane(paneId: string, from?: string): void {
   });
 }
 
+/**
+ * The line that starts an agent from the menu, flags and all.
+ *
+ * A profile's own login directory has none of the hooks the machine's does, so
+ * a Claude started into one is handed kururu's. See `hooks.ts`.
+ */
+function agentCommand(launcher: Launcher): string {
+  const hooks = launcher.cli === "claude" && loginsActive() ? hookSettingsFlag() : "";
+  return launcherCommand(launcher, launch) + hooks;
+}
+
+/**
+ * Hand a card to an agent: a terminal beside the board, running the chosen
+ * launcher with the card as its first message.
+ *
+ * Only the workspace on screen, because a terminal is opened into a pane and
+ * panes are only ever made in the active workspace — a board somebody is
+ * pressing a robot on is the one they are looking at, and a stale client
+ * naming another is refused rather than having an agent turn up somewhere it
+ * cannot see. The focus is handed back to the board afterwards: the point of
+ * handing work off is to carry on with the list, not to be taken to it.
+ */
+async function runCard(workspaceId: string, cardId: string, launcherId: string): Promise<{ agentId: string }> {
+  if (workspaceId !== workspaces.activeWorkspace.id) throw new Error("that board is not on screen");
+  const found = workspaces.findCard(workspaceId, cardId);
+  if (!found) throw new Error("no such card");
+  if (runLive(found.card.run) && host.agents.some((a) => a.id === found.card.run?.agentId && !a.exited)) {
+    throw new Error("that card already has an agent on it");
+  }
+  const launcher = typeof launcherId === "string" ? findLauncher(launcherId) : undefined;
+  if (!launcher) throw new Error(`no such agent: ${String(launcherId)}`);
+
+  const boardPane = paneWithAgent(workspaces.activeWorkspace.layout, BOARD_TAB)?.id;
+  const target = workspaces.paneBesideBoard();
+  if (!target) throw new Error("nowhere to put the agent");
+  const agent = await openTerminal(target, {
+    command: withPrompt(agentCommand(launcher), cardPrompt(found.card)),
+    kind: "agent",
+  });
+  /*
+   * Named after the card, as if somebody had typed it into rename-tab. Without
+   * it the sidebar row says `starting…` and then whatever the agent titles its
+   * first turn, and "which terminal is the migration" is the question the
+   * board was meant to have answered. A name the user gives it later wins, the
+   * same as always.
+   */
+  host.rename(agent.id, found.card.title.slice(0, 80));
+  workspaces.editBoard(workspaceId, (board) =>
+    startRun(board, cardId, { agentId: agent.id, launcher: launcher.id, label: launcher.label, startedAt: Date.now() }),
+  );
+  if (boardPane && workspaces.hasPane(boardPane)) workspaces.focusPane(boardPane);
+  return { agentId: agent.id };
+}
+
 /** The newest terminal in this workspace, preferring one that is still running. */
 function newestAgentHere(): string | undefined {
   const here = new Set(workspaces.agentsHere());
@@ -1120,7 +1179,7 @@ function newestAgentHere(): string | undefined {
  * deletion hand back what was inside them; this is what ends it.
  */
 function killAll(agentIds: string[]): void {
-  for (const agentId of agentIds) {
+  for (const agentId of terminalsOf(agentIds)) {
     host.kill(agentId);
     // It must not be left as a tab pointing at a terminal that no longer exists.
     workspaces.removeTab(agentId);
@@ -1137,6 +1196,9 @@ function killAll(agentIds: string[]): void {
  * moment the host stops listing it, which is the same event by a shorter road.
  */
 function forget(agentId: string): void {
+  // A card whose agent was killed outright ends here; one that exited on its
+  // own was already told by `noticeStatuses`.
+  workspaces.noteRun(agentId, "", true);
   activity.delete(agentId);
   lastAgent.delete(agentId);
   memory.delete(agentId);
@@ -1986,18 +2048,18 @@ function handleMessage(ws: WebSocket, raw: string): void {
         // second client with a stale one is still asking for a real agent.
         const launcher = typeof msg.launcher === "string" ? findLauncher(msg.launcher) : undefined;
         if (!launcher) throw new Error(`no such agent: ${String(msg.launcher)}`);
-        // A profile's own login directory has none of the hooks the machine's
-        // does, so a Claude started into one is handed kururu's. See `hooks.ts`.
-        const hooks = launcher.cli === "claude" && loginsActive() ? hookSettingsFlag() : "";
-        const command = launcherCommand(launcher, launch) + hooks;
-        return openTerminal(paneId, { cwd: msg.cwd, command, kind: "agent" });
+        return openTerminal(paneId, { cwd: msg.cwd, command: agentCommand(launcher), kind: "agent" });
       });
       return;
     }
 
     case "close-tab": {
-      const agentId = msg.agentId ?? workspaces.focusedAgent();
-      if (agentId) killAll([agentId]);
+      const focused = findPane(workspaces.activeWorkspace.layout, workspaces.focusedPaneId);
+      const agentId = msg.agentId ?? (focused ? activeAgent(focused) : null);
+      // The board's tab is a view: closing it ends nothing, and the cards stay
+      // on the workspace for the next `open-board`.
+      if (isBoardTab(agentId)) workspaces.removeTab(BOARD_TAB);
+      else if (agentId) killAll([agentId]);
       return;
     }
 
@@ -2041,7 +2103,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
       return;
 
     case "rename-tab":
-      host.rename(msg.agentId, msg.name);
+      if (!isBoardTab(msg.agentId)) host.rename(msg.agentId, msg.name);
       return;
 
     case "input":
@@ -2449,6 +2511,43 @@ function handleMessage(ws: WebSocket, raw: string): void {
         return;
       }
       void shutdown().then(() => process.exit(RESTART_EXIT_CODE));
+      return;
+
+    // --- the board ---------------------------------------------------------
+
+    case "open-board":
+      // From a workspace row, which may not be the workspace on screen: go
+      // there first, since a board is only ever opened where you can see it.
+      if (typeof msg.workspaceId === "string") workspaces.switchWorkspace(msg.workspaceId);
+      workspaces.openBoard(msg.paneId ?? workspaces.focusedPaneId, msg.here === true);
+      return;
+
+    case "add-card":
+      workspaces.editBoard(msg.workspaceId, (board) =>
+        addCard(board, { title: msg.title, body: msg.body, column: msg.column }, mintCardId(), Date.now()),
+      );
+      return;
+
+    case "edit-card":
+      workspaces.editBoard(msg.workspaceId, (board) => editCard(board, msg.cardId, { title: msg.title, body: msg.body }));
+      return;
+
+    case "move-card":
+      workspaces.editBoard(msg.workspaceId, (board) => moveCard(board, msg.cardId, msg.column, msg.index));
+      return;
+
+    /*
+     * Deleting a card does not touch its agent. The card is a note about the
+     * work; the terminal is the work, with its own ✕ — and ending somebody's
+     * agent because they tidied a list is the accident `hide-agent` exists to
+     * keep apart from `close-tab`.
+     */
+    case "delete-card":
+      workspaces.editBoard(msg.workspaceId, (board) => removeCard(board, msg.cardId));
+      return;
+
+    case "run-card":
+      void replyAsync(ws, msg.id, () => runCard(msg.workspaceId, msg.cardId, msg.launcher));
       return;
 
     // --- the reader --------------------------------------------------------

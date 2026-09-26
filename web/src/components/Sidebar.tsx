@@ -807,7 +807,18 @@ export function Sidebar({
           at={menu}
           onClose={() => setMenu(null)}
           items={[
-            { label: "Rename", run: () => setRenaming(menuWorkspace.id) },
+            /* First, because it is the one row here that goes somewhere: it
+               switches to this workspace and shows its board, making one if it
+               has never had one. `navigated` for the phone, where the sidebar
+               is a sheet over the thing you just asked to see. */
+            {
+              label: "Open the board",
+              run: () => {
+                api.openBoard(undefined, false, menuWorkspace.id);
+                navigated();
+              },
+            },
+            { label: "Rename", sep: true, run: () => setRenaming(menuWorkspace.id) },
             {
               label: "Colour…",
               run: () => setPicker({ workspaceId: menuWorkspace.id, x: menu.x, y: menu.y }),

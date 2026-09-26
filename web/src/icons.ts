@@ -52,6 +52,7 @@ const VECTORS: Record<IconName, string> = {
      that matches the triangle's weight. */
   stop: /* square */ `<rect width="14" height="14" x="5" y="5" rx="2"/>`,
   play: /* play */ `<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/>`,
+  bot: /* bot */ `<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>`,
 };
 
 /**

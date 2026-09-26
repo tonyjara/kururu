@@ -166,13 +166,14 @@
   --icon-database: "▤";
   --icon-stop: "■";
   --icon-play: "▸";
+  --icon-bot: "⚙";
 
   /* The icon strip a skin may bring instead of glyphs — every icon as one
      picture of `--icon-n` cells. `none` is the drawing. `--icon-n` is a
      constant the stylesheet needs for the arithmetic and is not a skin's to
      move: it is `ICON_NAMES.length`, and the test holds the two together. */
   --icon-sheet: none;
-  --icon-n: 18;
+  --icon-n: 19;
 
   /* ----------------------------------------------------------------------
      The parts: what a skin *paints*, three properties per region.
@@ -299,6 +300,7 @@
 .icon-database { --icon-svg: var(--icon-database-svg); --icon-glyph: var(--icon-database); --icon-i: 15; }
 .icon-stop { --icon-svg: var(--icon-stop-svg); --icon-glyph: var(--icon-stop); --icon-i: 16; }
 .icon-play { --icon-svg: var(--icon-play-svg); --icon-glyph: var(--icon-play); --icon-i: 17; }
+.icon-bot { --icon-svg: var(--icon-bot-svg); --icon-glyph: var(--icon-bot); --icon-i: 18; }
 /* An icon strip, when a skin brought one: every icon is one cell of a single
    picture, `--icon-n` cells across, and `--icon-i` on each class says which.
    The strip is scaled so one cell is exactly the icon's box — which is what
@@ -334,7 +336,8 @@
 :root[data-glyphs~="hide"] .icon-hide::before,
 :root[data-glyphs~="database"] .icon-database::before,
 :root[data-glyphs~="stop"] .icon-stop::before,
-:root[data-glyphs~="play"] .icon-play::before {
+:root[data-glyphs~="play"] .icon-play::before,
+:root[data-glyphs~="bot"] .icon-bot::before {
   content: var(--icon-glyph);
   width: auto;
   height: auto;
@@ -4607,6 +4610,207 @@ a.button {
 .tab-reader {
   cursor: var(--cursor);
   font-style: italic;
+}
+
+/* --------------------------------------------------------------------------
+   The board
+   -------------------------------------------------------------------------- */
+
+/* Four columns side by side, scrolled sideways once the pane is narrower than
+   four readable columns — which on a phone is always, and is why each column
+   snaps: one column to a screen is the phone's version of this layout. */
+.board {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(220px, 1fr);
+  gap: 8px;
+  padding: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--ui);
+}
+
+.board-col {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--chrome);
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-lg);
+  scroll-snap-align: start;
+}
+.board-col-over {
+  border-color: var(--accent);
+}
+
+.board-col-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 6px 10px;
+  font-size: var(--fs-base);
+}
+.board-col-name {
+  font-weight: 600;
+}
+.board-col-count {
+  color: var(--dimmer);
+  margin-right: auto;
+}
+
+.board-cards {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 6px 6px;
+}
+
+.board-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 7px 6px 7px 9px;
+  background: var(--bg);
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-md);
+  cursor: var(--cursor-pointer);
+}
+.board-card:hover {
+  border-color: var(--line-high);
+}
+/* A finished run is the thing the board exists to tell you about, so the card
+   carries it on its edge as well as in its words — visible from across a
+   column without reading anything. */
+.board-card-finished {
+  box-shadow: inset 2px 0 0 var(--done);
+}
+.board-card-blocked {
+  box-shadow: inset 2px 0 0 var(--blocked);
+}
+.board-card-working,
+.board-card-starting {
+  box-shadow: inset 2px 0 0 var(--working);
+}
+
+.board-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+.board-card-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-md);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* Three lines of the body and no more: the card is a handle on the ticket, and
+   the whole of it is one double-click away. */
+.board-card-body {
+  margin: 0;
+  font-size: var(--fs-base);
+  color: var(--dim);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.board-card-error {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--danger);
+}
+
+.board-robot:disabled {
+  opacity: 0.4;
+  cursor: var(--cursor);
+}
+
+.board-run {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.board-run-words {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The dot a run draws once its terminal has gone: an outline, the sidebar's
+   mark for exited, so an absence reads the same in both places. */
+.board-run-mark {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-round);
+  border: var(--border) var(--border-style) var(--exited);
+}
+.board-run-finished .board-run-mark {
+  border-color: var(--done);
+  background: var(--done);
+}
+.board-run-open {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--radius-md);
+  color: var(--text);
+  background: var(--chrome-high);
+  font-size: var(--fs-sm);
+  cursor: var(--cursor-pointer);
+}
+.board-run-open:hover {
+  background: var(--line);
+}
+
+.board-insert {
+  flex: none;
+  height: 2px;
+  border-radius: var(--radius-xs);
+  background: var(--accent);
+}
+
+.board-empty {
+  padding: 10px;
+  border: var(--border) dashed var(--line);
+  border-radius: var(--radius-md);
+  color: var(--dimmer);
+  font-size: var(--fs-base);
+  cursor: var(--cursor-pointer);
+}
+.board-empty:hover {
+  color: var(--text);
+  border-color: var(--line-high);
+}
+
+.board-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.board-composer .dialog-actions {
+  margin-top: 0;
+}
+.board-composer-body {
+  resize: vertical;
+  font-family: var(--ui);
+  font-size: var(--fs-base);
 }
 
 /* The way back from a zoom, and it is drawn only while there is one to come back

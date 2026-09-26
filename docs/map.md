@@ -10,6 +10,7 @@ in this folder.
 | `model.ts` | Agents and the hierarchy they live in. Not a mirror of anything |
 | `wire.ts` | The browser↔server protocol, and the timer intervals |
 | `layout.ts` | The split tree and every pure operation on it. Both halves use it |
+| `board.ts` | A workspace's cards, and what an agent's status does to the one it was handed |
 | `keys.ts` | Every action, ghosttown's defaults, and a user's overrides |
 | `labels.ts` | What to call a terminal and what to say it is doing — three places must agree |
 | `notify.ts` | When kururu may interrupt you, and the words. Ported policy |
@@ -112,6 +113,7 @@ for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` ·
 `Status.tsx` (a dot, or the mascot) · `Icon.tsx` (a class name and an
 `aria-hidden` span) · `Dialog.tsx` (while one is up, no key reaches a pty) ·
 `Menu.tsx` · `Reader.tsx` (**the thing kururu was built for**; one draggable tab per document) ·
+`Board.tsx` (a workspace's cards; the robot hands one to an agent) ·
 `FileTree.tsx` (markdown to the reader, the rest to nvim; holds the reader's zoom) · `DocPicker.tsx` (an empty reader only) ·
 `Keybar.tsx` · `Reach.tsx` · `Crash.tsx` · `HelpOverlay.tsx` (printed from the
 keymap, so it cannot document a dead key) · `Settings*.tsx`.

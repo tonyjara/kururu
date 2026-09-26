@@ -35,6 +35,7 @@ import type {
   WorkspaceBranch,
   WorkspaceProject,
 } from "../../shared/wire";
+import type { BoardColumn } from "../../shared/board";
 import type { LaunchSettings } from "../../shared/launchers";
 import type { NotifySettings } from "../../shared/notify";
 import type { TerminalAppearance } from "../../shared/theme";
@@ -671,6 +672,42 @@ export function restartServer(): void {
  */
 export function openReader(paneId?: string, agentId?: string, focus?: boolean): void {
   send({ type: "open-reader", paneId, agentId, focus });
+}
+
+/**
+ * Show this workspace's board — the first time, make it. See `shared/board.ts`.
+ * The server focuses it, since a board is a thing you type into.
+ */
+export function openBoard(paneId?: string, here?: boolean, workspaceId?: string): void {
+  send({ type: "open-board", paneId, here, workspaceId });
+}
+
+export function addCard(workspaceId: string, title: string, body: string, column?: BoardColumn): void {
+  send({ type: "add-card", workspaceId, title, body, column });
+}
+
+export function editCard(workspaceId: string, cardId: string, fields: { title?: string; body?: string }): void {
+  send({ type: "edit-card", workspaceId, cardId, ...fields });
+}
+
+/** `index` is a place among the destination column's cards, the moved one left out. */
+export function moveCard(workspaceId: string, cardId: string, column: BoardColumn, index?: number): void {
+  send({ type: "move-card", workspaceId, cardId, column, index });
+}
+
+/** The card only. Its agent, if it has one, runs on — see `delete-card`. */
+export function deleteCard(workspaceId: string, cardId: string): void {
+  send({ type: "delete-card", workspaceId, cardId });
+}
+
+/**
+ * Hand a card to an agent on this launcher. Waits, for `newTab`'s reason: a
+ * spawn that fails is not explained by the next snapshot.
+ */
+export function runCard(workspaceId: string, cardId: string, launcher: string): Promise<string> {
+  return request((id) => ({ type: "run-card", id, workspaceId, cardId, launcher })).then(
+    (result) => (result as { agentId: string }).agentId,
+  );
 }
 
 /** Stop following the editor, or start again. */

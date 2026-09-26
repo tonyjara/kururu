@@ -33,6 +33,7 @@
  * the answer, and it is complete. Only `new-tab` can fail in a way nothing else
  * would explain, so it alone carries an `id` and is answered with `reply`.
  */
+import type { BoardColumn } from "./board";
 import type { Direction } from "./layout";
 import type { Action } from "./keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
@@ -751,6 +752,39 @@ export type ClientMessage =
    * agent id it went to.
    */
   | { type: "open-in-editor"; id: number; root: string; path: string; agentId: string | null }
+
+  // --- the board -----------------------------------------------------------
+  /**
+   * Show the workspace's board, making it if this workspace has never had one.
+   * The only verb that creates a board — see `shared/board.ts`.
+   *
+   * The board is a tab (`BOARD_TAB` in `shared/layout.ts`). Without `here` this
+   * shows the one you have, or puts a new one beside `paneId`; with it — the
+   * new-tab menu — the tab goes *into* `paneId`, moved from wherever it was.
+   * `workspaceId` is a workspace row's menu, and switches there first.
+   */
+  | { type: "open-board"; paneId?: string; here?: boolean; workspaceId?: string }
+
+  /**
+   * The cards, as verbs like everything else. Each names its workspace rather
+   * than meaning "the one on screen", because a phone and a desktop can be
+   * looking at the same board through a switch the other has not drawn yet.
+   * The text is checked and capped on the server (`shared/board.ts`), and a
+   * move's index is a place among the destination column's cards.
+   */
+  | { type: "add-card"; workspaceId: string; title: string; body?: string; column?: BoardColumn }
+  | { type: "edit-card"; workspaceId: string; cardId: string; title?: string; body?: string }
+  | { type: "move-card"; workspaceId: string; cardId: string; column: BoardColumn; index?: number }
+  | { type: "delete-card"; workspaceId: string; cardId: string }
+
+  /**
+   * Hand a card to an agent: start one on `launcher` — an id from
+   * `shared/launchers.ts`, looked up and never built, for `new-tab`'s reason —
+   * with the card as its prompt, in a terminal pane of the card's workspace.
+   * Replied to with the new agent's id, because a spawn is the one thing here
+   * that can fail in a way the next snapshot would not explain.
+   */
+  | { type: "run-card"; id: number; workspaceId: string; cardId: string; launcher: string }
 
   // --- the mascot ----------------------------------------------------------
   /**
