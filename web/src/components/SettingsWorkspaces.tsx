@@ -254,7 +254,8 @@ function RepositorySettings({
         </div>
         <p className="set-note set-note-under">
           Run once in a fresh worktree, in the agent's terminal, before the agent. A worktree starts
-          with the tracked files and nothing else — no dependencies, no <span className="set-mono">.env</span>.
+          with the tracked files and a copy of the main checkout's ignored{" "}
+          <span className="set-mono">.env*</span> files — no dependencies.
         </p>
       </fieldset>
       <div className="set-row">

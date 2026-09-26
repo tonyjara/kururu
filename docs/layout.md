@@ -147,8 +147,18 @@ one cut beside it. A worktree that cannot be made is an error on the card, never
 an agent quietly started in the main checkout: the person pressed the robot
 expecting isolation.
 
+**A worktree gets the main checkout's env files.** `worktree add` brings the
+tracked files and nothing else, and `.env*` is ignored precisely so it is never
+tracked — so every card's dev server came up without its keys and died. On a
+fresh worktree, and again before its dev server starts (for worktrees made
+before this), `copyEnvFiles` asks git for the main checkout's *ignored*
+files, keeps the ones whose basename starts `.env` wherever they are in the
+tree, and copies each one the worktree does not already have. Never over a
+file that is there. The cost is a copy of the secrets per worktree on the same
+disk, which the user chose over a `cp` in every project's setup line.
+
 **The setup line runs in the agent's terminal, ahead of it.** A fresh worktree
-holds tracked files and nothing else — no `node_modules`, no `.env` — and the
+holds tracked files and the env files and nothing else — no `node_modules` — and the
 project's setup command (Settings → Workspaces) is prefixed onto the agent's
 command with `&&`, so an install that fails leaves its output on screen and no
 agent behind it. It runs on a fresh checkout only. The robot is pressed from
@@ -172,7 +182,11 @@ and draws a line under the branch: the port, **open** (an href, found by the
 dev-server scan as the server whose cwd is inside the worktree, the offered
 port only breaking ties — vite ignores `PORT`), **log**, ↻ and ■. ↻ is
 `restart-card-dev`, which ends the terminal and opens another in the same
-pane, or starts one on a card that has none; ■ is `stop-card-dev`. Any move
+pane, or starts one on a card that has none; ■ is `stop-card-dev`. A dev
+server that exits is the one terminal `reapExited` leaves standing: a dev line
+dies in its first second when it dies at all — a gitignored `.env` a worktree
+does not have, a port already taken — and the screen is the only place that
+said why. Any move
 into Done — merged or "Just move" — ends it and closes its tab, and so does a
 merge or a retire, before the directory goes. Only worktrees: in the main
 checkout the dev server is the one the person already runs.

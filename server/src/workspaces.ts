@@ -1126,6 +1126,13 @@ export class Workspaces {
     return found;
   }
 
+  /** Whether this terminal is serving some card's worktree, in any profile. */
+  isCardDev(agentId: string): boolean {
+    return this.profiles.some((profile) =>
+      profile.workspaces.some((workspace) => workspace.board?.cards.some((card) => card.dev?.agentId === agentId)),
+    );
+  }
+
   /** The card this id names in the active profile, and the workspace it is on. */
   findCard(workspaceId: string, cardId: string): { workspace: Workspace; card: Card } | null {
     const workspace = this.active.workspaces.find((w) => w.id === workspaceId);
