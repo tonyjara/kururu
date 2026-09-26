@@ -123,6 +123,7 @@ import {
   pullBranch,
   pushBranch,
   repoStatus,
+  mergeBlock,
   retireWorktree,
   stashAll,
   uncommittedError,
@@ -130,7 +131,15 @@ import {
   worktreePresent,
   worktreeStatus,
 } from "./worktree";
-import { adoptProject, projectSettingsFor, type WorktreeOutcome, type WorktreeStatus } from "../../shared/projects";
+import {
+  adoptProject,
+  projectSettingsFor,
+  type MergeBlock,
+  type MergeReply,
+  type MergeResolution,
+  type WorktreeOutcome,
+  type WorktreeStatus,
+} from "../../shared/projects";
 import { hookSettingsFlag } from "./hooks";
 import { claudeDirFor, loginDir, loginEnv, scanLogins } from "./logins";
 import {
@@ -1408,7 +1417,7 @@ async function retireWorktrees(root: unknown): Promise<WorktreeOutcome[]> {
   for (const { workspace, card, worktree } of workspaces.cardsWithWorktrees(root)) {
     const outcome: WorktreeOutcome = { cardId: card.id, title: card.title, branch: worktree.branch, commits: 0, error: null };
     try {
-      outcome.commits = await retireCard(workspace.id, card, worktree);
+      outcome.commits = (await retireCard(workspace.id, card, worktree)).commits;
     } catch (err) {
       outcome.error = err instanceof Error ? err.message : String(err);
     }
@@ -1426,16 +1435,59 @@ async function retireWorktrees(root: unknown): Promise<WorktreeOutcome[]> {
  * menu's merge puts it in Done, because merged is what done means on a board
  * that runs cards in worktrees.
  */
-async function retireCard(workspaceId: string, card: Card, worktree: CardWorktree): Promise<number> {
+async function retireCard(
+  workspaceId: string,
+  card: Card,
+  worktree: CardWorktree,
+  resolve?: MergeResolution,
+): Promise<{ commits: number; note: string | null }> {
   const changes = worktreePresent(worktree.path) ? await worktreeChanges(worktree.path) : [];
   if (changes.length) throw uncommittedError(changes);
+  /*
+   * The other tree with a say: the base's own checkout, with work in it that
+   * the merge would overwrite. Asked here, before the agent is ended, for
+   * the dirty check's reason — and answered with a block rather than an
+   * error, because the card has two ways through to offer. A resolution
+   * that arrives for a block neither way gets past is refused as an error,
+   * the same as any other refusal.
+   */
+  const block = await mergeBlock(worktree);
+  if (block) {
+    if (!resolve) throw new MergeBlocked(block);
+    if (block.untracked.length || block.clean === false) throw new MergeBlocked(block);
+    if (resolve === "commit") await commitAll(worktree.root, `wip: before merging “${card.title}”`, "");
+  }
   const agentId = card.run?.agentId;
   if (agentId && host.agents.some((agent) => agent.id === agentId && !agent.exited)) killAll([agentId]);
   // Its server goes before its directory does, for the same reason.
   stopDev(workspaceId, card.id);
-  const { commits } = await retireWorktree(worktree);
+  const outcome = await retireWorktree(worktree, { autostash: block !== null && resolve === "stash" });
   workspaces.editBoard(workspaceId, (board) => setWorktree(board, card.id, null));
-  return commits;
+  return outcome;
+}
+
+/**
+ * A merge stopped by `mergeBlock`, carried as an error so that the sweep and
+ * the menu's merge can treat it differently: the sweep reports its message
+ * on the card's row, the menu's merge hands the block itself back for the
+ * card to ask about.
+ */
+class MergeBlocked extends Error {
+  constructor(readonly block: MergeBlock) {
+    super(blockMessage(block));
+  }
+}
+
+function blockMessage(block: MergeBlock): string {
+  const list = (paths: string[]) => paths.slice(0, 3).join(", ") + (paths.length > 3 ? ` and ${paths.length - 3} more` : "");
+  const parts: string[] = [];
+  if (block.files.length) {
+    parts.push(`${block.base} has uncommitted changes in ${list(block.files)}, which this branch also changes`);
+  }
+  if (block.untracked.length) {
+    parts.push(`${block.base} has untracked ${list(block.untracked)}, which this branch creates`);
+  }
+  return `${parts.join("; ")} — commit or set them aside on ${block.base}, then merge again`;
 }
 
 /** The card, and the worktree on it — or the refusal, since every verb below needs both. */
@@ -1467,12 +1519,22 @@ async function stashCard(workspaceId: string, cardId: string): Promise<{ files: 
   return { files: files.length };
 }
 
-/** Merge this card back, take its worktree down, and put the card in Done. */
-async function mergeCard(workspaceId: string, cardId: string): Promise<{ commits: number }> {
+/**
+ * Merge this card back, take its worktree down, and put the card in Done —
+ * or hand back what stopped it, with nothing ended, when the stop is one the
+ * card can ask the person about.
+ */
+async function mergeCard(workspaceId: string, cardId: string, resolve?: MergeResolution): Promise<MergeReply> {
   const { card, worktree } = worktreeOf(workspaceId, cardId);
-  const commits = await retireCard(workspaceId, card, worktree);
+  let outcome: { commits: number; note: string | null };
+  try {
+    outcome = await retireCard(workspaceId, card, worktree, resolve);
+  } catch (err) {
+    if (err instanceof MergeBlocked && !resolve) return { blocked: err.block };
+    throw err;
+  }
   workspaces.editBoard(workspaceId, (board) => moveCard(board, cardId, "done"));
-  return { commits };
+  return outcome;
 }
 
 /**
@@ -3190,7 +3252,9 @@ function handleMessage(ws: WebSocket, raw: string): void {
       void replyAsync(ws, msg.id, () => stashCard(msg.workspaceId, msg.cardId));
       return;
     case "merge-card":
-      void replyAsync(ws, msg.id, () => mergeCard(msg.workspaceId, msg.cardId));
+      void replyAsync(ws, msg.id, () =>
+        mergeCard(msg.workspaceId, msg.cardId, msg.resolve === "commit" || msg.resolve === "stash" ? msg.resolve : undefined),
+      );
       return;
     case "open-worktree":
       void replyAsync(ws, msg.id, () => openWorktree(msg.workspaceId, msg.cardId));

@@ -27,7 +27,7 @@ import { execFile } from "node:child_process";
 import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { CardWorktree } from "../../shared/board";
-import { worktreeBranch, worktreeDir, worktreeName, type WorktreeStatus } from "../../shared/projects";
+import { worktreeBranch, worktreeDir, worktreeName, type MergeBlock, type WorktreeStatus } from "../../shared/projects";
 import { readHead, repoAt } from "./git";
 
 /**
@@ -53,6 +53,22 @@ export function git(args: string[], cwd: string): Promise<string> {
         const said = String(stderr).split("\n").find((line) => line.trim()) ?? err.message;
         reject(new Error(`git: ${said.replace(/^fatal:\s*/, "")}`));
       },
+    );
+  });
+}
+
+/**
+ * Run git for its exit status, when the status is the answer: `merge-tree`
+ * says "clean" with 0, "conflicts" with 1 and anything else for a question it
+ * could not take, and `git()` above folds the last two into one rejection.
+ */
+function gitStatus(args: string[], cwd: string): Promise<number> {
+  return new Promise((resolve) => {
+    execFile(
+      "git",
+      args,
+      { cwd, timeout: GIT_TIMEOUT_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, maxBuffer: 1 << 20 },
+      (err) => resolve(err ? (typeof err.code === "number" ? err.code : -1) : 0),
     );
   });
 }
@@ -207,6 +223,71 @@ export function uncommittedError(files: string[]): Error {
 }
 
 /**
+ * The paths in a `--porcelain=v1 -z` status listing, split into tracked files
+ * with changes and untracked ones. A rename carries two paths in a row and
+ * the second is where the file was; only where it is now can be overwritten.
+ */
+function parseStatus(listing: string): { changed: string[]; untracked: string[] } {
+  const changed: string[] = [];
+  const untracked: string[] = [];
+  const fields = listing.split("\0");
+  for (let i = 0; i < fields.length; i++) {
+    const entry = fields[i];
+    if (!entry || entry.length < 4) continue;
+    const code = entry.slice(0, 2);
+    const path = entry.slice(3);
+    if (code === "??") untracked.push(path);
+    else changed.push(path);
+    if (code.includes("R") || code.includes("C")) i++;
+  }
+  return { changed, untracked };
+}
+
+/**
+ * What would stop the fast-forward before anything is asked of git that
+ * cannot be taken back: uncommitted work in the base's own checkout, in the
+ * files the branch changes. Git refuses exactly this — "your local changes
+ * would be overwritten by merge" — but only at the merge, which in
+ * `retireWorktree` comes after the card's agent is ended and its branch
+ * rebased. So the same question is put first, from the two listings git
+ * refuses on: the checkout's status, and the branch's diff from where it
+ * forked. Changes elsewhere in the checkout are not in the answer, because a
+ * fast-forward does not mind them.
+ *
+ * Whether the two sets of changes fit is asked of `merge-tree`, on a commit
+ * `stash create` makes of the local work without touching the tree: a clean
+ * dry run is what makes "commit yours first" or "stash and restore" a way
+ * through rather than the same conflict moved to a worse place, and a
+ * conflicting one is reported as such rather than offered. Nothing here is
+ * the fetch path's concern: when the checkout is on some other branch the ref
+ * moves and the tree is not touched.
+ */
+export async function mergeBlock(worktree: CardWorktree): Promise<MergeBlock | null> {
+  const { root, branch, base } = worktree;
+  const repo = await repoAt(root);
+  const head = repo ? await readHead(repo) : null;
+  if (!head || head.detached || head.branch !== base) return null;
+  const status = parseStatus(await git(["status", "--porcelain=v1", "-z", "--untracked-files=all"], root));
+  if (!status.changed.length && !status.untracked.length) return null;
+  const touched = new Set((await git(["diff", "--name-only", "-z", `${base}...${branch}`], root)).split("\0").filter(Boolean));
+  const created = new Set(
+    (await git(["diff", "--name-only", "-z", "--diff-filter=A", `${base}...${branch}`], root)).split("\0").filter(Boolean),
+  );
+  const files = status.changed.filter((path) => touched.has(path));
+  const untracked = status.untracked.filter((path) => created.has(path));
+  if (!files.length && !untracked.length) return null;
+  let clean: boolean | null = null;
+  if (!untracked.length) {
+    const stash = (await git(["stash", "create"], root).catch(() => "")).trim();
+    if (stash) {
+      const code = await gitStatus(["merge-tree", "--write-tree", branch, stash], root);
+      clean = code === 0 ? true : code === 1 ? false : null;
+    }
+  }
+  return { base, files, untracked, clean };
+}
+
+/**
  * Take a card's worktree down, with its work merged back first.
  *
  * Four steps, and the order is the argument. Rebase the branch onto its base
@@ -219,14 +300,21 @@ export function uncommittedError(files: string[]): Error {
  * fast-forward. Then `worktree remove`, then `branch -d` — the one that only
  * goes once the branch is reachable from something, which the merge just made
  * true. Anything git says no to on the way comes back as the error, with the
- * worktree standing exactly as it was.
+ * worktree standing exactly as it was. The one refusal that can be seen
+ * coming — the base's checkout has work in the files the branch changes —
+ * is `mergeBlock`'s to find beforehand, and `autostash` is one of the two
+ * answers to it.
  *
  * A worktree whose directory has gone is merged and unregistered without the
  * rebase, since there is nowhere to rebase in; a branch that has gone too
  * leaves nothing to do but the pruning.
  */
-export async function retireWorktree(worktree: CardWorktree): Promise<{ commits: number }> {
+export async function retireWorktree(
+  worktree: CardWorktree,
+  options: { autostash?: boolean } = {},
+): Promise<{ commits: number; note: string | null }> {
   const { root, path, branch, base } = worktree;
+  let note: string | null = null;
   const standing = worktreePresent(path);
   const exists = await git(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], root).then(
     () => true,
@@ -234,7 +322,7 @@ export async function retireWorktree(worktree: CardWorktree): Promise<{ commits:
   );
   if (!exists && !standing) {
     await git(["worktree", "prune"], root).catch(() => undefined);
-    return { commits: 0 };
+    return { commits: 0, note };
   }
   if (base === "HEAD") throw new Error("was cut from a detached HEAD, so there is no branch to merge into");
 
@@ -253,7 +341,23 @@ export async function retireWorktree(worktree: CardWorktree): Promise<{ commits:
   const repo = await repoAt(root);
   const head = repo ? await readHead(repo) : null;
   if (head && !head.detached && head.branch === base) {
-    await git(["merge", "--ff-only", branch], root);
+    /*
+     * `--autostash` is git's own "stash, merge, put it back", chosen over
+     * doing the three by hand because of what it does when the last step
+     * fails: the merge stands, the stash stays, and it says so — on stderr,
+     * with exit 0, so the tree is asked whether anything was left unmerged.
+     * It takes tracked changes only, which is why `mergeBlock` offers it
+     * only when no untracked file is in the way.
+     */
+    await git(options.autostash ? ["merge", "--ff-only", "--autostash", branch] : ["merge", "--ff-only", branch], root);
+    if (options.autostash) {
+      const unmerged = (await git(["diff", "--name-only", "--diff-filter=U"], root).catch(() => "")).split("\n").filter(Boolean);
+      if (unmerged.length) {
+        note =
+          `the changes on ${base} did not go back on cleanly: ${unmerged.join(", ")} ${unmerged.length === 1 ? "has" : "have"} ` +
+          "conflict markers, and the original is in git stash as “autostash”";
+      }
+    }
   } else {
     await git(["fetch", ".", `${branch}:${base}`], root);
     /*
@@ -269,7 +373,7 @@ export async function retireWorktree(worktree: CardWorktree): Promise<{ commits:
   if (standing) await git(["worktree", "remove", path], root);
   else await git(["worktree", "prune"], root).catch(() => undefined);
   await git(["branch", "-d", branch], root);
-  return { commits };
+  return { commits, note };
 }
 
 /**

@@ -38,7 +38,7 @@ import type {
 } from "../../shared/wire";
 import type { BoardColumn } from "../../shared/board";
 import type { LaunchSettings } from "../../shared/launchers";
-import type { ProjectSettings, WorktreeOutcome, WorktreeStatus } from "../../shared/projects";
+import type { MergeReply, MergeResolution, ProjectSettings, WorktreeOutcome, WorktreeStatus } from "../../shared/projects";
 import type { NotifySettings } from "../../shared/notify";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { Grid } from "./grid";
@@ -743,8 +743,8 @@ export function commitCard(workspaceId: string, cardId: string): Promise<{ files
 export function stashCard(workspaceId: string, cardId: string): Promise<{ files: number }> {
   return request((id) => ({ type: "stash-card", id, workspaceId, cardId })) as Promise<{ files: number }>;
 }
-export function mergeCard(workspaceId: string, cardId: string): Promise<{ commits: number }> {
-  return request((id) => ({ type: "merge-card", id, workspaceId, cardId })) as Promise<{ commits: number }>;
+export function mergeCard(workspaceId: string, cardId: string, resolve?: MergeResolution): Promise<MergeReply> {
+  return request((id) => ({ type: "merge-card", id, workspaceId, cardId, ...(resolve ? { resolve } : {}) })) as Promise<MergeReply>;
 }
 /**
  * A verb on a workspace's git button, on its main checkout. Waits, for the

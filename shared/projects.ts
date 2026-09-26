@@ -77,6 +77,41 @@ export interface WorktreeStatus {
   behind: number;
 }
 
+/**
+ * Why a card's merge stopped before anything was ended: the checkout the base
+ * is on has uncommitted work in files the branch also changes, and git will
+ * not fast-forward over it. Found *before* the agent is ended and the rebase
+ * run, by comparing `git status` there with what the branch touched, because
+ * git's own refusal would come after both. `files` are tracked files with
+ * local changes the merge would overwrite; `untracked` are files the branch
+ * creates that already sit there untracked. `clean` is whether the local
+ * changes and the branch's fit together in a dry run (`git merge-tree`), null
+ * when git could not say — it is what tells committing or stashing the local
+ * work apart from a conflict that neither would get past.
+ */
+export interface MergeBlock {
+  base: string;
+  files: string[];
+  untracked: string[];
+  clean: boolean | null;
+}
+
+/**
+ * What to do about a `MergeBlock`, sent back with the second `merge-card`:
+ * commit everything on the base's checkout first and rebase the card onto
+ * that, or `git merge --autostash` — set the local changes aside, fast-forward,
+ * put them back. Neither is offered over an `untracked` collision or a dry run
+ * that conflicted.
+ */
+export type MergeResolution = "commit" | "stash";
+
+/**
+ * The reply to `merge-card`: the merge, with a `note` when it went through but
+ * left something to look at (an autostash that did not apply back), or the
+ * block that stopped it with nothing ended, for the card to ask about.
+ */
+export type MergeReply = { commits: number; note: string | null } | { blocked: MergeBlock };
+
 /** By repository root, as a realpath. */
 export type ProjectSettingsMap = Record<string, ProjectSettings>;
 

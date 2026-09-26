@@ -39,7 +39,7 @@ import type { Action } from "./keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
 import type { LaunchSettings } from "./launchers";
 import type { NotifyEvent, NotifySettings } from "./notify";
-import type { ProjectSettings } from "./projects";
+import type { MergeResolution, ProjectSettings } from "./projects";
 import type { TerminalAppearance } from "./theme";
 
 /**
@@ -861,12 +861,16 @@ export type ClientMessage =
    * away — the stash is in the repository and outlives the worktree.
    * `merge-card` is the one card's worktree merged back, removed, and the card
    * put in Done; it is `retire-worktrees` for one card and asks the same
-   * things of git. `open-worktree` opens a shell there, beside the board.
+   * things of git. Its reply is a `MergeReply`: a merge that the base's own
+   * checkout would have refused — uncommitted work there in files the branch
+   * changes — comes back as a `MergeBlock` with nothing ended, and the card
+   * sends the message again with a `MergeResolution` once the person has
+   * picked one. `open-worktree` opens a shell there, beside the board.
    */
   | { type: "worktree-status"; id: number; workspaceId: string; cardId: string }
   | { type: "commit-card"; id: number; workspaceId: string; cardId: string }
   | { type: "stash-card"; id: number; workspaceId: string; cardId: string }
-  | { type: "merge-card"; id: number; workspaceId: string; cardId: string }
+  | { type: "merge-card"; id: number; workspaceId: string; cardId: string; resolve?: MergeResolution }
   | { type: "open-worktree"; id: number; workspaceId: string; cardId: string }
   /**
    * The card's dev server, started on its own when the card's worktree is and
