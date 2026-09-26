@@ -786,6 +786,12 @@ export type ClientMessage =
    * that can fail in a way the next snapshot would not explain.
    */
   | { type: "run-card"; id: number; workspaceId: string; cardId: string; launcher: string }
+  /**
+   * The card's last conversation, picked back up on the launcher it ran on —
+   * `claude --resume` with the id the run was started under, or Codex's
+   * picker. Refused while the old agent's terminal is still open.
+   */
+  | { type: "resume-card"; id: number; workspaceId: string; cardId: string }
 
   /**
    * The git a card's worktree needs, from the card's menu, so that nobody has

@@ -71,7 +71,26 @@ export interface CardRun {
   startedAt: number;
   /** When it last finished or ended, for the card to say how long ago. */
   endedAt: number | null;
+  /**
+   * The conversation, for a CLI that lets kururu name it up front — Claude
+   * Code's `--session-id` — so that a card whose agent has gone can be handed
+   * the same conversation back with `--resume`. Unlike `agentId` it goes to
+   * disk: it names a transcript file, not a process, and the transcript is
+   * still there after a cold start. Null for Codex, which picks its own ids
+   * and says them to nobody, and for runs from before this was kept.
+   */
+  sessionId: string | null;
+  /**
+   * Where the agent started. Kept because a Claude transcript is filed under
+   * the directory it ran in and `--resume` only looks in the one it is run
+   * from — so resuming means starting there again, which is the card's
+   * worktree while it stands and a guess once it has gone.
+   */
+  cwd: string | null;
 }
+
+/** What a session id must look like to be put on a command line. Claude Code insists on a UUID. */
+export const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * The checkout a card's work happens in, when it has one of its own.
@@ -203,11 +222,14 @@ export function runLive(run: CardRun | null): boolean {
  * A card whose agent is still going is left alone — two agents on one ticket is
  * a thing somebody should do on purpose, with a second card.
  */
-export function startRun(board: Board, cardId: string, run: Omit<CardRun, "state" | "endedAt">): Board {
+export function startRun(
+  board: Board,
+  cardId: string,
+  run: Omit<CardRun, "state" | "endedAt" | "sessionId" | "cwd"> & Partial<Pick<CardRun, "sessionId" | "cwd">>,
+): Board {
+  const started: CardRun = { ...run, sessionId: run.sessionId ?? null, cwd: run.cwd ?? null, state: "starting", endedAt: null };
   return {
-    cards: board.cards.map((card) =>
-      card.id === cardId ? { ...card, column: "doing", run: { ...run, state: "starting", endedAt: null } } : card,
-    ),
+    cards: board.cards.map((card) => (card.id === cardId ? { ...card, column: "doing", run: started } : card)),
   };
 }
 
@@ -337,7 +359,22 @@ function adoptRun(value: unknown): CardRun | null {
     state,
     startedAt: Number.isFinite(run.startedAt) ? (run.startedAt as number) : 0,
     endedAt: Number.isFinite(run.endedAt) ? (run.endedAt as number) : null,
+    // Both end up on a command line or as a pty's cwd, and this file can be
+    // hand-edited: an id that is not a UUID is dropped, a cwd that is not
+    // absolute likewise.
+    sessionId: typeof run.sessionId === "string" && SESSION_ID.test(run.sessionId) ? run.sessionId : null,
+    cwd: typeof run.cwd === "string" && run.cwd.startsWith("/") ? run.cwd : null,
   };
+}
+
+/**
+ * Whether a card's last run can be picked up where it left off: its agent has
+ * gone, and it was one whose conversation kururu can find again. A run whose
+ * terminal is still open is not resumable — it is *running*, and a second
+ * `--resume` of one conversation is two agents writing one transcript.
+ */
+export function canResume(run: CardRun | null, open: boolean): boolean {
+  return run !== null && !open && (run.sessionId !== null || run.launcher.startsWith("codex"));
 }
 
 /** The board as `persist.ts` writes it: every card, and no process ids. */

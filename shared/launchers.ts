@@ -21,6 +21,8 @@
  * `sh -c`, and the ids are what a phone can send without knowing anything.
  */
 
+import { SESSION_ID } from "./board";
+
 export const AGENT_CLIS = ["claude", "codex"] as const;
 export type AgentCli = (typeof AGENT_CLIS)[number];
 
@@ -110,6 +112,32 @@ export function launcherCommand(launcher: Launcher, settings?: LaunchSettings): 
   if (launcher.model) parts.push(MODEL_FLAG[launcher.cli], launcher.model);
   if (settings?.bypassClis.includes(launcher.cli)) parts.push(BYPASS_FLAG[launcher.cli]);
   return parts.join(" ");
+}
+
+/**
+ * The line that picks a card's conversation back up, on the launcher it was
+ * started with.
+ *
+ * Claude Code is handed the id kururu gave the session at launch (`--session-id`,
+ * see `CardRun.sessionId`), so it goes straight back to the right one. Codex
+ * keeps its own ids and never says them, so it gets its picker instead —
+ * filtered to the directory, which on a card's worktree is nearly always the
+ * one conversation, and `--all` when that directory has gone and the filter
+ * would show nothing. The id is only ever one `SESSION_ID` has passed, and is
+ * checked again here because this is a line for `sh -c`.
+ */
+export function resumeCommand(
+  launcher: Launcher,
+  settings: LaunchSettings | undefined,
+  sessionId: string | null,
+  anyDirectory: boolean,
+): string | null {
+  const flags = launcherCommand(launcher, settings).split(" ").slice(1);
+  if (launcher.cli === "claude") {
+    if (!sessionId || !SESSION_ID.test(sessionId)) return null;
+    return ["claude", ...flags, "--resume", sessionId].join(" ");
+  }
+  return ["codex", "resume", ...(anyDirectory ? ["--all"] : []), ...flags].join(" ");
 }
 
 /**
