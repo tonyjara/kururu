@@ -3,10 +3,18 @@
  *
  * Two lists rather than a tree, and that is deliberate. The workspaces are the
  * structure — numbered, because prefix+1..9 jump to them and a number you cannot
- * see is a shortcut you do not use. The agents are flat and workspace-tagged,
- * because an agent is the thing you go looking for across a whole session, not
- * inside one layout: "where did the one that finished go" is a question about a
+ * see is a shortcut you do not use. The agents span the whole profile, because
+ * an agent is the thing you go looking for across a whole session, not inside
+ * one layout: "where did the one that finished go" is a question about a
  * profile, not about a split tree.
+ *
+ * They are grouped by workspace, under headings that fold. They were flat and
+ * workspace-tagged first, with the workspace's name leading every row — which
+ * answered "where is it" once per row, and by the tenth agent the list was
+ * mostly one word printed again and again. A heading says it once, and folding
+ * one away is how a profile with a workspace you are not working in today stops
+ * spending a third of the column on it. The groups follow the workspace list's
+ * order, so the two lists read top to bottom the same way.
  *
  * Clicking an agent shows it — the pane it is in, the tab it is on, focused. It
  * never rearranges anything to do so. *Dragging* one does: onto a pane it moves
@@ -182,6 +190,14 @@ export function Sidebar({
    * that reached over and undid the tidying on the desktop.
    */
   const [drawer, setDrawer] = useState(false);
+  /**
+   * The workspaces whose group of agents is folded away. Local, on the
+   * drawer's argument, and remembered per device on the foot sections' — see
+   * `useFolded`.
+   */
+  const [folded, toggleFolded] = useFolded();
+  /** The group heading a dragged terminal would move to, while it is over one. */
+  const [overGroup, setOverGroup] = useState<string | null>(null);
   /** The workspace whose name is being typed, if any. */
   const [renaming, setRenaming] = useState<string | null>(null);
   /** Where a context menu is open, and which row it belongs to. */
@@ -268,6 +284,30 @@ export function Sidebar({
   const away = new Set(profile.hiddenAgents);
   const shown = listed.filter((agent) => !away.has(agent.id));
   const hidden = listed.filter((agent) => away.has(agent.id));
+
+  /**
+   * The list proper, cut into one group per workspace, in the workspace list's
+   * order. A workspace with nothing listed in it draws no heading: an empty
+   * group is a row saying there is nothing to say, and the workspace list
+   * above already says the workspace exists.
+   *
+   * Within a group the order is still the profile's `agentOrder`, because this
+   * is a filter of `shown` and never a sort of it — so reordering inside a group
+   * is the same reorder it always was.
+   *
+   * A terminal in no workspace at all has no business existing, but a snapshot
+   * can arrive a beat before the layout that places it, and a row that vanished
+   * for that beat would be the list flickering. So it gets a group of its own,
+   * at the end, for as long as it takes.
+   */
+  const groups = [
+    ...profile.workspaces.map((workspace) => ({
+      id: workspace.id,
+      name: workspace.name,
+      agents: shown.filter((agent) => where.get(agent.id)?.workspaceId === workspace.id),
+    })),
+    { id: "", name: "Elsewhere", agents: shown.filter((agent) => !where.has(agent.id)) },
+  ].filter((group) => group.agents.length > 0);
 
   /**
    * Which colour each workspace is wearing, so an agent row can rule a line in
@@ -390,6 +430,13 @@ export function Sidebar({
           // The sidebar is inside a window that swallows stray file drops, and a pane
           // underneath would otherwise be offered a drop the list has already dealt with.
           event.stopPropagation();
+          // Dropped among another workspace's agents, which now that the list is
+          // grouped is a place and not only a position: a row that landed there and
+          // stayed in its own workspace would jump straight back to its own group,
+          // which is the drop being refused without saying so. So it goes to that
+          // workspace first, and the reorder places it within the group after.
+          const from = where.get(dragged)?.workspaceId;
+          if (at && from && from !== at.workspaceId) api.moveTabToWorkspace(dragged, at.workspaceId);
           const box = event.currentTarget.getBoundingClientRect();
           api.reorderAgent(dragged, insertBefore(event.clientY > box.top + box.height / 2));
         }}
@@ -419,17 +466,25 @@ export function Sidebar({
               goes where the workspace used to be, at the end of the line and dimmer, as
               the thing you read once you have found the row rather than the thing you
               find it by. */}
-          <span className="agent-top">
+          <span className={`agent-top ${hiddenHere ? "" : "agent-top-grouped"}`}>
             {/* The agent's own workspace, not the one you are looking at: this list spans
                 the whole profile, so two rows of it can legitimately be wearing different
                 mascots. */}
             <Status agent={agent} mascot={mascotFor(mascots, at?.mascotId ?? null)} />
-            <span className="agent-ws">{at ? at.workspace : "—"}</span>
+            {/* Under a group heading the workspace has already been said, so the program
+                takes its place and its weight. The drawer is not grouped — it is one
+                short list of things put away from anywhere — so its rows still lead with
+                where they live. */}
+            {hiddenHere ? (
+              <span className="agent-ws">{at ? at.workspace : "—"}</span>
+            ) : (
+              <span className="agent-title">{agentLabel(agent)}</span>
+            )}
             {/* Not "new output" any more, which it was and which lit nine rows in ten:
                 this is the turn that ended, or the question that was asked, while you
                 were not looking at it. The server decides it — see its `unread`. */}
             {agent.unread && <span className="unread" aria-label="waiting for you" />}
-            <span className="agent-name">{agentLabel(agent)}</span>
+            {hiddenHere && <span className="agent-name">{agentLabel(agent)}</span>}
           </span>
           {/* What it is doing, what it is costing, and how much room it has left to do it
               in. All three change constantly, which is why they are on their own line:
@@ -732,7 +787,61 @@ export function Sidebar({
                     : "Nothing running."}
             </li>
           )}
-          {shown.map((agent, index) => agentRow(agent, shown, index, true))}
+          {groups.map((group) => {
+            const shut = folded.has(group.id);
+            const bar = tint.get(group.id);
+            return (
+              <li key={group.id || "elsewhere"} className="agent-group">
+                {/* The heading is the fold, and also a place to drop a terminal: the
+                    same move a workspace row takes, offered here because this is
+                    where the terminal is being dragged from and the workspace list
+                    may be scrolled out of reach. Clicking it folds and never
+                    switches workspace — that is the workspace row's job, and a
+                    heading that did both would make folding one you are not in
+                    take you there. */}
+                <button
+                  className={`agent-group-head ${overGroup === group.id ? "ws-over" : ""}`}
+                  style={bar ? ({ "--tag": bar } as CSSProperties) : undefined}
+                  onClick={() => toggleFolded(group.id)}
+                  aria-expanded={!shut}
+                  title={shut ? `Show ${group.name}'s agents` : `Fold ${group.name}'s agents away`}
+                  onDragOver={(event) => {
+                    if (!group.id || dragging?.kind !== "agent") return;
+                    if (where.get(dragging.id)?.workspaceId === group.id) return;
+                    allowDrop(event);
+                    setOverGroup(group.id);
+                  }}
+                  onDragLeave={(event) => {
+                    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+                    setOverGroup((current) => (current === group.id ? null : current));
+                  }}
+                  onDrop={(event) => {
+                    setOverGroup(null);
+                    const agentId = event.dataTransfer.getData(AGENT_MIME);
+                    if (!agentId || !group.id) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    api.moveTabToWorkspace(agentId, group.id);
+                  }}
+                >
+                  <Icon name="caret" className={shut ? "drawer-caret-shut" : ""} />
+                  <span className="agent-group-name">{group.name}</span>
+                  {/* Folded, the heading has to be able to say what the rows would
+                      have: that one of them is waiting for you. Open, the row says
+                      it itself and a second mark would be the same news twice. */}
+                  {shut && group.agents.some((agent) => agent.unread) && (
+                    <span className="unread" aria-label="waiting for you" />
+                  )}
+                  <span className="agent-group-n">{group.agents.length}</span>
+                </button>
+                {!shut && (
+                  <ul className="agent-group-list">
+                    {group.agents.map((agent, index) => agentRow(agent, group.agents, index, true))}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
         </ul>
 
         {/* The drawer. Drawn only when there is something in it, because a
@@ -1349,6 +1458,38 @@ function useDisclosure(key: string, initial: boolean): [boolean, () => void] {
       return !was;
     });
   return [open, toggle];
+}
+
+/**
+ * Which workspaces' groups of agents are folded, remembered per device.
+ *
+ * A set of the folded rather than of the open, so that a workspace made on
+ * another client arrives open: a new group you cannot see the agents in is a
+ * new agent you do not notice. Ids of workspaces since deleted stay in the set
+ * and cost nothing — they name no group, so nothing reads them.
+ */
+function useFolded(): [ReadonlySet<string>, (workspaceId: string) => void] {
+  const key = "kururu.sidebar.folded";
+  const [folded, setFolded] = useState<ReadonlySet<string>>(() => {
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
+      return new Set(Array.isArray(saved) ? saved.filter((id) => typeof id === "string") : []);
+    } catch {
+      return new Set();
+    }
+  });
+  const toggle = (workspaceId: string) =>
+    setFolded((was) => {
+      const next = new Set(was);
+      if (!next.delete(workspaceId)) next.add(workspaceId);
+      try {
+        localStorage.setItem(key, JSON.stringify([...next]));
+      } catch {
+        // Not remembered; still folded.
+      }
+      return next;
+    });
+  return [folded, toggle];
 }
 
 /**

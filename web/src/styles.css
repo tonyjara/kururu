@@ -1091,7 +1091,7 @@ kbd {
   gap: 1px;
   opacity: 0;
 }
-.agent-list li:hover .agent-tools,
+.agent-list .agent-item:hover .agent-tools,
 .agent-item-on .agent-tools {
   opacity: 1;
 }
@@ -1112,6 +1112,78 @@ kbd {
 .agent-kill:hover {
   color: var(--danger);
   background: var(--chrome-high);
+}
+
+/* A workspace's agents, under a heading that folds them away. The group is an
+   `li` of the agent list, which the list's shared `li` rule would make a flex
+   row that lights up whole under the pointer — so it is put back to a plain
+   block here, and only the heading and the rows inside it answer a hover. */
+.agent-list .agent-group {
+  display: block;
+  margin-top: 4px;
+}
+.agent-list .agent-group:hover {
+  background: none;
+}
+.agent-group-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* The heading wears the workspace's rail, the same `--tag` its rows do, so a
+   folded group still says which colour it is. Not in capitals, unlike the
+   drawer's: this is a name somebody typed, and shouting it would change it. */
+.agent-group-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-left: var(--border-thick) var(--border-style) var(--tag, transparent);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  text-align: left;
+}
+.agent-group-head:hover {
+  background: var(--chrome-high);
+  color: var(--dim);
+}
+.agent-group-name {
+  min-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-group-n {
+  margin-left: auto;
+  font-family: var(--mono);
+  color: var(--dimmer);
+}
+
+/* A grouped row's top line leads with the program, since the heading above has
+   said where it is. It takes the workspace name's type and slack, and the line
+   keeps clear of the tools in its corner the way `.agent-name` used to for it. */
+.agent-top-grouped {
+  padding-right: 38px;
+}
+.agent-title {
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-item-on .agent-title {
+  color: var(--text);
+}
+.agent-row-exited .agent-title {
+  text-decoration: line-through;
+  color: var(--dimmer);
 }
 
 /* The drawer of put-away agents, under the list and outside its scroll: it is
@@ -1627,8 +1699,13 @@ kbd {
   font-size: var(--fs-lg);
 }
 /* And the name line clears both of them at that size. */
-:root[data-narrow] .agent-name {
+:root[data-narrow] .agent-name,
+:root[data-narrow] .agent-top-grouped {
   padding-right: 76px;
+}
+:root[data-narrow] .agent-group-head {
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 /* The phone's chip is 14px and its list sits in a 10px gutter rather than a 6px
    one, so the line the + has to stand on is four pixels further in. Same
