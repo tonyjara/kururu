@@ -167,13 +167,14 @@
   --icon-stop: "■";
   --icon-play: "▸";
   --icon-bot: "⚙";
+  --icon-git: "⎇";
 
   /* The icon strip a skin may bring instead of glyphs — every icon as one
      picture of `--icon-n` cells. `none` is the drawing. `--icon-n` is a
      constant the stylesheet needs for the arithmetic and is not a skin's to
      move: it is `ICON_NAMES.length`, and the test holds the two together. */
   --icon-sheet: none;
-  --icon-n: 19;
+  --icon-n: 20;
 
   /* ----------------------------------------------------------------------
      The parts: what a skin *paints*, three properties per region.
@@ -301,6 +302,7 @@
 .icon-stop { --icon-svg: var(--icon-stop-svg); --icon-glyph: var(--icon-stop); --icon-i: 16; }
 .icon-play { --icon-svg: var(--icon-play-svg); --icon-glyph: var(--icon-play); --icon-i: 17; }
 .icon-bot { --icon-svg: var(--icon-bot-svg); --icon-glyph: var(--icon-bot); --icon-i: 18; }
+.icon-git { --icon-svg: var(--icon-git-svg); --icon-glyph: var(--icon-git); --icon-i: 19; }
 /* An icon strip, when a skin brought one: every icon is one cell of a single
    picture, `--icon-n` cells across, and `--icon-i` on each class says which.
    The strip is scaled so one cell is exactly the icon's box — which is what
@@ -337,7 +339,8 @@
 :root[data-glyphs~="database"] .icon-database::before,
 :root[data-glyphs~="stop"] .icon-stop::before,
 :root[data-glyphs~="play"] .icon-play::before,
-:root[data-glyphs~="bot"] .icon-bot::before {
+:root[data-glyphs~="bot"] .icon-bot::before,
+:root[data-glyphs~="git"] .icon-git::before {
   content: var(--icon-glyph);
   width: auto;
   height: auto;
@@ -864,42 +867,60 @@ kbd {
   font-style: italic;
 }
 
-/* The colour, as a control rather than as the display of it — the rail is the
-   display. A filled dot, because that is what a colour looks like when it is a
-   thing you press; untagged it is an empty ring, present enough to be found and
-   quiet enough that a list of untagged workspaces does not read as a list of
-   empty fields. */
-.ws-swatch {
+/* The main checkout's git, where the colour swatch was — the rail is still
+   the colour's display, and the row's menu is still the way to change it. Quiet
+   when there is nothing to do; in the "wants a human" colour when there are
+   uncommitted changes, because that is exactly what it is; in the accent when
+   the tree is clean but the branch and its upstream have drifted apart. */
+.ws-git {
   grid-column: 2;
   grid-row: 1;
   justify-self: end;
-  flex: none;
-  width: 11px;
-  height: 11px;
-  margin-right: 6px;
-  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+  padding: 2px;
   border: none;
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
+  background: transparent;
   cursor: var(--cursor-pointer);
-  background: var(--dimmer);
-  opacity: 0.85;
+  color: var(--dimmer);
+  font-size: var(--fs-sm);
 }
-.ws-swatch:hover,
-.ws-swatch:focus-visible {
-  opacity: 1;
-  background: var(--dimmer);
+.ws-git:hover,
+.ws-git:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 var(--border-thick) var(--chrome), 0 0 0 3px var(--dim);
+  background: var(--chrome-high);
+  color: var(--dim);
 }
-.ws-swatch-off {
-  background: transparent;
-  box-shadow: inset 0 0 0 var(--border) var(--dimmer);
+.ws-git-moved,
+.ws-git-moved:hover,
+.ws-git-moved:focus-visible {
+  color: var(--accent);
 }
-.ws-swatch-off:hover,
-.ws-swatch-off:focus-visible {
-  background: transparent;
-  box-shadow: inset 0 0 0 var(--border) var(--dim), 0 0 0 var(--border-thick) var(--chrome),
-    0 0 0 3px var(--dim);
+.ws-git-dirty,
+.ws-git-dirty:hover,
+.ws-git-dirty:focus-visible {
+  color: var(--blocked);
+}
+.ws-git-busy {
+  cursor: progress;
+  opacity: 0.5;
+}
+
+/* What the git button's last verb came to, in the branch line's place until it
+   is clicked away. A button because it is dismissed by pressing it; styled as
+   the line it stands in for, so the row does not change shape to say it. */
+.ws-said {
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: var(--cursor-pointer);
+  color: var(--dim);
+}
+.ws-said-error,
+.ws-list li:hover .ws-said-error {
+  color: var(--danger);
 }
 
 /* Which workspace you are in. On the whole item rather than on the name's
@@ -1713,12 +1734,9 @@ kbd {
 :root[data-narrow] .side-section h2 .mini {
   transform: translateX(calc(50% - 9px));
 }
-:root[data-narrow] .ws-swatch {
-  width: 14px;
-  height: 14px;
-  padding: 0;
-  margin-right: 4px;
-  opacity: 1;
+:root[data-narrow] .ws-git {
+  padding: 4px;
+  font-size: var(--fs-md);
 }
 
 /* Every pixel of width is worth more on a phone than the gutter it was spent on.
@@ -4786,6 +4804,7 @@ a.button {
 }
 
 .board-card {
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -4825,8 +4844,9 @@ a.button {
   overflow-wrap: anywhere;
 }
 
-/* Three lines of the body and no more: the card is a handle on the ticket, and
-   the whole of it is one double-click away. */
+/* The whole body, however long: a card is as tall as its text and no taller
+   than the column scrolls to. Clamping it hid the end of a ticket behind a
+   double-click, which is a poor place to keep the part that says what to do. */
 .board-card-body {
   margin: 0;
   font-size: var(--fs-base);
@@ -4834,10 +4854,6 @@ a.button {
   line-height: 1.4;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 
 .board-card-error {
@@ -4973,7 +4989,9 @@ a.button {
   margin-top: 0;
 }
 .board-composer-body {
-  resize: vertical;
+  resize: none;
+  max-height: 16lh;
+  overflow-y: auto;
   font-family: var(--ui);
   font-size: var(--fs-base);
 }

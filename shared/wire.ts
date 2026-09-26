@@ -179,7 +179,54 @@ export interface WorkspaceBranch {
   branch: string;
   /** HEAD names a commit rather than a branch: a tag, a sha, or a rebase. */
   detached: boolean;
+  /**
+   * The repository's *main* checkout, for the git button on the row — which is
+   * about that checkout even when the workspace is looking at a card's
+   * worktree, because the worktrees are the board's to commit and merge and
+   * the button would otherwise change colour every time focus crossed into one.
+   * Null until the first `git status` has come back, and for a repository git
+   * itself will not read.
+   */
+  git: RepoGit | null;
 }
+
+/**
+ * What `git status` says about a main checkout. Polled more slowly than the
+ * branch, and apart from it, since this one is a subprocess — see
+ * `repoStatus` in `server/src/worktree.ts`.
+ */
+export interface RepoGit {
+  /** The main checkout's root, which is what every `workspace-git` acts on. */
+  root: string;
+  /** What that checkout has checked out, which may not be what `branch` above says. */
+  branch: string;
+  detached: boolean;
+  /** Files `git status` lists: modified, staged, or untracked. */
+  changes: number;
+  /** The branch it tracks, as `origin/main`, or null when it tracks nothing. */
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  /**
+   * The branch "merge" goes into: the remote's default, else a local `main` or
+   * `master`. Null when there is none, and when it is the branch already out —
+   * either way there is nothing to merge *into*, and the menu says so by not
+   * offering it.
+   */
+  base: string | null;
+}
+
+/**
+ * The verbs on a workspace's git button. The three that commit take the
+ * message the person typed; `commit-merge` then fast-forwards `base` to the
+ * branch, and `commit-push` pushes it. Nothing here forces, and nothing
+ * merges that is not a fast-forward — git's refusal is the reply.
+ */
+export const GIT_ACTIONS = ["commit", "commit-merge", "commit-push", "pull", "push", "fetch"] as const;
+export type GitAction = (typeof GIT_ACTIONS)[number];
+
+/** A commit message somebody typed. Generous, and still not a document. */
+export const COMMIT_MESSAGE_MAX = 10_000;
 
 /**
  * The directory a workspace's file tree is rooted at.
@@ -774,6 +821,13 @@ export type ClientMessage =
    * move's index is a place among the destination column's cards.
    */
   | { type: "add-card"; workspaceId: string; title: string; body?: string; column?: BoardColumn }
+  /**
+   * A card written and handed to an agent in one go — the composer's robot.
+   * Add and run are one verb because the card's id is minted by the server:
+   * two messages would leave the client with nothing to name the card by.
+   * Replied to like `run-card`; a run that fails leaves the card on the board.
+   */
+  | { type: "add-run-card"; id: number; workspaceId: string; title: string; body?: string; column?: BoardColumn; launcher: string }
   | { type: "edit-card"; workspaceId: string; cardId: string; title?: string; body?: string }
   | { type: "move-card"; workspaceId: string; cardId: string; column: BoardColumn; index?: number }
   | { type: "delete-card"; workspaceId: string; cardId: string }
@@ -814,6 +868,15 @@ export type ClientMessage =
   | { type: "stash-card"; id: number; workspaceId: string; cardId: string }
   | { type: "merge-card"; id: number; workspaceId: string; cardId: string }
   | { type: "open-worktree"; id: number; workspaceId: string; cardId: string }
+  /**
+   * The workspace's git button. Names the workspace, and the server finds the
+   * main checkout by walking up from where its terminals are — the path is
+   * never the client's. `root` is the checkout the button was showing, sent
+   * back only to be compared: the walk follows focus, and a verb that landed
+   * on another repository because a pane was clicked in between is refused
+   * rather than run. Replied to with what git said, or why it said no.
+   */
+  | { type: "workspace-git"; id: number; workspaceId: string; root: string; action: GitAction; message?: string }
 
   // --- the mascot ----------------------------------------------------------
   /**
@@ -960,6 +1023,14 @@ export const DEV_SCAN_MS = 3000;
  * time somebody checked out and glanced at the sidebar to confirm it.
  */
 export const GIT_SCAN_MS = 4000;
+/**
+ * How often a main checkout's `git status` is asked for, for the colour of the
+ * workspace's git button. Slower than the branch because it is a subprocess
+ * and a walk of the working tree, where the branch is one small read; and the
+ * button is redrawn at once after any of its own verbs, so the only change
+ * this is late for is one an agent or a terminal made.
+ */
+export const GIT_STATUS_MS = 10_000;
 /**
  * How often each profile's allowance is asked for. Slowest of the lot by two
  * orders of magnitude, and the only poll in kururu that leaves the machine.

@@ -48,7 +48,17 @@ import type {
   SessionSnapshot,
   Workspace,
 } from "../../shared/model";
-import type { ClientMessage, DevServer, EditorChoice, ServerMessage, WorkspaceBranch, WorkspaceProject } from "../../shared/wire";
+import type {
+  ClientMessage,
+  DevServer,
+  EditorChoice,
+  GitAction,
+  RepoGit,
+  ServerMessage,
+  WorkspaceBranch,
+  WorkspaceProject,
+} from "../../shared/wire";
+import { COMMIT_MESSAGE_MAX, GIT_ACTIONS, GIT_STATUS_MS } from "../../shared/wire";
 import { DEV_SCAN_MS, GIT_SCAN_MS, SAVE_DEBOUNCE_MS, USAGE_POLL_MS } from "../../shared/wire";
 import {
   bindAddress,
@@ -101,8 +111,15 @@ import { readLaunch, writeLaunch } from "./launch";
 import { readProjects, withProject, writeProjects } from "./projects";
 import {
   commitAll,
+  commitTyped,
+  defaultBranch,
   ensureWorktree,
+  fastForward,
+  fetchAll,
   mainRoot,
+  pullBranch,
+  pushBranch,
+  repoStatus,
   retireWorktree,
   stashAll,
   uncommittedError,
@@ -1929,7 +1946,7 @@ async function pollBranches(): Promise<void> {
       // repository is this workspace in", so the walk stops here either way —
       // trying the next directory up would find the *parent* repo and report a
       // branch from a project this workspace is not in.
-      if (head) branches.push({ workspaceId: workspace.id, ...head });
+      if (head) branches.push({ workspaceId: workspace.id, ...head, git: await gitFor(repo.root) });
       break;
     }
     /**
@@ -1954,6 +1971,154 @@ async function pollBranches(): Promise<void> {
   lastBranchJson = json;
   state.branches = branches;
   broadcast({ type: "branches", branches });
+}
+
+// ---------------------------------------------------------------------------
+// The workspace's git button
+// ---------------------------------------------------------------------------
+
+/**
+ * Which checkout is the main one for a repository the walk found, and which
+ * branch "merge" goes into — both subprocesses, and both facts that change
+ * about as often as a repository is moved, so they are kept for a minute like
+ * the walk is.
+ */
+const mainSeen = new Map<string, { at: number; root: string; base: string | null }>();
+
+async function mainFor(root: string, fresh = false): Promise<{ root: string; base: string | null }> {
+  const had = mainSeen.get(root);
+  if (!fresh && had && Date.now() - had.at < REPO_CACHE_MS) return had;
+  const main = await mainRoot(root);
+  const base = await defaultBranch(main).catch(() => null);
+  const seen = { at: Date.now(), root: main, base };
+  mainSeen.set(root, seen);
+  return seen;
+}
+
+/**
+ * What `git status` last said, by main checkout. Only the half of `RepoGit`
+ * that needs a subprocess is kept here; the branch is read off `HEAD` on every
+ * poll like the row's own, so the button can never name a branch the line
+ * under it has already moved on from.
+ */
+const statusSeen = new Map<string, { changes: number; upstream: string | null; ahead: number; behind: number }>();
+const statusAt = new Map<string, number>();
+const statusBusy = new Set<string>();
+
+/**
+ * Ask again, in the background, if it has been long enough — or now, after
+ * one of the button's own verbs. One at a time per checkout, so a slow status
+ * on a large tree is never stacked up behind itself. A change reruns the
+ * branch poll, which is what carries it to the clients.
+ */
+function refreshStatus(root: string, now = false): void {
+  if (statusBusy.has(root)) return;
+  if (!now && Date.now() - (statusAt.get(root) ?? 0) < GIT_STATUS_MS) return;
+  statusBusy.add(root);
+  statusAt.set(root, Date.now());
+  void repoStatus(root)
+    .then(
+      (status) => {
+        const changed = JSON.stringify(status) !== JSON.stringify(statusSeen.get(root));
+        statusSeen.set(root, status);
+        return changed;
+      },
+      () => statusSeen.delete(root),
+    )
+    .then((changed) => {
+      statusBusy.delete(root);
+      if (changed) void pollBranches();
+    });
+}
+
+/** The row's `git`: the main checkout's head, read now, and its status as last asked. */
+async function gitFor(root: string): Promise<RepoGit | null> {
+  const main = await mainFor(root).catch(() => null);
+  if (!main) return null;
+  refreshStatus(main.root);
+  const status = statusSeen.get(main.root);
+  const repo = status ? await repoFor(main.root) : null;
+  const head = repo ? await readHead(repo) : null;
+  if (!status || !head) return null;
+  return {
+    root: main.root,
+    branch: head.branch,
+    detached: head.detached,
+    ...status,
+    base: main.base && main.base !== head.branch ? main.base : null,
+  };
+}
+
+/**
+ * One of the git button's verbs, on the workspace's main checkout.
+ *
+ * The checkout is found the way the row's branch is — walking up from where
+ * the workspace's terminals are — and then taken to the main one, so a
+ * workspace looking at a card's worktree still commits where the button said
+ * it would. That walk follows focus, which `docs/layout.md` warns is no way
+ * to choose what a button acts on; so the client says which checkout it was
+ * showing and a mismatch is refused, and the commit prompt names the path. Detached is refused for everything but a fetch: a commit there is
+ * the one git makes easiest to lose.
+ */
+async function workspaceGit(
+  workspaceId: string,
+  shown: string,
+  action: GitAction,
+  message: string,
+): Promise<{ said: string }> {
+  const workspace = workspaces.active.workspaces.find((w) => w.id === workspaceId);
+  if (!workspace) throw new Error("that workspace is not in this profile");
+  let found: { root: string; git: string } | null = null;
+  for (const dir of focusedDirs(workspace)) {
+    found = await repoFor(dir);
+    if (found) break;
+  }
+  if (!found) throw new Error("this workspace is not in a git repository");
+  const { root, base } = await mainFor(found.root, true);
+  // Compared, never used: see `workspace-git` in `shared/wire.ts`.
+  if (root !== shown) throw new Error(`the workspace is looking at ${root} now, not ${shown} — try again`);
+  const repo = await repoFor(root);
+  const head = repo ? await readHead(repo) : null;
+  if (!head) throw new Error("could not read what is checked out");
+  if (head.detached && action !== "fetch") throw new Error(`HEAD is detached at ${head.branch} — check out a branch first`);
+  const branch = head.branch;
+
+  try {
+    if (action === "fetch") {
+      await fetchAll(root);
+      return { said: "Fetched" };
+    }
+    if (action === "pull") {
+      await pullBranch(root);
+      return { said: `Pulled ${branch}` };
+    }
+    if (action === "push") {
+      await pushBranch(root, branch, (await repoStatus(root)).upstream);
+      return { said: `Pushed ${branch}` };
+    }
+
+    // The three that commit. Nothing to commit is not a refusal for the two
+    // that go on to do something else — a clean tree with commits to merge or
+    // push is exactly when those are wanted — only for a plain commit.
+    const { changes, upstream } = await repoStatus(root);
+    const committed = changes ? (await commitTyped(root, message)).length : 0;
+    if (!changes && action === "commit") throw new Error("nothing to commit");
+    const files = committed ? `Committed ${committed} file${committed === 1 ? "" : "s"}` : "Nothing to commit";
+    if (action === "commit") return { said: files };
+    if (action === "commit-push") {
+      await pushBranch(root, branch, upstream);
+      return { said: `${files}, pushed ${branch}` };
+    }
+    if (!base) throw new Error(`${files}; there is no main branch to merge into`);
+    const { commits } = await fastForward(root, branch, base).catch((err: unknown) => {
+      // The commit already happened and is not undone; say so beside the refusal.
+      const why = err instanceof Error ? err.message : String(err);
+      throw new Error(committed ? `${files}, but ${why}` : why);
+    });
+    return { said: `${files}, ${base} took ${commits} commit${commits === 1 ? "" : "s"}` };
+  } finally {
+    refreshStatus(root, true);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2820,6 +2985,18 @@ function handleMessage(ws: WebSocket, raw: string): void {
       );
       return;
 
+    case "add-run-card":
+      void replyAsync(ws, msg.id, async () => {
+        if (typeof msg.launcher !== "string" || !findLauncher(msg.launcher)) throw new Error(`no such agent: ${String(msg.launcher)}`);
+        if (msg.workspaceId !== workspaces.activeWorkspace.id) throw new Error("that board is not on screen");
+        const cardId = mintCardId();
+        workspaces.editBoard(msg.workspaceId, (board) =>
+          addCard(board, { title: msg.title, body: msg.body, column: msg.column }, cardId, Date.now()),
+        );
+        return runCard(msg.workspaceId, cardId, msg.launcher);
+      });
+      return;
+
     case "edit-card":
       workspaces.editBoard(msg.workspaceId, (board) => editCard(board, msg.cardId, { title: msg.title, body: msg.body }));
       return;
@@ -2861,6 +3038,13 @@ function handleMessage(ws: WebSocket, raw: string): void {
     case "open-worktree":
       void replyAsync(ws, msg.id, () => openWorktree(msg.workspaceId, msg.cardId));
       return;
+
+    case "workspace-git": {
+      if (!(GIT_ACTIONS as readonly string[]).includes(msg.action)) return;
+      const message = typeof msg.message === "string" ? msg.message.slice(0, COMMIT_MESSAGE_MAX) : "";
+      void replyAsync(ws, msg.id, () => workspaceGit(msg.workspaceId, String(msg.root), msg.action, message));
+      return;
+    }
 
     // --- the reader --------------------------------------------------------
 

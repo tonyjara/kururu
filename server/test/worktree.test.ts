@@ -13,8 +13,13 @@ import { join } from "node:path";
 import { withProject } from "../src/projects";
 import {
   commitAll,
+  commitTyped,
+  defaultBranch,
   ensureWorktree,
+  fastForward,
   mainRoot,
+  parseStatusHeader,
+  repoStatus,
   retireWorktree,
   stashAll,
   worktreeChanges,
@@ -425,6 +430,68 @@ describe("the card's git", () => {
       expect(sh(root, "stash", "list")).toContain("kururu: Fix the tests");
     } finally {
       await cleanup(root);
+    }
+  });
+});
+
+describe("the workspace's git", () => {
+  it("reads the upstream and the counts off the status header", () => {
+    expect(parseStatusHeader("## main")).toEqual({ upstream: null, ahead: 0, behind: 0 });
+    expect(parseStatusHeader("## main...origin/main")).toEqual({ upstream: "origin/main", ahead: 0, behind: 0 });
+    expect(parseStatusHeader("## feature/x...origin/feature/x [ahead 2, behind 3]")).toEqual({
+      upstream: "origin/feature/x",
+      ahead: 2,
+      behind: 3,
+    });
+    expect(parseStatusHeader("## main...origin/main [behind 1]")).toEqual({ upstream: "origin/main", ahead: 0, behind: 1 });
+    expect(parseStatusHeader("## main...origin/main [gone]")).toEqual({ upstream: null, ahead: 0, behind: 0 });
+    expect(parseStatusHeader("## HEAD (no branch)")).toEqual({ upstream: null, ahead: 0, behind: 0 });
+    expect(parseStatusHeader("## No commits yet on main")).toEqual({ upstream: null, ahead: 0, behind: 0 });
+  });
+
+  it("counts changes, commits a typed message, and fast-forwards main without leaving the branch", async () => {
+    const root = await repo();
+    try {
+      expect(await defaultBranch(root)).toBe("main");
+      sh(root, "checkout", "-q", "-b", "topic");
+      expect(await repoStatus(root)).toEqual({ changes: 0, upstream: null, ahead: 0, behind: 0 });
+
+      await writeFile(join(root, "a.txt"), "changed\n");
+      await writeFile(join(root, "b.txt"), "b\n");
+      expect((await repoStatus(root)).changes).toBe(2);
+
+      await expect(commitTyped(root, "  \n")).rejects.toThrow("needs a message");
+      await commitTyped(root, "Subject line\n\nAnd a body");
+      expect(sh(root, "log", "-1", "--format=%s")).toBe("Subject line");
+      expect(sh(root, "log", "-1", "--format=%b")).toBe("And a body");
+      expect((await repoStatus(root)).changes).toBe(0);
+
+      expect(await fastForward(root, "topic", "main")).toEqual({ commits: 1 });
+      expect(sh(root, "rev-parse", "main")).toBe(sh(root, "rev-parse", "topic"));
+      expect(sh(root, "branch", "--show-current")).toBe("topic");
+      await expect(fastForward(root, "main", "main")).rejects.toThrow("nothing to merge");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to merge into a main that has moved on, and leaves it where it was", async () => {
+    const root = await repo();
+    try {
+      sh(root, "checkout", "-q", "-b", "topic");
+      await writeFile(join(root, "t.txt"), "t\n");
+      sh(root, "add", "t.txt");
+      sh(root, "commit", "-q", "-m", "topic");
+      sh(root, "checkout", "-q", "main");
+      await writeFile(join(root, "m.txt"), "m\n");
+      sh(root, "add", "m.txt");
+      sh(root, "commit", "-q", "-m", "meanwhile");
+      const before = sh(root, "rev-parse", "main");
+      sh(root, "checkout", "-q", "topic");
+      await expect(fastForward(root, "topic", "main")).rejects.toThrow("rebase topic onto main first");
+      expect(sh(root, "rev-parse", "main")).toBe(before);
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 });

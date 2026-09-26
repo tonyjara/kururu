@@ -47,6 +47,7 @@ import type {
   WorkspaceColor,
 } from "../../../shared/model";
 import { defaultMascot, mascotFor, WORKSPACE_COLORS } from "../../../shared/model";
+import type { GitAction, RepoGit } from "../../../shared/wire";
 import { colorValue, colorValues } from "../colors";
 import { AGENT_MIME, WORKSPACE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
 import type { Action } from "../keys";
@@ -55,7 +56,8 @@ import { previewLabel, previewUrl } from "../preview";
 import * as api from "../session";
 import { useKururu } from "../session";
 import { limitLabel, limitTitle, resetIn, staleTitle } from "../usage";
-import { Menu, Popover } from "./Menu";
+import { Menu, Popover, type MenuItem } from "./Menu";
+import type { DialogState } from "./Dialog";
 import { Icon } from "./Icon";
 import { Mascot, Status } from "./Status";
 
@@ -115,6 +117,12 @@ interface Props {
    * swallow the next letter as a command.
    */
   onEditing: (editing: boolean) => void;
+  /**
+   * Put a question up — the commit message, for the git button. The dialog is
+   * the app's, for the reason the delete confirmation is: while it is up no key
+   * reaches a pty, and that is a promise only the app can keep.
+   */
+  onPrompt: (state: DialogState) => void;
   /** Opens the settings dialog. The corner is the only way in. */
   onSettings: () => void;
   /** Opens the phone dialog — the addresses this server answers at, as QR codes. */
@@ -149,6 +157,7 @@ export function Sidebar({
   profileRef,
   onDeleteWorkspace,
   onEditing,
+  onPrompt,
   onSettings,
   onReach,
   overlay,
@@ -202,6 +211,23 @@ export function Sidebar({
   const [renaming, setRenaming] = useState<string | null>(null);
   /** Where a context menu is open, and which row it belongs to. */
   const [menu, setMenu] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
+  /** Where a git button's menu is open, and whose checkout it acts on. */
+  const [gitMenu, setGitMenu] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
+  /** The workspace whose git verb is still running — its button says so, and takes no second one. */
+  const [gitBusy, setGitBusy] = useState<string | null>(null);
+  /**
+   * What the last git verb came to, in place of the branch line until it is
+   * clicked away or a few seconds pass: what was committed and where it went,
+   * or git's reason for not. A line on the row rather than a toast, the way a
+   * card says what its merge came to — it is about this workspace, and a
+   * message that floated somewhere else would leave you working out which.
+   */
+  const [gitSaid, setGitSaid] = useState<{ workspaceId: string; text: string; error: boolean } | null>(null);
+  useEffect(() => {
+    if (!gitSaid || gitSaid.error) return;
+    const timer = setTimeout(() => setGitSaid(null), 8000);
+    return () => clearTimeout(timer);
+  }, [gitSaid]);
   /** Where the colour picker is open, and whose colour it is setting. */
   const [picker, setPicker] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
   /** The same, for the mascot. Two states rather than one with a mode in it,
@@ -617,7 +643,7 @@ export function Sidebar({
                  nothing when pressed — the branch, and the gap either side of
                  it, are a third of the height of a row you are aiming at.
 
-                 A click that landed on the swatch is not this: it means
+                 A click that landed on the git button is not this: it means
                  something else, and a workspace switch riding along behind it
                  would be a side effect nobody asked for. The name's button is the
                  exception rather than being listed, because it *is* this
@@ -711,32 +737,33 @@ export function Sidebar({
                     <span className="ws-name">{workspace.name}</span>
                   </button>
 
-                  {/* The colour, as a control, at the end of the name's line.
-                      What the colour *is* is said by the rail down the left of
-                      the row — the same two pixels every agent in this
-                      workspace wears, which is the thing that makes the
-                      connection. This is the way to change it, and it is drawn
-                      even when untagged, as an empty ring, because a control
-                      that only appears once it has been used is one nobody
-                      finds.
+                  {/* The main checkout's git, as a control, at the end of the
+                      name's line — where the colour swatch was, which lives on
+                      in the row's menu and in the rail down its left edge.
+                      Its colour is the answer to "is there anything to commit",
+                      asked of the main checkout and never of a card's worktree:
+                      those are the board's to commit and merge, and a button
+                      that changed colour whenever focus crossed into one would
+                      be saying something about the wrong checkout.
 
-                      Outside the row's own button rather than inside it: a
+                      Only in a repository, since there is nothing for it to do
+                      anywhere else. Outside the row's own button, because a
                       button inside a button is not a thing the platform will
                       give you. */}
-                  <button
-                    className={`ws-swatch ${workspace.color ? "" : "ws-swatch-off"}`}
-                    style={
-                      colorValue(workspace.color)
-                        ? { background: colorValue(workspace.color)! }
-                        : undefined
-                    }
-                    onClick={(event) => {
-                      const box = event.currentTarget.getBoundingClientRect();
-                      setPicker({ workspaceId: workspace.id, x: box.left, y: box.bottom + 4 });
-                    }}
-                    title={workspace.color ? `Colour: ${workspace.color}` : "Set a colour"}
-                    aria-label={workspace.color ? `Colour: ${workspace.color}` : "Set a colour"}
-                  />
+                  {head?.git && (
+                    <button
+                      className={`ws-git ${gitTone(head.git)} ${gitBusy === workspace.id ? "ws-git-busy" : ""}`}
+                      disabled={gitBusy === workspace.id}
+                      onClick={(event) => {
+                        const box = event.currentTarget.getBoundingClientRect();
+                        setGitMenu({ workspaceId: workspace.id, x: box.left, y: box.bottom + 4 });
+                      }}
+                      title={gitTitle(head.git)}
+                      aria-label={`Git: ${gitTitle(head.git)}`}
+                    >
+                      <Icon name="git" />
+                    </button>
+                  )}
 
                   {/* What is checked out where this workspace works, on a line
                       of its own under the name — and only when there is one, so
@@ -750,7 +777,15 @@ export function Sidebar({
                       shell prompt uses one: it makes a word that could be
                       anything read as a ref. It clips rather than wrapping,
                       because branch names are somebody else's length. */}
-                  {head && (
+                  {gitSaid?.workspaceId === workspace.id ? (
+                    <button
+                      className={`ws-branch ws-said ${gitSaid.error ? "ws-said-error" : ""}`}
+                      onClick={() => setGitSaid(null)}
+                      title={`${gitSaid.text}\nClick to dismiss`}
+                    >
+                      {gitSaid.text}
+                    </button>
+                  ) : head && (
                     <span
                       className={`ws-branch ${head.detached ? "ws-branch-off" : ""}`}
                       title={
@@ -956,6 +991,26 @@ export function Sidebar({
               run: () => onDeleteWorkspace(menuWorkspace.id),
             },
           ]}
+        />
+      )}
+
+      {gitMenu && (
+        <Menu
+          at={gitMenu}
+          onClose={() => setGitMenu(null)}
+          items={gitItems(heads.get(gitMenu.workspaceId)?.git ?? null, (root, action, message) => {
+            const workspaceId = gitMenu.workspaceId;
+            setGitBusy(workspaceId);
+            setGitSaid(null);
+            api
+              .workspaceGit(workspaceId, root, action, message)
+              .then(
+                (text) => setGitSaid({ workspaceId, text, error: false }),
+                (err: unknown) =>
+                  setGitSaid({ workspaceId, text: err instanceof Error ? err.message : String(err), error: true }),
+              )
+              .finally(() => setGitBusy((busy) => (busy === workspaceId ? null : busy)));
+          }, onPrompt)}
         />
       )}
 
@@ -1515,4 +1570,98 @@ function SectionToggle({
       {children}
     </button>
   );
+}
+
+/**
+ * The git button's colour: something to commit, something to push or pull,
+ * or nothing. Uncommitted wins over the rest because it is the one a merge
+ * or a push would leave behind.
+ */
+function gitTone(git: RepoGit): string {
+  if (git.changes) return "ws-git-dirty";
+  if (git.ahead || git.behind) return "ws-git-moved";
+  return "";
+}
+
+function gitTitle(git: RepoGit): string {
+  const parts = [git.detached ? `detached at ${git.branch}` : git.branch];
+  parts.push(git.changes ? `${git.changes} uncommitted` : "nothing to commit");
+  if (git.upstream) {
+    if (git.ahead) parts.push(`${git.ahead} to push`);
+    if (git.behind) parts.push(`${git.behind} to pull`);
+  } else if (!git.detached) {
+    parts.push("not pushed yet");
+  }
+  return `${parts.join(" · ")}\n${git.root}`;
+}
+
+/**
+ * The git button's menu. The three that commit ask for a message first — and
+ * only when there is something to commit: a clean tree with commits to merge
+ * or push runs straight away, because a prompt for a message that will not be
+ * used is a question with no answer. Merge is offered only when there is a
+ * main branch that is not the one already out.
+ */
+function gitItems(
+  git: RepoGit | null,
+  act: (root: string, action: GitAction, message?: string) => void,
+  prompt: (state: DialogState) => void,
+): MenuItem[] {
+  if (!git) return [{ label: "Not a git repository", disabled: true, run: () => undefined }];
+  const run = (action: GitAction, message?: string) => act(git.root, action, message);
+  const files = `${git.changes} file${git.changes === 1 ? "" : "s"}`;
+  const withMessage = (action: GitAction, title: string, submitLabel: string) => () =>
+    prompt({
+      kind: "prompt",
+      title,
+      hint: `${files} on ${git.branch}, in ${git.root}`,
+      value: "",
+      placeholder: "What this commit does",
+      submitLabel,
+      onSubmit: (message) => {
+        if (message.trim()) run(action, message);
+      },
+    });
+  const detached = git.detached;
+  const items: MenuItem[] = [
+    {
+      label: git.changes ? "Commit…" : "Nothing to commit",
+      hint: git.changes ? String(git.changes) : undefined,
+      disabled: !git.changes || detached,
+      run: withMessage("commit", `Commit to ${git.branch}`, "Commit"),
+    },
+  ];
+  if (git.base) {
+    items.push({
+      label: git.changes ? `Commit & merge into ${git.base}…` : `Merge into ${git.base}`,
+      disabled: detached,
+      run: git.changes
+        ? withMessage("commit-merge", `Commit, then merge ${git.branch} into ${git.base}`, "Commit & merge")
+        : () => run("commit-merge"),
+    });
+  }
+  if (git.changes) {
+    items.push({
+      label: "Commit & push…",
+      disabled: detached,
+      run: withMessage("commit-push", `Commit, then push ${git.branch}`, "Commit & push"),
+    });
+  }
+  items.push(
+    {
+      label: "Pull",
+      sep: true,
+      hint: git.behind ? `↓${git.behind}` : undefined,
+      disabled: detached || !git.upstream,
+      run: () => run("pull"),
+    },
+    {
+      label: git.upstream ? "Push" : "Publish branch",
+      hint: git.ahead ? `↑${git.ahead}` : undefined,
+      disabled: detached,
+      run: () => run("push"),
+    },
+    { label: "Fetch", run: () => run("fetch") },
+  );
+  return items;
 }

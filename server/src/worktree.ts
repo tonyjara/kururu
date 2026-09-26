@@ -272,3 +272,120 @@ export async function stashAll(path: string, label: string): Promise<string[]> {
   await git(["stash", "push", "-q", "-u", "-m", `kururu: ${label}`], path);
   return changes;
 }
+
+// ---------------------------------------------------------------------------
+// The main checkout, for the workspace's git button
+// ---------------------------------------------------------------------------
+
+/**
+ * The first line of `git status --porcelain -b`, which says in one line what
+ * would otherwise be three subprocesses: the branch, what it tracks, and how
+ * far apart they are. The shapes are `## main`, `## main...origin/main`,
+ * `## main...origin/main [ahead 1, behind 2]`, `## HEAD (no branch)` when
+ * detached, and `## No commits yet on main` in a repository with no commits.
+ * The branch is not taken from here — `HEAD` is read for that, as the row's
+ * branch is — only the upstream and the counts, which nothing on disk has.
+ */
+export function parseStatusHeader(line: string): { upstream: string | null; ahead: number; behind: number } {
+  const header = /^## (.*)$/.exec(line.trim());
+  const rest = header?.[1] ?? "";
+  const tracking = /^\S+?\.\.\.(\S+)(?: \[(.*)\])?$/.exec(rest);
+  if (!tracking) return { upstream: null, ahead: 0, behind: 0 };
+  const counts = tracking[2] ?? "";
+  // `[gone]` is an upstream that was deleted on the remote: tracked, and
+  // nothing to be ahead or behind of.
+  if (counts === "gone") return { upstream: null, ahead: 0, behind: 0 };
+  const count = (word: string) => Number.parseInt(new RegExp(`${word} (\\d+)`).exec(counts)?.[1] ?? "0", 10) || 0;
+  return { upstream: tracking[1]!, ahead: count("ahead"), behind: count("behind") };
+}
+
+/**
+ * Where a main checkout stands, for the colour of its button.
+ *
+ * `--no-optional-locks` is the reason this can be a poll at all. A plain
+ * `git status` refreshes the index as it goes, which takes `index.lock` — and
+ * an agent committing in the same checkout at that moment is told another git
+ * process is running and gives up. With the flag, status reads and never
+ * writes, which is what git added it for: exactly this, a tool asking in the
+ * background.
+ */
+export async function repoStatus(root: string): Promise<{ changes: number; upstream: string | null; ahead: number; behind: number }> {
+  const lines = (await git(["--no-optional-locks", "status", "--porcelain", "-b"], root)).split("\n");
+  const [first = "", ...rest] = lines;
+  return { changes: rest.filter((line) => line.trim()).length, ...parseStatusHeader(first) };
+}
+
+/**
+ * The branch "merge" goes into. The remote's own answer first — `origin/HEAD`
+ * is what `git clone` recorded as the default, and is the one a person means
+ * by "main" even when it is called something else — then a local `main`, then
+ * `master`. Null when none of those exist, and the menu then has no merge.
+ */
+export async function defaultBranch(root: string): Promise<string | null> {
+  const remote = await git(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], root).then(
+    (out) => out.trim().replace(/^origin\//, ""),
+    () => "",
+  );
+  for (const name of [remote, "main", "master"]) {
+    if (!name) continue;
+    const exists = await git(["rev-parse", "--verify", "--quiet", `refs/heads/${name}`], root).then(
+      () => true,
+      () => false,
+    );
+    if (exists) return name;
+  }
+  return null;
+}
+
+/**
+ * Commit everything in a checkout with a message somebody typed. The first
+ * line is the subject and the rest the body, which is how git would have split
+ * it from an editor. `commitAll` does the committing, for its reasons.
+ */
+export async function commitTyped(root: string, message: string): Promise<string[]> {
+  const [subject = "", ...body] = message.trim().split("\n");
+  if (!subject.trim()) throw new Error("a commit needs a message");
+  return commitAll(root, subject.trim(), body.join("\n").trim());
+}
+
+/**
+ * Bring `into` up to the branch the main checkout is on, and stay where it is.
+ *
+ * A fast-forward and nothing else, by the same means `retireWorktree` uses
+ * when the main tree is not on the base: `fetch . <branch>:<into>` moves the
+ * ref without touching the disk, and refuses anything that is not a
+ * fast-forward. A base that has moved on since the branch was cut is said
+ * plainly rather than merged with a knot — rebasing somebody's checked-out
+ * branch from a sidebar button is not a thing to do behind their back.
+ */
+export async function fastForward(root: string, branch: string, into: string): Promise<{ commits: number }> {
+  if (branch === into) throw new Error(`already on ${into}, so there is nothing to merge`);
+  const behind = await git(["merge-base", "--is-ancestor", into, branch], root).then(
+    () => false,
+    () => true,
+  );
+  if (behind) throw new Error(`${into} has commits ${branch} does not — rebase ${branch} onto ${into} first`);
+  const commits = Number.parseInt(await git(["rev-list", "--count", `${into}..${branch}`], root), 10) || 0;
+  if (commits) await git(["fetch", ".", `${branch}:${into}`], root);
+  return { commits };
+}
+
+/**
+ * Push the branch, setting its upstream the first time — which is the one
+ * thing a bare `git push` refuses that a person pressing Push obviously meant.
+ * No `--force`, ever: a push that is rejected is a remote that has work this
+ * checkout has not seen, and the answer is Pull.
+ */
+export async function pushBranch(root: string, branch: string, upstream: string | null): Promise<void> {
+  if (upstream) await git(["push", "--quiet"], root);
+  else await git(["push", "--quiet", "--set-upstream", "origin", branch], root);
+}
+
+/** A pull that only ever fast-forwards: anything else is a merge to make in a terminal. */
+export async function pullBranch(root: string): Promise<void> {
+  await git(["pull", "--ff-only", "--quiet"], root);
+}
+
+export async function fetchAll(root: string): Promise<void> {
+  await git(["fetch", "--quiet", "--prune"], root);
+}
