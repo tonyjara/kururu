@@ -142,6 +142,15 @@ The load-bearing invariants, one line each, with the argument behind the link:
   `HOST_PROTOCOL` exists. A profile may be pointed at another's key, from a
   list the server reads off the disk and refuses anything outside of; no path
   ever comes from a client. → [layout](docs/layout.md#profiles)
+- **A card's worktree is git's to refuse, never kururu's to force.**
+  `server/src/worktree.ts` is the only file that runs `git`: `worktree add` on
+  a click, with a timeout, and on the way back out a rebase, a fast-forward,
+  `worktree remove` and `branch -d` with no `--force` and no capital — a dirty
+  worktree or a conflicting rebase stays standing and says why. The card's
+  "discard" is `git stash`, never a checkout over the work. Anything that
+  ends an agent or removes a checkout asks in place first. Project settings
+  are keyed by repository root and the root is only ever one the server found
+  itself. → [layout](docs/layout.md#worktrees)
 - **The usage bar reads a Claude credential and never writes one** — the
   machine's, or the active profile's when profiles keep their own logins. It is
   the only thing in kururu that leaves the machine on the user's behalf:

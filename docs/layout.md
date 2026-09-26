@@ -80,6 +80,131 @@ disk. Never move a layout decision back into React state.
   and would hide every *exited* agent — whose row carries the only dismiss gesture
   there is. The test is "has one ever been seen in here".
 
+## The board
+
+**A tab, and the board is the workspace's, not the tab's.** It was a third
+kind of pane for a version, and a pane you could not put a terminal beside in
+its own strip was the thing people noticed first. Now it is `BOARD_TAB` in a
+pane's `agentIds`, an id no pty can have, so every tab gesture — reorder, drag
+into a pane, drop on an edge, pour — works on it with no code of its own. The
+cost is that a tab is no longer always a process: `activeTerminal`,
+`visibleAgents` and `terminalsOf` in `shared/layout.ts` are what anything that
+kills, watches or types must go through, `removeTab` takes it out of the
+workspace on screen only (every workspace's board has the same id), and a board
+tab never moves to another workspace. `adoptBoardPanes` turns a blob's board
+*pane* into the tab.
+
+`Workspace.board` holds the cards, so closing the tab puts them away and
+`open-board` finds them where they were. It is null until somebody opens it —
+the only verb that makes one — and rides the host's blob and `persist.ts` like
+the rest of the workspace, which is why none of this cost an edit to the pty
+host. The doors: `C-a K` and a pane menu's **Open the board** show the one you
+have or make one beside that pane; the new-tab menu's **Board** puts it *in*
+that pane; a workspace row's right-click switches there and shows it. On disk a card keeps its run's history but not
+its `agentId`: that is a process, and a cold start reads a run with no process
+behind it as `ended`.
+
+**The robot is `new-tab` with a prompt on the end.** `run-card` looks the
+launcher up by id, exactly as the new-tab menu does, and `withPrompt` in
+`shared/launchers.ts` single-quotes the card onto the command line — the one
+place text somebody typed reaches `sh -c`. The agent lands in a pane *beside*
+the board's (`paneBesideBoard`) rather than as a tab in it, since a new tab is
+shown and would take the board away from the person pressing the robot; it is
+renamed after the card, and the focus goes back to the board.
+
+**The automation moves a card on an edge, and only out of the column it put it
+in.** `noteRun` runs for every agent on every host snapshot and compares
+against the state it recorded on the card, not against the last status — so a
+server restart that forgot `lastStatus` still catches a run up, and a card
+somebody dragged back out of Review is not dragged back in by an agent that is
+still sitting at `done`. A finished turn goes to **Review**, never Done: nothing
+in a byte stream tells "finished" from "asking you a question".
+
+**Deleting a card never ends its agent.** The card is a note about the work;
+the terminal is the work and has its own ✕. Nor does it remove the card's
+worktree, for the same reason and one more: taking a checkout down is the Done
+column's job, and a deleted card has not been through it.
+
+### Worktrees
+
+**A card runs in a checkout of its own, beside the repository.** Two agents in
+one working tree are two agents editing each other's files, so `run-card` looks
+for the repository the agent would have started in, and — unless that project
+has been told not to in Settings → Workspaces — makes `<repo>.worktrees/<slug>-<id>`
+with `git worktree add` on a branch `kururu/<slug>-<id>`, cut from whatever the
+main tree has checked out. The agent starts in there. The naming is
+`shared/projects.ts`, the git is `server/src/worktree.ts`, and the latter is
+the one place kururu runs `git` at all: `git.ts` reads `HEAD` off the disk
+because it polls, and this runs once, on a click, with a timeout. It never
+forces anything — a branch checked out elsewhere and a directory that is not
+empty are refusals git makes on purpose, and they come back as the card's error.
+
+**The worktree is the card's, not the run's.** `Card.worktree` is four strings —
+root, path, branch, base — and every one goes to disk, because the checkout is
+still standing after a cold start. A second agent on the same card goes back
+into the same worktree; only a card whose directory has gone gets a new one, and
+if its branch survived, that branch is checked out again rather than a second
+one cut beside it. A worktree that cannot be made is an error on the card, never
+an agent quietly started in the main checkout: the person pressed the robot
+expecting isolation.
+
+**The setup line runs in the agent's terminal, ahead of it.** A fresh worktree
+holds tracked files and nothing else — no `node_modules`, no `.env` — and the
+project's setup command (Settings → Workspaces) is prefixed onto the agent's
+command with `&&`, so an install that fails leaves its output on screen and no
+agent behind it. It runs on a fresh checkout only. The robot is pressed from
+wherever the pane beside the board is, which may be an earlier card's worktree;
+`mainRoot` resolves that back to the repository it was linked from, so the next
+card is cut from `main` and not from the last card.
+
+**The card's menu carries the git, so nobody opens a terminal in each
+worktree.** Four rows under the moves, for a card with a worktree: **Commit
+changes** (`add -A`, the card's title as the subject and its body as the
+message, the person's own git identity), **Set changes aside** (`git stash
+push -u`, named after the card — the row somebody looks for as "discard", and
+deliberately not one: the stash is the repository's and is still in
+`git stash list` after the worktree is gone), **Merge into `<base>`** (the one
+card's worktree merged back and removed, the card put in Done, asked on the
+card itself before it goes because it ends the agent), and **Open a terminal in
+the worktree** for everything else. The menu opens at once with the rows that
+need counts disabled, and `worktree-status` fills them in a moment later —
+changes, ahead, behind — asked on the click and never polled, because each is a
+subprocess and `git.ts` keeps subprocesses out of the loop. Merge is disabled
+while anything is uncommitted; the hint says "commit first". What each action
+came to is a line on the card until clicked away. Every verb names the card and
+the server finds the worktree on it; no path crosses the wire.
+
+**Switching worktrees off retires the ones standing, and asks first.** The
+switch in Settings → Workspaces is the one control on that page that does
+anything to the disk: with worktrees still standing for the repository, it
+draws the list — branch, base, card, whether an agent is in it — and waits for
+a second click, in the page rather than in a dialog over it, the way deleting a
+profile asks. `retire-worktrees` then walks every card in the profile whose
+worktree is in that repository, one at a time because they all land on the same
+branch: rebase onto the base in the worktree, fast-forward the base from the
+main tree (`merge --ff-only` when it is on the base, a fetch of the repository
+into itself when it is not), `worktree remove`, `branch -d`. Nothing is forced.
+A worktree with uncommitted or untracked work is left standing with its agent
+still running — that check is made before anything is ended — and a rebase
+that conflicts is aborted and reported; every other card's agent is ended the
+way `close-tab` ends one, since its directory is about to go. The reply is a
+row per card, and the page shows each row: how many commits the base took, or
+why the worktree is still there. A card whose worktree went forgets it.
+
+**Project settings are keyed by repository, not workspace.** A workspace once
+remembered a dev command and it went with the sidebar's dev buttons: that was a
+fact *watched* off the process table. These are three things somebody typed
+about a project — worktrees or not, the setup line, the dev line — and two
+workspaces on one checkout want the same answers. `~/.config/kururu/projects.json`,
+by root. The page is drawn the other way round — Settings → Workspaces, a
+sub-tab per workspace in the profile, opening on the one you are in — because
+the workspace is the list a person has in their head and a stacked page is one
+you scroll to the wrong project. Under the tab is the repository the branch poll
+found for that workspace, and two workspaces in one repository show the same
+controls and say whose else they are. `set-project` refuses any root that is
+not one of those, on `files.ts`'s rule that a path never comes from a client.
+An entry at the defaults is not written.
+
 ## Dragging
 
 - **A pane a drag emptied is closed; a pane you emptied on purpose is not.** A

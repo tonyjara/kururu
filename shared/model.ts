@@ -27,8 +27,10 @@
  */
 import type { KeyOverrides } from "./keys";
 import type { LayoutNode } from "./layout";
+import type { Board } from "./board";
 import type { LaunchSettings } from "./launchers";
 import type { NotifySettings } from "./notify";
+import type { ProjectSettingsMap } from "./projects";
 import type { StyleLibrary } from "./styles";
 import type { Appearance } from "./theme";
 
@@ -601,6 +603,12 @@ export interface Workspace {
    * why nothing has to be cleaned up when one goes.
    */
   mascotId: string | null;
+  /**
+   * The workspace's board of cards, or null until somebody opens it — see
+   * `shared/board.ts`. Here rather than beside the workspace so that it
+   * survives both restarts by the roads the layout already takes.
+   */
+  board: Board | null;
 }
 
 /** A named session: a list of workspaces, and which of them you are in. */
@@ -830,6 +838,13 @@ export interface SessionSnapshot {
    * which rows somebody switched off.
    */
   launch: LaunchSettings;
+  /**
+   * What each repository the workspaces are in has been told about itself —
+   * worktrees or not, a setup line, a dev line — keyed by root. See
+   * `shared/projects.ts`. In the snapshot for `launch`'s reason: the page that
+   * edits it draws what comes back, and the phone's page is the desktop's.
+   */
+  projectSettings: ProjectSettingsMap;
   /**
    * Whether the pty host is one that every request of this server's reaches.
    * In the snapshot because the one setting whose effect depends on it —

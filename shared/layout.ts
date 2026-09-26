@@ -201,16 +201,49 @@ export function paneWithAgent(node: LayoutNode, agentId: string): PaneState | nu
   return panes(node).find((p) => p.agentIds.includes(agentId)) ?? null;
 }
 
-/** The terminal showing in a pane, or null when the pane is empty. */
+/**
+ * The workspace's board, as a tab.
+ *
+ * It sits in `agentIds` beside the terminals under an id no pty can have (the
+ * host mints `a1`, `a2`…), and that is the whole trick: every gesture a tab
+ * already has — reordering along a strip, dragging into another pane, dropping
+ * on an edge to split, pouring one pane into another — is written against
+ * that list, and a board that is one more entry in it gets all of them without
+ * a line of its own. The price is that the few things that treat a tab as a
+ * *process* have to be told this one is not: `activeTerminal`,
+ * `visibleAgents`, and the lists `workspaces.ts` hands to whatever kills.
+ *
+ * One per workspace, because the board is the workspace's and not the tab's
+ * (`Workspace.board`); closing the tab puts the cards away, and the next
+ * `open-board` finds them where they were.
+ */
+export const BOARD_TAB = "board";
+
+export function isBoardTab(id: unknown): boolean {
+  return id === BOARD_TAB;
+}
+
+/** Only the terminals of a list of tabs — what may be killed, watched or typed into. */
+export function terminalsOf(ids: readonly string[]): string[] {
+  return ids.filter((id) => id !== BOARD_TAB);
+}
+
+/** The tab showing in a pane — a terminal or the board — or null when the pane is empty. */
 export function activeAgent(pane: PaneState): string | null {
   return pane.agentIds[pane.activeIdx] ?? null;
+}
+
+/** The terminal showing in a pane, or null when it is empty or showing the board. */
+export function activeTerminal(pane: PaneState): string | null {
+  const id = activeAgent(pane);
+  return id === BOARD_TAB ? null : id;
 }
 
 /** Every terminal whose tab is the one showing — what a client needs to watch. */
 export function visibleAgents(node: LayoutNode): string[] {
   const ids: string[] = [];
   for (const pane of panes(node)) {
-    const id = activeAgent(pane);
+    const id = activeTerminal(pane);
     if (id) ids.push(id);
   }
   return ids;

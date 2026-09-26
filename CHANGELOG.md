@@ -15,6 +15,44 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **A card runs in a worktree of its own.** Press the robot on a card in a
+  repository and the agent starts in `<repo>.worktrees/<card>`, on a branch
+  `kururu/<card>` cut from whatever you had checked out, so two cards on one
+  project are two agents that cannot touch each other's files. The card shows
+  the branch and what it was cut from, and a second agent on the same card goes
+  back into the same checkout. New in Settings → **Workspaces**, a tab per
+  workspace showing the repository it is in: switch worktrees off for it, a
+  **Setup** line run in a fresh worktree before the agent (`bun install` —
+  a worktree starts with tracked files and nothing else), and a **Dev server**
+  line for the preview button that is coming next. Switching worktrees **off**
+  for a repository that has some standing asks first, with the list, and then
+  merges each one back into the branch it was cut from — a rebase and a
+  fast-forward, never a merge commit — removes the worktree and deletes the
+  branch. An agent still working in one is ended; a worktree with uncommitted
+  work, or a rebase that conflicts, is left exactly as it was and the page
+  says why. The card's own menu carries the git a worktree needs, so you never
+  open a terminal in each one: **Commit changes** with the card as the message,
+  **Set changes aside** (`git stash`, named after the card — the work is never
+  thrown away), **Merge into `<base>`**, which merges the one card back, removes
+  its worktree and puts the card in Done after asking on the card, and **Open a
+  terminal in the worktree** for the rest. The rows show how many files are
+  uncommitted and how many commits are waiting. Deleting a card still leaves
+  its worktree on disk, and the menu says so.
+
+- **A board for each workspace, and a robot on every card.** `C-a K`,
+  **Open the board** in a pane's menu or a workspace's right-click menu, or
+  **Board** in the `+` menu opens the workspace's board — To do, In progress,
+  Review and Done. Nothing exists until you open it. The board is a tab: drag
+  it along a strip, into another pane, or onto an edge, with terminals beside
+  it; closing it puts the cards away and ends nothing. Press the robot on a card, pick a model, and an agent
+  starts in a terminal next to the board with the card as its prompt, named
+  after the card. The card follows it: it goes to In progress, shows the
+  agent's live status, and moves to **Review** when the agent finishes its turn
+  — never to Done, because an agent that has stopped talking may be asking
+  you something. Cards drag between columns on the desktop and move from their
+  menu on the phone, and they survive a restart; which agent was on them does
+  not.
+
 - **The reader has tabs, one per document, and they drag like terminal tabs.**
   Markdown opened from the tree or by the editor it follows opens as a new tab
   rather than replacing the one you were reading. Drag a tab to reorder it, onto

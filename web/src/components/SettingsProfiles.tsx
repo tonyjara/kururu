@@ -293,7 +293,7 @@ function NewProfile({ onEditing }: { onEditing: (on: boolean) => void }) {
  * one word and sending it per keystroke would rename the profile six times on
  * the way to one.
  */
-function Text({
+export function Text({
   value,
   onCommit,
   onEditing,

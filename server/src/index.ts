@@ -71,7 +71,7 @@ import { renderMarkdown } from "./markdown";
 import { scanMemory } from "./memory";
 import { attach as attachEditor, findNvim, openFile } from "./nvim";
 import { readProcTable } from "./agents/procs";
-import { findPane, panes, paneWithAgent } from "../../shared/layout";
+import { activeAgent, BOARD_TAB, findPane, isBoardTab, panes, paneWithAgent, terminalsOf } from "../../shared/layout";
 import {
   adoptLegacySheet,
   builtinSheets,
@@ -97,9 +97,35 @@ import {
 } from "../../shared/notify";
 import { readNotify, writeNotify } from "./notify";
 import { readLaunch, writeLaunch } from "./launch";
+import { readProjects, withProject, writeProjects } from "./projects";
+import {
+  commitAll,
+  ensureWorktree,
+  mainRoot,
+  retireWorktree,
+  stashAll,
+  uncommittedError,
+  worktreeChanges,
+  worktreePresent,
+  worktreeStatus,
+} from "./worktree";
+import { adoptProject, projectSettingsFor, type WorktreeOutcome, type WorktreeStatus } from "../../shared/projects";
 import { hookSettingsFlag } from "./hooks";
 import { claudeDirFor, loginDir, loginEnv, scanLogins } from "./logins";
-import { adoptLaunch, findLauncher, launcherCommand, type LaunchSettings } from "../../shared/launchers";
+import { adoptLaunch, findLauncher, launcherCommand, withPrompt, type Launcher, type LaunchSettings } from "../../shared/launchers";
+import {
+  addCard,
+  cardPrompt,
+  editCard,
+  mintCardId,
+  moveCard,
+  removeCard,
+  runLive,
+  setWorktree,
+  startRun,
+  type Card,
+  type CardWorktree,
+} from "../../shared/board";
 import { soundBytes, sounds } from "./sounds";
 import { readAppearance, writeAppearance } from "./appearance";
 import {
@@ -310,6 +336,8 @@ let mascots = readMascots();
 let keys = readKeys();
 let notify = readNotify();
 let launch = readLaunch();
+/** By repository root — see `shared/projects.ts`. Written by `saveProject` only. */
+let projects = readProjects();
 
 /**
  * What the pty host said about itself when this server arrived — see
@@ -413,6 +441,21 @@ function saveNotify(next: NotifySettings): void {
 function saveLaunch(next: LaunchSettings): void {
   launch = next;
   writeLaunch(next);
+  pushSnapshot();
+}
+
+/**
+ * And for one repository. The root is checked against what the server has
+ * found for itself — the repositories the active profile's workspaces are in,
+ * and the ones already in the file — and anything else is dropped: a settings
+ * write is not a way to teach kururu a path.
+ */
+function saveProject(root: unknown, raw: unknown): void {
+  if (typeof root !== "string") return;
+  const known = root in projects || state.projects.some((project) => project.root === root);
+  if (!known) return;
+  projects = withProject(projects, root, adoptProject(raw));
+  writeProjects(projects);
   pushSnapshot();
 }
 
@@ -675,6 +718,7 @@ function snapshot(): SessionSnapshot {
     keys,
     notify,
     launch,
+    projectSettings: projects,
     appearance,
     styles,
   };
@@ -899,6 +943,10 @@ function noticeStatuses(): void {
   const live = new Set<string>();
   for (const agent of host.agents) {
     live.add(agent.id);
+    // Level-triggered on purpose, unlike everything below: a board compares
+    // against the state it recorded, so a server restart that forgot
+    // `lastStatus` still catches a run up. A no-op when nothing moved.
+    workspaces.noteRun(agent.id, agent.status, agent.exited);
     const before = lastStatus.get(agent.id);
     lastStatus.set(agent.id, agent.status);
     // Never seen before, or has not moved. See `lastStatus` for why those are
@@ -1106,6 +1154,220 @@ function fillPane(paneId: string, from?: string): void {
   });
 }
 
+/**
+ * The line that starts an agent from the menu, flags and all.
+ *
+ * A profile's own login directory has none of the hooks the machine's does, so
+ * a Claude started into one is handed kururu's. See `hooks.ts`.
+ */
+function agentCommand(launcher: Launcher): string {
+  const hooks = launcher.cli === "claude" && loginsActive() ? hookSettingsFlag() : "";
+  return launcherCommand(launcher, launch) + hooks;
+}
+
+/**
+ * Hand a card to an agent: a terminal beside the board, running the chosen
+ * launcher with the card as its first message.
+ *
+ * Only the workspace on screen, because a terminal is opened into a pane and
+ * panes are only ever made in the active workspace — a board somebody is
+ * pressing a robot on is the one they are looking at, and a stale client
+ * naming another is refused rather than having an agent turn up somewhere it
+ * cannot see. The focus is handed back to the board afterwards: the point of
+ * handing work off is to carry on with the list, not to be taken to it.
+ */
+async function runCard(workspaceId: string, cardId: string, launcherId: string): Promise<{ agentId: string }> {
+  if (workspaceId !== workspaces.activeWorkspace.id) throw new Error("that board is not on screen");
+  const found = workspaces.findCard(workspaceId, cardId);
+  if (!found) throw new Error("no such card");
+  if (runLive(found.card.run) && host.agents.some((a) => a.id === found.card.run?.agentId && !a.exited)) {
+    throw new Error("that card already has an agent on it");
+  }
+  const launcher = typeof launcherId === "string" ? findLauncher(launcherId) : undefined;
+  if (!launcher) throw new Error(`no such agent: ${String(launcherId)}`);
+
+  const boardPane = paneWithAgent(workspaces.activeWorkspace.layout, BOARD_TAB)?.id;
+  const target = workspaces.paneBesideBoard();
+  if (!target) throw new Error("nowhere to put the agent");
+  /*
+   * Where the agent would have started is where the repository is looked for;
+   * where it *does* start is the card's worktree, when the project runs cards
+   * that way. A worktree that cannot be made is an error on the card rather
+   * than an agent quietly started in the main checkout — the person pressed
+   * the robot expecting isolation, and the one thing worse than no agent is
+   * two agents in one tree that they believe are in two.
+   */
+  const from = await cwdForNewTab(target);
+  const checkout = await checkoutFor(found.card, from);
+  let command = withPrompt(agentCommand(launcher), cardPrompt(found.card));
+  /*
+   * The setup line runs in the agent's own terminal, ahead of it, rather than
+   * as a subprocess of the server's: an install takes a minute, its output is
+   * the only explanation when it fails, and `&&` means an agent is never
+   * started into a checkout the setup gave up on.
+   */
+  if (checkout?.fresh && checkout.setup) command = `${checkout.setup} && ${command}`;
+  const agent = await openTerminal(target, {
+    cwd: checkout?.worktree.path ?? from,
+    command,
+    kind: "agent",
+  });
+  /*
+   * Named after the card, as if somebody had typed it into rename-tab. Without
+   * it the sidebar row says `starting…` and then whatever the agent titles its
+   * first turn, and "which terminal is the migration" is the question the
+   * board was meant to have answered. A name the user gives it later wins, the
+   * same as always.
+   */
+  host.rename(agent.id, found.card.title.slice(0, 80));
+  workspaces.editBoard(workspaceId, (board) =>
+    startRun(setWorktree(board, cardId, checkout?.worktree ?? null), cardId, {
+      agentId: agent.id,
+      launcher: launcher.id,
+      label: launcher.label,
+      startedAt: Date.now(),
+    }),
+  );
+  if (boardPane && workspaces.hasPane(boardPane)) workspaces.focusPane(boardPane);
+  return { agentId: agent.id };
+}
+
+/**
+ * The checkout a card's agent works in: the card's own worktree, made now if
+ * it has to be, or null for "wherever the pane was going anyway".
+ *
+ * Null when the directory is not in a repository, and when the repository has
+ * been told not to — both are the ordinary run, in place. A card that already
+ * has a worktree standing goes back into it, whatever the project's setting
+ * says today: the work is in there. `setup` is empty on that road, since the
+ * setup line is for a checkout that has only ever held tracked files.
+ */
+async function checkoutFor(
+  card: Card,
+  from: string | undefined,
+): Promise<{ worktree: CardWorktree; fresh: boolean; setup: string } | null> {
+  if (card.worktree && worktreePresent(card.worktree.path)) return { worktree: card.worktree, fresh: false, setup: "" };
+  if (!from) return null;
+  const repo = await repoFor(from);
+  if (!repo) return null;
+  /*
+   * The *main* repository's settings, which is not always the one the walk
+   * found: the pane beside the board may be an earlier card's agent, and its
+   * worktree is a repository too. Cutting a card from another card's branch
+   * is never what anybody meant.
+   */
+  const root = await mainRoot(repo.root);
+  const settings = projectSettingsFor(projects, root);
+  if (!settings.worktrees) return null;
+  const made = await ensureWorktree(root, card);
+  return { ...made, setup: settings.setup };
+}
+
+/**
+ * Merge every card's worktree in one repository back and take it down — what
+ * switching worktrees off for a repository does to the ones already standing,
+ * after the person has read the list and confirmed it.
+ *
+ * One at a time and in order, because they all land on the same branch: the
+ * second card's rebase has to see the first card's commits on the base, or the
+ * second fast-forward is refused for being behind. A dirty worktree is left
+ * standing and its agent left running — that is the one check made *before*
+ * anything is ended, since `worktree remove` would refuse it anyway and there
+ * is no sense killing an agent for a removal that was never going to happen.
+ * Past that check the card's agent is ended first, the way `close-tab` ends
+ * one: it was working in a directory that is about to not exist. Each card
+ * gets a row in the reply, and a card whose worktree went forgets it, so the
+ * next robot press on it starts a fresh one — or, with worktrees now off, none.
+ */
+async function retireWorktrees(root: unknown): Promise<WorktreeOutcome[]> {
+  if (typeof root !== "string") throw new Error("no such repository");
+  const known = root in projects || state.projects.some((project) => project.root === root);
+  if (!known) throw new Error("no such repository");
+  const outcomes: WorktreeOutcome[] = [];
+  for (const { workspace, card, worktree } of workspaces.cardsWithWorktrees(root)) {
+    const outcome: WorktreeOutcome = { cardId: card.id, title: card.title, branch: worktree.branch, commits: 0, error: null };
+    try {
+      outcome.commits = await retireCard(workspace.id, card, worktree);
+    } catch (err) {
+      outcome.error = err instanceof Error ? err.message : String(err);
+    }
+    outcomes.push(outcome);
+  }
+  return outcomes;
+}
+
+/**
+ * One card's worktree merged back and taken down — the step the sweep repeats
+ * and `merge-card` does once. The dirty check comes before the agent is ended,
+ * for the reason given on the sweep; past it the card's agent goes the way
+ * `close-tab` ends one, and the card forgets a worktree that is no longer
+ * there. The card's column is the caller's business: the sweep leaves it, the
+ * menu's merge puts it in Done, because merged is what done means on a board
+ * that runs cards in worktrees.
+ */
+async function retireCard(workspaceId: string, card: Card, worktree: CardWorktree): Promise<number> {
+  const changes = worktreePresent(worktree.path) ? await worktreeChanges(worktree.path) : [];
+  if (changes.length) throw uncommittedError(changes);
+  const agentId = card.run?.agentId;
+  if (agentId && host.agents.some((agent) => agent.id === agentId && !agent.exited)) killAll([agentId]);
+  const { commits } = await retireWorktree(worktree);
+  workspaces.editBoard(workspaceId, (board) => setWorktree(board, card.id, null));
+  return commits;
+}
+
+/** The card, and the worktree on it — or the refusal, since every verb below needs both. */
+function worktreeOf(workspaceId: string, cardId: string): { card: Card; worktree: CardWorktree } {
+  const found = workspaces.findCard(workspaceId, cardId);
+  if (!found) throw new Error("no such card");
+  if (!found.card.worktree) throw new Error("this card has no worktree");
+  return { card: found.card, worktree: found.card.worktree };
+}
+
+/** The menu's opening question. */
+function cardStatus(workspaceId: string, cardId: string): Promise<WorktreeStatus> {
+  return worktreeStatus(worktreeOf(workspaceId, cardId).worktree);
+}
+
+/** Commit everything in the card's worktree, with the card as the message. */
+async function commitCard(workspaceId: string, cardId: string): Promise<{ files: number }> {
+  const { card, worktree } = worktreeOf(workspaceId, cardId);
+  if (!worktreePresent(worktree.path)) throw new Error("the worktree is not there any more");
+  const files = await commitAll(worktree.path, card.title, card.body);
+  return { files: files.length };
+}
+
+/** Set the card's uncommitted work aside — see `stashAll` for why this is not a discard. */
+async function stashCard(workspaceId: string, cardId: string): Promise<{ files: number }> {
+  const { card, worktree } = worktreeOf(workspaceId, cardId);
+  if (!worktreePresent(worktree.path)) throw new Error("the worktree is not there any more");
+  const files = await stashAll(worktree.path, card.title);
+  return { files: files.length };
+}
+
+/** Merge this card back, take its worktree down, and put the card in Done. */
+async function mergeCard(workspaceId: string, cardId: string): Promise<{ commits: number }> {
+  const { card, worktree } = worktreeOf(workspaceId, cardId);
+  const commits = await retireCard(workspaceId, card, worktree);
+  workspaces.editBoard(workspaceId, (board) => moveCard(board, cardId, "done"));
+  return { commits };
+}
+
+/**
+ * A shell in the card's worktree, beside the board — for whatever the four
+ * verbs above do not cover. Only the workspace on screen, for `runCard`'s
+ * reason: a terminal is opened into a pane, and panes are the active
+ * workspace's.
+ */
+async function openWorktree(workspaceId: string, cardId: string): Promise<{ agentId: string }> {
+  if (workspaceId !== workspaces.activeWorkspace.id) throw new Error("that board is not on screen");
+  const { worktree } = worktreeOf(workspaceId, cardId);
+  if (!worktreePresent(worktree.path)) throw new Error("the worktree is not there any more");
+  const target = workspaces.paneBesideBoard();
+  if (!target) throw new Error("nowhere to put the terminal");
+  const agent = await openTerminal(target, { cwd: worktree.path });
+  return { agentId: agent.id };
+}
+
 /** The newest terminal in this workspace, preferring one that is still running. */
 function newestAgentHere(): string | undefined {
   const here = new Set(workspaces.agentsHere());
@@ -1120,7 +1382,7 @@ function newestAgentHere(): string | undefined {
  * deletion hand back what was inside them; this is what ends it.
  */
 function killAll(agentIds: string[]): void {
-  for (const agentId of agentIds) {
+  for (const agentId of terminalsOf(agentIds)) {
     host.kill(agentId);
     // It must not be left as a tab pointing at a terminal that no longer exists.
     workspaces.removeTab(agentId);
@@ -1137,6 +1399,9 @@ function killAll(agentIds: string[]): void {
  * moment the host stops listing it, which is the same event by a shorter road.
  */
 function forget(agentId: string): void {
+  // A card whose agent was killed outright ends here; one that exited on its
+  // own was already told by `noticeStatuses`.
+  workspaces.noteRun(agentId, "", true);
   activity.delete(agentId);
   lastAgent.delete(agentId);
   memory.delete(agentId);
@@ -1986,18 +2251,18 @@ function handleMessage(ws: WebSocket, raw: string): void {
         // second client with a stale one is still asking for a real agent.
         const launcher = typeof msg.launcher === "string" ? findLauncher(msg.launcher) : undefined;
         if (!launcher) throw new Error(`no such agent: ${String(msg.launcher)}`);
-        // A profile's own login directory has none of the hooks the machine's
-        // does, so a Claude started into one is handed kururu's. See `hooks.ts`.
-        const hooks = launcher.cli === "claude" && loginsActive() ? hookSettingsFlag() : "";
-        const command = launcherCommand(launcher, launch) + hooks;
-        return openTerminal(paneId, { cwd: msg.cwd, command, kind: "agent" });
+        return openTerminal(paneId, { cwd: msg.cwd, command: agentCommand(launcher), kind: "agent" });
       });
       return;
     }
 
     case "close-tab": {
-      const agentId = msg.agentId ?? workspaces.focusedAgent();
-      if (agentId) killAll([agentId]);
+      const focused = findPane(workspaces.activeWorkspace.layout, workspaces.focusedPaneId);
+      const agentId = msg.agentId ?? (focused ? activeAgent(focused) : null);
+      // The board's tab is a view: closing it ends nothing, and the cards stay
+      // on the workspace for the next `open-board`.
+      if (isBoardTab(agentId)) workspaces.removeTab(BOARD_TAB);
+      else if (agentId) killAll([agentId]);
       return;
     }
 
@@ -2041,7 +2306,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
       return;
 
     case "rename-tab":
-      host.rename(msg.agentId, msg.name);
+      if (!isBoardTab(msg.agentId)) host.rename(msg.agentId, msg.name);
       return;
 
     case "input":
@@ -2361,6 +2626,14 @@ function handleMessage(ws: WebSocket, raw: string): void {
       workspaces.reveal(msg.agentId);
       return;
 
+    case "set-project":
+      saveProject(msg.root, msg.settings);
+      return;
+
+    case "retire-worktrees":
+      void replyAsync(ws, msg.id, () => retireWorktrees(msg.root));
+      return;
+
     case "set-launch":
       saveLaunch(adoptLaunch(msg.launch));
       // Which login the bar reads may just have changed hands.
@@ -2449,6 +2722,59 @@ function handleMessage(ws: WebSocket, raw: string): void {
         return;
       }
       void shutdown().then(() => process.exit(RESTART_EXIT_CODE));
+      return;
+
+    // --- the board ---------------------------------------------------------
+
+    case "open-board":
+      // From a workspace row, which may not be the workspace on screen: go
+      // there first, since a board is only ever opened where you can see it.
+      if (typeof msg.workspaceId === "string") workspaces.switchWorkspace(msg.workspaceId);
+      workspaces.openBoard(msg.paneId ?? workspaces.focusedPaneId, msg.here === true);
+      return;
+
+    case "add-card":
+      workspaces.editBoard(msg.workspaceId, (board) =>
+        addCard(board, { title: msg.title, body: msg.body, column: msg.column }, mintCardId(), Date.now()),
+      );
+      return;
+
+    case "edit-card":
+      workspaces.editBoard(msg.workspaceId, (board) => editCard(board, msg.cardId, { title: msg.title, body: msg.body }));
+      return;
+
+    case "move-card":
+      workspaces.editBoard(msg.workspaceId, (board) => moveCard(board, msg.cardId, msg.column, msg.index));
+      return;
+
+    /*
+     * Deleting a card does not touch its agent. The card is a note about the
+     * work; the terminal is the work, with its own ✕ — and ending somebody's
+     * agent because they tidied a list is the accident `hide-agent` exists to
+     * keep apart from `close-tab`.
+     */
+    case "delete-card":
+      workspaces.editBoard(msg.workspaceId, (board) => removeCard(board, msg.cardId));
+      return;
+
+    case "run-card":
+      void replyAsync(ws, msg.id, () => runCard(msg.workspaceId, msg.cardId, msg.launcher));
+      return;
+
+    case "worktree-status":
+      void replyAsync(ws, msg.id, () => cardStatus(msg.workspaceId, msg.cardId));
+      return;
+    case "commit-card":
+      void replyAsync(ws, msg.id, () => commitCard(msg.workspaceId, msg.cardId));
+      return;
+    case "stash-card":
+      void replyAsync(ws, msg.id, () => stashCard(msg.workspaceId, msg.cardId));
+      return;
+    case "merge-card":
+      void replyAsync(ws, msg.id, () => mergeCard(msg.workspaceId, msg.cardId));
+      return;
+    case "open-worktree":
+      void replyAsync(ws, msg.id, () => openWorktree(msg.workspaceId, msg.cardId));
       return;
 
     // --- the reader --------------------------------------------------------
