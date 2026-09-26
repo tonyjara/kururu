@@ -869,6 +869,16 @@ export type ClientMessage =
   | { type: "merge-card"; id: number; workspaceId: string; cardId: string }
   | { type: "open-worktree"; id: number; workspaceId: string; cardId: string }
   /**
+   * The card's dev server, started on its own when the card's worktree is and
+   * ended when the card goes to Done — these are the two buttons between.
+   * `restart-card-dev` ends the terminal it is in and opens another in the
+   * same pane, or opens the first; `stop-card-dev` ends it and closes the tab.
+   * The command is the project's dev line and the port the kernel's; neither
+   * comes from here.
+   */
+  | { type: "restart-card-dev"; id: number; workspaceId: string; cardId: string }
+  | { type: "stop-card-dev"; id: number; workspaceId: string; cardId: string }
+  /**
    * The workspace's git button. Names the workspace, and the server finds the
    * main checkout by walking up from where its terminals are — the path is
    * never the client's. `root` is the checkout the button was showing, sent

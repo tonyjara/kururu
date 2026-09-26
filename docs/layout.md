@@ -156,6 +156,27 @@ wherever the pane beside the board is, which may be an earlier card's worktree;
 `mainRoot` resolves that back to the repository it was linked from, so the next
 card is cut from `main` and not from the last card.
 
+**A card's worktree is served as soon as it exists.** With a dev line set for
+the project, `run-card` opens a second terminal beside the agent's running it
+in the worktree, with `export PORT=<n>` in front and `n` a port the kernel
+handed out (bind 0, read, close). It goes into the pane the last card's server
+went to, so they line up as tabs of one pane, else the pane of the newest
+terminal in the workspace — never the board's own — and is opened before the
+agent so that in a shared pane the agent is the tab left showing. On a fresh
+checkout it waits for the setup line in the agent's terminal: the agent's
+command touches a marker in the temp directory after the setup succeeds, and
+the server's loops until it is there (outside the worktree, because a file in
+there is a change that would hold up the merge). The card keeps the terminal
+as `Card.dev` — agent id and offered port, the id dropped on the way to disk —
+and draws a line under the branch: the port, **open** (an href, found by the
+dev-server scan as the server whose cwd is inside the worktree, the offered
+port only breaking ties — vite ignores `PORT`), **log**, ↻ and ■. ↻ is
+`restart-card-dev`, which ends the terminal and opens another in the same
+pane, or starts one on a card that has none; ■ is `stop-card-dev`. Any move
+into Done — merged or "Just move" — ends it and closes its tab, and so does a
+merge or a retire, before the directory goes. Only worktrees: in the main
+checkout the dev server is the one the person already runs.
+
 **The card's menu carries the git, so nobody opens a terminal in each
 worktree.** Four rows under the moves, for a card with a worktree: **Commit
 changes** (`add -A`, the card's title as the subject and its body as the
