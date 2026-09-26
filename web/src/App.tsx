@@ -1095,6 +1095,7 @@ export function App() {
           onRun={run}
           onDeleteWorkspace={confirmDeleteWorkspace}
           onEditing={setEditing}
+          onPrompt={setDialog}
           onSettings={() => setSettings("appearance")}
           onReach={() => setReach(true)}
           /* Whether it is a column or a screen, and how to get rid of it. The

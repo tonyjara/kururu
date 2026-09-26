@@ -141,7 +141,8 @@ export type IconName =
   | "database"
   | "stop"
   | "play"
-  | "bot";
+  | "bot"
+  | "git";
 
 export type IconSet = Record<IconName, string>;
 
@@ -178,6 +179,8 @@ export const ICON_NAMES: readonly IconName[] = [
   "play",
   /** Handing a board's card to an agent. */
   "bot",
+  /** A workspace's checkout: its commit, merge, pull and push, from the sidebar. */
+  "git",
 ];
 
 /**
@@ -724,6 +727,8 @@ export const BASE_ICONS: IconSet = {
   play: "▸",
   /** Handing a card to an agent. A cog, since no font a skin can count on has a robot. */
   bot: "⚙",
+  /** A workspace's git. A branch fork, which every monospace face has in some form. */
+  git: "⎇",
 };
 
 /**

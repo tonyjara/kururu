@@ -27,6 +27,10 @@ export type DialogState =
       title: string;
       hint?: string;
       value: string;
+      /** What the button says. "Save" when absent, which is what a rename is. */
+      submitLabel?: string;
+      /** Shown in the empty field — for a commit, what a message looks like. */
+      placeholder?: string;
       onSubmit: (value: string) => void;
     }
   | {
@@ -87,6 +91,7 @@ function Prompt({ state, onClose }: { state: Extract<DialogState, { kind: "promp
         className="dialog-input"
         value={value}
         autoFocus
+        placeholder={state.placeholder}
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={(event) => {
           event.stopPropagation();
@@ -100,7 +105,7 @@ function Prompt({ state, onClose }: { state: Extract<DialogState, { kind: "promp
           Cancel
         </button>
         <button type="submit" className="button">
-          Save
+          {state.submitLabel ?? "Save"}
         </button>
       </div>
     </form>

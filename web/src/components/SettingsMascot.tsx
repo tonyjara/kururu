@@ -468,7 +468,7 @@ export function MascotSettings({
  * recognises, and a frog mid-jump is.
  *
  * The star is drawn on every row rather than only on the default, for the same
- * reason the workspace colour swatch is drawn on untagged workspaces: a control
+ * reason the workspace colour chip was drawn on untagged workspaces: a control
  * that appears only once it has been used is one nobody finds.
  *
  * Adding copies the one you are looking at rather than starting from the

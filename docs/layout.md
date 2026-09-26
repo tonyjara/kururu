@@ -407,25 +407,49 @@ Restored sessions are left alone. A workspace that comes back from disk with no
 colour stays that way, because retagging on load would be a version change
 rearranging a palette somebody had arranged by hand.
 
-**Where you see it is the rail**, not the swatch: a two-pixel edge down the left
-of the workspace's row, in the same `--tag` every agent living in that workspace
-wears. The round chip on the row's second line is how you *change* it. Those are
-different jobs and they used to be one 10×3px mark doing neither well.
+**Where you see it is the rail**: a two-pixel edge down the left of the
+workspace's row, in the same `--tag` every agent living in that workspace wears.
+It is changed from the row's menu, **Colour…**. A round chip at the end of the
+name's line did that job until the git button took its place.
 
 ## The workspace row
 
-One line — the number, the name, and the colour chip at the end of it — and a
-second under the name only when the workspace is in a repository, holding its
-branch. Nothing on the row runs anything. It used to carry a dev server's ↯, ↻
-and ■ and a Supabase ▤ as well, and they went because a row read every time you
-look at the sidebar is the wrong place for buttons pressed twice a day: the dev
-servers are listed under the agents, and starting one is a line in a terminal.
+One line — the number, the name, and in a repository the git button at the end
+of it — and a second under the name only when the workspace is in a repository,
+holding its branch. The row used to carry a dev server's ↯, ↻ and ■ and a
+Supabase ▤ as well, and they went because a row read every time you look at the
+sidebar is the wrong place for buttons pressed twice a day: the dev servers are
+listed under the agents, and starting one is a line in a terminal.
+
+**The git button is about the main checkout, never a card's worktree.** Its
+colour says whether that checkout has anything uncommitted (`--blocked`), has
+drifted from its upstream with a clean tree (`--accent`), or neither. The
+worktrees are left out on purpose: they are the board's to commit and merge,
+and a button that changed colour whenever focus crossed into one would be
+describing the wrong checkout. Its menu is **Commit…**, **Commit & merge into
+`main`…**, **Commit & push…**, then Pull, Push and Fetch; the three that commit
+ask for a message in the app's prompt, and only when there is something to
+commit. Merge is a fast-forward of the default branch — `origin/HEAD`, else
+`main`, else `master` — to the branch that is out, by `fetch . branch:main`,
+without leaving the branch; a `main` that has moved on is refused with "rebase
+first", never merged with a knot. Pull is `--ff-only`, Push never forces and
+sets the upstream the first time. What each came to replaces the branch line
+until clicked away.
+
+`git status` is a subprocess, so it is not on the four-second branch poll: it
+runs every `GIT_STATUS_MS` per main checkout, one at a time, with
+`--no-optional-locks` so it can never take the `index.lock` an agent committing
+in the same checkout needs — and at once after any of the button's own verbs.
+The walk that finds the checkout follows focus, which the next section argues
+is no way to choose what a button acts on; so the client sends back the root it
+was showing and the server refuses a verb whose walk has since landed elsewhere.
+The root is compared, never used.
 
 **The whole row switches workspace, both lines of it, and the name's button does
 not.** A branch line under the name's button is a strip along the bottom of the
 row that lights up on hover exactly like the rest, and would do nothing when
 pressed if the button were the target. The handler is on the `li`; a click that
-landed on the colour chip is let through to it, and the name's button is the one exception because it *is*
+landed on the git button is not let through to it, and the name's button is the one exception because it *is*
 this gesture, which is also what keeps Enter working on a focused row.
 
 **And a row that is dragged is a row that cannot be clicked.** A `draggable`
@@ -438,8 +462,8 @@ finished within `CLICK_SLOP` of where it started was a click, and is handed back
 as one.
 
 `.ws-list` is one grid and every row a `subgrid` slice of it — the name's track
-and the chip's — so the chips stand in one column down the list whatever the
-names are.
+and the button's — so the buttons stand in one column down the list whatever
+the names are.
 
 ## The branch on the row
 

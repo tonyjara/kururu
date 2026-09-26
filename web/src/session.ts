@@ -30,6 +30,7 @@ import type {
   ClientMessage,
   DevServer,
   EditorChoice,
+  GitAction,
   Notification,
   ServerMessage,
   WorkspaceBranch,
@@ -687,6 +688,18 @@ export function addCard(workspaceId: string, title: string, body: string, column
   send({ type: "add-card", workspaceId, title, body, column });
 }
 
+export function addRunCard(
+  workspaceId: string,
+  title: string,
+  body: string,
+  column: BoardColumn | undefined,
+  launcher: string,
+): Promise<string> {
+  return request((id) => ({ type: "add-run-card", id, workspaceId, title, body, column, launcher })).then(
+    (result) => (result as { agentId: string }).agentId,
+  );
+}
+
 export function editCard(workspaceId: string, cardId: string, fields: { title?: string; body?: string }): void {
   send({ type: "edit-card", workspaceId, cardId, ...fields });
 }
@@ -732,6 +745,16 @@ export function stashCard(workspaceId: string, cardId: string): Promise<{ files:
 }
 export function mergeCard(workspaceId: string, cardId: string): Promise<{ commits: number }> {
   return request((id) => ({ type: "merge-card", id, workspaceId, cardId })) as Promise<{ commits: number }>;
+}
+/**
+ * A verb on a workspace's git button, on its main checkout. Waits, for the
+ * card verbs' reason, and resolves to the line to show — what was committed,
+ * pushed or merged — or rejects with git's reason for not.
+ */
+export function workspaceGit(workspaceId: string, root: string, action: GitAction, message?: string): Promise<string> {
+  return request((id) => ({ type: "workspace-git", id, workspaceId, root, action, message })).then(
+    (result) => (result as { said: string }).said,
+  );
 }
 export function openWorktree(workspaceId: string, cardId: string): Promise<string> {
   return request((id) => ({ type: "open-worktree", id, workspaceId, cardId })).then(

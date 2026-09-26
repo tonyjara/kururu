@@ -426,6 +426,26 @@ export function BoardView({
                     api.addCard(workspaceId, title, body, column);
                     // Stays open for the next one: cards are written in runs.
                   }}
+                  onRun={
+                    launchers.length > 0
+                      ? (title, body, at) =>
+                          setMenu({
+                            at,
+                            items: launchers.map((launcher, index) => ({
+                              label: launcher.label,
+                              hint: launcher.model ? undefined : "default model",
+                              sep: index > 0 && launchers[index - 1]?.cli !== launcher.cli,
+                              run: () => {
+                                setAdding(null);
+                                api.addRunCard(workspaceId, title, body, column, launcher.id).catch((err: unknown) => {
+                                  console.error("add-run-card failed", err);
+                                  window.alert(err instanceof Error ? err.message : String(err));
+                                });
+                              },
+                            })),
+                          })
+                      : undefined
+                  }
                   onCancel={() => setAdding(null)}
                   keepOpen
                 />
@@ -627,6 +647,7 @@ function Composer({
   body: initialBody,
   submit,
   onSubmit,
+  onRun,
   onCancel,
   keepOpen,
 }: {
@@ -634,6 +655,8 @@ function Composer({
   body: string;
   submit: string;
   onSubmit: (title: string, body: string) => void;
+  /** Add the card and hand it straight to an agent; the robot beside the submit button. */
+  onRun?: (title: string, body: string, at: MenuAt) => void;
   onCancel: () => void;
   /** Clear and stay open after saving, for adding several in a row. */
   keepOpen?: boolean;
@@ -652,6 +675,19 @@ function Composer({
       field.current?.focus();
     }
   };
+  // Grown by hand, not with `field-sizing`: the phone's browser is not always
+  // one that has it. The height follows the text; the stylesheet's max-height
+  // is where it stops and the textarea scrolls instead.
+  const area = useRef<HTMLTextAreaElement | null>(null);
+  const grow = (node: HTMLTextAreaElement | null) => {
+    area.current = node;
+  };
+  useLayoutEffect(() => {
+    const node = area.current;
+    if (!node) return;
+    node.style.height = "auto";
+    node.style.height = `${node.scrollHeight}px`;
+  }, [body]);
   const keys = (event: React.KeyboardEvent, enterSaves: boolean) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -679,6 +715,7 @@ function Composer({
         onKeyDown={(event) => keys(event, true)}
       />
       <textarea
+        ref={grow}
         className="dialog-input board-composer-body"
         placeholder="Details — the agent is handed the title and all of this"
         value={body}
@@ -693,6 +730,22 @@ function Composer({
         <button type="submit" className="button" disabled={!title.trim()}>
           {submit}
         </button>
+        {onRun && (
+          <button
+            type="button"
+            className="pane-btn"
+            title="Add and run on an agent"
+            aria-label="Add and run on an agent"
+            aria-haspopup="menu"
+            disabled={!title.trim()}
+            onClick={(event) => {
+              const box = event.currentTarget.getBoundingClientRect();
+              onRun(title, body, { x: box.left, y: box.bottom + 4 });
+            }}
+          >
+            <Icon name="bot" />
+          </button>
+        )}
       </div>
     </form>
   );
