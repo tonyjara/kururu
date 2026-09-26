@@ -15,17 +15,18 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
-- **A card runs in a worktree of its own.** Press the robot on a card in a
-  repository and the agent starts in `<repo>.worktrees/<card>`, on a branch
+- **A card can run in a worktree of its own.** Tick **Worktree** as you write a
+  card (it is off by default) and pressing the robot starts the agent in
+  `<repo>.worktrees/<card>`, on a branch
   `kururu/<card>` cut from whatever you had checked out, so two cards on one
   project are two agents that cannot touch each other's files. The card shows
   the branch and what it was cut from, and a second agent on the same card goes
   back into the same checkout. New in Settings → **Workspaces**, a tab per
-  workspace showing the repository it is in: switch worktrees off for it, a
+  workspace showing the repository it is in: a
   **Setup** line run in a fresh worktree before the agent (`bun install` —
   a worktree starts with tracked files and nothing else), and a **Dev server**
-  line for the preview button that is coming next. Switching worktrees **off**
-  for a repository that has some standing asks first, with the list, and then
+  line for the preview button that is coming next. With worktrees standing,
+  the page offers **Merge and remove**, which asks first, with the list, and then
   merges each one back into the branch it was cut from — a rebase and a
   fast-forward, never a merge commit — removes the worktree and deletes the
   branch. An agent still working in one is ended; a worktree with uncommitted

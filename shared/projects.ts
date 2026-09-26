@@ -1,7 +1,8 @@
 /**
- * What kururu knows about a repository that is not in the repository: whether a
- * card runs in a worktree of its own, what to run in a fresh one before the
- * agent starts, and what starts the project's dev server.
+ * What kururu knows about a repository that is not in the repository: what to
+ * run in a card's fresh worktree before the agent starts, and what starts the
+ * project's dev server. Whether a card gets a worktree at all is the card's —
+ * `Card.isolate`, ticked as it is written.
  *
  * Keyed by the repository's root and not by the workspace, and that is the
  * decision this file exists for. A workspace once remembered a dev command and
@@ -24,12 +25,6 @@
  */
 
 export interface ProjectSettings {
-  /**
-   * Cards run in a worktree beside the repository. On by default, because it
-   * is the whole reason a board hands work to more than one agent: two agents
-   * in one checkout are two agents editing each other's files.
-   */
-  worktrees: boolean;
   /**
    * Run in a *fresh* worktree, before the agent, in the agent's own terminal.
    * `git worktree add` gives you the tracked files and nothing else — no
@@ -115,7 +110,7 @@ export type MergeReply = { commits: number; note: string | null } | { blocked: M
 /** By repository root, as a realpath. */
 export type ProjectSettingsMap = Record<string, ProjectSettings>;
 
-export const DEFAULT_PROJECT: ProjectSettings = { worktrees: true, setup: "", dev: "" };
+export const DEFAULT_PROJECT: ProjectSettings = { setup: "", dev: "" };
 
 /** A shell line somebody typed. Long enough for a `&&` chain; not a script. */
 export const COMMAND_MAX = 2000;
@@ -129,7 +124,6 @@ function command(value: unknown): string {
 export function adoptProject(raw: unknown): ProjectSettings {
   const obj = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   return {
-    worktrees: obj.worktrees !== false,
     setup: command(obj.setup),
     dev: command(obj.dev),
   };
@@ -156,11 +150,11 @@ export function projectSettingsFor(map: ProjectSettingsMap, root: string): Proje
 
 /**
  * Whether a project's settings are the defaults, which is when its entry can
- * be left out of the file rather than written as three defaults that would
+ * be left out of the file rather than written as two defaults that would
  * then be a row on the page for a repository nobody has thought about.
  */
 export function isDefaultProject(settings: ProjectSettings): boolean {
-  return settings.worktrees === DEFAULT_PROJECT.worktrees && settings.setup === "" && settings.dev === "";
+  return settings.setup === "" && settings.dev === "";
 }
 
 // ---------------------------------------------------------------------------

@@ -126,10 +126,11 @@ column's job, and a deleted card has not been through it.
 
 ### Worktrees
 
-**A card runs in a checkout of its own, beside the repository.** Two agents in
-one working tree are two agents editing each other's files, so `run-card` looks
-for the repository the agent would have started in, and — unless that project
-has been told not to in Settings → Workspaces — makes `<repo>.worktrees/<slug>-<id>`
+**A card can run in a checkout of its own, beside the repository.** Two agents
+in one working tree are two agents editing each other's files, so the composer
+has a **Worktree** box, off by default and remembered across a run of new cards
+(`Card.isolate`; editable until the worktree exists). A ticked card's `run-card`
+looks for the repository the agent would have started in and makes `<repo>.worktrees/<slug>-<id>`
 with `git worktree add` on a branch `kururu/<slug>-<id>`, cut from whatever the
 main tree has checked out. The agent starts in there. The naming is
 `shared/projects.ts`, the git is `server/src/worktree.ts`, and the latter is
@@ -230,10 +231,9 @@ Codex picks its own ids and never says them, so its row opens `codex resume`'s
 picker instead, with `--all` when the directory is gone. Runs from before this
 have no id and no row.
 
-**Switching worktrees off retires the ones standing, and asks first.** The
-switch in Settings → Workspaces is the one control on that page that does
-anything to the disk: with worktrees still standing for the repository, it
-draws the list — branch, base, card, whether an agent is in it — and waits for
+**Retiring the worktrees standing asks first.** **Merge and remove** in
+Settings → Workspaces is the one control on that page that does anything to
+the disk: with worktrees still standing for the repository, it draws the list — branch, base, card, whether an agent is in it — and waits for
 a second click, in the page rather than in a dialog over it, the way deleting a
 profile asks. `retire-worktrees` then walks every card in the profile whose
 worktree is in that repository, one at a time because they all land on the same

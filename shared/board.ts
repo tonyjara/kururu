@@ -140,6 +140,14 @@ export interface Card {
   column: BoardColumn;
   createdAt: number;
   run: CardRun | null;
+  /**
+   * Whether the card's agent gets a worktree of its own, ticked when the card
+   * is written. A choice per card rather than a project setting, because most
+   * cards are a quick fix that belongs in the checkout you are already in, and
+   * the few that want isolation are the ones you know about as you write them.
+   * A card whose worktree already stands keeps going back into it either way.
+   */
+  isolate: boolean;
   worktree: CardWorktree | null;
   dev: CardDev | null;
 }
@@ -169,7 +177,12 @@ function text(value: unknown, max: number): string | null {
 }
 
 /** A new card at the foot of its column. A card with no title is not a card. */
-export function addCard(board: Board, fields: { title: unknown; body?: unknown; column?: unknown }, id: string, now: number): Board {
+export function addCard(
+  board: Board,
+  fields: { title: unknown; body?: unknown; column?: unknown; isolate?: unknown },
+  id: string,
+  now: number,
+): Board {
   const title = text(fields.title, TITLE_MAX);
   if (!title) return board;
   const card: Card = {
@@ -179,20 +192,29 @@ export function addCard(board: Board, fields: { title: unknown; body?: unknown; 
     column: isBoardColumn(fields.column) ? fields.column : "todo",
     createdAt: now,
     run: null,
+    isolate: fields.isolate === true,
     worktree: null,
     dev: null,
   };
   return { cards: [...board.cards, card] };
 }
 
-export function editCard(board: Board, cardId: string, fields: { title?: unknown; body?: unknown }): Board {
+export function editCard(board: Board, cardId: string, fields: { title?: unknown; body?: unknown; isolate?: unknown }): Board {
   const title = fields.title === undefined ? undefined : text(fields.title, TITLE_MAX);
   const body = fields.body === undefined ? undefined : text(fields.body, BODY_MAX);
   // An emptied title is refused rather than applied, for `addCard`'s reason.
   if (title === "" || title === null || body === null) return board;
+  const isolate = typeof fields.isolate === "boolean" ? fields.isolate : undefined;
   return {
     cards: board.cards.map((card) =>
-      card.id === cardId ? { ...card, ...(title !== undefined ? { title } : {}), ...(body !== undefined ? { body } : {}) } : card,
+      card.id === cardId
+        ? {
+            ...card,
+            ...(title !== undefined ? { title } : {}),
+            ...(body !== undefined ? { body } : {}),
+            ...(isolate !== undefined ? { isolate } : {}),
+          }
+        : card,
     ),
   };
 }
@@ -351,6 +373,8 @@ export function adoptBoard(value: unknown): Board | null {
       column: isBoardColumn(item.column) ? item.column : "todo",
       createdAt: Number.isFinite(item.createdAt) ? (item.createdAt as number) : 0,
       run: adoptRun(item.run),
+      // A card from before the choice was per card ran in a worktree if it has one.
+      isolate: item.isolate === true || adoptWorktree(item.worktree) !== null,
       worktree: adoptWorktree(item.worktree),
       dev: adoptDev(item.dev),
     });

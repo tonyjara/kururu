@@ -20,12 +20,13 @@
  * same reason — a line sent per keystroke is a settings file rewritten thirty
  * times on the way to `bun install`.
  *
- * Switching worktrees off is the one control here that does something to the
- * disk, and it asks first. The worktrees standing for that repository are
- * merged back and removed, which ends any agent still in one, so the switch
- * shows the list and waits for a second click — in the page rather than in a
- * dialog over it, the way deleting a profile asks: Settings is already modal,
- * and a confirm over a confirm is a stack.
+ * Whether a card runs in a worktree is the card's, ticked in its composer, so
+ * nothing here switches worktrees on or off. What is here is what a fresh one
+ * needs, and the one control that does something to the disk: merging every
+ * standing worktree back and removing it. That asks first, since it ends any
+ * agent still in one — in the page rather than in a dialog over it, the way
+ * deleting a profile asks: Settings is already modal, and a confirm over a
+ * confirm is a stack.
  */
 import { useState } from "react";
 import type { Card } from "../../../shared/board";
@@ -77,7 +78,8 @@ export function WorkspaceSettings({
       <section className="set-section">
         <h3 className="set-h">Workspaces</h3>
         <p className="set-note">
-          Where the robot on a card starts its agent, for the repository each workspace is in.
+          What a card's worktree gets, for the repository each workspace is in. Whether a card runs in
+          one is ticked on the card as you write it.
         </p>
       </section>
 
@@ -134,8 +136,8 @@ function RepositorySettings({
   const name = root.slice(root.lastIndexOf("/") + 1) || root;
   const set = (patch: Partial<ProjectSettings>) => api.setProject(root, { ...settings, ...patch });
   /**
-   * The switch's second click, and what came of it. `asking` is the list
-   * showing with the switch drawn off but nothing sent; `outcomes` is the
+   * The sweep's second click, and what came of it. `asking` is the list
+   * showing with nothing sent yet; `outcomes` is the
    * reply, kept on the page until the tab changes so a worktree that was left
    * standing has its reason next to it. `failed` is the sweep refused as a
    * whole, which the reply does not itemise.
@@ -145,18 +147,11 @@ function RepositorySettings({
   const [outcomes, setOutcomes] = useState<WorktreeOutcome[] | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
 
-  const toggle = (on: boolean) => {
-    if (on || standing.length === 0) set({ worktrees: on });
-    else setAsking(true);
-  };
   const retire = () => {
     setAsking(false);
     setBusy(true);
     setOutcomes(null);
     setFailed(null);
-    // The setting goes first: the person turned it off, and a worktree that
-    // refuses to merge is a reason to say so, not to leave the switch on.
-    if (settings.worktrees) set({ worktrees: false });
     api
       .retireWorktrees(root)
       .then(setOutcomes, (err: unknown) => setFailed(err instanceof Error ? err.message : String(err)))
@@ -172,24 +167,16 @@ function RepositorySettings({
           The same repository as <strong>{sharedWith.join(", ")}</strong>, so these settings are shared.
         </p>
       )}
-      <label className="set-check set-check-row">
-        <input
-          type="checkbox"
-          checked={settings.worktrees && !asking}
-          disabled={busy}
-          onChange={(event) => toggle(event.target.checked)}
-        />
-        Run each card in a worktree of its own
-      </label>
       <p className="set-note set-note-under">
-        Beside the repository, as <span className="set-mono">{worktreeDir(root, "<card>")}</span>, on a branch
-        under <span className="set-mono">kururu/</span>. Off, cards run in the checkout the board is in.
+        A card ticked <strong>Worktree</strong> runs beside the repository, as{" "}
+        <span className="set-mono">{worktreeDir(root, "<card>")}</span>, on a branch under{" "}
+        <span className="set-mono">kururu/</span>. Unticked, it runs in the checkout the board is in.
       </p>
 
       {asking && (
         <div className="set-warn set-retire">
           <p className="set-retire-lead">
-            Turning this off merges {count(standing.length, "worktree")} back into the branch each was cut from and
+            This merges {count(standing.length, "worktree")} back into the branch each was cut from and
             removes {standing.length === 1 ? "it" : "them"}. An agent still working in one is ended first. Anything
             uncommitted is left where it is, and that worktree stays.
           </p>
@@ -213,12 +200,9 @@ function RepositorySettings({
         </div>
       )}
 
-      {/* Worktrees off and some still standing — a sweep that left some behind,
-          or a repository switched off before there was a sweep. The same
-          question, from the other side of the switch. */}
-      {!asking && !busy && !settings.worktrees && standing.length > 0 && (
+      {!asking && !busy && standing.length > 0 && (
         <p className="set-note set-note-under">
-          {count(standing.length, "worktree")} still standing.{" "}
+          {count(standing.length, "worktree")} standing.{" "}
           <button className="set-choice set-button-inline" onClick={() => setAsking(true)}>
             Merge and remove
           </button>
@@ -240,24 +224,22 @@ function RepositorySettings({
         </ul>
       )}
 
-      <fieldset className="set-fieldset" disabled={!settings.worktrees}>
-        <div className="set-row">
-          <span className="set-label">Setup</span>
-          <Text
-            className="set-text"
-            value={settings.setup}
-            placeholder="bun install"
-            onCommit={(setup) => set({ setup })}
-            onEditing={onEditing}
-            aria-label="Setup command"
-          />
-        </div>
-        <p className="set-note set-note-under">
-          Run once in a fresh worktree, in the agent's terminal, before the agent. A worktree starts
-          with the tracked files and a copy of the main checkout's ignored{" "}
-          <span className="set-mono">.env*</span> files — no dependencies.
-        </p>
-      </fieldset>
+      <div className="set-row">
+        <span className="set-label">Setup</span>
+        <Text
+          className="set-text"
+          value={settings.setup}
+          placeholder="bun install"
+          onCommit={(setup) => set({ setup })}
+          onEditing={onEditing}
+          aria-label="Setup command"
+        />
+      </div>
+      <p className="set-note set-note-under">
+        Run once in a fresh worktree, in the agent's terminal, before the agent. A worktree starts
+        with the tracked files and a copy of the main checkout's ignored{" "}
+        <span className="set-mono">.env*</span> files — no dependencies.
+      </p>
       <div className="set-row">
         <span className="set-label">Dev server</span>
         <Text

@@ -820,15 +820,24 @@ export type ClientMessage =
    * The text is checked and capped on the server (`shared/board.ts`), and a
    * move's index is a place among the destination column's cards.
    */
-  | { type: "add-card"; workspaceId: string; title: string; body?: string; column?: BoardColumn }
+  | { type: "add-card"; workspaceId: string; title: string; body?: string; column?: BoardColumn; isolate?: boolean }
   /**
    * A card written and handed to an agent in one go — the composer's robot.
    * Add and run are one verb because the card's id is minted by the server:
    * two messages would leave the client with nothing to name the card by.
    * Replied to like `run-card`; a run that fails leaves the card on the board.
    */
-  | { type: "add-run-card"; id: number; workspaceId: string; title: string; body?: string; column?: BoardColumn; launcher: string }
-  | { type: "edit-card"; workspaceId: string; cardId: string; title?: string; body?: string }
+  | {
+      type: "add-run-card";
+      id: number;
+      workspaceId: string;
+      title: string;
+      body?: string;
+      column?: BoardColumn;
+      isolate?: boolean;
+      launcher: string;
+    }
+  | { type: "edit-card"; workspaceId: string; cardId: string; title?: string; body?: string; isolate?: boolean }
   | { type: "move-card"; workspaceId: string; cardId: string; column: BoardColumn; index?: number }
   | { type: "delete-card"; workspaceId: string; cardId: string }
 
@@ -998,8 +1007,8 @@ export type ClientMessage =
   | { type: "set-project"; root: string; settings: ProjectSettings }
   /**
    * Merge every card's worktree in this repository back into the branch it was
-   * cut from and take it down — what switching worktrees off for a repository
-   * asks, once the person has read the list and said so. Replied to with a
+   * cut from and take it down — the sweep Settings → Workspaces offers, once
+   * the person has read the list and said so. Replied to with a
    * `WorktreeOutcome` per card, because it is a sweep whose parts can fail
    * separately and the next snapshot only shows which worktrees are gone, not
    * why the others are not. `root` is checked as `set-project`'s is.
