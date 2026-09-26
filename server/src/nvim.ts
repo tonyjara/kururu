@@ -32,7 +32,7 @@
 import { execFile } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { childIndex, readProcTable, type ProcInfo } from "./agents/procs";
+import { childIndex, readProcTable, type ProcInfo, type ProcTable } from "./agents/procs";
 
 /** An editor kururu has found, and the socket it answers on. */
 export interface NvimInstance {
@@ -116,8 +116,12 @@ function isNvim(proc: ProcInfo): boolean {
  * first with a socket. An editor that goes back to being one process, or grows
  * another layer, needs no change here.
  */
-export async function findNvim(ptyPid: number): Promise<NvimInstance | null> {
-  const table = await readProcTable();
+export async function findNvim(
+  ptyPid: number,
+  /** A table already read, when several terminals are being asked about at once. */
+  given?: ProcTable,
+): Promise<NvimInstance | null> {
+  const table = given ?? (await readProcTable());
   const root = table.get(ptyPid);
   if (!root) return null;
   const children = childIndex(table);
@@ -177,18 +181,66 @@ return 1
 }
 
 /**
- * Install the hook, and say whether it took.
+ * Run a chunk of lua in an editor and hand back what it printed, or null.
  *
  * `--remote-expr` rather than `--remote-send`: send types keys into whatever
  * mode the editor happens to be in, which on a bad day is a buffer. An
  * expression is evaluated, answers, and cannot be a paste into somebody's file.
+ * An editor sitting in a prompt does not evaluate anything until it leaves it,
+ * which is what the timeout is for.
  */
-export function attach(instance: NvimInstance, agentId: string, port: number): Promise<boolean> {
-  const payload = Buffer.from(hookSource(agentId, port), "utf8").toString("base64");
+function evalLua(instance: NvimInstance, source: string): Promise<string | null> {
+  const payload = Buffer.from(source, "utf8").toString("base64");
   const expr = `luaeval('loadstring(vim.base64.decode("${payload}"))()')`;
   return new Promise((resolve) => {
     execFile("nvim", ["--server", instance.socket, "--remote-expr", expr], { timeout: 3000 }, (err, stdout) => {
-      resolve(!err && stdout.trim() === "1");
+      resolve(err ? null : stdout.trim());
     });
   });
+}
+
+/** Install the hook, and say whether it took. */
+export async function attach(instance: NvimInstance, agentId: string, port: number): Promise<boolean> {
+  return (await evalLua(instance, hookSource(agentId, port))) === "1";
+}
+
+/**
+ * The file tree's other half: open a file in an editor somebody already has.
+ *
+ * `:drop` rather than `:edit`, because it is the command that already means
+ * what a click in a tree means — go to the file where it is showing if it is
+ * showing anywhere, and open it here if it is not. But "here" is the window
+ * with the cursor in it, and in a configured nvim that is as likely to be a
+ * file explorer, a picker's float or a terminal buffer as a file. Dropping a
+ * source file into a sidebar is the one outcome worse than doing nothing, so a
+ * window that is not a plain buffer hands over to one in the same tab that is.
+ *
+ * `stopinsert` because a file that opens under a cursor still in insert mode
+ * is a file whose next keystroke is typed into it. The path crosses as base64,
+ * for the reason `attach` sends its source that way — there is no quoting
+ * scheme that survives lua, vimscript and a file name with a quote in it.
+ */
+export async function openFile(instance: NvimInstance, path: string): Promise<boolean> {
+  const encoded = Buffer.from(path, "utf8").toString("base64");
+  const source = `
+local path = vim.base64.decode("${encoded}")
+local function usable(win)
+  if vim.api.nvim_win_get_config(win).relative ~= "" then return false end
+  return vim.bo[vim.api.nvim_win_get_buf(win)].buftype == ""
+end
+local ok = pcall(function()
+  vim.cmd("stopinsert")
+  if not usable(vim.api.nvim_get_current_win()) then
+    for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      if usable(win) then
+        vim.api.nvim_set_current_win(win)
+        break
+      end
+    end
+  end
+  vim.cmd("drop " .. vim.fn.fnameescape(path))
+end)
+return ok and 1 or 0
+`;
+  return (await evalLua(instance, source)) === "1";
 }

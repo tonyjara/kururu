@@ -15,6 +15,23 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **The reader has tabs, one per document, and they drag like terminal tabs.**
+  Markdown opened from the tree or by the editor it follows opens as a new tab
+  rather than replacing the one you were reading. Drag a tab to reorder it, onto
+  another reader to move it, or onto any pane's edge for a reader of its own;
+  closing the last tab closes the pane. The name that used to open a picker is
+  gone — the tree is where documents come from now, and every pane's menu has
+  **Show the file tree**. The text-size buttons moved to the tree's header.
+
+- **A file tree, and a way out of it into nvim.** `C-a e`, or the folder at the
+  right of the status bar, opens the workspace's project down the right-hand
+  side. Markdown opens in the reader. Anything else opens in nvim: kururu
+  finds every nvim running in the workspace and asks which — the nearest is
+  first, so it is usually just `Enter` — and the file goes there with `:drop`,
+  or into a new nvim in a split if none is running. No plugin, no config. On a
+  phone it is a sheet, and a file picked there opens in the nvim on your
+  desktop.
+
 - **Each profile can keep its own logins.** Settings → Profiles has one switch,
   off by default: on, every terminal a profile opens starts Claude Code and
   Codex on directories of that profile's own, under
@@ -153,6 +170,11 @@ shows, so it is written once and read in three places — see
 
 ### Fixed
 
+- **The reader's pin button did nothing once pressed.** Pinning forgot which
+  editor the reader was following, so asking to follow again had nobody to
+  follow. It remembers now, and a reader opened from the tree — which never had
+  an editor — no longer shows the button at all.
+
 - **A phone you put down kept the desktop at phone width.** Two clients watching
   one agent both get a screen they can draw, which means the smaller of them
   decides — and a phone that locks keeps its panes and its connection, so it went
@@ -183,7 +205,7 @@ shows, so it is written once and read in three places — see
   Installing, Updating, Removing — and its own failure, shown on the row beside
   the button that tries again, and Refresh says when it is refreshing. The
   same sweep gave the Mascot tab's import and remove, and the studio's Create,
-  Delete, uploads and licence file, a visible in-progress state and a guard
+  Delete, and uploads and licence file, a visible in-progress state and a guard
   against a second press.
 - A skin's screenshot in the Styles tab went missing for up to ten minutes after
   every registry publish: the preview checked the picture against the digest in

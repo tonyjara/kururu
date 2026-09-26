@@ -203,8 +203,11 @@ argument that keeps `tailscale` commands out of kururu.
   lexical `../`; the second catches a symlink inside the project pointing at
   `~/.ssh`. An escaping path is **refused, never clamped** — a clamped traversal
   is a bug that looks like it worked. Roots are only ever learned from places the
-  server already knows (an agent's cwd, a dev server's cwd, `KURURU_ROOTS`),
-  never from a client.
+  server already knows (an agent's cwd, a dev server's cwd, `KURURU_ROOTS`, and
+  the repository `pollBranches` walked up to from one of those), never from a
+  client.
+- **`files.ts` never writes.** Code is never written by kururu; the tree hands
+  it to nvim.
 - **`markdown.ts`: `html: false` IS the sanitizer.** Server-side so the phone
   gets no parser.
 - **`update.ts` checks and never installs.** See [packaging](packaging.md).

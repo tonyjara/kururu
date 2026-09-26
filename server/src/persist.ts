@@ -26,7 +26,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Profile, Workspace } from "../../shared/model";
 import { isLoginKey, isWorkspaceColor, mintLoginKey } from "../../shared/model";
-import type { LayoutNode } from "../../shared/layout";
+import type { LayoutNode, ReaderState } from "../../shared/layout";
 import { nextId } from "./workspaces";
 
 /** Bumped when the shape below changes; an older file is ignored, not migrated. */
@@ -41,7 +41,7 @@ interface StoredPane {
    * restored reader comes back pinned to its last file — which is the honest
    * answer, because the nvim that was driving it is gone.
    */
-  reader?: { root: string; path: string };
+  reader?: { root: string; path: string; docs?: { root: string; path: string }[] };
 }
 type StoredNode =
   | { type: "pane"; pane: StoredPane }
@@ -98,7 +98,15 @@ function strip(node: LayoutNode): StoredNode {
       type: "pane",
       pane: {
         ...(cwd ? { cwd } : {}),
-        ...(reader?.path ? { reader: { root: reader.root, path: reader.path } } : {}),
+        ...(reader?.path
+          ? {
+              reader: {
+                root: reader.root,
+                path: reader.path,
+                docs: reader.docs.map((doc) => ({ root: doc.root, path: doc.path })),
+              },
+            }
+          : {}),
       },
     };
   }
@@ -149,7 +157,7 @@ function revive(node: StoredNode): LayoutNode {
     const stored = node.pane?.reader;
     const reader =
       stored && typeof stored.root === "string" && typeof stored.path === "string"
-        ? { root: stored.root, path: stored.path, follow: null, rev: 0 }
+        ? { root: stored.root, path: stored.path, follow: null, editor: null, docs: storedDocs(stored), rev: 0 }
         : undefined;
     return { type: "pane", pane: { id: nextId("n"), agentIds: [], activeIdx: 0, cwd, reader } };
   }
@@ -162,6 +170,46 @@ function revive(node: StoredNode): LayoutNode {
     a: revive(node.a),
     b: revive(node.b),
   };
+}
+
+/**
+ * A reader's tabs off the disk, with the showing document among them whatever
+ * the file says. A snapshot from before readers had tabs has no list at all, and
+ * comes back as the one tab it was showing.
+ */
+function storedDocs(stored: { root: string; path: string; docs?: unknown }): { root: string; path: string }[] {
+  const docs = Array.isArray(stored.docs)
+    ? (stored.docs as { root?: unknown; path?: unknown }[]).filter(
+        (doc): doc is { root: string; path: string } =>
+          Boolean(doc) && typeof doc.root === "string" && typeof doc.path === "string" && doc.path !== "",
+      )
+    : [];
+  const showing = docs.some((doc) => doc.root === stored.root && doc.path === stored.path);
+  return showing ? docs : [...docs, { root: stored.root, path: stored.path }];
+}
+
+/**
+ * Bring a host blob's readers up to the current shape.
+ *
+ * The blob is a live tree handed across a restart verbatim, so unlike the file
+ * it never passes through `revive` — and a server that predates reader tabs
+ * left readers with no `docs` and no `editor`. Trusting those as `ReaderState`
+ * is what took the first snapshot write down on `reader.docs.map`. The file's
+ * rules apply: the showing document is always among the tabs.
+ */
+export function adoptReaders(profiles: Profile[]): Profile[] {
+  const walk = (node: LayoutNode): LayoutNode => {
+    if (node.type === "split") return { ...node, a: walk(node.a), b: walk(node.b) };
+    const reader = node.pane.reader as (Partial<ReaderState> & { root: string; path: string }) | undefined;
+    if (!reader) return node;
+    const editor = typeof reader.editor === "string" ? reader.editor : (reader.follow ?? null);
+    const docs = reader.path ? storedDocs(reader) : Array.isArray(reader.docs) ? reader.docs : [];
+    return { ...node, pane: { ...node.pane, reader: { ...reader, follow: reader.follow ?? null, editor, docs, rev: reader.rev ?? 0 } } };
+  };
+  return profiles.map((profile) => ({
+    ...profile,
+    workspaces: profile.workspaces.map((workspace) => ({ ...workspace, layout: walk(workspace.layout) })),
+  }));
 }
 
 function looksLikeNode(value: unknown): value is StoredNode {

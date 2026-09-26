@@ -8,7 +8,7 @@
  * nothing else, which is what makes it testable at all.
  */
 import { describe, expect, it } from "bun:test";
-import { panes } from "../../shared/layout";
+import { findPane, panes } from "../../shared/layout";
 import { Workspaces, nextColor, nextId, orderAgents } from "../src/workspaces";
 import { LOGIN_KEY, WORKSPACE_COLORS, type Profile } from "../../shared/model";
 
@@ -343,6 +343,129 @@ describe("the reader", () => {
   it("does nothing to a pane that is not a reader", () => {
     const workspaces = new Workspaces();
     expect(workspaces.openDoc(workspaces.focusedPaneId, "/home/you/project", "README.md")).toBe(false);
+  });
+});
+
+/**
+ * A reader's tabs: one per document, the showing one always among them, and
+ * the last one closed takes the pane — plus the follow button, which used to
+ * forget the editor the moment it was pinned and so could never unpin.
+ */
+describe("reader tabs", () => {
+  const ROOT = "/home/you/project";
+  const readerOf = (workspaces: Workspaces, id: string) =>
+    panes(workspaces.activeWorkspace.layout).find((p) => p.id === id)?.reader;
+
+  it("opens each document as a tab after the one showing, and never twice", () => {
+    const workspaces = new Workspaces();
+    const made = workspaces.showDoc(ROOT, "a.md")!;
+    workspaces.showDoc(ROOT, "b.md");
+    workspaces.selectDoc(made, 0);
+    workspaces.showDoc(ROOT, "c.md");
+    workspaces.showDoc(ROOT, "b.md");
+    const reader = readerOf(workspaces, made)!;
+    expect(reader.docs.map((doc) => doc.path)).toEqual(["a.md", "c.md", "b.md"]);
+    expect(reader.path).toBe("b.md");
+    // Every click landed in the one reader rather than tiling the window.
+    expect(panes(workspaces.activeWorkspace.layout).filter((p) => p.reader)).toHaveLength(1);
+  });
+
+  it("shows the neighbour when the showing tab closes, and closes the pane with the last", () => {
+    const workspaces = new Workspaces();
+    const made = workspaces.showDoc(ROOT, "a.md")!;
+    workspaces.showDoc(ROOT, "b.md");
+    workspaces.showDoc(ROOT, "c.md");
+    workspaces.selectDoc(made, 1);
+    workspaces.closeDoc(made, 1);
+    expect(readerOf(workspaces, made)).toMatchObject({ path: "c.md" });
+    workspaces.closeDoc(made, 1);
+    expect(readerOf(workspaces, made)).toMatchObject({ path: "a.md" });
+    workspaces.closeDoc(made, 0);
+    expect(readerOf(workspaces, made)).toBeUndefined();
+  });
+
+  it("ignores an index that is not a tab", () => {
+    const workspaces = new Workspaces();
+    const made = workspaces.showDoc(ROOT, "a.md")!;
+    workspaces.closeDoc(made, 5);
+    workspaces.selectDoc(made, 5);
+    expect(readerOf(workspaces, made)).toMatchObject({ path: "a.md", docs: [{ root: ROOT, path: "a.md" }] });
+  });
+
+  it("remembers the editor through a pin, so following again has somebody to follow", () => {
+    const workspaces = new Workspaces();
+    const made = workspaces.openReader(workspaces.focusedPaneId, "agent-1", ROOT)!;
+    workspaces.pinReader(made, false);
+    expect(readerOf(workspaces, made)).toMatchObject({ follow: null, editor: "agent-1" });
+    workspaces.pinReader(made, true);
+    expect(readerOf(workspaces, made)).toMatchObject({ follow: "agent-1" });
+  });
+
+  it("has nobody to follow when it was opened from the tree", () => {
+    const workspaces = new Workspaces();
+    const made = workspaces.showDoc(ROOT, "a.md")!;
+    workspaces.pinReader(made, true);
+    expect(readerOf(workspaces, made)).toMatchObject({ follow: null, editor: null });
+  });
+
+  const paths = (workspaces: Workspaces, id: string) => readerOf(workspaces, id)?.docs.map((doc) => doc.path);
+
+  it("reorders along its own strip, the index read as where the tab was dropped", () => {
+    const workspaces = new Workspaces();
+    const made = workspaces.showDoc(ROOT, "a.md")!;
+    workspaces.showDoc(ROOT, "b.md");
+    workspaces.showDoc(ROOT, "c.md");
+    // a dropped on the insertion line after c.
+    workspaces.moveDoc(made, 0, made, 3);
+    expect(paths(workspaces, made)).toEqual(["b.md", "c.md", "a.md"]);
+    expect(readerOf(workspaces, made)?.path).toBe("a.md");
+    workspaces.moveDoc(made, 2, made, 0);
+    expect(paths(workspaces, made)).toEqual(["a.md", "b.md", "c.md"]);
+  });
+
+  it("moves a tab into another reader, and closes the one it emptied", () => {
+    const workspaces = new Workspaces();
+    const one = workspaces.showDoc(ROOT, "a.md")!;
+    workspaces.showDoc(ROOT, "b.md");
+    workspaces.splitWithDoc(one, 1, one, "row", false);
+    const two = workspaces.focusedPaneId;
+    expect(two).not.toBe(one);
+    expect(paths(workspaces, one)).toEqual(["a.md"]);
+    expect(paths(workspaces, two)).toEqual(["b.md"]);
+    workspaces.moveDoc(one, 0, two, 0);
+    expect(paths(workspaces, two)).toEqual(["a.md", "b.md"]);
+    expect(readerOf(workspaces, two)?.path).toBe("a.md");
+    expect(readerOf(workspaces, one)).toBeUndefined();
+  });
+
+  it("splits beside a terminal pane, and refuses to split a reader off its only tab", () => {
+    const workspaces = new Workspaces();
+    const terminal = workspaces.focusedPaneId;
+    const made = workspaces.showDoc(ROOT, "a.md")!;
+    const before = workspaces.activeWorkspace.layout;
+    workspaces.splitWithDoc(made, 0, made, "col", false);
+    expect(workspaces.activeWorkspace.layout).toBe(before);
+    workspaces.splitWithDoc(made, 0, terminal, "col", true);
+    const all = panes(workspaces.activeWorkspace.layout);
+    expect(all.filter((p) => p.reader).map((p) => p.reader!.path)).toEqual(["a.md"]);
+    expect(all.find((p) => p.id === made)).toBeUndefined();
+  });
+
+  it("pours a reader into a reader, and never into a terminal pane", () => {
+    const workspaces = new Workspaces();
+    const terminal = workspaces.focusedPaneId;
+    const one = workspaces.showDoc(ROOT, "a.md")!;
+    workspaces.showDoc(ROOT, "b.md");
+    workspaces.splitWithDoc(one, 1, one, "row", false);
+    const two = workspaces.focusedPaneId;
+    workspaces.showDoc(ROOT, "a.md");
+    workspaces.mergePanes(one, terminal);
+    expect(readerOf(workspaces, one)).toBeDefined();
+    workspaces.mergePanes(terminal, one);
+    expect(findPane(workspaces.activeWorkspace.layout, terminal)).not.toBeNull();
+    workspaces.mergePanes(one, two);
+    expect(readerOf(workspaces, one)).toBeUndefined();
+    expect(paths(workspaces, two)).toEqual(["b.md", "a.md"]);
   });
 });
 

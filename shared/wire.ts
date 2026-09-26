@@ -180,6 +180,33 @@ export interface WorkspaceBranch {
 }
 
 /**
+ * The directory a workspace's file tree is rooted at.
+ *
+ * The repository the workspace is in when it is in one, and otherwise the
+ * directory its focused terminal is standing in. A repository rather than a cwd
+ * because a terminal that has `cd`'d into `server/src` is still working on the
+ * whole project, and a tree that shrank to wherever you last stood would be a
+ * tree you kept climbing out of.
+ *
+ * Found by the server, from terminals it holds, and allowed as a root there —
+ * so it is also the answer to "may the tree read this": a client never names a
+ * root it was not first handed.
+ */
+export interface WorkspaceProject {
+  workspaceId: string;
+  root: string;
+}
+
+/**
+ * An nvim the file tree could open a file in: which terminal it is running in,
+ * and the pane that terminal is a tab of.
+ */
+export interface EditorChoice {
+  agentId: string;
+  paneId: string;
+}
+
+/**
  * One allowance, as the account itself reports it.
  *
  * Deliberately the shape the API states rather than three named fields, because
@@ -268,6 +295,8 @@ export type ServerMessage =
    * what it missed.
    */
   | { type: "branches"; branches: WorkspaceBranch[] }
+  /** Where each workspace's file tree starts. Sent whole, like `branches`. */
+  | { type: "projects"; projects: WorkspaceProject[] }
   /**
    * Sent on connect and whenever the allowance moves. Null while nothing has
    * ever been read successfully — which is not the same as `signedOut`, and the
@@ -670,6 +699,58 @@ export type ClientMessage =
    * editor goes somewhere else, and it is reversible by asking again.
    */
   | { type: "pin-reader"; paneId: string; follow: boolean }
+
+  /**
+   * Show, or close, one of a reader's tabs, by its place in the strip.
+   *
+   * An index rather than a path, for the reason tabs of terminals go by id: the
+   * client is naming a thing it can see, and the server already holds the list
+   * it is an index into — a path would be a second way to name a file that has
+   * to be checked all over again for a click that opens nothing new. Closing
+   * the last one closes the pane.
+   */
+  | { type: "select-doc"; paneId: string; index: number }
+  | { type: "close-doc"; paneId: string; index: number }
+
+  /**
+   * A reader's tab, dragged: onto a reader's strip, at a place in it — its own
+   * strip is a reorder — or onto a pane's edge, where it becomes a reader of
+   * its own. `move-tab` and `split-with` for documents, kept apart from them
+   * because a terminal is named by an id the whole server knows and a document
+   * is named by its place in one pane's list.
+   */
+  | { type: "move-doc"; fromPaneId: string; index: number; toPaneId: string; at?: number }
+  | { type: "split-with-doc"; fromPaneId: string; index: number; paneId: string; dir: "row" | "col"; before: boolean }
+
+  /**
+   * Show a markdown file, from the file tree.
+   *
+   * The server picks the pane rather than the client, because "the reader" is a
+   * question about the arrangement: the focused pane if it is a reader, else any
+   * reader in the workspace, else a new one split off the focused pane. A client
+   * that chose would have to send a split and then an `open-doc` to a pane id it
+   * had not seen yet. `focus` is `open-reader`'s — a phone wants to be taken to
+   * the document, a desktop wants its keyboard left where it was.
+   */
+  | { type: "show-doc"; root: string; path: string; focus?: boolean }
+
+  /**
+   * Every nvim in the workspace on screen, nearest first — the focused pane's,
+   * then the pane focus came from, then the rest. Replied to with
+   * `EditorChoice[]`, which may be empty.
+   */
+  | { type: "find-editors"; id: number }
+
+  /**
+   * Open a file from the tree in nvim.
+   *
+   * `agentId` names the terminal whose nvim to use, from a `find-editors`
+   * answer; null asks for a new one, in a split off the focused pane. Either way
+   * the pane it lands in is focused, because a file opened somewhere you are not
+   * looking has not been opened as far as you can tell. Replied to with the
+   * agent id it went to.
+   */
+  | { type: "open-in-editor"; id: number; root: string; path: string; agentId: string | null }
 
   // --- the mascot ----------------------------------------------------------
   /**

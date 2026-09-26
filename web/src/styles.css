@@ -1682,6 +1682,190 @@ kbd {
   background: var(--scrim);
 }
 
+/* --------------------------------------------------------------------------
+   File tree
+   -------------------------------------------------------------------------- */
+
+/* The sidebar's column, on the other side. Same width rule and for the same
+   reason — the chosen width is kept and the rendering yields to a small window —
+   and the same flat chrome, without the skin's sidebar picture, which is drawn
+   for a column that sits on the left. */
+.files {
+  position: relative;
+  width: min(var(--files-w, 240px), 33vw);
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--chrome);
+  border-left: var(--border) var(--border-style) var(--line);
+}
+
+.files-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 8px 6px 12px;
+  min-width: 0;
+  -webkit-app-region: drag;
+}
+/* The window's traffic lights are on the other side, but the strip above the
+   list is still the thing a window is dragged by — the same 28px the sidebar
+   leaves them, so the two columns' first rows line up. */
+.app-window .files-head {
+  padding-top: 34px;
+}
+.files-root {
+  font-size: var(--fs-md);
+  color: var(--text);
+  white-space: nowrap;
+}
+.files-path {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--dimmer);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.files-close {
+  align-self: center;
+  width: 24px;
+  height: 24px;
+}
+
+.files-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 6px 12px;
+}
+
+/* A row per entry. Indented by a custom property the component sets, so how far
+   one level is lives here with every other length. */
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 3px 6px 3px calc(6px + var(--depth, 0) * 12px);
+  border-radius: var(--radius-md);
+  text-align: left;
+  font-size: var(--fs-md);
+  color: var(--dim);
+}
+.tree-row:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+/* The documents are the rows this window can do something with itself, so
+   they are the ones that stand out; code is one click from nvim and reads as
+   the ordinary case it is. */
+.tree-doc {
+  color: var(--text);
+}
+.tree-dir {
+  color: var(--text);
+}
+.tree-on,
+.tree-on:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+.tree-on .tree-name {
+  color: var(--accent);
+}
+.tree-name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-caret {
+  flex: none;
+  width: 12px;
+  color: var(--dimmer);
+  transition: transform 80ms ease-out;
+}
+.tree-caret-shut {
+  transform: rotate(-90deg);
+}
+.tree-note {
+  margin: 4px 0;
+  padding: 3px 6px 3px calc(6px + var(--depth, 0) * 12px);
+  font-size: var(--fs-md);
+  color: var(--dimmer);
+}
+
+/* The sidebar's grip, on the left edge instead of the right. */
+.files-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 9px;
+  z-index: 4;
+  cursor: col-resize;
+  touch-action: none;
+}
+.files-grip::after {
+  content: "";
+  position: absolute;
+  inset: 0 4px;
+  border-radius: var(--radius-xs);
+}
+.files-grip:hover::after {
+  background: var(--accent);
+}
+
+/* On a phone the tree is a sheet, exactly as the sidebar is. */
+:root[data-narrow] .files {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  z-index: 40;
+  border-left: 0;
+}
+:root[data-narrow] .tree-row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+.files-close {
+  display: none;
+}
+.files-overlay .files-close,
+:root[data-narrow] .files-close {
+  display: flex;
+}
+
+/* The status bar's door onto the tree, the bars button's twin. */
+.sb-files {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  border-radius: var(--radius-md);
+  color: var(--dimmer);
+  flex: none;
+}
+.sb-files-on {
+  color: var(--text);
+}
+.sb-files:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+:root[data-narrow] .sb-files {
+  width: 32px;
+  height: 28px;
+  color: var(--dim);
+}
+
 /* The window's drag handle when there is no sidebar to hold it.
    The traffic lights float over the top-left corner whether or not anything is
    drawn under them, so hiding the sidebar used to leave them sitting on a
@@ -2015,6 +2199,10 @@ a.button {
 .pane-btn:hover {
   color: var(--text);
   background: var(--line);
+}
+/* A pane button that is a mode, while the mode is on — the reader's follow toggle. */
+.pane-btn-on {
+  color: var(--accent);
 }
 
 /* A phone's strip is a row of thumb targets. Apple's floor is 44pt and a tab
@@ -4228,18 +4416,6 @@ a.button {
   color: var(--text);
 }
 
-/* The caret on a reader's tab: this name opens something. Quiet, because the
-   file name is what you read and this is only the promise that it is a door. */
-.tab-caret {
-  margin-left: 4px;
-  font-size: var(--fs-sm);
-  color: var(--dimmer);
-}
-
-.tab-picking .tab-caret {
-  color: var(--accent);
-}
-
 /* A measure rather than the pane's full width: a pane dragged wide is a line
    length nobody can read, and the whole point of this pane is reading. */
 .md {
@@ -4252,7 +4428,6 @@ a.button {
 .md > :first-child {
   margin-top: 0;
 }
-
 .md h1,
 .md h2,
 .md h3,
@@ -4427,8 +4602,8 @@ a.button {
   font-size: var(--fs-base);
 }
 
-/* The strip's label for a reader: a tab that is not a button, because there is
-   nothing to switch to — the pane shows one file and the editor picks it. */
+/* The strip's label for a reader with no document yet: a tab that is not a
+   button, because there is nothing to switch to until the editor opens one. */
 .tab-reader {
   cursor: var(--cursor);
   font-style: italic;
@@ -4450,6 +4625,24 @@ a.button {
 }
 .reader-zoom:hover {
   color: var(--text);
+}
+/* At 100% the number is a readout, not a button: there is nothing to go back to. */
+.reader-zoom:disabled {
+  cursor: var(--cursor);
+}
+.reader-zoom:disabled:hover {
+  color: var(--dim);
+}
+
+/* The reader's text size, in the tree's header: one setting for every reader,
+   so it sits beside the documents rather than inside each one. */
+.files-zoom {
+  display: flex;
+  flex: none;
+  align-self: center;
+  align-items: center;
+  gap: 2px;
+  -webkit-app-region: no-drag;
 }
 
 /* An end of the ladder. Dimmed rather than removed, because a button that

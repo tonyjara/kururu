@@ -35,6 +35,7 @@ import {
 import { keymapFrom } from "../../shared/keys";
 import { mascotFor } from "../../shared/model";
 import { Dialog, type DialogState } from "./components/Dialog";
+import { FileTree, MARKDOWN } from "./components/FileTree";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Keybar } from "./components/Keybar";
 import { Menu, type MenuAt } from "./components/Menu";
@@ -83,6 +84,23 @@ const SIDEBAR_MIN = 168;
 const SIDEBAR_MAX = 460;
 /** Where a width the user chose is kept. Per browser, on purpose — see below. */
 const SIDEBAR_WIDTH_KEY = "kururu.sidebar.width";
+
+/**
+ * The file tree's width and whether it is open — the sidebar's two decisions,
+ * for the column on the other side, kept per browser for the same reason.
+ *
+ * Closed by default. The tree is a thing you open when you are going to look
+ * for a file, and a window that grew a third column on update would be taking
+ * width from every terminal on screen to show something nobody asked for.
+ */
+const FILES_DEFAULT = 240;
+const FILES_MIN = 168;
+const FILES_MAX = 520;
+const FILES_WIDTH_KEY = "kururu.files.width";
+const FILES_OPEN_KEY = "kururu.files.open";
+
+/** The pick-list row that means "a new nvim" rather than one that is running. */
+const NEW_EDITOR = "__new__";
 
 /**
  * Whether the touch key toolbar is drawn, on the device that decided.
@@ -167,7 +185,7 @@ function resumeSettings(): SettingsTab | null {
 }
 
 export function App() {
-  const { snapshot, connected } = useKururu();
+  const { snapshot, connected, projects } = useKururu();
 
   /**
    * Whether the window is narrow enough that the sidebar stops being a column
@@ -191,6 +209,14 @@ export function App() {
    */
   const [sidebarOpen, setSidebarOpen] = useState(() => !matchesNarrow());
   const [sidebarWidth, setSidebarWidth] = useState(storedSidebarWidth);
+  /**
+   * The file tree. On a narrow window it is a sheet over the panes like the
+   * sidebar is, and starts shut there whatever the desktop remembered — a
+   * phone opening onto a list of files instead of the agent it came to watch
+   * would be the wrong first screen.
+   */
+  const [filesOpen, setFilesOpen] = useState(() => !matchesNarrow() && storedFlag(FILES_OPEN_KEY));
+  const [filesWidth, setFilesWidth] = useState(() => storedWidth(FILES_WIDTH_KEY, FILES_DEFAULT, FILES_MIN, FILES_MAX));
   /** Zen: the focused pane takes the window. A view state, never the server's. */
   const [zen, setZen] = useState(false);
   /**
@@ -383,6 +409,23 @@ export function App() {
   useEffect(() => {
     setSidebarOpen(!narrow);
   }, [narrow]);
+
+  /** The tree's two, remembered the same way. Only a wide window's choice is kept. */
+  useEffect(() => {
+    try {
+      localStorage.setItem(FILES_WIDTH_KEY, String(filesWidth));
+      if (!narrow) localStorage.setItem(FILES_OPEN_KEY, filesOpen ? "1" : "0");
+    } catch {
+      // As for the sidebar: no storage is a default, not a failure.
+    }
+  }, [filesWidth, filesOpen, narrow]);
+  useEffect(() => {
+    if (narrow) setFilesOpen(false);
+  }, [narrow]);
+
+  const resizeFiles = useCallback((px: number) => {
+    setFilesWidth(Math.round(Math.min(FILES_MAX, Math.max(FILES_MIN, px))));
+  }, []);
 
   /** Remember the width for the next time this browser opens kururu. */
   useEffect(() => {
@@ -579,6 +622,11 @@ export function App() {
           return api.openReader();
         case "toggle-sidebar":
           return setSidebarOpen((open) => !open);
+        case "toggle-files":
+          // One sheet at a time on a phone: two full-screen overlays stacked is
+          // a window you have to dismiss twice to get back to.
+          if (narrow) setSidebarOpen(false);
+          return setFilesOpen((open) => !open);
         case "settings":
           return setSettings("appearance");
         case "zen-mode":
@@ -673,7 +721,84 @@ export function App() {
           return setHelp((on) => !on);
       }
     },
-    [workspace, profile, agents, promptNewProfile, confirmDeleteWorkspace],
+    [workspace, profile, agents, promptNewProfile, confirmDeleteWorkspace, narrow],
+  );
+
+  /**
+   * A file handed to nvim, after asking which one.
+   *
+   * It asks every time, and that is the design rather than caution: the tree
+   * cannot know whether the nvim in the next pane is the one you are editing
+   * in or one an agent left open, and a file opening in the wrong editor is a
+   * buffer you then have to go and close. So the choice is a list with the
+   * nearest editor first — enter takes it — and a new split at the bottom,
+   * which is also the whole list when there is no nvim here at all.
+   */
+  const openInNvim = useCallback(
+    async (root: string, path: string) => {
+      let editors: Awaited<ReturnType<typeof api.findEditors>> = [];
+      try {
+        editors = await api.findEditors();
+      } catch {
+        // Not connected: the list is just "a new one", which will then fail
+        // with a reason, which is better than a click that did nothing.
+      }
+      const name = path.split("/").pop() ?? path;
+      const where = (paneId: string) => {
+        const all = workspace ? panes(workspace.layout) : [];
+        const at = all.findIndex((pane) => pane.id === paneId);
+        if (workspace?.focusedPaneId === paneId) return "focused pane";
+        return all.length > 1 && at >= 0 ? `pane ${at + 1}` : "";
+      };
+      setDialog({
+        kind: "pick",
+        title: `Open ${name} in nvim`,
+        hint: editors.length === 0 ? "There is no nvim running in this workspace." : undefined,
+        items: [
+          ...editors.map((editor) => {
+            const agent = agents.find((a) => a.id === editor.agentId);
+            return {
+              id: editor.agentId,
+              label: `nvim in ${agent ? tabLabel(agent) : "a terminal"}`,
+              hint: where(editor.paneId),
+            };
+          }),
+          { id: NEW_EDITOR, label: "New nvim in a split", hint: "" },
+        ],
+        onPick: (id) => {
+          api
+            .openInEditor(root, path, id === NEW_EDITOR ? null : id)
+            .then(() => {
+              if (narrow) setFilesOpen(false);
+            })
+            .catch((err: unknown) =>
+              setDialog({
+                kind: "confirm",
+                title: `Could not open ${name}`,
+                hint: err instanceof Error ? err.message : String(err),
+                confirmLabel: "OK",
+                onConfirm: () => {},
+              }),
+            );
+        },
+      });
+    },
+    [workspace, agents, narrow],
+  );
+
+  /**
+   * A click in the tree. Markdown is read, here; everything else is somebody
+   * else's to open. On a phone the tree is a sheet over the pane it is about to
+   * change, so it gets out of the way — and the reader is focused, because a
+   * phone draws one pane and a document opened behind it did not open.
+   */
+  const openFromTree = useCallback(
+    (root: string, path: string) => {
+      if (!MARKDOWN.test(path)) return void openInNvim(root, path);
+      api.showDoc(root, path, narrow);
+      if (narrow) setFilesOpen(false);
+    },
+    [openInNvim, narrow],
   );
 
   // -------------------------------------------------------------------------
@@ -941,7 +1066,7 @@ export function App() {
        over this corner and are not there on a phone. */
     <div
       className={`app ${zen ? "app-zen" : ""} ${desktop() ? "app-window" : ""}`}
-      style={{ "--sidebar-w": `${sidebarWidth}px` } as React.CSSProperties}
+      style={{ "--sidebar-w": `${sidebarWidth}px`, "--files-w": `${filesWidth}px` } as React.CSSProperties}
     >
       {sidebarOpen && !zen && (
         <Sidebar
@@ -1002,6 +1127,8 @@ export function App() {
                breakpoint. */
             solo={narrow}
             keyboard={paneKeyboard}
+            filesOpen={filesOpen}
+            onToggleFiles={() => run("toggle-files")}
           />
         </main>
         {/* Between the panes and the status bar, which puts it directly above
@@ -1031,6 +1158,8 @@ export function App() {
              it with and nothing on screen saying the list is still there. */
           sidebarOpen={sidebarOpen}
           onToggleSidebar={() => run("toggle-sidebar")}
+          filesOpen={filesOpen}
+          onToggleFiles={() => run("toggle-files")}
           /* Null on a mouse, which is how the bar draws no toggle at all rather
              than a disabled one: a control for a thing that cannot exist here is
              worse than no control. */
@@ -1046,6 +1175,22 @@ export function App() {
           onHelp={() => setHelp(true)}
         />
       </div>
+
+      {filesOpen && !zen && workspace && (
+        <FileTree
+          root={projects.find((p) => p.workspaceId === workspace.id)?.root ?? null}
+          current={readerPathOf(workspace)}
+          overlay={narrow}
+          onOpen={openFromTree}
+          onOpenInEditor={(root, path) => void openInNvim(root, path)}
+          onClose={() => setFilesOpen(false)}
+          onResize={resizeFiles}
+          onResetWidth={() => setFilesWidth(FILES_DEFAULT)}
+        />
+      )}
+      {filesOpen && !zen && narrow && (
+        <div className="sidebar-scrim" onClick={() => setFilesOpen(false)} aria-hidden="true" />
+      )}
 
       {help && <HelpOverlay keymap={keymap} onClose={() => setHelp(false)} />}
       {settings && (
@@ -1263,4 +1408,31 @@ function focusedAgentOf(
   if (!workspace) return null;
   const pane = panes(workspace.layout).find((p) => p.id === workspace.focusedPaneId);
   return pane ? activeAgent(pane) : null;
+}
+
+/** The file a reader in this workspace is showing, for the tree to mark. */
+function readerPathOf(workspace: { layout: LayoutNode; focusedPaneId: string }): string | null {
+  const all = panes(workspace.layout);
+  const focused = all.find((p) => p.id === workspace.focusedPaneId);
+  const reader = focused?.reader ? focused.reader : all.find((p) => p.reader)?.reader;
+  return reader?.path || null;
+}
+
+function storedFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** `storedSidebarWidth`, for any column: clamped on the way in, for the same reason. */
+function storedWidth(key: string, fallback: number, min: number, max: number): number {
+  try {
+    const saved = Number(localStorage.getItem(key));
+    if (Number.isFinite(saved) && saved > 0) return Math.round(Math.min(max, Math.max(min, saved)));
+  } catch {
+    // A default width.
+  }
+  return fallback;
 }

@@ -39,7 +39,7 @@
  * over the rebuild in the first place. Neither a tab switch nor a layout change
  * rebuilds anything now.
  */
-import { Fragment, useCallback, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, useCallback, useRef, useState } from "react";
 import { keysByAction, type Action } from "../../../shared/keys";
 import {
   activeAgent,
@@ -52,13 +52,13 @@ import {
   type PaneState,
   type Rect,
 } from "../../../shared/layout";
+import { basename } from "../../../shared/labels";
 import { visibleLaunchers, type Launcher, type LaunchSettings } from "../../../shared/launchers";
 import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
-import { AGENT_MIME, PANE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
+import { AGENT_MIME, DOC_MIME, PANE_MIME, allowDrop, beginDrag, docId, endDrag, parseDocId, useDragging } from "../drag";
 import { keyLabel, PREFIX_LABEL } from "../keys";
 import { shortenPath, tabLabel } from "../labels";
 import * as api from "../session";
-import { canZoom, DEFAULT_ZOOM, resetZoom, zoomBy, zoomLabel, zoomStore } from "../zoom";
 import { ReaderView } from "./Reader";
 import { Icon } from "./Icon";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
@@ -98,6 +98,9 @@ interface Props {
    * once the dialog is answered.
    */
   keyboard: boolean;
+  /** Whether the file tree is showing, for the pane menu's row that toggles it. */
+  filesOpen: boolean;
+  onToggleFiles: () => void;
 }
 
 /** A normalized rect as the four percentages CSS wants. */
@@ -112,7 +115,19 @@ function place(rect: Rect): React.CSSProperties {
 
 const FULL: React.CSSProperties = { left: 0, top: 0, width: "100%", height: "100%" };
 
-export function Panes({ node, focusedPaneId, agents, mascot, keymap, launch, zen, solo, keyboard }: Props) {
+export function Panes({
+  node,
+  focusedPaneId,
+  agents,
+  mascot,
+  keymap,
+  launch,
+  zen,
+  solo,
+  keyboard,
+  filesOpen,
+  onToggleFiles,
+}: Props) {
   const area = useRef<HTMLDivElement>(null);
   const [resizing, setResizing] = useState(false);
   /**
@@ -153,6 +168,8 @@ export function Panes({ node, focusedPaneId, agents, mascot, keymap, launch, zen
    * the same way it already outlives a tab switch or a workspace change.
    */
   const shown = solo ? soloPane(node, focusedPaneId) : null;
+  /** Which panes are readers, for a pane in flight to know what it may pour into. */
+  const readers = new Set(all.filter((p) => p.reader).map((p) => p.id));
 
   return (
     /* A pane slides to a new position, but not while you are dragging its
@@ -196,6 +213,7 @@ export function Panes({ node, focusedPaneId, agents, mascot, keymap, launch, zen
               keyboard={keyboard}
               agents={agents}
               mascot={mascot}
+              readers={readers}
             />
           </div>
         );
@@ -221,6 +239,8 @@ export function Panes({ node, focusedPaneId, agents, mascot, keymap, launch, zen
                      this says is "a pane made now would be made off screen", and both
                      of them hide every pane but one. */
                   alone: solo || zen,
+                  filesOpen,
+                  onToggleFiles,
                 })
           }
         />
@@ -267,6 +287,8 @@ function paneMenu({
   agents,
   keymap,
   alone,
+  filesOpen,
+  onToggleFiles,
 }: {
   paneId: string;
   all: PaneState[];
@@ -274,6 +296,8 @@ function paneMenu({
   keymap: Record<string, Action>;
   /** The window draws one pane at a time, so anything new opens out of sight. */
   alone: boolean;
+  filesOpen: boolean;
+  onToggleFiles: () => void;
 }): MenuItem[] {
   const bound = keysByAction(keymap);
   const key = (action: Action): string | undefined => {
@@ -303,17 +327,26 @@ function paneMenu({
       run: () => api.splitPane("row", paneId),
     },
     { label: "Split down", hint: key("split-down"), run: () => api.splitPane("col", paneId) },
-    /* Not on a reader, which already has a picker where its name is: a second
-       door onto the same dialog, three rows below the first, is a menu padded
-       out to look complete. The keybind there means "follow the editor again",
-       which is what the pin button in that strip says in a word. */
+    /* The tree is the window's rather than this pane's, and it is here anyway:
+       this is the corner a mouse goes to for "what else can I open", and the
+       tree is where everything else opens from. The status bar has the same
+       door; this one is where you already are. */
+    {
+      label: filesOpen ? "Hide the file tree" : "Show the file tree",
+      hint: key("toggle-files"),
+      sep: true,
+      run: onToggleFiles,
+    },
+    /* Not on a reader, whose documents come from the tree and open as tabs in
+       it: a door onto a picker from inside the pane it would fill is a menu
+       padded out to look complete. The keybind there means "follow the editor
+       again", which is what the follow button in that strip says in a word. */
     ...(pane?.reader
       ? []
       : [
           {
             label: "Open a document",
             hint: key("open-reader"),
-            sep: true,
             /* It asks for the focus when there is no room to tile, since a pane
                you cannot see is one that did not open. On a tiled window it
                deliberately does not: the reader arrives beside the terminal you
@@ -471,6 +504,7 @@ function Pane({
   keyboard,
   agents,
   mascot,
+  readers,
 }: {
   pane: PaneState;
   focused: boolean;
@@ -481,23 +515,24 @@ function Pane({
   keyboard: boolean;
   agents: AgentSnapshot[];
   mascot: MascotConfig;
+  readers: Set<string>;
 }) {
   const showing = activeAgent(pane);
   const dragging = useDragging();
   /** Where in this strip a dropped tab would land, while one is over it. */
   const [dropAt, setDropAt] = useState<number | null>(null);
   /**
-   * The reader's picker is open over its document. Local to the pane and not in
-   * the layout, because it is a question somebody is in the middle of asking
-   * rather than a fact about the arrangement — the answer is what the server
-   * gets told, and a second window has no business having its picker opened from
-   * here. It is the same line `Settings` draws about which tab it has open.
+   * A tab of the kind this strip holds: terminals into a terminal pane,
+   * documents into a reader. Either kind can still go on any pane's *edge*,
+   * which makes a new pane of its own kind — see `DropZones`.
    */
-  const [picking, setPicking] = useState(false);
-
-  const takesTabs = dragging?.kind === "agent" && !pane.reader;
+  const takesTabs = pane.reader ? dragging?.kind === "doc" : dragging?.kind === "agent";
   /** Another pane is in flight, and it is not this one. */
   const takesPane = dragging?.kind === "pane" && dragging.id !== pane.id;
+  /** ...and it is the same kind of pane, so dropping it on this strip can pour it in. */
+  const mergesPane = takesPane && readers.has(dragging.id) === Boolean(pane.reader);
+  /** Something that can land on this pane's body: any tab on an edge, any pane. */
+  const takesZones = takesPane || dragging?.kind === "agent" || dragging?.kind === "doc";
   /** This pane is the one being dragged; show it as picked up. */
   const lifted = dragging?.kind === "pane" && dragging.id === pane.id;
 
@@ -514,15 +549,21 @@ function Pane({
     const index = dropAt;
     setDropAt(null);
     const agentId = event.dataTransfer.getData(AGENT_MIME);
-    if (agentId) {
+    if (agentId && !pane.reader) {
       event.preventDefault();
       event.stopPropagation();
       return api.moveTab(agentId, pane.id, index ?? undefined);
     }
+    const doc = parseDocId(event.dataTransfer.getData(DOC_MIME));
+    if (doc && pane.reader) {
+      event.preventDefault();
+      event.stopPropagation();
+      return api.moveDoc(doc.paneId, doc.index, pane.id, index ?? undefined);
+    }
     // A whole pane dropped on a strip pours its tabs in and disappears. It is
     // the way back from a split — without it a window divides but never rejoins.
     const paneId = event.dataTransfer.getData(PANE_MIME);
-    if (paneId && paneId !== pane.id) {
+    if (paneId && paneId !== pane.id && mergesPane) {
       event.preventDefault();
       event.stopPropagation();
       api.mergePanes(paneId, pane.id);
@@ -550,12 +591,18 @@ function Pane({
           endDrag();
           setDropAt(null);
         }}
-        onDragOver={(event) => (takesTabs || takesPane) && allowDrop(event)}
+        onDragOver={(event) => (takesTabs || mergesPane) && allowDrop(event)}
         onDragLeave={() => setDropAt(null)}
         onDrop={dropOnStrip}
       >
         {pane.reader ? (
-          <ReaderStrip pane={pane} picking={picking} onPick={() => setPicking((open) => !open)} />
+          <ReaderStrip
+            pane={pane}
+            dropAt={dropAt}
+            onOver={overTab}
+            onDrop={dropOnStrip}
+            onDragEnd={() => setDropAt(null)}
+          />
         ) : null}
         {!pane.reader &&
           pane.agentIds.map((agentId, index) => {
@@ -646,12 +693,7 @@ function Pane({
 
       <div className="pane-body">
         {pane.reader ? (
-          <ReaderView
-            paneId={pane.id}
-            reader={pane.reader}
-            picking={picking}
-            onPicked={() => setPicking(false)}
-          />
+          <ReaderView paneId={pane.id} reader={pane.reader} />
         ) : showing ? (
           /* Deliberately unkeyed. A key here would rebuild this on every tab
              switch, which is what it used to be for — and the emulator it would
@@ -663,7 +705,7 @@ function Pane({
         ) : (
           <EmptyPane pane={pane} />
         )}
-        {(takesTabs || takesPane) && <DropZones paneId={pane.id} />}
+        {takesZones && <DropZones paneId={pane.id} reader={Boolean(pane.reader)} />}
       </div>
     </section>
   );
@@ -730,14 +772,28 @@ function PaneMenuButton({ solo, onOpen }: { solo: SoloAt | null; onOpen: (at: Me
  * is. They exist only while a drag does, so nothing is ever laid over a terminal
  * you are trying to use.
  */
-function DropZones({ paneId }: { paneId: string }) {
+function DropZones({ paneId, reader }: { paneId: string; reader: boolean }) {
   const dragging = useDragging();
   const [over, setOver] = useState<string | null>(null);
+  /**
+   * The middle means "into this pane", and a tab only goes into a pane of its
+   * own kind. Over the other kind there is no middle to light up at all —
+   * the edges still take it, as a new pane of the kind it is.
+   */
+  const center =
+    dragging?.kind === "pane" || (dragging?.kind === "doc" ? reader : dragging?.kind === "agent" ? !reader : false);
 
   const act = (name: string) => (event: React.DragEvent) => {
+    const doc = parseDocId(event.dataTransfer.getData(DOC_MIME));
+    if (doc) {
+      if (name === "center") return reader && api.moveDoc(doc.paneId, doc.index, paneId);
+      const [dir, before] = EDGES[name]!;
+      return api.splitWithDoc(doc.paneId, doc.index, paneId, dir, before);
+    }
     const agentId = event.dataTransfer.getData(AGENT_MIME);
     if (agentId) {
-      if (name === "center") return api.moveTab(agentId, paneId);
+      // A terminal into a reader's middle would be a terminal in a reader.
+      if (name === "center") return !reader && api.moveTab(agentId, paneId);
       const [dir, before] = EDGES[name]!;
       return api.splitWith(agentId, paneId, dir, before);
     }
@@ -769,7 +825,7 @@ function DropZones({ paneId }: { paneId: string }) {
       <div {...zone("right")} />
       <div {...zone("top")} />
       <div {...zone("bottom")} />
-      <div {...zone("center")} />
+      {center && <div {...zone("center")} />}
     </div>
   );
 }
@@ -783,89 +839,101 @@ const EDGES: Record<string, ["row" | "col", boolean]> = {
 };
 
 /**
- * A reader's strip: what it is showing, and whether it is still listening.
+ * A reader's strip: its documents as tabs, and whether it is still listening.
  *
- * The name comes from the path the pane already has rather than from the
- * document's own first heading, which the server does send. A strip should say
- * which file you are looking at — two notes both titled "Notes" are a strip that
- * has stopped telling you anything.
+ * A tab's name comes from the path rather than from the document's own first
+ * heading, which the server does send. A strip should say which file you are
+ * looking at — two notes both titled "Notes" are a strip that has stopped
+ * telling you anything.
  *
- * Two controls say what it is pointed at, and they are the two ways to point it.
- * The toggle is the editor: following is the point of the pane, so that is the
- * default and pinning is the exception — the moment you want to keep reading one
- * file while the editor moves on. The name is the other way, for the window that
- * has no editor to follow, and picking a file there pins it by doing so.
+ * The tabs behave as a terminal pane's do, because a tab that looks like one
+ * and cannot be picked up is a tab that lies about what it is: drag one along
+ * the strip to reorder it, onto another reader to move it there, or onto any
+ * pane's edge to give it a reader of its own. The drop handling is the pane's
+ * (`Pane`), shared with terminal tabs; this only says where each tab is.
  *
- * The zoom is the third, and it is a different kind of thing: it says nothing
- * about which document, only about how big it is on *this* screen — which is why
- * it goes nowhere near the server (`web/src/zoom.ts` has the argument) and why
- * it is in the strip rather than under the cog. Settings is where a decision
- * about the whole window is made once; this is a knob you reach for in the
- * middle of reading, on the pane you are reading, and a page you have to leave
- * the document to resize is one nobody resizes.
+ * The one control is the editor toggle, on a reader that has an editor to
+ * follow. The file tree is not a reader's to open, so its door is in the pane
+ * menu and the status bar rather than on every reader's strip.
  */
 function ReaderStrip({
   pane,
-  picking,
-  onPick,
+  dropAt,
+  onOver,
+  onDrop,
+  onDragEnd,
 }: {
   pane: PaneState;
-  picking: boolean;
-  onPick: () => void;
+  dropAt: number | null;
+  onOver: (event: React.DragEvent, index: number) => void;
+  onDrop: (event: React.DragEvent) => void;
+  onDragEnd: () => void;
 }) {
-  const zoom = useSyncExternalStore(zoomStore.subscribe, zoomStore.getSnapshot, zoomStore.getSnapshot);
   const reader = pane.reader;
   if (!reader) return null;
-  const name = reader.path ? (reader.path.split("/").pop() ?? reader.path) : "reader";
   const following = reader.follow !== null;
   return (
     <>
-      {/* The name is the way back to the list, which is why it is a button and
-          not the label it used to be. A picker reachable only from an empty
-          reader would be a picker you could use once — and the file you are
-          reading is the obvious place to ask for a different one. */}
-      <button
-        className={`tab tab-on tab-reader ${picking ? "tab-picking" : ""}`}
-        onClick={onPick}
-        aria-expanded={picking}
-        title={reader.path ? `${reader.root}/${reader.path}\nClick to open another document` : "waiting for the editor"}
-      >
-        {name}
-        <Icon name="caret" className="tab-caret" />
-      </button>
-      <button
-        className="pane-btn"
-        onClick={() => api.pinReader(pane.id, !following)}
-        title={following ? "Following the editor — click to pin this file" : "Pinned — click to follow the editor"}
-        aria-label={following ? "Pin this file" : "Follow the editor"}
-      >
-        <Icon name={following ? "follow" : "pin"} />
-      </button>
-      <button
-        className="pane-btn"
-        onClick={() => zoomBy(-1)}
-        disabled={!canZoom(zoom, -1)}
-        aria-label="Smaller text"
-        title="Smaller text — or - while this pane has the keyboard"
-      >
-        −
-      </button>
-      {/* Only once there is something to undo, which is also the only time the
-          number is worth reading. See `.reader-zoom` in the stylesheet. */}
-      {zoom !== DEFAULT_ZOOM && (
-        <button className="reader-zoom" onClick={resetZoom} title="Back to 100% — or 0 while this pane has the keyboard">
-          {zoomLabel(zoom)}
+      {reader.docs.map((doc, index) => {
+        const on = doc.root === reader.root && doc.path === reader.path;
+        return (
+          <Fragment key={`${doc.root}/${doc.path}`}>
+            {dropAt === index && <span className="tab-insert" aria-hidden="true" />}
+            <button
+              className={`tab tab-doc ${on ? "tab-on" : ""}`}
+              onClick={() => !on && api.selectDoc(pane.id, index)}
+              title={`${doc.root}/${doc.path}`}
+              draggable
+              onDragStart={(event) => beginDrag(event, "doc", docId(pane.id, index))}
+              onDragEnd={() => {
+                endDrag();
+                onDragEnd();
+              }}
+              onDragOver={(event) => onOver(event, index)}
+              onDrop={onDrop}
+            >
+              <span className="tab-label">{basename(doc.path)}</span>
+              <span
+                className="tab-close"
+                role="button"
+                tabIndex={-1}
+                aria-label="Close tab"
+                title="Close this document"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  api.closeDoc(pane.id, index);
+                }}
+              >
+                <Icon name="close" />
+              </span>
+            </button>
+          </Fragment>
+        );
+      })}
+      {dropAt === reader.docs.length && <span className="tab-insert" aria-hidden="true" />}
+      {reader.docs.length === 0 && (
+        <span className="tab tab-on tab-reader" title="Waiting for the editor to open a markdown file">
+          <span className="tab-label">{following ? "waiting for the editor" : "reader"}</span>
+        </span>
+      )}
+      {/* Only for a reader that has an editor to go back to. One opened from the
+          tree never had one, and a follow button with nobody to follow was the
+          button that did nothing when you clicked it. */}
+      {reader.editor && (
+        <button
+          className={`pane-btn ${following ? "pane-btn-on" : ""}`}
+          onClick={() => api.pinReader(pane.id, !following)}
+          aria-pressed={following}
+          title={
+            following
+              ? "Following the editor: this pane shows whatever markdown its nvim opens. Click to stay on this file."
+              : "Staying on this file. Click to follow the editor again."
+          }
+          aria-label={following ? "Stop following the editor" : "Follow the editor"}
+        >
+          <Icon name="follow" />
         </button>
       )}
-      <button
-        className="pane-btn"
-        onClick={() => zoomBy(1)}
-        disabled={!canZoom(zoom, 1)}
-        aria-label="Larger text"
-        title="Larger text — or + while this pane has the keyboard"
-      >
-        +
-      </button>
     </>
   );
 }

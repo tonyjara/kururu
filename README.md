@@ -148,6 +148,7 @@ Twice sends it through.
 | `s` `S` | profiles — switch, rename / new profile |
 | `r` | resize mode — then `hjkl`, `esc` to leave |
 | `m` `b` | zen mode / toggle sidebar |
+| `e` | toggle the file tree |
 | `g` | settings |
 | `R` `B` | reload the window / restart the server (agents keep running) |
 | `?` | these keys |
@@ -196,16 +197,40 @@ splits, drags, stacks and moves between workspaces as a terminal does.
 **On the desktop it follows your editor**: an nvim in a neighbouring pane and the
 reader shows whatever buffer it is on, re-rendering on write. Nothing to install —
 neovim listens on a socket named after its pid, kururu knows the pid of every pty,
-and an autocmd does the rest. **On a phone** there is no editor to follow, so it
-has a picker: the project's markdown, most recently written first.
+and an autocmd does the rest. **On a phone** there is no editor to follow, so an
+empty reader is a picker: the project's markdown, most recently written first.
+
+**Every document is a tab**, and behaves like one. Markdown opened from the tree
+— or by the editor it follows — lands as a tab in the reader beside the one
+showing. Drag a tab along the strip to reorder it, onto another reader to move
+it there, or onto any pane's edge to give it a reader of its own; drag a whole
+reader onto another's strip to pour its tabs in. Closing the last tab closes
+the pane.
 
 Rendering happens on the **server**, so the phone is sent markup rather than a
 parser and a highlighter. Raw HTML passthrough is off, which is also the
 sanitizer.
 
-The strip has **⇄ / ⊙** (follow the editor, or pin the file) and **− / +** (type
-size, or `-` `+` `0` with the keyboard). The zoom is this device's and never
-reaches the server.
+The strip has **⇄** (lit while the reader follows its editor; click it to stay
+on this file, and again to follow — only on a reader that was opened to follow
+one). The type size is **− / +** in the tree's header, or `-` `+` `0` with the
+keyboard in a reader; it is this device's and never reaches the server.
+
+### The file tree
+
+`C-a e`, the folder at the right of the status bar, or **Show the file tree** in
+any pane's menu opens the project down the
+right-hand side — the repository the workspace is in, or the directory its
+terminal is standing in. It re-reads what is open every few seconds, because
+agents make files.
+
+**Markdown opens in the reader. Everything else opens in nvim**, because this is
+for people who already have an editor: kururu lists every nvim running in the
+workspace, nearest first, and `Enter` sends the file to that one with `:drop` —
+switching to it if it is already open. With no nvim running, the choice is a new
+one in a split. Right-click a file for *Open in nvim* on markdown too, or to copy
+its path. On a phone the tree is a full-screen sheet, and picking a file from it
+still opens it in the nvim on your desktop.
 
 ### Dev servers
 
