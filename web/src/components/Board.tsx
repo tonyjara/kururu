@@ -19,7 +19,7 @@
  * sidebar can never disagree about the same terminal, and falls back to the
  * recorded state when the terminal has gone.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   BOARD_COLUMNS,
   canResume,
@@ -686,7 +686,7 @@ function Composer({
     const node = area.current;
     if (!node) return;
     node.style.height = "auto";
-    node.style.height = `${node.scrollHeight}px`;
+    node.style.height = `${node.scrollHeight + node.offsetHeight - node.clientHeight}px`;
   }, [body]);
   const keys = (event: React.KeyboardEvent, enterSaves: boolean) => {
     if (event.key === "Escape") {
