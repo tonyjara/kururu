@@ -489,9 +489,13 @@ export function BoardView({
                     key={card.id}
                     title={card.title}
                     body={card.body}
+                    isolate={card.isolate}
+                    // A card whose worktree stands goes back into it whatever
+                    // the box says, so the box is only offered before there is one.
+                    offerIsolate={!card.worktree}
                     submit="Save"
-                    onSubmit={(title, body) => {
-                      api.editCard(workspaceId, card.id, { title, body });
+                    onSubmit={(title, body, isolate) => {
+                      api.editCard(workspaceId, card.id, { title, body, isolate });
                       setEditing(null);
                     }}
                     onCancel={() => setEditing(null)}
@@ -537,14 +541,16 @@ export function BoardView({
                 <Composer
                   title=""
                   body=""
+                  isolate={false}
+                  offerIsolate
                   submit="Add card"
-                  onSubmit={(title, body) => {
-                    api.addCard(workspaceId, title, body, column);
+                  onSubmit={(title, body, isolate) => {
+                    api.addCard(workspaceId, title, body, column, isolate);
                     // Stays open for the next one: cards are written in runs.
                   }}
                   onRun={
                     launchers.length > 0
-                      ? (title, body, at) =>
+                      ? (title, body, isolate, at) =>
                           setMenu({
                             at,
                             items: launchers.map((launcher, index) => ({
@@ -553,7 +559,7 @@ export function BoardView({
                               sep: index > 0 && launchers[index - 1]?.cli !== launcher.cli,
                               run: () => {
                                 setAdding(null);
-                                api.addRunCard(workspaceId, title, body, column, launcher.id).catch((err: unknown) => {
+                                api.addRunCard(workspaceId, title, body, column, isolate, launcher.id).catch((err: unknown) => {
                                   console.error("add-run-card failed", err);
                                   window.alert(err instanceof Error ? err.message : String(err));
                                 });
@@ -663,34 +669,45 @@ function CardView({
       >
         <div className="board-card-top">
           <span className="board-card-title">{card.title}</span>
-          <button
-            className="pane-btn board-robot"
-            disabled={running || !canRun}
-            title={
-              running
-                ? "An agent is already on this card"
-                : canRun
-                  ? "Hand this card to an agent"
-                  : "Every agent is switched off in Settings → Agents"
-            }
-            aria-label="Hand to an agent"
-            aria-haspopup="menu"
-            onClick={(event) => onRobot(below(event))}
-          >
-            <Icon name="bot" />
-          </button>
-          <button
-            className="pane-btn"
-            title="Move, edit or delete"
-            aria-label="Card menu"
-            aria-haspopup="menu"
-            onClick={(event) => onMenu(below(event))}
-          >
-            <Icon name="caret" />
-          </button>
+          <span className="board-card-actions">
+            <button
+              className="board-icon-btn board-robot"
+              disabled={running || !canRun}
+              title={
+                running
+                  ? "An agent is already on this card"
+                  : canRun
+                    ? "Hand this card to an agent"
+                    : "Every agent is switched off in Settings → Agents"
+              }
+              aria-label="Hand to an agent"
+              aria-haspopup="menu"
+              onClick={(event) => onRobot(below(event))}
+            >
+              <Icon name="bot" />
+            </button>
+            <button
+              className="board-icon-btn"
+              title="Move, edit or delete"
+              aria-label="Card menu"
+              aria-haspopup="menu"
+              onClick={(event) => onMenu(below(event))}
+            >
+              <Icon name="caret" />
+            </button>
+          </span>
         </div>
         {card.body && <p className="board-card-body">{card.body}</p>}
-        {card.worktree && <TreeLine worktree={card.worktree} />}
+        {card.worktree ? (
+          <TreeLine worktree={card.worktree} />
+        ) : (
+          card.isolate && (
+            <div className="board-tree board-tree-pending" title="Its agent starts in a worktree of its own">
+              <Icon name="git" />
+              <span className="board-tree-base">worktree on run</span>
+            </div>
+          )
+        )}
         {card.worktree && card.dev && server && (
           <DevLine
             dev={card.dev}
@@ -719,23 +736,23 @@ function CardView({
             <p className="board-card-ask-text">{ask.text}</p>
             {ask.choices?.map((choice) => (
               <div key={choice.label} className="board-card-ask-choice">
-                <button className="button" onClick={() => onAsk(choice.run)}>
+                <button className="board-btn" onClick={() => onAsk(choice.run)}>
                   {choice.label}
                 </button>
                 <p className="board-card-ask-outcome">{choice.outcome}</p>
               </div>
             ))}
             <div className="board-card-ask-actions">
-              <button className="button button-quiet" onClick={() => onAsk(null)}>
+              <button className="board-btn board-btn-quiet" onClick={() => onAsk(null)}>
                 Cancel
               </button>
               {ask.alt && (
-                <button className="button button-quiet" onClick={() => onAsk(ask.alt?.run ?? null)}>
+                <button className="board-btn board-btn-quiet" onClick={() => onAsk(ask.alt?.run ?? null)}>
                   {ask.alt.label}
                 </button>
               )}
               {ask.yes && (
-                <button className="button" onClick={() => onAsk(ask.run ?? null)}>
+                <button className="board-btn" onClick={() => onAsk(ask.run ?? null)}>
                   {ask.yes}
                 </button>
               )}
@@ -765,9 +782,11 @@ function RunLine({ run, agent, mascot }: { run: CardRun; agent: AgentSnapshot | 
         {run.endedAt && (run.state === "finished" || run.state === "ended") ? ` ${ago(run.endedAt)}` : ""}
       </span>
       {agent && (
-        <button className="board-run-open" onClick={() => api.revealAgent(agent.id)} title="Go to this agent's terminal">
-          open
-        </button>
+        <span className="board-seg">
+          <button className="board-seg-btn" onClick={() => api.revealAgent(agent.id)} title="Go to this agent's terminal">
+            open
+          </button>
+        </span>
       )}
     </div>
   );
@@ -783,6 +802,7 @@ function RunLine({ run, agent, mascot }: { run: CardRun; agent: AgentSnapshot | 
 function TreeLine({ worktree }: { worktree: CardWorktree }) {
   return (
     <div className="board-tree" title={`${worktree.path}\ncut from ${worktree.base}`}>
+      <Icon name="git" />
       <span className="board-tree-branch">{worktree.branch}</span>
       <span className="board-tree-base">from {worktree.base}</span>
     </div>
@@ -830,20 +850,30 @@ function DevLine({
       <span className="board-run-words" title={worktree.path}>
         {words}
       </span>
-      {url && (
-        <a className="board-run-open" href={url} target="_blank" rel="noreferrer noopener" title={`Open ${url}`}>
-          open <Icon name="external" />
-        </a>
-      )}
-      <button className="board-run-open" onClick={() => api.revealAgent(terminal.id)} title="Go to the dev server's terminal">
-        log
-      </button>
-      <button className="pane-btn" onClick={onRestart} title="Restart the dev server" aria-label="Restart the dev server">
-        <Icon name="restart" />
-      </button>
-      <button className="pane-btn" onClick={onStop} title="Stop the dev server and close its tab" aria-label="Stop the dev server">
-        <Icon name="stop" />
-      </button>
+      {/* One segmented group rather than two pills and two bare icons: every
+          control on the line is about the same terminal, and a row of four
+          differently shaped things read as four unrelated ones. */}
+      <span className="board-seg">
+        {url && (
+          <a className="board-seg-btn" href={url} target="_blank" rel="noreferrer noopener" title={`Open ${url}`}>
+            open <Icon name="external" />
+          </a>
+        )}
+        <button className="board-seg-btn" onClick={() => api.revealAgent(terminal.id)} title="Go to the dev server's terminal">
+          log
+        </button>
+        <button className="board-seg-btn" onClick={onRestart} title="Restart the dev server" aria-label="Restart the dev server">
+          <Icon name="restart" />
+        </button>
+        <button
+          className="board-seg-btn"
+          onClick={onStop}
+          title="Stop the dev server and close its tab"
+          aria-label="Stop the dev server"
+        >
+          <Icon name="stop" />
+        </button>
+      </span>
     </div>
   );
 }
@@ -865,6 +895,8 @@ function ago(at: number): string {
 function Composer({
   title: initialTitle,
   body: initialBody,
+  isolate: initialIsolate,
+  offerIsolate,
   submit,
   onSubmit,
   onRun,
@@ -873,22 +905,28 @@ function Composer({
 }: {
   title: string;
   body: string;
+  isolate: boolean;
+  /** Whether the worktree box is drawn; see `Card.isolate`. */
+  offerIsolate: boolean;
   submit: string;
-  onSubmit: (title: string, body: string) => void;
+  onSubmit: (title: string, body: string, isolate: boolean) => void;
   /** Add the card and hand it straight to an agent; the robot beside the submit button. */
-  onRun?: (title: string, body: string, at: MenuAt) => void;
+  onRun?: (title: string, body: string, isolate: boolean, at: MenuAt) => void;
   onCancel: () => void;
   /** Clear and stay open after saving, for adding several in a row. */
   keepOpen?: boolean;
 }) {
   const [title, setTitle] = useState(initialTitle);
   const [body, setBody] = useState(initialBody);
+  // Kept across a run of new cards, like the column: several written in a row
+  // are usually several of a kind.
+  const [isolate, setIsolate] = useState(initialIsolate);
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => field.current?.focus(), []);
 
   const save = () => {
     if (!title.trim()) return;
-    onSubmit(title, body);
+    onSubmit(title, body, isolate);
     if (keepOpen) {
       setTitle("");
       setBody("");
@@ -943,29 +981,43 @@ function Composer({
         onChange={(event) => setBody(event.target.value)}
         onKeyDown={(event) => keys(event, false)}
       />
-      <div className="dialog-actions">
-        <button type="button" className="button button-quiet" onClick={onCancel}>
+      <div className="board-composer-foot">
+        {offerIsolate && (
+          <label
+            className={`board-toggle ${isolate ? "board-toggle-on" : ""}`}
+            title="Start this card's agent in a git worktree of its own, beside the repository"
+          >
+            <input type="checkbox" checked={isolate} onChange={(event) => setIsolate(event.target.checked)} />
+            <Icon name="git" />
+            Worktree
+          </label>
+        )}
+        <button type="button" className="board-btn board-btn-quiet board-composer-cancel" onClick={onCancel}>
           {keepOpen ? "Done" : "Cancel"}
         </button>
-        <button type="submit" className="button" disabled={!title.trim()}>
-          {submit}
-        </button>
-        {onRun && (
-          <button
-            type="button"
-            className="pane-btn"
-            title="Add and run on an agent"
-            aria-label="Add and run on an agent"
-            aria-haspopup="menu"
-            disabled={!title.trim()}
-            onClick={(event) => {
-              const box = event.currentTarget.getBoundingClientRect();
-              onRun(title, body, { x: box.left, y: box.bottom + 4 });
-            }}
-          >
-            <Icon name="bot" />
+        {/* Add, and add-and-run, as one split button: the robot is the same
+            action with an agent on the end, not a third thing beside it. */}
+        <span className="board-split">
+          <button type="submit" className="board-btn" disabled={!title.trim()}>
+            {submit}
           </button>
-        )}
+          {onRun && (
+            <button
+              type="button"
+              className="board-btn board-split-run"
+              title="Add and run on an agent"
+              aria-label="Add and run on an agent"
+              aria-haspopup="menu"
+              disabled={!title.trim()}
+              onClick={(event) => {
+                const box = event.currentTarget.getBoundingClientRect();
+                onRun(title, body, isolate, { x: box.left, y: box.bottom + 4 });
+              }}
+            >
+              <Icon name="bot" />
+            </button>
+          )}
+        </span>
       </div>
     </form>
   );

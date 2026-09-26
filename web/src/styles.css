@@ -4834,7 +4834,47 @@ a.button {
 .board-card-top {
   display: flex;
   align-items: flex-start;
-  gap: 2px;
+  gap: 6px;
+}
+/* The robot and the menu, as one pair tucked into the corner. Quiet until the
+   card is pointed at, where there is a pointer to point with; a phone has no
+   hover and keeps them at full strength. */
+.board-card-actions {
+  flex: none;
+  display: inline-flex;
+  gap: 1px;
+  margin: -2px -2px 0 0;
+}
+@media (hover: hover) {
+  .board-card-actions {
+    opacity: 0.55;
+    transition: opacity 120ms;
+  }
+  .board-card:hover .board-card-actions,
+  .board-card:focus-within .board-card-actions {
+    opacity: 1;
+  }
+}
+.board-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-md);
+  color: var(--dim);
+  font-size: var(--fs-md);
+  line-height: 1;
+  cursor: var(--cursor-pointer);
+}
+.board-icon-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+:root[data-narrow] .board-icon-btn {
+  width: 32px;
+  height: 32px;
+  font-size: var(--fs-lg);
 }
 .board-card-title {
   flex: 1;
@@ -4919,6 +4959,7 @@ a.button {
 }
 .board-card-ask-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
 }
@@ -4935,8 +4976,95 @@ a.button {
 }
 
 .board-robot:disabled {
+  opacity: 0.35;
+  cursor: var(--cursor);
+}
+
+/* The board's own buttons: one height, one radius, one weight, so a row of
+   them lines up whatever each says. `.button` is a dialog's, and stretches. */
+.board-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: var(--cursor-pointer);
+}
+.board-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.board-btn:disabled {
   opacity: 0.4;
   cursor: var(--cursor);
+}
+.board-btn-quiet {
+  background: transparent;
+  color: var(--dim);
+  font-weight: 500;
+}
+.board-btn-quiet:hover:not(:disabled) {
+  filter: none;
+  color: var(--text);
+  background: var(--chrome-high);
+}
+
+/* Add, and add-and-run, joined: the robot is the same action with an agent on
+   the end, so it is drawn as the end of the same button. */
+.board-split {
+  display: inline-flex;
+}
+.board-split > .board-btn:not(:only-child):first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.board-split-run {
+  padding: 0 8px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--on-accent) 25%, transparent);
+}
+
+/* A row of small controls about one thing — a dev server's open, log, ↻ and ■,
+   a run's open — drawn as one segmented strip so they read as a set. */
+.board-seg {
+  flex: none;
+  display: inline-flex;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.board-seg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  color: var(--dim);
+  background: var(--chrome);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  text-decoration: none;
+  cursor: var(--cursor-pointer);
+}
+.board-seg-btn + .board-seg-btn {
+  border-left: var(--border) var(--border-style) var(--line);
+}
+.board-seg-btn:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+:root[data-narrow] .board-seg-btn {
+  height: 28px;
+  min-width: 30px;
 }
 
 .board-run {
@@ -4966,27 +5094,10 @@ a.button {
   border-color: var(--done);
   background: var(--done);
 }
-.board-run-open {
-  flex: none;
-  padding: 1px 6px;
-  border-radius: var(--radius-md);
-  color: var(--text);
-  background: var(--chrome-high);
-  font-size: var(--fs-sm);
-  cursor: var(--cursor-pointer);
-}
-.board-run-open:hover {
-  background: var(--line);
-}
-
-/* The card's dev server, under its branch. "open" is an anchor rather than a
-   button, for the sidebar row's reason — a real href is what a phone can
-   long-press — so it is told to look like its neighbours. */
-a.board-run-open {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  text-decoration: none;
+/* The dev server's line sits under its branch, a hair apart from the run line
+   so the two terminals a card can have read as two. */
+.board-dev {
+  padding-top: 1px;
 }
 .board-dev-ended .board-run-words {
   color: var(--dimmer);
@@ -4998,7 +5109,7 @@ a.board-run-open {
    branch. */
 .board-tree {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
   min-width: 0;
   font: var(--fs-sm) var(--mono);
@@ -5012,6 +5123,10 @@ a.board-run-open {
   color: var(--text);
 }
 .board-tree-base {
+  flex: none;
+  color: var(--dimmer);
+}
+.board-tree .icon {
   flex: none;
   color: var(--dimmer);
 }
@@ -5041,8 +5156,41 @@ a.board-run-open {
   flex-direction: column;
   gap: 6px;
 }
-.board-composer .dialog-actions {
-  margin-top: 0;
+/* The composer's foot: the worktree box on the left, where it is read as part
+   of the card being written, and the ways out on the right. */
+.board-composer-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.board-composer-cancel {
+  margin-left: auto;
+}
+.board-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px 0 6px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-md);
+  color: var(--dim);
+  font-size: var(--fs-sm);
+  cursor: var(--cursor-pointer);
+  user-select: none;
+}
+.board-toggle:hover {
+  color: var(--text);
+  border-color: var(--line-high);
+}
+.board-toggle input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.board-toggle-on {
+  color: var(--text);
+  border-color: var(--accent);
 }
 .board-composer-body {
   resize: none;

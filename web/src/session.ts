@@ -684,8 +684,8 @@ export function openBoard(paneId?: string, here?: boolean, workspaceId?: string)
   send({ type: "open-board", paneId, here, workspaceId });
 }
 
-export function addCard(workspaceId: string, title: string, body: string, column?: BoardColumn): void {
-  send({ type: "add-card", workspaceId, title, body, column });
+export function addCard(workspaceId: string, title: string, body: string, column?: BoardColumn, isolate?: boolean): void {
+  send({ type: "add-card", workspaceId, title, body, column, isolate });
 }
 
 export function addRunCard(
@@ -693,14 +693,15 @@ export function addRunCard(
   title: string,
   body: string,
   column: BoardColumn | undefined,
+  isolate: boolean,
   launcher: string,
 ): Promise<string> {
-  return request((id) => ({ type: "add-run-card", id, workspaceId, title, body, column, launcher })).then(
+  return request((id) => ({ type: "add-run-card", id, workspaceId, title, body, column, isolate, launcher })).then(
     (result) => (result as { agentId: string }).agentId,
   );
 }
 
-export function editCard(workspaceId: string, cardId: string, fields: { title?: string; body?: string }): void {
+export function editCard(workspaceId: string, cardId: string, fields: { title?: string; body?: string; isolate?: boolean }): void {
   send({ type: "edit-card", workspaceId, cardId, ...fields });
 }
 

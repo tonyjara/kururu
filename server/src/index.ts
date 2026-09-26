@@ -1234,8 +1234,7 @@ async function runCard(workspaceId: string, cardId: string, launcherId: string):
   if (!target) throw new Error("nowhere to put the agent");
   /*
    * Where the agent would have started is where the repository is looked for;
-   * where it *does* start is the card's worktree, when the project runs cards
-   * that way. A worktree that cannot be made is an error on the card rather
+   * where it *does* start is the card's worktree, when the card asked for one. A worktree that cannot be made is an error on the card rather
    * than an agent quietly started in the main checkout — the person pressed
    * the robot expecting isolation, and the one thing worse than no agent is
    * two agents in one tree that they believe are in two.
@@ -1364,10 +1363,10 @@ function isDirectory(path: string): boolean {
  * The checkout a card's agent works in: the card's own worktree, made now if
  * it has to be, or null for "wherever the pane was going anyway".
  *
- * Null when the directory is not in a repository, and when the repository has
- * been told not to — both are the ordinary run, in place. A card that already
- * has a worktree standing goes back into it, whatever the project's setting
- * says today: the work is in there. `setup` is empty on that road, since the
+ * Null when the card did not ask for a worktree, and when the directory is not
+ * in a repository — both are the ordinary run, in place. A card that already
+ * has a worktree standing goes back into it, whatever its box says today: the
+ * work is in there. `setup` is empty on that road, since the
  * setup line is for a checkout that has only ever held tracked files.
  */
 async function checkoutFor(
@@ -1377,7 +1376,7 @@ async function checkoutFor(
   if (card.worktree && worktreePresent(card.worktree.path)) {
     return { worktree: card.worktree, fresh: false, setup: "", dev: projectSettingsFor(projects, card.worktree.root).dev };
   }
-  if (!from) return null;
+  if (!card.isolate || !from) return null;
   const repo = await repoFor(from);
   if (!repo) return null;
   /*
@@ -1388,14 +1387,13 @@ async function checkoutFor(
    */
   const root = await mainRoot(repo.root);
   const settings = projectSettingsFor(projects, root);
-  if (!settings.worktrees) return null;
   const made = await ensureWorktree(root, card);
   return { ...made, setup: settings.setup, dev: settings.dev };
 }
 
 /**
- * Merge every card's worktree in one repository back and take it down — what
- * switching worktrees off for a repository does to the ones already standing,
+ * Merge every card's worktree in one repository back and take it down — the
+ * sweep Settings → Workspaces offers for a repository's standing worktrees,
  * after the person has read the list and confirmed it.
  *
  * One at a time and in order, because they all land on the same branch: the
@@ -1407,7 +1405,7 @@ async function checkoutFor(
  * Past that check the card's agent is ended first, the way `close-tab` ends
  * one: it was working in a directory that is about to not exist. Each card
  * gets a row in the reply, and a card whose worktree went forgets it, so the
- * next robot press on it starts a fresh one — or, with worktrees now off, none.
+ * next robot press on it starts a fresh one if the card still asks for one.
  */
 async function retireWorktrees(root: unknown): Promise<WorktreeOutcome[]> {
   if (typeof root !== "string") throw new Error("no such repository");
@@ -3197,7 +3195,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "add-card":
       workspaces.editBoard(msg.workspaceId, (board) =>
-        addCard(board, { title: msg.title, body: msg.body, column: msg.column }, mintCardId(), Date.now()),
+        addCard(board, { title: msg.title, body: msg.body, column: msg.column, isolate: msg.isolate }, mintCardId(), Date.now()),
       );
       return;
 
@@ -3207,14 +3205,14 @@ function handleMessage(ws: WebSocket, raw: string): void {
         if (msg.workspaceId !== workspaces.activeWorkspace.id) throw new Error("that board is not on screen");
         const cardId = mintCardId();
         workspaces.editBoard(msg.workspaceId, (board) =>
-          addCard(board, { title: msg.title, body: msg.body, column: msg.column }, cardId, Date.now()),
+          addCard(board, { title: msg.title, body: msg.body, column: msg.column, isolate: msg.isolate }, cardId, Date.now()),
         );
         return runCard(msg.workspaceId, cardId, msg.launcher);
       });
       return;
 
     case "edit-card":
-      workspaces.editBoard(msg.workspaceId, (board) => editCard(board, msg.cardId, { title: msg.title, body: msg.body }));
+      workspaces.editBoard(msg.workspaceId, (board) => editCard(board, msg.cardId, { title: msg.title, body: msg.body, isolate: msg.isolate }));
       return;
 
     case "move-card":

@@ -134,7 +134,22 @@ describe("on disk and in the blob", () => {
     expect(adoptBoard(undefined)).toBeNull();
     expect(adoptBoard(null)).toBeNull();
     const back = adoptBoard({ cards: [null, { id: 1, title: "x" }, { id: "k", title: "ok", column: 7, run: "no" }] });
-    expect(back!.cards).toEqual([{ id: "k", title: "ok", body: "", column: "todo", createdAt: 0, run: null, worktree: null, dev: null }]);
+    expect(back!.cards).toEqual([{ id: "k", title: "ok", body: "", column: "todo", createdAt: 0, run: null, isolate: false, worktree: null, dev: null }]);
+  });
+
+  /**
+   * The worktree box is the card's, off unless ticked. A card from before it
+   * was — one with a worktree standing — reads as having ticked it.
+   */
+  it("keeps a card's worktree box, and ticks it for a card that already has a worktree", () => {
+    const b = addCard(emptyBoard(), { title: "a", isolate: true }, "c0", 0);
+    expect(b.cards[0]!.isolate).toBe(true);
+    expect(addCard(emptyBoard(), { title: "a", isolate: "yes" }, "c0", 0).cards[0]!.isolate).toBe(false);
+    expect(adoptBoard(JSON.parse(JSON.stringify(storedBoard(b))))!.cards[0]!.isolate).toBe(true);
+    expect(editCard(b, "c0", { isolate: false }).cards[0]!.isolate).toBe(false);
+    expect(editCard(b, "c0", { title: "b" }).cards[0]!.isolate).toBe(true);
+    const tree = { root: "/r/app", path: "/r/app.worktrees/fix-c0", branch: "kururu/fix-c0", base: "main" };
+    expect(adoptBoard({ cards: [{ id: "k", title: "ok", worktree: tree }] })!.cards[0]!.isolate).toBe(true);
   });
 
   /**

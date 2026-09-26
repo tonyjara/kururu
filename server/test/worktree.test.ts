@@ -69,19 +69,19 @@ describe("naming", () => {
 describe("settings", () => {
   it("reads whatever was on disk as settings, and refuses a key that is not a path", () => {
     expect(adoptProject(undefined)).toEqual(DEFAULT_PROJECT);
+    // `worktrees` was a per-repository switch before it was a box on each card; an old file's is dropped.
     expect(adoptProject({ worktrees: false, setup: "  bun install\n", dev: 7 })).toEqual({
-      worktrees: false,
       setup: "bun install",
       dev: "",
     });
     const map = adoptProjects({ "/r/app": { dev: "bun run dev" }, "app": { dev: "x" }, "": {} });
     expect(Object.keys(map)).toEqual(["/r/app"]);
-    expect(map["/r/app"]).toEqual({ worktrees: true, setup: "", dev: "bun run dev" });
+    expect(map["/r/app"]).toEqual({ setup: "", dev: "bun run dev" });
   });
 
   it("writes no entry for a repository left at the defaults", () => {
     const one = withProject({}, "/r/app", { ...DEFAULT_PROJECT, setup: "bun install" });
-    expect(one).toEqual({ "/r/app": { worktrees: true, setup: "bun install", dev: "" } });
+    expect(one).toEqual({ "/r/app": { setup: "bun install", dev: "" } });
     expect(withProject(one, "/r/app", DEFAULT_PROJECT)).toEqual({});
   });
 });
