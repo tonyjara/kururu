@@ -600,15 +600,11 @@ export class Workspaces {
   }
 
   /**
-   * The same thing, for a terminal that ended on its own — and the pane goes
-   * with it if that was the only thing in there.
-   *
-   * The difference from `removeTab` is who asked. Closing a tab is a gesture
-   * aimed at the tab, so the pane it empties is a place somebody is keeping and
-   * stays standing as the button that opens the next terminal. A pty that
-   * *ended* is not a gesture about the pane at all: the reason the pane was
-   * there has gone, and leaving it would mean rearranging accumulated holes —
-   * which is exactly what `pruneEmptied` says about a pane a drag emptied. This
+   * The same thing, and the pane goes with it if that was the only thing in
+   * there. Used both for a terminal that ended on its own and for `close-tab`:
+   * the reason the pane was there has gone, and leaving it would mean
+   * rearranging accumulated holes — which is exactly what `pruneEmptied` says
+   * about a pane a drag emptied. This
    * cannot call that one, because it is about the workspace you are looking at
    * and a terminal ends wherever it was left.
    *

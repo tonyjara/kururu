@@ -966,6 +966,16 @@ export function App() {
             return resetZoom();
           }
         }
+        // An empty pane has no pty to own the key, and is the button that opens one.
+        if (
+          emptyPaneFocused(workspace) &&
+          !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey &&
+          keyName(event) === "enter"
+        ) {
+          take();
+          void api.newTab();
+          return;
+        }
         // Everything else belongs to the pty, and xterm is downstream of here.
         return;
       }
@@ -1409,6 +1419,14 @@ function readerFocused(
   if (!workspace) return false;
   const pane = panes(workspace.layout).find((p) => p.id === workspace.focusedPaneId);
   return Boolean(pane?.reader);
+}
+
+function emptyPaneFocused(
+  workspace: { layout: LayoutNode; focusedPaneId: string } | null,
+): boolean {
+  if (!workspace) return false;
+  const pane = panes(workspace.layout).find((p) => p.id === workspace.focusedPaneId);
+  return Boolean(pane && !pane.reader && pane.agentIds.length === 0);
 }
 
 function focusedAgentOf(
