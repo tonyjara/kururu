@@ -33,11 +33,13 @@
  * the answer, and it is complete. Only `new-tab` can fail in a way nothing else
  * would explain, so it alone carries an `id` and is answered with `reply`.
  */
+import type { BoardColumn } from "./board";
 import type { Direction } from "./layout";
 import type { Action } from "./keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
 import type { LaunchSettings } from "./launchers";
 import type { NotifyEvent, NotifySettings } from "./notify";
+import type { ProjectSettings } from "./projects";
 import type { TerminalAppearance } from "./theme";
 
 /**
@@ -752,6 +754,61 @@ export type ClientMessage =
    */
   | { type: "open-in-editor"; id: number; root: string; path: string; agentId: string | null }
 
+  // --- the board -----------------------------------------------------------
+  /**
+   * Show the workspace's board, making it if this workspace has never had one.
+   * The only verb that creates a board — see `shared/board.ts`.
+   *
+   * The board is a tab (`BOARD_TAB` in `shared/layout.ts`). Without `here` this
+   * shows the one you have, or puts a new one beside `paneId`; with it — the
+   * new-tab menu — the tab goes *into* `paneId`, moved from wherever it was.
+   * `workspaceId` is a workspace row's menu, and switches there first.
+   */
+  | { type: "open-board"; paneId?: string; here?: boolean; workspaceId?: string }
+
+  /**
+   * The cards, as verbs like everything else. Each names its workspace rather
+   * than meaning "the one on screen", because a phone and a desktop can be
+   * looking at the same board through a switch the other has not drawn yet.
+   * The text is checked and capped on the server (`shared/board.ts`), and a
+   * move's index is a place among the destination column's cards.
+   */
+  | { type: "add-card"; workspaceId: string; title: string; body?: string; column?: BoardColumn }
+  | { type: "edit-card"; workspaceId: string; cardId: string; title?: string; body?: string }
+  | { type: "move-card"; workspaceId: string; cardId: string; column: BoardColumn; index?: number }
+  | { type: "delete-card"; workspaceId: string; cardId: string }
+
+  /**
+   * Hand a card to an agent: start one on `launcher` — an id from
+   * `shared/launchers.ts`, looked up and never built, for `new-tab`'s reason —
+   * with the card as its prompt, in a terminal pane of the card's workspace.
+   * Replied to with the new agent's id, because a spawn is the one thing here
+   * that can fail in a way the next snapshot would not explain.
+   */
+  | { type: "run-card"; id: number; workspaceId: string; cardId: string; launcher: string }
+
+  /**
+   * The git a card's worktree needs, from the card's menu, so that nobody has
+   * to open a terminal in each worktree to get its work back to the branch.
+   * All five name the card and let the server find the worktree on it — a path
+   * never comes from a client — and all five are replied to, because each is a
+   * subprocess that can say no and the snapshot would not say why.
+   *
+   * `worktree-status` is what the menu opens with: changes, ahead, behind.
+   * `commit-card` commits everything in the worktree with the card as the
+   * message. `stash-card` sets the uncommitted work aside with `git stash`,
+   * which is how a worktree is cleared without kururu ever throwing anything
+   * away — the stash is in the repository and outlives the worktree.
+   * `merge-card` is the one card's worktree merged back, removed, and the card
+   * put in Done; it is `retire-worktrees` for one card and asks the same
+   * things of git. `open-worktree` opens a shell there, beside the board.
+   */
+  | { type: "worktree-status"; id: number; workspaceId: string; cardId: string }
+  | { type: "commit-card"; id: number; workspaceId: string; cardId: string }
+  | { type: "stash-card"; id: number; workspaceId: string; cardId: string }
+  | { type: "merge-card"; id: number; workspaceId: string; cardId: string }
+  | { type: "open-worktree"; id: number; workspaceId: string; cardId: string }
+
   // --- the mascot ----------------------------------------------------------
   /**
    * Change one saved mascot. A verb like everything else here: Settings does not
@@ -848,7 +905,23 @@ export type ClientMessage =
    * Which agents and models the new-tab menu offers. Server-owned like the rest
    * of Settings, so the phone's menu is the desktop's menu.
    */
-  | { type: "set-launch"; launch: LaunchSettings };
+  | { type: "set-launch"; launch: LaunchSettings }
+  /**
+   * What a repository has been told about itself — see `shared/projects.ts`.
+   * `root` must be one the server already knows: a repository it found by
+   * walking up from a terminal it holds, or one already in the file. Any other
+   * path is refused, on `files.ts`'s rule that a root never comes from a client.
+   */
+  | { type: "set-project"; root: string; settings: ProjectSettings }
+  /**
+   * Merge every card's worktree in this repository back into the branch it was
+   * cut from and take it down — what switching worktrees off for a repository
+   * asks, once the person has read the list and said so. Replied to with a
+   * `WorktreeOutcome` per card, because it is a sweep whose parts can fail
+   * separately and the next snapshot only shows which worktrees are gone, not
+   * why the others are not. `root` is checked as `set-project`'s is.
+   */
+  | { type: "retire-worktrees"; id: number; root: string };
 
 /**
  * How often the status heuristic is asked to notice that work has stopped.

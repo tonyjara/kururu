@@ -10,6 +10,8 @@ in this folder.
 | `model.ts` | Agents and the hierarchy they live in. Not a mirror of anything |
 | `wire.ts` | The browser↔server protocol, and the timer intervals |
 | `layout.ts` | The split tree and every pure operation on it. Both halves use it |
+| `board.ts` | A workspace's cards, and what an agent's status does to the one it was handed |
+| `projects.ts` | What a repository has been told about itself, and how a card's worktree is named |
 | `keys.ts` | Every action, ghosttown's defaults, and a user's overrides |
 | `labels.ts` | What to call a terminal and what to say it is doing — three places must agree |
 | `notify.ts` | When kururu may interrupt you, and the words. Ported policy |
@@ -68,6 +70,8 @@ in this folder.
 | `src/keys.ts` | The keymap a user has amended. Persistence only |
 | `src/notify.ts` | When to interrupt somebody, as they left it. Persistence only |
 | `src/launch.ts` | Which agents the new-tab menu leaves out. Persistence only |
+| `src/projects.ts` | Per-repository settings, by root. Persistence only |
+| `src/worktree.ts` | A card's checkout: `git worktree add` on a click, and rebase, fast-forward, `worktree remove`, `branch -d` when it is retired — never forced. The one place kururu runs `git` |
 | `src/logins.ts` | Where a profile's logins live, and the two env vars. Makes, never deletes |
 | `run.mjs` | Builds, spawns and re-spawns the server. What `C-a B` reaches |
 | `status.mjs` | The daemon has no face; this is it. Socket + `/api/agents` |
@@ -112,6 +116,7 @@ for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` ·
 `Status.tsx` (a dot, or the mascot) · `Icon.tsx` (a class name and an
 `aria-hidden` span) · `Dialog.tsx` (while one is up, no key reaches a pty) ·
 `Menu.tsx` · `Reader.tsx` (**the thing kururu was built for**; one draggable tab per document) ·
+`Board.tsx` (a workspace's cards; the robot hands one to an agent) ·
 `FileTree.tsx` (markdown to the reader, the rest to nvim; holds the reader's zoom) · `DocPicker.tsx` (an empty reader only) ·
 `Keybar.tsx` · `Reach.tsx` · `Crash.tsx` · `HelpOverlay.tsx` (printed from the
 keymap, so it cannot document a dead key) · `Settings*.tsx`.

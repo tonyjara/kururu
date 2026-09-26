@@ -21,10 +21,12 @@
 import { useCallback, useState } from "react";
 import type { KeyOverrides } from "../../../shared/keys";
 import type { LaunchSettings } from "../../../shared/launchers";
-import type { HostInfo, LoginSummary, MascotSet, ProfileSummary } from "../../../shared/model";
+import type { HostInfo, LoginSummary, MascotSet, ProfileSummary, Workspace } from "../../../shared/model";
 import type { NotifySettings as NotifyConfig } from "../../../shared/notify";
+import type { ProjectSettingsMap } from "../../../shared/projects";
 import type { StyleLibrary } from "../../../shared/styles";
 import type { Appearance } from "../../../shared/theme";
+import type { WorkspaceProject } from "../../../shared/wire";
 import { AboutSettings } from "./SettingsAbout";
 import { AgentSettings } from "./SettingsAgents";
 import { AppearanceSettings } from "./SettingsAppearance";
@@ -32,6 +34,7 @@ import { KeySettings } from "./SettingsKeys";
 import { MascotSettings } from "./SettingsMascot";
 import { NotifySettings } from "./SettingsNotify";
 import { ProfileSettings } from "./SettingsProfiles";
+import { WorkspaceSettings } from "./SettingsWorkspaces";
 import { StyleSettings } from "./SettingsStyles";
 import { StudioSettings } from "./SettingsStudio";
 
@@ -41,6 +44,7 @@ export type Tab =
   | "studio"
   | "profiles"
   | "agents"
+  | "workspaces"
   | "mascot"
   | "notify"
   | "keys"
@@ -83,6 +87,13 @@ const TABS: ReadonlyArray<readonly [Tab, string]> = [
    * new-tab button will put in one.
    */
   ["agents", "Agents"],
+  /**
+   * After Agents, and it is the same sentence read on: Agents is what the
+   * robot starts, this is where it starts it — in a worktree or not, and what
+   * runs in a fresh one first. A sub-tab per workspace, because that is the
+   * list a person has in their head; what is stored is the repository's.
+   */
+  ["workspaces", "Workspaces"],
   ["mascot", "Mascot"],
   /**
    * Beside the Mascot rather than beside Appearance, and the two are the same
@@ -120,11 +131,21 @@ export function Settings({
   profiles,
   logins,
   activeProfileId,
+  workspaces,
+  activeWorkspaceId,
+  projects,
+  projectSettings,
   initialTab,
   onClose,
   onEditing,
 }: {
   appearance: Appearance;
+  /** The active profile's workspaces — the Workspaces page's tabs — and which you are in. */
+  workspaces: Workspace[];
+  activeWorkspaceId: string;
+  /** The repository each of them is in, as the server found it. */
+  projects: WorkspaceProject[];
+  projectSettings: ProjectSettingsMap;
   /** Every theme and skin installed from the registry, and the record of them. */
   styles: StyleLibrary;
   mascots: MascotSet;
@@ -217,6 +238,14 @@ export function Settings({
             />
           ) : tab === "agents" ? (
             <AgentSettings launch={launch} />
+          ) : tab === "workspaces" ? (
+            <WorkspaceSettings
+              workspaces={workspaces}
+              activeWorkspaceId={activeWorkspaceId}
+              projects={projects}
+              settings={projectSettings}
+              onEditing={onEditing}
+            />
           ) : tab === "mascot" ? (
             <MascotSettings mascots={mascots} onEditing={onEditing} />
           ) : tab === "notify" ? (

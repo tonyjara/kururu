@@ -35,7 +35,9 @@ import type {
   WorkspaceBranch,
   WorkspaceProject,
 } from "../../shared/wire";
+import type { BoardColumn } from "../../shared/board";
 import type { LaunchSettings } from "../../shared/launchers";
+import type { ProjectSettings, WorktreeOutcome, WorktreeStatus } from "../../shared/projects";
 import type { NotifySettings } from "../../shared/notify";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { Grid } from "./grid";
@@ -673,6 +675,65 @@ export function openReader(paneId?: string, agentId?: string, focus?: boolean): 
   send({ type: "open-reader", paneId, agentId, focus });
 }
 
+/**
+ * Show this workspace's board — the first time, make it. See `shared/board.ts`.
+ * The server focuses it, since a board is a thing you type into.
+ */
+export function openBoard(paneId?: string, here?: boolean, workspaceId?: string): void {
+  send({ type: "open-board", paneId, here, workspaceId });
+}
+
+export function addCard(workspaceId: string, title: string, body: string, column?: BoardColumn): void {
+  send({ type: "add-card", workspaceId, title, body, column });
+}
+
+export function editCard(workspaceId: string, cardId: string, fields: { title?: string; body?: string }): void {
+  send({ type: "edit-card", workspaceId, cardId, ...fields });
+}
+
+/** `index` is a place among the destination column's cards, the moved one left out. */
+export function moveCard(workspaceId: string, cardId: string, column: BoardColumn, index?: number): void {
+  send({ type: "move-card", workspaceId, cardId, column, index });
+}
+
+/** The card only. Its agent, if it has one, runs on — see `delete-card`. */
+export function deleteCard(workspaceId: string, cardId: string): void {
+  send({ type: "delete-card", workspaceId, cardId });
+}
+
+/**
+ * Hand a card to an agent on this launcher. Waits, for `newTab`'s reason: a
+ * spawn that fails is not explained by the next snapshot.
+ */
+export function runCard(workspaceId: string, cardId: string, launcher: string): Promise<string> {
+  return request((id) => ({ type: "run-card", id, workspaceId, cardId, launcher })).then(
+    (result) => (result as { agentId: string }).agentId,
+  );
+}
+
+/**
+ * The git on a card's worktree, from its menu. All of them wait, because each
+ * is a subprocess on the server that can say no in a way the next snapshot
+ * would not explain — and the status is nothing *but* the answer.
+ */
+export function worktreeStatus(workspaceId: string, cardId: string): Promise<WorktreeStatus> {
+  return request((id) => ({ type: "worktree-status", id, workspaceId, cardId })) as Promise<WorktreeStatus>;
+}
+export function commitCard(workspaceId: string, cardId: string): Promise<{ files: number }> {
+  return request((id) => ({ type: "commit-card", id, workspaceId, cardId })) as Promise<{ files: number }>;
+}
+export function stashCard(workspaceId: string, cardId: string): Promise<{ files: number }> {
+  return request((id) => ({ type: "stash-card", id, workspaceId, cardId })) as Promise<{ files: number }>;
+}
+export function mergeCard(workspaceId: string, cardId: string): Promise<{ commits: number }> {
+  return request((id) => ({ type: "merge-card", id, workspaceId, cardId })) as Promise<{ commits: number }>;
+}
+export function openWorktree(workspaceId: string, cardId: string): Promise<string> {
+  return request((id) => ({ type: "open-worktree", id, workspaceId, cardId })).then(
+    (result) => (result as { agentId: string }).agentId,
+  );
+}
+
 /** Stop following the editor, or start again. */
 export function pinReader(paneId: string, follow: boolean): void {
   send({ type: "pin-reader", paneId, follow });
@@ -805,6 +866,20 @@ export function setNotify(notify: NotifySettings): void {
 /** Which agents and models the new-tab menu offers. */
 export function setLaunch(launch: LaunchSettings): void {
   send({ type: "set-launch", launch });
+}
+
+/** What one repository has been told about itself — worktrees, setup, dev. */
+export function setProject(root: string, settings: ProjectSettings): void {
+  send({ type: "set-project", root, settings });
+}
+
+/**
+ * Merge every card's worktree in this repository back and take it down. Waits,
+ * because the answer is a list of what happened to each, and the snapshot only
+ * shows which worktrees are gone.
+ */
+export function retireWorktrees(root: string): Promise<WorktreeOutcome[]> {
+  return request((id) => ({ type: "retire-worktrees", id, root })) as Promise<WorktreeOutcome[]>;
 }
 
 /**

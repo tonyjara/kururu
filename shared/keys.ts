@@ -50,6 +50,7 @@ export type Action =
   | "find-workspace"
   | "find-agent"
   | "open-reader"
+  | "open-board"
   | "settings"
   | "reload"
   | "restart-server"
@@ -105,6 +106,7 @@ export const ACTION_INFO: Record<Action, { label: string; group: ActionGroup }> 
   "new-profile": { label: "new profile", group: "profiles" },
 
   "open-reader": { label: "read the markdown open next door", group: "panes" },
+  "open-board": { label: "this workspace's board", group: "panes" },
 
   "toggle-sidebar": { label: "toggle the sidebar", group: "window" },
   "toggle-files": { label: "toggle the file tree", group: "window" },
@@ -135,6 +137,8 @@ export const DEFAULT_KEYMAP: Record<string, Action> = {
   // left unbound to be claimed back — it was unbound because there was nothing
   // here that it meant, not because the key was spoken for.
   M: "open-reader",
+  // K for kanban. Shifted, like M beside it, because `k` is focus-up.
+  K: "open-board",
   "|": "split-right",
   "\\": "split-right",
   "%": "split-right",
