@@ -247,6 +247,26 @@ way `close-tab` ends one, since its directory is about to go. The reply is a
 row per card, and the page shows each row: how many commits the base took, or
 why the worktree is still there. A card whose worktree went forgets it.
 
+**The main tree has a say, and it is asked first.** `merge --ff-only` refuses
+when the base's own checkout has uncommitted work in a file the branch
+changes — but only at the merge, after the agent is ended and the branch
+rebased. `mergeBlock` in `worktree.ts` puts the same question before anything
+is ended, from `git status` there against the branch's diff since it forked,
+and `merge-card` answers with a `MergeBlock` rather than an error: the files
+in the way, any untracked file the branch would create, and whether the two
+sets of changes fit, asked of `git merge-tree` on a commit `stash create`
+makes without touching the tree. The card shows the block in place with two
+ways through when the dry run was clean — commit everything on the base as a
+`wip:` commit and rebase the card over it, or `git merge --autostash` around
+the fast-forward — each with a sentence on what it does, and a second
+`merge-card` carries the choice as `resolve`. A dry run that conflicted, or
+an untracked collision, is shown with neither, because both would land in the
+same conflict and the stash one in a worse place: an autostash that does not
+apply back leaves the tree with conflict markers and the original in the
+stash, which is the one outcome `retireWorktree` has to report as a `note`
+after a merge that went through. The sweep gets the same block as a message
+on the card's row.
+
 **Project settings are keyed by repository, not workspace.** A workspace once
 remembered a dev command and it went with the sidebar's dev buttons: that was a
 fact *watched* off the process table. These are three things somebody typed

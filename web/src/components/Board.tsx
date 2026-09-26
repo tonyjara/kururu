@@ -35,7 +35,7 @@ import {
 } from "../../../shared/board";
 import type { Launcher } from "../../../shared/launchers";
 import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
-import type { WorktreeStatus } from "../../../shared/projects";
+import type { MergeBlock, MergeResolution, WorktreeStatus } from "../../../shared/projects";
 import type { DevServer } from "../../../shared/wire";
 import { isLoopback, previewUrl, serverIn } from "../preview";
 import * as api from "../session";
@@ -190,18 +190,87 @@ export function BoardView({
    * later. "Set aside" is `git stash`, and says so in its hint, because it is
    * the row somebody looks for as "discard" and it is deliberately not one.
    */
-  const merge = (card: Card, tree: CardWorktree, commitFirst: boolean) =>
+  const merge = (card: Card, tree: CardWorktree, commitFirst: boolean, resolve?: MergeResolution) =>
     whileWorking(
       card.id,
       commitFirst ? "Committing and merging…" : "Merging…",
       (commitFirst ? api.commitCard(workspaceId, card.id) : Promise.resolve(null)).then(() =>
-        api.mergeCard(workspaceId, card.id),
+        api.mergeCard(workspaceId, card.id, resolve),
       ),
     )
-      .then(({ commits }) =>
-        said(card.id, `Merged ${commits} ${commits === 1 ? "commit" : "commits"} into ${tree.base}; worktree removed`),
-      )
+      .then((reply) => {
+        if ("blocked" in reply) {
+          askAboutBlock(card, tree, reply.blocked);
+          return;
+        }
+        const merged = `Merged ${reply.commits} ${reply.commits === 1 ? "commit" : "commits"} into ${tree.base}; worktree removed`;
+        if (reply.note) failed(card.id)(new Error(`${merged} — but ${reply.note}`));
+        else said(card.id, merged);
+      })
       .catch(failed(card.id));
+
+  /**
+   * The merge that stopped before it started, because the checkout `base` is
+   * on has uncommitted work in the files this branch changes. Git would have
+   * refused the fast-forward over it; the server saw that coming and ended
+   * nothing. The card says what is in the way and, when a dry run says the
+   * two sets of changes fit, offers the two ways through with what each one
+   * does — commit the work on the base first and rebase the card over it, or
+   * git's own autostash around the fast-forward. A dry run that conflicted
+   * gets neither, because both would land in the same conflict, one of them
+   * in a worse place: that one is the person's to resolve by hand. An
+   * untracked file the branch would create is the same kind of stop, since
+   * autostash leaves untracked files where they are and a commit would only
+   * turn the collision into an add/add conflict.
+   */
+  const askAboutBlock = (card: Card, tree: CardWorktree, block: MergeBlock) => {
+    const list = (paths: string[]) => paths.slice(0, 4).join(", ") + (paths.length > 4 ? ` and ${paths.length - 4} more` : "");
+    const parts: string[] = [];
+    if (block.files.length) {
+      parts.push(
+        `${block.base} has uncommitted changes in ${list(block.files)}, which this branch also changes, and git will not fast-forward over them.`,
+      );
+    }
+    if (block.untracked.length) {
+      parts.push(
+        `${block.base} has untracked ${list(block.untracked)}, which this branch creates. Move or remove ${
+          block.untracked.length === 1 ? "it" : "them"
+        } and merge again.`,
+      );
+    }
+    const offer = !block.untracked.length && block.clean !== false;
+    if (!block.untracked.length) {
+      parts.push(
+        block.clean === true
+          ? "In a dry run the two fit together, so either of these gets through:"
+          : block.clean === false
+            ? `In a dry run they conflict, so neither committing nor stashing them would get past this. Resolve it on ${block.base} by hand, then merge again.`
+            : "Whether the two fit together could not be checked; if they do not, the step that finds out stops and says so.",
+      );
+    }
+    setAsk({
+      cardId: card.id,
+      text: parts.join(" "),
+      choices: offer
+        ? [
+            {
+              label: `Commit ${block.base}, then merge`,
+              outcome:
+                `Everything uncommitted on ${block.base} is committed as “wip: before merging ${card.title}”, the card is rebased onto ` +
+                `that, and ${block.base} fast-forwards. A rebase that conflicts is aborted and the worktree stays.`,
+              run: () => merge(card, tree, false, "commit"),
+            },
+            {
+              label: "Stash, merge, restore",
+              outcome:
+                `git merge --autostash: the changes are set aside, ${block.base} fast-forwards, and they are put back uncommitted. ` +
+                "If they do not apply, they stay in git stash and the card says so.",
+              run: () => merge(card, tree, false, "stash"),
+            },
+          ]
+        : [],
+    });
+  };
 
   /**
    * Every road into a column, the drag and the menu row alike. Done is the one
@@ -442,11 +511,9 @@ export function BoardView({
                     note={notes[card.id]}
                     onNoteClick={() => setNotes(({ [card.id]: _, ...rest }) => rest)}
                     ask={ask?.cardId === card.id ? ask : null}
-                    onAsk={(choice) => {
-                      const pending = ask;
+                    onAsk={(run) => {
                       setAsk(null);
-                      if (choice === "yes") pending?.run();
-                      else if (choice === "alt") pending?.alt?.run();
+                      run?.();
                     }}
                     insertBefore={dropAt?.column === column && dropAt.index === index}
                     canRun={launchers.length > 0}
@@ -515,13 +582,19 @@ export function BoardView({
   );
 }
 
-/** A question a card is asking in place: what it says, and what yes and the other way out do. */
+/**
+ * A question a card is asking in place: what it says, and what yes and the
+ * other way out do. A question with `choices` instead of a `yes` is one
+ * whose answers each need a sentence — they are drawn as rows, each with
+ * what it does under its button, and Cancel is the only plain button left.
+ */
 interface Ask {
   cardId: string;
   text: string;
-  yes: string;
-  run: () => void;
+  yes?: string;
+  run?: () => void;
   alt?: { label: string; run: () => void };
+  choices?: { label: string; outcome: string; run: () => void }[];
 }
 
 function CardView({
@@ -561,7 +634,8 @@ function CardView({
   onNoteClick: () => void;
   /** A merge waiting for its second click, or null. */
   ask: Ask | null;
-  onAsk: (choice: "yes" | "alt" | "no") => void;
+  /** The answer's action, or null for the way out. */
+  onAsk: (run: (() => void) | null) => void;
   insertBefore: boolean;
   canRun: boolean;
   onRobot: (at: MenuAt) => void;
@@ -643,18 +717,28 @@ function CardView({
         {ask && (
           <div className="board-card-ask" role="alertdialog" aria-label="Confirm">
             <p className="board-card-ask-text">{ask.text}</p>
+            {ask.choices?.map((choice) => (
+              <div key={choice.label} className="board-card-ask-choice">
+                <button className="button" onClick={() => onAsk(choice.run)}>
+                  {choice.label}
+                </button>
+                <p className="board-card-ask-outcome">{choice.outcome}</p>
+              </div>
+            ))}
             <div className="board-card-ask-actions">
-              <button className="button button-quiet" onClick={() => onAsk("no")}>
+              <button className="button button-quiet" onClick={() => onAsk(null)}>
                 Cancel
               </button>
               {ask.alt && (
-                <button className="button button-quiet" onClick={() => onAsk("alt")}>
+                <button className="button button-quiet" onClick={() => onAsk(ask.alt?.run ?? null)}>
                   {ask.alt.label}
                 </button>
               )}
-              <button className="button" onClick={() => onAsk("yes")}>
-                {ask.yes}
-              </button>
+              {ask.yes && (
+                <button className="button" onClick={() => onAsk(ask.run ?? null)}>
+                  {ask.yes}
+                </button>
+              )}
             </div>
           </div>
         )}

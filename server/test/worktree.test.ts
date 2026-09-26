@@ -20,6 +20,7 @@ import {
   envFiles,
   fastForward,
   mainRoot,
+  mergeBlock,
   parseStatusHeader,
   repoStatus,
   retireWorktree,
@@ -264,7 +265,7 @@ describe("retireWorktree", () => {
       await commitIn(worktree.path, "b.txt", "b\n", "card work");
       await commitIn(worktree.path, "c.txt", "c\n", "more card work");
 
-      expect(await retireWorktree(worktree)).toEqual({ commits: 2 });
+      expect(await retireWorktree(worktree)).toEqual({ commits: 2, note: null });
       expect(sh(root, "log", "--format=%s", "main")).toBe("more card work\ncard work\none");
       expect(existsSync(join(root, "c.txt"))).toBe(true);
       expect(worktreePresent(worktree.path)).toBe(false);
@@ -287,7 +288,7 @@ describe("retireWorktree", () => {
       await commitIn(worktree.path, "b.txt", "b\n", "card work");
       await commitIn(root, "d.txt", "d\n", "meanwhile on main");
 
-      expect(await retireWorktree(worktree)).toEqual({ commits: 1 });
+      expect(await retireWorktree(worktree)).toEqual({ commits: 1, note: null });
       expect(sh(root, "log", "--format=%s", "main")).toBe("card work\nmeanwhile on main\none");
       // One parent each: a fast-forward of a rebased branch, not a merge.
       expect(sh(root, "rev-list", "--merges", "--count", "main")).toBe("0");
@@ -354,7 +355,7 @@ describe("retireWorktree", () => {
     const root = await repo();
     try {
       const { worktree } = await ensureWorktree(root, card);
-      expect(await retireWorktree(worktree)).toEqual({ commits: 0 });
+      expect(await retireWorktree(worktree)).toEqual({ commits: 0, note: null });
       expect(worktreePresent(worktree.path)).toBe(false);
       expect(sh(root, "branch", "--list", worktree.branch)).toBe("");
     } finally {
@@ -374,7 +375,7 @@ describe("retireWorktree", () => {
       await commitIn(worktree.path, "b.txt", "b\n", "card work");
       sh(root, "checkout", "-q", "-b", "elsewhere");
 
-      expect(await retireWorktree(worktree)).toEqual({ commits: 1 });
+      expect(await retireWorktree(worktree)).toEqual({ commits: 1, note: null });
       expect(sh(root, "log", "--format=%s", "main")).toBe("card work\none");
       expect(sh(root, "branch", "--show-current")).toBe("elsewhere");
       expect(existsSync(join(root, "b.txt"))).toBe(false);
@@ -392,10 +393,125 @@ describe("retireWorktree", () => {
       await commitIn(worktree.path, "b.txt", "b\n", "card work");
       await rm(worktree.path, { recursive: true, force: true });
 
-      expect(await retireWorktree(worktree)).toEqual({ commits: 1 });
+      expect(await retireWorktree(worktree)).toEqual({ commits: 1, note: null });
       expect(sh(root, "log", "--format=%s", "main")).toBe("card work\none");
       expect(sh(root, "branch", "--list", worktree.branch)).toBe("");
       expect(sh(root, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree "))).toHaveLength(1);
+    } finally {
+      await cleanup(root);
+    }
+  });
+});
+
+/**
+ * The other tree with a say. These write a many-line `a.txt` first so that
+ * main and the card can each change a different line of it: the overlap git
+ * refuses to fast-forward over, without the conflict that nothing gets past.
+ */
+describe("mergeBlock", () => {
+  const card = { id: "c0123456789ab", title: "Fix the tests" };
+  const lines = "one\ntwo\nthree\nfour\nfive\n";
+  const commitIn = async (dir: string, file: string, text: string, message: string) => {
+    await writeFile(join(dir, file), text);
+    sh(dir, "add", file);
+    sh(dir, "commit", "-q", "-m", message);
+  };
+  const cleanup = async (root: string) => {
+    await rm(root, { recursive: true, force: true });
+    await rm(`${root}.worktrees`, { recursive: true, force: true });
+  };
+
+  it("sees nothing in the way of a clean checkout, or of changes to files the branch leaves alone", async () => {
+    const root = await repo();
+    try {
+      await commitIn(root, "a.txt", lines, "lines");
+      const { worktree } = await ensureWorktree(root, card);
+      await commitIn(worktree.path, "a.txt", lines.replace("one", "ONE"), "card work");
+      expect(await mergeBlock(worktree)).toBeNull();
+      await writeFile(join(root, "elsewhere.txt"), "untracked, and not the branch's\n");
+      await commitIn(root, "b.txt", "b\n", "a tracked file to dirty");
+      await writeFile(join(root, "b.txt"), "dirty\n");
+      expect(await mergeBlock(worktree)).toBeNull();
+      expect(await retireWorktree(worktree)).toEqual({ commits: 1, note: null });
+    } finally {
+      await cleanup(root);
+    }
+  });
+
+  it("names the overlap, and says whether the two changes fit", async () => {
+    const root = await repo();
+    try {
+      await commitIn(root, "a.txt", lines, "lines");
+      const { worktree } = await ensureWorktree(root, card);
+      await commitIn(worktree.path, "a.txt", lines.replace("one", "ONE"), "card work");
+      await writeFile(join(root, "a.txt"), lines.replace("five", "FIVE"));
+      expect(await mergeBlock(worktree)).toEqual({ base: "main", files: ["a.txt"], untracked: [], clean: true });
+      await writeFile(join(root, "a.txt"), lines.replace("one", "uno"));
+      expect(await mergeBlock(worktree)).toEqual({ base: "main", files: ["a.txt"], untracked: [], clean: false });
+      // Git itself agrees, and the block came before it could.
+      await expect(retireWorktree(worktree)).rejects.toThrow("local changes");
+    } finally {
+      await cleanup(root);
+    }
+  });
+
+  it("names an untracked file the branch would create, and does not guess whether it fits", async () => {
+    const root = await repo();
+    try {
+      const { worktree } = await ensureWorktree(root, card);
+      await commitIn(worktree.path, "new.txt", "the card's\n", "card work");
+      await writeFile(join(root, "new.txt"), "mine\n");
+      expect(await mergeBlock(worktree)).toEqual({ base: "main", files: [], untracked: ["new.txt"], clean: null });
+    } finally {
+      await cleanup(root);
+    }
+  });
+
+  it("is not a question when the main tree is on another branch", async () => {
+    const root = await repo();
+    try {
+      await commitIn(root, "a.txt", lines, "lines");
+      const { worktree } = await ensureWorktree(root, card);
+      await commitIn(worktree.path, "a.txt", lines.replace("one", "ONE"), "card work");
+      sh(root, "checkout", "-q", "-b", "elsewhere");
+      await writeFile(join(root, "a.txt"), lines.replace("one", "uno"));
+      expect(await mergeBlock(worktree)).toBeNull();
+      expect(await retireWorktree(worktree)).toEqual({ commits: 1, note: null });
+      expect(sh(root, "log", "--format=%s", "main")).toBe("card work\nlines\none");
+    } finally {
+      await cleanup(root);
+    }
+  });
+
+  it("stashes around the fast-forward and puts the changes back, uncommitted", async () => {
+    const root = await repo();
+    try {
+      await commitIn(root, "a.txt", lines, "lines");
+      const { worktree } = await ensureWorktree(root, card);
+      await commitIn(worktree.path, "a.txt", lines.replace("one", "ONE"), "card work");
+      await writeFile(join(root, "a.txt"), lines.replace("five", "FIVE"));
+      expect(await retireWorktree(worktree, { autostash: true })).toEqual({ commits: 1, note: null });
+      expect(readFileSync(join(root, "a.txt"), "utf8")).toBe(lines.replace("one", "ONE").replace("five", "FIVE"));
+      expect(sh(root, "status", "--porcelain")).toBe("M a.txt");
+      expect(sh(root, "stash", "list")).toBe("");
+    } finally {
+      await cleanup(root);
+    }
+  });
+
+  it("reports an autostash that did not go back on, and leaves it in the stash", async () => {
+    const root = await repo();
+    try {
+      await commitIn(root, "a.txt", lines, "lines");
+      const { worktree } = await ensureWorktree(root, card);
+      await commitIn(worktree.path, "a.txt", lines.replace("one", "ONE"), "card work");
+      await writeFile(join(root, "a.txt"), lines.replace("one", "uno"));
+      const { commits, note } = await retireWorktree(worktree, { autostash: true });
+      expect(commits).toBe(1);
+      expect(note).toContain("a.txt");
+      expect(note).toContain("autostash");
+      expect(sh(root, "stash", "list")).toContain("autostash");
+      expect(sh(root, "log", "--format=%s", "main")).toBe("card work\nlines\none");
     } finally {
       await cleanup(root);
     }
@@ -467,7 +583,7 @@ describe("the card's git", () => {
       expect(await worktreeChanges(worktree.path)).toEqual([]);
       expect(existsSync(join(worktree.path, ".env"))).toBe(false);
 
-      expect(await retireWorktree(worktree)).toEqual({ commits: 0 });
+      expect(await retireWorktree(worktree)).toEqual({ commits: 0, note: null });
       expect(sh(root, "stash", "list")).toContain("kururu: Fix the tests");
     } finally {
       await cleanup(root);

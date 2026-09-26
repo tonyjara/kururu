@@ -4922,6 +4922,17 @@ a.button {
   justify-content: flex-end;
   gap: 6px;
 }
+/* A way through with a sentence on what it does: the button, then the
+   outcome under it in the muted ink, so the two ways read as a choice and
+   not as two confirms. */
+.board-card-ask-choice {
+  margin: 0 0 8px;
+}
+.board-card-ask-outcome {
+  margin: 4px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
 
 .board-robot:disabled {
   opacity: 0.4;
