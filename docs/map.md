@@ -55,7 +55,7 @@ in this folder.
 | `src/proxy.ts` | Per-dev-server reverse proxy (HTTP + WS) for phone access |
 | `src/files.ts` | Traversal-safe file listing and reading |
 | `src/markdown.ts` | Markdown → markup with Shiki. `html: false` IS the sanitizer |
-| `src/nvim.ts` | The editor in a pane, found by its socket. An autocmd, not a poll |
+| `src/nvim.ts` | The editor in a pane, found by its socket. An autocmd, not a poll; `:drop` for the tree |
 | `src/mouseencoding.ts` | How a terminal writes its mouse reports |
 | `src/reach.ts` | Which addresses this machine answers to, for the phone's QR |
 | `src/version.ts` | What version this is, stamped in by the bundler |
@@ -111,7 +111,8 @@ in this folder.
 for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` ·
 `Status.tsx` (a dot, or the mascot) · `Icon.tsx` (a class name and an
 `aria-hidden` span) · `Dialog.tsx` (while one is up, no key reaches a pty) ·
-`Menu.tsx` · `Reader.tsx` (**the thing kururu was built for**) · `DocPicker.tsx` ·
+`Menu.tsx` · `Reader.tsx` (**the thing kururu was built for**; one draggable tab per document) ·
+`FileTree.tsx` (markdown to the reader, the rest to nvim; holds the reader's zoom) · `DocPicker.tsx` (an empty reader only) ·
 `Keybar.tsx` · `Reach.tsx` · `Crash.tsx` · `HelpOverlay.tsx` (printed from the
 keymap, so it cannot document a dead key) · `Settings*.tsx`.
 

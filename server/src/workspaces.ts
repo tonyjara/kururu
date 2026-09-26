@@ -33,6 +33,7 @@ import {
   findPane,
   makePane,
   mergePanes,
+  moveDocTo,
   movePaneTo,
   moveTabTo,
   nudge,
@@ -44,6 +45,8 @@ import {
   setRatio,
   split,
   splitWith,
+  splitWithDoc,
+  withoutDoc,
   stepPane,
   swapPanes,
   updatePane,
@@ -51,6 +54,8 @@ import {
   type Direction,
   type LayoutNode,
   type PaneState,
+  type ReaderDoc,
+  type ReaderState,
 } from "../../shared/layout";
 
 let seq = 0;
@@ -541,7 +546,9 @@ export class Workspaces {
     if (next === null) {
       this.mutateWorkspace(workspace.id, (w) => ({
         ...w,
-        layout: updatePane(w.layout, paneId, (p) => ({ ...p, agentIds: [], activeIdx: 0 })),
+        // A reader goes back to being a pane too: closing it is closing the
+        // documents, and a reader with none left is not a thing to leave standing.
+        layout: updatePane(w.layout, paneId, ({ reader: _, ...p }) => ({ ...p, agentIds: [], activeIdx: 0 })),
       }));
       return pane.agentIds;
     }
@@ -846,7 +853,7 @@ export class Workspaces {
          * learns what a root *is* — this stores the string it was handed, the
          * way `setReaderTarget` already does.
          */
-        reader: { root, path: "", follow: agentId, rev: 0 },
+        reader: { root, path: "", follow: agentId, editor: agentId, docs: [], rev: 0 },
       })),
       focusedPaneId: paneId,
     }));
@@ -857,7 +864,9 @@ export class Workspaces {
     this.mutateWorkspace(this.activeWorkspace.id, (w) => ({
       ...w,
       layout: updatePane(w.layout, paneId, (pane) =>
-        pane.reader ? { ...pane, reader: { ...pane.reader, follow: agentId } } : pane,
+        pane.reader
+          ? { ...pane, reader: { ...pane.reader, follow: agentId, editor: agentId ?? pane.reader.editor } }
+          : pane,
       ),
     }));
   }
@@ -865,11 +874,81 @@ export class Workspaces {
   /**
    * Stop following, or start again. Pinning keeps the file that is showing;
    * unpinning takes whatever the editor says next.
+   *
+   * Following again means the editor the reader was opened for, which `editor`
+   * keeps through the pin. A reader that never had one stays pinned: there is
+   * nobody to follow, and guessing at the terminal next door would be pointing
+   * a document at an nvim you never asked about.
    */
   pinReader(paneId: string, follow: boolean): void {
     const pane = findPane(this.activeWorkspace.layout, paneId);
     if (!pane?.reader) return;
-    this.setReaderFollow(paneId, follow ? (pane.reader.follow ?? null) : null);
+    this.setReaderFollow(paneId, follow ? pane.reader.editor : null);
+  }
+
+  /**
+   * Show one of a reader's tabs.
+   *
+   * Pins, when it is a different document: choosing a tab is choosing a file,
+   * and a reader still following an editor would take it straight back on the
+   * next `:w` — which is `openDoc`'s argument, made by a click on a tab rather
+   * than on the tree.
+   */
+  selectDoc(paneId: string, index: number): void {
+    const doc = findPane(this.activeWorkspace.layout, paneId)?.reader?.docs[index];
+    if (!doc) return;
+    this.openDoc(paneId, doc.root, doc.path);
+  }
+
+  /**
+   * Close one of a reader's tabs, and the pane with its last one.
+   *
+   * A reader with nothing in it is a pane with no reason to be there now that
+   * the tree is where documents come from — the terminal pane's empty state
+   * exists because a terminal is one click away, and a document is not. The
+   * neighbour takes over when the showing tab goes, the one after it first,
+   * which is where every tab strip people already use puts the focus.
+   */
+  closeDoc(paneId: string, index: number): void {
+    const reader = findPane(this.activeWorkspace.layout, paneId)?.reader;
+    if (!reader?.docs[index]) return;
+    if (reader.docs.length === 1) {
+      this.closePane(paneId);
+      return;
+    }
+    this.mutateWorkspace(this.activeWorkspace.id, (w) => ({
+      ...w,
+      layout: updatePane(w.layout, paneId, (pane) => (pane.reader ? { ...pane, reader: withoutDoc(pane.reader, index) } : pane)),
+    }));
+  }
+
+  /**
+   * A reader's tab, dropped on a reader's strip: its own, to reorder, or
+   * another's. The reader it left is closed if that was its last document —
+   * `moveTab`'s rule, for `closeDoc`'s reason.
+   */
+  moveDoc(fromPaneId: string, index: number, toPaneId: string, at?: number): void {
+    const workspace = this.activeWorkspace;
+    const layout = moveDocTo(workspace.layout, fromPaneId, index, toPaneId, at);
+    if (layout === workspace.layout) return;
+    this.mutateWorkspace(workspace.id, (w) => ({ ...w, layout }));
+    this.closeEmptyReader(fromPaneId);
+    this.focusPane(toPaneId);
+  }
+
+  /** A reader's tab, dropped on a pane's edge: a new reader there, holding just it. */
+  splitWithDoc(fromPaneId: string, index: number, paneId: string, dir: "row" | "col", before: boolean): void {
+    const workspace = this.activeWorkspace;
+    const freshId = nextId("n");
+    const layout = splitWithDoc(workspace.layout, fromPaneId, index, paneId, dir, before, nextId("s"), freshId);
+    if (layout === workspace.layout) return;
+    this.mutateWorkspace(workspace.id, (w) => ({ ...w, layout, focusedPaneId: freshId }));
+    this.closeEmptyReader(fromPaneId);
+  }
+
+  private closeEmptyReader(paneId: string): void {
+    const pane = findPane(this.activeWorkspace.layout, paneId);
+    if (pane?.reader && pane.reader.docs.length === 0) this.closePane(paneId);
   }
 
   /**
@@ -914,6 +993,11 @@ export class Workspaces {
    * have is stale" and a client that is being handed a different path already
    * knows that. Re-pointing at the same file is what a save looks like from
    * here, and it is the only reason this counts at all.
+   *
+   * A file that is not open yet becomes a tab, after the one showing — for an
+   * editor as much as for the tree. Replacing the showing tab instead would
+   * have an nvim wandering through the project close documents somebody opened
+   * by hand, and a tab strip is only worth having if what is in it stays put.
    */
   setReaderTarget(workspaceId: string, paneId: string, root: string, path: string): boolean {
     let changed = false;
@@ -923,10 +1007,35 @@ export class Workspaces {
         if (!pane.reader) return pane;
         const same = pane.reader.root === root && pane.reader.path === path;
         changed = true;
-        return { ...pane, reader: { ...pane.reader, root, path, rev: same ? pane.reader.rev + 1 : 0 } };
+        return {
+          ...pane,
+          reader: { ...pane.reader, root, path, docs: withDoc(pane.reader, root, path), rev: same ? pane.reader.rev + 1 : 0 },
+        };
       }),
     }));
     return changed;
+  }
+
+  /**
+   * Show a file in "the reader", making one if there is none.
+   *
+   * Which reader is the whole question, and the answer is the one you are
+   * least surprised by: the focused pane if it is one, else the first reader
+   * in the workspace, else a new one split off the focused pane. Reusing a
+   * reader is what makes clicking down a list of files in the tree open them as
+   * tabs of one pane rather than tiling the window with them.
+   *
+   * It pins, through `openDoc`, for the reason `open-doc` does: a file you
+   * clicked on is a file you asked for, and an editor next door should not take
+   * it off you. Returns the reader's pane.
+   */
+  showDoc(root: string, path: string): string | null {
+    const layout = this.activeWorkspace.layout;
+    const focused = findPane(layout, this.focusedPaneId);
+    const reader = focused?.reader ? focused : panes(layout).find((pane) => pane.reader);
+    const paneId = reader?.id ?? this.openReader(this.focusedPaneId, null, root);
+    if (!paneId) return null;
+    return this.openDoc(paneId, root, path) ? paneId : null;
   }
 
   /** The terminal a pane is showing, if any. */
@@ -1175,3 +1284,15 @@ export class Workspaces {
 }
 
 export type { LayoutNode };
+
+/**
+ * The tab list with this document in it: unchanged when it is already open,
+ * else with it placed after the tab showing now.
+ */
+function withDoc(reader: ReaderState, root: string, path: string): ReaderDoc[] {
+  if (!path || reader.docs.some((doc) => doc.root === root && doc.path === path)) return reader.docs;
+  const at = reader.docs.findIndex((doc) => doc.root === reader.root && doc.path === reader.path);
+  const docs = [...reader.docs];
+  docs.splice(at < 0 ? docs.length : at + 1, 0, { root, path });
+  return docs;
+}

@@ -47,7 +47,7 @@ import type {
   SessionSnapshot,
   Workspace,
 } from "../../shared/model";
-import type { ClientMessage, DevServer, ServerMessage, WorkspaceBranch } from "../../shared/wire";
+import type { ClientMessage, DevServer, EditorChoice, ServerMessage, WorkspaceBranch, WorkspaceProject } from "../../shared/wire";
 import { DEV_SCAN_MS, GIT_SCAN_MS, SAVE_DEBOUNCE_MS, USAGE_POLL_MS } from "../../shared/wire";
 import {
   bindAddress,
@@ -69,8 +69,9 @@ import { pollUsage, usageSnapshot } from "./usage";
 import { allowedRoots, allowRoot, findDocs, listDir, readBytes, readFile, resolveInRoot } from "./files";
 import { renderMarkdown } from "./markdown";
 import { scanMemory } from "./memory";
-import { attach as attachEditor, findNvim } from "./nvim";
-import { findPane, panes } from "../../shared/layout";
+import { attach as attachEditor, findNvim, openFile } from "./nvim";
+import { readProcTable } from "./agents/procs";
+import { findPane, panes, paneWithAgent } from "../../shared/layout";
 import {
   adoptLegacySheet,
   builtinSheets,
@@ -127,7 +128,7 @@ import { isStyleId, skinFor } from "../../shared/skin";
 import { HOST_PROTOCOL, HostLink, type Port } from "./hostlink";
 import { connectToHost, hostSocketPath, type SocketPort } from "./hostsock";
 import { MouseEncoding } from "./mouseencoding";
-import { readSnapshot, writeSnapshot } from "./persist";
+import { adoptReaders, readSnapshot, writeSnapshot } from "./persist";
 import { closeAllPreviews, closePreview, openPreview, openPreviews } from "./proxy";
 import { reach } from "./reach";
 import { smallestGrid, type Grid } from "./sizing";
@@ -256,6 +257,7 @@ const clients = new Map<WebSocket, ClientState>();
 const state = {
   devServers: [] as DevServer[],
   branches: [] as WorkspaceBranch[],
+  projects: [] as WorkspaceProject[],
 };
 
 function send(ws: WebSocket, msg: ServerMessage): void {
@@ -1564,6 +1566,7 @@ async function repoFor(dir: string): Promise<{ root: string; git: string } | nul
 }
 
 let lastBranchJson = "";
+let lastProjectJson = "";
 
 /**
  * What every workspace of the active profile has checked out.
@@ -1575,10 +1578,14 @@ let lastBranchJson = "";
 async function pollBranches(): Promise<void> {
   if (!host || !workspaces) return;
   const branches: WorkspaceBranch[] = [];
+  const projects: WorkspaceProject[] = [];
   for (const workspace of workspaces.active.workspaces) {
-    for (const dir of focusedDirs(workspace)) {
+    const dirs = focusedDirs(workspace);
+    let project = dirs[0];
+    for (const dir of dirs) {
       const repo = await repoFor(dir);
       if (!repo) continue;
+      project = repo.root;
       const head = await readHead(repo);
       // A repository whose HEAD could not be read is still the answer to "which
       // repository is this workspace in", so the walk stops here either way —
@@ -1587,6 +1594,22 @@ async function pollBranches(): Promise<void> {
       if (head) branches.push({ workspaceId: workspace.id, ...head });
       break;
     }
+    /**
+     * The repository is allowed as a root here, by the server, having found it
+     * by walking up from a directory a terminal is in — which is the rule
+     * `files.ts` keeps: a root is learned from what kururu holds, never from a
+     * client. It is also no wider than what that terminal can already read.
+     */
+    if (project) {
+      allowRoot(project);
+      projects.push({ workspaceId: workspace.id, root: project });
+    }
+  }
+  const projectJson = JSON.stringify(projects);
+  if (projectJson !== lastProjectJson) {
+    lastProjectJson = projectJson;
+    state.projects = projects;
+    broadcast({ type: "projects", projects });
   }
   const json = JSON.stringify(branches);
   if (json === lastBranchJson) return;
@@ -1715,6 +1738,97 @@ function nvimBuffer(body: unknown): void {
   for (const { workspaceId, paneId } of workspaces.readersFollowing(agent)) {
     workspaces.setReaderTarget(workspaceId, paneId, located.root, located.rel);
   }
+}
+
+/**
+ * Every nvim in the workspace on screen, in the order a person would reach for
+ * them.
+ *
+ * The focused pane first, because it is where you were typing; then the pane
+ * focus came from, which is where you were typing a moment ago — clicking in the
+ * tree does not move the pane focus, but a phone's trip through a reader might
+ * have. Within a pane the showing tab goes before the ones behind it. The
+ * process table is read once for the lot rather than once per terminal.
+ *
+ * The active workspace only, deliberately. The file is in this workspace's
+ * project, and an editor in another workspace is one you would have to go and
+ * find after it had opened the file — the move this exists to save.
+ */
+async function editorsHere(): Promise<EditorChoice[]> {
+  const workspace = workspaces.activeWorkspace;
+  const all = panes(workspace.layout);
+  const order = [workspace.focusedPaneId, workspace.lastPaneId];
+  const ranked = [...all].sort((a, b) => rank(a.id) - rank(b.id));
+  function rank(id: string): number {
+    const at = order.indexOf(id);
+    return at === -1 ? order.length : at;
+  }
+  const table = await readProcTable();
+  const found: EditorChoice[] = [];
+  for (const pane of ranked) {
+    const tabs = pane.agentIds.map((id, i) => ({ id, i }));
+    tabs.sort((a, b) => (a.i === pane.activeIdx ? -1 : b.i === pane.activeIdx ? 1 : a.i - b.i));
+    for (const { id } of tabs) {
+      const agent = host.find(id);
+      if (!agent || agent.exited || !agent.pid) continue;
+      if (await findNvim(agent.pid, table)) found.push({ agentId: id, paneId: pane.id });
+    }
+  }
+  return found;
+}
+
+/**
+ * Open a file from the tree in nvim — one that is running, or a new one.
+ *
+ * The path is resolved before anything else, and it is the resolved path that
+ * reaches the editor: `files.ts` is the only thing that decides what a path from
+ * a client means, and this one is about to be handed to a program.
+ *
+ * A new editor goes in a split off the focused pane, started in the project so
+ * `:e` and every picker in somebody's config are relative to the right place,
+ * and it drops into a shell when you quit it. The alternative — the pane ending
+ * with the editor — is tmux's `split-window nvim`, and it means `:q` on the
+ * wrong buffer closes a pane, which is not something `:q` does anywhere else.
+ */
+async function openInEditor(root: string, path: string, agentId: string | null): Promise<{ agentId: string }> {
+  const full = resolveInRoot(root, path);
+  if (!full) throw new Error("that file is outside the project");
+  if (agentId !== null) {
+    if (typeof agentId !== "string" || !workspaces.agentsHere().includes(agentId)) {
+      throw new Error("that terminal is not in this workspace any more");
+    }
+    const agent = host.find(agentId);
+    const nvim = agent && !agent.exited && agent.pid ? await findNvim(agent.pid) : null;
+    if (!nvim) throw new Error("there is no nvim in that terminal any more");
+    if (!(await openFile(nvim, full))) throw new Error("nvim did not answer — is it waiting at a prompt?");
+    const pane = paneWithAgent(workspaces.activeWorkspace.layout, agentId);
+    if (pane) {
+      workspaces.focusPane(pane.id);
+      workspaces.selectTab(pane.id, pane.agentIds.indexOf(agentId));
+    }
+    return { agentId };
+  }
+  const fresh = workspaces.split("row", workspaces.focusedPaneId);
+  if (!fresh) throw new Error("there is no pane to split");
+  /**
+   * The title is set by hand first, because the tab is named from the terminal
+   * title when there is one and from the command line when there is not — and
+   * this command line, cut at its last slash, is `sh}" -l`. An nvim with
+   * `set title` replaces it the moment it starts, and a shell that sets its own
+   * takes it back when the editor exits; one that does not says "nvim" for a
+   * while longer, which is at least where the tab came from.
+   */
+  const agent = await openTerminal(fresh, {
+    cwd: root,
+    command: `printf '\\033]2;nvim\\007'; nvim -- ${shellQuote(path)}; exec "\${SHELL:-/bin/sh}" -l`,
+    kind: "shell",
+  });
+  return { agentId: agent.id };
+}
+
+/** One argument for a POSIX shell, whatever is in it. */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 // ---------------------------------------------------------------------------
@@ -2360,6 +2474,45 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "pin-reader":
       workspaces.pinReader(msg.paneId, msg.follow);
+      return;
+
+    case "select-doc":
+    case "close-doc":
+      // An index off the wire, and `docs[NaN]` is merely undefined — but a
+      // fraction or a negative is not a tab either, and saying so here keeps the
+      // model from ever being asked.
+      if (!Number.isInteger(msg.index) || msg.index < 0) return;
+      if (msg.type === "select-doc") workspaces.selectDoc(msg.paneId, msg.index);
+      else workspaces.closeDoc(msg.paneId, msg.index);
+      return;
+
+    case "move-doc":
+      if (!Number.isInteger(msg.index) || msg.index < 0) return;
+      if (msg.at !== undefined && (!Number.isInteger(msg.at) || msg.at < 0)) return;
+      workspaces.moveDoc(msg.fromPaneId, msg.index, msg.toPaneId, msg.at);
+      return;
+
+    case "split-with-doc":
+      if (!Number.isInteger(msg.index) || msg.index < 0) return;
+      if (msg.dir !== "row" && msg.dir !== "col") return;
+      workspaces.splitWithDoc(msg.fromPaneId, msg.index, msg.paneId, msg.dir, msg.before === true);
+      return;
+
+    case "show-doc": {
+      // `open-doc`'s check, for the same reason: a path that does not resolve is
+      // a click that does nothing, not a reader blanked by a refusal.
+      if (!resolveInRoot(msg.root, msg.path)) return;
+      const shown = workspaces.showDoc(msg.root, msg.path);
+      if (shown && msg.focus) workspaces.focusPane(shown);
+      return;
+    }
+
+    case "find-editors":
+      void replyAsync(ws, msg.id, () => editorsHere());
+      return;
+
+    case "open-in-editor":
+      void replyAsync(ws, msg.id, () => openInEditor(msg.root, msg.path, msg.agentId));
       return;
 
     case "open-doc":
@@ -3281,6 +3434,7 @@ server.on("upgrade", (req, socket, head) => {
     send(ws, { type: "snapshot", snapshot: snapshot() });
     send(ws, { type: "dev-servers", servers: state.devServers });
     send(ws, { type: "branches", branches: state.branches });
+    send(ws, { type: "projects", projects: state.projects });
     send(ws, { type: "usage", usage: usageSnapshot() });
     // The first client through the door is also what starts the usage poll: it
     // is skipped while nothing is connected, so without this a freshly started
@@ -3346,7 +3500,7 @@ async function attach(port: Port): Promise<void> {
   if (state.blob) {
     try {
       const kept = JSON.parse(state.blob) as { profiles: Profile[]; activeProfileId: string };
-      profiles = kept.profiles;
+      profiles = adoptReaders(kept.profiles);
       activeProfileId = kept.activeProfileId;
     } catch {
       // A blob we cannot read is no worse than not having one.

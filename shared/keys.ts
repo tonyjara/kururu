@@ -36,6 +36,7 @@ export type Action =
   | "focus-up"
   | "focus-down"
   | "toggle-sidebar"
+  | "toggle-files"
   | "zen-mode"
   | "resize-mode"
   | "switch-profile"
@@ -106,6 +107,7 @@ export const ACTION_INFO: Record<Action, { label: string; group: ActionGroup }> 
   "open-reader": { label: "read the markdown open next door", group: "panes" },
 
   "toggle-sidebar": { label: "toggle the sidebar", group: "window" },
+  "toggle-files": { label: "toggle the file tree", group: "window" },
   "zen-mode": { label: "zen mode", group: "window" },
   settings: { label: "settings", group: "window" },
   reload: { label: "reload the window", group: "window" },
@@ -155,6 +157,9 @@ export const DEFAULT_KEYMAP: Record<string, Action> = {
   j: "focus-down",
   down: "focus-down",
   b: "toggle-sidebar",
+  // Unbound in ghosttown, and `e` for explorer is what every editor with a tree
+  // beside it has taught somebody to reach for.
+  e: "toggle-files",
   m: "zen-mode",
   r: "resize-mode",
   s: "switch-profile",

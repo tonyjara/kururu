@@ -29,9 +29,11 @@ import type {
   AccountUsage,
   ClientMessage,
   DevServer,
+  EditorChoice,
   Notification,
   ServerMessage,
   WorkspaceBranch,
+  WorkspaceProject,
 } from "../../shared/wire";
 import type { LaunchSettings } from "../../shared/launchers";
 import type { NotifySettings } from "../../shared/notify";
@@ -57,6 +59,8 @@ export interface KururuState {
    * reconnects gets the whole list rather than having to catch up.
    */
   branches: WorkspaceBranch[];
+  /** Where each workspace's file tree starts. Polled beside `branches`, from the same walk. */
+  projects: WorkspaceProject[];
   /**
    * What this machine's Claude account has spent. Null until a reading has
    * landed, which is not the same as a reading that says signed out — the
@@ -72,6 +76,7 @@ let state: KururuState = {
   snapshot: null,
   devServers: [],
   branches: [],
+  projects: [],
   usage: null,
 };
 
@@ -227,6 +232,9 @@ function connect(): void {
         break;
       case "branches":
         set({ branches: msg.branches });
+        break;
+      case "projects":
+        set({ projects: msg.projects });
         break;
       case "usage":
         set({ usage: msg.usage });
@@ -670,12 +678,56 @@ export function pinReader(paneId: string, follow: boolean): void {
   send({ type: "pin-reader", paneId, follow });
 }
 
+/** Show one of a reader's tabs. */
+export function selectDoc(paneId: string, index: number): void {
+  send({ type: "select-doc", paneId, index });
+}
+
+/** Close one of a reader's tabs; the last one takes the pane with it. */
+export function closeDoc(paneId: string, index: number): void {
+  send({ type: "close-doc", paneId, index });
+}
+
+/** A reader's tab, dropped on a reader's strip — its own, to reorder. */
+export function moveDoc(fromPaneId: string, index: number, toPaneId: string, at?: number): void {
+  send({ type: "move-doc", fromPaneId, index, toPaneId, at });
+}
+
+/** A reader's tab, dropped on a pane's edge: a reader of its own, on that side. */
+export function splitWithDoc(fromPaneId: string, index: number, paneId: string, dir: "row" | "col", before: boolean): void {
+  send({ type: "split-with-doc", fromPaneId, index, paneId, dir, before });
+}
+
 /**
  * Read this file in this pane. The other half of `pinReader`: it says which
  * document, and the server stops following an editor because of it.
  */
 export function openDoc(paneId: string, root: string, path: string): void {
   send({ type: "open-doc", paneId, root, path });
+}
+
+/**
+ * Read a markdown file from the tree. The server decides which reader shows it —
+ * see `show-doc` — and `focus` is for the window that can only see one pane.
+ */
+export function showDoc(root: string, path: string, focus?: boolean): void {
+  send({ type: "show-doc", root, path, focus });
+}
+
+/** Every nvim in the workspace on screen, nearest first. May be empty. */
+export function findEditors(): Promise<EditorChoice[]> {
+  return request((id) => ({ type: "find-editors", id })) as Promise<EditorChoice[]>;
+}
+
+/**
+ * Open a file in nvim: the one in that terminal, or a new one in a split when
+ * `agentId` is null. Waits, because "nvim did not answer" is a real outcome and
+ * the next snapshot would not explain it.
+ */
+export function openInEditor(root: string, path: string, agentId: string | null): Promise<string> {
+  return request((id) => ({ type: "open-in-editor", id, root, path, agentId })).then(
+    (result) => (result as { agentId: string }).agentId,
+  );
 }
 
 /**

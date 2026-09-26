@@ -165,17 +165,17 @@ Match ghosttown — the user writes in a distinctive register and kururu follows
 
 Shipped: the three-process split, tiled terminals with the server owning the
 size, the multiplexer hierarchy and dragging, the markdown reader with
-server-side highlighting, foreground notifications, the styles registry, the
+server-side highlighting and draggable document tabs, the file tree (markdown to the
+reader, everything else to nvim), foreground notifications, the styles registry, the
 skin studio, the plan-usage bar, and a signed self-updating app.
 
 Open, roughly in order — the argument for each is in `PLAN.md`:
 
 1. **The preview as a pane type.** `proxy.ts` works and nothing points at it.
-2. **The file tree in the window.** Same: `files.ts` is built and unused.
-3. **Transcripts as chat** — also how the phone stops being a desktop layout.
-4. **Push notifications**, so a phone with its screen off can be reached. The
+2. **Transcripts as chat** — also how the phone stops being a desktop layout.
+3. **Push notifications**, so a phone with its screen off can be reached. The
    foreground layer is done; this is the other one.
-5. **The element picker** injected by the proxy: long-press an element, send the
+4. **The element picker** injected by the proxy: long-press an element, send the
    selector and source location to the agent. Waits on the preview pane.
 
 Smaller things owed: the Homebrew tap, and attributing a discovered dev server

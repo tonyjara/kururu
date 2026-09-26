@@ -20,6 +20,9 @@ interface Props {
   sidebarOpen: boolean;
   /** `toggle-sidebar`, for a pointer. See below for why the bar is where it is. */
   onToggleSidebar: () => void;
+  /** The file tree, and its toggle: the sidebar's pair, for the other side. */
+  filesOpen: boolean;
+  onToggleFiles: () => void;
   /**
    * Whether the touch key toolbar is up, or null on a device that cannot have
    * one. Null rather than a second boolean beside it, so that "there is no such
@@ -53,6 +56,8 @@ export function StatusBar({
   resizeMode,
   sidebarOpen,
   onToggleSidebar,
+  filesOpen,
+  onToggleFiles,
   keybarOpen,
   onToggleKeybar,
   panes,
@@ -133,6 +138,19 @@ export function StatusBar({
           <KeysIcon />
         </button>
       )}
+      {/* The tree's door, on the side the tree opens on — the bars at the far
+          left open the column on the left, and this is the same gesture
+          mirrored. Before the key hint rather than after it, so the hint stays
+          the last thing on the bar on every device. */}
+      <button
+        className={`sb-files ${filesOpen ? "sb-files-on" : ""}`}
+        onClick={onToggleFiles}
+        title={filesOpen ? "Hide the files (C-a e)" : "Show the files (C-a e)"}
+        aria-label={filesOpen ? "Hide the files" : "Show the files"}
+        aria-expanded={filesOpen}
+      >
+        <FilesIcon />
+      </button>
       <button className="sb-help" onClick={onHelp} title="Keys">
         {PREFIX_LABEL} ?
       </button>
@@ -188,6 +206,20 @@ function KeysIcon() {
          strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="2" y="6" width="20" height="12" rx="2" />
       <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8" />
+    </svg>
+  );
+}
+
+/**
+ * A folder, drawn here rather than taken from the skin's icon set on
+ * `BarsIcon`'s reasoning — it is the partner of the bars at the other end of the
+ * bar, and means the same thing in any chrome.
+ */
+function FilesIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
     </svg>
   );
 }

@@ -122,6 +122,16 @@ Kept short on purpose; the detail is in git history.
   back on quit; and a **window reload — every emulator new — came back drawing the
   bar**, which is the half only the reconstruction can be wrong about. The
   character was legible through the block throughout.
+- **The file tree and the editor handoff**, in an isolated instance with its own
+  vite and a headless Chrome over CDP: the tree followed a new terminal into its
+  repository; a markdown click split off a reader and a second click reused it;
+  a file named `it's a file.ts` opened in a new nvim split titled `nvim`, and a
+  second file went to that nvim with `:drop` (asked back over its socket);
+  editors came back focused-pane first; a `..` path was refused. A double-clicked
+  list gained an item and the file on disk changed in those lines only; a stale
+  version got a 409, a `.json` and a root outside the allowed set a 400, and a
+  foreign `Origin` a 403. At 390px wide the tree was a sheet and a code file
+  raised the nvim prompt.
 - **The gate**, checked from the LAN address so requests genuinely arrived from a
   non-loopback peer: no token 403, wrong token 403, right token 200;
   `/api/access` returned a cookie that then worked alone; a valid token with an

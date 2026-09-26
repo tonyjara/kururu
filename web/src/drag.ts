@@ -17,15 +17,33 @@ import { useSyncExternalStore } from "react";
 export const AGENT_MIME = "application/x-kururu-agent";
 export const PANE_MIME = "application/x-kururu-pane";
 export const WORKSPACE_MIME = "application/x-kururu-workspace";
+/**
+ * A reader's tab. Its id is `docId(pane, index)` — a document has no id of its
+ * own, only a place in one pane's list, so the drag carries both halves.
+ */
+export const DOC_MIME = "application/x-kururu-doc";
 
-export type DragKind = "agent" | "pane" | "workspace";
+export type DragKind = "agent" | "pane" | "workspace" | "doc";
 export type Dragging = { kind: DragKind; id: string } | null;
 
 const MIME: Record<DragKind, string> = {
   agent: AGENT_MIME,
   pane: PANE_MIME,
   workspace: WORKSPACE_MIME,
+  doc: DOC_MIME,
 };
+
+export function docId(paneId: string, index: number): string {
+  return `${index}:${paneId}`;
+}
+
+/** The two halves of a `docId`, or null for anything that is not one. */
+export function parseDocId(id: string): { paneId: string; index: number } | null {
+  const colon = id.indexOf(":");
+  const index = Number(id.slice(0, colon));
+  if (colon < 1 || !Number.isInteger(index) || index < 0) return null;
+  return { paneId: id.slice(colon + 1), index };
+}
 
 let dragging: Dragging = null;
 const listeners = new Set<() => void>();

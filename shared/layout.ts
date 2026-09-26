@@ -30,6 +30,13 @@
  *
  * `follow` is the agent whose editor it is tracking, when it is tracking one.
  * Null means somebody pointed the pane at a file and it should stay there.
+ *
+ * `root` and `path` are the document *showing*; `docs` is every document open
+ * in the pane, as tabs. The showing one is kept as its own pair rather than as
+ * an index into the list because everything that reads a reader — the render,
+ * and the editor hook — only ever wants the one on screen, and an
+ * index is one more thing to fall out of step with a list that tabs close out
+ * of.
  */
 export interface ReaderState {
   root: string;
@@ -37,6 +44,18 @@ export interface ReaderState {
   path: string;
   /** The terminal whose nvim drives this, or null for a pinned file. */
   follow: string | null;
+  /**
+   * The terminal this reader was opened to follow, kept while it is pinned.
+   *
+   * Pinning used to throw the answer away — `follow` went to null and nothing
+   * remembered what it had been — so the button that says "follow the editor
+   * again" had no editor to go back to and did nothing at all. Null for a
+   * reader that was only ever opened from the tree: there is nothing to follow,
+   * and the strip shows no button for it.
+   */
+  editor: string | null;
+  /** The documents open as tabs, in strip order. Includes the showing one. */
+  docs: ReaderDoc[];
   /**
    * Bumped every time the file is written, which is the whole mechanism for
    * "it updates when I save".
@@ -47,6 +66,12 @@ export interface ReaderState {
    * fetches the render, and this is what tells it the answer it has is stale.
    */
   rev: number;
+}
+
+/** One tab in a reader: a file, by the only address `files.ts` answers to. */
+export interface ReaderDoc {
+  root: string;
+  path: string;
 }
 
 /** A leaf: terminals stacked as tabs, in strip order, one of them showing. */
@@ -422,7 +447,23 @@ export function movePaneTo(
 export function mergePanes(node: LayoutNode, fromId: string, intoId: string): LayoutNode {
   if (fromId === intoId) return node;
   const from = findPane(node, fromId);
-  if (!from || !findPane(node, intoId)) return node;
+  const into = findPane(node, intoId);
+  if (!from || !into) return node;
+  // A reader and a terminal pane are different kinds of pane, and pouring one
+  // into the other would leave terminals in a reader or close a reader's
+  // documents along with the pane that held them. Two readers pour their
+  // documents together, which is the same gesture at the same scale.
+  if (from.reader || into.reader) {
+    if (!from.reader || !into.reader) return node;
+    const docs = [...into.reader.docs];
+    for (const doc of from.reader.docs) if (!docs.some((d) => sameDoc(d, doc))) docs.push(doc);
+    const shown = from.reader.path ? from.reader : into.reader;
+    const joined = updatePane(node, intoId, (pane) => ({
+      ...pane,
+      reader: showing({ ...into.reader!, docs }, shown.root, shown.path),
+    }));
+    return closePane(joined, fromId) ?? joined;
+  }
   const merged = updatePane(node, intoId, (pane) => ({
     ...pane,
     agentIds: [...pane.agentIds, ...from.agentIds],
@@ -430,6 +471,112 @@ export function mergePanes(node: LayoutNode, fromId: string, intoId: string): La
     activeIdx: from.agentIds.length > 0 ? pane.agentIds.length : pane.activeIdx,
   }));
   return closePane(merged, fromId) ?? merged;
+}
+
+function sameDoc(a: ReaderDoc, b: ReaderDoc): boolean {
+  return a.root === b.root && a.path === b.path;
+}
+
+/**
+ * A reader showing this document. Pinned whenever that is a change: a document
+ * somebody put there by hand is one an editor next door should not take back on
+ * its next `:w`. The same document is no change at all, and leaves a reader that
+ * is following an editor still following it.
+ */
+function showing(reader: ReaderState, root: string, path: string): ReaderState {
+  if (reader.root === root && reader.path === path) return reader;
+  return { ...reader, root, path, follow: null, rev: 0 };
+}
+
+/**
+ * A reader with one of its documents gone, and its neighbour on screen if the
+ * one that went was showing — the one after it first, which is where every tab
+ * strip people already use puts you. An emptied reader keeps its last address
+ * and no tabs; closing the pane is the caller's call, as `splitWith` leaves an
+ * emptied terminal pane to `workspaces.ts`.
+ */
+export function withoutDoc(reader: ReaderState, index: number): ReaderState {
+  const doc = reader.docs[index];
+  if (!isIndex(index) || !doc) return reader;
+  const docs = reader.docs.filter((_, at) => at !== index);
+  if (!sameDoc(doc, reader)) return { ...reader, docs };
+  const next = docs[index] ?? docs[index - 1];
+  return next ? { ...reader, docs, root: next.root, path: next.path, rev: 0 } : { ...reader, docs };
+}
+
+/**
+ * Move a reader's tab: along its own strip, or into another reader's.
+ *
+ * `moveTabTo` for documents, with the same rule about the index — it is where
+ * the tab will sit once it is gone from where it was — and the same landing:
+ * the moved document is the one showing. A reader that already has it open
+ * gives up its copy rather than showing one file in two tabs.
+ *
+ * Only readers take documents. A terminal pane holds terminals, for the reason
+ * `PaneState.reader` gives, and a document dropped on one's edge is
+ * `splitWithDoc` instead.
+ */
+export function moveDocTo(
+  node: LayoutNode,
+  fromPaneId: string,
+  index: number,
+  toPaneId: string,
+  at?: number,
+): LayoutNode {
+  const from = findPane(node, fromPaneId)?.reader;
+  const to = findPane(node, toPaneId)?.reader;
+  const doc = isIndex(index) ? from?.docs[index] : undefined;
+  if (!doc || !to) return node;
+  const wanted = at !== undefined && !isIndex(at) ? undefined : at;
+  const without = fromPaneId === toPaneId ? node : updatePane(node, fromPaneId, (pane) => ({ ...pane, reader: withoutDoc(pane.reader!, index) }));
+  return updatePane(without, toPaneId, (pane) => {
+    const reader = pane.reader!;
+    let target = wanted;
+    const docs = reader.docs.filter((d, i) => {
+      if (!sameDoc(d, doc)) return true;
+      if (target !== undefined && i < target) target--;
+      return false;
+    });
+    const place = Math.max(0, Math.min(target ?? docs.length, docs.length));
+    docs.splice(place, 0, doc);
+    return { ...pane, reader: showing({ ...reader, docs }, doc.root, doc.path) };
+  });
+}
+
+/**
+ * Drop a reader's tab on a pane's edge: a new reader there, holding just it.
+ *
+ * `splitWith` for documents, and it works against any pane — terminal or
+ * reader — because what it makes is a new pane, and a reader beside a terminal
+ * is the layout the reader exists for. A reader's only document dropped on its
+ * own edge is refused: it would split the pane and close the half it came from,
+ * which is the pane it already was.
+ */
+export function splitWithDoc(
+  node: LayoutNode,
+  fromPaneId: string,
+  index: number,
+  paneId: string,
+  dir: SplitNode["dir"],
+  before: boolean,
+  splitId: string,
+  freshId: string,
+): LayoutNode {
+  const from = findPane(node, fromPaneId)?.reader;
+  const doc = isIndex(index) ? from?.docs[index] : undefined;
+  if (!from || !doc || !findPane(node, paneId)) return node;
+  if (fromPaneId === paneId && from.docs.length === 1) return node;
+  const without = updatePane(node, fromPaneId, (pane) => ({ ...pane, reader: withoutDoc(pane.reader!, index) }));
+  const fresh: PaneNode = {
+    type: "pane",
+    pane: {
+      id: freshId,
+      agentIds: [],
+      activeIdx: 0,
+      reader: { root: doc.root, path: doc.path, follow: null, editor: null, docs: [doc], rev: 0 },
+    },
+  };
+  return split(without, paneId, dir, splitId, fresh, before);
 }
 
 /** Drag a divider. Clamped so a pane can always be grabbed again. */
