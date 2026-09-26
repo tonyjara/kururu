@@ -27,9 +27,9 @@ disk. Never move a layout decision back into React state.
   offering one button was a step that decided nothing. A split's terminal starts
   where the half you split *is*, which is why `openTerminal` takes the pane to
   read the cwd off separately from the pane the terminal lands in.
-- **An empty pane is the button.** The two ways to have one are closing a pane's
-  last tab and restoring a layout, and in both there is one thing it can do — so
-  the pane body itself is what you click.
+- **An empty pane is the button.** The ways to have one are restoring a layout
+  and closing the last tab of a workspace's last pane, and in both there is one
+  thing it can do — so the pane body itself is what you click, or Enter.
 - **A new terminal starts where the last one *is*, not where it was opened.**
   `cwdForNewTab` asks the kernel for the pty's own cwd (`cwd.ts`, one `lsof`) and
   only falls back to the spawn directory. A shell is cd'd into a project within
@@ -46,10 +46,9 @@ disk. Never move a layout decision back into React state.
   `reapExited` in `index.ts` ends the tab and `Workspaces.reapTab` takes the pane
   with it when nothing else is in there — tmux's default, and what typing `exit`
   means everywhere else. Two refusals come with the pane half (`pruneEmptied`'s):
-  never the last pane of a workspace, and never a reader. `close-tab`
-  deliberately does **not** prune: closing a tab is a gesture aimed at the tab, so
-  the pane it empties stays standing as the button that opens the next terminal,
-  while a pty ending is not a gesture about the pane at all.
+  never the last pane of a workspace, and never a reader. `close-tab` prunes
+  the same way: closing a pane's last terminal closes the pane, and the last pane
+  of a workspace stays, empty. Enter in a focused empty pane opens a terminal.
 - **A pane's corner is a menu and a close button, at every width.** The splits
   were two buttons in a tiled strip and a menu on a phone, and the tell that this
   was wrong is that the reader — whose only other door is prefix+M, a key you

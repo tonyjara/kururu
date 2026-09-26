@@ -2262,7 +2262,15 @@ function handleMessage(ws: WebSocket, raw: string): void {
       // The board's tab is a view: closing it ends nothing, and the cards stay
       // on the workspace for the next `open-board`.
       if (isBoardTab(agentId)) workspaces.removeTab(BOARD_TAB);
-      else if (agentId) killAll([agentId]);
+      else if (agentId) {
+        // Closing a pane's last terminal closes the pane (`reapTab`), the same as
+        // when its pty ends; the last pane of a workspace stays, empty.
+        for (const id of terminalsOf([agentId])) {
+          host.kill(id);
+          workspaces.reapTab(id);
+          forget(id);
+        }
+      }
       return;
     }
 
