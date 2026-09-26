@@ -91,6 +91,18 @@ export function BoardView({
    * going to show.
    */
   const [ask, setAsk] = useState<Ask | null>(null);
+  /**
+   * Cards with a slow git action in flight, and what it is doing. A merge is a
+   * commit, a rebase, a worktree removal and an ended agent, and takes seconds
+   * in which the card would otherwise sit there looking like nothing happened.
+   */
+  const [working, setWorking] = useState<Record<string, string>>({});
+  const whileWorking = <T,>(cardId: string, text: string, job: Promise<T>) => {
+    setWorking((all) => ({ ...all, [cardId]: text }));
+    const done = () => setWorking(({ [cardId]: _, ...rest }) => rest);
+    job.then(done, done);
+    return job;
+  };
 
   const said = (cardId: string, text: string) => {
     setErrors(({ [cardId]: _, ...rest }) => rest);
@@ -179,8 +191,13 @@ export function BoardView({
    * the row somebody looks for as "discard" and it is deliberately not one.
    */
   const merge = (card: Card, tree: CardWorktree, commitFirst: boolean) =>
-    (commitFirst ? api.commitCard(workspaceId, card.id) : Promise.resolve(null))
-      .then(() => api.mergeCard(workspaceId, card.id))
+    whileWorking(
+      card.id,
+      commitFirst ? "Committing and merging…" : "Merging…",
+      (commitFirst ? api.commitCard(workspaceId, card.id) : Promise.resolve(null)).then(() =>
+        api.mergeCard(workspaceId, card.id),
+      ),
+    )
       .then(({ commits }) =>
         said(card.id, `Merged ${commits} ${commits === 1 ? "commit" : "commits"} into ${tree.base}; worktree removed`),
       )
@@ -421,6 +438,7 @@ export function BoardView({
                     onStopDev={() => stopDev(card)}
                     mascot={mascot}
                     error={errors[card.id]}
+                    working={working[card.id]}
                     note={notes[card.id]}
                     onNoteClick={() => setNotes(({ [card.id]: _, ...rest }) => rest)}
                     ask={ask?.cardId === card.id ? ask : null}
@@ -515,6 +533,7 @@ function CardView({
   onStopDev,
   mascot,
   error,
+  working,
   note,
   onNoteClick,
   ask,
@@ -535,6 +554,8 @@ function CardView({
   onStopDev: () => void;
   mascot: MascotConfig;
   error: string | undefined;
+  /** What a slow git action on this card is doing right now, if one is. */
+  working: string | undefined;
   /** What the last git action came to, until clicked away. */
   note: string | undefined;
   onNoteClick: () => void;
@@ -608,6 +629,12 @@ function CardView({
         )}
         {card.run && <RunLine run={card.run} agent={agent} mascot={mascot} />}
         {error && <p className="board-card-error">{error}</p>}
+        {working && (
+          <p className="board-card-busy" role="status">
+            <span className="spinner" aria-hidden="true" />
+            {working}
+          </p>
+        )}
         {note && (
           <p className="board-card-note" onClick={onNoteClick} title="Click to dismiss">
             {note}

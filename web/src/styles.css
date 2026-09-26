@@ -4871,6 +4871,38 @@ a.button {
   cursor: var(--cursor);
 }
 
+/* A slow git action in flight. The spinner is a ring in the text's own colour
+   and sized in em, so it follows the type and needs no token of its own; it
+   stops turning under reduced motion and the words carry the meaning alone. */
+.board-card-busy {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.spinner {
+  width: 1em;
+  height: 1em;
+  flex: none;
+  box-sizing: border-box;
+  border: 0.15em solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
+
 /* A merge asking for its second click, inside the card it is about — the
    same in-place confirm the Settings pages use, because the consequence lands
    right here and a dialog over the board would point away from it. */

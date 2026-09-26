@@ -24,8 +24,8 @@
  * already where `git merge` will look for it.
  */
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import type { CardWorktree } from "../../shared/board";
 import { worktreeBranch, worktreeDir, worktreeName, type WorktreeStatus } from "../../shared/projects";
 import { readHead, repoAt } from "./git";
@@ -127,7 +127,52 @@ export async function ensureWorktree(root: string, card: { id: string; title: st
   );
   if (exists) await git(["worktree", "add", path, branch], root);
   else await git(["worktree", "add", "-b", branch, path, base], root);
+  await copyEnvFiles(root, path);
   return { worktree: { root, path, branch, base }, fresh: true };
+}
+
+/**
+ * The paths in a `git ls-files -z --others --ignored --directory` listing that
+ * are env files: a basename starting `.env`, and not a directory (which the
+ * listing marks with a trailing slash — it is how `node_modules` comes back).
+ */
+export function envFiles(listing: string): string[] {
+  return listing
+    .split("\0")
+    .filter((entry) => entry && !entry.endsWith("/") && basename(entry).startsWith(".env"));
+}
+
+/**
+ * Copy the main checkout's ignored `.env*` files into a worktree, wherever in
+ * the tree they are, leaving any the worktree already has alone.
+ *
+ * `worktree add` gives a card the tracked files and nothing else, and the env
+ * files are ignored precisely so they are never tracked — so every card's dev
+ * server came up without its keys and died in its first second. A setup line
+ * could `cp` them, and every project would need the same line written out
+ * with the right relative path; this is the default instead, and the price is
+ * a copy of the secrets per worktree, on the same disk the originals are on.
+ * Only *ignored* ones: a tracked `.env.example` is already in the checkout,
+ * and git is asked which is which rather than a glob guessing. Never over a
+ * file that is there, since a card may have edited its own. Best-effort: a
+ * listing git will not give is no copies, not a card that fails to start.
+ */
+export async function copyEnvFiles(root: string, path: string): Promise<string[]> {
+  const listing = await git(["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"], root).catch(() => "");
+  const copied: string[] = [];
+  for (const file of envFiles(listing)) {
+    const from = join(root, file);
+    const to = join(path, file);
+    try {
+      if (!lstatSync(from).isFile() || existsSync(to)) continue;
+      mkdirSync(dirname(to), { recursive: true });
+      copyFileSync(from, to, constants.COPYFILE_EXCL);
+      copied.push(file);
+    } catch {
+      // One that cannot be copied is one the dev server will say is missing.
+    }
+  }
+  return copied;
 }
 
 /**

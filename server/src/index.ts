@@ -115,6 +115,7 @@ import {
   commitAll,
   commitTyped,
   defaultBranch,
+  copyEnvFiles,
   ensureWorktree,
   fastForward,
   fetchAll,
@@ -1556,6 +1557,9 @@ async function startDev(
 ): Promise<{ agentId: string; port: number }> {
   const target = pane && workspaces.hasPane(pane) ? pane : devPane();
   if (!target) throw new Error("nowhere to put the dev server");
+  // A worktree made before env files were copied in gets them here, on its
+  // next start; one made since already has them and nothing is overwritten.
+  await copyEnvFiles(worktree.root, worktree.path);
   const port = await freePort();
   const wait = ready
     ? `echo 'waiting for the setup line in the agent’s terminal…'; until [ -e ${shellQuote(ready)} ]; do sleep 1; done; rm -f ${shellQuote(ready)}; `
@@ -1667,6 +1671,14 @@ function forget(agentId: string): void {
 function reapExited(): void {
   for (const agent of host.agents) {
     if (!agent.exited) continue;
+    /*
+     * Except a card's dev server. A dev line that dies does it in its first
+     * second — a missing `.env`, a port already taken — and the screen is the
+     * only place the reason was ever written; reaping it made the tab flash
+     * and vanish with nothing to say why. It stays, the card says "ended",
+     * and the card's ↻ or ■ is what takes the tab away.
+     */
+    if (workspaces.isCardDev(agent.id)) continue;
     host.kill(agent.id);
     workspaces.reapTab(agent.id);
     forget(agent.id);

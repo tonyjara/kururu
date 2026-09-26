@@ -6,16 +6,18 @@
  */
 import { describe, expect, it } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { withProject } from "../src/projects";
 import {
   commitAll,
   commitTyped,
+  copyEnvFiles,
   defaultBranch,
   ensureWorktree,
+  envFiles,
   fastForward,
   mainRoot,
   parseStatusHeader,
@@ -124,6 +126,45 @@ async function repo(): Promise<string> {
   git("commit", "-q", "-m", "one");
   return root;
 }
+
+describe("env files", () => {
+  it("picks env files out of an ignored listing, never a directory", () => {
+    expect(envFiles(".env.local\0node_modules/\0web/.env\0.envrc-dir/\0dist/app.js\0")).toEqual([".env.local", "web/.env"]);
+    expect(envFiles("")).toEqual([]);
+  });
+
+  /**
+   * The ignored ones travel, the tracked example is already there, and a file
+   * the worktree has of its own is left as the card left it.
+   */
+  it("copies the main checkout's ignored env files into a new worktree, and overwrites nothing", async () => {
+    const root = await repo();
+    try {
+      await writeFile(join(root, ".gitignore"), ".env*\n!.env.example\nnode_modules/\n");
+      sh(root, "add", ".gitignore");
+      await writeFile(join(root, ".env.example"), "KEY=\n");
+      sh(root, "add", ".env.example");
+      sh(root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "ignore");
+      await writeFile(join(root, ".env.local"), "KEY=secret\n");
+      await mkdir(join(root, "web"));
+      await writeFile(join(root, "web", ".env"), "WEB=1\n");
+      await mkdir(join(root, "node_modules"));
+      await writeFile(join(root, "node_modules", ".env"), "no\n");
+
+      const { worktree } = await ensureWorktree(root, { id: "c0000000000ee", title: "env" });
+      expect(readFileSync(join(worktree.path, ".env.local"), "utf8")).toBe("KEY=secret\n");
+      expect(readFileSync(join(worktree.path, "web", ".env"), "utf8")).toBe("WEB=1\n");
+      expect(existsSync(join(worktree.path, "node_modules"))).toBe(false);
+
+      await writeFile(join(worktree.path, ".env.local"), "KEY=mine\n");
+      expect(await copyEnvFiles(root, worktree.path)).toEqual([]);
+      expect(readFileSync(join(worktree.path, ".env.local"), "utf8")).toBe("KEY=mine\n");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(`${root}.worktrees`, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("ensureWorktree", () => {
   const card = { id: "c0123456789ab", title: "Fix the tests" };
