@@ -27,6 +27,7 @@
  */
 import type { KeyOverrides } from "./keys";
 import type { LayoutNode } from "./layout";
+import type { Board } from "./board";
 import type { LaunchSettings } from "./launchers";
 import type { NotifySettings } from "./notify";
 import type { StyleLibrary } from "./styles";
@@ -601,6 +602,12 @@ export interface Workspace {
    * why nothing has to be cleaned up when one goes.
    */
   mascotId: string | null;
+  /**
+   * The workspace's board of cards, or null until somebody opens it — see
+   * `shared/board.ts`. Here rather than beside the workspace so that it
+   * survives both restarts by the roads the layout already takes.
+   */
+  board: Board | null;
 }
 
 /** A named session: a list of workspaces, and which of them you are in. */

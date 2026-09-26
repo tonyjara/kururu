@@ -26,7 +26,8 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Profile, Workspace } from "../../shared/model";
 import { isLoginKey, isWorkspaceColor, mintLoginKey } from "../../shared/model";
-import type { LayoutNode, ReaderState } from "../../shared/layout";
+import { BOARD_TAB, type LayoutNode, type ReaderState } from "../../shared/layout";
+import { adoptBoard, storedBoard, type Board } from "../../shared/board";
 import { nextId } from "./workspaces";
 
 /** Bumped when the shape below changes; an older file is ignored, not migrated. */
@@ -42,6 +43,12 @@ interface StoredPane {
    * answer, because the nvim that was driving it is gone.
    */
   reader?: { root: string; path: string; docs?: { root: string; path: string }[] };
+  /**
+   * This pane held the board's tab. The cards are the workspace's, below; this
+   * is only where the tab was, and it is the one tab a restored pane comes back
+   * with — it is a view, not a process, so bringing it back launches nothing.
+   */
+  board?: true;
 }
 type StoredNode =
   | { type: "pane"; pane: StoredPane }
@@ -54,6 +61,15 @@ interface StoredWorkspace {
   color?: string | null;
   /** Likewise: a session written before a workspace could pick a mascot. */
   mascotId?: string | null;
+  /**
+   * The workspace's cards, when it has ever had a board. Unlike almost
+   * everything else in here this is *content* rather than structure — text
+   * somebody wrote — and it is kept for that reason: a board that emptied on
+   * every quit would be a list nobody could keep. What it does not keep is
+   * which agent a card was handed to; that is a process, and `storedBoard`
+   * takes it off.
+   */
+  board?: Board;
 }
 interface StoredProfile {
   name: string;
@@ -93,11 +109,13 @@ export function snapshotPath(): string {
 
 function strip(node: LayoutNode): StoredNode {
   if (node.type === "pane") {
-    const { cwd, reader } = node.pane;
+    const { cwd, reader, agentIds } = node.pane;
+    const board = agentIds.includes(BOARD_TAB);
     return {
       type: "pane",
       pane: {
         ...(cwd ? { cwd } : {}),
+        ...(board ? { board: true as const } : {}),
         ...(reader?.path
           ? {
               reader: {
@@ -128,6 +146,7 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
         name: workspace.name,
         color: workspace.color,
         mascotId: workspace.mascotId,
+        ...(workspace.board ? { board: storedBoard(workspace.board) } : {}),
         layout: strip(workspace.layout),
       })),
     })),
@@ -159,7 +178,10 @@ function revive(node: StoredNode): LayoutNode {
       stored && typeof stored.root === "string" && typeof stored.path === "string"
         ? { root: stored.root, path: stored.path, follow: null, editor: null, docs: storedDocs(stored), rev: 0 }
         : undefined;
-    return { type: "pane", pane: { id: nextId("n"), agentIds: [], activeIdx: 0, cwd, reader } };
+    // A pane that says it is a board and a reader is a hand-edited file; the
+    // reader, which carries more, wins.
+    const agentIds = !reader && node.pane?.board === true ? [BOARD_TAB] : [];
+    return { type: "pane", pane: { id: nextId("n"), agentIds, activeIdx: 0, cwd, reader } };
   }
   const ratio = typeof node.ratio === "number" && node.ratio > 0 && node.ratio < 1 ? node.ratio : 0.5;
   return {
@@ -260,6 +282,7 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
         lastPaneId: null,
         color,
         mascotId,
+        board: adoptBoard(w.board),
       };
       workspaces.push(workspace);
     }

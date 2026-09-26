@@ -24,11 +24,16 @@
  * profile, it always has at least one workspace, that workspace always has at
  * least one pane, and the focused pane always exists.
  */
+import { adoptBoard, emptyBoard, noteRun, type Board, type Card } from "../../shared/board";
 import type { Profile, ProfileSummary, Workspace, WorkspaceColor } from "../../shared/model";
 import { isLoginKey, isWorkspaceColor, mintLoginKey, WORKSPACE_COLORS } from "../../shared/model";
 import {
+  activeTerminal,
   addTab,
+  BOARD_TAB,
   closePane,
+  isBoardTab,
+  terminalsOf,
   cycleTab,
   findPane,
   makePane,
@@ -171,6 +176,10 @@ function adopt(profile: Profile): Profile {
       // compares against null and gets a different answer than it did a restart
       // ago — which is the whole reason this function exists.
       mascotId: typeof workspace.mascotId === "string" ? workspace.mascotId : null,
+      // The same, and read as defensively as the rest: cards are text somebody
+      // typed and runs name processes, and an older blob has neither.
+      board: adoptBoard(workspace.board),
+      layout: adoptBoardPanes(workspace.layout),
     })),
   };
 }
@@ -307,7 +316,7 @@ export class Workspaces {
     if (!profile) return [];
     const ids: string[] = [];
     for (const workspace of profile.workspaces) {
-      for (const pane of panes(workspace.layout)) ids.push(...pane.agentIds);
+      for (const pane of panes(workspace.layout)) ids.push(...terminalsOf(pane.agentIds));
     }
     return ids;
   }
@@ -421,7 +430,7 @@ export class Workspaces {
    * guess than a home directory nobody is working in.
    */
   agentsHere(): string[] {
-    return panes(this.activeWorkspace.layout).flatMap((pane) => pane.agentIds);
+    return panes(this.activeWorkspace.layout).flatMap((pane) => terminalsOf(pane.agentIds));
   }
 
   // -------------------------------------------------------------------------
@@ -550,14 +559,16 @@ export class Workspaces {
         // documents, and a reader with none left is not a thing to leave standing.
         layout: updatePane(w.layout, paneId, ({ reader: _, ...p }) => ({ ...p, agentIds: [], activeIdx: 0 })),
       }));
-      return pane.agentIds;
+      return terminalsOf(pane.agentIds);
     }
     this.mutateWorkspace(workspace.id, (w) => ({
       ...w,
       layout: next,
       focusedPaneId: w.focusedPaneId === paneId ? panes(next)[0]!.id : w.focusedPaneId,
     }));
-    return pane.agentIds;
+    // The board's tab goes with the pane and its cards stay on the workspace;
+    // only terminals are handed back to be killed.
+    return terminalsOf(pane.agentIds);
   }
 
   addTab(agentId: string, cwd: string, paneId = this.focusedPaneId): void {
@@ -573,6 +584,13 @@ export class Workspaces {
    * its own has to be reachable from.
    */
   removeTab(agentId: string): void {
+    // Every workspace has a board tab of its own under the same id, so "take it
+    // out wherever it is" would close them all. The board is only ever moved or
+    // closed from the workspace on screen.
+    if (isBoardTab(agentId)) {
+      this.mutateWorkspace(this.activeWorkspace.id, (w) => ({ ...w, layout: removeTab(w.layout, agentId) }));
+      return;
+    }
     for (const profile of this.profiles) {
       for (const workspace of profile.workspaces) {
         if (!paneWithAgent(workspace.layout, agentId)) continue;
@@ -719,6 +737,9 @@ export class Workspaces {
 
   /** Send a terminal to another workspace, into whatever pane has focus there. */
   moveTabToWorkspace(agentId: string, workspaceId: string): void {
+    // The board is this workspace's cards; carried into another it would be
+    // showing somebody else's list under the wrong name.
+    if (isBoardTab(agentId)) return;
     const profile = this.active;
     const target = profile.workspaces.find((w) => w.id === workspaceId);
     if (!target || paneWithAgent(target.layout, agentId)) return;
@@ -1038,10 +1059,113 @@ export class Workspaces {
     return this.openDoc(paneId, root, path) ? paneId : null;
   }
 
+  // -------------------------------------------------------------------------
+  // The board
+  // -------------------------------------------------------------------------
+
+  /**
+   * Show this workspace's board, making the board if it has never had one.
+   *
+   * This is the only thing that creates a board, which is the point: a
+   * workspace nobody opened a board in has `board: null`, and nothing in its
+   * snapshot or on disk.
+   *
+   * `here` is the new-tab menu's meaning — *put it in this pane* — and moves
+   * the tab there from wherever it was, the way dragging it would. Without it
+   * this is the key and the menus' meaning, *show me the board*: the tab you
+   * already have is selected where it is, and only when there is none is one
+   * made, beside `paneId` rather than on top of what it is showing (an empty
+   * pane is used as it is, since it is asking to be). Either way the focus goes
+   * to the board, because it is a thing you type into.
+   */
+  openBoard(paneId: string, here = false): string | null {
+    const workspace = this.activeWorkspace;
+    if (!workspace.board) this.mutateWorkspace(workspace.id, (w) => ({ ...w, board: w.board ?? emptyBoard() }));
+    const existing = paneWithAgent(this.activeWorkspace.layout, BOARD_TAB);
+    const target = findPane(this.activeWorkspace.layout, paneId);
+    let at: string | null;
+    if (existing && (!here || existing.id === paneId)) {
+      at = existing.id;
+    } else if (existing && target) {
+      this.moveTab(BOARD_TAB, target.id);
+      at = target.id;
+    } else if (target) {
+      at = here || (!target.reader && target.agentIds.length === 0) ? target.id : this.split("row", target.id);
+      if (at) {
+        const into = at;
+        this.mutateWorkspace(this.activeWorkspace.id, (w) => ({ ...w, layout: addTab(w.layout, into, BOARD_TAB) }));
+      }
+    } else {
+      return null;
+    }
+    if (!at) return null;
+    const pane = findPane(this.activeWorkspace.layout, at);
+    if (pane) this.selectTab(at, pane.agentIds.indexOf(BOARD_TAB));
+    this.focusPane(at);
+    return at;
+  }
+
+  /** Change the active workspace's board. A workspace with none is left without one. */
+  editBoard(workspaceId: string, fn: (board: Board) => Board): void {
+    const workspace = this.active.workspaces.find((w) => w.id === workspaceId);
+    if (!workspace?.board) return;
+    const next = fn(workspace.board);
+    if (next === workspace.board) return;
+    this.mutateWorkspace(workspaceId, (w) => ({ ...w, board: next }));
+  }
+
+  /** The card this id names in the active profile, and the workspace it is on. */
+  findCard(workspaceId: string, cardId: string): { workspace: Workspace; card: Card } | null {
+    const workspace = this.active.workspaces.find((w) => w.id === workspaceId);
+    const card = workspace?.board?.cards.find((c) => c.id === cardId);
+    return workspace && card ? { workspace, card } : null;
+  }
+
+  /**
+   * Carry one agent's status onto whichever card it is running, wherever that
+   * card is — a run is started from the board you are looking at and finishes
+   * while you are somewhere else, which is the whole reason to hand it off.
+   *
+   * Called for every agent on every host snapshot, so it must be a no-op when
+   * nothing changed: `noteRun` hands back the same board then, and nothing is
+   * written or pushed.
+   */
+  noteRun(agentId: string, status: string, exited: boolean): void {
+    const now = Date.now();
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) {
+        const board = workspace.board;
+        if (!board || !board.cards.some((card) => card.run?.agentId === agentId)) continue;
+        const next = noteRun(board, agentId, status, exited, now);
+        if (next !== board) this.mutate(profile.id, workspace.id, (w) => ({ ...w, board: next }));
+      }
+    }
+  }
+
+  /**
+   * Where the agent a card was handed to should go: a pane beside the board's
+   * rather than a tab in it, since a new tab is shown and taking the board
+   * away from somebody who has just pressed a robot on it would be the
+   * opposite of handing work off. The pane focus came from, else any other
+   * terminal pane, else a fresh split off the board.
+   */
+  paneBesideBoard(): string | null {
+    const layout = this.activeWorkspace.layout;
+    const board = paneWithAgent(layout, BOARD_TAB);
+    if (!board) return this.focusedPaneId;
+    const takes = (pane: PaneState | null | undefined): pane is PaneState =>
+      Boolean(pane && pane.id !== board.id && !pane.reader);
+    const last = this.activeWorkspace.lastPaneId ? findPane(layout, this.activeWorkspace.lastPaneId) : null;
+    if (takes(last)) return last.id;
+    const any = panes(layout).find(takes);
+    if (any) return any.id;
+    return this.split("row", board.id);
+  }
+
   /** The terminal a pane is showing, if any. */
   activeAgentIn(paneId: string): string | null {
     const pane = findPane(this.activeWorkspace.layout, paneId);
-    return pane ? (pane.agentIds[pane.activeIdx] ?? null) : null;
+    return pane ? activeTerminal(pane) : null;
   }
 
   /** The terminal the focused pane is showing, if any. */
@@ -1134,7 +1258,7 @@ export class Workspaces {
     if (profile.workspaces.length < 2) return [];
     const doomed = profile.workspaces.find((w) => w.id === workspaceId);
     if (!doomed) return [];
-    const agents = panes(doomed.layout).flatMap((pane) => pane.agentIds);
+    const agents = panes(doomed.layout).flatMap((pane) => terminalsOf(pane.agentIds));
     const workspaces = profile.workspaces.filter((w) => w.id !== workspaceId);
     this.replaceProfile(profile.id, (p) => ({
       ...p,
@@ -1235,6 +1359,8 @@ export class Workspaces {
       lastPaneId: null,
       color: nextColor(taken.map((w) => w.color)),
       mascotId: null,
+      // Nobody has asked for one yet — see `Workspace.board`.
+      board: null,
     };
   }
 
@@ -1295,4 +1421,18 @@ function withDoc(reader: ReaderState, root: string, path: string): ReaderDoc[] {
   const docs = [...reader.docs];
   docs.splice(at < 0 ? docs.length : at + 1, 0, { root, path });
   return docs;
+}
+
+/**
+ * A board *pane*, as the first version of the board drew one, turned into a
+ * board *tab* in the same place. A blob written by that server has
+ * `pane.board: true` and no tab; without this the board would simply be gone
+ * from the layout, with its cards still on the workspace and nothing to say so.
+ */
+function adoptBoardPanes(node: LayoutNode): LayoutNode {
+  if (node.type === "split") return { ...node, a: adoptBoardPanes(node.a), b: adoptBoardPanes(node.b) };
+  const { board, ...pane } = node.pane as PaneState & { board?: unknown };
+  if (board === undefined) return node;
+  if (!board || pane.agentIds.includes(BOARD_TAB)) return { type: "pane", pane };
+  return { type: "pane", pane: { ...pane, agentIds: [BOARD_TAB, ...pane.agentIds], activeIdx: 0 } };
 }

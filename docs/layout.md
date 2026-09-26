@@ -80,6 +80,49 @@ disk. Never move a layout decision back into React state.
   and would hide every *exited* agent — whose row carries the only dismiss gesture
   there is. The test is "has one ever been seen in here".
 
+## The board
+
+**A tab, and the board is the workspace's, not the tab's.** It was a third
+kind of pane for a version, and a pane you could not put a terminal beside in
+its own strip was the thing people noticed first. Now it is `BOARD_TAB` in a
+pane's `agentIds`, an id no pty can have, so every tab gesture — reorder, drag
+into a pane, drop on an edge, pour — works on it with no code of its own. The
+cost is that a tab is no longer always a process: `activeTerminal`,
+`visibleAgents` and `terminalsOf` in `shared/layout.ts` are what anything that
+kills, watches or types must go through, `removeTab` takes it out of the
+workspace on screen only (every workspace's board has the same id), and a board
+tab never moves to another workspace. `adoptBoardPanes` turns a blob's board
+*pane* into the tab.
+
+`Workspace.board` holds the cards, so closing the tab puts them away and
+`open-board` finds them where they were. It is null until somebody opens it —
+the only verb that makes one — and rides the host's blob and `persist.ts` like
+the rest of the workspace, which is why none of this cost an edit to the pty
+host. The doors: `C-a K` and a pane menu's **Open the board** show the one you
+have or make one beside that pane; the new-tab menu's **Board** puts it *in*
+that pane; a workspace row's right-click switches there and shows it. On disk a card keeps its run's history but not
+its `agentId`: that is a process, and a cold start reads a run with no process
+behind it as `ended`.
+
+**The robot is `new-tab` with a prompt on the end.** `run-card` looks the
+launcher up by id, exactly as the new-tab menu does, and `withPrompt` in
+`shared/launchers.ts` single-quotes the card onto the command line — the one
+place text somebody typed reaches `sh -c`. The agent lands in a pane *beside*
+the board's (`paneBesideBoard`) rather than as a tab in it, since a new tab is
+shown and would take the board away from the person pressing the robot; it is
+renamed after the card, and the focus goes back to the board.
+
+**The automation moves a card on an edge, and only out of the column it put it
+in.** `noteRun` runs for every agent on every host snapshot and compares
+against the state it recorded on the card, not against the last status — so a
+server restart that forgot `lastStatus` still catches a run up, and a card
+somebody dragged back out of Review is not dragged back in by an agent that is
+still sitting at `done`. A finished turn goes to **Review**, never Done: nothing
+in a byte stream tells "finished" from "asking you a question".
+
+**Deleting a card never ends its agent.** The card is a note about the work;
+the terminal is the work and has its own ✕.
+
 ## Dragging
 
 - **A pane a drag emptied is closed; a pane you emptied on purpose is not.** A

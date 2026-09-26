@@ -24,7 +24,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  activeAgent,
+  activeTerminal,
+  terminalsOf,
   paneInDirection,
   panes,
   soloPane,
@@ -469,7 +470,7 @@ export function App() {
   const visible = useMemo(() => {
     if (!workspace) return [];
     if (!narrow) return visibleAgents(workspace.layout);
-    const shown = activeAgent(soloPane(workspace.layout, workspace.focusedPaneId));
+    const shown = activeTerminal(soloPane(workspace.layout, workspace.focusedPaneId));
     return shown ? [shown] : [];
   }, [workspace, narrow]);
   useEffect(() => {
@@ -552,7 +553,7 @@ export function App() {
       if (!profile || profile.workspaces.length < 2) return;
       const doomed = profile.workspaces.find((w) => w.id === workspaceId);
       if (!doomed) return;
-      const inside = panes(doomed.layout).reduce((n, p) => n + p.agentIds.length, 0);
+      const inside = panes(doomed.layout).reduce((n, p) => n + terminalsOf(p.agentIds).length, 0);
       setDialog({
         kind: "confirm",
         title: `Delete “${doomed.name}”?`,
@@ -620,6 +621,8 @@ export function App() {
         }
         case "open-reader":
           return api.openReader();
+        case "open-board":
+          return api.openBoard();
         case "toggle-sidebar":
           return setSidebarOpen((open) => !open);
         case "toggle-files":
@@ -1113,6 +1116,8 @@ export function App() {
         <main className="panes">
           <Panes
             node={workspace.layout}
+            workspaceId={workspace.id}
+            board={workspace.board}
             focusedPaneId={workspace.focusedPaneId}
             agents={agents}
             mascot={mascot}
@@ -1407,7 +1412,7 @@ function focusedAgentOf(
 ): string | null {
   if (!workspace) return null;
   const pane = panes(workspace.layout).find((p) => p.id === workspace.focusedPaneId);
-  return pane ? activeAgent(pane) : null;
+  return pane ? activeTerminal(pane) : null;
 }
 
 /** The file a reader in this workspace is showing, for the tree to mark. */
