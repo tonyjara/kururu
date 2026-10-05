@@ -25,9 +25,9 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Profile, Workspace } from "../../shared/model";
-import { isLoginKey, isWorkspaceColor, mintLoginKey } from "../../shared/model";
-import { BOARD_TAB, type LayoutNode, type ReaderState } from "../../shared/layout";
-import { adoptBoard, storedBoard, type Board } from "../../shared/board";
+import { groupName, isLoginKey, isWorkspaceColor, mintLoginKey } from "../../shared/model";
+import { BOARD_TAB, docTab, isDocTab, parseDocTab, type LayoutNode, type ReaderDoc } from "../../shared/layout";
+import { adoptBoard, adoptProfileBoard, storedBoard, type Board } from "../../shared/board";
 import { nextId } from "./workspaces";
 
 /** Bumped when the shape below changes; an older file is ignored, not migrated. */
@@ -36,18 +36,22 @@ const VERSION = 1;
 interface StoredPane {
   cwd?: string;
   /**
-   * Where a reader pane was looking, and deliberately not *what* it was
-   * following. A pane's shape is structure and survives; the editor it was
-   * tracking is a process, and this file has no business remembering one. So a
-   * restored reader comes back pinned to its last file — which is the honest
-   * answer, because the nvim that was driving it is gone.
+   * The tabs that are views rather than processes — the board and documents —
+   * in strip order, and the one of them that was showing. They are the tabs a
+   * restored pane comes back with, since bringing a view back launches nothing.
+   *
+   * Deliberately not what a reader was *following*. The editor it was tracking
+   * is a process, and this file has no business remembering one — so a
+   * restored document comes back pinned, which is the honest answer, because
+   * the nvim that was driving it is gone.
+   */
+  tabs?: ("board" | ReaderDoc)[];
+  showing?: number;
+  /**
+   * The shape before documents were tabs of any pane: a reader pane's
+   * documents, and a flag for the pane holding the board. Only read.
    */
   reader?: { root: string; path: string; docs?: { root: string; path: string }[] };
-  /**
-   * This pane held the board's tab. The cards are the workspace's, below; this
-   * is only where the tab was, and it is the one tab a restored pane comes back
-   * with — it is a view, not a process, so bringing it back launches nothing.
-   */
   board?: true;
 }
 type StoredNode =
@@ -61,6 +65,8 @@ interface StoredWorkspace {
   color?: string | null;
   /** Likewise: a session written before a workspace could pick a mascot. */
   mascotId?: string | null;
+  /** Likewise: a session written before workspaces could be grouped. */
+  group?: string | null;
   /**
    * The workspace's cards, when it has ever had a board. Unlike almost
    * everything else in here this is *content* rather than structure — text
@@ -82,6 +88,8 @@ interface StoredProfile {
    * true of it.
    */
   loginKey?: string;
+  /** The profile's own cards, when it has any. See `Profile.board`. */
+  board?: Board;
   workspaces: StoredWorkspace[];
   /** Index rather than id: ids are regenerated on the way back in. */
   activeWorkspace: number;
@@ -109,22 +117,19 @@ export function snapshotPath(): string {
 
 function strip(node: LayoutNode): StoredNode {
   if (node.type === "pane") {
-    const { cwd, reader, agentIds } = node.pane;
-    const board = agentIds.includes(BOARD_TAB);
+    const { cwd, agentIds, activeIdx } = node.pane;
+    const kept = agentIds.flatMap((id, at): { at: number; tab: "board" | ReaderDoc }[] => {
+      if (id === BOARD_TAB) return [{ at, tab: "board" }];
+      const doc = parseDocTab(id);
+      return doc ? [{ at, tab: doc }] : [];
+    });
+    const showing = kept.findIndex(({ at }) => at === activeIdx);
     return {
       type: "pane",
       pane: {
         ...(cwd ? { cwd } : {}),
-        ...(board ? { board: true as const } : {}),
-        ...(reader?.path
-          ? {
-              reader: {
-                root: reader.root,
-                path: reader.path,
-                docs: reader.docs.map((doc) => ({ root: doc.root, path: doc.path })),
-              },
-            }
-          : {}),
+        ...(kept.length > 0 ? { tabs: kept.map(({ tab }) => tab) } : {}),
+        ...(showing > 0 ? { showing } : {}),
       },
     };
   }
@@ -138,6 +143,9 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
     profiles: profiles.map((profile) => ({
       name: profile.name,
       loginKey: profile.loginKey,
+      // Always, empty or not: its counter must survive a cold start so that a
+      // number is not handed out twice, and its columns are a person's choice.
+      board: storedBoard(profile.board),
       activeWorkspace: Math.max(
         0,
         profile.workspaces.findIndex((w) => w.id === profile.activeWorkspaceId),
@@ -146,6 +154,7 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
         name: workspace.name,
         color: workspace.color,
         mascotId: workspace.mascotId,
+        group: workspace.group,
         ...(workspace.board ? { board: storedBoard(workspace.board) } : {}),
         layout: strip(workspace.layout),
       })),
@@ -173,15 +182,8 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
 function revive(node: StoredNode): LayoutNode {
   if (node.type === "pane") {
     const cwd = typeof node.pane?.cwd === "string" ? node.pane.cwd : undefined;
-    const stored = node.pane?.reader;
-    const reader =
-      stored && typeof stored.root === "string" && typeof stored.path === "string"
-        ? { root: stored.root, path: stored.path, follow: null, editor: null, docs: storedDocs(stored), rev: 0 }
-        : undefined;
-    // A pane that says it is a board and a reader is a hand-edited file; the
-    // reader, which carries more, wins.
-    const agentIds = !reader && node.pane?.board === true ? [BOARD_TAB] : [];
-    return { type: "pane", pane: { id: nextId("n"), agentIds, activeIdx: 0, cwd, reader } };
+    const { agentIds, activeIdx } = storedTabs(node.pane ?? {});
+    return { type: "pane", pane: { id: nextId("n"), agentIds, activeIdx, cwd } };
   }
   const ratio = typeof node.ratio === "number" && node.ratio > 0 && node.ratio < 1 ? node.ratio : 0.5;
   return {
@@ -194,39 +196,76 @@ function revive(node: StoredNode): LayoutNode {
   };
 }
 
+/** A pane's view tabs off the disk, in either shape it has been written in. */
+function storedTabs(pane: StoredPane): { agentIds: string[]; activeIdx: number } {
+  if (Array.isArray(pane.tabs)) {
+    const agentIds: string[] = [];
+    for (const tab of pane.tabs as unknown[]) {
+      if (tab === "board") {
+        if (!agentIds.includes(BOARD_TAB)) agentIds.push(BOARD_TAB);
+      } else if (isStoredDoc(tab)) {
+        const id = docTab(tab.root, tab.path);
+        if (!agentIds.includes(id)) agentIds.push(id);
+      }
+    }
+    const showing = typeof pane.showing === "number" && Number.isInteger(pane.showing) ? pane.showing : 0;
+    return { agentIds, activeIdx: showing >= 0 && showing < agentIds.length ? showing : 0 };
+  }
+  // The older shape. A pane that says it is a board and a reader is a
+  // hand-edited file; the reader, which carries more, wins.
+  const stored = pane.reader;
+  if (stored && typeof stored.root === "string" && typeof stored.path === "string" && stored.path) {
+    return readerTabs(stored);
+  }
+  return { agentIds: pane.board === true ? [BOARD_TAB] : [], activeIdx: 0 };
+}
+
+function isStoredDoc(value: unknown): value is ReaderDoc {
+  const doc = value as { root?: unknown; path?: unknown } | null;
+  return Boolean(doc) && typeof doc!.root === "string" && typeof doc!.path === "string" && doc!.path !== "";
+}
+
 /**
- * A reader's tabs off the disk, with the showing document among them whatever
- * the file says. A snapshot from before readers had tabs has no list at all, and
- * comes back as the one tab it was showing.
+ * A reader pane from before documents were tabs, as tabs: its list, with the
+ * document it was showing among them whatever the list says — a reader from
+ * before readers had tabs at all has no list and comes back as the one tab it
+ * was showing — and that one active.
  */
-function storedDocs(stored: { root: string; path: string; docs?: unknown }): { root: string; path: string }[] {
-  const docs = Array.isArray(stored.docs)
-    ? (stored.docs as { root?: unknown; path?: unknown }[]).filter(
-        (doc): doc is { root: string; path: string } =>
-          Boolean(doc) && typeof doc.root === "string" && typeof doc.path === "string" && doc.path !== "",
-      )
-    : [];
-  const showing = docs.some((doc) => doc.root === stored.root && doc.path === stored.path);
-  return showing ? docs : [...docs, { root: stored.root, path: stored.path }];
+function readerTabs(stored: { root: string; path: string; docs?: unknown }): { agentIds: string[]; activeIdx: number } {
+  const docs = Array.isArray(stored.docs) ? (stored.docs as unknown[]).filter(isStoredDoc) : [];
+  if (!docs.some((doc) => doc.root === stored.root && doc.path === stored.path)) {
+    docs.push({ root: stored.root, path: stored.path });
+  }
+  const agentIds = [...new Set(docs.map((doc) => docTab(doc.root, doc.path)))];
+  return { agentIds, activeIdx: Math.max(0, agentIds.indexOf(docTab(stored.root, stored.path))) };
 }
 
 /**
  * Bring a host blob's readers up to the current shape.
  *
  * The blob is a live tree handed across a restart verbatim, so unlike the file
- * it never passes through `revive` — and a server that predates reader tabs
- * left readers with no `docs` and no `editor`. Trusting those as `ReaderState`
- * is what took the first snapshot write down on `reader.docs.map`. The file's
- * rules apply: the showing document is always among the tabs.
+ * it never passes through `revive` — and a server from before documents were
+ * tabs of any pane left them in `reader.docs`, with `reader.path` saying which
+ * was showing and `agentIds` empty. Those become doc tabs, and the reader
+ * keeps only what is still its own: the editor it follows and the picker's
+ * project. A server older still left readers with no `editor` at all.
  */
 export function adoptReaders(profiles: Profile[]): Profile[] {
   const walk = (node: LayoutNode): LayoutNode => {
     if (node.type === "split") return { ...node, a: walk(node.a), b: walk(node.b) };
-    const reader = node.pane.reader as (Partial<ReaderState> & { root: string; path: string }) | undefined;
+    const reader = node.pane.reader as
+      | { root?: unknown; path?: unknown; docs?: unknown; follow?: unknown; editor?: unknown; rev?: unknown }
+      | undefined;
     if (!reader) return node;
-    const editor = typeof reader.editor === "string" ? reader.editor : (reader.follow ?? null);
-    const docs = reader.path ? storedDocs(reader) : Array.isArray(reader.docs) ? reader.docs : [];
-    return { ...node, pane: { ...node.pane, reader: { ...reader, follow: reader.follow ?? null, editor, docs, rev: reader.rev ?? 0 } } };
+    const root = typeof reader.root === "string" ? reader.root : "";
+    const follow = typeof reader.follow === "string" ? reader.follow : null;
+    const editor = typeof reader.editor === "string" ? reader.editor : follow;
+    const rev = typeof reader.rev === "number" && Number.isFinite(reader.rev) ? reader.rev : 0;
+    const old = "path" in reader || "docs" in reader;
+    const pane = { ...node.pane, reader: { root, follow, editor, rev } };
+    if (!old || pane.agentIds.some(isDocTab)) return { ...node, pane };
+    const tabs = typeof reader.path === "string" && reader.path ? readerTabs({ root, path: reader.path, docs: reader.docs }) : null;
+    return { ...node, pane: tabs ? { ...pane, agentIds: [...tabs.agentIds, ...pane.agentIds], activeIdx: tabs.activeIdx } : pane };
   };
   return profiles.map((profile) => ({
     ...profile,
@@ -282,6 +321,7 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
         lastPaneId: null,
         color,
         mascotId,
+        group: groupName(w.group),
         board: adoptBoard(w.board),
       };
       workspaces.push(workspace);
@@ -294,6 +334,7 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
       // Checked rather than trusted, because it becomes a path: see `logins.ts`.
       loginKey: isLoginKey(stored.loginKey) ? stored.loginKey : mintLoginKey(),
       workspaces,
+      board: adoptProfileBoard(stored.board),
       activeWorkspaceId: workspaces[at]!.id,
       lastWorkspaceId: null,
       // Empty, and not because the file is old: the order is a list of agent

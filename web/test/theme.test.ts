@@ -100,6 +100,11 @@ const NOT_THEME = new Set([
   // root by `useKeyboardInset`. A length the browser reports, like `--sidebar-w`
   // and for the same reason: not a colour, not a shape, nobody's to theme.
   "--keyboard",
+  // How many days and how many cards the timeline is drawing, set on its grid
+  // by `Timeline.tsx`. Counts, like `--depth`: the stylesheet decides how wide
+  // a day is and how tall a row.
+  "--days",
+  "--rows",
   // The height of the window's bottom edge, which the status bar and the
   // sidebar's foot both have to be. A constant the stylesheet declares for
   // itself: it exists so those two cannot drift apart, and there is nothing in

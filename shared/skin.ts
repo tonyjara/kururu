@@ -142,7 +142,10 @@ export type IconName =
   | "stop"
   | "play"
   | "bot"
-  | "git";
+  | "git"
+  | "board"
+  | "grip"
+  | "panel";
 
 export type IconSet = Record<IconName, string>;
 
@@ -181,6 +184,12 @@ export const ICON_NAMES: readonly IconName[] = [
   "bot",
   /** A workspace's checkout: its commit, merge, pull and push, from the sidebar. */
   "git",
+  /** The profile's own board, beside the profile's name. */
+  "board",
+  /** A thing to take hold of and drag: a board column, by its header. */
+  "grip",
+  /** Putting a side column away: the file tree, from its own header. */
+  "panel",
 ];
 
 /**
@@ -729,6 +738,12 @@ export const BASE_ICONS: IconSet = {
   bot: "⚙",
   /** A workspace's git. A branch fork, which every monospace face has in some form. */
   git: "⎇",
+  /** A board of cards. Three columns of uneven height, which is what a kanban is drawn as. */
+  board: "▥",
+  /** Something to drag by. Six dots is the only drawing of that anyone knows. */
+  grip: "⠿",
+  /** A column put away to the edge it lives on. */
+  panel: "⇥",
 };
 
 /**

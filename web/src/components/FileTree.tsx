@@ -16,11 +16,22 @@
  * only knew what was there when you opened it would be lying within a minute.
  * Every read goes through `files.ts`, rooted at a directory the server handed
  * over, and no path here is anything but a string relative to it.
+ *
+ * It also rearranges: new, rename, cut, copy, paste, drag, and the Trash —
+ * everything that changes where a file is and nothing that changes what is in
+ * it, which stays nvim's. Every edit is a verb sent to `fileops.ts` and the
+ * tree then reads again, so it never believes a move happened that the disk
+ * did not agree to. A drag is the desktop's way in; a phone cannot drag, so
+ * a long-press opens the same menu and "Move to…" picks the folder from a list.
  */
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { basename } from "../../../shared/labels";
+import type { WorkspaceProject } from "../../../shared/wire";
+import { beginDrag, endDrag as endPaneDrag, fileId } from "../drag";
+import { desktop } from "../desktop";
 import { shortenPath } from "../labels";
 import { canZoom, DEFAULT_ZOOM, resetZoom, zoomBy, zoomLabel, zoomStore } from "../zoom";
+import type { DialogState } from "./Dialog";
 import { Icon } from "./Icon";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
 
@@ -46,18 +57,57 @@ const REFRESH_MS = 4000;
 
 const EXPANDED_KEY = "kururu.tree.";
 
+/**
+ * The root somebody picked from the header, per workspace, in this browser.
+ * Only ever one of the server's `choices`, and only honoured while it still is
+ * one — close the last tab in that folder and the tree goes back to the guess,
+ * and comes back to the pick if a tab goes there again.
+ */
+const PICK_KEY = "kururu.files-root.";
+
+/** A row being dragged, told apart from the tabs, panes and cards that also drag. */
+const TREE_MIME = "application/x-kururu-tree";
+
+/** How long a finger rests on a row before that is a right-click. */
+const LONG_PRESS_MS = 500;
+/** How long a drag hovers over a shut folder before it opens to be dropped into. */
+const SPRING_MS = 700;
+
+/** Cut or copied, waiting for a paste. Per tree, not the system clipboard: it names a path in this project. */
+type Clip = { mode: "cut" | "copy"; path: string } | null;
+
+type OpBody =
+  | { op: "mkdir" | "touch"; dir: string; name: string }
+  | { op: "rename"; path: string; name: string }
+  | { op: "move" | "copy"; path: string; dir: string }
+  | { op: "trash" | "reveal"; path: string };
+
+/** The folder a path sits in, "" for the top. */
+function parentOf(path: string): string {
+  const slash = path.lastIndexOf("/");
+  return slash < 0 ? "" : path.slice(0, slash);
+}
+
+/** Is `path` this one or somewhere under it? */
+function within(path: string, dir: string): boolean {
+  return path === dir || path.startsWith(`${dir}/`);
+}
+
 export function FileTree({
-  root,
+  workspaceId,
+  project,
   current,
   overlay,
   onOpen,
   onOpenInEditor,
+  onPrompt,
   onClose,
   onResize,
   onResetWidth,
 }: {
-  /** The project, or null while the server has not said which one it is. */
-  root: string | null;
+  workspaceId: string;
+  /** Where this workspace is, or null while the server has not said. */
+  project: WorkspaceProject | null;
   /** The file the reader in this workspace is showing, to mark its row. */
   current: string | null;
   overlay: boolean;
@@ -65,13 +115,39 @@ export function FileTree({
   onOpen: (root: string, path: string) => void;
   /** Straight to nvim, for a markdown file you want to edit rather than read. */
   onOpenInEditor: (root: string, path: string) => void;
+  /** The window's one modal: names, "are you sure", and the folder picker. */
+  onPrompt: (state: DialogState) => void;
   onClose: () => void;
   onResize: (px: number) => void;
   onResetWidth: () => void;
 }) {
+  const [picked, setPicked] = useState<string | null>(() => storedPick(workspaceId));
+  const [pickedFor, setPickedFor] = useState(workspaceId);
+  if (pickedFor !== workspaceId) {
+    setPickedFor(workspaceId);
+    setPicked(storedPick(workspaceId));
+  }
+  const choices = project?.choices ?? [];
+  const root = picked && choices.includes(picked) ? picked : (project?.root ?? null);
+  const pick = (dir: string | null) => {
+    setPicked(dir);
+    try {
+      if (dir) localStorage.setItem(PICK_KEY + workspaceId, dir);
+      else localStorage.removeItem(PICK_KEY + workspaceId);
+    } catch {
+      // Private mode: the pick lasts as long as the tree does.
+    }
+  };
+  const [rootMenu, setRootMenu] = useState<MenuAt | null>(null);
+
   const [expanded, setExpanded] = useState<Set<string>>(() => storedExpanded(root));
   const [listings, setListings] = useState<Map<string, Entry[] | string>>(new Map());
-  const [menu, setMenu] = useState<{ at: MenuAt; entry: Entry } | null>(null);
+  const [menu, setMenu] = useState<{ at: MenuAt; entry: Entry | null } | null>(null);
+  const [clip, setClip] = useState<Clip>(null);
+  /** The last edit the disk refused, said until the next one. */
+  const [error, setError] = useState<string | null>(null);
+  /** The folder a drag would land in right now — "" is the top of the tree. */
+  const [dropAt, setDropAt] = useState<string | null>(null);
 
   /**
    * A different project is a different tree: what was open, and what was read,
@@ -83,6 +159,8 @@ export function FileTree({
     setShownRoot(root);
     setExpanded(storedExpanded(root));
     setListings(new Map());
+    setClip(null);
+    setError(null);
   }
 
   const load = useCallback(
@@ -155,22 +233,292 @@ export function FileTree({
     });
   };
 
-  const openMenu = (event: React.MouseEvent, entry: Entry) => {
+  const expand = (dir: string) => {
+    if (!dir || expandedRef.current.has(dir)) return;
+    void load(dir);
+    // Its ancestors too: a folder open inside a shut one is not a folder you can see.
+    setExpanded((had) => {
+      const next = new Set(had);
+      for (let at = dir; at; at = parentOf(at)) next.add(at);
+      return next;
+    });
+  };
+
+  /**
+   * One edit, sent and then read back. On success the folders it touched are
+   * listed again at once rather than on the next tick — the row you just moved
+   * should be where you put it before your eye gets there.
+   */
+  const run = async (body: OpBody, touched: string[]): Promise<string | null> => {
+    if (!root) return null;
+    let result: { ok?: boolean; path?: string; error?: string };
+    try {
+      const response = await fetch("/api/fs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...body, root }),
+      });
+      result = (await response.json()) as typeof result;
+    } catch {
+      result = { error: "the server did not answer" };
+    }
+    for (const dir of new Set(touched)) void load(dir);
+    if (!result.ok) {
+      setError(result.error ?? "that did not work");
+      return null;
+    }
+    setError(null);
+    return result.path ?? "";
+  };
+
+  /**
+   * A folder that moved takes what was open inside it along, so a rename does
+   * not fold up the part of the tree you were working in.
+   */
+  const follow = (from: string, to: string | null) => {
+    setExpanded((had) => {
+      if (![...had].some((path) => within(path, from))) return had;
+      const next = new Set<string>();
+      for (const path of had) {
+        if (!within(path, from)) next.add(path);
+        else if (to !== null) next.add(to + path.slice(from.length));
+      }
+      return next;
+    });
+    setClip((had) => (had && within(had.path, from) ? null : had));
+  };
+
+  const place = (dir: string) => (dir ? `in ${dir}` : `at the top of ${root ? basename(root) : "the project"}`);
+
+  const create = (dir: string, kind: "touch" | "mkdir") =>
+    onPrompt({
+      kind: "prompt",
+      title: kind === "touch" ? "New file" : "New folder",
+      hint: place(dir),
+      value: "",
+      submitLabel: "Create",
+      onSubmit: (name) =>
+        void run({ op: kind, dir, name }, [dir]).then((made) => {
+          if (made === null) return;
+          expand(dir);
+          // A file made here is a file you are about to write, and writing is nvim's.
+          if (kind === "touch" && root) onOpenInEditor(root, made);
+        }),
+    });
+
+  const rename = (entry: Entry) =>
+    onPrompt({
+      kind: "prompt",
+      title: `Rename ${entry.dir ? "folder" : "file"}`,
+      hint: entry.path,
+      value: entry.name,
+      submitLabel: "Rename",
+      onSubmit: (name) =>
+        void run({ op: "rename", path: entry.path, name }, [parentOf(entry.path)]).then((to) => {
+          if (to !== null && entry.dir) follow(entry.path, to);
+        }),
+    });
+
+  const move = async (path: string, dir: string, copy: boolean) => {
+    if (!copy && parentOf(path) === dir) return;
+    const to = await run({ op: copy ? "copy" : "move", path, dir }, [parentOf(path), dir]);
+    if (to === null) return;
+    expand(dir);
+    if (!copy) follow(path, to);
+  };
+
+  const paste = (dir: string) => {
+    if (!clip) return;
+    void move(clip.path, dir, clip.mode === "copy");
+    // A cut is spent by its paste; a copy can be pasted again.
+    if (clip.mode === "cut") setClip(null);
+  };
+
+  const moveTo = async (entry: Entry) => {
+    if (!root) return;
+    let dirs: string[] = [];
+    try {
+      const response = await fetch(`/api/dirs?${new URLSearchParams({ root })}`);
+      dirs = ((await response.json()) as { dirs?: string[] }).dirs ?? [];
+    } catch {
+      return setError("could not list the folders");
+    }
+    const from = parentOf(entry.path);
+    onPrompt({
+      kind: "pick",
+      title: `Move ${entry.name} to…`,
+      hint: `now ${place(from)}`,
+      items: [
+        ...(from ? [{ id: "", label: `${basename(root)}/`, hint: "the top" }] : []),
+        ...dirs
+          .filter((dir) => dir !== from && !(entry.dir && within(dir, entry.path)))
+          .sort((a, b) => a.localeCompare(b))
+          .map((dir) => ({ id: dir, label: `${dir}/` })),
+      ],
+      onPick: (dir) => void move(entry.path, dir, false),
+    });
+  };
+
+  const trash = (entry: Entry) =>
+    onPrompt({
+      kind: "confirm",
+      title: `Move ${entry.name} to the Trash?`,
+      hint: `${entry.dir ? "The folder and everything in it. " : ""}It can be put back from the Trash.`,
+      confirmLabel: "Move to Trash",
+      onConfirm: () =>
+        void run({ op: "trash", path: entry.path }, [parentOf(entry.path)]).then((done) => {
+          if (done !== null) follow(entry.path, null);
+        }),
+    });
+
+  const openMenu = (event: React.MouseEvent, entry: Entry | null) => {
     event.preventDefault();
+    event.stopPropagation();
     setMenu({ at: { x: event.clientX, y: event.clientY }, entry });
   };
 
-  const menuItems = (entry: Entry): MenuItem[] => {
+  /**
+   * The right-click a finger does not have. iOS never fires `contextmenu` on a
+   * long press, so the tree times one itself: held still for half a second is
+   * a menu, and the click that the lift would otherwise deliver is swallowed so
+   * the file does not also open underneath it.
+   */
+  const press = useRef<{ timer: number; x: number; y: number } | null>(null);
+  const pressed = useRef(false);
+  const cancelPress = () => {
+    if (press.current) window.clearTimeout(press.current.timer);
+    press.current = null;
+  };
+  const longPress = (entry: Entry | null) => ({
+    onPointerDown: (event: React.PointerEvent) => {
+      if (event.pointerType !== "touch") return;
+      event.stopPropagation();
+      cancelPress();
+      const { clientX: x, clientY: y } = event;
+      press.current = {
+        x,
+        y,
+        timer: window.setTimeout(() => {
+          press.current = null;
+          // Only a row has a click to swallow; the empty tree below the rows
+          // has none, and a flag left up would eat the next real tap.
+          pressed.current = entry !== null;
+          setMenu({ at: { x, y }, entry });
+        }, LONG_PRESS_MS),
+      };
+    },
+    onPointerMove: (event: React.PointerEvent) => {
+      const at = press.current;
+      if (at && Math.hypot(event.clientX - at.x, event.clientY - at.y) > 10) cancelPress();
+    },
+    onPointerUp: cancelPress,
+    onPointerCancel: cancelPress,
+  });
+  const swallowed = () => {
+    if (!pressed.current) return false;
+    pressed.current = false;
+    return true;
+  };
+
+  /**
+   * Hovering a drag over a shut folder opens it, as Finder does, so a file can
+   * be dropped deeper than what happened to be open when the drag began.
+   */
+  const spring = useRef<{ dir: string; timer: number } | null>(null);
+  const springTo = (dir: string | null) => {
+    if (spring.current?.dir === dir) return;
+    if (spring.current) window.clearTimeout(spring.current.timer);
+    spring.current = dir ? { dir, timer: window.setTimeout(() => expand(dir), SPRING_MS) } : null;
+  };
+  const endDrag = () => {
+    springTo(null);
+    setDropAt(null);
+  };
+
+  /** Drop handlers for a place things land in: a folder row, a file's folder, or the top. */
+  const dropInto = (dir: string, row?: Entry) => ({
+    onDragOver: (event: React.DragEvent) => {
+      if (!event.dataTransfer.types.includes(TREE_MIME)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      // Option copies, as it does in Finder; a plain drag moves.
+      event.dataTransfer.dropEffect = event.altKey ? "copy" : "move";
+      setDropAt(dir);
+      springTo(row?.dir && !expanded.has(row.path) ? row.path : null);
+    },
+    onDrop: (event: React.DragEvent) => {
+      const path = event.dataTransfer.getData(TREE_MIME);
+      if (!path) return;
+      event.preventDefault();
+      event.stopPropagation();
+      endDrag();
+      void move(path, dir, event.altKey);
+    },
+  });
+
+  const menuItems = (entry: Entry | null): MenuItem[] => {
     if (!root) return [];
     const items: MenuItem[] = [];
-    if (MARKDOWN.test(entry.path)) items.push({ label: "Read", run: () => onOpen(root, entry.path) });
-    items.push({ label: "Open in nvim…", run: () => onOpenInEditor(root, entry.path) });
+    // The folder a "new" or a paste lands in: the row's own if it is one, else
+    // the one it sits in — right-clicking a file to make its sibling is the
+    // common case, not a mistake.
+    const dir = entry ? (entry.dir ? entry.path : parentOf(entry.path)) : "";
+    if (entry && !entry.dir) {
+      if (MARKDOWN.test(entry.path)) items.push({ label: "Read", run: () => onOpen(root, entry.path) });
+      items.push({ label: "Open in nvim…", run: () => onOpenInEditor(root, entry.path) });
+    }
+    items.push({ label: "New file…", sep: items.length > 0, run: () => create(dir, "touch") });
+    items.push({ label: "New folder…", run: () => create(dir, "mkdir") });
+    if (clip) {
+      items.push({
+        label: `Paste ${basename(clip.path)}`,
+        hint: clip.mode === "cut" ? "move" : "copy",
+        run: () => paste(dir),
+      });
+    }
+    // Only in the window: Finder opens on the machine the server runs on, and
+    // from a phone that is a desk nobody is sitting at.
+    const reveal = desktop()
+      ? { label: "Open in Finder", sep: true, run: () => void run({ op: "reveal", path: entry?.path ?? "" }, []) }
+      : null;
+    if (!entry) {
+      if (reveal) items.push(reveal);
+      return items;
+    }
+    items.push({ label: "Rename…", sep: true, hint: "F2", run: () => rename(entry) });
+    items.push({ label: "Duplicate", run: () => void move(entry.path, parentOf(entry.path), true) });
+    items.push({ label: "Cut", hint: "⌘X", run: () => setClip({ mode: "cut", path: entry.path }) });
+    items.push({ label: "Copy", hint: "⌘C", run: () => setClip({ mode: "copy", path: entry.path }) });
+    items.push({ label: "Move to…", run: () => void moveTo(entry) });
     items.push({
       label: "Copy path",
       sep: true,
       run: () => void navigator.clipboard?.writeText(`${root}/${entry.path}`).catch(() => {}),
     });
+    if (reveal) items.push({ ...reveal, sep: false });
+    items.push({ label: "Move to Trash", sep: true, danger: true, hint: "⌘⌫", run: () => trash(entry) });
     return items;
+  };
+
+  /**
+   * The keys a file manager has, on the row that has focus. They are only
+   * heard here, on a focused tree row, so none of them can be mistaken for a
+   * keystroke meant for a terminal — the row is a button and a pty never sees
+   * what a button was sent.
+   */
+  const rowKeys = (event: React.KeyboardEvent, entry: Entry) => {
+    const mod = event.metaKey || event.ctrlKey;
+    const key = event.key.toLowerCase();
+    const act = (fn: () => void) => {
+      event.preventDefault();
+      event.stopPropagation();
+      fn();
+    };
+    if (event.key === "F2") return act(() => rename(entry));
+    if (mod && event.key === "Backspace") return act(() => trash(entry));
+    if (mod && key === "x") return act(() => setClip({ mode: "cut", path: entry.path }));
+    if (mod && key === "c") return act(() => setClip({ mode: "copy", path: entry.path }));
+    if (mod && key === "v" && clip) return act(() => paste(entry.dir ? entry.path : parentOf(entry.path)));
   };
 
   const rows = (dir: string, depth: number): React.ReactNode => {
@@ -186,13 +534,35 @@ export function FileTree({
           <button
             className={`tree-row ${entry.dir ? "tree-dir" : ""} ${doc ? "tree-doc" : ""} ${
               entry.path === current ? "tree-on" : ""
+            } ${entry.dir && dropAt === entry.path ? "tree-drop" : ""} ${
+              clip?.mode === "cut" && clip.path === entry.path ? "tree-cut" : ""
             }`}
             style={indent(depth)}
             role="treeitem"
             aria-expanded={entry.dir ? open : undefined}
             title={entry.dir ? entry.path : doc ? `${entry.path}\nClick to read` : `${entry.path}\nClick to open in nvim`}
-            onClick={() => (entry.dir ? toggle(entry) : root && onOpen(root, entry.path))}
-            onContextMenu={entry.dir ? undefined : (event) => openMenu(event, entry)}
+            onClick={() => {
+              if (swallowed()) return;
+              if (entry.dir) toggle(entry);
+              else if (root) onOpen(root, entry.path);
+            }}
+            onContextMenu={(event) => openMenu(event, entry)}
+            onKeyDown={(event) => rowKeys(event, entry)}
+            draggable
+            onDragStart={(event) => {
+              cancelPress();
+              // A markdown file can also be dropped on a pane, as a tab — so it
+              // announces itself to the panes too, which light up for it.
+              if (doc && root) beginDrag(event, "file", fileId(root, entry.path));
+              event.dataTransfer.setData(TREE_MIME, entry.path);
+              event.dataTransfer.effectAllowed = "copyMove";
+            }}
+            onDragEnd={() => {
+              endDrag();
+              endPaneDrag();
+            }}
+            {...longPress(entry)}
+            {...dropInto(entry.dir ? entry.path : parentOf(entry.path), entry)}
           >
             {entry.dir ? (
               <Icon name="caret" className={`tree-caret ${open ? "" : "tree-caret-shut"}`} />
@@ -210,20 +580,83 @@ export function FileTree({
   return (
     <aside className={`files ${overlay ? "files-overlay" : ""}`} aria-label="Files">
       <div className="files-head">
-        <span className="files-root" title={root ?? undefined}>
-          {root ? basename(root) : "files"}
-        </span>
+        {/* A picker only when there is something to pick: a workspace whose
+            tabs are all in one place has one root and a plain title. */}
+        {choices.length > 1 ? (
+          <button
+            className="files-root files-root-pick"
+            title={`${root ?? ""} — pick another folder this workspace's tabs are in`}
+            aria-haspopup="menu"
+            onClick={(event) => {
+              const box = event.currentTarget.getBoundingClientRect();
+              setRootMenu({ x: box.left, y: box.bottom + 4 });
+            }}
+          >
+            {root ? basename(root) : "files"}
+            <Icon name="caret" />
+          </button>
+        ) : (
+          <span className="files-root" title={root ?? undefined}>
+            {root ? basename(root) : "files"}
+          </span>
+        )}
         {root && <span className="files-path">{shortenPath(root)}</span>}
         <Zoom />
-        <button className="sidebar-close files-close" onClick={onClose} aria-label="Hide the file tree" title="Hide (C-a e)">
-          <Icon name="close" />
-        </button>
+        {/* On a wide window the tree's own way back to the edge, beside the
+            status bar's; on a sheet, the way out of it, which is a close. */}
+        {overlay ? (
+          <button className="sidebar-close files-close" onClick={onClose} aria-label="Hide the file tree" title="Hide (C-a e)">
+            <Icon name="close" />
+          </button>
+        ) : (
+          <button className="pane-btn files-close" onClick={onClose} aria-label="Hide the file tree" title="Hide (C-a e)">
+            <Icon name="panel" />
+          </button>
+        )}
       </div>
-      <div className="files-list" role="tree">
+      {error && (
+        <p className="tree-error" role="alert" onClick={() => setError(null)} title="Dismiss">
+          {error}
+        </p>
+      )}
+      <div
+        className={`files-list ${dropAt === "" ? "files-list-drop" : ""}`}
+        role="tree"
+        onContextMenu={root ? (event) => openMenu(event, null) : undefined}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) endDrag();
+        }}
+        {...longPress(null)}
+        {...dropInto("")}
+      >
         {root ? rows("", 0) : <p className="tree-note">Waiting for a terminal to say where this workspace is.</p>}
       </div>
       {!overlay && <Grip onResize={onResize} onReset={onResetWidth} />}
       {menu && <Menu at={menu.at} items={menuItems(menu.entry)} onClose={() => setMenu(null)} />}
+      {rootMenu && project && (
+        <Menu
+          at={rootMenu}
+          items={[
+            // The guess follows focus, so it is its own row rather than
+            // whichever folder it happens to name right now: picking that
+            // folder would pin it, and this is the way back to not pinning.
+            {
+              label: "Follow the focused tab",
+              hint: basename(project.root),
+              mark: !picked || !choices.includes(picked),
+              run: () => pick(null),
+            },
+            ...choices.map((dir, at) => ({
+              label: basename(dir) || dir,
+              hint: shortenPath(dir),
+              sep: at === 0,
+              mark: picked === dir,
+              run: () => pick(dir),
+            })),
+          ]}
+          onClose={() => setRootMenu(null)}
+        />
+      )}
     </aside>
   );
 }
@@ -274,6 +707,14 @@ function Zoom() {
 /** The depth as a custom property, so the stylesheet decides how far that is. */
 function indent(depth: number): React.CSSProperties {
   return { "--depth": depth } as React.CSSProperties;
+}
+
+function storedPick(workspaceId: string): string | null {
+  try {
+    return localStorage.getItem(PICK_KEY + workspaceId);
+  } catch {
+    return null;
+  }
 }
 
 function storedExpanded(root: string | null): Set<string> {

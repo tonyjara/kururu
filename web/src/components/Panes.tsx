@@ -46,6 +46,9 @@ import {
   BOARD_TAB,
   isBoardTab,
   dividers,
+  parseDocTab,
+  showingDoc,
+  showsDoc,
   panes,
   rects,
   soloPane,
@@ -58,7 +61,19 @@ import { basename } from "../../../shared/labels";
 import { emptyBoard, type Board } from "../../../shared/board";
 import { visibleLaunchers, type Launcher, type LaunchSettings } from "../../../shared/launchers";
 import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
-import { AGENT_MIME, DOC_MIME, PANE_MIME, allowDrop, beginDrag, docId, endDrag, parseDocId, useDragging } from "../drag";
+import {
+  AGENT_MIME,
+  DOC_MIME,
+  FILE_MIME,
+  PANE_MIME,
+  allowDrop,
+  beginDrag,
+  docId,
+  endDrag,
+  parseDocId,
+  parseFileId,
+  useDragging,
+} from "../drag";
 import { keyLabel, PREFIX_LABEL } from "../keys";
 import { shortenPath, tabLabel } from "../labels";
 import * as api from "../session";
@@ -72,6 +87,8 @@ import { TerminalView } from "./Terminal";
 interface Props {
   node: LayoutNode;
   workspaceId: string;
+  /** What the board's card codes are made from. */
+  workspaceName: string;
   /** The workspace's board, or null while it has never been opened. */
   board: Board | null;
   focusedPaneId: string;
@@ -125,6 +142,7 @@ const FULL: React.CSSProperties = { left: 0, top: 0, width: "100%", height: "100
 export function Panes({
   node,
   workspaceId,
+  workspaceName,
   board,
   focusedPaneId,
   agents,
@@ -177,8 +195,6 @@ export function Panes({
    * the same way it already outlives a tab switch or a workspace change.
    */
   const shown = solo ? soloPane(node, focusedPaneId) : null;
-  /** Which panes are readers, for a pane in flight to know what it may pour into. */
-  const readers = new Set(all.filter((p) => p.reader).map((p) => p.id));
 
   return (
     /* A pane slides to a new position, but not while you are dragging its
@@ -221,8 +237,8 @@ export function Panes({
               keyboard={keyboard}
               agents={agents}
               mascot={mascot}
-              readers={readers}
               workspaceId={workspaceId}
+              workspaceName={workspaceName}
               board={board}
               launchers={launchers}
             />
@@ -352,7 +368,7 @@ function paneMenu({
        it: a door onto a picker from inside the pane it would fill is a menu
        padded out to look complete. The keybind there means "follow the editor
        again", which is what the follow button in that strip says in a word. */
-    ...(pane?.reader
+    ...(pane && showsDoc(pane)
       ? []
       : [
           {
@@ -389,12 +405,17 @@ function paneMenu({
 }
 
 /**
- * The new-tab button's menu: a terminal, then an agent on a model.
+ * The new-tab button's menu: a terminal, nvim, a board, then an agent on a
+ * model.
  *
  * The terminal stays first and keeps its key, because it is still what C-a T
  * opens and what a pane with nothing in it opens when clicked — the menu adds
- * choices to the button without changing what the other two doors do. The
- * agents are grouped by CLI with a rule between them, in `LAUNCHERS` order.
+ * choices to the button without changing what the other two doors do. Nvim is
+ * a shell with `nvim` already typed into it rather than a launcher — it is
+ * not a coding agent and has no model to pick, so it builds no `Launcher` row;
+ * the server turns the `nvim` flag into the same command line the file tree's
+ * "Open in nvim" uses. The agents are grouped by CLI with a rule between them,
+ * in `LAUNCHERS` order.
  */
 function newTabMenu(paneId: string, launchers: Launcher[], keymap: Record<string, Action>): MenuItem[] {
   const first = keysByAction(keymap)["new-tab"]?.[0];
@@ -405,6 +426,7 @@ function newTabMenu(paneId: string, launchers: Launcher[], keymap: Record<string
       hint: first ? `${PREFIX_LABEL} ${keyLabel(first)}` : undefined,
       run: () => void api.newTab({ paneId }),
     },
+    { label: "Nvim", run: () => void api.newTab({ paneId, nvim: true }) },
     /* A tab here, moved from wherever it was if the workspace already has one:
        there is one board per workspace, so "a board in this pane" means this
        one. */
@@ -430,9 +452,9 @@ function newTabMenu(paneId: string, launchers: Launcher[], keymap: Record<string
  */
 function paneLabel(pane: PaneState, agents: AgentSnapshot[]): string {
   if (isBoardTab(activeAgent(pane))) return "board";
-  if (pane.reader) {
-    return pane.reader.path ? (pane.reader.path.split("/").pop() ?? "reader") : "reader";
-  }
+  const doc = showingDoc(pane);
+  if (doc) return basename(doc.path);
+  if (showsDoc(pane)) return "reader";
   const id = activeAgent(pane);
   const agent = id ? agents.find((a) => a.id === id) : null;
   return agent ? tabLabel(agent) : "empty";
@@ -532,8 +554,8 @@ function Pane({
   keyboard,
   agents,
   mascot,
-  readers,
   workspaceId,
+  workspaceName,
   board,
   launchers,
 }: {
@@ -546,8 +568,8 @@ function Pane({
   keyboard: boolean;
   agents: AgentSnapshot[];
   mascot: MascotConfig;
-  readers: Set<string>;
   workspaceId: string;
+  workspaceName: string;
   /** The workspace's board, for a board pane to draw. */
   board: Board | null;
   launchers: Launcher[];
@@ -557,17 +579,15 @@ function Pane({
   /** Where in this strip a dropped tab would land, while one is over it. */
   const [dropAt, setDropAt] = useState<number | null>(null);
   /**
-   * A tab of the kind this strip holds: terminals into a terminal pane,
-   * documents into a reader. Either kind can still go on any pane's *edge*,
-   * which makes a new pane of its own kind — see `DropZones`.
+   * A tab of any kind: a terminal, the board or a document goes into any
+   * strip, since a pane holds whatever you put in it — and so does a markdown
+   * file out of the tree, which arrives as a document.
    */
-  const takesTabs = pane.reader ? dragging?.kind === "doc" : dragging?.kind === "agent";
-  /** Another pane is in flight, and it is not this one. */
+  const takesTabs = dragging?.kind === "agent" || dragging?.kind === "doc" || dragging?.kind === "file";
+  /** Another pane is in flight, and it is not this one — dropped on this strip, it pours in. */
   const takesPane = dragging?.kind === "pane" && dragging.id !== pane.id;
-  /** ...and it is the same kind of pane, so dropping it on this strip can pour it in. */
-  const mergesPane = takesPane && readers.has(dragging.id) === Boolean(pane.reader);
-  /** Something that can land on this pane's body: any tab on an edge, any pane. */
-  const takesZones = takesPane || dragging?.kind === "agent" || dragging?.kind === "doc";
+  /** Something that can land on this pane's body: any tab, any pane. */
+  const takesZones = takesPane || takesTabs;
   /** This pane is the one being dragged; show it as picked up. */
   const lifted = dragging?.kind === "pane" && dragging.id === pane.id;
 
@@ -584,21 +604,27 @@ function Pane({
     const index = dropAt;
     setDropAt(null);
     const agentId = event.dataTransfer.getData(AGENT_MIME);
-    if (agentId && !pane.reader) {
+    if (agentId) {
       event.preventDefault();
       event.stopPropagation();
       return api.moveTab(agentId, pane.id, index ?? undefined);
     }
     const doc = parseDocId(event.dataTransfer.getData(DOC_MIME));
-    if (doc && pane.reader) {
+    if (doc) {
       event.preventDefault();
       event.stopPropagation();
       return api.moveDoc(doc.paneId, doc.index, pane.id, index ?? undefined);
     }
+    const file = parseFileId(event.dataTransfer.getData(FILE_MIME));
+    if (file) {
+      event.preventDefault();
+      event.stopPropagation();
+      return api.openDoc(pane.id, file.root, file.path, index ?? pane.agentIds.length);
+    }
     // A whole pane dropped on a strip pours its tabs in and disappears. It is
     // the way back from a split — without it a window divides but never rejoins.
     const paneId = event.dataTransfer.getData(PANE_MIME);
-    if (paneId && paneId !== pane.id && mergesPane) {
+    if (paneId && paneId !== pane.id) {
       event.preventDefault();
       event.stopPropagation();
       api.mergePanes(paneId, pane.id);
@@ -626,21 +652,11 @@ function Pane({
           endDrag();
           setDropAt(null);
         }}
-        onDragOver={(event) => (takesTabs || mergesPane) && allowDrop(event)}
+        onDragOver={(event) => (takesTabs || takesPane) && allowDrop(event)}
         onDragLeave={() => setDropAt(null)}
         onDrop={dropOnStrip}
       >
-        {pane.reader ? (
-          <ReaderStrip
-            pane={pane}
-            dropAt={dropAt}
-            onOver={overTab}
-            onDrop={dropOnStrip}
-            onDragEnd={() => setDropAt(null)}
-          />
-        ) : null}
-        {!pane.reader &&
-          pane.agentIds.map((agentId, index) => {
+        {pane.agentIds.map((agentId, index) => {
           if (isBoardTab(agentId)) {
             return (
               <Fragment key={agentId}>
@@ -648,6 +664,24 @@ function Pane({
                 <BoardTab
                   on={index === pane.activeIdx}
                   onSelect={() => api.selectTab(pane.id, index)}
+                  onDragOver={(event) => overTab(event, index)}
+                  onDrop={dropOnStrip}
+                  onDragEnd={() => setDropAt(null)}
+                />
+              </Fragment>
+            );
+          }
+          const doc = parseDocTab(agentId);
+          if (doc) {
+            return (
+              <Fragment key={agentId}>
+                {dropAt === index && <span className="tab-insert" aria-hidden="true" />}
+                <DocTab
+                  paneId={pane.id}
+                  index={index}
+                  root={doc.root}
+                  path={doc.path}
+                  on={index === pane.activeIdx}
                   onDragOver={(event) => overTab(event, index)}
                   onDrop={dropOnStrip}
                   onDragEnd={() => setDropAt(null)}
@@ -695,24 +729,28 @@ function Pane({
               </button>
             </Fragment>
           );
-          })}
-        {!pane.reader && dropAt === pane.agentIds.length && <span className="tab-insert" aria-hidden="true" />}
-
-        {!pane.reader && (
-          <button
-            className="tab tab-new"
-            onClick={(event) => {
-              if (!onNew) return void api.newTab({ paneId: pane.id });
-              const box = event.currentTarget.getBoundingClientRect();
-              onNew({ x: box.left, y: box.bottom + 4 });
-            }}
-            title={onNew ? "New tab here: a terminal or an agent" : "New terminal here (C-a T)"}
-            aria-label="New tab"
-            aria-haspopup={onNew ? "menu" : undefined}
-          >
-            <Icon name="add" />
-          </button>
+        })}
+        {dropAt === pane.agentIds.length && <span className="tab-insert" aria-hidden="true" />}
+        {pane.agentIds.length === 0 && pane.reader && (
+          <span className="tab tab-on tab-reader" title="Waiting for the editor to open a markdown file">
+            <span className="tab-label">{pane.reader.follow ? "waiting for the editor" : "reader"}</span>
+          </span>
         )}
+        {pane.reader?.editor && <FollowButton paneId={pane.id} following={pane.reader.follow !== null} />}
+
+        <button
+          className="tab tab-new"
+          onClick={(event) => {
+            if (!onNew) return void api.newTab({ paneId: pane.id });
+            const box = event.currentTarget.getBoundingClientRect();
+            onNew({ x: box.left, y: box.bottom + 4 });
+          }}
+          title={onNew ? "New tab here: a terminal or an agent" : "New terminal here (C-a T)"}
+          aria-label="New tab"
+          aria-haspopup={onNew ? "menu" : undefined}
+        >
+          <Icon name="add" />
+        </button>
 
         <span className="tab-spacer" />
         {/* The pane's own controls, as one block, because the block is what
@@ -743,14 +781,24 @@ function Pane({
       <div className="pane-body">
         {isBoardTab(showing) ? (
           <BoardView
+            key={workspaceId}
             workspaceId={workspaceId}
+            workspaceName={workspaceName}
             board={board ?? emptyBoard()}
             agents={agents}
             mascot={mascot}
             launchers={launchers}
           />
-        ) : pane.reader ? (
-          <ReaderView paneId={pane.id} reader={pane.reader} />
+        ) : showingDoc(pane) || (!showing && pane.reader) ? (
+          /* A document tab, or a reader with no tabs yet — which is its picker.
+             One view for both and unkeyed, so moving between two documents in
+             a strip keeps the last render on screen while the next arrives. */
+          <ReaderView
+            paneId={pane.id}
+            root={showingDoc(pane)?.root ?? pane.reader?.root ?? ""}
+            path={showingDoc(pane)?.path ?? ""}
+            rev={pane.reader?.rev ?? 0}
+          />
         ) : showing ? (
           /* Deliberately unkeyed. A key here would rebuild this on every tab
              switch, which is what it used to be for — and the emulator it would
@@ -762,7 +810,7 @@ function Pane({
         ) : (
           <EmptyPane pane={pane} />
         )}
-        {takesZones && <DropZones paneId={pane.id} reader={Boolean(pane.reader)} />}
+        {takesZones && <DropZones paneId={pane.id} />}
       </div>
     </section>
   );
@@ -882,28 +930,32 @@ function BoardTab({
   );
 }
 
-function DropZones({ paneId, reader }: { paneId: string; reader: boolean }) {
+/**
+ * The parts of a pane's body a drag can land on: an edge makes a new pane on
+ * that side holding what was dropped, and the middle means "into this pane" —
+ * a tab joins its strip, a pane swaps places with it.
+ */
+function DropZones({ paneId }: { paneId: string }) {
   const dragging = useDragging();
   const [over, setOver] = useState<string | null>(null);
-  /**
-   * The middle means "into this pane", and a tab only goes into a pane of its
-   * own kind. Over the other kind there is no middle to light up at all —
-   * the edges still take it, as a new pane of the kind it is.
-   */
-  const center =
-    dragging?.kind === "pane" || (dragging?.kind === "doc" ? reader : dragging?.kind === "agent" ? !reader : false);
 
   const act = (name: string) => (event: React.DragEvent) => {
     const doc = parseDocId(event.dataTransfer.getData(DOC_MIME));
     if (doc) {
-      if (name === "center") return reader && api.moveDoc(doc.paneId, doc.index, paneId);
+      if (name === "center") return api.moveDoc(doc.paneId, doc.index, paneId);
       const [dir, before] = EDGES[name]!;
       return api.splitWithDoc(doc.paneId, doc.index, paneId, dir, before);
     }
+    const file = parseFileId(event.dataTransfer.getData(FILE_MIME));
+    if (file) {
+      // The middle is the end of the strip, as it is for a tab; the server clamps.
+      if (name === "center") return api.openDoc(paneId, file.root, file.path, Number.MAX_SAFE_INTEGER);
+      const [dir, before] = EDGES[name]!;
+      return api.splitWithFile(file.root, file.path, paneId, dir, before);
+    }
     const agentId = event.dataTransfer.getData(AGENT_MIME);
     if (agentId) {
-      // A terminal into a reader's middle would be a terminal in a reader.
-      if (name === "center") return !reader && api.moveTab(agentId, paneId);
+      if (name === "center") return api.moveTab(agentId, paneId);
       const [dir, before] = EDGES[name]!;
       return api.splitWith(agentId, paneId, dir, before);
     }
@@ -935,7 +987,7 @@ function DropZones({ paneId, reader }: { paneId: string; reader: boolean }) {
       <div {...zone("right")} />
       <div {...zone("top")} />
       <div {...zone("bottom")} />
-      {center && <div {...zone("center")} />}
+      <div {...zone("center")} />
     </div>
   );
 }
@@ -949,102 +1001,91 @@ const EDGES: Record<string, ["row" | "col", boolean]> = {
 };
 
 /**
- * A reader's strip: its documents as tabs, and whether it is still listening.
+ * A document's tab.
  *
- * A tab's name comes from the path rather than from the document's own first
+ * Its name comes from the path rather than from the document's own first
  * heading, which the server does send. A strip should say which file you are
  * looking at — two notes both titled "Notes" are a strip that has stopped
  * telling you anything.
  *
- * The tabs behave as a terminal pane's do, because a tab that looks like one
- * and cannot be picked up is a tab that lies about what it is: drag one along
- * the strip to reorder it, onto another reader to move it there, or onto any
- * pane's edge to give it a reader of its own. The drop handling is the pane's
- * (`Pane`), shared with terminal tabs; this only says where each tab is.
- *
- * The one control is the editor toggle, on a reader that has an editor to
- * follow. The file tree is not a reader's to open, so its door is in the pane
- * menu and the status bar rather than on every reader's strip.
+ * It behaves as every other tab does, because a tab that looks like one and
+ * cannot be picked up is a tab that lies about what it is: along the strip to
+ * reorder, onto any pane to move there, onto an edge for a pane of its own. The
+ * drag carries where it is rather than what it is (`docId`), since the same
+ * file can be open in two panes. Its ✕ closes a view and ends nothing, and the
+ * tooltip says so beside tabs whose ✕ ends a terminal.
  */
-function ReaderStrip({
-  pane,
-  dropAt,
-  onOver,
+function DocTab({
+  paneId,
+  index,
+  root,
+  path,
+  on,
+  onDragOver,
   onDrop,
   onDragEnd,
 }: {
-  pane: PaneState;
-  dropAt: number | null;
-  onOver: (event: React.DragEvent, index: number) => void;
+  paneId: string;
+  index: number;
+  root: string;
+  path: string;
+  on: boolean;
+  onDragOver: (event: React.DragEvent) => void;
   onDrop: (event: React.DragEvent) => void;
   onDragEnd: () => void;
 }) {
-  const reader = pane.reader;
-  if (!reader) return null;
-  const following = reader.follow !== null;
   return (
-    <>
-      {reader.docs.map((doc, index) => {
-        const on = doc.root === reader.root && doc.path === reader.path;
-        return (
-          <Fragment key={`${doc.root}/${doc.path}`}>
-            {dropAt === index && <span className="tab-insert" aria-hidden="true" />}
-            <button
-              className={`tab tab-doc ${on ? "tab-on" : ""}`}
-              onClick={() => !on && api.selectDoc(pane.id, index)}
-              title={`${doc.root}/${doc.path}`}
-              draggable
-              onDragStart={(event) => beginDrag(event, "doc", docId(pane.id, index))}
-              onDragEnd={() => {
-                endDrag();
-                onDragEnd();
-              }}
-              onDragOver={(event) => onOver(event, index)}
-              onDrop={onDrop}
-            >
-              <span className="tab-label">{basename(doc.path)}</span>
-              <span
-                className="tab-close"
-                role="button"
-                tabIndex={-1}
-                aria-label="Close tab"
-                title="Close this document"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  api.closeDoc(pane.id, index);
-                }}
-              >
-                <Icon name="close" />
-              </span>
-            </button>
-          </Fragment>
-        );
-      })}
-      {dropAt === reader.docs.length && <span className="tab-insert" aria-hidden="true" />}
-      {reader.docs.length === 0 && (
-        <span className="tab tab-on tab-reader" title="Waiting for the editor to open a markdown file">
-          <span className="tab-label">{following ? "waiting for the editor" : "reader"}</span>
-        </span>
-      )}
-      {/* Only for a reader that has an editor to go back to. One opened from the
-          tree never had one, and a follow button with nobody to follow was the
-          button that did nothing when you clicked it. */}
-      {reader.editor && (
-        <button
-          className={`pane-btn ${following ? "pane-btn-on" : ""}`}
-          onClick={() => api.pinReader(pane.id, !following)}
-          aria-pressed={following}
-          title={
-            following
-              ? "Following the editor: this pane shows whatever markdown its nvim opens. Click to stay on this file."
-              : "Staying on this file. Click to follow the editor again."
-          }
-          aria-label={following ? "Stop following the editor" : "Follow the editor"}
-        >
-          <Icon name="follow" />
-        </button>
-      )}
-    </>
+    <button
+      className={`tab tab-doc ${on ? "tab-on" : ""}`}
+      onClick={() => !on && api.selectDoc(paneId, index)}
+      title={`${root}/${path}`}
+      draggable
+      onDragStart={(event) => beginDrag(event, "doc", docId(paneId, index))}
+      onDragEnd={() => {
+        endDrag();
+        onDragEnd();
+      }}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
+      <span className="tab-label">{basename(path)}</span>
+      <span
+        className="tab-close"
+        role="button"
+        tabIndex={-1}
+        aria-label="Close tab"
+        title="Close this document"
+        onClick={(event) => {
+          event.stopPropagation();
+          api.closeDoc(paneId, index);
+        }}
+      >
+        <Icon name="close" />
+      </span>
+    </button>
+  );
+}
+
+/**
+ * The editor toggle, on a pane whose reader has an editor to go back to. One
+ * opened from the tree never had one, and a follow button with nobody to
+ * follow was the button that did nothing when you clicked it.
+ */
+function FollowButton({ paneId, following }: { paneId: string; following: boolean }) {
+  return (
+    <button
+      className={`pane-btn ${following ? "pane-btn-on" : ""}`}
+      onClick={() => api.pinReader(paneId, !following)}
+      aria-pressed={following}
+      title={
+        following
+          ? "Following the editor: this pane shows whatever markdown its nvim opens. Click to stay on this file."
+          : "Staying on this file. Click to follow the editor again."
+      }
+      aria-label={following ? "Stop following the editor" : "Follow the editor"}
+    >
+      <Icon name="follow" />
+    </button>
   );
 }
 

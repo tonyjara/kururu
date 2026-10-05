@@ -20,7 +20,12 @@ const SERVER = process.env.KURURU_SERVER || `http://127.0.0.1:${process.env.KURU
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5173,
+    // Read from the same variable the desktop reads, which used to be true of the
+    // desktop alone — so setting it moved the window and left vite where it was.
+    port: Number(process.env.KURURU_VITE_PORT) || 5173,
+    // A taken port is an error rather than a drift to 5174, because the window
+    // has already decided where vite is and would load whatever answers there.
+    strictPort: true,
     // The phone reaches the vite dev server over the tailnet too.
     host: "0.0.0.0",
     allowedHosts: [".ts.net"],

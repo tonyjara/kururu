@@ -911,6 +911,26 @@ function create(agentId: string): Pooled {
      * makes, and the same one every terminal that sends Alt has to make.
      */
     em.attachCustomKeyEventHandler((event) => {
+      /**
+       * Ctrl+V, which ghostty-web also swallows: `handleKeyDown` returns early
+       * on it so the browser can fire a paste, the Windows convention. Nowhere
+       * else is it paste — macOS pastes on cmd+V, Linux terminals on
+       * ctrl+shift+V — so the keystroke went nowhere and vim never saw the ^V
+       * that is its visual block, its literal-insert, and Telescope's
+       * open-in-vsplit. Windows keeps the paste.
+       */
+      if (
+        event.type === "keydown" &&
+        event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        !event.shiftKey &&
+        event.code === "KeyV" &&
+        !/Win/.test(navigator.platform)
+      ) {
+        input(agentId, "\x16");
+        return true;
+      }
       if (!event.altKey || event.ctrlKey || event.metaKey) return false;
       const letter = /^Key([A-Z])$/.exec(event.code)?.[1];
       if (!letter) return false;

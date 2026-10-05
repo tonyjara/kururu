@@ -1,5 +1,5 @@
 /**
- * Settings → Skin studio: making a skin, with the window as the preview.
+ * Settings → Appearance → Skin studio: making a skin, with the window as the preview.
  *
  * Winamp's skins were a directory of bitmaps — a titlebar, a set of buttons, a
  * frame — and the reason a thousand people drew one is that the format asked

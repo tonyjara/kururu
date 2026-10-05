@@ -45,8 +45,9 @@ disk. Never move a layout decision back into React state.
 - **The host keeps an exited agent listed; the server clears it away.**
   `reapExited` in `index.ts` ends the tab and `Workspaces.reapTab` takes the pane
   with it when nothing else is in there — tmux's default, and what typing `exit`
-  means everywhere else. Two refusals come with the pane half (`pruneEmptied`'s):
-  never the last pane of a workspace, and never a reader. `close-tab` prunes
+  means everywhere else. The pane half refuses the last pane of a workspace
+  (`pruneEmptied`'s rule), and a pane with a document or the board still in
+  it has not been emptied. `close-tab` prunes
   the same way: closing a pane's last terminal closes the pane, and the last pane
   of a workspace stays, empty. Enter in a focused empty pane opens a terminal.
 - **A pane's corner is a menu and a close button, at every width.** The splits
@@ -78,6 +79,38 @@ disk. Never move a layout decision back into React state.
   Filtering on `agent` alone would drop rows every time the process poll blinked,
   and would hide every *exited* agent — whose row carries the only dismiss gesture
   there is. The test is "has one ever been seen in here".
+
+## Documents
+
+**A document is a tab, in any pane, beside anything.** A reader was its own
+kind of pane for a while — `reader.docs`, mutually exclusive with terminals, on
+the argument that one strip mixing them gives one ✕ two verbs. It lost to the
+argument about arranging: a spec could not sit in the strip of the board that
+was working through it. Now a document is `docTab(root, path)` in `agentIds`,
+the board's trick again, and every tab gesture works on it. Three things are
+different from the board:
+
+- **The same document may be open in two panes,** so nothing addresses a
+  document tab by id across the tree. `move-doc`, `split-with-doc`,
+  `select-doc` and `close-doc` name the pane and the place in its strip (the
+  whole strip, terminals included), and `moveTab` and `splitWith` refuse a
+  doc id. Within one pane a document is one tab: `placeTab` and `mergePanes` move
+  rather than double it.
+- **`PaneState.reader` is what is left that is the pane's:** which editor it
+  follows (`follow`, and `editor` kept through a pin), the project the picker
+  opens on, and `rev`. Which file is showing is the active tab. A pane opened
+  as a reader and still waiting has a `reader` and no tabs, and draws the
+  picker (`showsDoc`).
+- **An editor never takes a terminal's screen.** A followed nvim's report adds
+  its file as a tab after the one showing, and shows it only in a pane already
+  showing a document (`withDoc`). Showing a *different* document by hand — a
+  tab clicked, a file dropped or picked — pins (`switchTab`, `placeTab`), since the
+  next `:w` would otherwise take it back.
+
+`persist.ts` writes a pane's view tabs as `tabs` (the board and documents in
+order) and `showing`, and reads the older `reader`/`board` shape; `adoptReaders`
+turns a host blob's `reader.docs` into tabs, which is how an old server's
+arrangement survives the restart into this one without costing the host.
 
 ## The board
 
@@ -123,6 +156,67 @@ in a byte stream tells "finished" from "asking you a question".
 the terminal is the work and has its own ✕. Nor does it remove the card's
 worktree, for the same reason and one more: taking a checkout down is the Done
 column's job, and a deleted card has not been through it.
+
+### The profile's board
+
+**Cards for no workspace yet, and one road out.** `Profile.board` is a
+`Board` like a workspace's, drawn by `ProfileBoard.tsx` as a sheet over the
+window from the icon beside the profile name — an overlay, not a tab, because
+a tab lives in one workspace's layout and this board is precisely the one that
+is no workspace's. Its columns are its own (`Board.columns`, a `BoardLane` list
+that only this board has): it starts with To do, In progress and Done — no
+Review, since nothing on it runs — and a person can add, rename, reorder and
+delete them from the column header. A workspace's four stay fixed because the
+run automation reads them; nothing reads the profile's but a person. Deleting a
+column moves its cards to its neighbour (`removeLane`), and the last column
+cannot go. No robot, no worktree. The one thing it does that a workspace board
+does not is the card menu's **Send to *workspace***: `send-profile-card` moves
+the card onto that workspace's board in one change (`transferCard` — new number
+there, same id, and its To do if it sat in a column the workspace does not
+have), making the board if the workspace had none. It rides the blob
+through `adopt()` and goes to disk beside the workspaces, counter included.
+
+**A card has dates, and they are days.** `Card.dates` is a start and an end as
+`2026-09-28` strings — one day is a range whose ends are the same — or null,
+which is most cards. Days and not timestamps, because a timestamp is a day only
+in the timezone it was written in and the phone is the client most likely to be
+in another one; `shared/days.ts` is the arithmetic, on a count of days in UTC
+so that a change of clocks is not a day lost. They are given on the profile's
+board, in the composer's two date fields. A range that runs backwards is
+refused rather than swapped (`adoptDates`), and an edit carrying dates that are
+not dates is refused whole, so that a bad range is never read as "take them
+off" — for which the wire has `dates: null`. A card sent to a workspace keeps
+them and shows them; that board's composer offers the fields only on a card
+that arrived with dates, since it is not where a calendar is kept.
+
+**The timeline is a second view of the same board, not a second board.** The
+sheet's header switches between **Board** and **Timeline** (`Timeline.tsx`),
+and the second draws each dated card as a bar across its days: five weeks at a
+time, moved a week at a time, because a span from the first date to the last is
+as wide as its worst typo. What is outside the window is counted on the arrow
+that leads to it. It holds nothing of its own but which weeks it is showing —
+`timeline()` in `shared/board.ts` is the layout, pure, and dragging a bar or
+one of its ends is `edit-profile-card` with `dates` and nothing else, so there
+is one road onto a card's dates. Cards with none sit in a tray under the days
+and are dropped onto one; a double-click on an empty day writes a card for it.
+Bars are dragged with a mouse and never with a finger, where a drag is a
+scroll: on a phone a tap opens the card and the dates are two fields. A date
+that has passed is dimmer and never red — nothing on a board knows a card is
+finished except the name of a column a person made.
+
+**A column has a colour, and its cards wear it on the timeline.**
+`BoardLane.color` is one of a workspace's tag colours by name
+(`WORKSPACE_COLORS`) or null, and `set-profile-column-color` refuses anything
+else, for `set-workspace-color`'s reason: the name ends up in a style. It is
+what is left of the columns in a view that has given them up — a bar is its
+column's colour, so moving a card to In progress changes its bar, and the key
+above the days says which is which. Every column has one without being asked:
+the starting three are blue, amber and green, a new one takes the first colour
+no other column is wearing (`freeColor`, by rule rather than at random, since
+`board.ts` is pure), and a board written before columns had colours is given
+them on the way in. A colour that is *absent* is that old board; a colour that
+is null was chosen, and stays none. The swatch in the column's header is the
+picker, the sidebar's own.
 
 ### Worktrees
 
@@ -316,8 +410,9 @@ An entry at the defaults is not written.
 
 **`persist.ts` restores structure, never processes.** A snapshot with four agent
 tabs must not launch four agents on the next start — that spends four context
-windows before anybody asked. Panes come back empty, with the cwd they were
-working in. This is the exception to "making a pane opens a terminal": a restored
+windows before anybody asked. Panes come back with their views — the board and
+documents, which launch nothing — and without their terminals, with the cwd they
+were working in. This is the exception to "making a pane opens a terminal": a restored
 pane is not a pane being made, because nobody just asked for it.
 
 `Workspace.dev` is written by watching, and only ever replaced. The scan sees a
@@ -519,6 +614,42 @@ as one.
 `.ws-list` is one grid and every row a `subgrid` slice of it — the name's track
 and the button's — so the buttons stand in one column down the list whatever
 the names are.
+
+## Workspace groups
+
+**A group is a name on its members and nothing else.** `Workspace.group` is the
+name, or null for a loose workspace; there is no list of groups on the profile,
+so a group exists exactly as long as something is filed in it and an empty one
+is not a state to manage. Renaming one (`rename-workspace-group`) rewrites every
+member — onto a name in use the two merge, onto null the group disbands.
+
+**The list is kept gathered.** Every verb that files a workspace runs the list
+through `gatherGroups`, which brings each group's members together where the
+first of them stands and leaves every loose workspace where it was — so a group
+can sit anywhere in the list, between two workspaces as readily as at the end,
+and the number beside a row is still the index prefix+1..9 jumps to. (Groups
+were gathered below every loose workspace for a version; it could not express
+a group in the middle, which was the first thing asked of it.) A new group
+starts where its workspace already stands, joining puts a workspace last in a
+group, and leaving puts it just after the group it left.
+
+`move-workspace` takes the group of whatever was at the position it lands on,
+because leaving the group alone would have the gather pull a workspace straight
+back out of a group it had been dropped among. The row menu's Move up and Move
+down stop at a group's edge for the same reason; filing is **New group…**,
+**Move to …** and **Remove from group**, or dropping a row on a heading.
+
+**A heading drags its whole group.** Dropped on any row — a loose workspace, or
+a member or heading of another group — the group takes that place
+(`move-workspace-group`, which names a workspace id and lets a member stand for
+its group), landing after it from above and before it from below, as a dragged
+row does. The list is cut into `workspaceUnits` for this: a loose workspace or a
+whole group, the things that move as one. The heading's menu has Move group up
+and down, a step past whichever unit is beside it.
+
+**Whether a group is folded is the client's**, per device, on the hidden-agents
+drawer's argument. A folded group still shows the workspace you are in, and its
+heading carries the unread mark when something under it is waiting.
 
 ## The branch on the row
 

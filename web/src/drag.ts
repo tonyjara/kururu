@@ -18,12 +18,20 @@ export const AGENT_MIME = "application/x-kururu-agent";
 export const PANE_MIME = "application/x-kururu-pane";
 export const WORKSPACE_MIME = "application/x-kururu-workspace";
 /**
- * A reader's tab. Its id is `docId(pane, index)` — a document has no id of its
- * own, only a place in one pane's list, so the drag carries both halves.
+ * A document's tab. Its id is `docId(pane, index)` — the same document can be
+ * open in two panes, so the drag carries where it is rather than what it is.
  */
 export const DOC_MIME = "application/x-kururu-doc";
+/**
+ * A markdown file out of the tree, on its way to becoming a tab. Its id is
+ * `fileId(root, path)`: it has no place in any strip yet, so it goes by the
+ * address `files.ts` answers to, and the server checks it like any other.
+ */
+export const FILE_MIME = "application/x-kururu-file";
+/** A group of workspaces, by its heading. Its id is the group's name — see `Workspace.group`. */
+export const GROUP_MIME = "application/x-kururu-group";
 
-export type DragKind = "agent" | "pane" | "workspace" | "doc";
+export type DragKind = "agent" | "pane" | "workspace" | "doc" | "file" | "group";
 export type Dragging = { kind: DragKind; id: string } | null;
 
 const MIME: Record<DragKind, string> = {
@@ -31,6 +39,8 @@ const MIME: Record<DragKind, string> = {
   pane: PANE_MIME,
   workspace: WORKSPACE_MIME,
   doc: DOC_MIME,
+  file: FILE_MIME,
+  group: GROUP_MIME,
 };
 
 export function docId(paneId: string, index: number): string {
@@ -43,6 +53,22 @@ export function parseDocId(id: string): { paneId: string; index: number } | null
   const index = Number(id.slice(0, colon));
   if (colon < 1 || !Number.isInteger(index) || index < 0) return null;
   return { paneId: id.slice(colon + 1), index };
+}
+
+export function fileId(root: string, path: string): string {
+  return JSON.stringify([root, path]);
+}
+
+/** The two halves of a `fileId`, or null for anything that is not one. */
+export function parseFileId(id: string): { root: string; path: string } | null {
+  try {
+    const parsed: unknown = id ? JSON.parse(id) : null;
+    if (!Array.isArray(parsed) || parsed.length !== 2) return null;
+    const [root, path] = parsed as unknown[];
+    return typeof root === "string" && typeof path === "string" && path ? { root, path } : null;
+  } catch {
+    return null;
+  }
 }
 
 let dragging: Dragging = null;

@@ -23,12 +23,14 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   BOARD_COLUMNS,
   canResume,
+  cardCode,
   columnCards,
   COLUMN_LABELS,
   runLive,
   type Board,
   type BoardColumn,
   type Card,
+  type CardDates,
   type CardDev,
   type CardRun,
   type CardWorktree,
@@ -39,6 +41,7 @@ import type { MergeBlock, MergeResolution, WorktreeStatus } from "../../../share
 import type { DevServer } from "../../../shared/wire";
 import { isLoopback, previewUrl, serverIn } from "../preview";
 import * as api from "../session";
+import { datesLabel, datesTense } from "../when";
 import { Icon } from "./Icon";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
 import { Status } from "./Status";
@@ -54,22 +57,61 @@ const RUN_WORDS: Record<CardRun["state"], string> = {
   ended: "ended",
 };
 
+/**
+ * Half-written cards, kept out here rather than in the board's state because
+ * the board is unmounted whenever its tab or its workspace is left, and a card
+ * someone was in the middle of writing should be where they left it when they
+ * come back. Which composers were open is kept beside the text, since a draft
+ * nobody can see is as good as lost. Memory only, not storage: a draft is a
+ * minute's work, and a reload putting it away is less surprising than one
+ * reappearing a day later on a board that has moved on.
+ */
+interface Draft {
+  title: string;
+  body: string;
+  isolate: boolean;
+  /** The two date fields as typed, either of which may be empty — see `Composer`. */
+  start: string;
+  end: string;
+}
+const drafts = new Map<string, Draft>();
+/** Put a composer's draft away, for a board that keeps its own keys — the profile's. */
+export const dropDraft = (key: string) => void drafts.delete(key);
+const openComposers = new Map<string, { adding: BoardColumn | null; editing: string | null }>();
+const newDraft = (workspaceId: string, column: BoardColumn) => `${workspaceId}\0new\0${column}`;
+const editDraft = (workspaceId: string, cardId: string) => `${workspaceId}\0card\0${cardId}`;
+
 export function BoardView({
   workspaceId,
+  workspaceName,
   board,
   agents,
   mascot,
   launchers,
 }: {
   workspaceId: string;
+  workspaceName: string;
   board: Board;
   agents: AgentSnapshot[];
   mascot: MascotConfig;
   launchers: Launcher[];
 }) {
   /** The column a new card is being written in, or null. One composer at a time. */
-  const [adding, setAdding] = useState<BoardColumn | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
+  const [adding, setAddingState] = useState<BoardColumn | null>(() => openComposers.get(workspaceId)?.adding ?? null);
+  const [editing, setEditingState] = useState<string | null>(() => openComposers.get(workspaceId)?.editing ?? null);
+  // A composer put away on purpose takes its draft with it; one the board was
+  // unmounted from underneath keeps it, which is the whole point of `drafts`.
+  const setAdding = (column: BoardColumn | null) => {
+    if (adding && adding !== column) drafts.delete(newDraft(workspaceId, adding));
+    setAddingState(column);
+  };
+  const setEditing = (cardId: string | null) => {
+    if (editing && editing !== cardId) drafts.delete(editDraft(workspaceId, editing));
+    setEditingState(cardId);
+  };
+  useEffect(() => {
+    openComposers.set(workspaceId, { adding, editing });
+  }, [workspaceId, adding, editing]);
   /**
    * The open menu, and whose it is: a card's menu opens before its worktree
    * has been asked how it stands, and the answer only belongs in a menu that
@@ -487,15 +529,21 @@ export function BoardView({
                 editing === card.id ? (
                   <Composer
                     key={card.id}
+                    draft={editDraft(workspaceId, card.id)}
                     title={card.title}
                     body={card.body}
                     isolate={card.isolate}
                     // A card whose worktree stands goes back into it whatever
                     // the box says, so the box is only offered before there is one.
                     offerIsolate={!card.worktree}
+                    // Dates are given on the profile's board, which has the
+                    // timeline. A card that was sent here with some can have
+                    // them moved or taken off; one without is not asked.
+                    dates={card.dates}
+                    offerDates={card.dates !== null}
                     submit="Save"
-                    onSubmit={(title, body, isolate) => {
-                      api.editCard(workspaceId, card.id, { title, body, isolate });
+                    onSubmit={(title, body, isolate, dates) => {
+                      api.editCard(workspaceId, card.id, { title, body, isolate, ...(card.dates ? { dates } : {}) });
                       setEditing(null);
                     }}
                     onCancel={() => setEditing(null)}
@@ -504,6 +552,7 @@ export function BoardView({
                   <CardView
                     key={card.id}
                     card={card}
+                    code={cardCode(workspaceName, card.number)}
                     agent={card.run?.agentId ? agents.find((a) => a.id === card.run?.agentId) : undefined}
                     server={card.dev?.agentId ? agents.find((a) => a.id === card.dev?.agentId) : undefined}
                     devServers={devServers}
@@ -539,11 +588,12 @@ export function BoardView({
               )}
               {adding === column ? (
                 <Composer
+                  draft={newDraft(workspaceId, column)}
                   title=""
                   body=""
                   isolate={false}
                   offerIsolate
-                  submit="Add card"
+                  submit="Add"
                   onSubmit={(title, body, isolate) => {
                     api.addCard(workspaceId, title, body, column, isolate);
                     // Stays open for the next one: cards are written in runs.
@@ -605,6 +655,7 @@ interface Ask {
 
 function CardView({
   card,
+  code,
   agent,
   server,
   devServers,
@@ -625,6 +676,7 @@ function CardView({
   onOver,
 }: {
   card: Card;
+  code: string;
   agent: AgentSnapshot | undefined;
   /** The terminal the card's dev server runs in, while it has one. */
   server: AgentSnapshot | undefined;
@@ -668,6 +720,7 @@ function CardView({
         onDoubleClick={onEdit}
       >
         <div className="board-card-top">
+          <span className="board-card-code">{code}</span>
           <span className="board-card-title">{card.title}</span>
           <span className="board-card-actions">
             <button
@@ -698,6 +751,7 @@ function CardView({
           </span>
         </div>
         {card.body && <p className="board-card-body">{card.body}</p>}
+        {card.dates && <CardWhen dates={card.dates} />}
         {card.worktree ? (
           <TreeLine worktree={card.worktree} />
         ) : (
@@ -892,44 +946,88 @@ function ago(at: number): string {
  * Escape cancels in both, since a pane has no other way to put the form away
  * from the keyboard.
  */
-function Composer({
+/**
+ * When a card is for, as a line on the card. It says which side of today the
+ * dates fall on by its ink alone, so that a column can be scanned for what is
+ * happening now without reading a date on it.
+ */
+export function CardWhen({ dates }: { dates: CardDates }) {
+  return <span className={`board-card-when board-card-when-${datesTense(dates)}`}>{datesLabel(dates)}</span>;
+}
+
+export function Composer({
+  draft,
   title: initialTitle,
   body: initialBody,
   isolate: initialIsolate,
   offerIsolate,
+  dates: initialDates = null,
+  offerDates = false,
   submit,
   onSubmit,
   onRun,
   onCancel,
   keepOpen,
+  bodyHint = "Details — the agent is handed the title and all of this",
 }: {
+  /** Where in `drafts` this composer's text is kept while the board is away. */
+  draft: string;
   title: string;
   body: string;
   isolate: boolean;
   /** Whether the worktree box is drawn; see `Card.isolate`. */
   offerIsolate: boolean;
+  dates?: CardDates | null;
+  /** Whether the date fields are drawn; see `Card.dates`. Without them `onSubmit` is handed what came in. */
+  offerDates?: boolean;
   submit: string;
-  onSubmit: (title: string, body: string, isolate: boolean) => void;
+  onSubmit: (title: string, body: string, isolate: boolean, dates: CardDates | null) => void;
   /** Add the card and hand it straight to an agent; the robot beside the submit button. */
   onRun?: (title: string, body: string, isolate: boolean, at: MenuAt) => void;
   onCancel: () => void;
   /** Clear and stay open after saving, for adding several in a row. */
   keepOpen?: boolean;
+  /** What the empty body says it is for. The profile's board hands nothing to an agent. */
+  bodyHint?: string;
 }) {
-  const [title, setTitle] = useState(initialTitle);
-  const [body, setBody] = useState(initialBody);
+  const [kept] = useState(() => drafts.get(draft));
+  const [title, setTitle] = useState(kept?.title ?? initialTitle);
+  const [body, setBody] = useState(kept?.body ?? initialBody);
   // Kept across a run of new cards, like the column: several written in a row
   // are usually several of a kind.
-  const [isolate, setIsolate] = useState(initialIsolate);
+  const [isolate, setIsolate] = useState(kept?.isolate ?? initialIsolate);
+  const [start, setStart] = useState(kept?.start ?? initialDates?.start ?? "");
+  const [end, setEnd] = useState(kept?.end ?? (initialDates && initialDates.end !== initialDates.start ? initialDates.end : ""));
+  useEffect(() => {
+    drafts.set(draft, { title, body, isolate, start, end });
+  }, [draft, title, body, isolate, start, end]);
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => field.current?.focus(), []);
 
+  /**
+   * The two fields as a range. Either alone is one day, and the two the wrong
+   * way round are put right rather than refused: the server refuses a range
+   * that runs backwards because it cannot know which end was meant, and here
+   * both ends are on screen and the person can see what they came to.
+   */
+  const dates = (): CardDates | null => {
+    if (!offerDates) return initialDates;
+    const a = start || end;
+    const b = end || start;
+    if (!a || !b) return null;
+    return a <= b ? { start: a, end: b } : { start: b, end: a };
+  };
+
   const save = () => {
     if (!title.trim()) return;
-    onSubmit(title, body, isolate);
+    onSubmit(title, body, isolate, dates());
     if (keepOpen) {
+      // The dates go with the text, unlike the worktree box: several cards in
+      // a row are often several of a kind, and seldom several for one day.
       setTitle("");
       setBody("");
+      setStart("");
+      setEnd("");
       field.current?.focus();
     }
   };
@@ -964,23 +1062,82 @@ function Composer({
         save();
       }}
     >
-      <input
-        ref={field}
-        className="dialog-input"
-        placeholder="What needs doing"
-        value={title}
-        onChange={(event) => setTitle(event.target.value)}
-        onKeyDown={(event) => keys(event, true)}
-      />
+      {/* The way out is an X at the corner, where a panel's close is looked
+          for, rather than a word in the foot competing with the one that adds. */}
+      <div className="board-composer-head">
+        <input
+          ref={field}
+          className="dialog-input"
+          placeholder="What needs doing"
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          onKeyDown={(event) => keys(event, true)}
+        />
+        <button
+          type="button"
+          className="board-icon-btn"
+          title={keepOpen ? "Close" : "Cancel"}
+          aria-label={keepOpen ? "Close" : "Cancel"}
+          onClick={onCancel}
+        >
+          <Icon name="close" />
+        </button>
+      </div>
       <textarea
         ref={grow}
         className="dialog-input board-composer-body"
-        placeholder="Details — the agent is handed the title and all of this"
+        placeholder={bodyHint}
         value={body}
         rows={4}
         onChange={(event) => setBody(event.target.value)}
         onKeyDown={(event) => keys(event, false)}
       />
+      {offerDates && (
+        <div className="board-composer-dates">
+          {/* The browser's own date field, for `.studio-swatch`'s reason: a
+              calendar is a control it draws better than this file could, and
+              on a phone it is the wheel a thumb already knows. */}
+          <input
+            type="date"
+            className="dialog-input board-date"
+            aria-label="On, or from"
+            title="The day this is for, or the first of them"
+            value={start}
+            max={end || undefined}
+            onChange={(event) => setStart(event.target.value)}
+            onKeyDown={(event) => keys(event, true)}
+          />
+          {/* The word travels with the field it introduces, so that where the
+              two fields wrap it starts the second line and does not end the first. */}
+          <span className="board-date-until">
+            <span className="board-date-to">to</span>
+            <input
+              type="date"
+              className="dialog-input board-date"
+              aria-label="Until"
+              title="The last day, for work that takes more than one"
+              value={end}
+              min={start || undefined}
+              onChange={(event) => setEnd(event.target.value)}
+              onKeyDown={(event) => keys(event, true)}
+            />
+          </span>
+          {(start || end) && (
+            <button
+              type="button"
+              className="board-icon-btn"
+              title="Take the dates off"
+              aria-label="Take the dates off"
+              onClick={() => {
+                setStart("");
+                setEnd("");
+              }}
+            >
+              <Icon name="close" />
+            </button>
+          )}
+        </div>
+      )}
       <div className="board-composer-foot">
         {offerIsolate && (
           <label
@@ -992,12 +1149,9 @@ function Composer({
             Worktree
           </label>
         )}
-        <button type="button" className="board-btn board-btn-quiet board-composer-cancel" onClick={onCancel}>
-          {keepOpen ? "Done" : "Cancel"}
-        </button>
         {/* Add, and add-and-run, as one split button: the robot is the same
             action with an agent on the end, not a third thing beside it. */}
-        <span className="board-split">
+        <span className="board-split board-composer-submit">
           <button type="submit" className="board-btn" disabled={!title.trim()}>
             {submit}
           </button>

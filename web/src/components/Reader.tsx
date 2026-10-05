@@ -20,7 +20,6 @@
  * here, where it would be a list of tags to keep in step with.
  */
 import { useEffect, useRef, useState } from "react";
-import type { ReaderState } from "../../../shared/layout";
 import { drawDiagrams } from "../mermaid";
 import { DocPicker } from "./DocPicker";
 
@@ -38,13 +37,23 @@ interface Rendered {
  * exists to respond to, and the document is almost always nearly identical to
  * the one already there.
  */
-export function ReaderView({ paneId, reader }: { paneId: string; reader: ReaderState }) {
+export function ReaderView({
+  paneId,
+  root,
+  path,
+  rev,
+}: {
+  paneId: string;
+  /** The document's root — or, with no `path`, the project the picker opens on. */
+  root: string;
+  /** Empty for a reader with nothing to show yet, which draws the picker. */
+  path: string;
+  rev: number;
+}) {
   const [doc, setDoc] = useState<Rendered | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const article = useRef<HTMLElement>(null);
-
-  const { root, path, rev } = reader;
 
   useEffect(() => {
     if (!path) {

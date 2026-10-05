@@ -8,7 +8,7 @@
  * end.
  */
 import { describe, expect, it } from "bun:test";
-import { hookSettings } from "../src/hooks";
+import { hookSettings, runsReporter } from "../src/hooks";
 
 type Settings = { hooks: Record<string, { hooks: { type: string; async: boolean; command: string }[] }[]> };
 
@@ -34,5 +34,25 @@ describe("hookSettings", () => {
     expect(command).toContain(`'/x/it'\\''s/report.mjs'`);
     expect(command).toEndWith("|| true");
     expect(settings.hooks.Stop?.[0]?.hooks[0]?.async).toBe(true);
+  });
+});
+
+describe("runsReporter", () => {
+  const script = "/Applications/kururu.app/Contents/Resources/report.mjs";
+  const one = (command: unknown) => ({ hooks: { Stop: [{ hooks: [{ type: "command", command }] }] } });
+
+  it("knows the hand-installed line and the bundled one", () => {
+    expect(runsReporter(one("bun /src/kururu/server/src/report-cli.ts done || true"), script)).toBe(true);
+    expect(runsReporter(hookSettings("/bin/node", script), script)).toBe(true);
+  });
+
+  it("does not take somebody else's report.mjs for ours", () => {
+    expect(runsReporter(one("node /elsewhere/report.mjs"), script)).toBe(false);
+  });
+
+  it("says no to a profile with nothing in it, or nothing it can read", () => {
+    for (const settings of [{}, null, "hooks", { hooks: [] }, { hooks: { Stop: "x" } }, one(42)]) {
+      expect(runsReporter(settings, script)).toBe(false);
+    }
   });
 });

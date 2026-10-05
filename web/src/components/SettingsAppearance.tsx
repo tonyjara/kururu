@@ -110,7 +110,7 @@ export function AppearanceSettings({
       {/* First, because it is the widest gesture on the page: everything below
           is one axis and this is all of them at once. Absent entirely when
           nothing is installed rather than sitting there empty — an installed
-          pack is the only thing this section can be about, and the Styles tab
+          pack is the only thing this section can be about, and the Explore page
           is where you would go to get one. */}
       {packs.length > 0 && (
         <section className="set-section">

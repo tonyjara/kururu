@@ -604,11 +604,77 @@ export interface Workspace {
    */
   mascotId: string | null;
   /**
+   * The group this workspace is filed under in the sidebar, by name, or null
+   * for the loose ones above every group.
+   *
+   * A name rather than an id into a list of groups on the profile, because a
+   * group is nothing *but* its name and its members: a list of its own would be
+   * a second thing to keep in step, with an empty group as the state the two
+   * disagree in. So a group exists for as long as something is filed in it,
+   * renaming one rewrites its members, and `persist.ts` regenerating every id
+   * on a cold start costs it nothing.
+   *
+   * The workspace list is kept so each group's members are contiguous — see
+   * `gatherGroups` — which is what lets the number beside a row stay the index
+   * prefix+1..9 jump to. Whether a group is folded is the client's, on the
+   * hidden-agents drawer's argument: it is a thing you do with your eyes.
+   */
+  group: string | null;
+  /**
    * The workspace's board of cards, or null until somebody opens it — see
    * `shared/board.ts`. Here rather than beside the workspace so that it
    * survives both restarts by the roads the layout already takes.
    */
   board: Board | null;
+}
+
+/** Long enough for a client's name and a word; a group heading is one line of a narrow column. */
+export const GROUP_NAME_MAX = 40;
+
+/**
+ * A group name as it may be stored: trimmed, single-line, capped — or null,
+ * which is "no group". Anything that is not a string is null rather than a
+ * refusal, because the only thing a bad value could mean is "take it out".
+ */
+export function groupName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const name = value.replace(/\s+/g, " ").trim().slice(0, GROUP_NAME_MAX).trim();
+  return name || null;
+}
+
+/**
+ * The workspace list with each group's members brought together where the
+ * first of them stands, and every loose workspace exactly where it was.
+ *
+ * Every verb that can file a workspace runs the list through this rather than
+ * placing it carefully, so there is one rule for where a group's members go
+ * and no verb can break it. Groups used to be gathered below every loose
+ * workspace, on the argument that what you have not put away is what you are
+ * using; it lost to wanting a group *between* two workspaces, which is an
+ * arrangement that rule could not express at all.
+ */
+export function gatherGroups<T extends { group: string | null }>(workspaces: readonly T[]): T[] {
+  const seen = new Set<string>();
+  return workspaces.flatMap((w) => {
+    if (w.group === null) return [w];
+    if (seen.has(w.group)) return [];
+    seen.add(w.group);
+    return workspaces.filter((m) => m.group === w.group);
+  });
+}
+
+/**
+ * The list cut into the things that move as one: a loose workspace, or a whole
+ * group. Expects a gathered list.
+ */
+export function workspaceUnits<T extends { group: string | null }>(workspaces: readonly T[]): T[][] {
+  const units: T[][] = [];
+  for (const w of workspaces) {
+    const last = units[units.length - 1];
+    if (w.group !== null && last?.[0]?.group === w.group) last.push(w);
+    else units.push([w]);
+  }
+  return units;
 }
 
 /** A named session: a list of workspaces, and which of them you are in. */
@@ -634,6 +700,16 @@ export interface Profile {
    */
   loginKey: string;
   workspaces: Workspace[];
+  /**
+   * Cards that belong to the profile rather than to any one workspace — the
+   * inbox a thought goes into before it is clear which checkout it is about.
+   * Simpler than a workspace's board on purpose: nothing on it runs, and the
+   * one thing it does that a note would not is send a card to a workspace's
+   * board, where the robot is. Always there rather than null until asked for
+   * like `Workspace.board`, because there is one per profile and its icon is
+   * always in the sidebar — an empty board behind it costs nothing.
+   */
+  board: Board;
   activeWorkspaceId: string;
   /**
    * The workspace you were in before this one — tmux's last-window, which is

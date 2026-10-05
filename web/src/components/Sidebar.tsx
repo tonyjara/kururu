@@ -37,7 +37,7 @@
  * prefix+W does — and they exist because a keymap is worth nothing until it has
  * been learnt, and a row has no room to print five buttons.
  */
-import { useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { Fragment, useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { panes } from "../../../shared/layout";
 import type {
   AgentSnapshot,
@@ -46,10 +46,11 @@ import type {
   Profile,
   WorkspaceColor,
 } from "../../../shared/model";
-import { defaultMascot, mascotFor, WORKSPACE_COLORS } from "../../../shared/model";
+import { defaultMascot, mascotFor, WORKSPACE_COLORS, workspaceUnits } from "../../../shared/model";
 import type { GitAction, RepoGit } from "../../../shared/wire";
+import { formatBytes as formatSize, vpsSeverity, type VpsStatus, type VpsUsed } from "../../../shared/vps";
 import { colorValue, colorValues } from "../colors";
-import { AGENT_MIME, WORKSPACE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
+import { AGENT_MIME, GROUP_MIME, WORKSPACE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
 import type { Action } from "../keys";
 import { agentLabel, agentSummary, shortenPath } from "../labels";
 import { previewLabel, previewUrl } from "../preview";
@@ -127,6 +128,8 @@ interface Props {
   onSettings: () => void;
   /** Opens the phone dialog — the addresses this server answers at, as QR codes. */
   onReach: () => void;
+  /** Opens the profile's own board — see `ProfileBoard`. */
+  onBoard: () => void;
   /**
    * Whether this is a column beside the panes or a screen in front of them.
    *
@@ -158,6 +161,7 @@ export function Sidebar({
   onDeleteWorkspace,
   onEditing,
   onPrompt,
+  onBoard,
   onSettings,
   onReach,
   overlay,
@@ -205,6 +209,16 @@ export function Sidebar({
    * `useFolded`.
    */
   const [folded, toggleFolded] = useFolded();
+  /**
+   * The groups of *workspaces* that are folded, by name. Per device for the
+   * same reason the agent groups are, and kept apart from them because a
+   * workspace id and a group name are two vocabularies that could collide.
+   */
+  const [foldedGroups, toggleGroup] = useFolded("kururu.sidebar.groups.folded");
+  /** The workspace group whose name is being typed, if any. */
+  const [renamingGroup, setRenamingGroup] = useState<string | null>(null);
+  /** Where a group heading's menu is open, and which group it is. */
+  const [groupMenu, setGroupMenu] = useState<{ group: string; x: number; y: number } | null>(null);
   /** The group heading a dragged terminal would move to, while it is over one. */
   const [overGroup, setOverGroup] = useState<string | null>(null);
   /** The workspace whose name is being typed, if any. */
@@ -248,11 +262,11 @@ export function Sidebar({
   const dragFrom = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
-    onEditing(renaming !== null);
+    onEditing(renaming !== null || renamingGroup !== null);
     // Also on unmount: a sidebar hidden mid-rename must not leave the keyboard
     // switched off with nothing on screen to explain why.
     return () => onEditing(false);
-  }, [renaming, onEditing]);
+  }, [renaming, renamingGroup, onEditing]);
 
   /** Where each agent lives, so a row can say which workspace to look in. */
   const where = new Map<
@@ -307,6 +321,7 @@ export function Sidebar({
    * terminal ends, on `orderAgents`' bargain: an id naming nothing costs one
    * `has` per row, and tidying it away would cost a write per snapshot.
    */
+  const openCards = profile.board.cards.filter((card) => card.column !== "done").length;
   const away = new Set(profile.hiddenAgents);
   const shown = listed.filter((agent) => !away.has(agent.id));
   const hidden = listed.filter((agent) => away.has(agent.id));
@@ -356,6 +371,131 @@ export function Sidebar({
    */
   const navigated = () => {
     if (overlay) onClose();
+  };
+
+  /** Every group in the profile, in the order the list draws them. */
+  const groupNames = [...new Set(profile.workspaces.flatMap((w) => (w.group === null ? [] : [w.group])))];
+
+  /**
+   * File a workspace under a group that does not exist yet, and open the new
+   * heading's name for typing. The placeholder is unique so it cannot merge
+   * into a group already there before anybody has typed a word.
+   */
+  const newGroup = (workspaceId: string) => {
+    let n = groupNames.length + 1;
+    while (groupNames.includes(`group ${n}`)) n++;
+    api.setWorkspaceGroup(workspaceId, `group ${n}`);
+    setRenamingGroup(`group ${n}`);
+  };
+
+  /**
+   * A group's heading in the workspace list: the fold, a place to drop a
+   * workspace into the group, and on right-click the group's own menu.
+   *
+   * Folding one leaves the workspace you are in standing under it. A fold is a
+   * way of not looking at things, and the one workspace you are in is the one
+   * thing in the list you are certainly looking at — hiding it would leave the
+   * window showing a workspace the sidebar says nothing about.
+   */
+  const groupHead = (group: string) => {
+    const members = profile.workspaces.filter((w) => w.group === group);
+    const shut = foldedGroups.has(group);
+    const waiting = members.some((w) =>
+      agents.some((agent) => agent.unread && where.get(agent.id)?.workspaceId === w.id),
+    );
+    if (renamingGroup === group) {
+      return (
+        <li className="ws-group">
+          <input
+            className="ws-edit"
+            defaultValue={group}
+            autoFocus
+            onFocus={(event) => event.currentTarget.select()}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              if (event.key === "Escape") cancelled.current = true;
+              if (event.key === "Enter" || event.key === "Escape") event.currentTarget.blur();
+            }}
+            onBlur={(event) => {
+              // An empty name is not a disband: that is a menu row of its own,
+              // and a field cleared by accident should not scatter a group.
+              const to = event.currentTarget.value.trim();
+              if (!cancelled.current && to) {
+                // The fold follows the name, which is the only key it has.
+                if (shut && !foldedGroups.has(to)) toggleGroup(to);
+                api.renameWorkspaceGroup(group, to);
+              }
+              cancelled.current = false;
+              setRenamingGroup(null);
+            }}
+            spellCheck={false}
+            autoComplete="off"
+            aria-label="Group name"
+          />
+        </li>
+      );
+    }
+    return (
+      <li className={`ws-group ${overGroup === `group:${group}` ? "ws-over" : ""}`}>
+        <button
+          className="ws-group-head"
+          onClick={() => toggleGroup(group)}
+          onDoubleClick={() => setRenamingGroup(group)}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            setGroupMenu({ group, x: event.clientX, y: event.clientY });
+          }}
+          aria-expanded={!shut}
+          title={`${shut ? "Show" : "Fold away"} ${group} \u00b7 double-click to rename`}
+          /* The heading is the group's handle, and a click that wobbled into
+             a drag is handed back as the fold — `CLICK_SLOP`, as on a row. */
+          draggable
+          onDragStart={(event) => {
+            dragFrom.current = { x: event.clientX, y: event.clientY };
+            beginDrag(event, "group", group);
+          }}
+          onDragEnd={(event) => {
+            const from = dragFrom.current;
+            dragFrom.current = null;
+            endDrag();
+            setOverGroup(null);
+            if (!from || event.dataTransfer.dropEffect !== "none") return;
+            if (Math.hypot(event.clientX - from.x, event.clientY - from.y) <= CLICK_SLOP) toggleGroup(group);
+          }}
+          /* Two things land here: a workspace, which joins the group, and
+             another group, which takes this one's place. */
+          onDragOver={(event) => {
+            if (dragging?.kind === "group") {
+              if (dragging.id === group) return;
+            } else if (dragging?.kind === "workspace") {
+              if (profile.workspaces.find((w) => w.id === dragging.id)?.group === group) return;
+            } else return;
+            allowDrop(event);
+            setOverGroup(`group:${group}`);
+          }}
+          onDragLeave={() => setOverGroup((current) => (current === `group:${group}` ? null : current))}
+          onDrop={(event) => {
+            setOverGroup(null);
+            const heading = event.dataTransfer.getData(GROUP_MIME);
+            if (heading) {
+              event.preventDefault();
+              return api.moveWorkspaceGroup(heading, members[0]!.id);
+            }
+            const moved = event.dataTransfer.getData(WORKSPACE_MIME);
+            if (!moved) return;
+            event.preventDefault();
+            api.setWorkspaceGroup(moved, group);
+          }}
+        >
+          <Icon name="caret" className={shut ? "drawer-caret-shut" : ""} />
+          <span className="agent-group-name">{group}</span>
+          {/* Folded, the heading says what its rows would have: that something
+              in there is waiting for you. */}
+          {shut && waiting && <span className="unread" aria-label="waiting for you" />}
+          <span className="agent-group-n">{members.length}</span>
+        </button>
+      </li>
+    );
   };
 
   /**
@@ -600,6 +740,18 @@ export function Sidebar({
           {profile.name}
           <Icon name="caret" className="profile-caret" />
         </button>
+        {/* The profile's board, beside the name because it is the profile's and
+            no workspace's. The count is what is not done yet: the number worth
+            glancing at is the pile still waiting to be sent somewhere. */}
+        <button
+          className="profile-board-btn"
+          onClick={onBoard}
+          title="This profile's board"
+          aria-label={`${profile.name}'s board`}
+        >
+          <Icon name="board" />
+          {openCards > 0 && <span className="profile-board-count">{openCards}</span>}
+        </button>
         {/* The way out of a full-screen sidebar. Drawn only when it is one: as a
             column, the panes next to it are already the way out, and a close
             button beside a thing with a keyboard shortcut and a status-bar
@@ -621,12 +773,20 @@ export function Sidebar({
         <ul className="ws-list">
           {profile.workspaces.map((workspace, index) => {
             const head = heads.get(workspace.id);
+            const group = workspace.group;
+            // The list is kept gathered (`gatherGroups`), so a group starts
+            // wherever the row above is not in it.
+            const opens = group !== null && profile.workspaces[index - 1]?.group !== group;
+            const tucked =
+              group !== null && foldedGroups.has(group) && workspace.id !== profile.activeWorkspaceId;
             return (
+            <Fragment key={workspace.id}>
+            {opens && groupHead(group)}
+            {!tucked && (
             <li
-              key={workspace.id}
               className={`ws-item ${workspace.id === profile.activeWorkspaceId ? "ws-item-on" : ""} ${
                 overWorkspace === workspace.id ? "ws-over" : ""
-              }`}
+              } ${group !== null ? "ws-item-grouped" : ""}`}
               /* The rail down the left edge, in this workspace's colour — the
                  same `--tag` every agent living in here wears, so the sidebar
                  says which agents belong to which workspace by lining them up
@@ -657,14 +817,16 @@ export function Sidebar({
                 event.preventDefault();
                 setMenu({ workspaceId: workspace.id, x: event.clientX, y: event.clientY });
               }}
-              /* Two things can land on a workspace row: a terminal, which moves
-                 to that workspace, and another workspace, which reorders the
-                 list. The drag store says which without opening the payload. */
+              /* Three things can land on a workspace row: a terminal, which moves
+                 to that workspace; another workspace, which reorders the list;
+                 and a group's heading, which moves the whole group to this
+                 row's place. The drag store says which without opening the payload. */
               onDragOver={(event) => {
                 // A whole pane is not something a workspace row knows what to do
                 // with, so it does not offer to take one.
-                if (dragging?.kind !== "agent" && dragging?.kind !== "workspace") return;
+                if (dragging?.kind !== "agent" && dragging?.kind !== "workspace" && dragging?.kind !== "group") return;
                 if (dragging.kind === "workspace" && dragging.id === workspace.id) return;
+                if (dragging.kind === "group" && dragging.id === group) return;
                 allowDrop(event);
                 setOverWorkspace(workspace.id);
               }}
@@ -676,6 +838,8 @@ export function Sidebar({
                 setOverWorkspace(null);
                 const agentId = event.dataTransfer.getData(AGENT_MIME);
                 if (agentId) return api.moveTabToWorkspace(agentId, workspace.id);
+                const heading = event.dataTransfer.getData(GROUP_MIME);
+                if (heading) return api.moveWorkspaceGroup(heading, workspace.id);
                 const moved = event.dataTransfer.getData(WORKSPACE_MIME);
                 if (moved) api.moveWorkspace(moved, index);
               }}
@@ -800,6 +964,8 @@ export function Sidebar({
                 </>
               )}
             </li>
+            )}
+            </Fragment>
             );
           })}
         </ul>
@@ -915,6 +1081,7 @@ export function Sidebar({
       </section>
 
       <Usage />
+      <Vps />
       <DevServers />
 
       {/* A new terminal used to be a button down here and is not one any more:
@@ -971,16 +1138,29 @@ export function Sidebar({
               label: "Mascot…",
               run: () => setMascotPicker({ workspaceId: menuWorkspace.id, x: menu.x, y: menu.y }),
             },
+            /* Within its group: a step across the edge would take the
+               neighbour's group with it (`moveWorkspace`), and filing is what
+               the rows below are for. */
             {
               label: "Move up",
-              disabled: menuAt === 0,
+              disabled: profile.workspaces[menuAt - 1]?.group !== menuWorkspace.group,
               run: () => api.moveWorkspace(menuWorkspace.id, menuAt - 1),
             },
             {
               label: "Move down",
-              disabled: menuAt === profile.workspaces.length - 1,
+              disabled: profile.workspaces[menuAt + 1]?.group !== menuWorkspace.group,
               run: () => api.moveWorkspace(menuWorkspace.id, menuAt + 1),
             },
+            { label: "New group…", sep: true, run: () => newGroup(menuWorkspace.id) },
+            ...groupNames
+              .filter((name) => name !== menuWorkspace.group)
+              .map((name) => ({
+                label: `Move to ${name}`,
+                run: () => api.setWorkspaceGroup(menuWorkspace.id, name),
+              })),
+            ...(menuWorkspace.group !== null
+              ? [{ label: "Remove from group", run: () => api.setWorkspaceGroup(menuWorkspace.id, null) }]
+              : []),
             { label: "New workspace", sep: true, run: () => onRun("new-workspace") },
             {
               label: "Delete",
@@ -990,6 +1170,35 @@ export function Sidebar({
               disabled: profile.workspaces.length < 2,
               run: () => onDeleteWorkspace(menuWorkspace.id),
             },
+          ]}
+        />
+      )}
+
+      {groupMenu && (
+        <Menu
+          at={groupMenu}
+          onClose={() => setGroupMenu(null)}
+          items={[
+            { label: "Rename group", run: () => setRenamingGroup(groupMenu.group) },
+            /* One step past whatever is beside it — a loose workspace or a
+               whole group, which are the things that move as one. */
+            ...[-1, 1].map((step) => {
+              const units = workspaceUnits(profile.workspaces);
+              const at = units.findIndex((unit) => unit[0]!.group === groupMenu.group);
+              const beside = units[at + step]?.[0];
+              return {
+                label: step < 0 ? "Move group up" : "Move group down",
+                disabled: !beside,
+                run: () => beside && api.moveWorkspaceGroup(groupMenu.group, beside.id),
+              };
+            }),
+            {
+              label: foldedGroups.has(groupMenu.group) ? "Show" : "Fold away",
+              run: () => toggleGroup(groupMenu.group),
+            },
+            /* Disbanding ends nothing — the workspaces go back to being loose —
+               so it asks nobody first, unlike deleting one. */
+            { label: "Ungroup", sep: true, run: () => api.renameWorkspaceGroup(groupMenu.group, null) },
           ]}
         />
       )}
@@ -1057,7 +1266,7 @@ export function Sidebar({
  * kind of decision as changing it, and burying the undo of a thing one row lower
  * than the thing is how people end up with a palette they cannot get out of.
  */
-function ColorPicker({
+export function ColorPicker({
   at,
   current,
   onPick,
@@ -1397,6 +1606,165 @@ function Usage() {
 }
 
 /**
+ * The VPSes somebody asked to watch, a bar each for CPU, memory and disk.
+ *
+ * Under the usage bars and drawn with their parts, because it is the same kind
+ * of glance — a thing you notice on the way past rather than go and read — and
+ * two gauges that look alike should mean alike: a fill is what is *spent*.
+ *
+ * Shut, one line per machine with the three percentages, which is enough to see
+ * that nothing is on fire. Open, the bars, and the heaviest containers — which
+ * on a Dokploy box are the apps and databases by name, and are the answer to
+ * the question a climbing RAM bar asks.
+ *
+ * Draws nothing until one has been added in Settings, like the dev servers: an
+ * empty section on every window for a feature most people never use is noise.
+ */
+function Vps() {
+  const { vps } = useKururu();
+  const [open, toggle] = useDisclosure("kururu.sidebar.vps", true);
+  if (vps.length === 0) return null;
+  const failing = vps.some((server) => server.error);
+
+  return (
+    <section className="side-section side-vps">
+      <h2>
+        <SectionToggle open={open} onToggle={toggle} label="VPS">
+          {failing && (
+            <span className="usage-stale" title="A VPS could not be reached. Its numbers are the last ones read.">
+              ·
+            </span>
+          )}
+        </SectionToggle>
+      </h2>
+      <ul className="vps-list">
+        {vps.map((server) => (
+          <VpsRow key={server.id} server={server} open={open} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function VpsRow({ server, open }: { server: VpsStatus; open: boolean }) {
+  const reading = server.reading;
+  const title = [server.host, server.error && `Last attempt: ${server.error}`].filter(Boolean).join("\n");
+  const name = server.panel ? (
+    <a className="vps-name" href={server.panel} target="_blank" rel="noreferrer noopener" title={`${title}\n→ ${server.panel}`}>
+      {server.name}
+    </a>
+  ) : (
+    <span className="vps-name" title={title}>
+      {server.name}
+    </span>
+  );
+
+  if (!reading) {
+    return (
+      <li className="vps-item">
+        <span className="usage-head">
+          {name}
+          <span className="usage-used">{server.error ? "unreachable" : "…"}</span>
+        </span>
+        {server.error && <span className="vps-error">{server.error}</span>}
+      </li>
+    );
+  }
+
+  const cpu = reading.cpu;
+  const mem = share(reading.mem);
+  const disk = share(reading.disk);
+  const memFigure = reading.mem && `${formatSize(reading.mem.used)} / ${formatSize(reading.mem.total)}`;
+  const diskFigure = reading.disk && `${formatSize(reading.disk.used)} / ${formatSize(reading.disk.total)}`;
+
+  /* Shut, a ring each on the name's own line — the same three figures and the
+     same colours as the bars, in one row's height rather than four. */
+  if (!open) {
+    return (
+      <li className={`vps-item vps-item-shut ${server.stale ? "vps-stale" : ""}`}>
+        {name}
+        <span className="vps-rings">
+          {cpu !== null && <VpsRing label="CPU" percent={cpu} figure={`${Math.round(cpu)}%`} />}
+          {mem !== null && <VpsRing label="RAM" percent={mem} figure={memFigure ?? ""} />}
+          {disk !== null && <VpsRing label="Disk" percent={disk} figure={diskFigure ?? ""} />}
+        </span>
+      </li>
+    );
+  }
+
+  return (
+    <li className={`vps-item ${server.stale ? "vps-stale" : ""}`}>
+      {name}
+      {cpu !== null && <VpsMeter label="CPU" percent={cpu} figure={`${Math.round(cpu)}%`} />}
+      {mem !== null && memFigure && <VpsMeter label="RAM" percent={mem} figure={memFigure} />}
+      {disk !== null && diskFigure && <VpsMeter label="Disk" percent={disk} figure={diskFigure} />}
+      {server.error && <span className="vps-error">{server.error}</span>}
+    </li>
+  );
+}
+
+/**
+ * One figure as a ring, the context ring's shape. The label is the letter
+ * beside it rather than a word, because three words and three rings do not fit
+ * beside a name in a sidebar; the tooltip carries the whole sentence.
+ */
+function VpsRing({ label, percent, figure }: { label: string; percent: number; figure: string }) {
+  const circumference = 2 * Math.PI * 5;
+  const rounded = Math.round(percent);
+  return (
+    <span
+      className="vps-ring"
+      role="meter"
+      aria-label={`${label} used`}
+      aria-valuenow={rounded}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      title={`${label} ${rounded}% used${figure && figure !== `${rounded}%` ? ` — ${figure}` : ""}`}
+    >
+      <svg className="ring" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" data-severity={vpsSeverity(percent)}>
+        <circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" strokeWidth="2" opacity="0.2" />
+        <circle
+          cx="7" cy="7" r="5" fill="none" stroke="currentColor" strokeWidth="2"
+          strokeDasharray={`${(percent / 100) * circumference} ${circumference}`}
+          transform="rotate(-90 7 7)"
+          strokeLinecap="round"
+        />
+      </svg>
+      <span className="vps-ring-label">{label[0]}</span>
+      <span className="vps-ring-pct">{rounded}%</span>
+    </span>
+  );
+}
+
+function VpsMeter({ label, percent, figure }: { label: string; percent: number; figure: string }) {
+  return (
+    <div className="vps-meter">
+      <span className="usage-head">
+        <span className="usage-name">{label}</span>
+        <span className="usage-used">{figure}</span>
+      </span>
+      <span
+        className="usage-bar"
+        role="meter"
+        aria-label={`${label} used`}
+        aria-valuenow={Math.round(percent)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        title={`${Math.round(percent)}% used`}
+      >
+        <span className="usage-fill" data-severity={vpsSeverity(percent)} style={{ width: `${percent}%` }} />
+      </span>
+    </div>
+  );
+}
+
+/** Used as a percentage of total, or null when there is no total to be a share of. */
+function share(part: VpsUsed | null): number | null {
+  if (!part || part.total <= 0) return null;
+  return Math.min(100, (part.used / part.total) * 100);
+}
+
+/**
  * The dev servers running on this machine, each one a link you can open.
  *
  * This exists because of the phone. On the desktop a dev server is already
@@ -1522,9 +1890,10 @@ function useDisclosure(key: string, initial: boolean): [boolean, () => void] {
  * another client arrives open: a new group you cannot see the agents in is a
  * new agent you do not notice. Ids of workspaces since deleted stay in the set
  * and cost nothing — they name no group, so nothing reads them.
+ *
+ * The workspace groups use it too, under their own key and by name.
  */
-function useFolded(): [ReadonlySet<string>, (workspaceId: string) => void] {
-  const key = "kururu.sidebar.folded";
+function useFolded(key = "kururu.sidebar.folded"): [ReadonlySet<string>, (id: string) => void] {
   const [folded, setFolded] = useState<ReadonlySet<string>>(() => {
     try {
       const saved: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");

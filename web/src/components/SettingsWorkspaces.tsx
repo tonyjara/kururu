@@ -1,5 +1,5 @@
 /**
- * Settings → Workspaces: where the robot on a card starts its agent, one
+ * Settings → General → Workspaces: where the robot on a card starts its agent, one
  * sub-tab per workspace in the profile.
  *
  * Drawn per workspace and stored per repository, and the two are not in

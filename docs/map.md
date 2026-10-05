@@ -10,7 +10,8 @@ in this folder.
 | `model.ts` | Agents and the hierarchy they live in. Not a mirror of anything |
 | `wire.ts` | The browser↔server protocol, and the timer intervals |
 | `layout.ts` | The split tree and every pure operation on it. Both halves use it |
-| `board.ts` | A workspace's cards, and what an agent's status does to the one it was handed |
+| `board.ts` | A workspace's cards, and what an agent's status does to the one it was handed. Also the profile's board, a card's dates, and the timeline's layout |
+| `days.ts` | Calendar days as strings, and the arithmetic over them. Why a card's date is not a timestamp |
 | `projects.ts` | What a repository has been told about itself, and how a card's worktree is named |
 | `keys.ts` | Every action, ghosttown's defaults, and a user's overrides |
 | `labels.ts` | What to call a terminal and what to say it is doing — three places must agree |
@@ -49,13 +50,16 @@ in this folder.
 | `src/sizing.ts` | How big a terminal is when several panes have an opinion |
 | `src/cwd.ts` | Where a process *is*, not where it was spawned. One `lsof` |
 | `src/memory.ts` | What each terminal costs the machine, off `ps`. Rounded first |
+| `src/footprint.ts` | Settings → Processes: each terminal's tree read with argv — agents, nvims, dev servers counted once each. Only when the page asks (`/api/footprint`, types in `shared/footprint.ts`) |
 | `src/record.ts` | Rolling raw-stream tape per agent, for bugs you can't reproduce |
 | `src/transcript.ts` | How full a Claude Code window is, off its transcript. Ported |
 | `src/usage.ts` | The plan allowance, off a Claude credential — the machine's or the profile's. Read, never written |
+| `src/vps.ts` | The sidebar's VPSes: the user's own `ssh`, `BatchMode`, one fixed read-only script. A client names a host and nothing else (`shared/vps.ts`) |
 | `src/report-cli.ts` | What a Claude Code hook runs. Not in `agents/` on purpose |
 | `src/devservers.ts` | lsof + ps discovery of what is listening, and what started it |
 | `src/proxy.ts` | Per-dev-server reverse proxy (HTTP + WS) for phone access |
 | `src/files.ts` | Traversal-safe file listing and reading |
+| `src/fileops.ts` | The file tree's edits: new, rename, move, copy, Trash — the only writer |
 | `src/markdown.ts` | Markdown → markup with Shiki. `html: false` IS the sanitizer |
 | `src/nvim.ts` | The editor in a pane, found by its socket. An autocmd, not a poll; `:drop` for the tree |
 | `src/mouseencoding.ts` | How a terminal writes its mouse reports |
@@ -106,6 +110,7 @@ in this folder.
 | `src/qr.ts` | A QR code, encoded here. Pure |
 | `src/access.ts` | The token in the address, exchanged once for a cookie. Five lines |
 | `src/zoom.ts` | How big the reader's type is, per device |
+| `src/when.ts` | What a card's dates are called here: month names, and which day a week starts on |
 | `src/desktop.ts` | The preload bridge, typed. Null in a browser — that's the contract |
 | `src/styles.css` | No hex, no px. See [styles](styles.md) |
 
@@ -117,6 +122,8 @@ for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` ·
 `aria-hidden` span) · `Dialog.tsx` (while one is up, no key reaches a pty) ·
 `Menu.tsx` · `Reader.tsx` (**the thing kururu was built for**; one draggable tab per document) ·
 `Board.tsx` (a workspace's cards; the robot hands one to an agent) ·
+`ProfileBoard.tsx` (the profile's own cards, in a sheet over the window) ·
+`Timeline.tsx` (that board by when its cards are for; holds only which weeks it is showing) ·
 `FileTree.tsx` (markdown to the reader, the rest to nvim; holds the reader's zoom) · `DocPicker.tsx` (an empty reader only) ·
 `Keybar.tsx` · `Reach.tsx` · `Crash.tsx` · `HelpOverlay.tsx` (printed from the
 keymap, so it cannot document a dead key) · `Settings*.tsx`.

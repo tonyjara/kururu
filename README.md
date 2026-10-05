@@ -277,6 +277,13 @@ Nothing says which agent is reporting and nothing needs to: every pty is spawned
 with `KURURU_AGENT_ID` and a hook is a child of the agent. Safe to install
 globally — outside kururu the variable is absent and it exits silently.
 
+With **logins per profile** on, Claude reads the profile's own directory instead
+— `~/.config/kururu/profiles/<key>/claude/settings.json` — and that starts with
+no hooks. A Claude opened from the new-tab menu is handed kururu's for the one
+launch; a `claude` typed into a shell is not, and goes without its context ring
+until the same block is in that file too. Once it is, the menu stops handing
+over its own copy, so nothing is reported twice.
+
 ## Settings
 
 The cog, or `C-a g`. Five tabs, all server-side, in `~/.config/kururu` — so a

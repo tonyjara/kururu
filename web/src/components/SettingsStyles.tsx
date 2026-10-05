@@ -1,5 +1,5 @@
 /**
- * Settings → Styles: what `../kururu-styles` is offering, and what of it this
+ * Settings → Appearance → Explore: what `../kururu-styles` is offering, and what of it this
  * machine has.
  *
  * A tab of its own rather than a section on Appearance, and the line between
