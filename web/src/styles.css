@@ -168,13 +168,16 @@
   --icon-play: "▸";
   --icon-bot: "⚙";
   --icon-git: "⎇";
+  --icon-board: "▥";
+  --icon-grip: "⠿";
+  --icon-panel: "⇥";
 
   /* The icon strip a skin may bring instead of glyphs — every icon as one
      picture of `--icon-n` cells. `none` is the drawing. `--icon-n` is a
      constant the stylesheet needs for the arithmetic and is not a skin's to
      move: it is `ICON_NAMES.length`, and the test holds the two together. */
   --icon-sheet: none;
-  --icon-n: 20;
+  --icon-n: 23;
 
   /* ----------------------------------------------------------------------
      The parts: what a skin *paints*, three properties per region.
@@ -303,6 +306,9 @@
 .icon-play { --icon-svg: var(--icon-play-svg); --icon-glyph: var(--icon-play); --icon-i: 17; }
 .icon-bot { --icon-svg: var(--icon-bot-svg); --icon-glyph: var(--icon-bot); --icon-i: 18; }
 .icon-git { --icon-svg: var(--icon-git-svg); --icon-glyph: var(--icon-git); --icon-i: 19; }
+.icon-board { --icon-svg: var(--icon-board-svg); --icon-glyph: var(--icon-board); --icon-i: 20; }
+.icon-grip { --icon-svg: var(--icon-grip-svg); --icon-glyph: var(--icon-grip); --icon-i: 21; }
+.icon-panel { --icon-svg: var(--icon-panel-svg); --icon-glyph: var(--icon-panel); --icon-i: 22; }
 /* An icon strip, when a skin brought one: every icon is one cell of a single
    picture, `--icon-n` cells across, and `--icon-i` on each class says which.
    The strip is scaled so one cell is exactly the icon's box — which is what
@@ -340,7 +346,10 @@
 :root[data-glyphs~="stop"] .icon-stop::before,
 :root[data-glyphs~="play"] .icon-play::before,
 :root[data-glyphs~="bot"] .icon-bot::before,
-:root[data-glyphs~="git"] .icon-git::before {
+:root[data-glyphs~="git"] .icon-git::before,
+:root[data-glyphs~="board"] .icon-board::before,
+:root[data-glyphs~="grip"] .icon-grip::before,
+:root[data-glyphs~="panel"] .icon-panel::before {
   content: var(--icon-glyph);
   width: auto;
   height: auto;
@@ -632,6 +641,32 @@ kbd {
 .profile-btn:hover .profile-caret {
   color: var(--dim);
 }
+/* The profile's board, beside the name — as quiet as the caret until you are
+   on it, with the count of cards not yet done when there are any. */
+.profile-board-btn {
+  -webkit-app-region: no-drag;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 5px;
+  border-radius: var(--radius-md);
+  color: var(--dimmer);
+  font-size: var(--fs-sm);
+}
+.profile-board-btn:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+.profile-board-count {
+  font-variant-numeric: tabular-nums;
+}
+:root[data-narrow] .profile-board-btn {
+  min-width: 36px;
+  min-height: 36px;
+  justify-content: center;
+  font-size: var(--fs-md);
+}
 .dot {
   width: 7px;
   height: 7px;
@@ -692,6 +727,7 @@ kbd {
    links — so when the window is short they are the wrong place to find room;
    the list of agents is. */
 .side-usage,
+.side-vps,
 .side-dev {
   flex: none;
 }
@@ -964,6 +1000,36 @@ kbd {
   color: var(--text);
   font-size: var(--fs-md);
   outline: none;
+}
+
+/* A group of workspaces: a heading across the whole grid, in the agent
+   groups' type so the two kinds of fold read as one, and its members stepped in
+   under it — the rail moves in with them, which is what says where a group ends
+   without a rule drawn under it. */
+.ws-list .ws-group {
+  grid-column: 1 / -1;
+  display: block;
+  margin-top: 4px;
+}
+.ws-list .ws-group:hover {
+  background: none;
+}
+.ws-group-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: var(--radius-lg);
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  text-align: left;
+}
+.ws-group-head:hover {
+  background: var(--chrome-high);
+}
+.ws-list .ws-item-grouped {
+  margin-left: 10px;
 }
 
 .sidebar-empty {
@@ -1549,6 +1615,94 @@ kbd {
   line-height: 1;
 }
 
+/* The VPS section, built out of the usage bar's parts — see `Vps` in
+   Sidebar.tsx for why the two gauges are drawn alike. Its own list because a
+   machine is a group of bars rather than one, and because a few machines with
+   their containers open is taller than a sidebar's foot should be: it scrolls
+   inside a cap, in the dev list's idiom, rather than pushing the agents away. */
+.vps-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 12px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  max-height: 35vh;
+}
+
+.vps-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.vps-name {
+  font-size: var(--fs-sm);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: none;
+}
+a.vps-name:hover {
+  text-decoration: underline;
+}
+
+/* Last reading kept across a failed poll: still drawn, visibly not current. */
+.vps-stale {
+  opacity: 0.55;
+}
+
+.vps-error {
+  font-size: var(--fs-xs);
+  color: var(--dimmer);
+  overflow-wrap: anywhere;
+}
+
+/* Shut: the name, then the rings, on one line. The name gives way first —
+   the rings are the reason the row is there. */
+.vps-item-shut {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.vps-item-shut .vps-name {
+  min-width: 0;
+}
+
+.vps-rings {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.vps-ring {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--fs-xs);
+  color: var(--dimmer);
+}
+
+/* The bars' three bands, as ink: the ring is a stroke in currentColor. */
+.vps-ring .ring {
+  color: var(--accent);
+}
+.vps-ring .ring[data-severity="warning"] {
+  color: var(--working);
+}
+.vps-ring .ring[data-severity="critical"] {
+  color: var(--danger-bg);
+}
+
+.vps-ring-pct {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
 /* The dev servers, pinned under the agent list rather than scrolling with it.
    `.side-agents` is the section that grows, so this one keeps its height and
    stays on screen with a profile's worth of terminals above it — which is the
@@ -1724,7 +1878,8 @@ kbd {
 :root[data-narrow] .agent-top-grouped {
   padding-right: 76px;
 }
-:root[data-narrow] .agent-group-head {
+:root[data-narrow] .agent-group-head,
+:root[data-narrow] .ws-group-head {
   padding-top: 6px;
   padding-bottom: 6px;
 }
@@ -1799,27 +1954,62 @@ kbd {
   border-left: var(--border) var(--border-style) var(--line);
 }
 
+/* The header is built to a tab strip's measurements so that it lines up with
+   the panes' strips beside it: the same top (the well's gutter plus the pane
+   box's, which is two gutters), the same padding, and a title sized the way a
+   tab is, so the two rows are one line across the window rather than two that
+   nearly agree. The skin's strip and tab border widths are borrowed as
+   transparent borders for the same reason — a skin that thickens its strip
+   moves the tabs, and the header has to move with them. */
 .files-head {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 8px 8px 6px 12px;
+  align-items: stretch;
+  gap: 2px;
+  padding: 3px 4px;
+  padding-top: calc(2 * var(--gutter) + 3px);
   min-width: 0;
+  border-width: var(--p-tabstrip-w);
+  border-style: solid;
+  border-color: transparent;
   -webkit-app-region: drag;
 }
-/* The window's traffic lights are on the other side, but the strip above the
-   list is still the thing a window is dragged by — the same 28px the sidebar
-   leaves them, so the two columns' first rows line up. */
-.app-window .files-head {
-  padding-top: 34px;
+/* With the sidebar hidden the stage carries the window's drag strip and the
+   panes start below it, so the tree's first row does too. */
+.app-window.app-sidebar-hidden .files-head {
+  padding-top: calc(28px + 2 * var(--gutter) + 3px);
 }
 .files-root {
-  font-size: var(--fs-md);
+  display: flex;
+  align-items: center;
+  padding: 3px 4px;
+  border-width: var(--p-tab-w);
+  border-style: solid;
+  border-color: transparent;
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  /* A tab's height is its close button's — a 1.2em icon in a 3px box, given
+     back 2px by its margin — so the title is held to that. */
+  min-height: calc(1.2em + 2px);
+  box-sizing: content-box;
   color: var(--text);
   white-space: nowrap;
 }
+/* The same title, as a door: only drawn when the workspace's tabs are in more
+   than one place, so the caret is itself the news that there is a choice.
+   Out of the head's drag strip, or the window takes the click as a drag. */
+.files-root-pick {
+  gap: 0.2em;
+  -webkit-app-region: no-drag;
+}
+.files-root-pick .icon {
+  color: var(--dimmer);
+}
+.files-root-pick:hover .icon {
+  color: var(--text);
+}
 .files-path {
   flex: 1;
+  align-self: center;
   min-width: 0;
   font-family: var(--mono);
   font-size: var(--fs-sm);
@@ -1829,9 +2019,7 @@ kbd {
   text-overflow: ellipsis;
 }
 .files-close {
-  align-self: center;
-  width: 24px;
-  height: 24px;
+  -webkit-app-region: no-drag;
 }
 
 .files-list {
@@ -1898,6 +2086,30 @@ kbd {
   font-size: var(--fs-md);
   color: var(--dimmer);
 }
+/* A long press is the phone's right-click, and iOS answers one on a button with
+   a callout and a text selection unless told not to. */
+.tree-row {
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+/* Where a drag would land: the folder, or the whole tree for the top. Drawn as
+   an inset ring rather than a fill so it reads over a row that is also current. */
+.tree-drop,
+.files-list-drop {
+  box-shadow: inset 0 0 0 var(--border) color-mix(in srgb, var(--accent) 60%, transparent);
+}
+/* Cut and waiting for a paste: still there, and visibly on its way out. */
+.tree-cut {
+  opacity: 0.5;
+}
+/* The last edit the disk refused. A tap dismisses it; the next edit replaces it. */
+.tree-error {
+  margin: 0 6px 4px;
+  padding: 3px 6px;
+  font-size: var(--fs-md);
+  color: var(--danger);
+  cursor: pointer;
+}
 
 /* The sidebar's grip, on the left edge instead of the right. */
 .files-grip {
@@ -1932,12 +2144,24 @@ kbd {
   padding-top: 8px;
   padding-bottom: 8px;
 }
-.files-close {
-  display: none;
+/* A sheet has no panes beside it to line up with, and a phone's header wants
+   the room a thumb needs — so it keeps the sidebar's header, the same 28px left
+   for the traffic lights in a window narrow enough to be one. */
+.files-overlay .files-head {
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 6px 12px;
+  border-width: 0;
 }
-.files-overlay .files-close,
-:root[data-narrow] .files-close {
-  display: flex;
+.app-window .files-overlay .files-head {
+  padding-top: 34px;
+}
+.files-overlay .files-root {
+  padding: 0;
+  border-width: 0;
+  font-family: inherit;
+  font-size: var(--fs-md);
+  min-height: 0;
 }
 
 /* The status bar's door onto the tree, the bars button's twin. */
@@ -3556,6 +3780,197 @@ a.button {
   flex-wrap: wrap;
   gap: 6px;
 }
+/* The same row one level up: the pages inside a Settings tab — Theme, Explore,
+   Skin studio and Mascot under Appearance. Outside the scrolling body, so the
+   page you are on stays named while you scroll through it. */
+.set-pagetabs {
+  margin: -4px 0 12px;
+}
+
+/* --------------------------------------------------------------------------
+   Processes
+
+   A tally across the top and then the tree it came from: profile, workspace,
+   tab. Each tab is one line — status, name, what is running in it, where, how
+   many processes, a bar against the heaviest tab, the figure, and the button.
+   The bar is relative to the biggest tab rather than to the machine, because
+   "which one" is the question and a row of slivers against 32 GB cannot answer it.
+   -------------------------------------------------------------------------- */
+
+.proc-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.proc-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+}
+.proc-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--chrome);
+}
+.proc-tile-value {
+  font-family: var(--mono);
+  font-size: var(--fs-xl);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-strong);
+}
+.proc-tile-label {
+  font-size: var(--fs-base);
+  color: var(--dim);
+}
+.proc-tile-under {
+  font-size: var(--fs-sm);
+  color: var(--dimmer);
+}
+.proc-profile {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.proc-here {
+  margin-left: 6px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--accent);
+}
+.proc-group {
+  margin-top: 8px;
+  padding-left: 8px;
+  border-left: var(--border-thick) var(--border-style) var(--tag, var(--line));
+}
+.proc-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+}
+.proc-group-name {
+  font-size: var(--fs-md);
+  color: var(--text);
+}
+.proc-group-head .proc-mem {
+  margin-left: auto;
+  color: var(--text);
+}
+.proc-list {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.proc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 2px 0;
+  border-top: var(--border) var(--border-style) var(--chrome-high);
+}
+.proc-row-exited .proc-label {
+  color: var(--dimmer);
+  text-decoration: line-through;
+}
+.proc-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-round);
+  flex: none;
+}
+.proc-dot-idle {
+  background: var(--idle);
+}
+.proc-dot-working {
+  background: var(--working);
+}
+.proc-dot-blocked {
+  background: var(--blocked);
+}
+.proc-dot-done {
+  background: var(--done);
+}
+.proc-dot-exited {
+  background: var(--exited);
+}
+.proc-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.proc-label {
+  font-size: var(--fs-md);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.proc-badge {
+  flex: none;
+  padding: 0 5px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+.proc-cwd {
+  font-size: var(--fs-sm);
+  color: var(--dimmer);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.proc-count {
+  flex: none;
+  font-size: var(--fs-sm);
+  color: var(--dimmer);
+  font-variant-numeric: tabular-nums;
+}
+.proc-bar {
+  flex: none;
+  width: 80px;
+  height: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--chrome-high);
+  overflow: hidden;
+}
+.proc-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.proc-mem {
+  flex: none;
+  min-width: 52px;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+/* A phone holds the name, the figure and the button; the rest is the desktop's. */
+@media (max-width: 600px) {
+  .proc-bar,
+  .proc-count,
+  .proc-cwd {
+    display: none;
+  }
+}
 
 /* The worktree switch asking before it acts: a warning box holding the list of
    what would be merged and the two answers. The list is the point of the box —
@@ -4876,6 +5291,17 @@ a.button {
   height: 32px;
   font-size: var(--fs-lg);
 }
+/* The card's key, `KUR-12`: set in the monospace face so that a column of
+   them lines up and reads as a label rather than as the start of the title. */
+.board-card-code {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  /* The title's first line box, so the two sit on one line whatever the sizes. */
+  line-height: calc(var(--fs-md) * 1.35);
+  color: var(--dimmer);
+  font-variant-numeric: tabular-nums;
+}
 .board-card-title {
   flex: 1;
   min-width: 0;
@@ -4894,6 +5320,24 @@ a.button {
   line-height: 1.4;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* When the card is for. Its ink is which side of today that is — the accent
+   for what is happening now, the dimmest for what has passed — so a column can
+   be scanned for this week without a date being read. Never the danger colour:
+   a date behind today is not a card that is late, since nothing on a board
+   knows a card is finished but a person. */
+.board-card-when {
+  align-self: flex-start;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+.board-card-when-now {
+  color: var(--accent);
+}
+.board-card-when-past {
+  color: var(--dimmer);
 }
 
 .board-card-error {
@@ -5062,6 +5506,12 @@ a.button {
   color: var(--text);
   background: var(--chrome-high);
 }
+/* The strip as a choice between views rather than a row of actions: the one
+   that is on stays the colour the others turn when they are pointed at. */
+.board-seg-btn-on {
+  color: var(--text);
+  background: var(--chrome-high);
+}
 :root[data-narrow] .board-seg-btn {
   height: 28px;
   min-width: 30px;
@@ -5157,15 +5607,53 @@ a.button {
   gap: 6px;
 }
 /* The composer's foot: the worktree box on the left, where it is read as part
-   of the card being written, and the ways out on the right. */
+   of the card being written, and the add on the right. */
 .board-composer-foot {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
 }
-.board-composer-cancel {
+.board-composer-submit {
   margin-left: auto;
+}
+/* The title and the composer's close on one line. */
+.board-composer-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.board-composer-head > .dialog-input {
+  flex: 1;
+  min-width: 0;
+}
+/* The card's dates: two of the browser's own date fields with a word between.
+   They wrap, because a column on a phone is not as wide as two dates. */
+.board-composer-dates {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.board-date-until {
+  flex: 1 1 116px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.board-date {
+  flex: 1 1 100px;
+  width: auto;
+  min-width: 0;
+  padding: 4px 6px;
+  font-family: var(--ui);
+  font-size: var(--fs-base);
+  font-variant-numeric: tabular-nums;
+}
+.board-date-to {
+  color: var(--dimmer);
+  font-size: var(--fs-sm);
 }
 .board-toggle {
   display: inline-flex;
@@ -5389,7 +5877,7 @@ a.button {
 /* --------------------------------------------------------------------------
    The styles registry
 
-   Settings → Styles, which is a list of things that are not installed yet.
+   Settings → Appearance → Explore, which is a list of things that are not installed yet.
    Every card here is drawn *as itself* — a theme in its colours, a skin in its
    shape, a mascot moving — for the reason the theme list next door already
    gives: a row of names makes you install one to find out what it is.
@@ -6287,4 +6775,497 @@ a.button {
   width: 36px;
   text-align: center;
   padding: 3px 4px;
+}
+
+/* The profile's board: a board's columns in a sheet over the window, since it
+   belongs to no workspace's layout — see `ProfileBoard.tsx`. Centred, and the
+   whole screen on a phone, where the columns snap one to a screen as a pane's
+   board does. */
+.profile-board-scrim {
+  align-items: center;
+  padding: 16px;
+}
+.profile-board {
+  width: min(1100px, 100%);
+  height: min(760px, 100%);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--chrome);
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elev-dialog);
+  overflow: hidden;
+}
+.profile-board-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 4px 14px;
+}
+.profile-board-head .dialog-title {
+  margin: 0;
+}
+.profile-board-note {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+  font-size: var(--fs-base);
+}
+.profile-board-cols {
+  min-height: 0;
+}
+/* The column's name as a field, in the header where the name was — a rename
+   or a column being made. */
+.board-col-input {
+  flex: 1;
+  min-width: 0;
+  margin-right: auto;
+  padding: 2px 6px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg);
+  border: var(--border) var(--border-style) var(--accent);
+  border-radius: var(--radius-md);
+  outline: none;
+}
+.board-col-name {
+  cursor: var(--cursor);
+}
+/* The column's colour, as a swatch you press to change it. A ring with
+   nothing in it for a column with none, so there is still something to press. */
+.board-col-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-round);
+  background: var(--tag, transparent);
+  border: var(--border) var(--border-style) var(--tag, var(--line-high));
+}
+.board-col-dot:hover,
+.board-col-dot:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 var(--border-thick) var(--chrome), 0 0 0 3px var(--dim);
+}
+/* The handle a profile board's column is dragged by. Dim until it is pointed
+   at, because it is on every column and is only wanted now and then. */
+.board-col-grip {
+  flex: none;
+  display: flex;
+  margin-left: -6px;
+  color: var(--dimmer);
+  cursor: grab;
+}
+.board-col-grip:hover {
+  color: var(--text);
+}
+.board-col-grip:active {
+  cursor: grabbing;
+}
+/* The column in flight stays where it was, faded, so the gap it left is
+   still visibly its own. */
+.board-col-lifted {
+  opacity: 0.4;
+}
+/* Where a dragged column would land: a bar in the gutter beside the column
+   it would go before — or after, for the last. A shadow rather than a border,
+   so the columns do not shift by its width while the pointer moves. */
+.board-col-before {
+  box-shadow: calc(var(--border-thick) * -2) 0 0 var(--accent);
+}
+.board-col-after {
+  box-shadow: calc(var(--border-thick) * 2) 0 0 var(--accent);
+}
+/* The tile after the last column that makes another: a column's outline,
+   dashed like `.board-empty`, so it reads as a place a column would go. */
+.board-col-add {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px;
+  border: var(--border) dashed var(--line);
+  border-radius: var(--radius-lg);
+  color: var(--dimmer);
+  font-size: var(--fs-base);
+  cursor: var(--cursor-pointer);
+  scroll-snap-align: start;
+}
+.board-col-add:hover {
+  color: var(--text);
+  border-color: var(--line-high);
+}
+:root[data-narrow] .profile-board-scrim {
+  padding: 0;
+}
+:root[data-narrow] .profile-board {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  border: none;
+}
+
+/* --------------------------------------------------------------------------
+   The timeline
+
+   The profile's board by when its cards are for — see `Timeline.tsx`. One
+   grid: a column of labels and then a column a day, a row of headings and
+   then a row a card, so that a bar lines up with its days because it is *in*
+   them and nothing is measured to put it there. `--days` and `--rows` are
+   counts the component writes; what a day and a row measure is decided here.
+   -------------------------------------------------------------------------- */
+
+.timeline {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--ui);
+}
+.timeline-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  background: var(--chrome);
+  font-size: var(--fs-base);
+}
+.timeline-range {
+  flex: none;
+  white-space: nowrap;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+/* Which colour is which column. It takes the room between the dates and the
+   button and gives up the columns that do not fit rather than wrapping: it is
+   a key, and the board a tap away is the full list. */
+.timeline-key {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--dim);
+  font-size: var(--fs-sm);
+}
+.timeline-key-lane {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.timeline-key-lane::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-xs);
+  background: var(--tag, var(--accent));
+}
+/* The one chevron kururu has points down, and these two point along the days. */
+.timeline-earlier .icon {
+  transform: rotate(90deg);
+}
+.timeline-later .icon {
+  transform: rotate(-90deg);
+}
+/* How many dated cards are out of sight that way: the reason to press it. */
+.timeline-waiting {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+/* The card being written or edited, above the days rather than in them: a
+   composer is a form, and a row of a timeline is not tall enough to be one. */
+.timeline-editor {
+  padding: 8px;
+  background: var(--chrome);
+  border-top: var(--border) var(--border-style) var(--line);
+}
+.timeline-editor .board-composer {
+  max-width: 520px;
+}
+
+.timeline-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border-top: var(--border) var(--border-style) var(--line);
+}
+.timeline-grid {
+  display: grid;
+  grid-template-columns: 220px repeat(var(--days), minmax(24px, 1fr));
+  /* The headings, the cards, and one row more that takes what height is left
+     — so the days run to the foot of the sheet however few cards there are. */
+  grid-template-rows: auto repeat(var(--rows), 30px) minmax(30px, 1fr);
+  min-height: 100%;
+  user-select: none;
+}
+
+/* The headings stay at the top and the labels at the left while the days
+   scroll under both, which is the stack: days, bars, labels, headings, and
+   the corner where the last two meet. */
+.timeline-corner,
+.timeline-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  grid-row: 1;
+  background: var(--chrome);
+  border-bottom: var(--border) var(--border-style) var(--line);
+}
+.timeline-corner {
+  left: 0;
+  z-index: 4;
+  grid-column: 1;
+  border-right: var(--border) var(--border-style) var(--line);
+}
+.timeline-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 3px 0 4px;
+  font-size: var(--fs-xs);
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+/* The month, on the first day drawn and on the first of each: it is wider than
+   a day and is let run over the days after it, which never have one. */
+.timeline-month {
+  align-self: flex-start;
+  height: 1lh;
+  padding-left: 3px;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--dim);
+}
+.timeline-weekday {
+  color: var(--dimmer);
+}
+.timeline-date {
+  color: var(--dim);
+}
+.timeline-head-now .timeline-weekday,
+.timeline-head-now .timeline-date {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* A day, from under the headings to the foot. Behind the bars, and the thing
+   a double-click lands on where there is no bar. */
+.timeline-day {
+  grid-row: 2 / -1;
+  border-left: var(--border) var(--border-style) color-mix(in srgb, var(--line) 40%, transparent);
+}
+.timeline-day-week {
+  border-left-color: var(--line);
+}
+.timeline-day-rest {
+  background: color-mix(in srgb, var(--chrome) 70%, transparent);
+}
+.timeline-day-now {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.timeline-day-over {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+.timeline-label {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  grid-column: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 4px 0 10px;
+  background: var(--bg);
+  border-right: var(--border) var(--border-style) var(--line);
+  font-size: var(--fs-base);
+}
+.timeline-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+@media (hover: hover) {
+  .timeline-label .board-icon-btn {
+    opacity: 0.55;
+  }
+  .timeline-label:hover .board-icon-btn,
+  .timeline-label:focus-within .board-icon-btn {
+    opacity: 1;
+  }
+}
+
+/* A card's days. It says nothing in words — its label is at the end of its
+   row and its dates are in the headings above it — so it is only a shape, and
+   which side of today it falls on is how solid that shape is. */
+.timeline-span {
+  position: relative;
+  z-index: 1;
+  align-self: center;
+  min-width: 0;
+  height: 18px;
+  margin: 0 2px;
+  border-radius: var(--radius-md);
+  /* Its column's colour, as `--tag`; the accent for a column with none. */
+  background: var(--tag, var(--accent));
+  cursor: grab;
+}
+.timeline-span-ahead {
+  background: color-mix(in srgb, var(--tag, var(--accent)) 60%, var(--bg));
+}
+.timeline-span-past {
+  background: color-mix(in srgb, var(--tag, var(--accent)) 28%, var(--bg));
+}
+.timeline-span:hover,
+.timeline-span:focus-visible {
+  filter: brightness(1.12);
+}
+.timeline-span:focus-visible {
+  outline: var(--border-thick) var(--border-style) var(--line-high);
+  outline-offset: 1px;
+}
+.timeline-span-held {
+  cursor: grabbing;
+  box-shadow: var(--elev-menu);
+}
+/* An end the window cut off is square and runs to the edge: the card goes on
+   past it, and a rounded end there would say it stopped. */
+.timeline-span-cut-start {
+  margin-left: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.timeline-span-cut-end {
+  margin-right: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+/* The ends, which are dragged on their own to make the card longer or
+   shorter. Narrow enough that a bar one day wide still has a middle. */
+.timeline-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: ew-resize;
+}
+.timeline-grip-start {
+  left: 0;
+}
+.timeline-grip-end {
+  right: 0;
+}
+.timeline-span-held .timeline-grip {
+  cursor: inherit;
+}
+
+.timeline-none {
+  grid-row: 2;
+  grid-column: 2 / -1;
+  z-index: 1;
+  align-self: center;
+  margin: 0;
+  padding: 0 10px;
+  white-space: nowrap;
+  color: var(--dimmer);
+  font-size: var(--fs-base);
+  pointer-events: none;
+}
+
+/* The cards with no date, under the days: a tray to pick them up out of. It
+   is never taller than a third of the sheet, so a long inbox does not push
+   the calendar it is waiting to go on off the screen. */
+.timeline-loose {
+  flex: none;
+  max-height: 34%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--chrome);
+  border-top: var(--border) var(--border-style) var(--line);
+}
+.timeline-loose-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 10px 2px;
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+.timeline-loose-head .board-col-count {
+  margin-right: 0;
+  font-weight: 400;
+}
+.timeline-hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dimmer);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+}
+.timeline-loose-cards {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 8px 8px;
+}
+.timeline-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 280px;
+  padding: 4px 8px;
+  background: var(--bg);
+  border: var(--border) var(--border-style) var(--line);
+  border-left: var(--border-thick) var(--border-style) var(--tag, var(--line));
+  border-radius: var(--radius-md);
+  font-size: var(--fs-base);
+  cursor: grab;
+}
+.timeline-chip:hover {
+  border-color: var(--line-high);
+  border-left-color: var(--tag, var(--line-high));
+}
+
+/* A phone: a narrower label and a wider day, since a day there is a thing a
+   thumb has to land on, and the five weeks scroll sideways under the labels.
+   The hint about dragging goes — nothing is dragged with a finger here. */
+:root[data-narrow] .timeline-grid {
+  grid-template-columns: 150px repeat(var(--days), minmax(32px, 1fr));
+  grid-template-rows: auto repeat(var(--rows), 38px) minmax(38px, 1fr);
+}
+:root[data-narrow] .timeline-span {
+  height: 24px;
+}
+:root[data-narrow] .timeline-hint {
+  display: none;
+}
+/* The key goes under the arrows on a phone, where there is no room beside them. */
+:root[data-narrow] .timeline-bar {
+  flex-wrap: wrap;
+}
+:root[data-narrow] .timeline-range {
+  flex: 1;
+}
+:root[data-narrow] .timeline-key {
+  order: 1;
+  flex: 1 0 100%;
+  justify-content: flex-start;
 }

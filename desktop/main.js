@@ -38,7 +38,16 @@ const DEV = process.env.KURURU_DEV === "1";
 const PACKAGED = app.isPackaged;
 const PORT = Number(process.env.KURURU_PORT || 7717);
 const LOCAL = `http://127.0.0.1:${PORT}`;
-const VITE_URL = `http://localhost:${process.env.KURURU_VITE_PORT || 5173}`;
+/**
+ * An address and never `localhost`, because `localhost` is two addresses and the
+ * port is only ours on one of them. Our vite binds `0.0.0.0` for the phone, which
+ * is IPv4 only, so another project's vite on its default `localhost` binds `[::1]`
+ * on the *same port* without either one seeing `EADDRINUSE` — and `localhost`
+ * resolves to `::1` first. The readiness probe below would get its 200 from the
+ * other project and the window would load it. That is not hypothetical: it is
+ * how a Platypost renderer turned up in this window.
+ */
+const VITE_URL = `http://127.0.0.1:${process.env.KURURU_VITE_PORT || 5173}`;
 const PICKER = path.join(__dirname, "connect.html");
 
 /** Where bun lives when it is not on PATH — a GUI launch inherits almost none. */

@@ -16,7 +16,10 @@ in both directions, every spelling of a colour, a sequence cut in half by a read
 boundary, and that the two directions round-trip), `styles` (the registry format
 and every check applied to a manifest a stranger wrote — no network, no disk),
 `screen` (serialize, rebuild, compare the buffers; and the hidden cursor),
-`layout` (asserting *through* `JSON.stringify`), `markdown` (the reader's whole
+`layout` (asserting *through* `JSON.stringify`), `days` (that a day no calendar
+has is refused rather than rolled into the next month, and that a change of
+clocks is not a day), `board` (the run automation, and a card's dates and the
+timeline's window), `markdown` (the reader's whole
 security story: that raw HTML cannot be emitted and that no `href` or `src`
 carries a scheme the browser would run — the one test that drives a real
 dependency, since Shiki's wasm has to load), and the pane tree in `web/test`,

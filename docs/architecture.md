@@ -203,11 +203,18 @@ argument that keeps `tailscale` commands out of kururu.
   lexical `../`; the second catches a symlink inside the project pointing at
   `~/.ssh`. An escaping path is **refused, never clamped** — a clamped traversal
   is a bug that looks like it worked. Roots are only ever learned from places the
-  server already knows (an agent's cwd, a dev server's cwd, `KURURU_ROOTS`, and
-  the repository `pollBranches` walked up to from one of those), never from a
-  client.
-- **`files.ts` never writes.** Code is never written by kururu; the tree hands
-  it to nvim.
+  server already knows (an agent's cwd — spawn or live — a dev server's cwd,
+  `KURURU_ROOTS`, and the repository `pollBranches` walked up to from one of
+  those), never from a client. The tree's header can switch root, but only
+  among the `choices` the server sent in `projects`; the pick is a client
+  preference, not a new root.
+- **`files.ts` never writes; `fileops.ts` is the one file that does, and only
+  where files are, never what is in them.** Code is never written by kururu —
+  the tree hands it to nvim. The tree's new / rename / move / copy / Trash go
+  through `fileops.ts`: every path through `resolveInRoot`, a new name is one
+  path component or refused, nothing is ever overwritten, `.git` is off limits,
+  and delete is the platform Trash (`/usr/bin/trash`, then Finder, then
+  `gio trash`) — **never `rm`**, and no Trash means no delete.
 - **`markdown.ts`: `html: false` IS the sanitizer.** Server-side so the phone
   gets no parser.
 - **`update.ts` checks and never installs.** See [packaging](packaging.md).

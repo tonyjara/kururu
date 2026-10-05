@@ -28,6 +28,8 @@ import {
   terminalsOf,
   paneInDirection,
   panes,
+  showingDoc,
+  showsDoc,
   soloPane,
   visibleAgents,
   type Direction,
@@ -37,6 +39,7 @@ import { keymapFrom } from "../../shared/keys";
 import { mascotFor } from "../../shared/model";
 import { Dialog, type DialogState } from "./components/Dialog";
 import { FileTree, MARKDOWN } from "./components/FileTree";
+import { ProfileBoard } from "./components/ProfileBoard";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Keybar } from "./components/Keybar";
 import { Menu, type MenuAt } from "./components/Menu";
@@ -98,7 +101,14 @@ const FILES_DEFAULT = 240;
 const FILES_MIN = 168;
 const FILES_MAX = 520;
 const FILES_WIDTH_KEY = "kururu.files.width";
-const FILES_OPEN_KEY = "kururu.files.open";
+/**
+ * Which workspaces have the tree open, as a list of ids. Per workspace because
+ * the tree is a view of one project: a workspace you read documents in wants it
+ * beside the panes, and one that is three agents side by side wants the width.
+ * A new key rather than the old flag's, which was one answer for every
+ * workspace and has nothing to say about any particular one.
+ */
+const FILES_OPEN_KEY = "kururu.files.open-in";
 
 /** The pick-list row that means "a new nvim" rather than one that is running. */
 const NEW_EDITOR = "__new__";
@@ -216,7 +226,13 @@ export function App() {
    * phone opening onto a list of files instead of the agent it came to watch
    * would be the wrong first screen.
    */
-  const [filesOpen, setFilesOpen] = useState(() => !matchesNarrow() && storedFlag(FILES_OPEN_KEY));
+  const [filesOpenIn, setFilesOpenIn] = useState<ReadonlySet<string>>(() => storedIds(FILES_OPEN_KEY));
+  /**
+   * The narrow window's sheet, which is its own flag rather than the set above:
+   * the phone's tree is a momentary overlay, not a column anybody chose to keep,
+   * and a phone dismissing it must not close it in the desktop's memory.
+   */
+  const [filesSheet, setFilesSheet] = useState(false);
   const [filesWidth, setFilesWidth] = useState(() => storedWidth(FILES_WIDTH_KEY, FILES_DEFAULT, FILES_MIN, FILES_MAX));
   /** Zen: the focused pane takes the window. A view state, never the server's. */
   const [zen, setZen] = useState(false);
@@ -234,6 +250,8 @@ export function App() {
   const [resizeMode, setResizeMode] = useState(false);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [help, setHelp] = useState(false);
+  /** The profile's board, over the window — view state, like the help overlay. */
+  const [profileBoard, setProfileBoard] = useState(false);
   /**
    * Settings: which page of it is open, or null for closed. A view state like the
    * help overlay rather than anything the server knows about — what it *edits* is
@@ -295,7 +313,7 @@ export function App() {
    * exactly where it is and the terminal needs no second handover when hjkl
    * stops moving a divider.
    */
-  const paneKeyboard = !(dialog || editing || settings || help || reach || profileMenu);
+  const paneKeyboard = !(dialog || editing || settings || help || reach || profileMenu || profileBoard);
 
   const profile = snapshot?.profile ?? null;
   const workspace = useMemo(
@@ -303,6 +321,24 @@ export function App() {
     [profile],
   );
   const agents = useMemo(() => snapshot?.agents ?? [], [snapshot]);
+  const filesOpen = narrow ? filesSheet : !!workspace && filesOpenIn.has(workspace.id);
+  /** Opens or shuts the tree for the workspace in front of you, and only it. */
+  const setFilesOpen = useCallback(
+    (next: boolean | ((open: boolean) => boolean)) => {
+      if (narrow) return setFilesSheet(next);
+      const id = workspace?.id;
+      if (!id) return;
+      setFilesOpenIn((current) => {
+        const open = typeof next === "function" ? next(current.has(id)) : next;
+        if (open === current.has(id)) return current;
+        const updated = new Set(current);
+        if (open) updated.add(id);
+        else updated.delete(id);
+        return updated;
+      });
+    },
+    [narrow, workspace?.id],
+  );
   /**
    * The keys this window is using: ghosttown's table as the user has amended it.
    * Derived from the snapshot rather than held, like everything else the server
@@ -415,13 +451,13 @@ export function App() {
   useEffect(() => {
     try {
       localStorage.setItem(FILES_WIDTH_KEY, String(filesWidth));
-      if (!narrow) localStorage.setItem(FILES_OPEN_KEY, filesOpen ? "1" : "0");
+      localStorage.setItem(FILES_OPEN_KEY, JSON.stringify([...filesOpenIn]));
     } catch {
       // As for the sidebar: no storage is a default, not a failure.
     }
-  }, [filesWidth, filesOpen, narrow]);
+  }, [filesWidth, filesOpenIn]);
   useEffect(() => {
-    if (narrow) setFilesOpen(false);
+    if (narrow) setFilesSheet(false);
   }, [narrow]);
 
   const resizeFiles = useCallback((px: number) => {
@@ -901,6 +937,21 @@ export function App() {
         return;
       }
 
+      // The profile's board is full of fields like Settings is, and modal over
+      // the keyboard for the same reason. Escape inside a composer is the
+      // composer's own way out, so it closes the board only from outside one —
+      // and a column's name field is the same.
+      if (profileBoard) {
+        if (
+          keyName(event) === "escape" &&
+          !(event.target instanceof HTMLElement && event.target.closest(".board-composer, .board-col-input"))
+        ) {
+          take();
+          setProfileBoard(false);
+        }
+        return;
+      }
+
       if (help) {
         if (isPrefix(event) || keyName(event) === "escape" || keyName(event) === "?") {
           take();
@@ -1000,7 +1051,7 @@ export function App() {
 
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [prefixArmed, resizeMode, dialog, editing, help, settings, reach, profileMenu, workspace, keymap, run, arm, disarm]);
+  }, [prefixArmed, resizeMode, dialog, editing, help, settings, reach, profileMenu, profileBoard, workspace, keymap, run, arm, disarm]);
 
   /**
    * A file dropped anywhere that is not a terminal does nothing.
@@ -1078,7 +1129,7 @@ export function App() {
        tab, and exists for exactly one thing: the traffic lights, which float
        over this corner and are not there on a phone. */
     <div
-      className={`app ${zen ? "app-zen" : ""} ${desktop() ? "app-window" : ""}`}
+      className={`app ${zen ? "app-zen" : ""} ${desktop() ? "app-window" : ""} ${sidebarOpen ? "" : "app-sidebar-hidden"}`}
       style={{ "--sidebar-w": `${sidebarWidth}px`, "--files-w": `${filesWidth}px` } as React.CSSProperties}
     >
       {sidebarOpen && !zen && (
@@ -1098,6 +1149,12 @@ export function App() {
           onPrompt={setDialog}
           onSettings={() => setSettings("appearance")}
           onReach={() => setReach(true)}
+          onBoard={() => {
+            setProfileBoard(true);
+            // On a phone the sidebar is a screen of its own, and the board goes
+            // over the window rather than over it — so it is put away first.
+            if (narrow) setSidebarOpen(false);
+          }}
           /* Whether it is a column or a screen, and how to get rid of it. The
              sidebar draws a close button only in the second case — in the first
              the panes beside it are already the way out. */
@@ -1128,6 +1185,7 @@ export function App() {
           <Panes
             node={workspace.layout}
             workspaceId={workspace.id}
+            workspaceName={workspace.name}
             board={workspace.board}
             focusedPaneId={workspace.focusedPaneId}
             agents={agents}
@@ -1194,11 +1252,13 @@ export function App() {
 
       {filesOpen && !zen && workspace && (
         <FileTree
-          root={projects.find((p) => p.workspaceId === workspace.id)?.root ?? null}
+          workspaceId={workspace.id}
+          project={projects.find((p) => p.workspaceId === workspace.id) ?? null}
           current={readerPathOf(workspace)}
           overlay={narrow}
           onOpen={openFromTree}
           onOpenInEditor={(root, path) => void openInNvim(root, path)}
+          onPrompt={setDialog}
           onClose={() => setFilesOpen(false)}
           onResize={resizeFiles}
           onResetWidth={() => setFilesWidth(FILES_DEFAULT)}
@@ -1209,6 +1269,7 @@ export function App() {
       )}
 
       {help && <HelpOverlay keymap={keymap} onClose={() => setHelp(false)} />}
+      {profileBoard && <ProfileBoard profile={profile} onClose={() => setProfileBoard(false)} />}
       {settings && (
         <Settings
           appearance={snapshot.appearance}
@@ -1419,7 +1480,7 @@ function readerFocused(
 ): boolean {
   if (!workspace) return false;
   const pane = panes(workspace.layout).find((p) => p.id === workspace.focusedPaneId);
-  return Boolean(pane?.reader);
+  return Boolean(pane && showsDoc(pane));
 }
 
 function emptyPaneFocused(
@@ -1442,15 +1503,17 @@ function focusedAgentOf(
 function readerPathOf(workspace: { layout: LayoutNode; focusedPaneId: string }): string | null {
   const all = panes(workspace.layout);
   const focused = all.find((p) => p.id === workspace.focusedPaneId);
-  const reader = focused?.reader ? focused.reader : all.find((p) => p.reader)?.reader;
-  return reader?.path || null;
+  const reader = focused && showsDoc(focused) ? focused : all.find(showsDoc);
+  return (reader && showingDoc(reader)?.path) || null;
 }
 
-function storedFlag(key: string): boolean {
+/** A list of ids, kept as JSON. Anything that is not one reads as none. */
+function storedIds(key: string): ReadonlySet<string> {
   try {
-    return localStorage.getItem(key) === "1";
+    const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
+    return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : []);
   } catch {
-    return false;
+    return new Set();
   }
 }
 

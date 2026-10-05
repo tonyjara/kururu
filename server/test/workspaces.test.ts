@@ -8,9 +8,9 @@
  * nothing else, which is what makes it testable at all.
  */
 import { describe, expect, it } from "bun:test";
-import { findPane, panes } from "../../shared/layout";
+import { BOARD_TAB, docTab, docsOf, findPane, panes, showingDoc } from "../../shared/layout";
 import { Workspaces, nextColor, nextId, orderAgents } from "../src/workspaces";
-import { LOGIN_KEY, WORKSPACE_COLORS, type Profile } from "../../shared/model";
+import { LOGIN_KEY, WORKSPACE_COLORS, gatherGroups, groupName, type Profile } from "../../shared/model";
 
 describe("split", () => {
   it("returns the pane it made, and it is in the tree", () => {
@@ -84,6 +84,111 @@ describe("setWorkspaceColor", () => {
     const had = workspaces.activeWorkspace.color;
     workspaces.setWorkspaceColor("w-nope", "cyan");
     expect(workspaces.activeWorkspace.color).toBe(had);
+  });
+});
+
+/**
+ * Groups of workspaces. The property that matters is the one the sidebar's
+ * numbers rest on: every verb leaves each group's members side by side, so the
+ * index a row prints is still the index prefix+1..9 jumps to.
+ */
+describe("workspace groups", () => {
+  /** Four workspaces, a..d, and the names the list is in. */
+  const four = () => {
+    const workspaces = new Workspaces();
+    workspaces.renameWorkspace(workspaces.activeWorkspace.id, "a");
+    for (const name of ["b", "c", "d"]) workspaces.newWorkspace(name);
+    const id = (name: string) => workspaces.active.workspaces.find((w) => w.name === name)!.id;
+    const order = () => workspaces.active.workspaces.map((w) => `${w.name}${w.group ? `:${w.group}` : ""}`);
+    return { workspaces, id, order };
+  };
+
+  it("gathers each group where its first member stands, and leaves loose ones be", () => {
+    const list = [
+      { n: 1, group: "x" },
+      { n: 2, group: null },
+      { n: 3, group: "y" },
+      { n: 4, group: "x" },
+      { n: 5, group: null },
+    ];
+    expect(gatherGroups(list).map((w) => w.n)).toEqual([1, 4, 2, 3, 5]);
+  });
+
+  it("starts a group in place, files into its end, and leaves just after it", () => {
+    const { workspaces, id, order } = four();
+    workspaces.setWorkspaceGroup(id("b"), "work");
+    expect(order()).toEqual(["a", "b:work", "c", "d"]);
+    workspaces.setWorkspaceGroup(id("d"), "work");
+    expect(order()).toEqual(["a", "b:work", "d:work", "c"]);
+    workspaces.setWorkspaceGroup(id("b"), null);
+    expect(order()).toEqual(["a", "d:work", "b", "c"]);
+  });
+
+  it("cleans the name, and reads one with nothing in it as no group", () => {
+    expect(groupName("  two\n words ")).toBe("two words");
+    expect(groupName("   ")).toBeNull();
+    expect(groupName(7)).toBeNull();
+    expect(groupName("x".repeat(100))!.length).toBe(40);
+  });
+
+  it("renames a group on every member, merges onto a name in use, and disbands onto null", () => {
+    const { workspaces, id, order } = four();
+    workspaces.setWorkspaceGroup(id("a"), "one");
+    workspaces.setWorkspaceGroup(id("b"), "two");
+    workspaces.setWorkspaceGroup(id("c"), "two");
+    workspaces.renameWorkspaceGroup("two", "three");
+    expect(order()).toEqual(["a:one", "b:three", "c:three", "d"]);
+    // The merged group stands where the first of the two did.
+    workspaces.renameWorkspaceGroup("one", "three");
+    expect(order()).toEqual(["a:three", "b:three", "c:three", "d"]);
+    workspaces.renameWorkspaceGroup("three", null);
+    expect(order()).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("moves a dragged workspace into the group of the row it was dropped on", () => {
+    const { workspaces, id, order } = four();
+    workspaces.setWorkspaceGroup(id("c"), "g");
+    workspaces.setWorkspaceGroup(id("d"), "g");
+    expect(order()).toEqual(["a", "b", "c:g", "d:g"]);
+    workspaces.moveWorkspace(id("a"), 3);
+    expect(order()).toEqual(["b", "c:g", "d:g", "a:g"]);
+    workspaces.moveWorkspace(id("c"), 0);
+    expect(order()).toEqual(["c", "b", "d:g", "a:g"]);
+  });
+
+  it("moves a whole group to a loose row's place or another group's, from either side", () => {
+    const { workspaces, id, order } = four();
+    workspaces.setWorkspaceGroup(id("b"), "x");
+    workspaces.setWorkspaceGroup(id("c"), "x");
+    expect(order()).toEqual(["a", "b:x", "c:x", "d"]);
+    // Down past a loose one, then back up between two.
+    workspaces.moveWorkspaceGroup("x", id("d"));
+    expect(order()).toEqual(["a", "d", "b:x", "c:x"]);
+    workspaces.moveWorkspaceGroup("x", id("a"));
+    expect(order()).toEqual(["b:x", "c:x", "a", "d"]);
+    // Onto another group, by any of its members.
+    workspaces.setWorkspaceGroup(id("d"), "y");
+    workspaces.moveWorkspaceGroup("x", id("d"));
+    expect(order()).toEqual(["a", "d:y", "b:x", "c:x"]);
+    // Onto itself, onto nothing, and as no group at all: nothing moves.
+    for (const onto of [id("b"), "w-nope", 7]) workspaces.moveWorkspaceGroup("x", onto);
+    workspaces.moveWorkspaceGroup(null, id("a"));
+    expect(order()).toEqual(["a", "d:y", "b:x", "c:x"]);
+  });
+
+  it("refuses a position that is not a number", () => {
+    const { workspaces, id, order } = four();
+    workspaces.moveWorkspace(id("a"), Number.NaN);
+    expect(order()).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("survives a restore that never heard of groups", () => {
+    const { workspaces, id } = four();
+    workspaces.setWorkspaceGroup(id("b"), "g");
+    const blob = JSON.parse(JSON.stringify(workspaces.active)) as Profile;
+    for (const w of blob.workspaces) delete (w as { group?: unknown }).group;
+    const restored = new Workspaces([blob]);
+    expect(restored.active.workspaces.every((w) => w.group === null)).toBe(true);
   });
 });
 
@@ -313,11 +418,13 @@ describe("lastPane", () => {
  * following an editor: the project it opens on, and what happens to the follow.
  */
 describe("the reader", () => {
+  const paneOf = (workspaces: Workspaces, id: string) => findPane(workspaces.activeWorkspace.layout, id)!;
+
   it("carries the project in at birth, so the picker has somewhere to open", () => {
     const workspaces = new Workspaces();
     const made = workspaces.openReader(workspaces.focusedPaneId, null, "/home/you/project")!;
-    const reader = panes(workspaces.activeWorkspace.layout).find((p) => p.id === made)?.reader;
-    expect(reader).toMatchObject({ root: "/home/you/project", path: "", follow: null });
+    expect(paneOf(workspaces, made).reader).toMatchObject({ root: "/home/you/project", follow: null });
+    expect(paneOf(workspaces, made).agentIds).toEqual([]);
   });
 
   it("leaves the focus where it was — the caller decides whether to move it", () => {
@@ -335,26 +442,53 @@ describe("the reader", () => {
     expect(workspaces.readersFollowing("agent-1")).toHaveLength(1);
 
     expect(workspaces.openDoc(made, "/home/you/project", "docs/PLAN.md")).toBe(true);
-    const reader = panes(workspaces.activeWorkspace.layout).find((p) => p.id === made)?.reader;
-    expect(reader).toMatchObject({ root: "/home/you/project", path: "docs/PLAN.md", follow: null });
+    expect(showingDoc(paneOf(workspaces, made))).toEqual({ root: "/home/you/project", path: "docs/PLAN.md" });
+    expect(paneOf(workspaces, made).reader).toMatchObject({ follow: null });
     expect(workspaces.readersFollowing("agent-1")).toHaveLength(0);
   });
 
-  it("does nothing to a pane that is not a reader", () => {
+  it("opens a document in any pane, as a tab after the one showing", () => {
     const workspaces = new Workspaces();
-    expect(workspaces.openDoc(workspaces.focusedPaneId, "/home/you/project", "README.md")).toBe(false);
+    const pane = workspaces.focusedPaneId;
+    workspaces.addTab("a1", "/home/you/project", pane);
+    expect(workspaces.openDoc(pane, "/home/you/project", "README.md")).toBe(true);
+    expect(paneOf(workspaces, pane).agentIds).toEqual(["a1", docTab("/home/you/project", "README.md")]);
+    expect(showingDoc(paneOf(workspaces, pane))?.path).toBe("README.md");
+    expect(workspaces.agentsHere()).toEqual(["a1"]);
+  });
+
+  it("takes the screen for an editor's report only where a document is already showing", () => {
+    const workspaces = new Workspaces();
+    const made = workspaces.openReader(workspaces.focusedPaneId, "agent-1", "/p")!;
+    const w = workspaces.activeWorkspace.id;
+    workspaces.setReaderTarget(w, made, "/p", "a.md");
+    expect(showingDoc(paneOf(workspaces, made))?.path).toBe("a.md");
+    // A terminal dragged in and showing: the next report lands behind it.
+    workspaces.moveTab("a2", made);
+    workspaces.setReaderTarget(w, made, "/p", "b.md");
+    expect(paneOf(workspaces, made).agentIds).toEqual([docTab("/p", "a.md"), "a2", docTab("/p", "b.md")]);
+    expect(paneOf(workspaces, made).activeIdx).toBe(1);
+    expect(paneOf(workspaces, made).reader).toMatchObject({ follow: "agent-1" });
   });
 });
 
 /**
- * A reader's tabs: one per document, the showing one always among them, and
- * the last one closed takes the pane — plus the follow button, which used to
- * forget the editor the moment it was pinned and so could never unpin.
+ * Documents as tabs: one per document per pane, in any pane beside terminals
+ * and the board, and the pane goes with its last tab — plus the follow button,
+ * which used to forget the editor the moment it was pinned and so could never
+ * unpin.
  */
-describe("reader tabs", () => {
+describe("document tabs", () => {
   const ROOT = "/home/you/project";
-  const readerOf = (workspaces: Workspaces, id: string) =>
-    panes(workspaces.activeWorkspace.layout).find((p) => p.id === id)?.reader;
+  const paneOf = (workspaces: Workspaces, id: string) => findPane(workspaces.activeWorkspace.layout, id) ?? undefined;
+  const paths = (workspaces: Workspaces, id: string) => {
+    const pane = paneOf(workspaces, id);
+    return pane ? docsOf(pane).map((doc) => doc.path) : undefined;
+  };
+  const shown = (workspaces: Workspaces, id: string) => {
+    const pane = paneOf(workspaces, id);
+    return pane ? showingDoc(pane)?.path : undefined;
+  };
 
   it("opens each document as a tab after the one showing, and never twice", () => {
     const workspaces = new Workspaces();
@@ -363,11 +497,10 @@ describe("reader tabs", () => {
     workspaces.selectDoc(made, 0);
     workspaces.showDoc(ROOT, "c.md");
     workspaces.showDoc(ROOT, "b.md");
-    const reader = readerOf(workspaces, made)!;
-    expect(reader.docs.map((doc) => doc.path)).toEqual(["a.md", "c.md", "b.md"]);
-    expect(reader.path).toBe("b.md");
-    // Every click landed in the one reader rather than tiling the window.
-    expect(panes(workspaces.activeWorkspace.layout).filter((p) => p.reader)).toHaveLength(1);
+    expect(paths(workspaces, made)).toEqual(["a.md", "c.md", "b.md"]);
+    expect(shown(workspaces, made)).toBe("b.md");
+    // Every click landed in the one pane rather than tiling the window.
+    expect(panes(workspaces.activeWorkspace.layout).filter((p) => docsOf(p).length > 0)).toHaveLength(1);
   });
 
   it("shows the neighbour when the showing tab closes, and closes the pane with the last", () => {
@@ -377,38 +510,38 @@ describe("reader tabs", () => {
     workspaces.showDoc(ROOT, "c.md");
     workspaces.selectDoc(made, 1);
     workspaces.closeDoc(made, 1);
-    expect(readerOf(workspaces, made)).toMatchObject({ path: "c.md" });
+    expect(shown(workspaces, made)).toBe("a.md");
     workspaces.closeDoc(made, 1);
-    expect(readerOf(workspaces, made)).toMatchObject({ path: "a.md" });
+    expect(shown(workspaces, made)).toBe("a.md");
     workspaces.closeDoc(made, 0);
-    expect(readerOf(workspaces, made)).toBeUndefined();
+    expect(paneOf(workspaces, made)).toBeUndefined();
   });
 
-  it("ignores an index that is not a tab", () => {
+  it("ignores an index that is not a document", () => {
     const workspaces = new Workspaces();
     const made = workspaces.showDoc(ROOT, "a.md")!;
+    workspaces.moveTab("a1", made);
     workspaces.closeDoc(made, 5);
     workspaces.selectDoc(made, 5);
-    expect(readerOf(workspaces, made)).toMatchObject({ path: "a.md", docs: [{ root: ROOT, path: "a.md" }] });
+    workspaces.closeDoc(made, 1);
+    expect(paneOf(workspaces, made)?.agentIds).toEqual([docTab(ROOT, "a.md"), "a1"]);
   });
 
   it("remembers the editor through a pin, so following again has somebody to follow", () => {
     const workspaces = new Workspaces();
     const made = workspaces.openReader(workspaces.focusedPaneId, "agent-1", ROOT)!;
     workspaces.pinReader(made, false);
-    expect(readerOf(workspaces, made)).toMatchObject({ follow: null, editor: "agent-1" });
+    expect(paneOf(workspaces, made)?.reader).toMatchObject({ follow: null, editor: "agent-1" });
     workspaces.pinReader(made, true);
-    expect(readerOf(workspaces, made)).toMatchObject({ follow: "agent-1" });
+    expect(paneOf(workspaces, made)?.reader).toMatchObject({ follow: "agent-1" });
   });
 
   it("has nobody to follow when it was opened from the tree", () => {
     const workspaces = new Workspaces();
     const made = workspaces.showDoc(ROOT, "a.md")!;
     workspaces.pinReader(made, true);
-    expect(readerOf(workspaces, made)).toMatchObject({ follow: null, editor: null });
+    expect(paneOf(workspaces, made)?.reader?.follow ?? null).toBeNull();
   });
-
-  const paths = (workspaces: Workspaces, id: string) => readerOf(workspaces, id)?.docs.map((doc) => doc.path);
 
   it("reorders along its own strip, the index read as where the tab was dropped", () => {
     const workspaces = new Workspaces();
@@ -418,12 +551,12 @@ describe("reader tabs", () => {
     // a dropped on the insertion line after c.
     workspaces.moveDoc(made, 0, made, 3);
     expect(paths(workspaces, made)).toEqual(["b.md", "c.md", "a.md"]);
-    expect(readerOf(workspaces, made)?.path).toBe("a.md");
+    expect(shown(workspaces, made)).toBe("a.md");
     workspaces.moveDoc(made, 2, made, 0);
     expect(paths(workspaces, made)).toEqual(["a.md", "b.md", "c.md"]);
   });
 
-  it("moves a tab into another reader, and closes the one it emptied", () => {
+  it("moves a tab into another pane, and closes the one it emptied", () => {
     const workspaces = new Workspaces();
     const one = workspaces.showDoc(ROOT, "a.md")!;
     workspaces.showDoc(ROOT, "b.md");
@@ -434,11 +567,38 @@ describe("reader tabs", () => {
     expect(paths(workspaces, two)).toEqual(["b.md"]);
     workspaces.moveDoc(one, 0, two, 0);
     expect(paths(workspaces, two)).toEqual(["a.md", "b.md"]);
-    expect(readerOf(workspaces, two)?.path).toBe("a.md");
-    expect(readerOf(workspaces, one)).toBeUndefined();
+    expect(shown(workspaces, two)).toBe("a.md");
+    expect(paneOf(workspaces, one)).toBeUndefined();
   });
 
-  it("splits beside a terminal pane, and refuses to split a reader off its only tab", () => {
+  it("goes into the strip of a pane with the board and terminals in it, and back out", () => {
+    const workspaces = new Workspaces();
+    const home = workspaces.focusedPaneId;
+    workspaces.addTab("a1", ROOT, home);
+    workspaces.openBoard(home, true);
+    const reader = workspaces.showDoc(ROOT, "spec.md")!;
+    expect(reader).not.toBe(home);
+
+    workspaces.moveDoc(reader, 0, home, 1);
+    expect(paneOf(workspaces, home)?.agentIds).toEqual(["a1", docTab(ROOT, "spec.md"), BOARD_TAB]);
+    expect(shown(workspaces, home)).toBe("spec.md");
+    expect(paneOf(workspaces, reader)).toBeUndefined();
+    // Nothing that treats a tab as a process sees it.
+    expect(workspaces.agentsHere()).toEqual(["a1"]);
+    expect(workspaces.closePane(home)).toEqual(["a1"]);
+  });
+
+  it("takes a terminal into a pane of documents", () => {
+    const workspaces = new Workspaces();
+    const home = workspaces.focusedPaneId;
+    workspaces.addTab("a1", ROOT, home);
+    const reader = workspaces.showDoc(ROOT, "a.md")!;
+    workspaces.moveTab("a1", reader);
+    expect(paneOf(workspaces, reader)?.agentIds).toEqual([docTab(ROOT, "a.md"), "a1"]);
+    expect(paneOf(workspaces, home)).toBeUndefined();
+  });
+
+  it("splits beside any pane, and refuses to split a pane off its only tab", () => {
     const workspaces = new Workspaces();
     const terminal = workspaces.focusedPaneId;
     const made = workspaces.showDoc(ROOT, "a.md")!;
@@ -447,25 +607,64 @@ describe("reader tabs", () => {
     expect(workspaces.activeWorkspace.layout).toBe(before);
     workspaces.splitWithDoc(made, 0, terminal, "col", true);
     const all = panes(workspaces.activeWorkspace.layout);
-    expect(all.filter((p) => p.reader).map((p) => p.reader!.path)).toEqual(["a.md"]);
+    expect(all.flatMap((p) => docsOf(p).map((d) => d.path))).toEqual(["a.md"]);
     expect(all.find((p) => p.id === made)).toBeUndefined();
   });
 
-  it("pours a reader into a reader, and never into a terminal pane", () => {
+  it("pours any pane into any other, a document already there not brought twice", () => {
     const workspaces = new Workspaces();
     const terminal = workspaces.focusedPaneId;
+    workspaces.addTab("a1", ROOT, terminal);
     const one = workspaces.showDoc(ROOT, "a.md")!;
     workspaces.showDoc(ROOT, "b.md");
     workspaces.splitWithDoc(one, 1, one, "row", false);
     const two = workspaces.focusedPaneId;
     workspaces.showDoc(ROOT, "a.md");
-    workspaces.mergePanes(one, terminal);
-    expect(readerOf(workspaces, one)).toBeDefined();
-    workspaces.mergePanes(terminal, one);
-    expect(findPane(workspaces.activeWorkspace.layout, terminal)).not.toBeNull();
     workspaces.mergePanes(one, two);
-    expect(readerOf(workspaces, one)).toBeUndefined();
+    expect(paneOf(workspaces, one)).toBeUndefined();
     expect(paths(workspaces, two)).toEqual(["b.md", "a.md"]);
+    workspaces.mergePanes(two, terminal);
+    expect(paneOf(workspaces, terminal)?.agentIds).toEqual(["a1", docTab(ROOT, "b.md"), docTab(ROOT, "a.md")]);
+  });
+
+  it("refuses a document through the verbs that address a tab by id", () => {
+    const workspaces = new Workspaces();
+    const made = workspaces.showDoc(ROOT, "a.md")!;
+    const other = workspaces.split("row")!;
+    const before = workspaces.activeWorkspace.layout;
+    workspaces.moveTab(docTab(ROOT, "a.md"), other);
+    workspaces.splitWith(docTab(ROOT, "a.md"), other, "row", false);
+    expect(workspaces.activeWorkspace.layout).toBe(before);
+    expect(paths(workspaces, made)).toEqual(["a.md"]);
+  });
+
+  it("lands a file dropped from the tree where it was dropped, or in a pane of its own", () => {
+    const workspaces = new Workspaces();
+    const home = workspaces.focusedPaneId;
+    workspaces.addTab("a1", ROOT, home);
+    workspaces.openBoard(home, true);
+    workspaces.openDoc(home, ROOT, "a.md", 1);
+    expect(paneOf(workspaces, home)?.agentIds).toEqual(["a1", docTab(ROOT, "a.md"), BOARD_TAB]);
+    // Dropped again further along: it moves rather than doubling.
+    workspaces.openDoc(home, ROOT, "a.md", 3);
+    expect(paneOf(workspaces, home)?.agentIds).toEqual(["a1", BOARD_TAB, docTab(ROOT, "a.md")]);
+    workspaces.splitWithFile(ROOT, "b.md", home, "row", true);
+    const [left, right] = panes(workspaces.activeWorkspace.layout);
+    expect(left!.agentIds).toEqual([docTab(ROOT, "b.md")]);
+    expect(right!.id).toBe(home);
+    expect(workspaces.focusedPaneId).toBe(left!.id);
+  });
+
+  it("pins a following reader when a different document is picked from its strip", () => {
+    const workspaces = new Workspaces();
+    const made = workspaces.openReader(workspaces.focusedPaneId, "agent-1", ROOT)!;
+    const w = workspaces.activeWorkspace.id;
+    workspaces.setReaderTarget(w, made, ROOT, "a.md");
+    workspaces.setReaderTarget(w, made, ROOT, "b.md");
+    workspaces.selectDoc(made, 1);
+    expect(paneOf(workspaces, made)?.reader?.follow).toBe("agent-1");
+    workspaces.selectDoc(made, 0);
+    expect(paneOf(workspaces, made)?.reader?.follow).toBeNull();
   });
 });
 
@@ -473,8 +672,9 @@ describe("reader tabs", () => {
  * What a terminal ending does to the arrangement it was in. `removeTab` is the
  * gesture — close this tab, keep the pane, it is a place you are keeping —
  * and `reapTab` is the pty being gone, which takes the pane with it unless
- * something else is left in there. The two refusals are the interesting half:
- * a workspace must keep a pane to focus, and a reader is not a hole.
+ * something else is left in there. The refusals are the interesting half: a
+ * workspace must keep a pane to focus, and a pane with a document or the board
+ * still in it is not a hole.
  */
 describe("reapTab", () => {
   it("takes the pane with the tab when there is nothing else in it", () => {

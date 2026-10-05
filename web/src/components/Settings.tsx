@@ -33,92 +33,117 @@ import { AppearanceSettings } from "./SettingsAppearance";
 import { KeySettings } from "./SettingsKeys";
 import { MascotSettings } from "./SettingsMascot";
 import { NotifySettings } from "./SettingsNotify";
+import { ProcessSettings } from "./SettingsProcesses";
 import { ProfileSettings } from "./SettingsProfiles";
 import { WorkspaceSettings } from "./SettingsWorkspaces";
 import { StyleSettings } from "./SettingsStyles";
 import { StudioSettings } from "./SettingsStudio";
+import { VpsSettings } from "./SettingsVps";
 
 export type Tab =
   | "appearance"
   | "styles"
   | "studio"
-  | "profiles"
-  | "agents"
-  | "workspaces"
   | "mascot"
+  | "profiles"
+  | "workspaces"
+  | "agents"
+  | "processes"
   | "notify"
+  | "vps"
   | "keys"
   | "about";
 
 /**
- * Appearance first, and not alphabetically: it is the page somebody opens
- * Settings to find, and the rest are things you go looking for once. It is also
- * the only one whose effect is visible behind the dialog while you are using it,
- * which is worth having on the tab that opens by default.
+ * The strip along the top, each holding one page or several.
  *
- * Profiles is second and is the exception that makes the ordering worth
- * defending: it is the one page that is mostly arrived at rather than browsed
- * for, because the profile name in the sidebar opens Settings straight onto it.
- * Which is also why `tab` is a prop here — where Settings opens is the caller's
- * to say, even though where it goes next is not.
+ * It was eleven tabs in a row, which on a desktop was a strip you read left to
+ * right to find anything and on a phone was most of a strip you could not see.
+ * Pages that answer the same question now share a tab and are told apart by a
+ * second, smaller row under it: what the window looks like (the palette, what
+ * there is to download, what you make yourself, what moves in the sidebar), and
+ * where the work lives (profiles, and the repositories their workspaces are in).
+ *
+ * `Tab` stays the name of a *page*, not of a section, and that is deliberate:
+ * the sidebar's "Profile settings…" opens a page, `App` remembers a page across
+ * a reload, and both would have had to learn a pair of names if the section were
+ * part of the address. A section is found from its page, never the other way.
+ *
+ * Appearance first: it is the page somebody opens Settings to find, the cog
+ * opens on it, and it is the only one whose effect is visible behind the dialog
+ * while you use it. About last, because it edits nothing.
  */
-const TABS: ReadonlyArray<readonly [Tab, string]> = [
-  ["appearance", "Appearance"],
+const SECTIONS: ReadonlyArray<{
+  id: string;
+  label: string;
+  pages: ReadonlyArray<readonly [Tab, string]>;
+}> = [
+  {
+    id: "appearance",
+    label: "Appearance",
+    pages: [
+      ["appearance", "Theme"],
+      /**
+       * What you are *wearing* against what there is to *get*: Theme lists every
+       * theme and skin this machine has with no idea where any came from, and
+       * this is the one that knows. Somebody changing theme ten times an
+       * afternoon should never pass through a list of downloads to do it, which
+       * is why it is the second page and not the first.
+       */
+      ["styles", "Explore"],
+      /**
+       * The shop's other door: what you could not find there you make here, and
+       * what you make here is one pull request from being there. It edits a
+       * skin live — the window behind the dialog is the preview.
+       */
+      ["studio", "Skin studio"],
+      ["mascot", "Mascot"],
+    ],
+  },
+  {
+    id: "general",
+    label: "General",
+    pages: [
+      /**
+       * Profiles first: it is the page the sidebar's profile name opens straight
+       * onto. Workspaces after it because a profile is a drawer of them, and the
+       * page is about the repository each one is in.
+       */
+      ["profiles", "Profiles"],
+      ["workspaces", "Workspaces"],
+    ],
+  },
   /**
-   * Second, and beside Appearance rather than inside it. The line between the
-   * two is what you are *wearing* against what there is to *get*: Appearance
-   * lists every theme and skin this machine has, built-in and installed alike,
-   * with no idea where any of them came from, and this is the one that knows.
-   * Somebody changing theme ten times an afternoon should never pass through a
-   * list of downloads to do it.
+   * What the new-tab button will start — beside General because both are about
+   * what you work *in* rather than what it looks like.
    */
-  ["styles", "Styles"],
+  { id: "agents", label: "Agents", pages: [["agents", "Agents"]] },
   /**
-   * Third, after the shop, because it is the shop's other door: what you could
-   * not find there, you make here, and what you make here is one pull request
-   * from being there. It edits a skin *live* — the window behind the dialog is
-   * the preview — which is the second reason it sits near Appearance.
+   * What everything started from those two pages is costing, and the place to
+   * close what is not worth it. Right after Agents, which is where they came from.
    */
-  ["studio", "Skin studio"],
-  ["profiles", "Profiles"],
+  { id: "processes", label: "Processes", pages: [["processes", "Processes"]] },
   /**
-   * Beside Profiles because both are about what you work *in* rather than what
-   * it looks like: a profile is where the terminals are, and this is what the
-   * new-tab button will put in one.
+   * How kururu says an agent wants you while you are not looking at the window.
    */
-  ["agents", "Agents"],
-  /**
-   * After Agents, and it is the same sentence read on: Agents is what the
-   * robot starts, this is where it starts it — in a worktree or not, and what
-   * runs in a fresh one first. A sub-tab per workspace, because that is the
-   * list a person has in their head; what is stored is the repository's.
-   */
-  ["workspaces", "Workspaces"],
-  ["mascot", "Mascot"],
-  /**
-   * Beside the Mascot rather than beside Appearance, and the two are the same
-   * subject read one step further out: the badge is how kururu says an agent
-   * wants you while you are looking at the window, and this is how it says so
-   * while you are not. Before Keys, which stays last because it is the one page
-   * that is a table rather than a form.
-   */
-  ["notify", "Notifications"],
-  ["keys", "Keys"],
-  /**
-   * Last, and after the one page that is a table, because it is the only page
-   * here that edits nothing — you arrive at it once, to answer a question about
-   * kururu rather than to change it.
-   */
-  ["about", "About"],
+  { id: "notify", label: "Notifications", pages: [["notify", "Notifications"]] },
+  /** The one page about a machine that is not this one, set up once. */
+  { id: "vps", label: "VPS", pages: [["vps", "VPS"]] },
+  { id: "keys", label: "Keys", pages: [["keys", "Keys"]] },
+  { id: "about", label: "About", pages: [["about", "About"]] },
 ];
 
+function sectionOf(tab: Tab) {
+  return SECTIONS.find((section) => section.pages.some(([page]) => page === tab)) ?? SECTIONS[0]!;
+}
+
 /**
- * The tab names alone, derived rather than typed out a second time, for the
+ * The page names alone, derived rather than typed out a second time, for the
  * reason `ICON_NAMES` is one list: `App` has to check a name that came back out
  * of storage against something at runtime, and a hand-written copy of this is a
  * copy that loses a page the day one is added here.
  */
-export const TAB_NAMES: readonly Tab[] = TABS.map(([name]) => name);
+export const TAB_NAMES: readonly Tab[] = SECTIONS.flatMap((section) => section.pages.map(([name]) => name));
 
 export function Settings({
   appearance,
@@ -176,12 +201,23 @@ export function Settings({
   onEditing: (on: boolean) => void;
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
+  const section = sectionOf(tab);
+  /**
+   * The page last open in each section, so that going to Agents and back to
+   * Appearance lands on Explore if Explore is where you were. The window's,
+   * like `tab`, and forgotten when the dialog closes.
+   */
+  const [lastPage, setLastPage] = useState<Record<string, Tab>>({});
+  const go = (page: Tab) => {
+    setTab(page);
+    setLastPage((last) => ({ ...last, [sectionOf(page).id]: page }));
+  };
 
   /**
    * Keep the tab you are on inside the strip, which only ever moves anything on
-   * a window too narrow to hold seven of them — a phone. Two cases and they are
+   * a window too narrow to hold eight of them — a phone. Two cases and they are
    * the same line of code: Settings opened on a tab somebody else chose
-   * (`initialTab` is Profiles when the sidebar's name opens it, and Profiles is
+   * (`initialTab` is Profiles when the sidebar's name opens it, which would be
    * off the right edge at 390px), and a tab tapped when half of it was showing.
    *
    * A callback ref rather than an effect because the node *is* the event: it is
@@ -205,20 +241,35 @@ export function Settings({
       >
         <div className="set-tabbar">
           <div className="set-tabs" role="tablist" aria-label="Settings">
-            {TABS.map(([id, label]) => (
+            {SECTIONS.map(({ id, label, pages }) => (
               <button
                 key={id}
                 role="tab"
-                aria-selected={tab === id}
-                ref={tab === id ? onTab : undefined}
-                className={`set-tab ${tab === id ? "set-tab-on" : ""}`}
-                onClick={() => setTab(id)}
+                aria-selected={section.id === id}
+                ref={section.id === id ? onTab : undefined}
+                className={`set-tab ${section.id === id ? "set-tab-on" : ""}`}
+                onClick={() => go(lastPage[id] ?? pages[0]![0])}
               >
                 {label}
               </button>
             ))}
           </div>
         </div>
+        {section.pages.length > 1 && (
+          <div className="set-subtabs set-pagetabs" role="tablist" aria-label={section.label}>
+            {section.pages.map(([id, label]) => (
+              <button
+                key={id}
+                role="tab"
+                aria-selected={tab === id}
+                className={`set-choice ${tab === id ? "set-choice-on" : ""}`}
+                onClick={() => go(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="set-body">
           {tab === "appearance" ? (
@@ -250,6 +301,10 @@ export function Settings({
             <MascotSettings mascots={mascots} onEditing={onEditing} />
           ) : tab === "notify" ? (
             <NotifySettings notify={notify} />
+          ) : tab === "vps" ? (
+            <VpsSettings onEditing={onEditing} />
+          ) : tab === "processes" ? (
+            <ProcessSettings />
           ) : tab === "about" ? (
             <AboutSettings host={host} />
           ) : (

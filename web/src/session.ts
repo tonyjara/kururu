@@ -36,10 +36,11 @@ import type {
   WorkspaceBranch,
   WorkspaceProject,
 } from "../../shared/wire";
-import type { BoardColumn } from "../../shared/board";
+import type { BoardColumn, CardDates } from "../../shared/board";
 import type { LaunchSettings } from "../../shared/launchers";
 import type { MergeReply, MergeResolution, ProjectSettings, WorktreeOutcome, WorktreeStatus } from "../../shared/projects";
 import type { NotifySettings } from "../../shared/notify";
+import type { VpsEntry, VpsStatus } from "../../shared/vps";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { Grid } from "./grid";
 import { claimAccess } from "./access";
@@ -70,6 +71,8 @@ export interface KururuState {
    * sidebar draws neither, and only one of them is an answer.
    */
   usage: AccountUsage | null;
+  /** Every VPS the sidebar watches, with its last reading. See `shared/vps.ts`. */
+  vps: VpsStatus[];
 }
 
 const RETRY_MS = [200, 500, 1000, 2000, 4000];
@@ -81,6 +84,7 @@ let state: KururuState = {
   branches: [],
   projects: [],
   usage: null,
+  vps: [],
 };
 
 const listeners = new Set<() => void>();
@@ -241,6 +245,9 @@ function connect(): void {
         break;
       case "usage":
         set({ usage: msg.usage });
+        break;
+      case "vps":
+        set({ vps: msg.vps });
         break;
       case "output":
         for (const sink of sinks.get(msg.agentId) ?? []) deliver(() => sink.write(msg.data));
@@ -483,7 +490,7 @@ export function proposeSize(agentId: string, cols: number, rows: number): void {
  * not explain.
  */
 export function newTab(
-  options: { kind?: PtyKind; cwd?: string; command?: string; launcher?: string; paneId?: string } = {},
+  options: { kind?: PtyKind; cwd?: string; command?: string; launcher?: string; nvim?: boolean; paneId?: string } = {},
 ): Promise<string> {
   return request((id) => ({ type: "new-tab", id, ...options })).then(
     (result) => (result as { id: string }).id,
@@ -634,6 +641,21 @@ export function moveWorkspace(workspaceId: string, index: number): void {
   send({ type: "move-workspace", workspaceId, index });
 }
 
+/** File it under a group, made by naming it, or take it out with null. See `Workspace.group`. */
+export function setWorkspaceGroup(workspaceId: string, group: string | null): void {
+  send({ type: "set-workspace-group", workspaceId, group });
+}
+
+/** A whole group dragged onto a row, taking its place. `onto` is a workspace id. */
+export function moveWorkspaceGroup(group: string, onto: string): void {
+  send({ type: "move-workspace-group", group, onto });
+}
+
+/** Rename a group on every member; null disbands it. */
+export function renameWorkspaceGroup(from: string, to: string | null): void {
+  send({ type: "rename-workspace-group", from, to });
+}
+
 export function newProfile(name: string): void {
   send({ type: "new-profile", name });
 }
@@ -701,7 +723,11 @@ export function addRunCard(
   );
 }
 
-export function editCard(workspaceId: string, cardId: string, fields: { title?: string; body?: string; isolate?: boolean }): void {
+export function editCard(
+  workspaceId: string,
+  cardId: string,
+  fields: { title?: string; body?: string; isolate?: boolean; dates?: CardDates | null },
+): void {
   send({ type: "edit-card", workspaceId, cardId, ...fields });
 }
 
@@ -713,6 +739,56 @@ export function moveCard(workspaceId: string, cardId: string, column: BoardColum
 /** The card only. Its agent, if it has one, runs on — see `delete-card`. */
 export function deleteCard(workspaceId: string, cardId: string): void {
   send({ type: "delete-card", workspaceId, cardId });
+}
+
+// The profile's board: the same verbs, by profile — see `send-profile-card`.
+
+export function addProfileCard(profileId: string, title: string, body: string, column?: string, dates?: CardDates | null): void {
+  send({ type: "add-profile-card", profileId, title, body, column, dates });
+}
+
+/** `dates` absent leaves the card's alone; null takes them off. */
+export function editProfileCard(
+  profileId: string,
+  cardId: string,
+  fields: { title?: string; body?: string; dates?: CardDates | null },
+): void {
+  send({ type: "edit-profile-card", profileId, cardId, ...fields });
+}
+
+export function moveProfileCard(profileId: string, cardId: string, column: string, index?: number): void {
+  send({ type: "move-profile-card", profileId, cardId, column, index });
+}
+
+export function deleteProfileCard(profileId: string, cardId: string): void {
+  send({ type: "delete-profile-card", profileId, cardId });
+}
+
+export function addProfileColumn(profileId: string, name: string): void {
+  send({ type: "add-profile-column", profileId, name });
+}
+
+export function renameProfileColumn(profileId: string, columnId: string, name: string): void {
+  send({ type: "rename-profile-column", profileId, columnId, name });
+}
+
+/** One of WORKSPACE_COLORS, or null for none. */
+export function colorProfileColumn(profileId: string, columnId: string, color: string | null): void {
+  send({ type: "set-profile-column-color", profileId, columnId, color });
+}
+
+export function moveProfileColumn(profileId: string, columnId: string, index: number): void {
+  send({ type: "move-profile-column", profileId, columnId, index });
+}
+
+/** Its cards go to the column beside it — see `removeLane`. */
+export function deleteProfileColumn(profileId: string, columnId: string): void {
+  send({ type: "delete-profile-column", profileId, columnId });
+}
+
+/** Off the profile's board and onto a workspace's, which is made if it has none. */
+export function sendProfileCard(profileId: string, cardId: string, workspaceId: string): void {
+  send({ type: "send-profile-card", profileId, cardId, workspaceId });
 }
 
 /**
@@ -801,8 +877,13 @@ export function splitWithDoc(fromPaneId: string, index: number, paneId: string, 
  * Read this file in this pane. The other half of `pinReader`: it says which
  * document, and the server stops following an editor because of it.
  */
-export function openDoc(paneId: string, root: string, path: string): void {
-  send({ type: "open-doc", paneId, root, path });
+export function openDoc(paneId: string, root: string, path: string, at?: number): void {
+  send({ type: "open-doc", paneId, root, path, ...(at !== undefined ? { at, focus: true } : {}) });
+}
+
+/** A file from the tree, dropped on a pane's edge: a pane of its own, on that side. */
+export function splitWithFile(root: string, path: string, paneId: string, dir: "row" | "col", before: boolean): void {
+  send({ type: "split-with-file", root, path, paneId, dir, before });
 }
 
 /**
@@ -899,6 +980,15 @@ export function setTerminalAppearance(terminal: TerminalAppearance): void {
 /** When kururu may interrupt you, and what it sounds like. All five at once. */
 export function setNotify(notify: NotifySettings): void {
   send({ type: "set-notify", notify });
+}
+
+/** Watch a VPS. Rejects with the server's sentence when the host is not one it will run. */
+export function addVps(name: string, host: string, panel: string): Promise<VpsEntry> {
+  return request((id) => ({ type: "add-vps", id, name, host, panel })) as Promise<VpsEntry>;
+}
+
+export function removeVps(vpsId: string): void {
+  send({ type: "remove-vps", vpsId });
 }
 
 /** Which agents and models the new-tab menu offers. */

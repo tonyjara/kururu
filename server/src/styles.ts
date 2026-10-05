@@ -82,7 +82,38 @@ import { importSheet, removeSheet, sheets } from "./mascot";
  * as the way somebody tests a style they are writing — point kururu at a local
  * checkout served over HTTP and the Styles tab is their own working copy.
  */
-const BASE = (process.env.KURURU_STYLES_URL || "https://raw.githubusercontent.com/tonyjara/kururu-styles/main").replace(/\/+$/, "");
+const REPO = "tonyjara/kururu-styles";
+const BRANCH = "main";
+const OVERRIDE = process.env.KURURU_STYLES_URL?.replace(/\/+$/, "");
+const BASE = OVERRIDE || `https://raw.githubusercontent.com/${REPO}/${BRANCH}`;
+
+/**
+ * Where to read the registry *as it is right now*, for "Check for updates".
+ *
+ * `raw.githubusercontent.com` serves a branch with `max-age=300` and its CDN
+ * ignores query strings, so a forced refresh against `BASE` in the five minutes
+ * after a push fetches again and is handed the same old index — a button that
+ * visibly works and changes nothing. A commit's URL is immutable and so has
+ * never been cached stale, which is why the fix is to ask the API which commit
+ * the branch is on and read that, rather than to try to bust a cache that is
+ * not ours. It costs one API call on a click, against an anonymous limit of
+ * sixty an hour; if that is spent or GitHub is down, the branch is still the
+ * right answer, only possibly a few minutes behind. An override is somebody's
+ * own server and is taken as it is.
+ */
+async function freshBase(): Promise<string> {
+  if (OVERRIDE) return BASE;
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/commits/${BRANCH}`, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT),
+      headers: { accept: "application/vnd.github.sha" },
+    });
+    const sha = res.ok ? (await res.text()).trim() : "";
+    return /^[0-9a-f]{40}$/.test(sha) ? `https://raw.githubusercontent.com/${REPO}/${sha}` : BASE;
+  } catch {
+    return BASE;
+  }
+}
 
 export function stylesDir(): string {
   return configPath("styles");
@@ -310,7 +341,13 @@ export function assetFile(kindRaw: string, idRaw: string, fileRaw: string): stri
 // The catalogue
 // ---------------------------------------------------------------------------
 
-let cached: { index: StyleIndex; at: number } | null = null;
+/**
+ * `base` is where this index was read from, and every file it describes is read
+ * from the same place. An index pinned to a commit next to pictures from the
+ * branch's CDN would be a fresh digest checked against a stale file — refused as
+ * "did not arrive intact" for five minutes after every update.
+ */
+let cached: { index: StyleIndex; at: number; base: string } | null = null;
 
 /** Ten minutes. Long enough that opening the tab twice is one request, short enough that "check for updates" is rarely the only way. */
 const CACHE_MS = 10 * 60 * 1000;
@@ -325,27 +362,31 @@ const CACHE_MS = 10 * 60 * 1000;
  * this list is somebody deciding what to install, which is exactly when being
  * told "could not reach the registry" and nothing else is least useful.
  */
-export async function catalog(force = false): Promise<{ index: StyleIndex | null; stale: boolean; error?: string }> {
-  if (!force && cached && Date.now() - cached.at < CACHE_MS) return { index: cached.index, stale: false };
+export async function catalog(
+  force = false,
+): Promise<{ index: StyleIndex | null; stale: boolean; base: string; error?: string }> {
+  if (!force && cached && Date.now() - cached.at < CACHE_MS) return { index: cached.index, stale: false, base: cached.base };
+  const base = force ? await freshBase() : BASE;
   try {
-    const res = await fetch(`${BASE}/index.json`, {
+    const res = await fetch(`${base}/index.json`, {
       signal: AbortSignal.timeout(FETCH_TIMEOUT),
       headers: { accept: "application/json" },
     });
     if (!res.ok) throw new Error(`the registry answered ${res.status}`);
     const index = adoptIndex(await res.json());
     if (!index) throw new Error("the registry's index is not one this version understands");
-    cached = { index, at: Date.now() };
+    cached = { index, at: Date.now(), base };
     try {
       mkdirSync(stylesDir(), { recursive: true });
       writeFileSync(join(stylesDir(), "catalog.json"), JSON.stringify(index), "utf8");
     } catch {}
-    return { index, stale: false };
+    return { index, stale: false, base };
   } catch (error) {
     const last = lastCatalog();
     return {
       index: last,
       stale: true,
+      base: BASE,
       error: error instanceof Error ? error.message : "could not reach the registry",
     };
   }
@@ -445,7 +486,7 @@ export async function preview(kind: string, id: string, name: string | null = nu
 }
 
 async function lookup(kind: StyleKind, id: string, name: string | null, fresh: boolean): Promise<{ bytes: Buffer; file: string } | null> {
-  const { index } = await catalog(fresh);
+  const { index, base } = await catalog(fresh);
   if (!index) return null;
   const entry = index.entries.find((e) => e.kind === kind && e.id === id);
   if (!entry) return null;
@@ -461,7 +502,7 @@ async function lookup(kind: StyleKind, id: string, name: string | null, fresh: b
   if (already) return { bytes: already, file: file.name };
 
   try {
-    const res = await fetch(`${BASE}/${entry.path}/${file.name}`, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+    const res = await fetch(`${base}/${entry.path}/${file.name}`, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
     if (!res.ok) return null;
     const bytes = Buffer.from(await res.arrayBuffer());
     if (bytes.length > FILE_LIMIT) return null;
@@ -527,7 +568,7 @@ export type InstallResult =
  */
 export async function install(kind: string, id: string): Promise<InstallResult> {
   if (!isStyleKind(kind) || !isStyleId(id)) return { ok: false, error: "that is not a style" };
-  const { index } = await catalog();
+  const { index, base } = await catalog();
   if (!index) return { ok: false, error: "could not reach the registry" };
   const entry = index.entries.find((e) => e.kind === kind && e.id === id);
   if (!entry) return { ok: false, error: `the registry has no ${kind} called ${id}` };
@@ -541,7 +582,7 @@ export async function install(kind: string, id: string): Promise<InstallResult> 
   const bytes = new Map<string, Buffer>();
   for (const file of entry.files) {
     try {
-      const res = await fetch(`${BASE}/${entry.path}/${file.name}`, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+      const res = await fetch(`${base}/${entry.path}/${file.name}`, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
       if (!res.ok) return { ok: false, error: `${file.name} came back ${res.status}` };
       const body = Buffer.from(await res.arrayBuffer());
       if (body.length > FILE_LIMIT) return { ok: false, error: `${file.name} is over a megabyte` };

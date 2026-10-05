@@ -1,5 +1,5 @@
 /**
- * Settings → Profiles: the drawers your workspaces live in.
+ * Settings → General → Profiles: the drawers your workspaces live in.
  *
  * This page is where the profile switcher went. It was a pick dialog — a list,
  * with rename and delete hung off the rows — and a dialog is for choosing one of

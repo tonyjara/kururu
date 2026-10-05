@@ -8,11 +8,10 @@
  * look like a focus bug.
  *
  * The shape is ghosttown's, deliberately — a workspace is one split tree, a leaf
- * is a *pane*, and a pane holds a stack of terminals as tabs with one showing.
- * That last part is the difference from the tree kururu had a week ago, where a
- * pane held exactly one terminal. Tabs are what let a pane be a place you work
- * rather than a slot one process occupies: four agents in one project belong in
- * one pane, not four.
+ * is a *pane*, and a pane holds a stack of tabs with one showing. Tabs are what
+ * let a pane be a place you work rather than a slot one process occupies: four
+ * agents in one project belong in one pane, not four. A tab is a terminal, the
+ * board, or a document, in any mix — see `BOARD_TAB` and `docTab`.
  *
  * Everything here is pure and immutable. An operation returns a new tree, which
  * is what lets the server diff nothing and broadcast whole, and what lets React
@@ -20,29 +19,27 @@
  */
 
 /**
- * What a reader pane is looking at.
+ * What a pane's documents are doing, beyond being tabs.
  *
- * A path and the root it is under, which is all `files.ts` will answer to — and
- * deliberately nothing else, because this goes to disk with the layout. A
- * rendered document is derived from a file somebody else owns, so the pane
- * remembers where to look and nothing about what it found: reopening kururu
- * shows the file as it is now, not as it was when the window closed.
+ * A document is a tab like a terminal or the board is (`docTab`), so which
+ * file a pane is showing is simply its active tab and which files it has open
+ * is its strip. What is left over is the part that belongs to the pane rather
+ * than to any one document: whether it is tracking an editor, and the project
+ * its picker opens on while it has nothing to show yet.
  *
- * `follow` is the agent whose editor it is tracking, when it is tracking one.
- * Null means somebody pointed the pane at a file and it should stay there.
+ * Deliberately nothing about what a document *said*, because this goes to disk
+ * with the layout. A rendered document is derived from a file somebody else
+ * owns, so the pane remembers where to look and nothing about what it found:
+ * reopening kururu shows the file as it is now, not as it was.
  *
- * `root` and `path` are the document *showing*; `docs` is every document open
- * in the pane, as tabs. The showing one is kept as its own pair rather than as
- * an index into the list because everything that reads a reader — the render,
- * and the editor hook — only ever wants the one on screen, and an
- * index is one more thing to fall out of step with a list that tabs close out
- * of.
+ * Optional on a pane, and a pane without one can still hold documents — one
+ * dragged in from a reader needs nothing here. It exists for a pane that was
+ * opened *as* a reader: one following an editor, or waiting on its picker.
  */
 export interface ReaderState {
+  /** The project the picker opens on, or "" for "ask". Not the document's root. */
   root: string;
-  /** Relative to `root`, forward slashes, the shape `files.ts` takes. */
-  path: string;
-  /** The terminal whose nvim drives this, or null for a pinned file. */
+  /** The terminal whose nvim drives this, or null for a pinned pane. */
   follow: string | null;
   /**
    * The terminal this reader was opened to follow, kept while it is pinned.
@@ -54,30 +51,36 @@ export interface ReaderState {
    * and the strip shows no button for it.
    */
   editor: string | null;
-  /** The documents open as tabs, in strip order. Includes the showing one. */
-  docs: ReaderDoc[];
   /**
-   * Bumped every time the file is written, which is the whole mechanism for
-   * "it updates when I save".
+   * Bumped every time the editor writes the file, which is the whole mechanism
+   * for "it updates when I save".
    *
    * The snapshot carries this rather than the rendered markup: a snapshot goes
    * out on every change to anything, and putting a document's HTML in one would
    * send a README to every client because somebody switched tabs. So the client
    * fetches the render, and this is what tells it the answer it has is stale.
+   * It is a cache key and only ever goes up; which document it is for is the
+   * active tab's business.
    */
   rev: number;
 }
 
-/** One tab in a reader: a file, by the only address `files.ts` answers to. */
+/** A document, by the only address `files.ts` answers to. */
 export interface ReaderDoc {
   root: string;
+  /** Relative to `root`, forward slashes, the shape `files.ts` takes. */
   path: string;
 }
 
-/** A leaf: terminals stacked as tabs, in strip order, one of them showing. */
+/** A leaf: tabs in strip order, one of them showing. */
 export interface PaneState {
   id: string;
-  /** Agent ids, in tab order. Empty is a real state — a pane with nothing in it. */
+  /**
+   * The tabs, in strip order: terminals by agent id, the board (`BOARD_TAB`)
+   * and documents (`docTab`). Named for what it held first, and kept that way
+   * because the wire, the host's blob and `session.json` all spell it so.
+   * Empty is a real state — a pane with nothing in it.
+   */
   agentIds: string[];
   /** Index into `agentIds`. Meaningless when the pane is empty. */
   activeIdx: number;
@@ -89,13 +92,15 @@ export interface PaneState {
    */
   cwd?: string;
   /**
-   * When set, this pane is a reader and not a terminal pane at all.
+   * The pane's reader, when it was opened as one. See `ReaderState`.
    *
-   * Mutually exclusive with `agentIds` rather than a tab alongside them, which
-   * is the plan's "one pane type per thing worth looking at". A tab strip that
-   * mixed the two would have to answer what closing a tab means when one of them
-   * ends a process and the other closes a view — two verbs wearing one button,
-   * which is the thing `kill-agent` and `close-pane` are kept apart to avoid.
+   * It used to be the other kind of pane — mutually exclusive with terminals,
+   * on the argument that one strip mixing them would have one ✕ meaning two
+   * verbs. That argument lost to the one about arranging: a window whose
+   * documents could only ever sit in panes of their own could not put a spec
+   * beside the board that is working through it, in the strip you are already
+   * looking at. The ✕ says which verb it is in its tooltip, the way the
+   * board's already did.
    */
   reader?: ReaderState;
 }
@@ -223,20 +228,79 @@ export function isBoardTab(id: unknown): boolean {
   return id === BOARD_TAB;
 }
 
-/** Only the terminals of a list of tabs — what may be killed, watched or typed into. */
-export function terminalsOf(ids: readonly string[]): string[] {
-  return ids.filter((id) => id !== BOARD_TAB);
+/**
+ * A document, as a tab.
+ *
+ * The board's trick again: an id no pty can have, in the same list as the
+ * terminals, so every gesture a tab has — reordering, dragging between panes,
+ * splitting off onto an edge, pouring one pane into another — works on a
+ * document without a line of its own. The address is the id, JSON so that no
+ * character a path can contain is ambiguous, which also makes the same file
+ * the same tab: a pane holds a document once.
+ *
+ * Unlike the board and the terminals, the same document may be open in two
+ * panes. That is why nothing addresses a document tab by id alone across the
+ * tree — `moveDocTo` and `splitWithDoc` take the pane it is leaving and where
+ * in that pane's strip it is.
+ */
+const DOC_PREFIX = "doc:";
+
+export function docTab(root: string, path: string): string {
+  return DOC_PREFIX + JSON.stringify([root, path]);
 }
 
-/** The tab showing in a pane — a terminal or the board — or null when the pane is empty. */
+export function isDocTab(id: unknown): id is string {
+  return typeof id === "string" && id.startsWith(DOC_PREFIX);
+}
+
+/** The document a tab is, or null for a terminal, the board, or anything malformed. */
+export function parseDocTab(id: unknown): ReaderDoc | null {
+  if (!isDocTab(id)) return null;
+  try {
+    const parsed: unknown = JSON.parse(id.slice(DOC_PREFIX.length));
+    if (!Array.isArray(parsed) || parsed.length !== 2) return null;
+    const [root, path] = parsed as unknown[];
+    return typeof root === "string" && typeof path === "string" && path !== "" ? { root, path } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Only the terminals of a list of tabs — what may be killed, watched or typed into. */
+export function terminalsOf(ids: readonly string[]): string[] {
+  return ids.filter((id) => id !== BOARD_TAB && !isDocTab(id));
+}
+
+/** A pane's documents, in strip order. */
+export function docsOf(pane: PaneState): ReaderDoc[] {
+  return pane.agentIds.flatMap((id) => parseDocTab(id) ?? []);
+}
+
+/** The tab showing in a pane — a terminal, the board or a document — or null when it is empty. */
 export function activeAgent(pane: PaneState): string | null {
   return pane.agentIds[pane.activeIdx] ?? null;
 }
 
-/** The terminal showing in a pane, or null when it is empty or showing the board. */
+/** The terminal showing in a pane, or null when it is empty or showing the board or a document. */
 export function activeTerminal(pane: PaneState): string | null {
   const id = activeAgent(pane);
-  return id === BOARD_TAB ? null : id;
+  return id === BOARD_TAB || isDocTab(id) ? null : id;
+}
+
+/** The document showing in a pane, or null when the active tab is not one. */
+export function showingDoc(pane: PaneState): ReaderDoc | null {
+  return parseDocTab(activeAgent(pane));
+}
+
+/**
+ * Whether a pane is being read rather than worked in: its active tab is a
+ * document, or it has no tabs and is a reader waiting on its picker or its
+ * editor. The question everything asks before it takes a pane's screen away —
+ * a new terminal lands elsewhere, an editor's `:w` may change which document
+ * shows but never swaps a terminal out for one.
+ */
+export function showsDoc(pane: PaneState): boolean {
+  return pane.agentIds.length === 0 ? Boolean(pane.reader) : showingDoc(pane) !== null;
 }
 
 /** Every terminal whose tab is the one showing — what a client needs to watch. */
@@ -279,21 +343,30 @@ export function addTab(node: LayoutNode, paneId: string, agentId: string, cwd?: 
 }
 
 /**
- * Take a terminal out of whatever pane holds it.
+ * A pane with the tab at `at` gone.
  *
- * The pane it leaves shows its neighbour — the tab to the left, which is where
- * your eye already is — and clamps rather than trusting the index it had.
+ * The showing tab going hands the screen to its neighbour — the tab to the
+ * left, which is where your eye already is. A tab going from elsewhere in the
+ * strip leaves the one you were looking at showing, which means shifting the
+ * index when it went from the left of it.
+ */
+export function removeAt(pane: PaneState, at: number): PaneState {
+  if (!isIndex(at) || at >= pane.agentIds.length) return pane;
+  const agentIds = pane.agentIds.filter((_, i) => i !== at);
+  const active =
+    at < pane.activeIdx ? pane.activeIdx - 1 : at === pane.activeIdx ? (at > 0 ? at - 1 : 0) : pane.activeIdx;
+  return { ...pane, agentIds, activeIdx: Math.max(0, Math.min(active, agentIds.length - 1)) };
+}
+
+/**
+ * Take a terminal out of whatever pane holds it. Terminals and the board only:
+ * a document can be open in two panes, and taking it out "wherever it is"
+ * would close both.
  */
 export function removeTab(node: LayoutNode, agentId: string): LayoutNode {
   return mapPanes(node, (pane) => {
     const at = pane.agentIds.indexOf(agentId);
-    if (at === -1) return pane;
-    const agentIds = pane.agentIds.filter((id) => id !== agentId);
-    return {
-      ...pane,
-      agentIds,
-      activeIdx: Math.max(0, Math.min(at > 0 ? at - 1 : 0, agentIds.length - 1)),
-    };
+    return at === -1 ? pane : removeAt(pane, at);
   });
 }
 
@@ -476,34 +549,55 @@ export function movePaneTo(
  * The inverse of dropping a tab on an edge, and the only way back: without it a
  * window can be divided by mouse but never put back together, which is a
  * rearrangement gesture that only works in one direction.
+ *
+ * Any pane into any other, since a pane is no longer one kind of thing. A
+ * document the target already has is not brought twice, and a reader's state
+ * comes along when the target has none — which is what keeps a pane following
+ * an editor still following it after being poured somewhere.
  */
 export function mergePanes(node: LayoutNode, fromId: string, intoId: string): LayoutNode {
   if (fromId === intoId) return node;
   const from = findPane(node, fromId);
   const into = findPane(node, intoId);
   if (!from || !into) return node;
-  // A reader and a terminal pane are different kinds of pane, and pouring one
-  // into the other would leave terminals in a reader or close a reader's
-  // documents along with the pane that held them. Two readers pour their
-  // documents together, which is the same gesture at the same scale.
-  if (from.reader || into.reader) {
-    if (!from.reader || !into.reader) return node;
-    const docs = [...into.reader.docs];
-    for (const doc of from.reader.docs) if (!docs.some((d) => sameDoc(d, doc))) docs.push(doc);
-    const shown = from.reader.path ? from.reader : into.reader;
-    const joined = updatePane(node, intoId, (pane) => ({
-      ...pane,
-      reader: showing({ ...into.reader!, docs }, shown.root, shown.path),
-    }));
-    return closePane(joined, fromId) ?? joined;
-  }
+  const arriving = from.agentIds.filter((id) => !(isDocTab(id) && into.agentIds.includes(id)));
   const merged = updatePane(node, intoId, (pane) => ({
     ...pane,
-    agentIds: [...pane.agentIds, ...from.agentIds],
+    agentIds: [...pane.agentIds, ...arriving],
     // Show the first of what arrived, the way a single dropped tab shows.
-    activeIdx: from.agentIds.length > 0 ? pane.agentIds.length : pane.activeIdx,
+    activeIdx: arriving.length > 0 ? pane.agentIds.length : pane.activeIdx,
+    reader: pane.reader ?? from.reader,
   }));
   return closePane(merged, fromId) ?? merged;
+}
+
+/**
+ * Put a tab into a pane's strip at `at` (the end when it has nothing to say),
+ * showing. A document the pane already has moves rather than doubling, with
+ * `at` read as where it lands once its old place has gone.
+ *
+ * Pins a reader that was following an editor when what shows changes to a
+ * different document: a document somebody put there by hand is one an editor
+ * next door should not take back on its next `:w`.
+ */
+export function placeTab(pane: PaneState, id: string, at: number | undefined): PaneState {
+  const before = showingDoc(pane);
+  let target = at;
+  const agentIds = pane.agentIds.filter((existing, i) => {
+    if (existing !== id) return true;
+    if (target !== undefined && i < target) target--;
+    return false;
+  });
+  const place = Math.max(0, Math.min(target ?? agentIds.length, agentIds.length));
+  agentIds.splice(place, 0, id);
+  const doc = parseDocTab(id);
+  const pinned = doc && pane.reader?.follow && !(before && sameDoc(before, doc));
+  return {
+    ...pane,
+    agentIds,
+    activeIdx: place,
+    ...(pinned ? { reader: { ...pane.reader!, follow: null } } : {}),
+  };
 }
 
 function sameDoc(a: ReaderDoc, b: ReaderDoc): boolean {
@@ -511,43 +605,29 @@ function sameDoc(a: ReaderDoc, b: ReaderDoc): boolean {
 }
 
 /**
- * A reader showing this document. Pinned whenever that is a change: a document
- * somebody put there by hand is one an editor next door should not take back on
- * its next `:w`. The same document is no change at all, and leaves a reader that
- * is following an editor still following it.
+ * Open a document in a pane as a tab, after the one showing — or select it,
+ * when the pane has it already. `show` says whether it takes the screen: a
+ * file somebody picked always does; an editor's report does only in a pane
+ * already showing a document, because an nvim wandering through a project
+ * should not swap the terminal you are watching for a README.
  */
-function showing(reader: ReaderState, root: string, path: string): ReaderState {
-  if (reader.root === root && reader.path === path) return reader;
-  return { ...reader, root, path, follow: null, rev: 0 };
+export function withDoc(pane: PaneState, doc: ReaderDoc, show: boolean): PaneState {
+  const id = docTab(doc.root, doc.path);
+  const at = pane.agentIds.indexOf(id);
+  if (at !== -1) return show ? { ...pane, activeIdx: at } : pane;
+  const place = pane.agentIds.length === 0 ? 0 : pane.activeIdx + 1;
+  const agentIds = [...pane.agentIds];
+  agentIds.splice(place, 0, id);
+  return { ...pane, agentIds, activeIdx: show || pane.agentIds.length === 0 ? place : pane.activeIdx };
 }
 
 /**
- * A reader with one of its documents gone, and its neighbour on screen if the
- * one that went was showing — the one after it first, which is where every tab
- * strip people already use puts you. An emptied reader keeps its last address
- * and no tabs; closing the pane is the caller's call, as `splitWith` leaves an
- * emptied terminal pane to `workspaces.ts`.
- */
-export function withoutDoc(reader: ReaderState, index: number): ReaderState {
-  const doc = reader.docs[index];
-  if (!isIndex(index) || !doc) return reader;
-  const docs = reader.docs.filter((_, at) => at !== index);
-  if (!sameDoc(doc, reader)) return { ...reader, docs };
-  const next = docs[index] ?? docs[index - 1];
-  return next ? { ...reader, docs, root: next.root, path: next.path, rev: 0 } : { ...reader, docs };
-}
-
-/**
- * Move a reader's tab: along its own strip, or into another reader's.
+ * Move a document's tab: along its own strip, or into any other pane's.
  *
  * `moveTabTo` for documents, with the same rule about the index — it is where
  * the tab will sit once it is gone from where it was — and the same landing:
- * the moved document is the one showing. A reader that already has it open
- * gives up its copy rather than showing one file in two tabs.
- *
- * Only readers take documents. A terminal pane holds terminals, for the reason
- * `PaneState.reader` gives, and a document dropped on one's edge is
- * `splitWithDoc` instead.
+ * the moved document is the one showing. Addressed by pane and position rather
+ * than by id because the same document can be open in two panes.
  */
 export function moveDocTo(
   node: LayoutNode,
@@ -556,34 +636,20 @@ export function moveDocTo(
   toPaneId: string,
   at?: number,
 ): LayoutNode {
-  const from = findPane(node, fromPaneId)?.reader;
-  const to = findPane(node, toPaneId)?.reader;
-  const doc = isIndex(index) ? from?.docs[index] : undefined;
-  if (!doc || !to) return node;
+  const id = isIndex(index) ? findPane(node, fromPaneId)?.agentIds[index] : undefined;
+  if (!isDocTab(id) || !findPane(node, toPaneId)) return node;
   const wanted = at !== undefined && !isIndex(at) ? undefined : at;
-  const without = fromPaneId === toPaneId ? node : updatePane(node, fromPaneId, (pane) => ({ ...pane, reader: withoutDoc(pane.reader!, index) }));
-  return updatePane(without, toPaneId, (pane) => {
-    const reader = pane.reader!;
-    let target = wanted;
-    const docs = reader.docs.filter((d, i) => {
-      if (!sameDoc(d, doc)) return true;
-      if (target !== undefined && i < target) target--;
-      return false;
-    });
-    const place = Math.max(0, Math.min(target ?? docs.length, docs.length));
-    docs.splice(place, 0, doc);
-    return { ...pane, reader: showing({ ...reader, docs }, doc.root, doc.path) };
-  });
+  if (fromPaneId === toPaneId) return updatePane(node, toPaneId, (pane) => placeTab(pane, id, wanted));
+  const without = updatePane(node, fromPaneId, (pane) => removeAt(pane, index));
+  return updatePane(without, toPaneId, (pane) => placeTab(pane, id, wanted));
 }
 
 /**
- * Drop a reader's tab on a pane's edge: a new reader there, holding just it.
+ * Drop a document's tab on a pane's edge: a new pane there, holding just it.
  *
- * `splitWith` for documents, and it works against any pane — terminal or
- * reader — because what it makes is a new pane, and a reader beside a terminal
- * is the layout the reader exists for. A reader's only document dropped on its
- * own edge is refused: it would split the pane and close the half it came from,
- * which is the pane it already was.
+ * `splitWith` for documents. A pane's only tab dropped on its own edge is
+ * refused: it would split the pane and close the half it came from, which is
+ * the pane it already was.
  */
 export function splitWithDoc(
   node: LayoutNode,
@@ -595,20 +661,12 @@ export function splitWithDoc(
   splitId: string,
   freshId: string,
 ): LayoutNode {
-  const from = findPane(node, fromPaneId)?.reader;
-  const doc = isIndex(index) ? from?.docs[index] : undefined;
-  if (!from || !doc || !findPane(node, paneId)) return node;
-  if (fromPaneId === paneId && from.docs.length === 1) return node;
-  const without = updatePane(node, fromPaneId, (pane) => ({ ...pane, reader: withoutDoc(pane.reader!, index) }));
-  const fresh: PaneNode = {
-    type: "pane",
-    pane: {
-      id: freshId,
-      agentIds: [],
-      activeIdx: 0,
-      reader: { root: doc.root, path: doc.path, follow: null, editor: null, docs: [doc], rev: 0 },
-    },
-  };
+  const from = findPane(node, fromPaneId);
+  const id = isIndex(index) ? from?.agentIds[index] : undefined;
+  if (!from || !isDocTab(id) || !findPane(node, paneId)) return node;
+  if (fromPaneId === paneId && from.agentIds.length === 1) return node;
+  const without = updatePane(node, fromPaneId, (pane) => removeAt(pane, index));
+  const fresh: PaneNode = { type: "pane", pane: { id: freshId, agentIds: [id], activeIdx: 0 } };
   return split(without, paneId, dir, splitId, fresh, before);
 }
 

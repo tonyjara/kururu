@@ -9,13 +9,27 @@ import { describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
   addCard,
+  addLane,
   adoptBoard,
+  adoptDates,
+  colorLane,
+  shiftDates,
+  timeline,
+  adoptProfileBoard,
+  boardLanes,
+  emptyProfileBoard,
+  moveLane,
+  removeLane,
+  renameLane,
   canResume,
+  cardCode,
   columnCards,
   editCard,
   emptyBoard,
   moveCard,
   noteRun,
+  removeCard,
+  transferCard,
   setWorktree,
   startRun,
   storedBoard,
@@ -130,11 +144,45 @@ describe("on disk and in the blob", () => {
     expect(bad!.cards[0]!.run).toMatchObject({ sessionId: null, cwd: null });
   });
 
+  /**
+   * A card's number is its place in the order the board was written in, and
+   * is never handed out twice — deleting the newest card does not give its
+   * number to the next one.
+   */
+  it("numbers cards in the order they were written, and never reuses a number", () => {
+    const b = board("a", "b", "c");
+    expect(b.cards.map((c) => c.number)).toEqual([1, 2, 3]);
+    const again = addCard(removeCard(b, "c2"), { title: "d" }, "c3", 0);
+    expect(again.cards.map((c) => c.number)).toEqual([1, 2, 4]);
+    expect(adoptBoard(JSON.parse(JSON.stringify(storedBoard(again))))).toEqual(again);
+  });
+
+  it("numbers a board from before numbers by when its cards were written, after any it has", () => {
+    const back = adoptBoard({
+      cards: [
+        { id: "x", title: "late", createdAt: 30 },
+        { id: "y", title: "kept", createdAt: 10, number: 5 },
+        { id: "z", title: "early", createdAt: 20 },
+        { id: "w", title: "clash", createdAt: 40, number: 5 },
+      ],
+    })!;
+    expect(back.cards.map((c) => [c.id, c.number])).toEqual([["x", 7], ["y", 5], ["z", 6], ["w", 8]]);
+    expect(back.next).toBe(9);
+    expect(adoptBoard({ cards: [], next: 12 })!.next).toBe(12);
+  });
+
+  it("codes a card with its workspace's first three letters", () => {
+    expect(cardCode("kururu", 12)).toBe("KUR-12");
+    expect(cardCode("my app", 3)).toBe("MYA-3");
+    expect(cardCode("ok", 1)).toBe("OK-1");
+    expect(cardCode("—", 4)).toBe("#4");
+  });
+
   it("drops what is not a card, and has no board for nothing", () => {
     expect(adoptBoard(undefined)).toBeNull();
     expect(adoptBoard(null)).toBeNull();
     const back = adoptBoard({ cards: [null, { id: 1, title: "x" }, { id: "k", title: "ok", column: 7, run: "no" }] });
-    expect(back!.cards).toEqual([{ id: "k", title: "ok", body: "", column: "todo", createdAt: 0, run: null, isolate: false, worktree: null, dev: null }]);
+    expect(back!.cards).toEqual([{ id: "k", number: 1, title: "ok", body: "", column: "todo", createdAt: 0, run: null, isolate: false, worktree: null, dev: null, dates: null }]);
   });
 
   /**
@@ -198,7 +246,7 @@ describe("the board as a tab", () => {
     expect(w.activeWorkspace.board).toBeNull();
     const pane = w.activeWorkspace.focusedPaneId;
     expect(w.openBoard(pane)).toBe(pane);
-    expect(w.activeWorkspace.board).toEqual({ cards: [] });
+    expect(w.activeWorkspace.board).toEqual({ cards: [], next: 1 });
     expect(tabsOf(w)).toEqual([{ id: pane, tabs: [BOARD_TAB], showing: BOARD_TAB }]);
   });
 
@@ -289,5 +337,266 @@ describe("resuming a card", () => {
     expect(resumeCommand(findLauncher("claude")!, settings, "not-a-uuid", false)).toBeNull();
     expect(resumeCommand(findLauncher("codex")!, settings, null, false)).toBe("codex resume");
     expect(resumeCommand(findLauncher("codex:gpt-5.5")!, settings, null, true)).toBe("codex resume --all --model gpt-5.5");
+  });
+});
+
+describe("transferCard", () => {
+  const two = () => {
+    let from = emptyBoard();
+    from = addCard(from, { title: "flicker", body: "on the phone", column: "doing" }, "c1", 1);
+    from = addCard(from, { title: "other" }, "c2", 2);
+    let to = emptyBoard();
+    for (const n of [1, 2, 3]) to = addCard(to, { title: `t${n}` }, `w${n}`, n);
+    return { from, to };
+  };
+
+  it("takes the card off one board and numbers it on the other", () => {
+    const { from, to } = two();
+    const out = transferCard(from, to, "c1");
+    expect(out.from.cards.map((c) => c.id)).toEqual(["c2"]);
+    const moved = out.to.cards.find((c) => c.id === "c1")!;
+    expect(moved).toMatchObject({ title: "flicker", body: "on the phone", column: "doing", number: 4, run: null, worktree: null });
+    expect(out.to.next).toBe(5);
+    // The profile's counter is not given back: a number is never handed out twice.
+    expect(out.from.next).toBe(3);
+  });
+
+  it("lands at the foot of its column", () => {
+    const { from, to } = two();
+    const out = transferCard(from, to, "c2");
+    expect(columnCards(out.to, "todo").map((c) => c.id)).toEqual(["w1", "w2", "w3", "c2"]);
+  });
+
+  it("changes nothing for a card that is not there", () => {
+    const { from, to } = two();
+    const out = transferCard(from, to, "nope");
+    expect(out.from).toBe(from);
+    expect(out.to).toBe(to);
+  });
+});
+
+describe("the profile's columns", () => {
+  const withCards = () => {
+    let board = emptyProfileBoard();
+    board = addCard(board, { title: "a", column: "todo" }, "c1", 1);
+    board = addCard(board, { title: "b", column: "doing" }, "c2", 2);
+    board = addCard(board, { title: "c", column: "doing" }, "c3", 3);
+    return board;
+  };
+
+  it("adds, renames and moves a column, and cards can go in it", () => {
+    let board = addLane(emptyProfileBoard(), "  Someday ", "k1");
+    expect(boardLanes(board).map((l) => l.name)).toEqual(["To do", "In progress", "Done", "Someday"]);
+    board = renameLane(board, "k1", "Later");
+    board = moveLane(board, "k1", 0);
+    expect(boardLanes(board).map((l) => l.id)).toEqual(["k1", "todo", "doing", "done"]);
+    board = addCard(board, { title: "x", column: "k1" }, "c1", 1);
+    expect(columnCards(board, "k1").map((c) => c.id)).toEqual(["c1"]);
+  });
+
+  it("refuses an empty name, a duplicate id, a bad index, and a workspace board", () => {
+    const board = emptyProfileBoard();
+    expect(addLane(board, "   ", "k1")).toBe(board);
+    expect(addLane(board, "Again", "todo")).toBe(board);
+    expect(moveLane(board, "todo", Number.NaN)).toBe(board);
+    expect(renameLane(board, "nope", "x")).toBe(board);
+    const workspace = emptyBoard();
+    expect(addLane(workspace, "Someday", "k1")).toBe(workspace);
+  });
+
+  it("keeps a column's cards when it is deleted, moving them to its neighbour", () => {
+    const board = removeLane(withCards(), "doing");
+    expect(boardLanes(board).map((l) => l.id)).toEqual(["todo", "done"]);
+    expect(columnCards(board, "todo").map((c) => c.id)).toEqual(["c1", "c2", "c3"]);
+    expect(columnCards(removeLane(withCards(), "todo"), "doing").map((c) => c.id)).toEqual(["c2", "c3", "c1"]);
+  });
+
+  it("never deletes the last column", () => {
+    let board = emptyProfileBoard();
+    board = removeLane(removeLane(board, "todo"), "doing");
+    expect(removeLane(board, "done")).toBe(board);
+  });
+
+  it("holds a card to the board's own columns", () => {
+    const board = withCards();
+    expect(moveCard(board, "c1", "review")).toBe(board);
+    expect(addCard(board, { title: "d", column: "review" }, "c4", 4).cards.at(-1)!.column).toBe("todo");
+  });
+
+  it("sends a card from a made column to the workspace's To do", () => {
+    let from = addLane(emptyProfileBoard(), "Someday", "k1");
+    from = addCard(from, { title: "x", column: "k1" }, "c1", 1);
+    const out = transferCard(from, emptyBoard(), "c1");
+    expect(out.to.cards[0]!.column).toBe("todo");
+    expect(out.to.columns).toBeUndefined();
+  });
+
+  it("gives a board from before columns the three it drew, and keeps made ones", () => {
+    const old = adoptProfileBoard({ cards: [{ id: "c1", title: "a", column: "doing" }] });
+    expect(boardLanes(old).map((l) => l.id)).toEqual(["todo", "doing", "done"]);
+    expect(old.cards[0]!.column).toBe("doing");
+    const made = adoptProfileBoard(storedBoard(addLane(withCards(), "Someday", "k1")));
+    expect(boardLanes(made).map((l) => l.id)).toEqual(["todo", "doing", "done", "k1"]);
+    const orphan = adoptProfileBoard({ columns: [{ id: "k1", name: "Only" }], cards: [{ id: "c1", title: "a", column: "gone" }] });
+    expect(orphan.cards[0]!.column).toBe("k1");
+  });
+});
+
+describe("a card's dates", () => {
+  const week = { start: "2026-09-28", end: "2026-10-02" };
+
+  it("takes one day as a range of one, and refuses what is not a calendar's", () => {
+    expect(adoptDates({ start: "2026-09-28" })).toEqual({ start: "2026-09-28", end: "2026-09-28" });
+    expect(adoptDates(week)).toEqual(week);
+    expect(adoptDates({ start: "2026-02-30" })).toBeNull();
+    expect(adoptDates({ start: "2026-9-28" })).toBeNull();
+    expect(adoptDates({ start: 20260928 })).toBeNull();
+    expect(adoptDates({ start: "2026-09-28", end: "soon" })).toBeNull();
+    expect(adoptDates("2026-09-28")).toBeNull();
+  });
+
+  it("refuses a range that runs backwards rather than guessing which end was meant", () => {
+    expect(adoptDates({ start: "2026-10-02", end: "2026-09-28" })).toBeNull();
+  });
+
+  it("adds a card with them, and one with bad ones as a card with none", () => {
+    expect(addCard(emptyBoard(), { title: "a", dates: week }, "c0", 0).cards[0]!.dates).toEqual(week);
+    expect(addCard(emptyBoard(), { title: "a", dates: { start: "never" } }, "c0", 0).cards[0]!.dates).toBeNull();
+    expect(board("a").cards[0]!.dates).toBeNull();
+  });
+
+  it("leaves them alone when an edit does not name them, and takes them off for null", () => {
+    const b = addCard(emptyBoard(), { title: "a", dates: week }, "c0", 0);
+    expect(editCard(b, "c0", { title: "b" }).cards[0]!.dates).toEqual(week);
+    expect(editCard(b, "c0", { dates: { start: "2026-10-05" } }).cards[0]!.dates).toEqual({ start: "2026-10-05", end: "2026-10-05" });
+    expect(editCard(b, "c0", { dates: null }).cards[0]!.dates).toBeNull();
+  });
+
+  it("refuses the whole edit for dates that are not dates, so a bad range is never a cleared one", () => {
+    const b = addCard(emptyBoard(), { title: "a", dates: week }, "c0", 0);
+    expect(editCard(b, "c0", { title: "b", dates: { start: "2026-10-02", end: "2026-09-28" } })).toBe(b);
+    expect(editCard(b, "c0", { dates: 0 })).toBe(b);
+    expect(editCard(b, "c0", { dates: "" })).toBe(b);
+  });
+
+  it("keeps them to disk and back, and across being sent to a workspace", () => {
+    const b = addCard(emptyProfileBoard(), { title: "a", dates: week }, "c0", 0);
+    expect(adoptProfileBoard(JSON.parse(JSON.stringify(storedBoard(b)))).cards[0]!.dates).toEqual(week);
+    expect(adoptBoard({ cards: [{ id: "c1", title: "old" }] })!.cards[0]!.dates).toBeNull();
+    expect(adoptBoard({ cards: [{ id: "c1", title: "edited", dates: { start: "2026-13-01" } }] })!.cards[0]!.dates).toBeNull();
+    expect(transferCard(b, emptyBoard(), "c0").to.cards[0]!.dates).toEqual(week);
+  });
+
+  it("moves a dragged bar whole, and stops a dragged end at the other", () => {
+    expect(shiftDates(week, 3, "both")).toEqual({ start: "2026-10-01", end: "2026-10-05" });
+    expect(shiftDates(week, -28, "both")).toEqual({ start: "2026-08-31", end: "2026-09-04" });
+    expect(shiftDates(week, 2, "end")).toEqual({ start: "2026-09-28", end: "2026-10-04" });
+    expect(shiftDates(week, -1, "start")).toEqual({ start: "2026-09-27", end: "2026-10-02" });
+    expect(shiftDates(week, 9, "start")).toEqual({ start: "2026-10-02", end: "2026-10-02" });
+    expect(shiftDates(week, -9, "end")).toEqual({ start: "2026-09-28", end: "2026-09-28" });
+    expect(shiftDates(week, Number.NaN, "both")).toBe(week);
+  });
+});
+
+describe("the timeline", () => {
+  // 2026-09-28 is a Monday, and day 20724 since 1970.
+  const first = 20724;
+  const dated = (...cards: [string, string, string?][]) =>
+    cards.reduce((b, [title, start, end], i) => addCard(b, { title, dates: { start, end } }, `c${i}`, i), emptyProfileBoard());
+
+  it("places a bar by the days it covers, counted from the window's first", () => {
+    const { rows } = timeline(dated(["a", "2026-09-30", "2026-10-02"]), first, 35);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ at: 2, span: 3, cutStart: false, cutEnd: false });
+  });
+
+  it("cuts a bar that runs past an edge, and says which", () => {
+    const { rows } = timeline(dated(["before", "2026-09-20", "2026-09-29"], ["after", "2026-10-31", "2026-11-20"], ["both", "2026-01-01", "2026-12-31"]), first, 35);
+    expect(rows.map((r) => [r.card.title, r.at, r.span, r.cutStart, r.cutEnd])).toEqual([
+      ["both", 0, 35, true, true],
+      ["before", 0, 2, true, false],
+      ["after", 33, 2, false, true],
+    ]);
+  });
+
+  it("counts what is outside the window instead of drawing it", () => {
+    const out = timeline(dated(["gone", "2026-09-01"], ["last day before", "2026-09-27"], ["first day after", "2026-11-02"], ["in", "2026-11-01"]), first, 35);
+    expect(out.rows.map((r) => r.card.title)).toEqual(["in"]);
+    expect(out.earlier).toBe(2);
+    expect(out.later).toBe(1);
+  });
+
+  it("reads down the page in the order the days read across it", () => {
+    const { rows } = timeline(
+      dated(["late", "2026-10-10"], ["long", "2026-09-29", "2026-10-09"], ["short", "2026-09-29"], ["twin", "2026-09-29"]),
+      first,
+      35,
+    );
+    expect(rows.map((r) => r.card.title)).toEqual(["short", "twin", "long", "late"]);
+  });
+
+  it("keeps the cards with no date apart, in the board's order", () => {
+    let b = dated(["when", "2026-09-30"]);
+    b = addCard(b, { title: "someday" }, "x1", 0);
+    b = addCard(b, { title: "maybe" }, "x2", 0);
+    const out = timeline(b, first, 35);
+    expect(out.loose.map((c) => c.title)).toEqual(["someday", "maybe"]);
+    expect(out.rows).toHaveLength(1);
+  });
+
+  it("draws nothing for a window that is not a whole number of days", () => {
+    const b = dated(["a", "2026-09-30"]);
+    expect(timeline(b, Number.NaN, 35).rows).toEqual([]);
+    expect(timeline(b, first, 0).rows).toEqual([]);
+    expect(timeline(b, first, 3.5).rows).toEqual([]);
+  });
+});
+
+describe("a column's colour", () => {
+  const colors = (b: Board) => boardLanes(b).map((l) => l.color);
+
+  it("starts the profile's three on the colours kururu already means by them", () => {
+    expect(colors(emptyProfileBoard())).toEqual(["blue", "amber", "green"]);
+    expect(colors(emptyBoard())).toEqual([null, null, null, null]);
+  });
+
+  it("makes a new column in a colour nobody else is wearing", () => {
+    let b = addLane(emptyProfileBoard(), "Someday", "k1");
+    b = addLane(b, "Bugs", "k2");
+    expect(new Set(colors(b)).size).toBe(5);
+    expect(colors(b)).not.toContain(null);
+  });
+
+  it("takes a colour by name, and none, and refuses anything else", () => {
+    const b = emptyProfileBoard();
+    expect(colors(colorLane(b, "doing", "violet"))).toEqual(["blue", "violet", "green"]);
+    expect(colors(colorLane(b, "doing", null))).toEqual(["blue", null, "green"]);
+    expect(colorLane(b, "doing", "#ff0000")).toBe(b);
+    expect(colorLane(b, "doing", "url(x)")).toBe(b);
+    expect(colorLane(b, "doing", undefined)).toBe(b);
+    expect(colorLane(b, "nope", "violet")).toBe(b);
+    expect(colorLane(emptyBoard(), "doing", "violet").columns).toBeUndefined();
+  });
+
+  it("colours a board from before columns had one, and the same way twice", () => {
+    const old = { columns: [{ id: "todo", name: "To do" }, { id: "k1", name: "Someday" }, { id: "doing", name: "Doing" }, { id: "k2", name: "Bugs" }], cards: [] };
+    const back = adoptProfileBoard(old);
+    expect(colors(back).slice(0, 3)).toEqual(["blue", colors(back)[1]!, "amber"]);
+    expect(new Set(colors(back)).size).toBe(4);
+    expect(colors(back)).not.toContain(null);
+    expect(colors(adoptProfileBoard(old))).toEqual(colors(back));
+  });
+
+  it("keeps a chosen colour and a chosen none to disk and back, and drops what is not one", () => {
+    let b = colorLane(emptyProfileBoard(), "todo", null);
+    b = colorLane(b, "done", "rose");
+    expect(colors(adoptProfileBoard(JSON.parse(JSON.stringify(storedBoard(b)))))).toEqual([null, "amber", "rose"]);
+    expect(colors(adoptProfileBoard({ columns: [{ id: "k1", name: "Edited", color: "javascript:1" }], cards: [] }))).toEqual([null]);
+  });
+
+  it("does not hand a spare colour to one column that another has chosen", () => {
+    const back = adoptProfileBoard({ columns: [{ id: "k1", name: "Old" }, { id: "k2", name: "Chosen", color: "violet" }], cards: [] });
+    expect(colors(back)[1]).toBe("violet");
+    expect(colors(back)[0]).not.toBe("violet");
   });
 });

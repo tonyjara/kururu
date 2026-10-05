@@ -278,3 +278,47 @@ export function findDocs(root: string): Doc[] {
 function sorted(docs: Doc[]): Doc[] {
   return docs.sort((a, b) => b.mtime - a.mtime);
 }
+
+/**
+ * Every folder under a root, shallowest first — the list "Move to…" picks from.
+ *
+ * A drag is the desktop's way to move something, and a phone cannot drag, so it
+ * needs the destination as a list it can filter by typing. Only the open
+ * directories' listings are in the client, and a move is most often to a folder
+ * that is *not* open, so the server walks for it. Same shape and the same
+ * budget as `findDocs`, for the same reason: this is synchronous on the process
+ * relaying every terminal, and a root can be a home directory.
+ */
+const MAX_DIRS = 2000;
+
+export function listDirs(root: string): string[] {
+  const base = resolveInRoot(root, "");
+  if (!base) throw new Error("path is outside the project");
+  const found: string[] = [];
+  let level = [""];
+  for (let depth = 0; depth <= MAX_DOC_DEPTH && level.length > 0; depth++) {
+    const next: string[] = [];
+    for (const rel of level) {
+      let entries;
+      try {
+        entries = readdirSync(resolve(base, rel), { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const dirent of entries) {
+        const name = dirent.name;
+        // `isDirectory` on a dirent does not follow links, so a symlinked
+        // folder is left out — the move would land somewhere `resolveInRoot`
+        // might then refuse, and a row that fails when picked is worse than none.
+        if (!dirent.isDirectory() || SKIP_DIRS.has(name)) continue;
+        if (name.startsWith(".") && name !== ".claude" && name !== ".github") continue;
+        const path = rel ? `${rel}/${name}` : name;
+        found.push(path);
+        next.push(path);
+        if (found.length >= MAX_DIRS) return found;
+      }
+    }
+    level = next;
+  }
+  return found;
+}

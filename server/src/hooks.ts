@@ -20,7 +20,9 @@
  *
  * What it does not reach is a `claude` typed into a shell, which kururu never
  * sees being launched. That still wants the hooks in the profile's own settings,
- * by hand, as it always did for `~/.claude`.
+ * by hand, as it always did for `~/.claude` — and a profile that has them is the
+ * machine's case over again, so the flag steps aside for it rather than report
+ * every event twice. `runsReporter` is how it tells.
  *
  * The script is `report.mjs`, bundled beside `server.mjs` by `desktop/build.mjs`,
  * and run by whatever is running the server: `node` from a checkout, the app's
@@ -29,7 +31,7 @@
  * only has the app. Rewritten at every launch rather than once, because the
  * path in it moves when the server does and the write is a few hundred bytes.
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -66,7 +68,7 @@ export function hookSettings(runtime: string, script: string): object {
  * gets an agent without a ring rather than a hook that fails on every turn.
  */
 export function hookSettingsFile(): string | null {
-  const script = fileURLToPath(new URL("./report.mjs", import.meta.url));
+  const script = reportScript();
   if (!existsSync(script)) return null;
   const dir = join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
   const path = join(dir, "claude-hooks.json");
@@ -79,8 +81,55 @@ export function hookSettingsFile(): string | null {
   }
 }
 
-/** ` --settings '<file>'`, or nothing. Appended to a launcher's command line. */
-export function hookSettingsFlag(): string {
+/** Where the bundled reporter is, whether or not it has been built. */
+function reportScript(): string {
+  return fileURLToPath(new URL("./report.mjs", import.meta.url));
+}
+
+/**
+ * Whether a Claude settings object already runs kururu's reporter on some event.
+ * Pure, for the test.
+ *
+ * Known by `report-cli` — what the README has people install from a checkout —
+ * or by this server's own bundled script, and by nothing looser. The two ways
+ * of being wrong are not the same size: a miss hands the launch a second copy
+ * and every event is reported twice, while a false match takes the flag away
+ * from an agent that had no other hooks, and that is the missing ring this
+ * module exists to prevent. So a hook merely named `report.mjs` is not ours.
+ */
+export function runsReporter(settings: unknown, script: string): boolean {
+  const hooks = (settings as { hooks?: unknown } | null)?.hooks;
+  if (!hooks || typeof hooks !== "object") return false;
+  return Object.values(hooks).some(
+    (groups) =>
+      Array.isArray(groups) &&
+      groups.some((group) => {
+        const list = (group as { hooks?: unknown } | null)?.hooks;
+        return (
+          Array.isArray(list) &&
+          list.some((hook) => {
+            const command = (hook as { command?: unknown } | null)?.command;
+            return typeof command === "string" && (command.includes("report-cli") || command.includes(script));
+          })
+        );
+      }),
+  );
+}
+
+/**
+ * ` --settings '<file>'`, or nothing. Appended to a launcher's command line.
+ *
+ * Nothing as well when the directory Claude is about to read already runs the
+ * reporter. A settings file that will not parse counts as not running it: the
+ * cost of that guess is a doubled report, and the cost of the other is no ring.
+ */
+export function hookSettingsFlag(claudeDir: string): string {
+  try {
+    const own: unknown = JSON.parse(readFileSync(join(claudeDir, "settings.json"), "utf8"));
+    if (runsReporter(own, reportScript())) return "";
+  } catch {
+    // No settings yet, which is how every profile starts.
+  }
   const file = hookSettingsFile();
   return file ? ` --settings ${quote(file)}` : "";
 }

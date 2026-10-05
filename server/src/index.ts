@@ -33,7 +33,7 @@ import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileS
 import { execFile, spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createNetServer } from "node:net";
-import { tmpdir } from "node:os";
+import { tmpdir, totalmem } from "node:os";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -61,7 +61,7 @@ import type {
   WorkspaceProject,
 } from "../../shared/wire";
 import { COMMIT_MESSAGE_MAX, GIT_ACTIONS, GIT_STATUS_MS } from "../../shared/wire";
-import { DEV_SCAN_MS, GIT_SCAN_MS, SAVE_DEBOUNCE_MS, USAGE_POLL_MS } from "../../shared/wire";
+import { DEV_SCAN_MS, GIT_SCAN_MS, SAVE_DEBOUNCE_MS, USAGE_POLL_MS, VPS_POLL_MS } from "../../shared/wire";
 import {
   bindAddress,
   cookieHeader,
@@ -79,12 +79,16 @@ import { processCwd } from "./cwd";
 import { scanDevServers } from "./devservers";
 import { readHead, repoAt } from "./git";
 import { pollUsage, usageSnapshot } from "./usage";
-import { allowedRoots, allowRoot, findDocs, listDir, readBytes, readFile, resolveInRoot } from "./files";
+import { addVps, pollVps, pollVpsOne, removeVps, vpsSnapshot } from "./vps";
+import { allowedRoots, allowRoot, findDocs, listDir, listDirs, readBytes, readFile, resolveInRoot } from "./files";
+import { parseFileOp, runFileOp } from "./fileops";
 import { renderMarkdown } from "./markdown";
 import { scanMemory } from "./memory";
+import { childIndex as footChildren, hostPidOf, readFootTable, readTree } from "./footprint";
+import type { Footprint, FootprintTerminal } from "../../shared/footprint";
 import { attach as attachEditor, findNvim, openFile } from "./nvim";
 import { readProcTable } from "./agents/procs";
-import { activeAgent, BOARD_TAB, findPane, isBoardTab, panes, paneWithAgent, terminalsOf } from "../../shared/layout";
+import { activeAgent, BOARD_TAB, findPane, isBoardTab, isDocTab, panes, paneWithAgent, showsDoc, terminalsOf } from "../../shared/layout";
 import {
   adoptLegacySheet,
   builtinSheets,
@@ -158,6 +162,12 @@ import {
   editCard,
   mintCardId,
   moveCard,
+  addLane,
+  colorLane,
+  mintLaneId,
+  moveLane,
+  removeLane,
+  renameLane,
   removeCard,
   runLive,
   setDev,
@@ -1205,7 +1215,8 @@ function agentCommand(launcher: Launcher): string {
 }
 
 function hooksFor(launcher: Launcher): string {
-  return launcher.cli === "claude" && loginsActive() ? hookSettingsFlag() : "";
+  if (launcher.cli !== "claude" || !loginsActive()) return "";
+  return hookSettingsFlag(claudeDirFor(workspaces.active.loginKey));
 }
 
 /**
@@ -1593,7 +1604,7 @@ function devPane(): string | null {
   const newest = (ids: Set<string>) => host.agents.filter((agent) => ids.has(agent.id)).at(-1)?.id;
   for (const agentId of [newest(servers), newest(here)]) {
     const pane = agentId ? paneWithAgent(layout, agentId) : null;
-    if (pane && pane.id !== board?.id && !pane.reader) return pane.id;
+    if (pane && pane.id !== board?.id && !showsDoc(pane)) return pane.id;
   }
   return workspaces.paneBesideBoard();
 }
@@ -2055,6 +2066,36 @@ async function pollDevServers(): Promise<void> {
 }
 
 /**
+ * Where a tab's terminal is now, as of the last look — never a wait.
+ *
+ * The spawn directory was the answer here once, and it is the reason a fresh
+ * workspace's tree could sit on `~` while its only terminal had long since
+ * `cd`'d into a project: a shell that moves never says so. The live cwd is an
+ * `lsof` on macOS, one per terminal, and this is asked about every tab of
+ * every workspace on the git poll — so the answer is cached, refreshed in the
+ * background when stale, and a tab nobody has looked at yet answers with where
+ * it was opened until the first look comes back one poll later.
+ */
+const cwdSeen = new Map<string, { at: number; cwd: string | undefined }>();
+const CWD_CACHE_MS = 10_000;
+
+function tabCwd(agentId: string): string | undefined {
+  const agent = host.find(agentId);
+  if (!agent) {
+    cwdSeen.delete(agentId);
+    return undefined;
+  }
+  const seen = cwdSeen.get(agentId);
+  if (!seen || Date.now() - seen.at > CWD_CACHE_MS) {
+    // Stamped before the look so a slow `lsof` is not asked again by every
+    // poll that lands while it is still running.
+    cwdSeen.set(agentId, { at: Date.now(), cwd: seen?.cwd });
+    void followCwd(agentId).then((cwd) => cwdSeen.set(agentId, { at: Date.now(), cwd }));
+  }
+  return seen?.cwd ?? agent.cwd;
+}
+
+/**
  * Every directory this workspace could be said to be *in*, best first.
  *
  * A workspace has no directory of its own — it is an arrangement, not a project
@@ -2069,7 +2110,7 @@ function workspaceDirs(workspace: Workspace): string[] {
     if (dir && !dirs.includes(dir)) dirs.push(dir);
   };
   for (const pane of panes(workspace.layout)) {
-    for (const agentId of pane.agentIds) add(host.find(agentId)?.cwd);
+    for (const agentId of pane.agentIds) add(tabCwd(agentId));
     add(pane.cwd);
   }
   return dirs;
@@ -2101,8 +2142,8 @@ function focusedDirs(workspace: Workspace): string[] {
   const front: (string | undefined)[] = [];
   if (pane) {
     const showing = pane.agentIds[pane.activeIdx];
-    if (showing) front.push(host.find(showing)?.cwd);
-    for (const agentId of pane.agentIds) front.push(host.find(agentId)?.cwd);
+    if (showing) front.push(tabCwd(showing));
+    for (const agentId of pane.agentIds) front.push(tabCwd(agentId));
     front.push(pane.cwd);
   }
   const first = front.filter((dir): dir is string => Boolean(dir));
@@ -2132,6 +2173,26 @@ async function repoFor(dir: string): Promise<{ root: string; git: string } | nul
   const found = await repoAt(dir);
   repoSeen.set(dir, { at: Date.now(), found });
   return found;
+}
+
+/**
+ * The roots a workspace's tree could be drawn at: each directory's repository,
+ * and the directory itself when it is somewhere inside one — a tab sitting in
+ * `web/` of a monorepo is a tab whose tree you might want to start at `web/`.
+ * Tabs in the same place say it once, which is most workspaces: one entry, and
+ * the header draws no picker at all.
+ */
+async function rootChoices(dirs: string[]): Promise<string[]> {
+  const choices: string[] = [];
+  const add = (dir: string) => {
+    if (!choices.includes(dir)) choices.push(dir);
+  };
+  for (const dir of dirs) {
+    const repo = await repoFor(dir);
+    if (repo) add(repo.root);
+    if (!repo || repo.root !== dir) add(dir);
+  }
+  return choices;
 }
 
 let lastBranchJson = "";
@@ -2164,14 +2225,19 @@ async function pollBranches(): Promise<void> {
       break;
     }
     /**
-     * The repository is allowed as a root here, by the server, having found it
-     * by walking up from a directory a terminal is in — which is the rule
-     * `files.ts` keeps: a root is learned from what kururu holds, never from a
-     * client. It is also no wider than what that terminal can already read.
+     * The roots are allowed here, by the server, having found them by walking
+     * up from a directory a terminal is in — which is the rule `files.ts`
+     * keeps: a root is learned from what kururu holds, never from a client. None
+     * is wider than what that terminal can already read.
+     *
+     * The choices are in tree order rather than focus order, so the header's
+     * list does not reshuffle every time focus crosses a pane.
      */
     if (project) {
-      allowRoot(project);
-      projects.push({ workspaceId: workspace.id, root: project });
+      const choices = await rootChoices(workspaceDirs(workspace));
+      if (!choices.includes(project)) choices.unshift(project);
+      for (const root of choices) allowRoot(root);
+      projects.push({ workspaceId: workspace.id, root: project, choices });
     }
   }
   const projectJson = JSON.stringify(projects);
@@ -2527,25 +2593,31 @@ async function openInEditor(root: string, path: string, agentId: string | null):
   }
   const fresh = workspaces.split("row", workspaces.focusedPaneId);
   if (!fresh) throw new Error("there is no pane to split");
-  /**
-   * The title is set by hand first, because the tab is named from the terminal
-   * title when there is one and from the command line when there is not — and
-   * this command line, cut at its last slash, is `sh}" -l`. An nvim with
-   * `set title` replaces it the moment it starts, and a shell that sets its own
-   * takes it back when the editor exits; one that does not says "nvim" for a
-   * while longer, which is at least where the tab came from.
-   */
-  const agent = await openTerminal(fresh, {
-    cwd: root,
-    command: `printf '\\033]2;nvim\\007'; nvim -- ${shellQuote(path)}; exec "\${SHELL:-/bin/sh}" -l`,
-    kind: "shell",
-  });
+  const agent = await openTerminal(fresh, { cwd: root, command: nvimCommand(path), kind: "shell" });
   return { agentId: agent.id };
 }
 
 /** One argument for a POSIX shell, whatever is in it. */
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * The command line for a tab that is nvim rather than a shell that happens to
+ * have nvim typed into it — the new-tab menu's row, and the file tree's.
+ *
+ * The title is set by hand first, because the tab is named from the terminal
+ * title when there is one and from the command line when there is not — and
+ * this command line, cut at its last slash, is `sh}" -l`. An nvim with
+ * `set title` replaces it the moment it starts, and a shell that sets its own
+ * takes it back when the editor exits; one that does not says "nvim" for a
+ * while longer, which is at least where the tab came from. Dropping into a
+ * shell on exit rather than ending the pty is the same choice `openInEditor`
+ * makes below: `:q` should close a buffer, not a tab.
+ */
+function nvimCommand(path?: string): string {
+  const arg = path ? ` -- ${shellQuote(path)}` : "";
+  return `printf '\\033]2;nvim\\007'; nvim${arg}; exec "\${SHELL:-/bin/sh}" -l`;
 }
 
 // ---------------------------------------------------------------------------
@@ -2612,6 +2684,67 @@ async function pollMemory(): Promise<void> {
 }
 
 /**
+ * One reading of every terminal the host holds, placed in the profile and
+ * workspace whose tab holds it.
+ *
+ * Every profile and not only the active one, which is the difference between
+ * this and the snapshot: the snapshot is what one window is drawing, and this is
+ * what the machine is paying for — a claude left running in a profile you
+ * switched away from yesterday is exactly the one worth finding. A terminal no
+ * tab holds is listed apart rather than dropped, for the same reason.
+ */
+async function footprint(): Promise<Footprint> {
+  const table = await readFootTable();
+  const children = footChildren(table);
+  const roots: number[] = [];
+  const terminals: FootprintTerminal[] = (host?.agents ?? []).map((raw) => {
+    const agent = overlay(raw);
+    const tree = !agent.exited && agent.pid ? readTree(agent.pid, table, children) : null;
+    if (tree) roots.push(agent.pid);
+    return {
+      agentId: agent.id,
+      label: agentLabel(agent),
+      summary: agentSummary(agent),
+      kind: agent.kind,
+      status: agent.status,
+      exited: agent.exited,
+      cwd: agent.cwd,
+      rss: tree?.rss ?? null,
+      processes: tree?.processes ?? 0,
+      agents: tree?.agents ?? [],
+      editors: tree?.editors ?? 0,
+      devServers: tree?.devServers ?? [],
+    };
+  });
+  const known = new Set(terminals.map((t) => t.agentId));
+  const placed = new Set<string>();
+  const profiles = workspaces.all().map((profile) => ({
+    id: profile.id,
+    name: profile.name,
+    active: profile.id === workspaces.active.id,
+    workspaces: profile.workspaces.map((workspace) => {
+      const ids = panes(workspace.layout)
+        .flatMap((pane) => terminalsOf(pane.agentIds))
+        .filter((id) => known.has(id));
+      for (const id of ids) placed.add(id);
+      return { id: workspace.id, name: workspace.name, color: workspace.color, terminals: ids };
+    }),
+  }));
+  const hostPid = hostPidOf(roots, table);
+  return {
+    measuredAt: Date.now(),
+    terminals,
+    profiles,
+    unplaced: terminals.filter((t) => !placed.has(t.agentId)).map((t) => t.agentId),
+    kururu: {
+      server: table.get(process.pid)?.rss ?? null,
+      host: hostPid === null ? null : (table.get(hostPid)?.rss ?? null),
+    },
+    machineTotal: totalmem(),
+  };
+}
+
+/**
  * Ask the account where it stands against its limits.
  *
  * Skipped entirely when nobody is connected, which none of the other polls
@@ -2636,6 +2769,17 @@ async function pollAccountUsage(): Promise<void> {
 }
 
 /**
+ * Sample every VPS the sidebar watches. Skipped while nobody is connected, on
+ * the usage poll's argument: it leaves the machine, as the user, and doing that
+ * for a window that is not open is not a thing to do on a timer.
+ */
+async function pollServers(): Promise<void> {
+  if (clients.size === 0) return;
+  await pollVps();
+  broadcast({ type: "vps", vps: vpsSnapshot() });
+}
+
+/**
  * The timers left in this process, and what they have in common: each one asks
  * the *machine* a question no pty can raise an event about. The status heuristic
  * and the agent scan went with the ptys, because those are questions about a
@@ -2652,6 +2796,7 @@ const timers = [
   setInterval(() => void pollEditors(), NVIM_SCAN_MS),
   setInterval(() => void pollMemory(), MEM_SCAN_MS),
   setInterval(() => void pollAccountUsage(), USAGE_POLL_MS),
+  setInterval(() => void pollServers(), VPS_POLL_MS),
 ];
 
 void pollDevServers();
@@ -2695,15 +2840,16 @@ function handleMessage(ws: WebSocket, raw: string): void {
     case "new-tab": {
       const paneId = msg.paneId ?? workspaces.focusedPaneId;
       void replyAsync(ws, msg.id, () => {
-        if (msg.launcher === undefined) {
-          return openTerminal(paneId, { cwd: msg.cwd, command: msg.command, kind: msg.kind });
+        if (msg.launcher !== undefined) {
+          // Looked up, never built: the id is the only thing taken off the wire.
+          // Switched-off rows are not refused — the setting trims a menu, and a
+          // second client with a stale one is still asking for a real agent.
+          const launcher = typeof msg.launcher === "string" ? findLauncher(msg.launcher) : undefined;
+          if (!launcher) throw new Error(`no such agent: ${String(msg.launcher)}`);
+          return openTerminal(paneId, { cwd: msg.cwd, command: agentCommand(launcher), kind: "agent" });
         }
-        // Looked up, never built: the id is the only thing taken off the wire.
-        // Switched-off rows are not refused — the setting trims a menu, and a
-        // second client with a stale one is still asking for a real agent.
-        const launcher = typeof msg.launcher === "string" ? findLauncher(msg.launcher) : undefined;
-        if (!launcher) throw new Error(`no such agent: ${String(msg.launcher)}`);
-        return openTerminal(paneId, { cwd: msg.cwd, command: agentCommand(launcher), kind: "agent" });
+        if (msg.nvim) return openTerminal(paneId, { cwd: msg.cwd, command: nvimCommand(), kind: "shell" });
+        return openTerminal(paneId, { cwd: msg.cwd, command: msg.command, kind: msg.kind });
       });
       return;
     }
@@ -2714,7 +2860,11 @@ function handleMessage(ws: WebSocket, raw: string): void {
       // The board's tab is a view: closing it ends nothing, and the cards stay
       // on the workspace for the next `open-board`.
       if (isBoardTab(agentId)) workspaces.removeTab(BOARD_TAB);
-      else if (agentId) {
+      // A document is closed where it is showing — the only place the key can
+      // mean — since the same one may be open in another pane.
+      else if (isDocTab(agentId)) {
+        if (focused && !msg.agentId) workspaces.closeDoc(focused.id, focused.activeIdx);
+      } else if (agentId) {
         // Closing a pane's last terminal closes the pane (`reapTab`), the same as
         // when its pty ends; the last pane of a workspace stays, empty.
         for (const id of terminalsOf([agentId])) {
@@ -3094,6 +3244,21 @@ function handleMessage(ws: WebSocket, raw: string): void {
       void replyAsync(ws, msg.id, () => retireWorktrees(msg.root));
       return;
 
+    case "add-vps":
+      reply(ws, msg.id, () => {
+        const entry = addVps(msg);
+        broadcast({ type: "vps", vps: vpsSnapshot() });
+        void pollVpsOne(entry.id).then(() => broadcast({ type: "vps", vps: vpsSnapshot() }));
+        return entry;
+      });
+      return;
+
+    case "remove-vps":
+      if (typeof msg.vpsId !== "string") return;
+      removeVps(msg.vpsId);
+      broadcast({ type: "vps", vps: vpsSnapshot() });
+      return;
+
     case "set-launch":
       saveLaunch(adoptLaunch(msg.launch));
       // Which login the bar reads may just have changed hands.
@@ -3125,6 +3290,18 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "move-workspace":
       workspaces.moveWorkspace(msg.workspaceId, msg.index);
+      return;
+
+    case "set-workspace-group":
+      workspaces.setWorkspaceGroup(msg.workspaceId, msg.group);
+      return;
+
+    case "rename-workspace-group":
+      workspaces.renameWorkspaceGroup(msg.from, msg.to);
+      return;
+
+    case "move-workspace-group":
+      workspaces.moveWorkspaceGroup(msg.group, msg.onto);
       return;
 
     // --- profiles ----------------------------------------------------------
@@ -3212,7 +3389,9 @@ function handleMessage(ws: WebSocket, raw: string): void {
       return;
 
     case "edit-card":
-      workspaces.editBoard(msg.workspaceId, (board) => editCard(board, msg.cardId, { title: msg.title, body: msg.body, isolate: msg.isolate }));
+      workspaces.editBoard(msg.workspaceId, (board) =>
+        editCard(board, msg.cardId, { title: msg.title, body: msg.body, isolate: msg.isolate, dates: msg.dates }),
+      );
       return;
 
     case "move-card":
@@ -3230,6 +3409,55 @@ function handleMessage(ws: WebSocket, raw: string): void {
      */
     case "delete-card":
       workspaces.editBoard(msg.workspaceId, (board) => removeCard(board, msg.cardId));
+      return;
+
+    // The profile's board. Nothing on it runs, so these are the pure functions
+    // and nothing else — no agent to end on Done and no worktree to ask about.
+    // The column is held to the ones the board has by the pure functions
+    // themselves, since the board is what knows its columns.
+    case "add-profile-card":
+      workspaces.editProfileBoard(msg.profileId, (board) =>
+        addCard(board, { title: msg.title, body: msg.body, column: msg.column, dates: msg.dates }, mintCardId(), Date.now()),
+      );
+      return;
+
+    case "edit-profile-card":
+      workspaces.editProfileBoard(msg.profileId, (board) =>
+        editCard(board, msg.cardId, { title: msg.title, body: msg.body, dates: msg.dates }),
+      );
+      return;
+
+    case "move-profile-card":
+      workspaces.editProfileBoard(msg.profileId, (board) => moveCard(board, msg.cardId, msg.column, msg.index));
+      return;
+
+    case "delete-profile-card":
+      workspaces.editProfileBoard(msg.profileId, (board) => removeCard(board, msg.cardId));
+      return;
+
+    case "add-profile-column":
+      workspaces.editProfileBoard(msg.profileId, (board) => addLane(board, msg.name, mintLaneId()));
+      return;
+
+    case "rename-profile-column":
+      workspaces.editProfileBoard(msg.profileId, (board) => renameLane(board, msg.columnId, msg.name));
+      return;
+
+    case "set-profile-column-color":
+      workspaces.editProfileBoard(msg.profileId, (board) => colorLane(board, msg.columnId, msg.color));
+      return;
+
+    case "move-profile-column":
+      workspaces.editProfileBoard(msg.profileId, (board) => moveLane(board, msg.columnId, msg.index));
+      return;
+
+    case "delete-profile-column":
+      workspaces.editProfileBoard(msg.profileId, (board) => removeLane(board, msg.columnId));
+      return;
+
+    case "send-profile-card":
+      if (typeof msg.cardId !== "string" || typeof msg.workspaceId !== "string") return;
+      workspaces.sendProfileCard(msg.profileId, msg.cardId, msg.workspaceId);
       return;
 
     case "run-card":
@@ -3298,7 +3526,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "select-doc":
     case "close-doc":
-      // An index off the wire, and `docs[NaN]` is merely undefined — but a
+      // An index off the wire, and `agentIds[NaN]` is merely undefined — but a
       // fraction or a negative is not a tab either, and saying so here keeps the
       // model from ever being asked.
       if (!Number.isInteger(msg.index) || msg.index < 0) return;
@@ -3344,7 +3572,14 @@ function handleMessage(ws: WebSocket, raw: string): void {
        * makes about a colour it will not take.
        */
       if (!resolveInRoot(msg.root, msg.path)) return;
-      workspaces.openDoc(msg.paneId, msg.root, msg.path);
+      if (msg.at !== undefined && (!Number.isInteger(msg.at) || msg.at < 0)) return;
+      if (workspaces.openDoc(msg.paneId, msg.root, msg.path, msg.at) && msg.focus) workspaces.focusPane(msg.paneId);
+      return;
+
+    case "split-with-file":
+      if (!resolveInRoot(msg.root, msg.path)) return;
+      if (msg.dir !== "row" && msg.dir !== "col") return;
+      workspaces.splitWithFile(msg.root, msg.path, msg.paneId, msg.dir, msg.before === true);
       return;
   }
 }
@@ -3592,6 +3827,16 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         counts: countsAsAgent(agent),
       })),
     });
+    return;
+  }
+
+  /**
+   * Settings' Processes page: every terminal, what is running in it and what
+   * it costs, grouped the way the sidebar groups them. Asked for, never polled
+   * from here — the page asks while it is open. See `shared/footprint.ts`.
+   */
+  if (url.pathname === "/api/footprint") {
+    json(res, await footprint());
     return;
   }
 
@@ -4188,6 +4433,35 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
     return;
   }
+  if (url.pathname === "/api/dirs") {
+    try {
+      json(res, { dirs: listDirs(url.searchParams.get("root") ?? "") });
+    } catch (err) {
+      json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+    return;
+  }
+  /**
+   * The tree's edits — see `fileops.ts`, which is the only thing that decides
+   * anything here. POST only: a GET that renames a file is one a prefetch, a
+   * crawler or a pasted link can trigger, and the gate above is what stops a
+   * page somewhere else from sending one of these at all.
+   */
+  if (url.pathname === "/api/fs" && req.method === "POST") {
+    void (async () => {
+      let op;
+      try {
+        op = parseFileOp(await readJsonBody(req));
+      } catch {
+        op = null;
+      }
+      if (!op) return json(res, { error: "not a file operation" }, 400);
+      const result = await runFileOp(op);
+      if (result.ok) json(res, result);
+      else json(res, { error: result.error }, 400);
+    })();
+    return;
+  }
   if (url.pathname === "/api/ls" || url.pathname === "/api/file") {
     const root = url.searchParams.get("root") ?? "";
     const path = url.searchParams.get("path") ?? "";
@@ -4256,10 +4530,14 @@ server.on("upgrade", (req, socket, head) => {
     send(ws, { type: "branches", branches: state.branches });
     send(ws, { type: "projects", projects: state.projects });
     send(ws, { type: "usage", usage: usageSnapshot() });
+    send(ws, { type: "vps", vps: vpsSnapshot() });
     // The first client through the door is also what starts the usage poll: it
     // is skipped while nothing is connected, so without this a freshly started
     // server would draw no bar for a minute.
     void pollAccountUsage();
+    // The VPS poll the same way, but only for the first: a second window would
+    // otherwise buy every VPS an extra ssh round for nothing.
+    if (clients.size === 1) void pollServers();
 
     ws.on("message", (data) => handleMessage(ws, data.toString()));
     ws.on("close", () => dropClient(ws));

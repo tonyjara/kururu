@@ -13,7 +13,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LOGIN_KEY } from "../../shared/model";
-import { readSnapshot, snapshotPath, writeSnapshot } from "../src/persist";
+import { BOARD_TAB, docTab, panes, type LayoutNode } from "../../shared/layout";
+import { adoptReaders, readSnapshot, snapshotPath, writeSnapshot } from "../src/persist";
 import { Workspaces } from "../src/workspaces";
 
 let dir: string;
@@ -51,5 +52,66 @@ describe("loginKey on disk", () => {
     expect(old!.loginKey).toMatch(LOGIN_KEY);
     expect(tampered!.loginKey).toMatch(LOGIN_KEY);
     expect(tampered!.loginKey).not.toBe(old!.loginKey);
+  });
+});
+
+/**
+ * The views a pane holds — the board and documents — come back in their order
+ * and with the one that was showing still showing; the terminals beside them
+ * do not, because they are processes. Both older shapes a reader has been
+ * written in, on disk and in the host's blob, come back as document tabs.
+ */
+describe("view tabs on disk", () => {
+  const ROOT = "/home/you/project";
+
+  it("goes round the trip with the terminals left out", () => {
+    const workspaces = new Workspaces();
+    const pane = workspaces.focusedPaneId;
+    workspaces.addTab("a1", ROOT, pane);
+    workspaces.openBoard(pane, true);
+    workspaces.openDoc(pane, ROOT, "a.md");
+    workspaces.openDoc(pane, ROOT, "b.md");
+    workspaces.selectTab(pane, 2);
+    writeSnapshot(workspaces.all(), workspaces.active.id);
+    const layout = readSnapshot()!.profiles[0]!.workspaces[0]!.layout;
+    const [restored] = panes(layout);
+    expect(restored!.agentIds).toEqual([BOARD_TAB, docTab(ROOT, "a.md"), docTab(ROOT, "b.md")]);
+    expect(restored!.activeIdx).toBe(1);
+  });
+
+  it("reads a reader pane written before documents were tabs of any pane", () => {
+    const workspaces = new Workspaces();
+    writeSnapshot(workspaces.all(), workspaces.active.id);
+    const session = JSON.parse(readFileSync(snapshotPath(), "utf8"));
+    session.profiles[0].workspaces[0].layout = {
+      type: "pane",
+      pane: { reader: { root: ROOT, path: "b.md", docs: [{ root: ROOT, path: "a.md" }] } },
+    };
+    writeFileSync(snapshotPath(), JSON.stringify(session));
+    const [restored] = panes(readSnapshot()!.profiles[0]!.workspaces[0]!.layout);
+    expect(restored!.agentIds).toEqual([docTab(ROOT, "a.md"), docTab(ROOT, "b.md")]);
+    expect(restored!.activeIdx).toBe(1);
+  });
+
+  it("adopts a host blob's reader pane, keeping who it follows", () => {
+    const workspaces = new Workspaces();
+    const [profile] = workspaces.all();
+    const old = {
+      type: "pane",
+      pane: {
+        id: "n1",
+        agentIds: [],
+        activeIdx: 0,
+        reader: { root: ROOT, path: "a.md", follow: "a3", editor: "a3", docs: [{ root: ROOT, path: "a.md" }, { root: ROOT, path: "b.md" }], rev: 4 },
+      },
+    } as unknown as LayoutNode;
+    const blob = [{ ...profile!, workspaces: [{ ...profile!.workspaces[0]!, layout: old }] }];
+    const [pane] = panes(adoptReaders(blob)[0]!.workspaces[0]!.layout);
+    expect(pane!.agentIds).toEqual([docTab(ROOT, "a.md"), docTab(ROOT, "b.md")]);
+    expect(pane!.activeIdx).toBe(0);
+    expect(pane!.reader).toEqual({ root: ROOT, follow: "a3", editor: "a3", rev: 4 });
+    // Adopting what is already current changes nothing.
+    const again = adoptReaders(adoptReaders(blob));
+    expect(panes(again[0]!.workspaces[0]!.layout)[0]!.agentIds).toEqual(pane!.agentIds);
   });
 });

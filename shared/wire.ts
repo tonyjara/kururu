@@ -33,11 +33,12 @@
  * the answer, and it is complete. Only `new-tab` can fail in a way nothing else
  * would explain, so it alone carries an `id` and is answered with `reply`.
  */
-import type { BoardColumn } from "./board";
+import type { BoardColumn, CardDates } from "./board";
 import type { Direction } from "./layout";
 import type { Action } from "./keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
 import type { LaunchSettings } from "./launchers";
+import type { VpsStatus } from "./vps";
 import type { NotifyEvent, NotifySettings } from "./notify";
 import type { MergeResolution, ProjectSettings } from "./projects";
 import type { TerminalAppearance } from "./theme";
@@ -243,7 +244,16 @@ export const COMMIT_MESSAGE_MAX = 10_000;
  */
 export interface WorkspaceProject {
   workspaceId: string;
+  /** The server's guess: the repository the focused tab is in. */
   root: string;
+  /**
+   * Every root this workspace's terminals are in, deduplicated, `root` among
+   * them — what the tree's header offers when the guess is the wrong one. Each
+   * tab gives its repository's root and, when it is further down, the folder
+   * it is actually in. All of them allowed by the server, so a client picking
+   * one is choosing among roots, never naming one.
+   */
+  choices: string[];
 }
 
 /**
@@ -352,6 +362,13 @@ export type ServerMessage =
    * sidebar draws neither.
    */
   | { type: "usage"; usage: AccountUsage | null }
+  /**
+   * Sent on connect, after every VPS poll, and whenever the list changes: every
+   * VPS the sidebar watches, with its last reading. Whole, like `branches` —
+   * there are a handful, and the list and the numbers travel together so the
+   * settings page and the sidebar can never disagree about which exist.
+   */
+  | { type: "vps"; vps: VpsStatus[] }
   /** Raw pty output, exactly as it arrived, for a terminal this client is watching. */
   | { type: "output"; agentId: string; data: string }
   /**
@@ -429,7 +446,11 @@ export type ClientMessage =
    *
    * `launcher` is an id from `shared/launchers.ts` — an agent on a model, picked
    * from the new-tab menu — and the server turns it into the command. It wins
-   * over `command` and `kind` when both are sent.
+   * over `command` and `kind` when both are sent, and over `nvim` too.
+   *
+   * `nvim` is the same menu's plain-editor row: a shell that starts nvim and
+   * drops back to the shell when it quits, built server-side for the reason
+   * `launcher` is an id rather than a command string — see `shared/launchers.ts`.
    */
   | {
       type: "new-tab";
@@ -438,6 +459,7 @@ export type ClientMessage =
       cwd?: string;
       command?: string;
       launcher?: string;
+      nvim?: boolean;
       paneId?: string;
     }
   /**
@@ -631,8 +653,26 @@ export type ClientMessage =
   | { type: "set-workspace-mascot"; workspaceId: string; mascotId: string | null }
   /** Deletes it and ends everything in it. The last workspace cannot go. */
   | { type: "delete-workspace"; workspaceId: string }
-  /** Dragged up or down the sidebar list. An absolute position, not a step. */
+  /**
+   * Dragged up or down the sidebar list. An absolute position, not a step —
+   * and it takes the group of whatever was at that position, so dropping a
+   * workspace among a group's rows files it there. See `Workspace.group`.
+   */
   | { type: "move-workspace"; workspaceId: string; index: number }
+  /** File a workspace under a group, made by naming it, or take it out with null. */
+  | { type: "set-workspace-group"; workspaceId: string; group: string | null }
+  /**
+   * Rename a group, which is renaming it on every member. Onto a name already
+   * in use the two merge; onto null the group is disbanded and its workspaces
+   * go back to being loose. Nothing in a workspace is touched but the label.
+   */
+  | { type: "rename-workspace-group"; from: string; to: string | null }
+  /**
+   * A whole group, dragged by its heading onto a workspace's row or another
+   * group's heading: it takes that place, the way a workspace dropped on a row
+   * takes the row's. `onto` is a workspace id; a member stands for its group.
+   */
+  | { type: "move-workspace-group"; group: string; onto: string }
 
   // --- profiles ------------------------------------------------------------
   | { type: "new-profile"; name: string }
@@ -713,8 +753,8 @@ export type ClientMessage =
    * is whose nvim to follow, and with neither the focused pane and its showing
    * terminal are used, which is what the keybinding sends.
    *
-   * A pane that is already a reader is re-pointed rather than split again: the
-   * second press of a key that made a pane should not make another one.
+   * A pane already showing a document is re-pointed rather than split again:
+   * the second press of a key that made a pane should not make another one.
    *
    * `focus` moves the focus onto the reader instead of leaving it where it was,
    * and it is the client's to decide because it is a fact about the window
@@ -726,7 +766,8 @@ export type ClientMessage =
   | { type: "open-reader"; paneId?: string; agentId?: string; focus?: boolean }
 
   /**
-   * Point a reader at a file somebody chose, and stop following an editor.
+   * Open a file somebody chose in a pane — any pane, as a tab after the one
+   * showing — and stop that pane following an editor.
    *
    * The unfollowing is not a separate decision the caller gets to make: a file
    * you picked by hand that the next `:w` on another machine could replace is a
@@ -737,8 +778,12 @@ export type ClientMessage =
    * `root` is one of the roots the server already holds. A client naming a root
    * of its own is the one thing `files.ts` exists to refuse, so this is checked
    * there like every other path that arrives from outside.
+   *
+   * `at` is a file dropped on a strip, and lands where it was dropped; without
+   * it the tab goes after the one showing. `focus` moves the focus there, which
+   * a drop wants and a pick in the pane you are already in does not need.
    */
-  | { type: "open-doc"; paneId: string; root: string; path: string }
+  | { type: "open-doc"; paneId: string; root: string; path: string; at?: number; focus?: boolean }
 
   /**
    * Stop following an editor and sit on the file it is showing now.
@@ -750,33 +795,44 @@ export type ClientMessage =
   | { type: "pin-reader"; paneId: string; follow: boolean }
 
   /**
-   * Show, or close, one of a reader's tabs, by its place in the strip.
+   * Show, or close, a document's tab, by its place in the pane's strip — the
+   * whole strip, terminals and board included, since a document is a tab like
+   * they are. A place that is not a document is refused.
    *
    * An index rather than a path, for the reason tabs of terminals go by id: the
    * client is naming a thing it can see, and the server already holds the list
    * it is an index into — a path would be a second way to name a file that has
    * to be checked all over again for a click that opens nothing new. Closing
-   * the last one closes the pane.
+   * a pane's last tab closes the pane.
    */
   | { type: "select-doc"; paneId: string; index: number }
   | { type: "close-doc"; paneId: string; index: number }
 
   /**
-   * A reader's tab, dragged: onto a reader's strip, at a place in it — its own
-   * strip is a reorder — or onto a pane's edge, where it becomes a reader of
-   * its own. `move-tab` and `split-with` for documents, kept apart from them
-   * because a terminal is named by an id the whole server knows and a document
-   * is named by its place in one pane's list.
+   * A document's tab, dragged: onto any pane's strip or middle, at a place in
+   * it — its own strip is a reorder — or onto a pane's edge, where it gets a
+   * pane of its own. `move-tab` and `split-with` for documents, kept apart from
+   * them because a terminal is named by an id the whole server knows and a
+   * document, which may be open in two panes, by its place in one pane's list.
    */
   | { type: "move-doc"; fromPaneId: string; index: number; toPaneId: string; at?: number }
   | { type: "split-with-doc"; fromPaneId: string; index: number; paneId: string; dir: "row" | "col"; before: boolean }
 
   /**
+   * A markdown file dragged out of the tree onto a pane: `open-doc` with an
+   * `at` for its strip or middle, and this for an edge, where it gets a pane of
+   * its own. A path rather than a place, since it had no tab to be taken from —
+   * and checked like every other path a client sends.
+   */
+  | { type: "split-with-file"; root: string; path: string; paneId: string; dir: "row" | "col"; before: boolean }
+
+  /**
    * Show a markdown file, from the file tree.
    *
    * The server picks the pane rather than the client, because "the reader" is a
-   * question about the arrangement: the focused pane if it is a reader, else any
-   * reader in the workspace, else a new one split off the focused pane. A client
+   * question about the arrangement: the focused pane if it is showing a
+   * document, else any pane in the workspace that is, else a new one split off
+   * the focused pane. A client
    * that chose would have to send a split and then an `open-doc` to a pane id it
    * had not seen yet. `focus` is `open-reader`'s — a phone wants to be taken to
    * the document, a desktop wants its keyboard left where it was.
@@ -837,9 +893,52 @@ export type ClientMessage =
       isolate?: boolean;
       launcher: string;
     }
-  | { type: "edit-card"; workspaceId: string; cardId: string; title?: string; body?: string; isolate?: boolean }
+  /**
+   * `dates` is absent to leave the card's alone and null to take them off —
+   * see `editCard`. Only an edit carries them here: a workspace's card has
+   * dates because it was sent with them, and its board can move or remove
+   * them but is not where a calendar is kept.
+   */
+  | {
+      type: "edit-card";
+      workspaceId: string;
+      cardId: string;
+      title?: string;
+      body?: string;
+      isolate?: boolean;
+      dates?: CardDates | null;
+    }
   | { type: "move-card"; workspaceId: string; cardId: string; column: BoardColumn; index?: number }
   | { type: "delete-card"; workspaceId: string; cardId: string }
+
+  /**
+   * The profile's board — see `Profile.board`. The same four verbs, naming a
+   * profile where those name a workspace and for the same reason, and one
+   * more: `send-profile-card` takes the card off the profile's board and puts
+   * it on `workspaceId`'s, making that board if the workspace never had one.
+   * Sending is the only road between the two, and it runs one way.
+   *
+   * These are also the timeline's verbs. Dragging a bar is `edit-profile-card`
+   * with `dates` and nothing else, so there is no second road onto a card for
+   * a day to arrive by.
+   */
+  | { type: "add-profile-card"; profileId: string; title: string; body?: string; column?: string; dates?: CardDates | null }
+  | { type: "edit-profile-card"; profileId: string; cardId: string; title?: string; body?: string; dates?: CardDates | null }
+  | { type: "move-profile-card"; profileId: string; cardId: string; column: string; index?: number }
+  | { type: "delete-profile-card"; profileId: string; cardId: string }
+  | { type: "send-profile-card"; profileId: string; cardId: string; workspaceId: string }
+
+  /**
+   * The profile's board's columns, which a person makes — see `BoardLane`. The
+   * server mints the id; a move's index is a place among the other columns;
+   * deleting one moves its cards to its neighbour rather than losing them.
+   */
+  | { type: "add-profile-column"; profileId: string; name: string }
+  | { type: "rename-profile-column"; profileId: string; columnId: string; name: string }
+  /** `color` is one of WORKSPACE_COLORS or null for none, and refused otherwise — see `colorLane`. */
+  | { type: "set-profile-column-color"; profileId: string; columnId: string; color: string | null }
+  | { type: "move-profile-column"; profileId: string; columnId: string; index: number }
+  | { type: "delete-profile-column"; profileId: string; columnId: string }
 
   /**
    * Hand a card to an agent: start one on `launcher` — an id from
@@ -1013,7 +1112,15 @@ export type ClientMessage =
    * separately and the next snapshot only shows which worktrees are gone, not
    * why the others are not. `root` is checked as `set-project`'s is.
    */
-  | { type: "retire-worktrees"; id: number; root: string };
+  | { type: "retire-worktrees"; id: number; root: string }
+  /**
+   * Watch a VPS from the sidebar. `host` is an ssh destination and is the only
+   * thing here that reaches a command line — `shared/vps.ts` holds it to a
+   * grammar with no room for an option, and the command run on the far side is
+   * the server's own. Replied to with the new entry, or with why it was refused.
+   */
+  | { type: "add-vps"; id: number; name: string; host: string; panel: string }
+  | { type: "remove-vps"; vpsId: string };
 
 /**
  * How often the status heuristic is asked to notice that work has stopped.
@@ -1066,3 +1173,10 @@ export const GIT_STATUS_MS = 10_000;
  * else's API.
  */
 export const USAGE_POLL_MS = 60_000;
+
+/**
+ * How often each VPS is sampled. Fifteen seconds because this one *is* read for
+ * movement — a RAM bar climbing while a migration runs — and because each poll
+ * is a channel on a connection ssh already holds open, not a handshake.
+ */
+export const VPS_POLL_MS = 15_000;

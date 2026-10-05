@@ -27,6 +27,14 @@ Things that fail with an error naming something other than the cause.
   from Node's own parser as `bad option`. Three symptoms, one cause, none of them
   names it. `env -u ELECTRON_RUN_AS_NODE` is the fix. The tell, when a stack trace
   is all you have, is a Node version Electron does not embed.
+- **A dev window showing another project's app means two vites share 5173.**
+  Ours binds `0.0.0.0`, which is IPv4 only; a vite left on its default
+  `localhost` binds `[::1]`, so both get 5173 and neither sees `EADDRINUSE`.
+  `localhost` resolves to `::1` first, so the window loaded the other one —
+  Platypost's, in the case that found it. The window now asks for `127.0.0.1`,
+  and vite takes `strictPort`, so a taken port stops it instead of moving it
+  somewhere the window is not looking. `lsof -nP -iTCP:5173 -sTCP:LISTEN` shows
+  every holder.
 - **`EADDRINUSE` on 7717 means a stale server**, usually from an earlier turn. Not
   a code bug: `pkill -f "server/run.mjs"; pkill -f "desktop/dist/server.mjs"`. The
   pty host is deliberately *not* in that list — killing it is the one thing that

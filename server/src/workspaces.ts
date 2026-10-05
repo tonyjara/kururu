@@ -24,15 +24,16 @@
  * profile, it always has at least one workspace, that workspace always has at
  * least one pane, and the focused pane always exists.
  */
-import { adoptBoard, emptyBoard, noteRun, type Board, type Card, type CardWorktree } from "../../shared/board";
+import { adoptBoard, adoptProfileBoard, emptyBoard, emptyProfileBoard, noteRun, transferCard, type Board, type Card, type CardWorktree } from "../../shared/board";
 import type { Profile, ProfileSummary, Workspace, WorkspaceColor } from "../../shared/model";
-import { isLoginKey, isWorkspaceColor, mintLoginKey, WORKSPACE_COLORS } from "../../shared/model";
+import { gatherGroups, groupName, workspaceUnits, isLoginKey, isWorkspaceColor, mintLoginKey, WORKSPACE_COLORS } from "../../shared/model";
 import {
   activeTerminal,
   addTab,
   BOARD_TAB,
   closePane,
   isBoardTab,
+  isDocTab,
   terminalsOf,
   cycleTab,
   findPane,
@@ -51,16 +52,20 @@ import {
   split,
   splitWith,
   splitWithDoc,
-  withoutDoc,
+  removeAt,
+  docTab,
+  placeTab,
+  showingDoc,
+  showsDoc,
+  withDoc,
   stepPane,
   swapPanes,
   updatePane,
   visibleAgents,
   type Direction,
   type LayoutNode,
+  type PaneNode,
   type PaneState,
-  type ReaderDoc,
-  type ReaderState,
 } from "../../shared/layout";
 
 let seq = 0;
@@ -161,10 +166,13 @@ function adopt(profile: Profile): Profile {
     hiddenAgents: Array.isArray(profile.hiddenAgents)
       ? profile.hiddenAgents.filter((id): id is string => typeof id === "string")
       : [],
+    // Absent from every blob written before profiles had a board, which reads
+    // as an empty one — see `Profile.board` for why it is never null.
+    board: adoptProfileBoard(profile.board),
     // `dev` is taken off rather than carried: a blob written while workspaces
     // remembered a dev command still has one, and a field the type no longer
     // names would ride along into every snapshot and back out to disk.
-    workspaces: profile.workspaces.map(({ dev: _dev, ...workspace }: Workspace & { dev?: unknown }) => ({
+    workspaces: gatherGroups(profile.workspaces.map(({ dev: _dev, ...workspace }: Workspace & { dev?: unknown }) => ({
       ...workspace,
       color: isWorkspaceColor(workspace.color) ? workspace.color : null,
       // A field this version has and the blob may not, like the three below.
@@ -176,11 +184,14 @@ function adopt(profile: Profile): Profile {
       // compares against null and gets a different answer than it did a restart
       // ago — which is the whole reason this function exists.
       mascotId: typeof workspace.mascotId === "string" ? workspace.mascotId : null,
+      // Likewise, and through the same cleaning a client's name goes through,
+      // since the blob is only ever as trustworthy as the server that wrote it.
+      group: groupName(workspace.group),
       // The same, and read as defensively as the rest: cards are text somebody
       // typed and runs name processes, and an older blob has neither.
       board: adoptBoard(workspace.board),
       layout: adoptBoardPanes(workspace.layout),
-    })),
+    }))),
   };
 }
 
@@ -555,8 +566,8 @@ export class Workspaces {
     if (next === null) {
       this.mutateWorkspace(workspace.id, (w) => ({
         ...w,
-        // A reader goes back to being a pane too: closing it is closing the
-        // documents, and a reader with none left is not a thing to leave standing.
+        // Its reader goes too: closing a pane is closing its documents, and a
+        // reader with none left is not a thing to leave standing.
         layout: updatePane(w.layout, paneId, ({ reader: _, ...p }) => ({ ...p, agentIds: [], activeIdx: 0 })),
       }));
       return terminalsOf(pane.agentIds);
@@ -608,10 +619,10 @@ export class Workspaces {
    * cannot call that one, because it is about the workspace you are looking at
    * and a terminal ends wherever it was left.
    *
-   * Its two refusals are that one's, for the same reasons: never the last pane
-   * of a workspace, which would leave nothing to focus and nothing to aim an
-   * action at, and never a reader, which holds no terminals and is therefore
-   * not a hole. `repair` moves the focus if the pane holding it went.
+   * Its refusal is that one's, for the same reason: never the last pane of a
+   * workspace, which would leave nothing to focus and nothing to aim an action
+   * at. A pane with documents or the board left in it is not emptied, and
+   * stays. `repair` moves the focus if the pane holding it went.
    */
   reapTab(agentId: string): void {
     for (const profile of this.profiles) {
@@ -621,7 +632,7 @@ export class Workspaces {
         this.mutate(profile.id, workspace.id, (w) => {
           const layout = removeTab(w.layout, agentId);
           const emptied = findPane(layout, pane.id);
-          if (!emptied || emptied.reader || emptied.agentIds.length > 0) return { ...w, layout };
+          if (!emptied || emptied.agentIds.length > 0) return { ...w, layout };
           if (panes(layout).length < 2) return { ...w, layout };
           return { ...w, layout: closePane(layout, pane.id) ?? layout };
         });
@@ -630,17 +641,29 @@ export class Workspaces {
   }
 
   selectTab(paneId: string, index: number): void {
-    this.mutateWorkspace(this.activeWorkspace.id, (w) => ({
-      ...w,
-      layout: selectTab(w.layout, paneId, index),
-    }));
+    this.switchTab(paneId, (layout) => selectTab(layout, paneId, index));
   }
 
   cycleTab(delta: number, paneId = this.focusedPaneId): void {
-    this.mutateWorkspace(this.activeWorkspace.id, (w) => ({
-      ...w,
-      layout: cycleTab(w.layout, paneId, delta),
-    }));
+    this.switchTab(paneId, (layout) => cycleTab(layout, paneId, delta));
+  }
+
+  /**
+   * Change which tab a pane shows, pinning its reader if that brought a
+   * different document up: choosing a document is choosing a file, and a
+   * reader still following an editor would take it straight back on the next
+   * `:w`. Switching to a terminal or the board leaves the following alone —
+   * the editor's next report lands as a tab behind it.
+   */
+  private switchTab(paneId: string, fn: (layout: LayoutNode) => LayoutNode): void {
+    const before = findPane(this.activeWorkspace.layout, paneId);
+    const was = before ? showingDoc(before) : null;
+    this.mutateWorkspace(this.activeWorkspace.id, (w) => ({ ...w, layout: fn(w.layout) }));
+    const after = findPane(this.activeWorkspace.layout, paneId);
+    const now = after ? showingDoc(after) : null;
+    if (after?.reader?.follow && now && !(was && was.root === now.root && was.path === now.path)) {
+      this.setReaderFollow(paneId, null);
+    }
   }
 
   /**
@@ -654,6 +677,9 @@ export class Workspaces {
    * is why this is here and not a general sweep of the tree.
    */
   moveTab(agentId: string, toPaneId: string, index?: number): void {
+    // A document is addressed by where it is, not by what it is — it can be
+    // open in two panes. `moveDoc` is its verb.
+    if (isDocTab(agentId)) return;
     const workspace = this.activeWorkspace;
     if (!findPane(workspace.layout, toPaneId)) return;
     const source = paneWithAgent(workspace.layout, agentId);
@@ -710,6 +736,7 @@ export class Workspaces {
 
   /** Drop on a pane's edge: divide it and put the terminal in the new half. */
   splitWith(agentId: string, paneId: string, dir: "row" | "col", before: boolean): void {
+    if (isDocTab(agentId)) return;
     const workspace = this.activeWorkspace;
     if (!findPane(workspace.layout, paneId)) return;
     const source = paneWithAgent(workspace.layout, agentId);
@@ -735,7 +762,7 @@ export class Workspaces {
   moveTabToWorkspace(agentId: string, workspaceId: string): void {
     // The board is this workspace's cards; carried into another it would be
     // showing somebody else's list under the wrong name.
-    if (isBoardTab(agentId)) return;
+    if (isBoardTab(agentId) || isDocTab(agentId)) return;
     const profile = this.active;
     const target = profile.workspaces.find((w) => w.id === workspaceId);
     if (!target || paneWithAgent(target.layout, agentId)) return;
@@ -818,10 +845,7 @@ export class Workspaces {
     if (!paneId || paneId === keep) return;
     const workspace = this.activeWorkspace;
     const pane = findPane(workspace.layout, paneId);
-    // A reader holds no terminals and is not therefore a hole: it is a pane
-    // somebody asked for, showing something, and closing it because a tab left
-    // the pane next door would be the opposite of what the drag meant.
-    if (!pane || pane.reader || pane.agentIds.length > 0) return;
+    if (!pane || pane.agentIds.length > 0) return;
     if (panes(workspace.layout).length < 2) return;
     this.closePane(paneId);
   }
@@ -840,7 +864,8 @@ export class Workspaces {
    *
    * Asking twice finds the reader you already have rather than making a second
    * one. A key that makes a pane has to be safe to lean on, and two readers of
-   * one editor would both be correct and both be in the way.
+   * one editor would both be correct and both be in the way. Asking from a pane
+   * that is showing a document makes that pane the reader, for the same reason.
    */
   openReader(paneId: string, agentId: string | null, root = ""): string | null {
     if (agentId) {
@@ -852,8 +877,8 @@ export class Workspaces {
     }
     const source = findPane(this.activeWorkspace.layout, paneId);
     if (!source) return null;
-    if (source.reader) {
-      this.setReaderFollow(source.id, agentId);
+    if (showsDoc(source)) {
+      this.setReaderFollow(source.id, agentId, root);
       return source.id;
     }
     const made = this.split("row", paneId);
@@ -867,24 +892,24 @@ export class Workspaces {
          * when the caller could not work one out. It is what the picker opens
          * on, and a reader that knows which project it is for before it knows
          * which file is the difference between one tap and two. Nothing here
-         * learns what a root *is* — this stores the string it was handed, the
-         * way `setReaderTarget` already does.
+         * learns what a root *is* — this stores the string it was handed.
          */
-        reader: { root, path: "", follow: agentId, editor: agentId, docs: [], rev: 0 },
+        reader: { root, follow: agentId, editor: agentId, rev: 0 },
       })),
       focusedPaneId: paneId,
     }));
     return made;
   }
 
-  private setReaderFollow(paneId: string, agentId: string | null): void {
+  /** Follow this editor, or stop — giving the pane a reader if it had none to hold the answer. */
+  private setReaderFollow(paneId: string, agentId: string | null, root = ""): void {
     this.mutateWorkspace(this.activeWorkspace.id, (w) => ({
       ...w,
-      layout: updatePane(w.layout, paneId, (pane) =>
-        pane.reader
-          ? { ...pane, reader: { ...pane.reader, follow: agentId, editor: agentId ?? pane.reader.editor } }
-          : pane,
-      ),
+      layout: updatePane(w.layout, paneId, (pane) => {
+        if (!pane.reader && !agentId) return pane;
+        const reader = pane.reader ?? { root, follow: null, editor: null, rev: 0 };
+        return { ...pane, reader: { ...reader, follow: agentId, editor: agentId ?? reader.editor } };
+      }),
     }));
   }
 
@@ -904,72 +929,75 @@ export class Workspaces {
   }
 
   /**
-   * Show one of a reader's tabs.
-   *
-   * Pins, when it is a different document: choosing a tab is choosing a file,
-   * and a reader still following an editor would take it straight back on the
-   * next `:w` — which is `openDoc`'s argument, made by a click on a tab rather
-   * than on the tree.
+   * Show one of a pane's documents. `selectTab`, which pins when it changes
+   * the document showing — see there.
    */
   selectDoc(paneId: string, index: number): void {
-    const doc = findPane(this.activeWorkspace.layout, paneId)?.reader?.docs[index];
-    if (!doc) return;
-    this.openDoc(paneId, doc.root, doc.path);
+    if (!isDocTab(findPane(this.activeWorkspace.layout, paneId)?.agentIds[index])) return;
+    this.selectTab(paneId, index);
   }
 
   /**
-   * Close one of a reader's tabs, and the pane with its last one.
+   * Close one of a pane's documents, and the pane with its last tab.
    *
-   * A reader with nothing in it is a pane with no reason to be there now that
-   * the tree is where documents come from — the terminal pane's empty state
-   * exists because a terminal is one click away, and a document is not. The
-   * neighbour takes over when the showing tab goes, the one after it first,
-   * which is where every tab strip people already use puts the focus.
+   * A pane with nothing in it is a pane with no reason to be there now that
+   * the tree is where documents come from — `reapTab`'s rule, for a document.
+   * The last pane of a workspace stays, empty, the way it always does.
    */
   closeDoc(paneId: string, index: number): void {
-    const reader = findPane(this.activeWorkspace.layout, paneId)?.reader;
-    if (!reader?.docs[index]) return;
-    if (reader.docs.length === 1) {
+    const pane = findPane(this.activeWorkspace.layout, paneId);
+    if (!pane || !isDocTab(pane.agentIds[index])) return;
+    if (pane.agentIds.length === 1) {
       this.closePane(paneId);
       return;
     }
     this.mutateWorkspace(this.activeWorkspace.id, (w) => ({
       ...w,
-      layout: updatePane(w.layout, paneId, (pane) => (pane.reader ? { ...pane, reader: withoutDoc(pane.reader, index) } : pane)),
+      layout: updatePane(w.layout, paneId, (p) => removeAt(p, index)),
     }));
   }
 
   /**
-   * A reader's tab, dropped on a reader's strip: its own, to reorder, or
-   * another's. The reader it left is closed if that was its last document —
-   * `moveTab`'s rule, for `closeDoc`'s reason.
+   * A document's tab, dropped on a strip: its own, to reorder, or any other
+   * pane's. The pane it left is closed if that was its last tab — `moveTab`'s
+   * rule, for the same reason.
    */
   moveDoc(fromPaneId: string, index: number, toPaneId: string, at?: number): void {
     const workspace = this.activeWorkspace;
     const layout = moveDocTo(workspace.layout, fromPaneId, index, toPaneId, at);
     if (layout === workspace.layout) return;
     this.mutateWorkspace(workspace.id, (w) => ({ ...w, layout }));
-    this.closeEmptyReader(fromPaneId);
+    this.pruneEmptied(fromPaneId, toPaneId);
     this.focusPane(toPaneId);
   }
 
-  /** A reader's tab, dropped on a pane's edge: a new reader there, holding just it. */
+  /** A document's tab, dropped on a pane's edge: a new pane there, holding just it. */
   splitWithDoc(fromPaneId: string, index: number, paneId: string, dir: "row" | "col", before: boolean): void {
     const workspace = this.activeWorkspace;
     const freshId = nextId("n");
     const layout = splitWithDoc(workspace.layout, fromPaneId, index, paneId, dir, before, nextId("s"), freshId);
     if (layout === workspace.layout) return;
     this.mutateWorkspace(workspace.id, (w) => ({ ...w, layout, focusedPaneId: freshId }));
-    this.closeEmptyReader(fromPaneId);
-  }
-
-  private closeEmptyReader(paneId: string): void {
-    const pane = findPane(this.activeWorkspace.layout, paneId);
-    if (pane?.reader && pane.reader.docs.length === 0) this.closePane(paneId);
+    this.pruneEmptied(fromPaneId, freshId);
   }
 
   /**
-   * Point a reader at a file somebody picked, and stop following.
+   * A file dropped on a pane's edge — from the tree, so it was open nowhere —
+   * gets a pane of its own on that side. `splitWithDoc` for a document that
+   * had no tab to leave.
+   */
+  splitWithFile(root: string, path: string, paneId: string, dir: "row" | "col", before: boolean): void {
+    if (!path || !findPane(this.activeWorkspace.layout, paneId)) return;
+    const fresh: PaneNode = { type: "pane", pane: { id: nextId("n"), agentIds: [docTab(root, path)], activeIdx: 0 } };
+    this.mutateWorkspace(this.activeWorkspace.id, (w) => ({
+      ...w,
+      layout: split(w.layout, paneId, dir, nextId("s"), fresh, before),
+      focusedPaneId: fresh.pane.id,
+    }));
+  }
+
+  /**
+   * Point a pane at a file somebody picked, and stop following.
    *
    * The two halves are one gesture rather than two calls a caller could make
    * separately, because a hand-picked file that an editor can still replace is
@@ -977,8 +1005,17 @@ export class Workspaces {
    * only: a pick comes from a pane on somebody's screen, unlike an editor's
    * report, which arrives for whatever workspace the reader happens to be in.
    */
-  openDoc(paneId: string, root: string, path: string): boolean {
-    if (!this.setReaderTarget(this.activeWorkspace.id, paneId, root, path)) return false;
+  openDoc(paneId: string, root: string, path: string, at?: number): boolean {
+    if (!path || !findPane(this.activeWorkspace.layout, paneId)) return false;
+    // A place in the strip is a file dropped on it, and lands where it was
+    // dropped — moving there if the pane already had it, as a tab dragged would.
+    const place = at !== undefined && Number.isInteger(at) && at >= 0 ? at : undefined;
+    this.mutateWorkspace(this.activeWorkspace.id, (w) => ({
+      ...w,
+      layout: updatePane(w.layout, paneId, (pane) =>
+        place === undefined ? withDoc(pane, { root, path }, true) : placeTab(pane, docTab(root, path), place),
+      ),
+    }));
     this.setReaderFollow(paneId, null);
     return true;
   }
@@ -1004,30 +1041,24 @@ export class Workspaces {
   }
 
   /**
-   * Point a reader at a file, and say the file moved on.
+   * An editor saying where it is, delivered to a reader following it.
    *
-   * `rev` only advances when the target is unchanged, because it means "what you
-   * have is stale" and a client that is being handed a different path already
-   * knows that. Re-pointing at the same file is what a save looks like from
-   * here, and it is the only reason this counts at all.
-   *
-   * A file that is not open yet becomes a tab, after the one showing — for an
-   * editor as much as for the tree. Replacing the showing tab instead would
-   * have an nvim wandering through the project close documents somebody opened
-   * by hand, and a tab strip is only worth having if what is in it stays put.
+   * A file not open yet becomes a tab, after the one showing. Replacing the
+   * showing tab instead would have an nvim wandering through the project close
+   * documents somebody opened by hand, and a tab strip is only worth having if
+   * what is in it stays put. It takes the screen only in a pane that is
+   * already showing a document (`withDoc`), and `rev` goes up either way —
+   * the same file reported again is what a save looks like from here.
    */
   setReaderTarget(workspaceId: string, paneId: string, root: string, path: string): boolean {
     let changed = false;
     this.mutateWorkspace(workspaceId, (w) => ({
       ...w,
       layout: updatePane(w.layout, paneId, (pane) => {
-        if (!pane.reader) return pane;
-        const same = pane.reader.root === root && pane.reader.path === path;
+        if (!pane.reader || !path) return pane;
         changed = true;
-        return {
-          ...pane,
-          reader: { ...pane.reader, root, path, docs: withDoc(pane.reader, root, path), rev: same ? pane.reader.rev + 1 : 0 },
-        };
+        const shown = withDoc(pane, { root, path }, showsDoc(pane));
+        return { ...shown, reader: { ...pane.reader, rev: pane.reader.rev + 1 } };
       }),
     }));
     return changed;
@@ -1036,20 +1067,21 @@ export class Workspaces {
   /**
    * Show a file in "the reader", making one if there is none.
    *
-   * Which reader is the whole question, and the answer is the one you are
-   * least surprised by: the focused pane if it is one, else the first reader
-   * in the workspace, else a new one split off the focused pane. Reusing a
-   * reader is what makes clicking down a list of files in the tree open them as
-   * tabs of one pane rather than tiling the window with them.
+   * Which pane is the whole question, and the answer is the one you are least
+   * surprised by: the focused pane if it is showing a document, else the first
+   * pane in the workspace that is, else a new one split off the focused pane.
+   * Reusing one is what makes clicking down a list of files in the tree open
+   * them as tabs of one pane rather than tiling the window with them — and
+   * what keeps a click from swapping out the terminal you were watching.
    *
    * It pins, through `openDoc`, for the reason `open-doc` does: a file you
    * clicked on is a file you asked for, and an editor next door should not take
-   * it off you. Returns the reader's pane.
+   * it off you. Returns the pane.
    */
   showDoc(root: string, path: string): string | null {
     const layout = this.activeWorkspace.layout;
     const focused = findPane(layout, this.focusedPaneId);
-    const reader = focused?.reader ? focused : panes(layout).find((pane) => pane.reader);
+    const reader = focused && showsDoc(focused) ? focused : panes(layout).find(showsDoc);
     const paneId = reader?.id ?? this.openReader(this.focusedPaneId, null, root);
     if (!paneId) return null;
     return this.openDoc(paneId, root, path) ? paneId : null;
@@ -1086,7 +1118,7 @@ export class Workspaces {
       this.moveTab(BOARD_TAB, target.id);
       at = target.id;
     } else if (target) {
-      at = here || (!target.reader && target.agentIds.length === 0) ? target.id : this.split("row", target.id);
+      at = here || (!showsDoc(target) && target.agentIds.length === 0) ? target.id : this.split("row", target.id);
       if (at) {
         const into = at;
         this.mutateWorkspace(this.activeWorkspace.id, (w) => ({ ...w, layout: addTab(w.layout, into, BOARD_TAB) }));
@@ -1108,6 +1140,36 @@ export class Workspaces {
     const next = fn(workspace.board);
     if (next === workspace.board) return;
     this.mutateWorkspace(workspaceId, (w) => ({ ...w, board: next }));
+  }
+
+  /** Change a profile's own board — see `Profile.board`. */
+  editProfileBoard(profileId: string, fn: (board: Board) => Board): void {
+    const profile = this.profiles.find((p) => p.id === profileId);
+    if (!profile) return;
+    const next = fn(profile.board);
+    if (next === profile.board) return;
+    this.replaceProfile(profileId, (p) => ({ ...p, board: next }));
+  }
+
+  /**
+   * Send a card from the profile's board to one of its workspaces' boards, in
+   * one change so that no snapshot has it on both or on neither. A workspace
+   * that has never had a board gets one, which makes this the second thing
+   * that creates a board — and the reason it may is that sending a card there
+   * *is* asking for one. No tab is opened: the card was sent from somewhere
+   * else, and the workspace it went to may not be the one on screen.
+   */
+  sendProfileCard(profileId: string, cardId: string, workspaceId: string): void {
+    const profile = this.profiles.find((p) => p.id === profileId);
+    const workspace = profile?.workspaces.find((w) => w.id === workspaceId);
+    if (!profile || !workspace) return;
+    const { from, to } = transferCard(profile.board, workspace.board ?? emptyBoard(), cardId);
+    if (from === profile.board) return;
+    this.replaceProfile(profileId, (p) => ({
+      ...p,
+      board: from,
+      workspaces: p.workspaces.map((w) => (w.id === workspaceId ? { ...w, board: to } : w)),
+    }));
   }
 
   /**
@@ -1173,7 +1235,7 @@ export class Workspaces {
     const board = paneWithAgent(layout, BOARD_TAB);
     if (!board) return this.focusedPaneId;
     const takes = (pane: PaneState | null | undefined): pane is PaneState =>
-      Boolean(pane && pane.id !== board.id && !pane.reader);
+      Boolean(pane && pane.id !== board.id && !showsDoc(pane));
     const last = this.activeWorkspace.lastPaneId ? findPane(layout, this.activeWorkspace.lastPaneId) : null;
     if (takes(last)) return last.id;
     const any = panes(layout).find(takes);
@@ -1288,16 +1350,77 @@ export class Workspaces {
     return agents;
   }
 
-  /** Dragged up or down the sidebar list, to a position rather than by a step. */
+  /**
+   * Dragged up or down the sidebar list, to a position rather than by a step.
+   *
+   * It joins the group of whatever was at that position. The alternative —
+   * moving it and leaving its group alone — would have `gatherGroups` pull it
+   * straight back out of a group it had been dropped among, which is a drop
+   * that visibly did something other than what was asked.
+   */
   moveWorkspace(workspaceId: string, index: number): void {
+    if (!Number.isFinite(index)) return;
     const profile = this.active;
     const at = profile.workspaces.findIndex((w) => w.id === workspaceId);
-    const to = Math.max(0, Math.min(index, profile.workspaces.length - 1));
+    const to = Math.max(0, Math.min(Math.trunc(index), profile.workspaces.length - 1));
     if (at === -1 || at === to) return;
+    const group = profile.workspaces[to]!.group;
     const workspaces = [...profile.workspaces];
     const [moved] = workspaces.splice(at, 1);
-    workspaces.splice(to, 0, moved!);
-    this.replaceProfile(profile.id, (p) => ({ ...p, workspaces }));
+    workspaces.splice(to, 0, { ...moved!, group });
+    this.replaceProfile(profile.id, (p) => ({ ...p, workspaces: gatherGroups(workspaces) }));
+  }
+
+  /**
+   * File a workspace under a group, or take it out of one with null.
+   *
+   * Joining a group puts it last in that group; a group named for the first
+   * time starts where the workspace already stands; leaving one puts it just
+   * after the group it left, so nothing jumps across the list to obey a label.
+   */
+  setWorkspaceGroup(workspaceId: string, group: unknown): void {
+    const name = groupName(group);
+    const profile = this.active;
+    const at = profile.workspaces.findIndex((w) => w.id === workspaceId);
+    const moved = profile.workspaces[at];
+    if (!moved || moved.group === name) return;
+    const rest = profile.workspaces.filter((w) => w.id !== workspaceId);
+    const anchor = name === null ? moved.group : name;
+    const last = rest.findLastIndex((w) => w.group === anchor);
+    const workspaces = [...rest];
+    workspaces.splice(last === -1 ? at : last + 1, 0, { ...moved, group: name });
+    this.replaceProfile(profile.id, (p) => ({ ...p, workspaces: gatherGroups(workspaces) }));
+  }
+
+  /**
+   * Move a whole group to where a workspace is — a loose one, or any member of
+   * another group, which stands for that group. It takes that place the way a
+   * dragged workspace takes a row's: from above it lands after, from below
+   * before. A group has no order of its own beyond where its members stand, so
+   * this moves the members and nothing else.
+   */
+  moveWorkspaceGroup(group: unknown, ontoWorkspaceId: unknown): void {
+    const name = groupName(group);
+    if (name === null || typeof ontoWorkspaceId !== "string") return;
+    const profile = this.active;
+    const units = workspaceUnits(gatherGroups(profile.workspaces));
+    const at = units.findIndex((u) => u[0]!.group === name);
+    const to = units.findIndex((u) => u.some((w) => w.id === ontoWorkspaceId));
+    if (at === -1 || to === -1 || at === to) return;
+    const [moved] = units.splice(at, 1);
+    units.splice(to, 0, moved!);
+    this.replaceProfile(profile.id, (p) => ({ ...p, workspaces: units.flat() }));
+  }
+
+  /** Rename a group on every member; onto an existing name they merge, onto null it disbands. */
+  renameWorkspaceGroup(from: unknown, to: unknown): void {
+    const old = groupName(from);
+    if (old === null) return;
+    const name = groupName(to);
+    const profile = this.active;
+    if (old === name || !profile.workspaces.some((w) => w.group === old)) return;
+    const workspaces = profile.workspaces.map((w) => (w.group === old ? { ...w, group: name } : w));
+    this.replaceProfile(profile.id, (p) => ({ ...p, workspaces: gatherGroups(workspaces) }));
   }
 
   // -------------------------------------------------------------------------
@@ -1378,6 +1501,7 @@ export class Workspaces {
       lastPaneId: null,
       color: nextColor(taken.map((w) => w.color)),
       mascotId: null,
+      group: null,
       // Nobody has asked for one yet — see `Workspace.board`.
       board: null,
     };
@@ -1390,6 +1514,7 @@ export class Workspaces {
       name,
       loginKey: mintLoginKey(),
       workspaces: [workspace],
+      board: emptyProfileBoard(),
       activeWorkspaceId: workspace.id,
       lastWorkspaceId: null,
       // Nothing has been dragged yet, which is spawn order — see `orderAgents`.
@@ -1429,18 +1554,6 @@ export class Workspaces {
 }
 
 export type { LayoutNode };
-
-/**
- * The tab list with this document in it: unchanged when it is already open,
- * else with it placed after the tab showing now.
- */
-function withDoc(reader: ReaderState, root: string, path: string): ReaderDoc[] {
-  if (!path || reader.docs.some((doc) => doc.root === root && doc.path === path)) return reader.docs;
-  const at = reader.docs.findIndex((doc) => doc.root === reader.root && doc.path === reader.path);
-  const docs = [...reader.docs];
-  docs.splice(at < 0 ? docs.length : at + 1, 0, { root, path });
-  return docs;
-}
 
 /**
  * A board *pane*, as the first version of the board drew one, turned into a
