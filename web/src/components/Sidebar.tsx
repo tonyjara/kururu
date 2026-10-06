@@ -49,6 +49,14 @@ import type {
 import { defaultMascot, mascotFor, WORKSPACE_COLORS, workspaceUnits } from "../../../shared/model";
 import type { GitAction, RepoGit } from "../../../shared/wire";
 import { formatBytes as formatSize, vpsSeverity, type VpsStatus, type VpsUsed } from "../../../shared/vps";
+import {
+  balanceOf,
+  balanceSeverity,
+  formatDollars,
+  formatRunway,
+  runway,
+  type OpenRouterReading,
+} from "../../../shared/openrouter";
 import { colorValue, colorValues } from "../colors";
 import { AGENT_MIME, GROUP_MIME, WORKSPACE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
 import type { Action } from "../keys";
@@ -1081,6 +1089,7 @@ export function Sidebar({
       </section>
 
       <Usage />
+      <OpenRouter />
       <Vps />
       <DevServers />
 
@@ -1602,6 +1611,105 @@ function Usage() {
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * The OpenRouter account: what is left, and how fast it is going.
+ *
+ * Words rather than a bar, which is the departure from the two sections either
+ * side of it, and it is because a balance has no whole to be a share of.
+ * `credits` is every dollar ever bought, so spent-over-bought is a bar that
+ * creeps toward full for the life of the account and says nothing about this
+ * week. A balance in dollars, coloured by how many days it lasts at the pace it
+ * is going, says the thing — `balanceSeverity` has those days.
+ *
+ * Shut, the balance and today's spend on one line, which is the glance. Open,
+ * the week and the month under it, the pace in words, and which key is asking.
+ *
+ * Draws nothing until a key has been given in Settings, like the VPS section.
+ */
+function OpenRouter() {
+  const { openrouter } = useKururu();
+  const [open, toggle] = useDisclosure("kururu.sidebar.openrouter", false);
+  if (!openrouter) return null;
+  const { reading, stale, error } = openrouter;
+
+  return (
+    <section className="side-section side-openrouter">
+      <h2>
+        <SectionToggle open={open} onToggle={toggle} label="OpenRouter">
+          {error && (
+            <span className="usage-stale" title={reading ? `${error}\nThe balance is the last one read.` : error}>
+              ·
+            </span>
+          )}
+        </SectionToggle>
+      </h2>
+      <ul className="usage-list">
+        {reading ? (
+          <OpenRouterBalance reading={reading} stale={stale} open={open} />
+        ) : (
+          <li className="usage-item">
+            <span className="usage-head">
+              <span className="usage-name">Balance</span>
+              <span className="usage-used">{error ? "unreachable" : "…"}</span>
+            </span>
+            {error && <span className="usage-reset">{error}</span>}
+          </li>
+        )}
+      </ul>
+      {open && (
+        <p className="usage-account" title="The management key reading this account">
+          {openrouter.hint}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function OpenRouterBalance({ reading, stale, open }: { reading: OpenRouterReading; stale: boolean; open: boolean }) {
+  const pace = runway(reading);
+  const title = [
+    `${formatDollars(reading.used)} spent of ${formatDollars(reading.credits)} bought`,
+    pace && `${formatRunway(pace.days)} left at ${formatDollars(pace.perDay)} a day — this ${pace.basis}'s pace`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const spend = reading.spend;
+
+  return (
+    <>
+      <li className={`usage-item ${stale ? "or-stale" : ""}`}>
+        <span className="usage-head" title={title}>
+          <span className="or-balance" data-severity={balanceSeverity(reading)}>
+            {formatDollars(balanceOf(reading))} left
+          </span>
+          {!open && spend && <span className="usage-used">{formatDollars(spend.day)} today</span>}
+        </span>
+        {open && pace && (
+          <span className="usage-reset">
+            {formatRunway(pace.days)} at this {pace.basis}'s pace
+          </span>
+        )}
+      </li>
+      {open &&
+        spend &&
+        (
+          [
+            ["Today", spend.day],
+            ["This week", spend.week],
+            ["This month", spend.month],
+          ] as const
+        ).map(([label, amount]) => (
+          <li key={label} className={`usage-item ${stale ? "or-stale" : ""}`}>
+            <span className="usage-head">
+              <span className="usage-name">{label}</span>
+              <span className="usage-used">{formatDollars(amount)}</span>
+            </span>
+          </li>
+        ))}
+    </>
   );
 }
 

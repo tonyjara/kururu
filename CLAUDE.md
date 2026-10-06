@@ -157,6 +157,11 @@ The load-bearing invariants, one line each, with the argument behind the link:
   read at the moment of the fetch, never held, never logged, never on the wire —
   and no token refresh, because writing that store could log out a running agent
   to draw a bar. `server/src/usage.ts` is the only file that has seen it.
+- **The OpenRouter key is the one credential kururu stores, and it only comes
+  in.** A management key, pasted once in Settings, kept 0600 in
+  `~/.config/kururu/openrouter.json`, read per fetch and used for GETs only.
+  A client is sent its `hint` and dollars, never the key. →
+  `shared/openrouter.ts`
 
 ## Code style
 

@@ -38,6 +38,7 @@ import type { Direction } from "./layout";
 import type { Action } from "./keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
 import type { LaunchSettings } from "./launchers";
+import type { OpenRouterStatus } from "./openrouter";
 import type { VpsStatus } from "./vps";
 import type { NotifyEvent, NotifySettings } from "./notify";
 import type { MergeResolution, ProjectSettings } from "./projects";
@@ -369,6 +370,12 @@ export type ServerMessage =
    * settings page and the sidebar can never disagree about which exist.
    */
   | { type: "vps"; vps: VpsStatus[] }
+  /**
+   * Sent on connect, after a poll that moved anything, and whenever the key is
+   * set or removed. Null when no key has been given, which the sidebar draws as
+   * nothing. Never carries the key — see `shared/openrouter.ts`.
+   */
+  | { type: "openrouter"; openrouter: OpenRouterStatus | null }
   /** Raw pty output, exactly as it arrived, for a terminal this client is watching. */
   | { type: "output"; agentId: string; data: string }
   /**
@@ -1120,7 +1127,15 @@ export type ClientMessage =
    * the server's own. Replied to with the new entry, or with why it was refused.
    */
   | { type: "add-vps"; id: number; name: string; host: string; panel: string }
-  | { type: "remove-vps"; vpsId: string };
+  | { type: "remove-vps"; vpsId: string }
+  /**
+   * Give the server an OpenRouter management key. The one message in the
+   * protocol that carries a secret, and it only ever travels this way: it is
+   * tried, saved owner-only, and answered with the status, whose `hint` is all
+   * of the key a client ever sees again. Replied to with why, when refused.
+   */
+  | { type: "set-openrouter-key"; id: number; key: string }
+  | { type: "clear-openrouter-key" };
 
 /**
  * How often the status heuristic is asked to notice that work has stopped.
@@ -1180,3 +1195,10 @@ export const USAGE_POLL_MS = 60_000;
  * is a channel on a connection ssh already holds open, not a handshake.
  */
 export const VPS_POLL_MS = 15_000;
+
+/**
+ * How often the OpenRouter balance is asked for. The usage bar's minute, for
+ * the same reason inverted: a balance moves by cents a call, and what anybody
+ * reads off it is days, so a figure a minute old is a current one.
+ */
+export const OPENROUTER_POLL_MS = 60_000;

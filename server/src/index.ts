@@ -61,7 +61,14 @@ import type {
   WorkspaceProject,
 } from "../../shared/wire";
 import { COMMIT_MESSAGE_MAX, GIT_ACTIONS, GIT_STATUS_MS } from "../../shared/wire";
-import { DEV_SCAN_MS, GIT_SCAN_MS, SAVE_DEBOUNCE_MS, USAGE_POLL_MS, VPS_POLL_MS } from "../../shared/wire";
+import {
+  DEV_SCAN_MS,
+  GIT_SCAN_MS,
+  OPENROUTER_POLL_MS,
+  SAVE_DEBOUNCE_MS,
+  USAGE_POLL_MS,
+  VPS_POLL_MS,
+} from "../../shared/wire";
 import {
   bindAddress,
   cookieHeader,
@@ -79,6 +86,7 @@ import { processCwd } from "./cwd";
 import { scanDevServers } from "./devservers";
 import { readHead, repoAt } from "./git";
 import { pollUsage, usageSnapshot } from "./usage";
+import { clearOpenRouterKey, openRouterSnapshot, pollOpenRouter, setOpenRouterKey } from "./openrouter";
 import { addVps, pollVps, pollVpsOne, removeVps, vpsSnapshot } from "./vps";
 import { allowedRoots, allowRoot, findDocs, listDir, listDirs, readBytes, readFile, resolveInRoot } from "./files";
 import { parseFileOp, runFileOp } from "./fileops";
@@ -2780,6 +2788,15 @@ async function pollServers(): Promise<void> {
 }
 
 /**
+ * Ask OpenRouter what is left. Skipped while nobody is connected, on the usage
+ * poll's argument, and a no-op while no key has been given.
+ */
+async function pollOpenRouterAccount(): Promise<void> {
+  if (clients.size === 0) return;
+  if (await pollOpenRouter()) broadcast({ type: "openrouter", openrouter: openRouterSnapshot() });
+}
+
+/**
  * The timers left in this process, and what they have in common: each one asks
  * the *machine* a question no pty can raise an event about. The status heuristic
  * and the agent scan went with the ptys, because those are questions about a
@@ -2797,6 +2814,7 @@ const timers = [
   setInterval(() => void pollMemory(), MEM_SCAN_MS),
   setInterval(() => void pollAccountUsage(), USAGE_POLL_MS),
   setInterval(() => void pollServers(), VPS_POLL_MS),
+  setInterval(() => void pollOpenRouterAccount(), OPENROUTER_POLL_MS),
 ];
 
 void pollDevServers();
@@ -3257,6 +3275,19 @@ function handleMessage(ws: WebSocket, raw: string): void {
       if (typeof msg.vpsId !== "string") return;
       removeVps(msg.vpsId);
       broadcast({ type: "vps", vps: vpsSnapshot() });
+      return;
+
+    case "set-openrouter-key":
+      void replyAsync(ws, msg.id, async () => {
+        const status = await setOpenRouterKey(msg.key);
+        broadcast({ type: "openrouter", openrouter: status });
+        return status;
+      });
+      return;
+
+    case "clear-openrouter-key":
+      clearOpenRouterKey();
+      broadcast({ type: "openrouter", openrouter: null });
       return;
 
     case "set-launch":
@@ -4531,13 +4562,18 @@ server.on("upgrade", (req, socket, head) => {
     send(ws, { type: "projects", projects: state.projects });
     send(ws, { type: "usage", usage: usageSnapshot() });
     send(ws, { type: "vps", vps: vpsSnapshot() });
+    send(ws, { type: "openrouter", openrouter: openRouterSnapshot() });
     // The first client through the door is also what starts the usage poll: it
     // is skipped while nothing is connected, so without this a freshly started
     // server would draw no bar for a minute.
     void pollAccountUsage();
-    // The VPS poll the same way, but only for the first: a second window would
-    // otherwise buy every VPS an extra ssh round for nothing.
-    if (clients.size === 1) void pollServers();
+    // The VPS and OpenRouter polls the same way, but only for the first: a
+    // second window would otherwise buy every VPS an extra ssh round, and the
+    // account an extra request, for nothing.
+    if (clients.size === 1) {
+      void pollServers();
+      void pollOpenRouterAccount();
+    }
 
     ws.on("message", (data) => handleMessage(ws, data.toString()));
     ws.on("close", () => dropClient(ws));

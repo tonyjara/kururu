@@ -40,6 +40,7 @@ import type { BoardColumn, CardDates } from "../../shared/board";
 import type { LaunchSettings } from "../../shared/launchers";
 import type { MergeReply, MergeResolution, ProjectSettings, WorktreeOutcome, WorktreeStatus } from "../../shared/projects";
 import type { NotifySettings } from "../../shared/notify";
+import type { OpenRouterStatus } from "../../shared/openrouter";
 import type { VpsEntry, VpsStatus } from "../../shared/vps";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { Grid } from "./grid";
@@ -73,6 +74,8 @@ export interface KururuState {
   usage: AccountUsage | null;
   /** Every VPS the sidebar watches, with its last reading. See `shared/vps.ts`. */
   vps: VpsStatus[];
+  /** The OpenRouter account, or null when no key has been given. See `shared/openrouter.ts`. */
+  openrouter: OpenRouterStatus | null;
 }
 
 const RETRY_MS = [200, 500, 1000, 2000, 4000];
@@ -85,6 +88,7 @@ let state: KururuState = {
   projects: [],
   usage: null,
   vps: [],
+  openrouter: null,
 };
 
 const listeners = new Set<() => void>();
@@ -248,6 +252,9 @@ function connect(): void {
         break;
       case "vps":
         set({ vps: msg.vps });
+        break;
+      case "openrouter":
+        set({ openrouter: msg.openrouter });
         break;
       case "output":
         for (const sink of sinks.get(msg.agentId) ?? []) deliver(() => sink.write(msg.data));
@@ -989,6 +996,15 @@ export function addVps(name: string, host: string, panel: string): Promise<VpsEn
 
 export function removeVps(vpsId: string): void {
   send({ type: "remove-vps", vpsId });
+}
+
+/** Hand the server an OpenRouter key. Rejects with OpenRouter's reason, in a sentence, when it is refused. */
+export function setOpenRouterKey(key: string): Promise<OpenRouterStatus> {
+  return request((id) => ({ type: "set-openrouter-key", id, key })) as Promise<OpenRouterStatus>;
+}
+
+export function clearOpenRouterKey(): void {
+  send({ type: "clear-openrouter-key" });
 }
 
 /** Which agents and models the new-tab menu offers. */
