@@ -47,7 +47,7 @@ import type {
   WorkspaceColor,
 } from "../../../shared/model";
 import { defaultMascot, mascotFor, WORKSPACE_COLORS, workspaceUnits } from "../../../shared/model";
-import type { GitAction, RepoGit } from "../../../shared/wire";
+import type { DevServer, GitAction, RepoGit } from "../../../shared/wire";
 import { formatBytes as formatSize, vpsSeverity, type VpsStatus, type VpsUsed } from "../../../shared/vps";
 import {
   balanceOf,
@@ -1872,6 +1872,9 @@ function share(part: VpsUsed | null): number | null {
   return Math.min(100, (part.used / part.total) * 100);
 }
 
+/** How long a dev server's stop button keeps asking before it lets the question go. */
+const STOP_ASK_MS = 4000;
+
 /**
  * The dev servers running on this machine, each one a link you can open.
  *
@@ -1902,6 +1905,15 @@ function share(part: VpsUsed | null): number | null {
  * the window that draws dev servers, and threading a list through two
  * components to be used in one of them is how a prop list stops describing what
  * a component is for.
+ *
+ * Each row can also be stopped, with a square beside the link that asks in
+ * place before it does anything. The list is machine-wide, so the server under
+ * a thumb may be one an agent in another profile is in the middle of using, and
+ * a tap meant for the link that landed a few pixels right should cost nothing.
+ * The question takes itself back after a few seconds rather than waiting for a
+ * blur, because a tap on a phone does not focus a button and there would be no
+ * blur to wait for — an armed button left lying there is the accident it was
+ * meant to prevent, a little later.
  */
 function DevServers() {
   const { devServers } = useKururu();
@@ -1909,7 +1921,29 @@ function DevServers() {
      get, not a thing you watch — so the count is what the heading carries, and
      the rows are one press away. */
   const [open, toggle] = useDisclosure("kururu.sidebar.dev", false);
+  /** The port whose stop button is asking "sure?". */
+  const [asking, setAsking] = useState<number | null>(null);
+  const [stopping, setStopping] = useState<readonly number[]>([]);
+  /** Why the last stop did not happen, on the row it was for. */
+  const [said, setSaid] = useState<{ port: number; text: string } | null>(null);
+
+  useEffect(() => {
+    if (asking === null) return;
+    const timer = setTimeout(() => setAsking(null), STOP_ASK_MS);
+    return () => clearTimeout(timer);
+  }, [asking]);
+
   if (devServers.length === 0) return null;
+
+  const stop = (dev: DevServer) => {
+    setAsking(null);
+    setSaid(null);
+    setStopping((ports) => [...ports, dev.port]);
+    api
+      .stopDevServer(dev.port, dev.pid)
+      .catch((err: unknown) => setSaid({ port: dev.port, text: err instanceof Error ? err.message : String(err) }))
+      .finally(() => setStopping((ports) => ports.filter((port) => port !== dev.port)));
+  };
 
   return (
     <section className="side-section side-dev">
@@ -1922,6 +1956,8 @@ function DevServers() {
         <ul className="dev-list">
           {devServers.map((dev) => {
             const url = previewUrl(window.location, dev);
+            const armed = asking === dev.port;
+            const busy = stopping.includes(dev.port);
             return (
               <li key={dev.port} className="dev-item">
                 {url ? (
@@ -1948,6 +1984,21 @@ function DevServers() {
                     <span className="dev-name">{previewLabel(dev)}</span>
                     <span className="dev-port">:{dev.port}</span>
                   </span>
+                )}
+                <button
+                  className={`dev-stop ${armed ? "dev-stop-ask" : ""} ${busy ? "dev-stop-busy" : ""}`}
+                  disabled={busy}
+                  onClick={() => (armed ? stop(dev) : setAsking(dev.port))}
+                  onBlur={() => setAsking((port) => (port === dev.port ? null : port))}
+                  title={busy ? "Stopping…" : armed ? `Stop ${dev.command}` : `Stop this dev server\n${dev.command}`}
+                  aria-label={armed ? `Confirm: stop ${previewLabel(dev)}` : `Stop ${previewLabel(dev)}`}
+                >
+                  {armed ? "Stop?" : <Icon name="stop" />}
+                </button>
+                {said?.port === dev.port && (
+                  <button className="dev-said" onClick={() => setSaid(null)} title="Click to dismiss">
+                    {said.text}
+                  </button>
                 )}
               </li>
             );

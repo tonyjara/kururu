@@ -9,6 +9,7 @@ import {
   parseListeners,
   parseProcTable,
   resolveDevCommand,
+  stopTargets,
 } from "../src/devservers";
 
 describe("matchDevCommand", () => {
@@ -80,10 +81,68 @@ describe("resolveDevCommand", () => {
   const table = parseProcTable(["34999 34994 bun run dev", "35001 34999 bun run serve.ts", "34994     1 -zsh"].join("\n"));
 
   it("walks up to the ancestor that names the server", () => {
-    expect(resolveDevCommand(35001, table)).toEqual({ program: "bun dev", command: "bun run dev" });
+    expect(resolveDevCommand(35001, table)).toEqual({ program: "bun dev", command: "bun run dev", pid: 34999 });
   });
 
   it("stops rather than claiming the shell is a dev server", () => {
     expect(resolveDevCommand(34994, table)).toBeNull();
+  });
+});
+
+describe("stopTargets", () => {
+  /**
+   * The shapes from a real machine: a shell in a kururu terminal running
+   * `concurrently`, which runs `next dev`, whose `next-server` holds the port
+   * and has workers of its own — and beside it, the pty host and an agent.
+   */
+  const table = parseProcTable(
+    [
+      "100     1 node ptyhostd.mjs",
+      "200   100 -zsh",
+      "300   200 node concurrently -k next dev node mail.js",
+      "310   300 node /x/node_modules/.bin/next dev --port 3003",
+      "311   310 next-server (v16.3.6)",
+      "312   311 node /x/.next/dev/build/postcss.js",
+      "320   300 node mail.js",
+      "400   100 claude",
+      "410   400 /bin/zsh -c python3 -m http.server 8000",
+      "411   410 python3 -m http.server 8000",
+    ].join("\n"),
+  );
+  const spare = new Set([100, 200, 400]);
+
+  it("ends the command the row is named after, and what it started", () => {
+    expect(stopTargets(311, table, spare)?.sort()).toEqual([310, 311, 312]);
+  });
+
+  it("leaves what started the dev command alone", () => {
+    const targets = stopTargets(311, table, spare) ?? [];
+    expect(targets).not.toContain(300); // concurrently
+    expect(targets).not.toContain(320); // its other child
+    expect(targets).not.toContain(200); // the shell
+  });
+
+  it("falls back to the listener when the named command would take a terminal with it", () => {
+    // A terminal opened *as* `bun run dev`: the walk up names the terminal itself.
+    const own = parseProcTable(["100 1 node ptyhostd.mjs", "500 100 bun run dev", "501 500 node app.js"].join("\n"));
+    expect(resolveDevCommand(501, own)?.pid).toBe(500);
+    expect(stopTargets(501, own, new Set([100, 500]))).toEqual([501]);
+  });
+
+  it("refuses rather than reach a spared process from either end", () => {
+    // The listener *is* a terminal: there is nothing to end that is not the terminal.
+    expect(stopTargets(200, table, spare)).toBeNull();
+    // An agent's process under the would-be tree.
+    expect(stopTargets(411, table, new Set([...spare, 411]))).toBeNull();
+  });
+
+  it("never signals launchd", () => {
+    const orphan = parseProcTable(["1 0 launchd", "700 1 node /x/.bin/vite"].join("\n"));
+    expect(stopTargets(700, orphan, new Set())).toEqual([700]);
+    expect(stopTargets(1, orphan, new Set())).toBeNull();
+  });
+
+  it("finds nothing to end for a process that has already gone", () => {
+    expect(stopTargets(999, table, spare)).toBeNull();
   });
 });

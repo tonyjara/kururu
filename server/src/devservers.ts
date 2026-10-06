@@ -200,13 +200,76 @@ const MAX_ANCESTORS = 4;
 export function resolveDevCommand(
   pid: number,
   table: Map<number, ProcInfo>,
-): { program: string; command: string } | null {
+): { program: string; command: string; pid: number } | null {
   let current = table.get(pid);
   for (let hop = 0; current && hop <= MAX_ANCESTORS; hop++) {
     const program = matchDevCommand(current.args);
-    if (program) return { program, command: current.args };
+    if (program) return { program, command: current.args, pid: current.pid };
     if (current.ppid <= 1) break; // launchd is nobody's dev server
     current = table.get(current.ppid);
+  }
+  return null;
+}
+
+/** Every process at or under `root`, root first. */
+function subtree(root: number, table: Map<number, ProcInfo>): number[] {
+  const children = new Map<number, number[]>();
+  for (const proc of table.values()) {
+    const siblings = children.get(proc.ppid);
+    if (siblings) siblings.push(proc.pid);
+    else children.set(proc.ppid, [proc.pid]);
+  }
+  const out: number[] = [];
+  const seen = new Set<number>();
+  const stack = [root];
+  while (stack.length > 0) {
+    const pid = stack.pop()!;
+    if (seen.has(pid) || !table.has(pid)) continue;
+    seen.add(pid);
+    out.push(pid);
+    stack.push(...(children.get(pid) ?? []));
+  }
+  return out;
+}
+
+/**
+ * What stopping a dev server ends: the command the row is named after and
+ * everything under it — or, failing that, the listener and everything under
+ * it — or nothing, which is null.
+ *
+ * The named command rather than the listener, because the listener is so often
+ * not the thing anybody started. `next dev` forks a `next-server` that holds the
+ * port, nodemon and `tsx watch` hold it through a child they will restart on the
+ * next save, and ending only the child of any of those leaves the row gone and
+ * the server about to come back. The command the walk up found is the one the
+ * row prints, so it is also the one a person pressing "stop" on that row means.
+ *
+ * A tree and not a process group, though a group is what Ctrl-C signals. A dev
+ * server an agent started from its own tool shares the agent's group as often as
+ * not, and signalling the group the port is in would end the agent with it.
+ * Downward from a dev command is the one direction that cannot reach anything
+ * that started it.
+ *
+ * `spare` is what may never be in the tree: kururu, its pty host, and the
+ * process each terminal was opened with. The walk up is what makes that
+ * necessary rather than paranoid — it goes four hops looking for a name, and a
+ * listener with no name of its own (`python -m http.server`) typed into a
+ * kururu shell could otherwise find one above the shell. When the named command
+ * would take a spared process with it the listener alone is tried; when that
+ * would too — a terminal opened *as* the dev server — the answer is no, and its
+ * tab is the way to end it.
+ */
+export function stopTargets(
+  listener: number,
+  table: Map<number, ProcInfo>,
+  spare: ReadonlySet<number>,
+): number[] | null {
+  if (!table.has(listener)) return null;
+  const named = resolveDevCommand(listener, table)?.pid;
+  const roots = named === undefined || named === listener ? [listener] : [named, listener];
+  for (const root of roots) {
+    const tree = subtree(root, table);
+    if (!tree.some((pid) => pid <= 1 || spare.has(pid))) return tree;
   }
   return null;
 }
@@ -282,4 +345,80 @@ export async function scanDevServers(): Promise<DevServer[]> {
   );
 
   return found.sort((a, b) => a.port - b.port);
+}
+
+/** How long a dev server is given to shut itself down before it is made to. */
+const STOP_GRACE_MS = 3000;
+
+/** Signal 0 asks whether a pid exists; EPERM is a yes that is not ours. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** Signal each pid, and say how many took it and how many were not ours to. */
+function signal(pids: number[], sig: NodeJS.Signals): { sent: number; denied: number } {
+  let sent = 0;
+  let denied = 0;
+  for (const pid of pids) {
+    try {
+      process.kill(pid, sig);
+      sent++;
+    } catch (err) {
+      // ESRCH is a process that finished on its own between the read and now.
+      if ((err as NodeJS.ErrnoException).code === "EPERM") denied++;
+    }
+  }
+  return { sent, denied };
+}
+
+/**
+ * Stop the dev server `pid` is holding `port` for, and resolve once it has.
+ *
+ * Both numbers are what the row was showing, and both are checked again here
+ * against a fresh read rather than believed: the list is up to a scan old, and
+ * in that time the server can have stopped and the pid, or the port, been taken
+ * by something that is not a dev server at all. The narrow `lsof -p` is the
+ * question "does this process still hold this port", asked of one process
+ * instead of the machine.
+ *
+ * SIGTERM first, because every dev server worth the name cleans up on it — vite
+ * closes its watcher, next its workers — and then SIGKILL for whatever is still
+ * there after the grace, because "stop" that leaves the port held is not one.
+ * The second signal goes to the same pids a few seconds later; the kernel does
+ * not hand a pid out again inside that window on any machine this runs on.
+ */
+export async function stopDevServer(
+  port: number,
+  pid: number,
+  spare: (table: Map<number, ProcInfo>) => ReadonlySet<number>,
+): Promise<number[]> {
+  const [lsofOut, psOut] = await Promise.all([
+    run(["lsof", "-nP", "-a", "-p", String(pid), "-iTCP", "-sTCP:LISTEN", "-F", "pn"]),
+    run(["ps", "-eo", "pid=,ppid=,args="]),
+  ]);
+  if (!parseListeners(lsofOut).get(pid)?.includes(port)) {
+    throw new Error(`Nothing is serving :${port} from that process any more`);
+  }
+  const table = parseProcTable(psOut);
+  const match = resolveDevCommand(pid, table);
+  if (!match) throw new Error(`What is on :${port} is not a dev server`);
+  const targets = stopTargets(pid, table, spare(table));
+  if (!targets) throw new Error(`:${port} is a kururu terminal of its own — close its tab instead`);
+
+  const { sent, denied } = signal(targets, "SIGTERM");
+  if (sent === 0 && denied > 0) throw new Error(`${match.program} on :${port} belongs to another user`);
+
+  const deadline = Date.now() + STOP_GRACE_MS;
+  let left = targets.filter(alive);
+  while (left.length > 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    left = left.filter(alive);
+  }
+  if (left.length > 0) signal(left, "SIGKILL");
+  return targets;
 }

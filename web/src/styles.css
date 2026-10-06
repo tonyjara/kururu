@@ -1740,6 +1740,7 @@ a.vps-name:hover {
 }
 .dev-list li {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   border-radius: var(--radius-lg);
 }
@@ -1792,6 +1793,64 @@ a.vps-name:hover {
 .dev-row-off {
   cursor: var(--cursor);
   color: var(--dimmer);
+}
+
+/* Stopping one. The square waits for the pointer the way an agent row's ✕
+   does, and lights in the colour the palette keeps for ending a process — then
+   becomes its own question when pressed, which is why the asking state is drawn
+   whether or not the pointer is still there. */
+.dev-stop {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  margin-right: 2px;
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  color: var(--dim);
+  font-size: var(--fs-base);
+  opacity: 0;
+}
+.dev-list li:hover .dev-stop,
+.dev-stop:focus-visible,
+.dev-stop-ask,
+.dev-stop-busy {
+  opacity: 1;
+}
+/* Two classes on the asking state, so that it outranks the skin's tool layer at
+   the foot of the file — which a hover does already, by being a pseudo-class. */
+.dev-stop:hover,
+.dev-stop.dev-stop-ask {
+  color: var(--danger);
+  background: var(--chrome-high);
+}
+.dev-stop-ask {
+  padding: 3px 6px;
+  font-size: var(--fs-sm);
+}
+.dev-stop-busy,
+.dev-stop-busy:hover {
+  color: var(--dimmer);
+  background: none;
+  cursor: var(--cursor);
+}
+/* No hover on a phone to bring it out, and a thumb wants more than a pointer —
+   the same trade the agent rows make. */
+:root[data-narrow] .dev-stop {
+  opacity: 1;
+  padding: 8px;
+  font-size: var(--fs-lg);
+}
+:root[data-narrow] .dev-stop-ask {
+  font-size: var(--fs-sm);
+}
+
+/* Why a stop did not happen, under the row it was for, until it is pressed. */
+.dev-said {
+  flex-basis: 100%;
+  padding: 0 8px 5px;
+  text-align: left;
+  font-size: var(--fs-sm);
+  color: var(--danger);
 }
 
 .sidebar-foot {
@@ -6462,6 +6521,7 @@ a.button {
 .sb-bars,
 .sb-panes,
 .agent-tool,
+.dev-stop,
 .style-remove,
 .sidebar-close {
   /* At rest these draw no ground of their own, so the skin's layer sits over
