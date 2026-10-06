@@ -749,6 +749,18 @@ export type ClientMessage =
    * never a number.
    */
 
+  /**
+   * Stop one of the dev servers in the sidebar's list.
+   *
+   * It names a server the scan found, by the two numbers the row was drawn
+   * from, and is refused for any pair the last scan did not report — so it can
+   * end only a process kururu already found serving a dev command, never one a
+   * client chose. Then both are checked again against the machine, because the
+   * row can be a scan old. Which processes end is `stopTargets`' to decide.
+   * Replied to once the server has gone, or with why it was not stopped.
+   */
+  | { type: "stop-dev-server"; id: number; port: number; pid: number }
+
   // --- the reader ----------------------------------------------------------
   /**
    * Split a reader off the pane a terminal is in, and point it at that

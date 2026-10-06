@@ -94,7 +94,10 @@ Kept short on purpose; the detail is in git history.
   while a deliberately empty one stays.
 - **Dev servers:** discovery from both ends, restart in the same tab, recovery in
   a fresh one after a cold start; the preview proxy including HMR websockets with
-  subprotocol negotiation; traversal-safe file browsing.
+  subprotocol negotiation; traversal-safe file browsing. Stopping one, against
+  throwaway servers on real sockets: a nodemon-shaped parent that respawns its
+  listener stays down, a server that ignores SIGTERM is gone after the grace,
+  and a stale pid is refused.
 - **Styles:** installing a theme, a skin, a mascot and a pack writes and
   activates; `/api/styles/asset` serves a font and refuses a traversal;
   `/api/styles/preview` proxies a sheet; `1.10.0 > 1.0.0` the right way round;

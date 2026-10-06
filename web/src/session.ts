@@ -855,6 +855,14 @@ export function stopCardDev(workspaceId: string, cardId: string): Promise<unknow
   return request((id) => ({ type: "stop-card-dev", id, workspaceId, cardId }));
 }
 
+/**
+ * Stop a dev server from the sidebar's list, by the port and pid its row was
+ * drawn from. Resolves once it has gone; rejects with why it was not stopped.
+ */
+export function stopDevServer(port: number, pid: number): Promise<unknown> {
+  return request((id) => ({ type: "stop-dev-server", id, port, pid }));
+}
+
 /** Stop following the editor, or start again. */
 export function pinReader(paneId: string, follow: boolean): void {
   send({ type: "pin-reader", paneId, follow });

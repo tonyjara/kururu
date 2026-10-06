@@ -83,7 +83,7 @@ import {
 import { parseReport } from "./agents/report";
 import { dump as dumpRecording, forget as forgetRecording, recordBacklog, recordInput, recordNote, recordOutput } from "./record";
 import { processCwd } from "./cwd";
-import { scanDevServers } from "./devservers";
+import { scanDevServers, stopDevServer } from "./devservers";
 import { readHead, repoAt } from "./git";
 import { pollUsage, usageSnapshot } from "./usage";
 import { clearOpenRouterKey, openRouterSnapshot, pollOpenRouter, setOpenRouterKey } from "./openrouter";
@@ -2012,9 +2012,20 @@ async function sendBacklog(ws: WebSocket, agentId: string): Promise<void> {
 }
 
 let lastDevJson = "";
+let devScansStarted = 0;
+let devScanShown = 0;
 
 async function pollDevServers(): Promise<void> {
+  const scan = ++devScansStarted;
   const servers = await scanDevServers();
+  /**
+   * Never an older reading over a newer one. Stopping a server asks for a scan
+   * at once, so the row goes when the server does, and a timer scan that began
+   * before the stop can finish after it — putting the stopped server back in
+   * the list and opening it a fresh proxy.
+   */
+  if (scan < devScanShown) return;
+  devScanShown = scan;
   for (const server of servers) allowRoot(server.cwd);
   /**
    * Every dev server gets a proxy, whether or not anything has asked for one.
@@ -2071,6 +2082,33 @@ async function pollDevServers(): Promise<void> {
   lastDevJson = json;
   state.devServers = servers;
   broadcast({ type: "dev-servers", servers });
+}
+
+/**
+ * Stop a dev server from the sidebar's list, by the port and pid its row showed.
+ *
+ * The pair has to be one the last scan reported, which is what keeps this a
+ * verb about servers kururu found rather than a way to signal any pid a client
+ * names. What is spared is decided here because only here knows it: this
+ * process, every terminal the host holds, and the host itself, found as the
+ * terminals' parent — the same way `hostPidOf` finds it.
+ */
+async function stopListedDevServer(port: unknown, pid: unknown): Promise<{ stopped: number }> {
+  if (!Number.isInteger(port) || !Number.isInteger(pid)) throw new Error("no such dev server");
+  if (!state.devServers.some((server) => server.port === port && server.pid === pid)) {
+    throw new Error("That dev server is not running any more");
+  }
+  const roots = memRoots().map(([, root]) => root);
+  const stopped = await stopDevServer(port as number, pid as number, (table) => {
+    const spare = new Set([process.pid, ...roots]);
+    for (const root of roots) {
+      const parent = table.get(root)?.ppid;
+      if (parent && parent > 1) spare.add(parent);
+    }
+    return spare;
+  });
+  await pollDevServers();
+  return { stopped: stopped.length };
 }
 
 /**
@@ -3521,6 +3559,9 @@ function handleMessage(ws: WebSocket, raw: string): void {
       return;
     case "stop-card-dev":
       void replyAsync(ws, msg.id, async () => stopDev(msg.workspaceId, msg.cardId));
+      return;
+    case "stop-dev-server":
+      void replyAsync(ws, msg.id, () => stopListedDevServer(msg.port, msg.pid));
       return;
 
     case "workspace-git": {
