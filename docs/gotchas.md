@@ -35,6 +35,13 @@ Things that fail with an error naming something other than the cause.
   and vite takes `strictPort`, so a taken port stops it instead of moving it
   somewhere the window is not looking. `lsof -nP -iTCP:5173 -sTCP:LISTEN` shows
   every holder.
+- **A phone on vite reloaded every time Safari came back to the front.** In dev
+  the Share dialog points the phone at 5173, and vite's client reads a dropped
+  HMR socket as vite restarting: it polls, then `location.reload()`. iOS kills a
+  backgrounded page's sockets, so every return rebuilt the whole page.
+  `web/src/main.tsx` holds that reload on any non-loopback page, and the phone
+  keeps the code it loaded until it is reloaded by hand. The tell is a live
+  connection from a `100.x` address in `lsof -nP -iTCP:5173 -sTCP:ESTABLISHED`.
 - **`EADDRINUSE` on 7717 means a stale server**, usually from an earlier turn. Not
   a code bug: `pkill -f "server/run.mjs"; pkill -f "desktop/dist/server.mjs"`. The
   pty host is deliberately *not* in that list — killing it is the one thing that

@@ -727,6 +727,7 @@ kbd {
    links — so when the window is short they are the wrong place to find room;
    the list of agents is. */
 .side-usage,
+.side-openrouter,
 .side-vps,
 .side-dev {
   flex: none;
@@ -1613,6 +1614,28 @@ kbd {
   color: var(--working);
   font-size: var(--fs-lg);
   line-height: 1;
+}
+
+/* The OpenRouter balance: the figure itself carries the colour, because there
+   is no bar to — see `OpenRouter` in Sidebar.tsx. The bars' three meanings,
+   but as ink: `danger` rather than `dangerBg`, which is a fill. */
+.or-balance {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  white-space: nowrap;
+}
+.or-balance[data-severity="warning"] {
+  color: var(--working);
+}
+.or-balance[data-severity="critical"] {
+  color: var(--danger);
+}
+
+/* Last reading kept across a failed poll, as `.vps-stale` keeps one. */
+.or-stale {
+  opacity: 0.55;
 }
 
 /* The VPS section, built out of the usage bar's parts — see `Vps` in

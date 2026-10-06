@@ -33,6 +33,7 @@ import { AppearanceSettings } from "./SettingsAppearance";
 import { KeySettings } from "./SettingsKeys";
 import { MascotSettings } from "./SettingsMascot";
 import { NotifySettings } from "./SettingsNotify";
+import { OpenRouterSettings } from "./SettingsOpenRouter";
 import { ProcessSettings } from "./SettingsProcesses";
 import { ProfileSettings } from "./SettingsProfiles";
 import { WorkspaceSettings } from "./SettingsWorkspaces";
@@ -51,6 +52,7 @@ export type Tab =
   | "processes"
   | "notify"
   | "vps"
+  | "openrouter"
   | "keys"
   | "about";
 
@@ -127,8 +129,18 @@ const SECTIONS: ReadonlyArray<{
    * How kururu says an agent wants you while you are not looking at the window.
    */
   { id: "notify", label: "Notifications", pages: [["notify", "Notifications"]] },
-  /** The one page about a machine that is not this one, set up once. */
-  { id: "vps", label: "VPS", pages: [["vps", "VPS"]] },
+  /**
+   * The sidebar's gauges of things that are not this machine — a server, an
+   * account — each set up once and then only looked at in the sidebar.
+   */
+  {
+    id: "monitors",
+    label: "Monitors",
+    pages: [
+      ["vps", "VPS"],
+      ["openrouter", "OpenRouter"],
+    ],
+  },
   { id: "keys", label: "Keys", pages: [["keys", "Keys"]] },
   { id: "about", label: "About", pages: [["about", "About"]] },
 ];
@@ -303,6 +315,8 @@ export function Settings({
             <NotifySettings notify={notify} />
           ) : tab === "vps" ? (
             <VpsSettings onEditing={onEditing} />
+          ) : tab === "openrouter" ? (
+            <OpenRouterSettings onEditing={onEditing} />
           ) : tab === "processes" ? (
             <ProcessSettings />
           ) : tab === "about" ? (
