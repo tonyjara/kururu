@@ -12,10 +12,12 @@
     "@xterm/headless": "^6.0.0",
     "markdown-it": "^15.0.2",
     "node-pty": "^1.1.0",
+    "pg": "^8.23.1",
     "shiki": "^4.4.3",
     "ws": "^8.21.3"
   },
   "devDependencies": {
+    "@types/pg": "^8.15.0",
     "@types/ws": "^8.18.1"
   }
 }

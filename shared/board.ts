@@ -68,11 +68,19 @@ export function isBoardColumn(value: unknown): value is BoardColumn {
  * and every column is made with one for the reason `Workspace.color` gives:
  * nobody chooses, and a colour that waits to be chosen arrives the day after
  * it would have helped. Null is "no colour", which a person can still pick.
+ *
+ * `collapsed` is the column folded down to its name on its side, the way Jira
+ * does it: out of the way, and still a place to drop a card. On the board
+ * rather than kept by the window, for the reason a column's colour is — it is
+ * how this board is arranged, and the board looks the same from the phone.
+ * Present only when true, so that the ordinary column, and every one written
+ * before columns folded, is the shape it always was.
  */
 export interface BoardLane {
   id: string;
   name: string;
   color: WorkspaceColor | null;
+  collapsed?: true;
 }
 
 /**
@@ -632,6 +640,7 @@ function adoptLanes(value: unknown): BoardLane[] | null {
     const name = text(item.name, LANE_NAME_MAX);
     if (!name || lanes.some((lane) => lane.id === item.id)) continue;
     const lane: BoardLane = { id: item.id, name, color: isWorkspaceColor(item.color) ? item.color : null };
+    if (item.collapsed === true) lane.collapsed = true;
     if (item.color === undefined) {
       lane.color = LANE_COLORS[lane.id] ?? null;
       if (lane.color === null) uncoloured.push(lane);
@@ -663,6 +672,23 @@ export function colorLane(board: Board, laneId: string, color: unknown): Board {
   if (!board.columns || !hasLane(board, laneId)) return board;
   if (color !== null && !isWorkspaceColor(color)) return board;
   return { ...board, columns: board.columns.map((lane) => (lane.id === laneId ? { ...lane, color } : lane)) };
+}
+
+/**
+ * Fold a column down to its name, or open it again. Its cards stay where they
+ * are and stay counted — only the drawing changes. Anything but a boolean is
+ * refused rather than read as one, since `"false"` is truthy.
+ */
+export function collapseLane(board: Board, laneId: string, collapsed: unknown): Board {
+  if (!board.columns || !hasLane(board, laneId) || typeof collapsed !== "boolean") return board;
+  return {
+    ...board,
+    columns: board.columns.map((lane) => {
+      if (lane.id !== laneId) return lane;
+      const { collapsed: _, ...open } = lane;
+      return collapsed ? { ...open, collapsed: true } : open;
+    }),
+  };
 }
 
 export function renameLane(board: Board, laneId: string, name: unknown): Board {

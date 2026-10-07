@@ -47,7 +47,8 @@ import type {
   WorkspaceColor,
 } from "../../../shared/model";
 import { defaultMascot, mascotFor, WORKSPACE_COLORS, workspaceUnits } from "../../../shared/model";
-import type { DevServer, GitAction, RepoGit } from "../../../shared/wire";
+import type { AccountUsage, DevServer, GitAction, RepoGit } from "../../../shared/wire";
+import type { WorkspaceDatabase } from "../../../shared/databases";
 import { formatBytes as formatSize, vpsSeverity, type VpsStatus, type VpsUsed } from "../../../shared/vps";
 import {
   balanceOf,
@@ -64,7 +65,7 @@ import { agentLabel, agentSummary, shortenPath } from "../labels";
 import { previewLabel, previewUrl } from "../preview";
 import * as api from "../session";
 import { useKururu } from "../session";
-import { limitLabel, limitTitle, resetIn, staleTitle } from "../usage";
+import { limitLabel, limitMarks, limitTitle, resetIn, staleTitle } from "../usage";
 import { Menu, Popover, type MenuItem } from "./Menu";
 import type { DialogState } from "./Dialog";
 import { Icon } from "./Icon";
@@ -121,6 +122,12 @@ interface Props {
    */
   onDeleteWorkspace: (workspaceId: string) => void;
   /**
+   * The database button on a row: the workspace's env files name at least one,
+   * and the sheet that opens is the app's, like the profile's board — it goes
+   * over the window, and on a phone the sidebar is put away first.
+   */
+  onDatabases: (workspaceId: string) => void;
+  /**
    * Say when a name is being typed in here, because the prefix has to stand
    * down for it: ctrl+a is select-all in a text field, and an armed prefix would
    * swallow the next letter as a command.
@@ -167,6 +174,7 @@ export function Sidebar({
   onRun,
   profileRef,
   onDeleteWorkspace,
+  onDatabases,
   onEditing,
   onPrompt,
   onBoard,
@@ -186,8 +194,19 @@ export function Sidebar({
    * the sidebar draws, and passing it through the app would mean two components
    * knowing about it so that one of them could forget.
    */
-  const { branches } = useKururu();
+  const { branches, databases } = useKururu();
   const heads = new Map(branches.map((head) => [head.workspaceId, head] as const));
+  const dbCount = new Map<string, number>();
+  for (const db of databases) dbCount.set(db.workspaceId, (dbCount.get(db.workspaceId) ?? 0) + 1);
+  /**
+   * Whether any workspace wears a mascot of its own — and so whether every row
+   * keeps a column for one. All of them or none, because the point of the column
+   * is that the names start in one place: a mascot on four rows of ten, with the
+   * other six names starting a sprite further left, would be a ragged edge drawn
+   * on purpose. None when nobody has picked, so the feature costs nothing to
+   * somebody not using it.
+   */
+  const mascotted = profile.workspaces.some((w) => ownMascot(mascots, w.mascotId));
   /** The workspace row a drop would land on, while something is over it. */
   const [overWorkspace, setOverWorkspace] = useState<string | null>(null);
   /**
@@ -778,7 +797,7 @@ export function Sidebar({
             <Icon name="add" />
           </button>
         </h2>
-        <ul className="ws-list">
+        <ul className={`ws-list ${mascotted ? "ws-list-mascots" : ""}`}>
           {profile.workspaces.map((workspace, index) => {
             const head = heads.get(workspace.id);
             const group = workspace.group;
@@ -906,6 +925,7 @@ export function Sidebar({
                     }}
                   >
                     <span className="ws-index">{index < 9 ? index + 1 : "\u00b7"}</span>
+                    {mascotted && <WorkspaceMascot mascots={mascots} mascotId={workspace.mascotId} />}
                     <span className="ws-name">{workspace.name}</span>
                   </button>
 
@@ -922,19 +942,38 @@ export function Sidebar({
                       anywhere else. Outside the row's own button, because a
                       button inside a button is not a thing the platform will
                       give you. */}
-                  {head?.git && (
-                    <button
-                      className={`ws-git ${gitTone(head.git)} ${gitBusy === workspace.id ? "ws-git-busy" : ""}`}
-                      disabled={gitBusy === workspace.id}
-                      onClick={(event) => {
-                        const box = event.currentTarget.getBoundingClientRect();
-                        setGitMenu({ workspaceId: workspace.id, x: box.left, y: box.bottom + 4 });
-                      }}
-                      title={gitTitle(head.git)}
-                      aria-label={`Git: ${gitTitle(head.git)}`}
-                    >
-                      <Icon name="git" />
-                    </button>
+                  {(head?.git || dbCount.get(workspace.id)) && (
+                    <span className="ws-tools">
+                      {/* The workspace's databases, to the left of git: drawn
+                          only when its env files name one, and the sheet it
+                          opens is the app's. The count is how many places,
+                          not how many files — two files pointing at one
+                          database are one database. */}
+                      {(dbCount.get(workspace.id) ?? 0) > 0 && (
+                        <button
+                          className="ws-db"
+                          onClick={() => onDatabases(workspace.id)}
+                          title={dbTitle(databases.filter((db) => db.workspaceId === workspace.id))}
+                          aria-label={`Databases: ${dbCount.get(workspace.id)}`}
+                        >
+                          <Icon name="database" />
+                        </button>
+                      )}
+                      {head?.git && (
+                        <button
+                          className={`ws-git ${gitTone(head.git)} ${gitBusy === workspace.id ? "ws-git-busy" : ""}`}
+                          disabled={gitBusy === workspace.id}
+                          onClick={(event) => {
+                            const box = event.currentTarget.getBoundingClientRect();
+                            setGitMenu({ workspaceId: workspace.id, x: box.left, y: box.bottom + 4 });
+                          }}
+                          title={gitTitle(head.git)}
+                          aria-label={`Git: ${gitTitle(head.git)}`}
+                        >
+                          <Icon name="git" />
+                        </button>
+                      )}
+                    </span>
                   )}
 
                   {/* What is checked out where this workspace works, on a line
@@ -1372,6 +1411,40 @@ function Resizer({ onResize, onReset }: { onResize: (px: number) => void; onRese
 }
 
 /**
+ * The workspace's own mascot, sitting idle between its number and its name.
+ *
+ * Only for a workspace that picked one. A workspace following the default would
+ * put the same frog on every row, and a mark that is on everything distinguishes
+ * nothing — what this says is "this one is different", and it can only say that
+ * where it is. An id naming a mascot that has since been deleted is found by
+ * nothing here and draws nothing, rather than falling back the way `mascotFor`
+ * does: the fallback is the default, which is exactly the case left out.
+ *
+ * The idle clip, because the row is a name and not an agent — nothing in a
+ * workspace is "working" — and a sidebar of hopping names would be louder than
+ * the agent badges whose hop actually means something. A mascot with no idle
+ * clip shows its working one rather than vanishing, since having picked it is
+ * the fact being drawn. Motion is the mascot's own setting, and a frozen frame
+ * is fine here where it was not on a badge: this is a picture of a choice, not
+ * a state the stillness could be mistaken for.
+ */
+function WorkspaceMascot({ mascots, mascotId }: { mascots: MascotSet; mascotId: string | null }) {
+  const mascot = ownMascot(mascots, mascotId);
+  /* Empty rather than absent on a row without one: the box is the column, and
+     it is what keeps this row's name starting where its neighbours' do. */
+  return (
+    <span className="status status-idle ws-mascot" aria-hidden>
+      {mascot && <Mascot config={mascot} clip={mascot.idle ?? mascot.working} />}
+    </span>
+  );
+}
+
+/** The mascot a workspace picked for itself, or nothing — never the default. */
+function ownMascot(mascots: MascotSet, mascotId: string | null): MascotSet["list"][number] | undefined {
+  return mascotId === null ? undefined : mascots.list.find((m) => m.id === mascotId);
+}
+
+/**
  * Which mascot this workspace's agents wear.
  *
  * Each one is drawn animating rather than named, for the same reason the colour
@@ -1548,18 +1621,6 @@ function Usage() {
   // nothing to say, and a row explaining that would be noise on every window.
   if (!account || account.signedOut || account.limits.length === 0) return null;
 
-  /**
-   * Shut, the one bar that moves while you watch: the session's. The weekly
-   * limits move by a percent an afternoon and are worth a look now and then,
-   * not a third of the sidebar's foot all day. An account that reports no
-   * session limit shows whichever it reports first rather than nothing, on
-   * `limitLabel`'s argument — the limit nobody expected is the one about to
-   * bite.
-   */
-  const shown = open
-    ? account.limits
-    : [account.limits.find((limit) => limit.kind === "session") ?? account.limits[0]!];
-
   return (
     <section className="side-section side-usage">
       <h2>
@@ -1571,36 +1632,48 @@ function Usage() {
           {account.stale && <span className="usage-stale" title={staleTitle(account.at)}>·</span>}
         </SectionToggle>
       </h2>
-      <ul className="usage-list">
-        {shown.map((limit) => (
-          <li key={`${limit.kind}:${limit.scope ?? ""}`} className="usage-item">
-            <span className="usage-head">
-              <span className="usage-name">{limitLabel(limit)}</span>
-              {/* "97%" alone is read as 97% *left* about as often as not, and
-                  the two readings are three percent apart at one end of the bar
-                  and ninety-four at the other. The word is four characters and
-                  removes the question. */}
-              <span className="usage-used">{Math.round(limit.percent)}% used</span>
-            </span>
-            <span
-              className="usage-bar"
-              role="meter"
-              aria-label={`${limitLabel(limit)} used`}
-              aria-valuenow={Math.round(limit.percent)}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              title={limitTitle(limit)}
-            >
+      {/* Shut, every limit as a ring on one line, the VPS row's shape. It used
+          to be the session's bar alone, on the argument that the weeks move by
+          a percent an afternoon; but a ring is small enough that the weeks cost
+          nothing to keep in view, and the week is the one that ends an
+          afternoon outright when it runs out. The reset countdowns go to the
+          tooltips — open is where they are read. */}
+      {open ? (
+        <ul className="usage-list">
+          {account.limits.map((limit) => (
+            <li key={`${limit.kind}:${limit.scope ?? ""}`} className="usage-item">
+              <span className="usage-head">
+                <span className="usage-name">{limitLabel(limit)}</span>
+                {/* "97%" alone is read as 97% *left* about as often as not, and
+                    the two readings are three percent apart at one end of the bar
+                    and ninety-four at the other. The word is four characters and
+                    removes the question. */}
+                <span className="usage-used">{Math.round(limit.percent)}% used</span>
+              </span>
               <span
-                className="usage-fill"
-                data-severity={limit.severity}
-                style={{ width: `${limit.percent}%` }}
-              />
-            </span>
-            {limit.resetsAt && <span className="usage-reset">{resetIn(limit.resetsAt)}</span>}
-          </li>
-        ))}
-      </ul>
+                className="usage-bar"
+                role="meter"
+                aria-label={`${limitLabel(limit)} used`}
+                aria-valuenow={Math.round(limit.percent)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                title={limitTitle(limit)}
+              >
+                <span
+                  className="usage-fill"
+                  data-severity={limit.severity}
+                  style={{ width: `${limit.percent}%` }}
+                />
+              </span>
+              {limit.resetsAt && <span className="usage-reset">{resetIn(limit.resetsAt)}</span>}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <ul className="usage-list">
+          <UsageRings account={account} />
+        </ul>
+      )}
       {/* Whose allowance this is. With more than one Claude login on the
           machine the bars are for whichever was signed into last — or, with
           logins kept per profile, for the profile on screen — and two
@@ -1611,6 +1684,38 @@ function Usage() {
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * The shut usage row: whose allowance on the left, a ring per limit on the
+ * right. Named "Claude" rather than left blank because the heading already says
+ * "Usage", and what the row has to add is which account it is — the email is
+ * the name's tooltip, as the host is a VPS name's.
+ */
+function UsageRings({ account }: { account: AccountUsage }) {
+  const marks = limitMarks(account.limits);
+  return (
+    <li className="gauge-item">
+      <span className="gauge-name" title={account.email ?? undefined}>
+        Claude
+      </span>
+      <span className="gauge-rings">
+        {account.limits.map((limit, i) => {
+          const reset = limit.resetsAt ? resetIn(limit.resetsAt) : "";
+          return (
+            <GaugeRing
+              key={`${limit.kind}:${limit.scope ?? ""}`}
+              label={limitLabel(limit)}
+              mark={marks[i] ?? ""}
+              percent={limit.percent}
+              severity={limit.severity}
+              title={`${limitLabel(limit)}${reset ? ` — ${reset}` : ""}\n${limitTitle(limit)}`}
+            />
+          );
+        })}
+      </span>
+    </li>
   );
 }
 
@@ -1789,9 +1894,9 @@ function VpsRow({ server, open }: { server: VpsStatus; open: boolean }) {
      same colours as the bars, in one row's height rather than four. */
   if (!open) {
     return (
-      <li className={`vps-item vps-item-shut ${server.stale ? "vps-stale" : ""}`}>
+      <li className={`vps-item gauge-item ${server.stale ? "vps-stale" : ""}`}>
         {name}
-        <span className="vps-rings">
+        <span className="gauge-rings">
           {cpu !== null && <VpsRing label="CPU" percent={cpu} figure={`${Math.round(cpu)}%`} />}
           {mem !== null && <VpsRing label="RAM" percent={mem} figure={memFigure ?? ""} />}
           {disk !== null && <VpsRing label="Disk" percent={disk} figure={diskFigure ?? ""} />}
@@ -1811,25 +1916,51 @@ function VpsRow({ server, open }: { server: VpsStatus; open: boolean }) {
   );
 }
 
-/**
- * One figure as a ring, the context ring's shape. The label is the letter
- * beside it rather than a word, because three words and three rings do not fit
- * beside a name in a sidebar; the tooltip carries the whole sentence.
- */
 function VpsRing({ label, percent, figure }: { label: string; percent: number; figure: string }) {
+  const rounded = Math.round(percent);
+  return (
+    <GaugeRing
+      label={label}
+      mark={label[0] ?? ""}
+      percent={percent}
+      severity={vpsSeverity(percent)}
+      title={`${label} ${rounded}% used${figure && figure !== `${rounded}%` ? ` — ${figure}` : ""}`}
+    />
+  );
+}
+
+/**
+ * One figure as a ring, the context ring's shape: the shut form of a bar, for a
+ * VPS row and the usage row alike. The mark is a letter beside it rather than a
+ * word, because three words and three rings do not fit beside a name in a
+ * sidebar; the tooltip carries the whole sentence.
+ */
+function GaugeRing({
+  label,
+  mark,
+  percent,
+  severity,
+  title,
+}: {
+  label: string;
+  mark: string;
+  percent: number;
+  severity: string;
+  title: string;
+}) {
   const circumference = 2 * Math.PI * 5;
   const rounded = Math.round(percent);
   return (
     <span
-      className="vps-ring"
+      className="gauge-ring"
       role="meter"
       aria-label={`${label} used`}
       aria-valuenow={rounded}
       aria-valuemin={0}
       aria-valuemax={100}
-      title={`${label} ${rounded}% used${figure && figure !== `${rounded}%` ? ` — ${figure}` : ""}`}
+      title={title}
     >
-      <svg className="ring" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" data-severity={vpsSeverity(percent)}>
+      <svg className="ring" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" data-severity={severity}>
         <circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" strokeWidth="2" opacity="0.2" />
         <circle
           cx="7" cy="7" r="5" fill="none" stroke="currentColor" strokeWidth="2"
@@ -1838,8 +1969,8 @@ function VpsRing({ label, percent, figure }: { label: string; percent: number; f
           strokeLinecap="round"
         />
       </svg>
-      <span className="vps-ring-label">{label[0]}</span>
-      <span className="vps-ring-pct">{rounded}%</span>
+      <span className="gauge-ring-label">{mark}</span>
+      <span className="gauge-ring-pct">{rounded}%</span>
     </span>
   );
 }
@@ -2105,6 +2236,11 @@ function SectionToggle({
  * or nothing. Uncommitted wins over the rest because it is the one a merge
  * or a push would leave behind.
  */
+/** The tooltip on the database button: one line per place, file first. */
+function dbTitle(dbs: WorkspaceDatabase[]): string {
+  return dbs.map((db) => `${db.files.join(", ")} → ${db.host}/${db.database}`).join("\n");
+}
+
 function gitTone(git: RepoGit): string {
   if (git.changes) return "ws-git-dirty";
   if (git.ahead || git.behind) return "ws-git-moved";

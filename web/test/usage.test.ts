@@ -8,7 +8,7 @@
  * the reset itself, which is the one that can go negative.
  */
 import { describe, expect, it } from "bun:test";
-import { limitLabel, limitTitle, resetIn, staleTitle } from "../src/usage";
+import { limitLabel, limitMarks, limitTitle, resetIn, staleTitle } from "../src/usage";
 import type { UsageLimit } from "../../shared/wire";
 
 function limit(over: Partial<UsageLimit> = {}): UsageLimit {
@@ -42,6 +42,27 @@ describe("limitLabel", () => {
   /** A kind nobody has seen gets a readable label rather than no row. */
   it("tidies a kind it does not know", () => {
     expect(limitLabel(limit({ kind: "monthly_all" }))).toBe("Monthly all");
+  });
+});
+
+describe("limitMarks", () => {
+  it("marks the session and the week by their clocks", () => {
+    expect(limitMarks([limit({ kind: "session" }), limit({ kind: "weekly_all" })])).toEqual(["S", "W"]);
+  });
+
+  /** "W W" would be two rings nobody could tell apart without hovering. */
+  it("marks a scoped week by its model", () => {
+    expect(limitMarks([limit({ kind: "weekly_all" }), limit({ kind: "weekly_scoped", scope: "Opus" })])).toEqual([
+      "W",
+      "O",
+    ]);
+  });
+
+  /** A Sonnet week beside the session, the collision that actually happens. */
+  it("widens a letter already taken to two", () => {
+    expect(
+      limitMarks([limit({ kind: "session" }), limit({ kind: "weekly_scoped", scope: "Sonnet" })]),
+    ).toEqual(["S", "So"]);
   });
 });
 

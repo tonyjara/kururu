@@ -33,7 +33,7 @@ import { boardLanes, cardCode, columnCards, LANE_NAME_MAX, LANES_MAX, type Board
 import type { Profile } from "../../../shared/model";
 import { colorValue } from "../colors";
 import * as api from "../session";
-import { CardWhen, Composer, dropDraft } from "./Board";
+import { CardWhen, Composer, dropDraft, useComposerInView } from "./Board";
 import { Icon } from "./Icon";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
 import { ColorPicker } from "./Sidebar";
@@ -146,6 +146,7 @@ export function ProfileBoard({ profile, onClose }: { profile: Profile; onClose: 
       items: [
         { label: "Rename", run: () => setNaming(lane.id) },
         { label: "Colour", hint: lane.color ?? "none", run: () => setPicking({ column: lane.id, at }) },
+        { label: "Collapse", run: () => api.collapseProfileColumn(profile.id, lane.id, true) },
         ...(index > 0
           ? [{ label: "Move left", run: () => api.moveProfileColumn(profile.id, lane.id, index - 1) }]
           : []),
@@ -190,11 +191,45 @@ export function ProfileBoard({ profile, onClose }: { profile: Profile; onClose: 
     setLaneDrag(null);
   };
 
-  const over = (column: string, foot: number) => (event: React.DragEvent) => {
+  /**
+   * A card over a column's own background goes to its foot; over a card, the
+   * card's `onOver` has already said which side of it. A folded column has no
+   * cards to point between, so anywhere on it is its foot.
+   */
+  const over = (column: string, foot: number, anywhere = false) => (event: React.DragEvent) => {
     if (!event.dataTransfer.types.includes(CARD_MIME)) return;
     event.preventDefault();
-    if (event.target === event.currentTarget) setDropAt({ column, index: foot });
+    if (anywhere || event.target === event.currentTarget) setDropAt({ column, index: foot });
   };
+
+  /**
+   * The handle a column is dragged by, open or folded. Only the grip is
+   * draggable, so the header's buttons and a rename's input keep their clicks
+   * and their text selection.
+   */
+  const grip = (column: string) => (
+    <span
+      className="board-col-grip"
+      draggable
+      title="Drag to move this column"
+      aria-hidden="true"
+      onDragStart={(event) => {
+        event.dataTransfer.setData(LANE_MIME, column);
+        event.dataTransfer.effectAllowed = "move";
+        const col = event.currentTarget.closest(".board-col");
+        if (col) {
+          const box = col.getBoundingClientRect();
+          event.dataTransfer.setDragImage(col, event.clientX - box.left, event.clientY - box.top);
+        }
+        setLaneDrag({ id: column, gap: null });
+      }}
+      onDragEnd={() => setLaneDrag(null)}
+    >
+      <Icon name="grip" />
+    </span>
+  );
+
+  const addingList = useComposerInView(adding, adding ? columnCards(board, adding).length : 0);
 
   return (
     <div className="scrim profile-board-scrim" onPointerDown={onClose}>
@@ -238,62 +273,65 @@ export function ProfileBoard({ profile, onClose }: { profile: Profile; onClose: 
             {lanes.map((lane, laneIndex) => {
               const column = lane.id;
               const cards = columnCards(board, column);
+              const shut = lane.collapsed === true;
               const gap = laneDrag?.gap;
               const laneClass = [
                 "board-col",
+                shut ? "board-col-shut" : "",
                 dropAt?.column === column ? "board-col-over" : "",
                 laneDrag?.id === column ? "board-col-lifted" : "",
                 gap === laneIndex ? "board-col-before" : "",
                 gap === laneIndex + 1 && laneIndex === lanes.length - 1 ? "board-col-after" : "",
               ].join(" ");
-              return (
-                <section
-                  key={column}
-                  className={laneClass}
-                  style={lane.color ? ({ "--tag": colorValue(lane.color) } as React.CSSProperties) : undefined}
-                  onDragOver={(event) => {
-                    overLane(laneIndex)(event);
-                    over(column, cards.length)(event);
-                  }}
-                  onDragLeave={(event) => {
-                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropAt(null);
-                  }}
-                  onDrop={(event) => {
-                    if (event.dataTransfer.types.includes(LANE_MIME)) {
-                      event.preventDefault();
-                      return dropLane();
-                    }
-                    const cardId = event.dataTransfer.getData(CARD_MIME);
-                    const index = dropAt?.column === column ? dropAt.index : undefined;
-                    setDropAt(null);
-                    if (!cardId) return;
+              // The same drop target folded or open, so that a folded column
+              // takes a card and a column exactly as it would standing up.
+              const target = {
+                className: laneClass,
+                style: lane.color ? ({ "--tag": colorValue(lane.color) } as React.CSSProperties) : undefined,
+                onDragOver: (event: React.DragEvent<HTMLElement>) => {
+                  overLane(laneIndex)(event);
+                  over(column, cards.length, shut)(event);
+                },
+                onDragLeave: (event: React.DragEvent<HTMLElement>) => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropAt(null);
+                },
+                onDrop: (event: React.DragEvent<HTMLElement>) => {
+                  if (event.dataTransfer.types.includes(LANE_MIME)) {
                     event.preventDefault();
-                    api.moveProfileCard(profile.id, cardId, column, index);
-                  }}
-                >
-                  <header className="board-col-head">
-                    {/* The handle the whole column is dragged by. Only the grip
-                        is draggable, so the header's buttons and a rename's
-                        input keep their clicks and their text selection. */}
-                    <span
-                      className="board-col-grip"
-                      draggable
-                      title="Drag to move this column"
-                      aria-hidden="true"
-                      onDragStart={(event) => {
-                        event.dataTransfer.setData(LANE_MIME, column);
-                        event.dataTransfer.effectAllowed = "move";
-                        const col = event.currentTarget.closest(".board-col");
-                        if (col) {
-                          const box = col.getBoundingClientRect();
-                          event.dataTransfer.setDragImage(col, event.clientX - box.left, event.clientY - box.top);
-                        }
-                        setLaneDrag({ id: column, gap: null });
-                      }}
-                      onDragEnd={() => setLaneDrag(null)}
+                    return dropLane();
+                  }
+                  const cardId = event.dataTransfer.getData(CARD_MIME);
+                  const index = dropAt?.column === column ? dropAt.index : undefined;
+                  setDropAt(null);
+                  if (!cardId) return;
+                  event.preventDefault();
+                  api.moveProfileCard(profile.id, cardId, column, index);
+                },
+              };
+              if (shut)
+                return (
+                  <section key={column} {...target}>
+                    {grip(column)}
+                    {/* The whole strip is the button that opens it again, as
+                        in Jira: the name on its side is the thing to press. */}
+                    <button
+                      className="board-col-open"
+                      title={`Expand ${lane.name}`}
+                      aria-label={`Expand ${lane.name}, ${cards.length} card${cards.length === 1 ? "" : "s"}`}
+                      aria-expanded={false}
+                      onClick={() => api.collapseProfileColumn(profile.id, column, false)}
                     >
-                      <Icon name="grip" />
-                    </span>
+                      <Icon name="caret" />
+                      <span className="board-col-dot" />
+                      <span className="board-col-count">{cards.length}</span>
+                      <span className="board-col-name">{lane.name}</span>
+                    </button>
+                  </section>
+                );
+              return (
+                <section key={column} {...target}>
+                  <header className="board-col-head">
+                    {grip(column)}
                     {naming === column ? (
                       <LaneName
                         name={lane.name}
@@ -323,6 +361,15 @@ export function ProfileBoard({ profile, onClose }: { profile: Profile; onClose: 
                       </>
                     )}
                     <button
+                      className="pane-btn board-col-fold"
+                      title="Collapse this column — it still takes a card dropped on it"
+                      aria-label="Collapse column"
+                      aria-expanded
+                      onClick={() => api.collapseProfileColumn(profile.id, column, true)}
+                    >
+                      <Icon name="caret" />
+                    </button>
+                    <button
                       className="pane-btn"
                       title={`Add a card to ${lane.name}`}
                       aria-label="Add a card"
@@ -344,7 +391,11 @@ export function ProfileBoard({ profile, onClose }: { profile: Profile; onClose: 
                     </button>
                   </header>
 
-                  <div className="board-cards" onDragOver={over(column, cards.length)}>
+                  <div
+                    className="board-cards"
+                    ref={adding === column ? addingList : undefined}
+                    onDragOver={over(column, cards.length)}
+                  >
                     {cards.map((card, index) =>
                       editing === card.id ? (
                         <Composer
@@ -400,11 +451,9 @@ export function ProfileBoard({ profile, onClose }: { profile: Profile; onClose: 
                         keepOpen
                       />
                     ) : (
-                      cards.length === 0 && (
-                        <button className="board-empty" onClick={() => setAdding(column)}>
-                          Add a card
-                        </button>
-                      )
+                      <button className="board-empty" onClick={() => setAdding(column)}>
+                        Add a card
+                      </button>
                     )}
                   </div>
                 </section>

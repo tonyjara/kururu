@@ -49,6 +49,7 @@ export type Action =
   | "delete-workspace"
   | "find-workspace"
   | "find-agent"
+  | "find-tab"
   | "open-reader"
   | "open-board"
   | "settings"
@@ -81,6 +82,7 @@ export const ACTION_INFO: Record<Action, { label: string; group: ActionGroup }> 
   "close-tab": { label: "close tab (ends it)", group: "terminals" },
   "rename-tab": { label: "rename tab", group: "terminals" },
   "find-agent": { label: "find an agent", group: "terminals" },
+  "find-tab": { label: "find a tab in this workspace", group: "terminals" },
 
   "split-right": { label: "split right", group: "panes" },
   "split-down": { label: "split down", group: "panes" },
@@ -176,6 +178,9 @@ export const DEFAULT_KEYMAP: Record<string, Action> = {
   X: "delete-workspace",
   w: "find-workspace",
   a: "find-agent",
+  // Unbound in ghosttown. Lowercase beside the shifted `T` that makes a tab,
+  // the way `w` finds a workspace beside the `W` that renames one.
+  t: "find-tab",
   g: "settings",
   R: "reload",
   B: "restart-server",

@@ -39,7 +39,7 @@
  * over the rebuild in the first place. Neither a tab switch nor a layout change
  * rebuilds anything now.
  */
-import { Fragment, useCallback, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { keysByAction, type Action } from "../../../shared/keys";
 import {
   activeAgent,
@@ -125,6 +125,12 @@ interface Props {
   /** Whether the file tree is showing, for the pane menu's row that toggles it. */
   filesOpen: boolean;
   onToggleFiles: () => void;
+  /**
+   * A tab's name is being typed, in the strip. The sidebar's rename says the
+   * same thing up the same wire, and for its reason: the prefix and ctrl+a
+   * belong to the field while there is one.
+   */
+  onEditing: (on: boolean) => void;
 }
 
 /** A normalized rect as the four percentages CSS wants. */
@@ -154,6 +160,7 @@ export function Panes({
   keyboard,
   filesOpen,
   onToggleFiles,
+  onEditing,
 }: Props) {
   const area = useRef<HTMLDivElement>(null);
   const [resizing, setResizing] = useState(false);
@@ -241,6 +248,7 @@ export function Panes({
               workspaceName={workspaceName}
               board={board}
               launchers={launchers}
+              onEditing={onEditing}
             />
           </div>
         );
@@ -558,6 +566,7 @@ function Pane({
   workspaceName,
   board,
   launchers,
+  onEditing,
 }: {
   pane: PaneState;
   focused: boolean;
@@ -573,6 +582,7 @@ function Pane({
   /** The workspace's board, for a board pane to draw. */
   board: Board | null;
   launchers: Launcher[];
+  onEditing: (on: boolean) => void;
 }) {
   const showing = activeAgent(pane);
   const dragging = useDragging();
@@ -590,6 +600,14 @@ function Pane({
   const takesZones = takesPane || takesTabs;
   /** This pane is the one being dragged; show it as picked up. */
   const lifted = dragging?.kind === "pane" && dragging.id === pane.id;
+  /** The terminal tab whose name is a field, from a right-click on it. */
+  const [renaming, setRenaming] = useState<string | null>(null);
+  // A tab that left mid-rename — closed, or moved by another client — takes the
+  // rename with it, rather than leaving the strip undraggable and the field
+  // waiting to reappear if it ever came back.
+  useEffect(() => {
+    if (renaming !== null && !pane.agentIds.includes(renaming)) setRenaming(null);
+  }, [renaming, pane.agentIds]);
 
   const overTab = (event: React.DragEvent, index: number) => {
     if (!takesTabs) return;
@@ -642,8 +660,11 @@ function Pane({
         className={`tabstrip ${lifted ? "tabstrip-lifted" : ""}`}
         /* The pane's own drag handle — but `dragstart` bubbles up from every
            tab in here, so only claim the drag when the strip itself is what was
-           grabbed. Without this, picking up a tab would put the pane in flight. */
-        draggable
+           grabbed. Without this, picking up a tab would put the pane in flight.
+           Not while a name is being typed in it, where a drag across the
+           field is a selection and a draggable ancestor would take it as the
+           pane being picked up. */
+        draggable={renaming === null}
         onDragStart={(event) => {
           if (event.target !== event.currentTarget) return;
           beginDrag(event, "pane", pane.id);
@@ -691,6 +712,14 @@ function Pane({
           }
           const agent = agents.find((a) => a.id === agentId);
           if (!agent) return null;
+          if (renaming === agentId) {
+            return (
+              <span key={agentId} className={`tab tab-renaming ${index === pane.activeIdx ? "tab-on" : ""}`}>
+                <Status agent={agent} mascot={mascot} />
+                <TabName agent={agent} onEditing={onEditing} onDone={() => setRenaming(null)} />
+              </span>
+            );
+          }
           return (
             <Fragment key={agentId}>
               {dropAt === index && <span className="tab-insert" aria-hidden="true" />}
@@ -700,7 +729,14 @@ function Pane({
                 /* The label leads, because a tab is 180px wide and a summary an
                    agent wrote is usually longer than that — the tooltip is the
                    only place the whole sentence fits. */
-                title={[tabLabel(agent), agent.command, agent.cwd].join("\n")}
+                title={[tabLabel(agent), agent.command, agent.cwd, "Right-click to rename"].join("\n")}
+                /* The strip and not the terminal: a right-click inside the pane
+                   belongs to whatever is running there, and the emulator takes
+                   it for itself (`terminals.ts`). */
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setRenaming(agentId);
+                }}
                 draggable
                 onDragStart={(event) => beginDrag(event, "agent", agentId)}
                 onDragEnd={() => {
@@ -877,6 +913,74 @@ function PaneMenuButton({ solo, onOpen }: { solo: SoloAt | null; onOpen: (at: Me
  * is. They exist only while a drag does, so nothing is ever laid over a terminal
  * you are trying to use.
  */
+/**
+ * A terminal tab's name as a field, in the tab, where the name was.
+ *
+ * In place rather than the prompt C-a , opens, because a right-click is a
+ * gesture *at* the tab, and an answer that appears in the middle of the window
+ * is an answer somewhere else. Both send the same `rename-tab`, so the two can
+ * only differ in where you type.
+ *
+ * It starts on the name you can see, not on the override alone: the field
+ * should hold what the tab said. Which is also why an unchanged name is not
+ * sent — that would turn a summary the agent keeps rewriting into a name
+ * somebody typed, and pin it there, for a right-click and an enter. Empty is
+ * sent, and hands the tab back to whatever it would otherwise be called.
+ *
+ * The keyboard is claimed for as long as the field exists, not for as long as
+ * the pane's state says so. A tab can go out from under it — closed by another
+ * client, the agent ending — and a field removed from the document fires no
+ * blur, so a claim released only on blur would leave every pane deaf with
+ * nothing on screen to say why. The effect's cleanup is the exit every path
+ * goes through. It releases and does not also end the rename, because
+ * StrictMode runs every cleanup once on mount, and a field that put itself
+ * away there would never be seen in development at all; the pane clears a
+ * rename whose tab has left it.
+ */
+function TabName({
+  agent,
+  onEditing,
+  onDone,
+}: {
+  agent: AgentSnapshot;
+  onEditing: (on: boolean) => void;
+  onDone: () => void;
+}) {
+  const shown = agent.titleOverride ?? tabLabel(agent);
+  /** Escape blurs, as enter and clicking away do; this says it was not a commit. */
+  const cancelled = useRef(false);
+
+  useEffect(() => {
+    onEditing(true);
+    return () => onEditing(false);
+  }, [onEditing]);
+
+  return (
+    <input
+      className="tab-edit"
+      defaultValue={shown}
+      autoFocus
+      onFocus={(event) => event.currentTarget.select()}
+      onKeyDown={(event) => {
+        // The app listens on window in the capture phase, so this stops
+        // nothing it does; it is here for the pane underneath.
+        event.stopPropagation();
+        if (event.key === "Escape") cancelled.current = true;
+        if (event.key === "Enter" || event.key === "Escape") event.currentTarget.blur();
+      }}
+      onBlur={(event) => {
+        const name = event.currentTarget.value.trim();
+        if (!cancelled.current && name !== shown) api.renameTab(agent.id, name);
+        cancelled.current = false;
+        onDone();
+      }}
+      spellCheck={false}
+      autoComplete="off"
+      aria-label="Tab name"
+    />
+  );
+}
+
 /**
  * The board's tab. A tab like any terminal's — it drags, reorders, splits off
  * onto an edge and closes — carrying the same drag payload, because the layout
