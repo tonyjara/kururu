@@ -34,6 +34,27 @@ export function limitLabel(limit: UsageLimit): string {
   return limit.scope ? `${base} · ${limit.scope}` : base;
 }
 
+/**
+ * The letter each limit wears beside its ring when the section is shut.
+ *
+ * A scoped limit is marked by its model rather than its clock, because the clock
+ * is the thing the scoped and unscoped weeks have in common — "W W" is two rings
+ * that cannot be told apart without hovering, and "W O" is not. A letter already
+ * taken widens to two, which is what keeps a Sonnet week from wearing the
+ * session's "S"; first come keeps the single letter, and the account lists the
+ * session first.
+ */
+export function limitMarks(limits: readonly UsageLimit[]): string[] {
+  const taken = new Set<string>();
+  return limits.map((limit) => {
+    const word = limit.scope ?? limitLabel(limit);
+    const one = word.slice(0, 1).toUpperCase();
+    const mark = taken.has(one) ? one + word.slice(1, 2).toLowerCase() : one;
+    taken.add(mark);
+    return mark;
+  });
+}
+
 /** Both numbers and the exact reset, for the reader who wants the real figure. */
 export function limitTitle(limit: UsageLimit): string {
   const left = Math.round(100 - limit.percent);

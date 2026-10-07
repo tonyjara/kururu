@@ -60,6 +60,16 @@ async function bundle(entry, outfile) {
     // Native, and resolved at runtime. `ws` could be bundled but is left external
     // alongside it so the two are found the same way.
     external: ["node-pty", "ws"],
+    /**
+     * A `require` for the CommonJS inside the bundle. `pg` is CommonJS and asks
+     * for `events` and `net` with `require`, which esbuild leaves as a call
+     * when the module is a Node builtin — and an ESM file has no `require` to
+     * call, so the server died on its first line with "Dynamic require of
+     * 'events' is not supported". One made from `import.meta.url` is the
+     * standard answer, and it is a line at the top rather than a switch to CJS
+     * output because the header above says why the output is ESM.
+     */
+    banner: { js: 'import { createRequire as __kururuRequire } from "node:module"; const require = __kururuRequire(import.meta.url);' },
     logLevel: "info",
   });
 }

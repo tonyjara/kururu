@@ -26,8 +26,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   activeTerminal,
   terminalsOf,
+  isBoardTab,
   paneInDirection,
   panes,
+  parseDocTab,
   showingDoc,
   showsDoc,
   soloPane,
@@ -36,10 +38,11 @@ import {
   type LayoutNode,
 } from "../../shared/layout";
 import { keymapFrom } from "../../shared/keys";
-import { mascotFor } from "../../shared/model";
+import { mascotFor, type AgentSnapshot } from "../../shared/model";
 import { Dialog, type DialogState } from "./components/Dialog";
 import { FileTree, MARKDOWN } from "./components/FileTree";
 import { ProfileBoard } from "./components/ProfileBoard";
+import { Databases } from "./components/Databases";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Keybar } from "./components/Keybar";
 import { Menu, type MenuAt } from "./components/Menu";
@@ -62,7 +65,7 @@ import {
 import { desktop } from "./desktop";
 import { isFileDrag } from "./drop";
 import { announce, primeAudio, primeNotifyPermission } from "./notify";
-import { tabLabel } from "./labels";
+import { agentLabel, basename, tabLabel } from "./labels";
 import { applyAppearance } from "./theme";
 import { skinFor } from "../../shared/skin";
 import * as api from "./session";
@@ -252,6 +255,8 @@ export function App() {
   const [help, setHelp] = useState(false);
   /** The profile's board, over the window — view state, like the help overlay. */
   const [profileBoard, setProfileBoard] = useState(false);
+  /** The database sheet, over the window, and whose workspace it is showing. Null is closed. */
+  const [databasesFor, setDatabasesFor] = useState<string | null>(null);
   /**
    * Settings: which page of it is open, or null for closed. A view state like the
    * help overlay rather than anything the server knows about — what it *edits* is
@@ -723,6 +728,35 @@ export function App() {
             },
           });
         /**
+         * prefix+w, one level down: the tabs of the workspace you are in, every
+         * pane's strip in one list. Only this workspace's, because the question
+         * it answers is "where in here did that go" — the other rooms are
+         * prefix+w's to find.
+         */
+        case "find-tab": {
+          if (!workspace) return;
+          const tabs = tabsOf(workspace.layout, agents);
+          return setDialog({
+            kind: "pick",
+            title: "Tabs",
+            items: tabs.map(({ key, label, hint }) => ({ id: key, label, hint })),
+            onPick: (key) => {
+              const tab = tabs.find((t) => t.key === key);
+              if (!tab) return;
+              // A terminal is found by its id on the server, against the layout
+              // as it is when the pick lands rather than when the list was
+              // drawn, so a tab that closed beside it cannot shift the pick onto
+              // its neighbour.
+              if (tab.terminal) return api.revealAgent(tab.id);
+              // The board and a document have no id of their own to be found
+              // by (one document can be open in two panes), so they are reached
+              // by where they were.
+              api.focusPane(tab.paneId);
+              api.selectTab(tab.paneId, tab.index);
+            },
+          });
+        }
+        /**
          * The profile menu, under the sidebar's profile name.
          *
          * This has been all three things a switcher can be, and the split it
@@ -952,6 +986,19 @@ export function App() {
         return;
       }
 
+      // The database sheet is modal for the board's reason — a query box is a
+      // field, and ctrl+a in it is select-all. Escape in the box leaves the
+      // box, so that a second escape closes the sheet rather than the first
+      // one throwing away the view behind a half-typed query.
+      if (databasesFor) {
+        if (keyName(event) === "escape") {
+          take();
+          if (event.target instanceof HTMLElement && event.target.closest(".db-sql")) event.target.blur();
+          else setDatabasesFor(null);
+        }
+        return;
+      }
+
       if (help) {
         if (isPrefix(event) || keyName(event) === "escape" || keyName(event) === "?") {
           take();
@@ -1051,7 +1098,7 @@ export function App() {
 
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [prefixArmed, resizeMode, dialog, editing, help, settings, reach, profileMenu, profileBoard, workspace, keymap, run, arm, disarm]);
+  }, [prefixArmed, resizeMode, dialog, editing, help, settings, reach, profileMenu, profileBoard, databasesFor, workspace, keymap, run, arm, disarm]);
 
   /**
    * A file dropped anywhere that is not a terminal does nothing.
@@ -1155,6 +1202,10 @@ export function App() {
             // over the window rather than over it — so it is put away first.
             if (narrow) setSidebarOpen(false);
           }}
+          onDatabases={(workspaceId) => {
+            setDatabasesFor(workspaceId);
+            if (narrow) setSidebarOpen(false);
+          }}
           /* Whether it is a column or a screen, and how to get rid of it. The
              sidebar draws a close button only in the second case — in the first
              the panes beside it are already the way out. */
@@ -1203,6 +1254,7 @@ export function App() {
             keyboard={paneKeyboard}
             filesOpen={filesOpen}
             onToggleFiles={() => run("toggle-files")}
+            onEditing={setEditing}
           />
         </main>
         {/* Between the panes and the status bar, which puts it directly above
@@ -1270,6 +1322,13 @@ export function App() {
 
       {help && <HelpOverlay keymap={keymap} onClose={() => setHelp(false)} />}
       {profileBoard && <ProfileBoard profile={profile} onClose={() => setProfileBoard(false)} />}
+      {databasesFor && (
+        <Databases
+          workspaceId={databasesFor}
+          workspaceName={profile.workspaces.find((w) => w.id === databasesFor)?.name ?? "Workspace"}
+          onClose={() => setDatabasesFor(null)}
+        />
+      )}
       {settings && (
         <Settings
           appearance={snapshot.appearance}
@@ -1497,6 +1556,53 @@ function focusedAgentOf(
   if (!workspace) return null;
   const pane = panes(workspace.layout).find((p) => p.id === workspace.focusedPaneId);
   return pane ? activeTerminal(pane) : null;
+}
+
+interface TabEntry {
+  /** Unique across the list, where `id` is not: a document can sit in two panes. */
+  key: string;
+  id: string;
+  label: string;
+  hint: string;
+  terminal: boolean;
+  paneId: string;
+  index: number;
+}
+
+/**
+ * Every tab in a workspace, in the order the screen has them: pane by pane,
+ * along each strip.
+ *
+ * Each is called what its strip calls it, for `find-agent`'s reason. The hint
+ * carries what the label leaves out — the program behind a terminal whose tab
+ * shows its summary, the folder a document is in — and the filter searches it
+ * too, so "codex" finds a codex whose tab is showing what it is doing.
+ */
+function tabsOf(layout: LayoutNode, agents: AgentSnapshot[]): TabEntry[] {
+  const out: TabEntry[] = [];
+  for (const pane of panes(layout)) {
+    pane.agentIds.forEach((id, index) => {
+      const at = { key: `${pane.id}:${index}`, id, paneId: pane.id, index };
+      if (isBoardTab(id)) {
+        out.push({ ...at, label: "board", hint: "", terminal: false });
+        return;
+      }
+      const doc = parseDocTab(id);
+      if (doc) {
+        const folder = doc.path.includes("/") ? doc.path.slice(0, doc.path.lastIndexOf("/")) : "";
+        out.push({ ...at, label: basename(doc.path), hint: folder, terminal: false });
+        return;
+      }
+      // A pane can name a terminal the snapshot has not caught up with; the
+      // strip skips it too.
+      const agent = agents.find((a) => a.id === id);
+      if (!agent) return;
+      const label = tabLabel(agent);
+      const program = agentLabel(agent);
+      out.push({ ...at, label, hint: program !== label ? program : "", terminal: true });
+    });
+  }
+  return out;
 }
 
 /** The file a reader in this workspace is showing, for the tree to mark. */

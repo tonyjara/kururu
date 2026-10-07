@@ -37,6 +37,7 @@ import type {
   WorkspaceProject,
 } from "../../shared/wire";
 import type { BoardColumn, CardDates } from "../../shared/board";
+import type { DbCatalog, DbResult, DbRows, WorkspaceDatabase } from "../../shared/databases";
 import type { LaunchSettings } from "../../shared/launchers";
 import type { MergeReply, MergeResolution, ProjectSettings, WorktreeOutcome, WorktreeStatus } from "../../shared/projects";
 import type { NotifySettings } from "../../shared/notify";
@@ -76,6 +77,12 @@ export interface KururuState {
   vps: VpsStatus[];
   /** The OpenRouter account, or null when no key has been given. See `shared/openrouter.ts`. */
   openrouter: OpenRouterStatus | null;
+  /**
+   * Every database every workspace's env files name, for the button on the
+   * row and the viewer behind it. Found by the walk that finds `branches`, and
+   * sent the same way. See `shared/databases.ts`.
+   */
+  databases: WorkspaceDatabase[];
 }
 
 const RETRY_MS = [200, 500, 1000, 2000, 4000];
@@ -89,6 +96,7 @@ let state: KururuState = {
   usage: null,
   vps: [],
   openrouter: null,
+  databases: [],
 };
 
 const listeners = new Set<() => void>();
@@ -255,6 +263,9 @@ function connect(): void {
         break;
       case "openrouter":
         set({ openrouter: msg.openrouter });
+        break;
+      case "databases":
+        set({ databases: msg.databases });
         break;
       case "output":
         for (const sink of sinks.get(msg.agentId) ?? []) deliver(() => sink.write(msg.data));
@@ -784,6 +795,10 @@ export function colorProfileColumn(profileId: string, columnId: string, color: s
   send({ type: "set-profile-column-color", profileId, columnId, color });
 }
 
+export function collapseProfileColumn(profileId: string, columnId: string, collapsed: boolean): void {
+  send({ type: "set-profile-column-collapsed", profileId, columnId, collapsed });
+}
+
 export function moveProfileColumn(profileId: string, columnId: string, index: number): void {
   send({ type: "move-profile-column", profileId, columnId, index });
 }
@@ -1013,6 +1028,40 @@ export function setOpenRouterKey(key: string): Promise<OpenRouterStatus> {
 
 export function clearOpenRouterKey(): void {
   send({ type: "clear-openrouter-key" });
+}
+
+/**
+ * The database viewer's three questions. Each rejects with what Postgres
+ * said, in its own words, which the viewer shows where the answer would go.
+ * `database` is another database on the same server, or undefined for the
+ * URL's own.
+ */
+export function dbCatalog(dbId: string, database?: string): Promise<DbCatalog> {
+  return request((id) => ({ type: "db-catalog", id, dbId, ...(database ? { database } : {}) })) as Promise<DbCatalog>;
+}
+
+export function dbRows(
+  dbId: string,
+  database: string | undefined,
+  schema: string,
+  table: string,
+  offset: number,
+  limit: number,
+): Promise<DbRows> {
+  return request((id) => ({
+    type: "db-rows",
+    id,
+    dbId,
+    ...(database ? { database } : {}),
+    schema,
+    table,
+    offset,
+    limit,
+  })) as Promise<DbRows>;
+}
+
+export function dbQuery(dbId: string, database: string | undefined, sql: string, writes: boolean): Promise<DbResult> {
+  return request((id) => ({ type: "db-query", id, dbId, ...(database ? { database } : {}), sql, writes })) as Promise<DbResult>;
 }
 
 /** Which agents and models the new-tab menu offers. */

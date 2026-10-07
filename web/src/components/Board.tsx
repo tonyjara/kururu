@@ -81,6 +81,26 @@ const openComposers = new Map<string, { adding: BoardColumn | null; editing: str
 const newDraft = (workspaceId: string, column: BoardColumn) => `${workspaceId}\0new\0${column}`;
 const editDraft = (workspaceId: string, cardId: string) => `${workspaceId}\0card\0${cardId}`;
 
+/**
+ * Hold a new card's composer in sight, for the list of the column it is open
+ * in. It is written at the foot of the column, which in a long one is below
+ * the fold: the header's add opened it out of view, and the title field's
+ * focus scrolled only that field in, leaving the body and the add button
+ * under the edge. And it stays open for the next card, so every card it adds
+ * lands above it and pushes it down again — which is why this follows the
+ * count and not only the opening. The list is scrolled rather than the form
+ * asked into view, because `scrollIntoView` scrolls every ancestor that can,
+ * and the board sideways is one of them.
+ */
+export function useComposerInView(column: string | null, count: number) {
+  const list = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const node = list.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [column, count]);
+  return list;
+}
+
 export function BoardView({
   workspaceId,
   workspaceName,
@@ -485,6 +505,8 @@ export function BoardView({
     else api.moveCard(workspaceId, cardId, column, index);
   };
 
+  const addingList = useComposerInView(adding, adding ? columnCards(board, adding).length : 0);
+
   return (
     <div className="board">
       {BOARD_COLUMNS.map((column) => {
@@ -519,6 +541,7 @@ export function BoardView({
 
             <div
               className="board-cards"
+              ref={adding === column ? addingList : undefined}
               onDragOver={(event) => {
                 if (!event.dataTransfer.types.includes(CARD_MIME)) return;
                 event.preventDefault();
@@ -622,11 +645,12 @@ export function BoardView({
                   keepOpen
                 />
               ) : (
-                cards.length === 0 && (
-                  <button className="board-empty" onClick={() => setAdding(column)}>
-                    Add a card
-                  </button>
-                )
+                // At the foot of every column, not only an empty one: the end
+                // of a long column is where the next card is looked for, and
+                // the header's add is a screen away by then.
+                <button className="board-empty" onClick={() => setAdding(column)}>
+                  Add a card
+                </button>
               )}
             </div>
           </section>

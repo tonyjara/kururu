@@ -13,6 +13,7 @@ import {
   adoptBoard,
   adoptDates,
   colorLane,
+  collapseLane,
   shiftDates,
   timeline,
   adoptProfileBoard,
@@ -598,5 +599,34 @@ describe("a column's colour", () => {
     const back = adoptProfileBoard({ columns: [{ id: "k1", name: "Old" }, { id: "k2", name: "Chosen", color: "violet" }], cards: [] });
     expect(colors(back)[1]).toBe("violet");
     expect(colors(back)[0]).not.toBe("violet");
+  });
+});
+
+describe("a folded column", () => {
+  const folded = (b: Board) => boardLanes(b).map((l) => l.collapsed === true);
+
+  it("folds and opens, and leaves its cards where they were", () => {
+    let b = addCard(emptyProfileBoard(), { title: "a", column: "doing" }, "c1", 0);
+    b = collapseLane(b, "doing", true);
+    expect(folded(b)).toEqual([false, true, false]);
+    expect(columnCards(b, "doing").map((c) => c.id)).toEqual(["c1"]);
+    b = collapseLane(b, "doing", false);
+    expect(folded(b)).toEqual([false, false, false]);
+    expect("collapsed" in boardLanes(b)[1]!).toBe(false);
+  });
+
+  it("refuses anything that is not a boolean, a column it does not have, and a workspace's board", () => {
+    const b = emptyProfileBoard();
+    expect(collapseLane(b, "doing", "false")).toBe(b);
+    expect(collapseLane(b, "doing", 1)).toBe(b);
+    expect(collapseLane(b, "doing", undefined)).toBe(b);
+    expect(collapseLane(b, "nope", true)).toBe(b);
+    expect(collapseLane(emptyBoard(), "doing", true).columns).toBeUndefined();
+  });
+
+  it("stays folded to disk and back, and a hand-edited truthy is not folded", () => {
+    const b = collapseLane(emptyProfileBoard(), "done", true);
+    expect(folded(adoptProfileBoard(JSON.parse(JSON.stringify(storedBoard(b)))))).toEqual([false, false, true]);
+    expect(folded(adoptProfileBoard({ columns: [{ id: "k1", name: "Edited", collapsed: "yes" }], cards: [] }))).toEqual([false]);
   });
 });

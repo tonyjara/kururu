@@ -162,6 +162,14 @@ The load-bearing invariants, one line each, with the argument behind the link:
   `~/.config/kururu/openrouter.json`, read per fetch and used for GETs only.
   A client is sent its `hint` and dollars, never the key. →
   `shared/openrouter.ts`
+- **A database is whatever `DATABASE_URL` says, read when asked and never
+  held.** The scan reads a workspace's `.env*` files under the roots the branch
+  walk found, never a path a client sent, and a client is told host, port,
+  database and user — never the URL. `server/src/databases.ts` reads the file
+  again at the moment it connects. Every query runs in `BEGIN READ ONLY` and
+  Postgres refuses the write; the viewer's switch sends `READ WRITE` for one
+  run and no regex here decides what a query is. Postgres only, on purpose. →
+  [layout](docs/layout.md#the-databases-on-the-row)
 
 ## Code style
 

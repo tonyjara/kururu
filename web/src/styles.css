@@ -894,6 +894,12 @@ kbd {
 .ws-list li:hover .ws-branch {
   color: var(--dim);
 }
+/* With a mascot column in the list the name starts one badge and one gap
+   further in, and the branch follows it there rather than sitting under the
+   sprite: 26px as above, plus the 16px badge and the row's 8px gap. */
+.ws-list-mascots .ws-branch {
+  padding-left: 50px;
+}
 /* Detached: a sha, a tag, or the middle of a rebase. Said rather than hidden,
    because it is exactly the state in which somebody commits work and then
    cannot find it — and said in the colour the rest of the window uses for
@@ -909,13 +915,22 @@ kbd {
    when there is nothing to do; in the "wants a human" colour when there are
    uncommitted changes, because that is exactly what it is; in the accent when
    the tree is clean but the branch and its upstream have drifted apart. */
-.ws-git {
+/* The row's buttons, at the end of the name's line: databases, then git. One
+   cell of the row's grid rather than one per button, so a second button does
+   not need a third column that every row without it would leave empty. */
+.ws-tools {
   grid-column: 2;
   grid-row: 1;
   justify-self: end;
   display: inline-flex;
   align-items: center;
+  gap: 2px;
   margin-right: 4px;
+}
+.ws-git,
+.ws-db {
+  display: inline-flex;
+  align-items: center;
   padding: 2px;
   border: none;
   border-radius: var(--radius-sm);
@@ -925,7 +940,9 @@ kbd {
   font-size: var(--fs-sm);
 }
 .ws-git:hover,
-.ws-git:focus-visible {
+.ws-git:focus-visible,
+.ws-db:hover,
+.ws-db:focus-visible {
   outline: none;
   background: var(--chrome-high);
   color: var(--dim);
@@ -1660,7 +1677,8 @@ kbd {
   gap: 5px;
 }
 
-.vps-name {
+.vps-name,
+.gauge-name {
   font-size: var(--fs-sm);
   color: var(--text);
   white-space: nowrap;
@@ -1683,26 +1701,34 @@ a.vps-name:hover {
   overflow-wrap: anywhere;
 }
 
-/* Shut: the name, then the rings, on one line. The name gives way first —
-   the rings are the reason the row is there. */
-.vps-item-shut {
+/* Shut, a VPS row or the usage row: the name, then the rings, on one line.
+   After `.vps-item` so its row beats that column. The name gives way first —
+   the rings are the reason the row is there — and the rings wrap rather than
+   run off the edge, since an account with a scoped week for two models is four
+   of them, which a narrow sidebar does not have the width for. */
+.gauge-item {
+  display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
-.vps-item-shut .vps-name {
+.gauge-item .vps-name,
+.gauge-name {
   min-width: 0;
 }
 
-.vps-rings {
+.gauge-rings {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
   flex: none;
+  max-width: 100%;
 }
 
-.vps-ring {
+.gauge-ring {
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -1711,17 +1737,17 @@ a.vps-name:hover {
 }
 
 /* The bars' three bands, as ink: the ring is a stroke in currentColor. */
-.vps-ring .ring {
+.gauge-ring .ring {
   color: var(--accent);
 }
-.vps-ring .ring[data-severity="warning"] {
+.gauge-ring .ring[data-severity="warning"] {
   color: var(--working);
 }
-.vps-ring .ring[data-severity="critical"] {
+.gauge-ring .ring[data-severity="critical"] {
   color: var(--danger-bg);
 }
 
-.vps-ring-pct {
+.gauge-ring-pct {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
 }
@@ -2497,6 +2523,30 @@ a.button {
   font-family: var(--mono);
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* A tab's name as a field, where the name was — the sidebar's rename at the
+   tab's size. Wide enough for a name rather than for the one it replaced, which
+   is often an agent's summary cut off at the ellipsis; the tab's own max-width
+   still holds it to the strip. No hover on a tab being typed in: it is not a
+   button for the duration. */
+.tab-edit {
+  width: 18ch;
+  min-width: 0;
+  padding: 0 4px;
+  border: var(--border) var(--border-style) var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  outline: none;
+}
+.tab-renaming:hover {
+  background: none;
+}
+.tab-renaming.tab-on:hover {
+  background: var(--bg);
 }
 
 /* A target rather than a glyph: the icon sits in a padded, rounded box that
@@ -6898,8 +6948,65 @@ a.button {
   color: var(--dim);
   font-size: var(--fs-base);
 }
+/* A row rather than the board's grid, because a folded column is a strip and
+   a grid's implicit columns are all one width. The open ones share what the
+   strips leave, which is the grid's `minmax(220px, 1fr)` said in flex. */
 .profile-board-cols {
   min-height: 0;
+  display: flex;
+}
+.profile-board-cols > .board-col,
+.profile-board-cols > .board-col-add {
+  flex: 1 1 0;
+  min-width: 220px;
+}
+.profile-board-cols > .board-col-shut {
+  flex: none;
+  min-width: 0;
+  padding-top: 6px;
+}
+.board-col-shut .board-col-grip {
+  justify-content: center;
+  margin-left: 0;
+}
+/* A folded column: the whole strip is the button that opens it, its name on
+   its side under the count. The caret points the way it would open. */
+.board-col-open {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 10px;
+  color: var(--dim);
+  font-size: var(--fs-base);
+  cursor: var(--cursor-pointer);
+}
+.board-col-open:hover {
+  color: var(--text);
+}
+.board-col-open .icon-caret {
+  transform: rotate(-90deg);
+}
+.board-col-open .board-col-dot {
+  pointer-events: none;
+}
+.board-col-open .board-col-count {
+  margin: 0;
+}
+.board-col-open .board-col-name {
+  min-height: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  writing-mode: vertical-rl;
+  color: var(--text);
+  cursor: inherit;
+}
+/* Open, the fold button's caret points the way the column would go. */
+.board-col-fold .icon-caret {
+  transform: rotate(90deg);
 }
 /* The column's name as a field, in the header where the name was — a rename
    or a column being made. */
@@ -6917,6 +7024,10 @@ a.button {
   outline: none;
 }
 .board-col-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: var(--cursor);
 }
 /* The column's colour, as a swatch you press to change it. A ring with
@@ -7351,4 +7462,422 @@ a.button {
   order: 1;
   flex: 1 0 100%;
   justify-content: flex-start;
+}
+
+/* The database sheet: a workspace's databases over the window — see
+   `Databases.tsx`. Sized and placed as the profile's board is, since it is the
+   same kind of thing: a sheet that belongs to no arrangement of panes. Three
+   columns inside — connections and tables on the left, rows or the query box
+   on the right — and on a phone the left column is a screen of its own, which
+   the database button in the header switches to. */
+.db-scrim {
+  align-items: center;
+  padding: 16px;
+}
+.db {
+  width: min(1200px, 100%);
+  height: min(800px, 100%);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--chrome);
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elev-dialog);
+  overflow: hidden;
+}
+.db-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 14px;
+  border-bottom: var(--border) var(--border-style) var(--line);
+}
+.db-head .dialog-title {
+  flex: none;
+  margin: 0;
+}
+/* Where the queries are going, in the mono face for the branch line's reason:
+   it makes a word that could be anything read as a host. It clips rather than
+   wrapping, because hosts are somebody else's length. */
+.db-where {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+.db-seg {
+  margin-left: auto;
+}
+.db-nav-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: -8px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--dim);
+  cursor: var(--cursor-pointer);
+}
+.db-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.db-nav {
+  flex: none;
+  width: 260px;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px;
+  border-right: var(--border) var(--border-style) var(--line);
+}
+.db-conns,
+.db-schemas,
+.db-tables {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+/* A connection: the file on top, where it goes underneath, because the file
+   is what the person thinks of it as and the host is what it actually is —
+   and a `.env.local` that goes to production is a thing worth reading twice. */
+.db-conn {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  text-align: left;
+  cursor: var(--cursor-pointer);
+}
+.db-conn:hover,
+.db-conn-on {
+  background: var(--chrome-high);
+  color: var(--text);
+}
+.db-conn-file {
+  font-size: var(--fs-md);
+}
+.db-conn-target {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dimmer);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+.db-conn-on .db-conn-target {
+  color: var(--dim);
+}
+.db-dbpick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 4px;
+  color: var(--dim);
+  font-size: var(--fs-sm);
+}
+.db-dbselect {
+  flex: 1;
+  min-width: 0;
+}
+.db-schemas {
+  margin-top: 6px;
+}
+.db-schema-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  background: transparent;
+  color: var(--dim);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: var(--cursor-pointer);
+}
+.db-schema-head:hover {
+  color: var(--text);
+}
+.db-schema-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-schema-count {
+  color: var(--dimmer);
+}
+.db-table {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 3px 6px 3px 18px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  text-align: left;
+  cursor: var(--cursor-pointer);
+}
+.db-table:hover,
+.db-table-on {
+  background: var(--chrome-high);
+  color: var(--text);
+}
+.db-table-on .db-table-name {
+  color: var(--accent);
+}
+.db-table-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-table-kind,
+.db-table-est {
+  flex: none;
+  color: var(--dimmer);
+  font-family: var(--ui);
+  font-size: var(--fs-xs);
+}
+.db-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.db-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: var(--border) var(--border-style) var(--line);
+  color: var(--dim);
+  font-size: var(--fs-base);
+}
+.db-bar-fill {
+  flex: 1;
+}
+.db-bar-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+}
+.db-bar-schema {
+  color: var(--dimmer);
+}
+.db-bar-range {
+  font-variant-numeric: tabular-nums;
+}
+/* Stale on screen while fresh is on its way: the figure dims rather than
+   vanishing, because the rows under it are still the best picture there is
+   and a bar that went blank would say otherwise. */
+.db-bar-busy {
+  color: var(--dimmer);
+}
+.db-busy {
+  cursor: progress;
+  opacity: 0.5;
+}
+.db-note-busy {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.db-bar-tls {
+  color: var(--dimmer);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+/* The query box. Plain and the terminal's colour, because what is typed into
+   it is what a terminal would be typed; no highlighting, since a box that
+   coloured keywords and got one wrong would be a box that was lying. */
+.db-sql {
+  flex: none;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 96px;
+  max-height: 40%;
+  margin: 0;
+  padding: 10px 12px;
+  border: none;
+  border-bottom: var(--border) var(--border-style) var(--line);
+  background: var(--bg);
+  color: var(--text);
+  font: var(--fs-md)/1.5 var(--mono);
+  outline: none;
+  resize: vertical;
+}
+.db-run {
+  flex: none;
+}
+/* The writes switch: three states, three looks. Off is quiet. Armed is the
+   "wants a human" colour, which is what it is waiting for. On is the danger
+   colour, because the next run can delete something. */
+.db-writes {
+  padding: 3px 8px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--dim);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  cursor: var(--cursor-pointer);
+}
+.db-writes:hover {
+  border-color: var(--line-high);
+  color: var(--text);
+}
+.db-writes-armed,
+.db-writes-armed:hover {
+  border-color: var(--blocked);
+  color: var(--blocked);
+}
+.db-writes-on,
+.db-writes-on:hover {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+  color: var(--on-danger);
+}
+.db-error {
+  flex: none;
+  max-height: 40%;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border-bottom: var(--border) var(--border-style) var(--line);
+  color: var(--danger);
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  white-space: pre-wrap;
+}
+.db-note {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--dimmer);
+  font-size: var(--fs-base);
+}
+/* The grid. Mono, one line per row, and every cell clipped at a width rather
+   than wrapped: a table of JSON documents that wrapped would be a table with
+   one row on the screen. The full cell is the tooltip. */
+.db-grid-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.db-grid {
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  white-space: nowrap;
+}
+.db-grid th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 10px;
+  border-bottom: var(--border) var(--border-style) var(--line);
+  background: var(--chrome);
+  color: var(--text);
+  font-weight: normal;
+  text-align: left;
+  vertical-align: bottom;
+}
+.db-grid-col {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.db-grid-pk {
+  color: var(--accent);
+  font-size: var(--fs-xs);
+}
+.db-grid-type {
+  display: block;
+  color: var(--dimmer);
+  font-family: var(--ui);
+  font-size: var(--fs-xs);
+}
+.db-grid td {
+  max-width: 480px;
+  padding: 3px 10px;
+  overflow: hidden;
+  border-bottom: var(--border) var(--border-style) var(--strip);
+  color: var(--text);
+  text-overflow: ellipsis;
+}
+.db-grid tbody tr:hover td {
+  background: var(--chrome-high);
+}
+.db-grid-n {
+  color: var(--dimmer);
+  font-size: var(--fs-xs);
+  text-align: right;
+  user-select: none;
+}
+.db-grid-null,
+.db-grid-empty {
+  color: var(--dimmer);
+  font-style: italic;
+}
+/* A phone: the whole screen, and the left column as a screen of its own. */
+:root[data-narrow] .db-scrim {
+  padding: 0;
+}
+:root[data-narrow] .db {
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: 0;
+}
+:root[data-narrow] .db-nav-toggle {
+  display: inline-flex;
+}
+:root[data-narrow] .db-where {
+  display: none;
+}
+:root[data-narrow] .db-nav {
+  display: none;
+}
+:root[data-narrow] .db-nav-open .db-nav {
+  display: block;
+  width: 100%;
+  border-right: none;
+}
+:root[data-narrow] .db-nav-open .db-main {
+  display: none;
+}
+:root[data-narrow] .db-grid td {
+  max-width: 240px;
 }

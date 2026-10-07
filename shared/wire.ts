@@ -40,6 +40,7 @@ import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
 import type { LaunchSettings } from "./launchers";
 import type { OpenRouterStatus } from "./openrouter";
 import type { VpsStatus } from "./vps";
+import type { WorkspaceDatabase } from "./databases";
 import type { NotifyEvent, NotifySettings } from "./notify";
 import type { MergeResolution, ProjectSettings } from "./projects";
 import type { TerminalAppearance } from "./theme";
@@ -370,6 +371,14 @@ export type ServerMessage =
    * settings page and the sidebar can never disagree about which exist.
    */
   | { type: "vps"; vps: VpsStatus[] }
+  /**
+   * Sent on connect and whenever the scan finds the list changed: every
+   * database every workspace's env files name, with the password left out.
+   * Whole, like `branches`, and found by the same walk — a workspace's
+   * `.env` files are read from the roots that walk found, never from a path a
+   * client sent. See `shared/databases.ts`.
+   */
+  | { type: "databases"; databases: WorkspaceDatabase[] }
   /**
    * Sent on connect, after a poll that moved anything, and whenever the key is
    * set or removed. Null when no key has been given, which the sidebar draws as
@@ -956,6 +965,8 @@ export type ClientMessage =
   | { type: "rename-profile-column"; profileId: string; columnId: string; name: string }
   /** `color` is one of WORKSPACE_COLORS or null for none, and refused otherwise — see `colorLane`. */
   | { type: "set-profile-column-color"; profileId: string; columnId: string; color: string | null }
+  /** Fold a column down to its name, or open it — see `collapseLane`. */
+  | { type: "set-profile-column-collapsed"; profileId: string; columnId: string; collapsed: boolean }
   | { type: "move-profile-column"; profileId: string; columnId: string; index: number }
   | { type: "delete-profile-column"; profileId: string; columnId: string }
 
@@ -1147,7 +1158,28 @@ export type ClientMessage =
    * of the key a client ever sees again. Replied to with why, when refused.
    */
   | { type: "set-openrouter-key"; id: number; key: string }
-  | { type: "clear-openrouter-key" };
+  | { type: "clear-openrouter-key" }
+  /**
+   * The database viewer's three questions. Each names a database by the id
+   * the server minted for it, never by a URL or a path, and the server reads
+   * the env file again to answer. `database` picks another database on the
+   * same server, from the list the catalogue gave; absent is the URL's own.
+   * Everything runs in a read-only transaction unless `writes` says
+   * otherwise, and only `db-query` can say so. Replied to with the answer, or
+   * with what Postgres said, in its own words.
+   */
+  | { type: "db-catalog"; id: number; dbId: string; database?: string }
+  | {
+      type: "db-rows";
+      id: number;
+      dbId: string;
+      database?: string;
+      schema: string;
+      table: string;
+      offset: number;
+      limit: number;
+    }
+  | { type: "db-query"; id: number; dbId: string; database?: string; sql: string; writes: boolean };
 
 /**
  * How often the status heuristic is asked to notice that work has stopped.

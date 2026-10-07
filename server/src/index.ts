@@ -61,6 +61,7 @@ import type {
   WorkspaceProject,
 } from "../../shared/wire";
 import { COMMIT_MESSAGE_MAX, GIT_ACTIONS, GIT_STATUS_MS } from "../../shared/wire";
+import { DB_ROW_CAP, DB_SQL_MAX, type WorkspaceDatabase } from "../../shared/databases";
 import {
   DEV_SCAN_MS,
   GIT_SCAN_MS,
@@ -88,6 +89,7 @@ import { readHead, repoAt } from "./git";
 import { pollUsage, usageSnapshot } from "./usage";
 import { clearOpenRouterKey, openRouterSnapshot, pollOpenRouter, setOpenRouterKey } from "./openrouter";
 import { addVps, pollVps, pollVpsOne, removeVps, vpsSnapshot } from "./vps";
+import { closeDatabasePools, dbCatalog, dbQuery, dbRows, scanDatabases, type DatabaseScanInput } from "./databases";
 import { allowedRoots, allowRoot, findDocs, listDir, listDirs, readBytes, readFile, resolveInRoot } from "./files";
 import { parseFileOp, runFileOp } from "./fileops";
 import { renderMarkdown } from "./markdown";
@@ -172,6 +174,7 @@ import {
   moveCard,
   addLane,
   colorLane,
+  collapseLane,
   mintLaneId,
   moveLane,
   removeLane,
@@ -342,6 +345,7 @@ const state = {
   devServers: [] as DevServer[],
   branches: [] as WorkspaceBranch[],
   projects: [] as WorkspaceProject[],
+  databases: [] as WorkspaceDatabase[],
 };
 
 function send(ws: WebSocket, msg: ServerMessage): void {
@@ -1910,6 +1914,9 @@ function dropClient(ws: WebSocket): void {
   clients.delete(ws);
   syncWatched();
   for (const agentId of st.proposals.keys()) applySize(agentId);
+  // The viewer cannot be open with nobody connected, and a connection to
+  // somebody's production database is not a thing to keep for the company.
+  if (clients.size === 0) void closeDatabasePools();
 }
 
 /**
@@ -2243,6 +2250,7 @@ async function rootChoices(dirs: string[]): Promise<string[]> {
 
 let lastBranchJson = "";
 let lastProjectJson = "";
+let lastDatabasesJson = "";
 
 /**
  * What every workspace of the active profile has checked out.
@@ -2255,6 +2263,7 @@ async function pollBranches(): Promise<void> {
   if (!host || !workspaces) return;
   const branches: WorkspaceBranch[] = [];
   const projects: WorkspaceProject[] = [];
+  const scans: DatabaseScanInput[] = [];
   for (const workspace of workspaces.active.workspaces) {
     const dirs = focusedDirs(workspace);
     let project = dirs[0];
@@ -2284,6 +2293,7 @@ async function pollBranches(): Promise<void> {
       if (!choices.includes(project)) choices.unshift(project);
       for (const root of choices) allowRoot(root);
       projects.push({ workspaceId: workspace.id, root: project, choices });
+      scans.push({ workspaceId: workspace.id, project, roots: choices });
     }
   }
   const projectJson = JSON.stringify(projects);
@@ -2291,6 +2301,19 @@ async function pollBranches(): Promise<void> {
     lastProjectJson = projectJson;
     state.projects = projects;
     broadcast({ type: "projects", projects });
+  }
+  /**
+   * The env files in the same roots, for the database button on the row. The
+   * roots are this walk's, which is the whole of why the scan sits here rather
+   * than on a timer of its own: it reads under directories the server found
+   * by walking up from a terminal, and learns none from anywhere else.
+   */
+  const databases = await scanDatabases(scans);
+  const databasesJson = JSON.stringify(databases);
+  if (databasesJson !== lastDatabasesJson) {
+    lastDatabasesJson = databasesJson;
+    state.databases = databases;
+    broadcast({ type: "databases", databases });
   }
   const json = JSON.stringify(branches);
   if (json === lastBranchJson) return;
@@ -2497,6 +2520,10 @@ async function hookEditor(agentId: string): Promise<void> {
  * session for no reason at all. A reader is the asking.
  */
 async function pollEditors(): Promise<void> {
+  // The host may not have said hello yet, in which case there is no
+  // arrangement to read — the guard every other poll in here has, and the one
+  // that was missing when a fresh instance's timer fired before its host was up.
+  if (!workspaces) return;
   const following = new Set<string>();
   for (const profile of workspaces.all()) {
     for (const workspace of profile.workspaces) {
@@ -2861,6 +2888,11 @@ void pollBranches();
 // ---------------------------------------------------------------------------
 // WebSocket
 // ---------------------------------------------------------------------------
+
+/** A database id and an optional database name, as the viewer's three requests all carry. */
+function validDbRef(dbId: unknown, database: unknown): dbId is string {
+  return typeof dbId === "string" && (database === undefined || typeof database === "string");
+}
 
 function reply(ws: WebSocket, id: number, run: () => unknown): void {
   try {
@@ -3328,6 +3360,39 @@ function handleMessage(ws: WebSocket, raw: string): void {
       broadcast({ type: "openrouter", openrouter: null });
       return;
 
+    // --- the database viewer ----------------------------------------------
+    // Each is a request, so a malformed one is answered rather than dropped: a
+    // viewer left waiting on a reply that never comes is a spinner forever.
+
+    case "db-catalog":
+      void replyAsync(ws, msg.id, () => {
+        if (!validDbRef(msg.dbId, msg.database)) throw new Error("Not a database kururu knows.");
+        return dbCatalog(msg.dbId, msg.database);
+      });
+      return;
+
+    case "db-rows":
+      void replyAsync(ws, msg.id, () => {
+        if (!validDbRef(msg.dbId, msg.database)) throw new Error("Not a database kururu knows.");
+        if (typeof msg.schema !== "string" || typeof msg.table !== "string") throw new Error("No table named.");
+        // Numbers off the wire: NaN loses every comparison it is in, so a
+        // page that is not a number is refused rather than clamped to one.
+        if (!Number.isFinite(msg.offset) || !Number.isFinite(msg.limit) || msg.offset < 0 || msg.limit < 1) {
+          throw new Error("Not a page.");
+        }
+        return dbRows(msg.dbId, msg.database, msg.schema, msg.table, msg.offset, Math.min(msg.limit, DB_ROW_CAP));
+      });
+      return;
+
+    case "db-query":
+      void replyAsync(ws, msg.id, () => {
+        if (!validDbRef(msg.dbId, msg.database)) throw new Error("Not a database kururu knows.");
+        if (typeof msg.sql !== "string") throw new Error("Nothing to run.");
+        if (msg.sql.length > DB_SQL_MAX) throw new Error("That is a file, not a query.");
+        return dbQuery(msg.dbId, msg.database, msg.sql, msg.writes === true);
+      });
+      return;
+
     case "set-launch":
       saveLaunch(adoptLaunch(msg.launch));
       // Which login the bar reads may just have changed hands.
@@ -3514,6 +3579,10 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "set-profile-column-color":
       workspaces.editProfileBoard(msg.profileId, (board) => colorLane(board, msg.columnId, msg.color));
+      return;
+
+    case "set-profile-column-collapsed":
+      workspaces.editProfileBoard(msg.profileId, (board) => collapseLane(board, msg.columnId, msg.collapsed));
       return;
 
     case "move-profile-column":
@@ -4601,6 +4670,7 @@ server.on("upgrade", (req, socket, head) => {
     send(ws, { type: "dev-servers", servers: state.devServers });
     send(ws, { type: "branches", branches: state.branches });
     send(ws, { type: "projects", projects: state.projects });
+    send(ws, { type: "databases", databases: state.databases });
     send(ws, { type: "usage", usage: usageSnapshot() });
     send(ws, { type: "vps", vps: vpsSnapshot() });
     send(ws, { type: "openrouter", openrouter: openRouterSnapshot() });
@@ -4845,6 +4915,7 @@ export function shutdown(): Promise<void> {
     if (saveTimer) clearTimeout(saveTimer);
     if (workspaces) writeSnapshot(workspaces.all(), workspaces.active.id);
     closeAllPreviews();
+    void closeDatabasePools();
     for (const ws of clients.keys()) {
       try { ws.terminate(); } catch { /* already gone */ }
     }

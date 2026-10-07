@@ -218,6 +218,18 @@ them on the way in. A colour that is *absent* is that old board; a colour that
 is null was chosen, and stays none. The swatch in the column's header is the
 picker, the sidebar's own.
 
+**A column folds, and a folded column still takes a card.** The `‹` in a
+column's header (or **Collapse** in its menu) sends
+`set-profile-column-collapsed`, and the column is drawn as a strip with its
+name on its side, its count and its colour — Jira's collapsed column. The whole
+strip opens it again; a card dragged onto any part of it goes to its foot, and
+the strip still has its grip for reordering. `BoardLane.collapsed` is on the
+board rather than in the window for the colour's reason — it is how the board
+is arranged, and the phone sees the same one — and is written only when true,
+so an ordinary column keeps the shape it always had. The sheet's columns are a
+flex row rather than the board's grid for this alone: a grid's implicit
+columns are all one width, and the open ones should share what a strip leaves.
+
 ### Worktrees
 
 **A card can run in a checkout of its own, beside the repository.** Two agents
@@ -695,3 +707,68 @@ exists to show.
 The poll is every four seconds, faster than the dev-server scan, because it is
 cheap and it is the one fact a person changes deliberately and then immediately
 looks at.
+
+## The databases on the row
+
+Left of the git button, when the workspace's env files name at least one, and
+it opens a sheet over the window — `Databases.tsx` — with the connections on
+the left, their schemas and tables under them, and a page of rows or a query box
+on the right. An overlay rather than a pane for the profile board's reason: it
+is the workspace's and no arrangement's, and it is the same sheet on the phone.
+
+**Found, not registered.** `DATABASE_URL=` in `.env`, `.env.local`, `.env.prod`
+is as close to a convention as there is, so the branch poll reads the `.env*`
+files in the roots its walk found and keeps every value that parses as a
+Postgres URL. The roots are the walk's — up from a directory a terminal is in —
+and never a client's. `.env.example` and its cousins are refused by name, since a
+placeholder parses as a perfectly good URL to a host that does not exist; so is a
+`.bak`. The grammar is dotenv's, because the one thing the parser must never do
+is read a value the application reads differently.
+
+**Two facts about real projects decided the dedupe.** The file name is not the
+environment — a `.env.local` pointing at production exists — so an entry is
+labelled by the file *and* says the host and database under it. And one file
+often holds a pooled URL and a direct one for the same database
+(`DATABASE_URL_DIRECT`, Prisma's shape); the pooled host is sometimes a name only
+the deployment's own network resolves, so when both name one database the direct
+one is the entry. Two files pointing at exactly one place are one entry that
+names both files.
+
+**The password never leaves the server.** What crosses the wire is host, port,
+database, user and whether TLS was asked for, plus an id minted from the project
+root and the target. A client names an id; the server reads the file *again* at
+the moment of connecting, checks the URL still points where the client was told,
+and hands it to the driver and nowhere else — `usage.ts`'s rule, for its reason.
+Postgres only, and said plainly rather than hidden behind a driver interface with
+one implementation.
+
+**Read-only is Postgres's job.** Every request runs inside `BEGIN READ ONLY`
+with a `LOCAL` statement timeout, and Postgres refuses an `INSERT`, an `UPDATE`
+or a `DROP` in one with a sentence that says why. No regex decides whether a
+query writes, because every such regex is wrong about something. The query tab's
+switch is armed with one click and turned on with a second, the way a dev server
+is stopped; it sends `BEGIN READ WRITE` for that run, and goes back off after
+it. A query that looks like a read is declared as a cursor and fetched one row
+past the cap, so a `SELECT *` on the wrong table is five hundred rows in this
+process rather than ten million; anything else runs plainly under the timeout.
+A table's page is ordered by its primary key when it has one.
+
+**What was seen is kept, and shown again while it is checked.** The first
+version fetched afresh on every click, which made moving between two databases
+a blank column and a spinner each way — correct, and what no database client
+does. Every catalogue and every page of rows the sheet has fetched is kept in
+the window, beyond the sheet's closing, and coming back to one draws it at once
+with a refresh already on its way: the figure in the bar dims to "Refreshing…"
+and the rows stay until fresh ones replace them. A refresh that fails keeps the
+stale rows and says why beside them. Which connection, database, view, page and
+open schemas were last looked at are kept the same way, so the sheet reopens
+where it was left. The one thing never re-run on its own is a query somebody
+typed: a write must not run twice because a tab was clicked, and the read slow
+enough to be the reason for the caching is as likely to be one of those. Its
+last result stays on screen, marked as an earlier run once the box no longer
+says what produced it, until Run is pressed again.
+
+A pool per connection, two clients wide, closed after two idle minutes and when
+the last client leaves — a connection to somebody's production database is not
+a thing to keep for the company. Editing any of this costs a reconnect and no
+agents.
