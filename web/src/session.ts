@@ -1095,6 +1095,15 @@ export function revealAgent(agentId: string): void {
   send({ type: "reveal-agent", agentId });
 }
 
+/**
+ * Take me to the harness: started, resumed or revealed, whichever it needs —
+ * the server knows which and the button does not. `fresh` throws the old
+ * conversation away, which is a thing to ask for by name.
+ */
+export function openHarness(options: { fresh?: boolean; launcher?: string } = {}): void {
+  send({ type: "open-harness", ...options });
+}
+
 // ---------------------------------------------------------------------------
 // React binding
 // ---------------------------------------------------------------------------

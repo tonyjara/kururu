@@ -145,6 +145,8 @@ interface Props {
   onReach: () => void;
   /** Opens the profile's own board — see `ProfileBoard`. */
   onBoard: () => void;
+  /** Starts or goes to the profile's harness — see `shared/harness.ts`. */
+  onHarness: () => void;
   /**
    * Whether this is a column beside the panes or a screen in front of them.
    *
@@ -178,6 +180,7 @@ export function Sidebar({
   onEditing,
   onPrompt,
   onBoard,
+  onHarness,
   onSettings,
   onReach,
   overlay,
@@ -349,6 +352,8 @@ export function Sidebar({
    * `has` per row, and tidying it away would cost a write per snapshot.
    */
   const openCards = profile.board.cards.filter((card) => card.column !== "done").length;
+  const harnessId = profile.harness?.agentId;
+  const harnessLive = harnessId !== undefined && harnessId !== null && agents.some((agent) => agent.id === harnessId && !agent.exited);
   const away = new Set(profile.hiddenAgents);
   const shown = listed.filter((agent) => !away.has(agent.id));
   const hidden = listed.filter((agent) => away.has(agent.id));
@@ -778,6 +783,19 @@ export function Sidebar({
         >
           <Icon name="board" />
           {openCards > 0 && <span className="profile-board-count">{openCards}</span>}
+        </button>
+        {/* The profile's harness, beside its board for the same reason: it is
+            the profile's, over every workspace. One button whatever its state —
+            start, resume or go to — because the user means one thing by it.
+            Lit while it runs, so a glance says whether there is anybody home. */}
+        <button
+          className={`profile-board-btn profile-harness-btn${harnessLive ? " profile-harness-live" : ""}`}
+          onClick={onHarness}
+          title={harnessLive ? "Go to this profile's harness (C-a H)" : "Start this profile's harness (C-a H)"}
+          aria-label={`${profile.name}'s harness`}
+          aria-pressed={harnessLive}
+        >
+          <Icon name="bot" />
         </button>
         {/* The way out of a full-screen sidebar. Drawn only when it is one: as a
             column, the panes next to it are already the way out, and a close

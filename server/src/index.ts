@@ -33,7 +33,7 @@ import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileS
 import { execFile, spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createNetServer } from "node:net";
-import { tmpdir, totalmem } from "node:os";
+import { homedir, tmpdir, totalmem } from "node:os";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -155,6 +155,8 @@ import {
   type WorktreeStatus,
 } from "../../shared/projects";
 import { hookSettingsFlag } from "./hooks";
+import { Harness } from "./harness";
+import { mcpAnswer } from "./mcp";
 import { claudeDirFor, loginDir, loginEnv, scanLogins } from "./logins";
 import {
   adoptLaunch,
@@ -339,6 +341,8 @@ interface ClientState {
 // Assigned by `attach()` before anything is served; see the bottom of the file.
 let host!: HostLink;
 let workspaces!: Workspaces;
+/** The harness's hands — built once the two above exist, at the foot of startup. See `harness.ts`. */
+let harness!: Harness;
 const clients = new Map<WebSocket, ClientState>();
 
 const state = {
@@ -429,7 +433,20 @@ function loginsActive(): boolean {
  * rather than empty, which keeps the common case off the wire.
  */
 function spawnEnv(): Record<string, string> | undefined {
-  return loginsActive() ? loginEnv(workspaces.active.loginKey) : undefined;
+  return spawnEnvFor(workspaces.active.id);
+}
+
+/** The same, for a terminal opened in a profile that need not be the one on screen — the harness's case. */
+function spawnEnvFor(profileId: string): Record<string, string> | undefined {
+  const profile = workspaces.profile(profileId);
+  return loginsActive() && profile ? loginEnv(profile.loginKey) : undefined;
+}
+
+/** Where a profile's Claude keeps its config, and so its transcripts: its own directory, or the machine's. */
+function claudeDirOf(profileId: string): string {
+  const profile = workspaces.profile(profileId);
+  if (loginsActive() && profile) return claudeDirFor(profile.loginKey);
+  return process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
 }
 
 /**
@@ -1015,6 +1032,8 @@ function noticeStatuses(): void {
     // two cases and not one.
     if (before === undefined || before === agent.status) continue;
     if (agent.exited) continue;
+    // The harness hears every edge a person would; `reapExited` tells it the exits.
+    harness.noticed(agent, agent.status, false);
     if (!isNotifyEvent(agent.status)) {
       // It has stopped wanting anybody — it was typed into, or it went back to
       // work — so the dot has nothing left to be about. `forget` covers the
@@ -1206,6 +1225,50 @@ async function openTerminal(
 }
 
 /**
+ * `openTerminal`, into a pane of a workspace that need not be on screen — the
+ * harness's spelling, with the profile and workspace named. Nothing is
+ * focused, because nobody is looking: the terminal is in the layout for when
+ * they do. A pane closed while the host was spawning gets the workspace's
+ * focused pane instead, on `openTerminal`'s reasoning.
+ */
+async function openTerminalAt(
+  profileId: string,
+  workspaceId: string,
+  paneId: string,
+  options: { cwd?: string; command?: string; kind?: PtyKind } = {},
+): Promise<AgentSnapshot> {
+  const agent = await host.create({
+    cwd: options.cwd ?? (await cwdForPaneIn(profileId, workspaceId, paneId)),
+    command: options.command,
+    env: spawnEnvFor(profileId),
+    kind: options.kind ?? "shell",
+  });
+  const workspace = workspaces.workspaceIn(profileId, workspaceId);
+  if (!workspace) throw new Error("that workspace is gone");
+  const target = workspaces.hasPaneIn(profileId, workspaceId, paneId) ? paneId : workspace.focusedPaneId;
+  workspaces.addTabIn(profileId, workspaceId, target, agent.id, agent.cwd);
+  allowRoot(agent.cwd);
+  return agent;
+}
+
+/** `cwdForNewTab`, for a pane of any workspace: the terminal it shows, else what it remembers, else the workspace's newest. */
+async function cwdForPaneIn(profileId: string, workspaceId: string, paneId: string): Promise<string | undefined> {
+  const showing = workspaces.activeAgentInW(profileId, workspaceId, paneId);
+  if (showing) {
+    const followed = await followCwd(showing);
+    if (followed) return followed;
+  }
+  const remembered = workspaces.cwdForIn(profileId, workspaceId, paneId);
+  if (remembered) return remembered;
+  const newest = workspaces
+    .agentsInWorkspace(profileId, workspaceId)
+    .map((id) => host.find(id))
+    .filter((a): a is AgentSnapshot => a !== undefined && !a.exited)
+    .sort((a, b) => b.createdAt - a.createdAt)[0];
+  return newest ? await followCwd(newest.id) : undefined;
+}
+
+/**
  * The same, for the gestures that make a pane rather than ask for a terminal.
  * There is no reply for them to fail: a spawn that cannot happen leaves the pane
  * empty, which is a state the window can still draw and click its way out of.
@@ -1223,12 +1286,18 @@ function fillPane(paneId: string, from?: string): void {
  * a Claude started into one is handed kururu's. See `hooks.ts`.
  */
 function agentCommand(launcher: Launcher): string {
-  return launcherCommand(launcher, launch) + hooksFor(launcher);
+  return agentCommandFor(launcher, workspaces.active.id);
 }
 
-function hooksFor(launcher: Launcher): string {
-  if (launcher.cli !== "claude" || !loginsActive()) return "";
-  return hookSettingsFlag(claudeDirFor(workspaces.active.loginKey));
+/** The same, for a profile that need not be on screen: its own hooks, if it has its own directory. */
+function agentCommandFor(launcher: Launcher, profileId: string): string {
+  return launcherCommand(launcher, launch) + hooksFor(launcher, profileId);
+}
+
+function hooksFor(launcher: Launcher, profileId: string): string {
+  const profile = workspaces.profile(profileId);
+  if (launcher.cli !== "claude" || !loginsActive() || !profile) return "";
+  return hookSettingsFlag(claudeDirFor(profile.loginKey));
 }
 
 /**
@@ -1244,7 +1313,22 @@ function hooksFor(launcher: Launcher): string {
  */
 async function runCard(workspaceId: string, cardId: string, launcherId: string): Promise<{ agentId: string }> {
   if (workspaceId !== workspaces.activeWorkspace.id) throw new Error("that board is not on screen");
-  const found = workspaces.findCard(workspaceId, cardId);
+  return runCardAt(workspaces.active.id, workspaceId, cardId, launcherId);
+}
+
+/**
+ * The same, for a board that need not be on screen — the harness pressing the
+ * robot on a workspace the user is not in. One difference, and it is on
+ * purpose: a card's dev server is only started when the workspace is the one
+ * on screen, because its terminal goes into a pane of whatever is on screen
+ * and a server for a project you are not looking at, in a pane of the one you
+ * are, is a surprise. The card's ↻ starts it when they get there.
+ */
+async function runCardAt(profileId: string, workspaceId: string, cardId: string, launcherId: string): Promise<{ agentId: string }> {
+  const onScreen = profileId === workspaces.active.id && workspaceId === workspaces.activeWorkspace.id;
+  const workspace = workspaces.workspaceIn(profileId, workspaceId);
+  if (!workspace) throw new Error("no such workspace");
+  const found = workspaces.findCardIn(profileId, workspaceId, cardId);
   if (!found) throw new Error("no such card");
   if (runLive(found.card.run) && host.agents.some((a) => a.id === found.card.run?.agentId && !a.exited)) {
     throw new Error("that card already has an agent on it");
@@ -1252,8 +1336,8 @@ async function runCard(workspaceId: string, cardId: string, launcherId: string):
   const launcher = typeof launcherId === "string" ? findLauncher(launcherId) : undefined;
   if (!launcher) throw new Error(`no such agent: ${String(launcherId)}`);
 
-  const boardPane = paneWithAgent(workspaces.activeWorkspace.layout, BOARD_TAB)?.id;
-  const target = workspaces.paneBesideBoard();
+  const boardPane = paneWithAgent(workspace.layout, BOARD_TAB)?.id;
+  const target = workspaces.paneBesideBoardIn(profileId, workspaceId);
   if (!target) throw new Error("nowhere to put the agent");
   /*
    * Where the agent would have started is where the repository is looked for;
@@ -1262,7 +1346,7 @@ async function runCard(workspaceId: string, cardId: string, launcherId: string):
    * the robot expecting isolation, and the one thing worse than no agent is
    * two agents in one tree that they believe are in two.
    */
-  const from = await cwdForNewTab(target);
+  const from = await cwdForPaneIn(profileId, workspaceId, target);
   const checkout = await checkoutFor(found.card, from);
   /*
    * A Claude run is told its session id rather than left to pick one, because
@@ -1271,7 +1355,7 @@ async function runCard(workspaceId: string, cardId: string, launcherId: string):
    */
   const sessionId = launcher.cli === "claude" ? randomUUID() : null;
   const cwd = checkout?.worktree.path ?? from;
-  let command = withPrompt(agentCommand(launcher) + (sessionId ? ` --session-id ${sessionId}` : ""), cardPrompt(found.card));
+  let command = withPrompt(agentCommandFor(launcher, profileId) + (sessionId ? ` --session-id ${sessionId}` : ""), cardPrompt(found.card));
   /*
    * The dev server starts with the worktree, when the project has a dev line —
    * so that the card's work can be looked at without anybody having to ask.
@@ -1282,7 +1366,7 @@ async function runCard(workspaceId: string, cardId: string, launcherId: string):
    * agree that it has, and it lives outside the worktree because a file in
    * there is an uncommitted change that would hold up the merge.
    */
-  const serve = checkout && checkout.dev && !devOpen(found.card) ? { ...checkout, dev: checkout.dev } : null;
+  const serve = onScreen && checkout && checkout.dev && !devOpen(found.card) ? { ...checkout, dev: checkout.dev } : null;
   const ready = serve?.fresh && serve.setup ? join(tmpdir(), `kururu-setup-${cardId}-${Date.now()}`) : null;
   /*
    * The setup line runs in the agent's own terminal, ahead of it, rather than
@@ -1304,7 +1388,9 @@ async function runCard(workspaceId: string, cardId: string, launcherId: string):
       console.error("kururu: could not start the card's dev server:", err instanceof Error ? err.message : err);
     });
   }
-  const agent = await openTerminal(target, { cwd, command, kind: "agent" });
+  const agent = onScreen
+    ? await openTerminal(target, { cwd, command, kind: "agent" })
+    : await openTerminalAt(profileId, workspaceId, target, { cwd, command, kind: "agent" });
   /*
    * Named after the card, as if somebody had typed it into rename-tab. Without
    * it the sidebar row says `starting…` and then whatever the agent titles its
@@ -1313,7 +1399,7 @@ async function runCard(workspaceId: string, cardId: string, launcherId: string):
    * same as always.
    */
   host.rename(agent.id, found.card.title.slice(0, 80));
-  workspaces.editBoard(workspaceId, (board) =>
+  workspaces.editBoardIn(profileId, workspaceId, (board) =>
     startRun(setWorktree(board, cardId, checkout?.worktree ?? null), cardId, {
       agentId: agent.id,
       launcher: launcher.id,
@@ -1323,7 +1409,7 @@ async function runCard(workspaceId: string, cardId: string, launcherId: string):
       cwd: cwd ?? null,
     }),
   );
-  if (boardPane && workspaces.hasPane(boardPane)) workspaces.focusPane(boardPane);
+  if (onScreen && boardPane && workspaces.hasPane(boardPane)) workspaces.focusPane(boardPane);
   return { agentId: agent.id };
 }
 
@@ -1358,7 +1444,7 @@ async function resumeCard(workspaceId: string, cardId: string): Promise<{ agentI
   const cwd = there ?? found.card.worktree?.root ?? (await cwdForNewTab(target));
   const command = resumeCommand(launcher, launch, run.sessionId, there === null);
   if (!command) throw new Error("there is no conversation on this card to resume");
-  const agent = await openTerminal(target, { cwd, command: command + hooksFor(launcher), kind: "agent" });
+  const agent = await openTerminal(target, { cwd, command: command + hooksFor(launcher, workspaces.active.id), kind: "agent" });
   host.rename(agent.id, found.card.title.slice(0, 80));
   workspaces.editBoard(workspaceId, (board) =>
     startRun(board, cardId, {
@@ -1722,6 +1808,7 @@ function forget(agentId: string): void {
   // own was already told by `noticeStatuses`.
   workspaces.noteRun(agentId, "", true);
   activity.delete(agentId);
+  harness.forget(agentId);
   lastAgent.delete(agentId);
   memory.delete(agentId);
   unread.delete(agentId);
@@ -1762,6 +1849,8 @@ function reapExited(): void {
      * and the card's ↻ or ■ is what takes the tab away.
      */
     if (workspaces.isCardDev(agent.id)) continue;
+    // Before the tab goes, while the layout can still say whose it was.
+    harness.noticed(agent, agent.status, true);
     host.kill(agent.id);
     workspaces.reapTab(agent.id);
     forget(agent.id);
@@ -3324,6 +3413,19 @@ function handleMessage(ws: WebSocket, raw: string): void {
       workspaces.reveal(msg.agentId);
       return;
 
+    // The profile on screen is the one whose harness the button means; the
+    // harness itself, once running, is not bound to what is on screen.
+    case "open-harness": {
+      const run = () =>
+        harness.open(workspaces.active.id, {
+          fresh: msg.fresh === true,
+          launcher: typeof msg.launcher === "string" ? msg.launcher : undefined,
+        });
+      if (typeof msg.id === "number") void replyAsync(ws, msg.id, run);
+      else void run().catch((err: unknown) => console.error("kururu: could not open the harness:", err instanceof Error ? err.message : err));
+      return;
+    }
+
     case "set-project":
       saveProject(msg.root, msg.settings);
       return;
@@ -4039,7 +4141,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return;
     }
     try {
-      const parsed = parseReport(await readJsonBody(req));
+      const body = await readJsonBody(req);
+      const parsed = parseReport(body);
       if (!parsed) {
         json(res, { error: "need a valid status or context" }, 400);
         return;
@@ -4052,6 +4155,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         return;
       }
       host.report(agentId, parsed.report);
+      // The rest of the report is the harness's: where the transcript and the
+      // inbox are, and what was last said. See `harness.ts`.
+      harness.report(agentId, body as Record<string, unknown>);
       /**
        * The host is told the status and the context; the message stops here.
        * It is the one part of a report that says something about the work rather
@@ -4065,6 +4171,49 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       json(res, { ok: true });
     } catch (err) {
       json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+    return;
+  }
+
+  /**
+   * Kururu as an MCP server: the harness's verbs, for the harness session that
+   * was started with this address in its `--mcp-config`. The address names the
+   * profile the tools act on and the session they were issued to, so the
+   * endpoint knows who is calling without a session of its own. Behind the
+   * same gate as everything else, which on loopback is open — any local process
+   * may drive kururu this way, and that is the point of exposing the verbs at
+   * all. See `mcp.ts` for the protocol and `harness.ts` for the tools.
+   */
+  if (url.pathname === "/mcp") {
+    if (req.method === "GET") {
+      // No server-initiated stream here; the protocol lets a server say so.
+      text(res, "kururu speaks MCP over POST only\n", 405);
+      return;
+    }
+    if (req.method === "DELETE") {
+      res.writeHead(200).end();
+      return;
+    }
+    if (req.method !== "POST") {
+      text(res, "POST only", 405);
+      return;
+    }
+    const profileId = url.searchParams.get("profile") ?? "";
+    if (!workspaces.profile(profileId)) {
+      json(res, { jsonrpc: "2.0", id: null, error: { code: -32000, message: "no such profile" } }, 404);
+      return;
+    }
+    const selfId = harness.selfFor(profileId, url.searchParams.get("session") ?? "");
+    try {
+      const body = await readJsonBody(req, 256 * 1024);
+      const answer = await mcpAnswer(body, harness.tools(), (name, args) => harness.call(profileId, selfId, name, args), {
+        name: "kururu",
+        version: VERSION,
+      });
+      if (answer.body === undefined) res.writeHead(answer.status).end();
+      else json(res, answer.body, answer.status);
+    } catch (err) {
+      json(res, { jsonrpc: "2.0", id: null, error: { code: -32700, message: err instanceof Error ? err.message : String(err) } }, 400);
     }
     return;
   }
@@ -4759,6 +4908,23 @@ async function attach(port: Port): Promise<void> {
 
   workspaces = new Workspaces(profiles);
   if (activeProfileId) workspaces.switchProfile(activeProfileId);
+  // Everything the harness touches, lent as functions: `index.ts` exports
+  // nothing and should not start to for one caller.
+  harness = new Harness({
+    workspaces,
+    host,
+    version: VERSION,
+    port: () => PORT,
+    launch: () => launch,
+    grid: ownedGrid,
+    activity,
+    claudeDir: claudeDirOf,
+    agentCommand: agentCommandFor,
+    openTerminal: openTerminalAt,
+    cwdFor: cwdForPaneIn,
+    runCard: runCardAt,
+    stopDev,
+  });
   for (const agentId of workspaces.allAgents()) {
     if (!live.has(agentId)) workspaces.removeTab(agentId);
   }

@@ -113,12 +113,26 @@ async function main(): Promise<void> {
   // pointless to provoke.
   if (!status && !context && !message) return;
 
+  /**
+   * Three things the harness wants that only a hook can know, carried along
+   * on the same report rather than a second one. The transcript's path and
+   * the session's inbox socket are in the hook's environment and nowhere else
+   * — Claude Code exports both to its hooks and to nothing outside itself —
+   * and the last message of a turn is on the `Stop` payload, which the docs
+   * say to prefer over the transcript, since the file may not have it yet.
+   * See `server/src/harness.ts` for what each is used for.
+   */
+  const socket = process.env.CLAUDE_CODE_MESSAGING_SOCKET;
+  const inbox = socket ? { socket, token: process.env.CLAUDE_CODE_MESSAGING_TOKEN ?? null } : undefined;
+  const last = payload?.last_assistant_message;
+  const reply = typeof last === "string" && last.trim() ? last.trim().slice(0, 20_000) : undefined;
+
   const port = process.env.KURURU_PORT ?? "7717";
   try {
     await fetch(`http://127.0.0.1:${port}/api/report`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agent, status, context: context ?? undefined, message }),
+      body: JSON.stringify({ agent, status, context: context ?? undefined, message, transcript: path || undefined, inbox, reply }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch {

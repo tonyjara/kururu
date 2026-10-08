@@ -52,6 +52,7 @@ export type Action =
   | "find-tab"
   | "open-reader"
   | "open-board"
+  | "open-harness"
   | "settings"
   | "reload"
   | "restart-server"
@@ -109,6 +110,7 @@ export const ACTION_INFO: Record<Action, { label: string; group: ActionGroup }> 
 
   "open-reader": { label: "read the markdown open next door", group: "panes" },
   "open-board": { label: "this workspace's board", group: "panes" },
+  "open-harness": { label: "this profile's harness: start, or go to it", group: "panes" },
 
   "toggle-sidebar": { label: "toggle the sidebar", group: "window" },
   "toggle-files": { label: "toggle the file tree", group: "window" },
@@ -141,6 +143,8 @@ export const DEFAULT_KEYMAP: Record<string, Action> = {
   M: "open-reader",
   // K for kanban. Shifted, like M beside it, because `k` is focus-up.
   K: "open-board",
+  // H for harness, shifted for the same reason: `h` is focus-left.
+  H: "open-harness",
   "|": "split-right",
   "\\": "split-right",
   "%": "split-right",
