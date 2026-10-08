@@ -10,6 +10,7 @@ in this folder.
 | `model.ts` | Agents and the hierarchy they live in. Not a mirror of anything |
 | `wire.ts` | The browser↔server protocol, and the timer intervals |
 | `layout.ts` | The split tree and every pure operation on it. Both halves use it |
+| `harness.ts` | The harness's vocabulary: the MCP tool catalogue, the role prompt, key and paste grammar, inbox frames, transcript turns. Pure, tested |
 | `board.ts` | A workspace's cards, and what an agent's status does to the one it was handed. Also the profile's board, a card's dates, and the timeline's layout |
 | `days.ts` | Calendar days as strings, and the arithmetic over them. Why a card's date is not a timestamp |
 | `projects.ts` | What a repository has been told about itself, and how a card's worktree is named |
@@ -57,7 +58,9 @@ in this folder.
 | `src/vps.ts` | The sidebar's VPSes: the user's own `ssh`, `BatchMode`, one fixed read-only script. A client names a host and nothing else (`shared/vps.ts`) |
 | `src/openrouter.ts` | The sidebar's OpenRouter balance and spend, read with a management key kept owner-only in `~/.config/kururu/openrouter.json`. GETs only; the key comes in once and never goes back out (`shared/openrouter.ts`) |
 | `src/databases.ts` | The database sheet: `DATABASE_URL` read out of the workspace's env files at the moment of connecting and never held, every query in a `READ ONLY` transaction unless the switch says otherwise, reads bounded through a cursor. Postgres only (`shared/databases.ts`) |
-| `src/report-cli.ts` | What a Claude Code hook runs. Not in `agents/` on purpose |
+| `src/report-cli.ts` | What a Claude Code hook runs. Not in `agents/` on purpose. Also carries the session's inbox socket, transcript path and last reply for the harness |
+| `src/harness.ts` | The harness's hands: kururu's verbs as MCP tools for one profile, a terminal read as text, a message into a Claude's inbox socket, the status feed. Explicit targets, never `active` (`shared/harness.ts`) |
+| `src/mcp.ts` | Five methods of MCP over JSON-RPC, written out rather than the SDK. Pure; served at `POST /mcp` |
 | `src/devservers.ts` | lsof + ps discovery of what is listening, and what started it — and stopping one: the named command's tree, never a terminal's (`stopTargets`) |
 | `src/proxy.ts` | Per-dev-server reverse proxy (HTTP + WS) for phone access |
 | `src/files.ts` | Traversal-safe file listing and reading |

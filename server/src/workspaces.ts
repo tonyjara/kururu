@@ -25,7 +25,8 @@
  * least one pane, and the focused pane always exists.
  */
 import { adoptBoard, adoptProfileBoard, emptyBoard, emptyProfileBoard, noteRun, transferCard, type Board, type Card, type CardWorktree } from "../../shared/board";
-import type { Profile, ProfileSummary, Workspace, WorkspaceColor } from "../../shared/model";
+import { adoptHarness } from "../../shared/harness";
+import type { HarnessState, Profile, ProfileSummary, Workspace, WorkspaceColor } from "../../shared/model";
 import { gatherGroups, groupName, workspaceUnits, isLoginKey, isWorkspaceColor, mintLoginKey, WORKSPACE_COLORS } from "../../shared/model";
 import {
   activeTerminal,
@@ -169,6 +170,8 @@ function adopt(profile: Profile): Profile {
     // Absent from every blob written before profiles had a board, which reads
     // as an empty one — see `Profile.board` for why it is never null.
     board: adoptProfileBoard(profile.board),
+    // Absent before profiles had a harness, and null is "none started".
+    harness: adoptHarness(profile.harness),
     // `dev` is taken off rather than carried: a blob written while workspaces
     // remembered a dev command still has one, and a field the type no longer
     // names would ride along into every snapshot and back out to disk.
@@ -1197,9 +1200,119 @@ export class Workspaces {
 
   /** The card this id names in the active profile, and the workspace it is on. */
   findCard(workspaceId: string, cardId: string): { workspace: Workspace; card: Card } | null {
-    const workspace = this.active.workspaces.find((w) => w.id === workspaceId);
+    return this.findCardIn(this.activeId, workspaceId, cardId);
+  }
+
+  // -------------------------------------------------------------------------
+  // Explicit targets
+  //
+  // Everything above acts on the profile and workspace on screen, because a
+  // client is by definition looking at them. The harness is not: it is one
+  // session in a profile that acts on every workspace of that profile, from a
+  // pane the user may have switched away from. So the handful of things it
+  // does — find a card, change a board, pick a pane, make a workspace — have a
+  // spelling here that names the profile and workspace, and the on-screen
+  // spellings call these with the active ids. The arrangement is still the
+  // server's; this only widens who may send a verb for it.
+  // -------------------------------------------------------------------------
+
+  profile(profileId: string): Profile | null {
+    return this.profiles.find((p) => p.id === profileId) ?? null;
+  }
+
+  workspaceIn(profileId: string, workspaceId: string): Workspace | null {
+    return this.profile(profileId)?.workspaces.find((w) => w.id === workspaceId) ?? null;
+  }
+
+  findCardIn(profileId: string, workspaceId: string, cardId: string): { workspace: Workspace; card: Card } | null {
+    const workspace = this.workspaceIn(profileId, workspaceId);
     const card = workspace?.board?.cards.find((c) => c.id === cardId);
     return workspace && card ? { workspace, card } : null;
+  }
+
+  /** `editBoard`, for a workspace that need not be on screen. A workspace with no board is left without one. */
+  editBoardIn(profileId: string, workspaceId: string, fn: (board: Board) => Board): void {
+    const workspace = this.workspaceIn(profileId, workspaceId);
+    if (!workspace?.board) return;
+    const next = fn(workspace.board);
+    if (next === workspace.board) return;
+    this.mutate(profileId, workspaceId, (w) => ({ ...w, board: next }));
+  }
+
+  /** Give a workspace a board without showing it — the harness adding a card to a workspace that never opened one. */
+  ensureBoardIn(profileId: string, workspaceId: string): void {
+    const workspace = this.workspaceIn(profileId, workspaceId);
+    if (!workspace || workspace.board) return;
+    this.mutate(profileId, workspaceId, (w) => ({ ...w, board: emptyBoard() }));
+  }
+
+  hasPaneIn(profileId: string, workspaceId: string, paneId: string): boolean {
+    const workspace = this.workspaceIn(profileId, workspaceId);
+    return workspace !== null && findPane(workspace.layout, paneId) !== null;
+  }
+
+  /** `addTab`, into a pane of a workspace that need not be on screen. */
+  addTabIn(profileId: string, workspaceId: string, paneId: string, agentId: string, cwd: string): void {
+    this.mutate(profileId, workspaceId, (w) => ({ ...w, layout: addTab(w.layout, paneId, agentId, cwd) }));
+  }
+
+  /** The terminal a pane of any workspace is showing, if any. */
+  activeAgentInW(profileId: string, workspaceId: string, paneId: string): string | null {
+    const workspace = this.workspaceIn(profileId, workspaceId);
+    const pane = workspace ? findPane(workspace.layout, paneId) : null;
+    return pane ? activeTerminal(pane) : null;
+  }
+
+  /** Every terminal in one workspace, wherever in it. */
+  agentsInWorkspace(profileId: string, workspaceId: string): string[] {
+    const workspace = this.workspaceIn(profileId, workspaceId);
+    return workspace ? panes(workspace.layout).flatMap((pane) => terminalsOf(pane.agentIds)) : [];
+  }
+
+  /** Where a pane's next tab should start, as far as the layout of any workspace knows. */
+  cwdForIn(profileId: string, workspaceId: string, paneId: string): string | undefined {
+    const workspace = this.workspaceIn(profileId, workspaceId);
+    return workspace ? findPane(workspace.layout, paneId)?.cwd : undefined;
+  }
+
+  /** `split`, in a workspace that need not be on screen. Focus is left alone: nobody is looking. */
+  splitIn(profileId: string, workspaceId: string, dir: "row" | "col", paneId: string): string | null {
+    const workspace = this.workspaceIn(profileId, workspaceId);
+    if (!workspace || !findPane(workspace.layout, paneId)) return null;
+    const fresh = makePane(id("n"));
+    this.mutate(profileId, workspaceId, (w) => ({ ...w, layout: split(w.layout, paneId, dir, id("s"), fresh) }));
+    return fresh.pane.id;
+  }
+
+  /** `paneBesideBoard`, for a workspace that need not be on screen — the same preferences, against that layout. */
+  paneBesideBoardIn(profileId: string, workspaceId: string): string | null {
+    const workspace = this.workspaceIn(profileId, workspaceId);
+    if (!workspace) return null;
+    const layout = workspace.layout;
+    const board = paneWithAgent(layout, BOARD_TAB);
+    if (!board) return workspace.focusedPaneId;
+    const takes = (pane: PaneState | null | undefined): pane is PaneState =>
+      Boolean(pane && pane.id !== board.id && !showsDoc(pane));
+    const last = workspace.lastPaneId ? findPane(layout, workspace.lastPaneId) : null;
+    if (takes(last)) return last.id;
+    const any = panes(layout).find(takes);
+    if (any) return any.id;
+    return this.splitIn(profileId, workspaceId, "row", board.id);
+  }
+
+  /** `newWorkspace`, in a profile that need not be on screen, and without switching anybody to it. */
+  newWorkspaceIn(profileId: string, name: string): string | null {
+    const profile = this.profile(profileId);
+    if (!profile) return null;
+    const workspace = this.blankWorkspace(name, profile.workspaces);
+    this.replaceProfile(profileId, (p) => ({ ...p, workspaces: [...p.workspaces, workspace] }));
+    return workspace.id;
+  }
+
+  /** The harness a profile has, started or merely remembered — see `Profile.harness`. */
+  setHarness(profileId: string, harness: HarnessState | null): void {
+    if (!this.profile(profileId)) return;
+    this.replaceProfile(profileId, (p) => ({ ...p, harness }));
   }
 
   /**
@@ -1521,6 +1634,7 @@ export class Workspaces {
       agentOrder: [],
       // And nothing has been put away, because nothing is running in it yet.
       hiddenAgents: [],
+      harness: null,
     };
   }
 

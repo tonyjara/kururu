@@ -758,6 +758,24 @@ export interface Profile {
    * per snapshot to reach the answer a filter already gives.
    */
   hiddenAgents: string[];
+  /**
+   * The profile's harness: the one session that drives the others, if one has
+   * ever been started here — see `shared/harness.ts`. Null until it has. The
+   * session id is what survives: a harness whose terminal is gone is resumed
+   * into the same conversation the next time it is opened, so what it knew
+   * about the afternoon is not lost with the pane. The agent id is the
+   * terminal it is in right now and is a process, dropped on the way to disk
+   * like a card's run.
+   */
+  harness: HarnessState | null;
+}
+
+/** A profile's harness session: the conversation, the launcher it was started on, and the terminal it is in. */
+export interface HarnessState {
+  sessionId: string;
+  launcher: string;
+  agentId: string | null;
+  startedAt: number;
 }
 
 /** What a login key may be: the hex `mintLoginKey` makes, and nothing that could be a path. */

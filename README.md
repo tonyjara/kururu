@@ -284,6 +284,26 @@ launch; a `claude` typed into a shell is not, and goes without its context ring
 until the same block is in that file too. Once it is, the menu stops handing
 over its own copy, so nothing is reported twice.
 
+## The harness
+
+The bot button beside the profile's board, or `C-a H`, opens the profile's
+**harness**: one Claude Code session that oversees every agent in the profile.
+Talk to it as you would to any Claude, about all of them at once — "start an
+agent on the migration card", "what did the API worker say", "tell it to use
+the other branch", "is anybody stuck" — and it uses kururu's own verbs, handed
+to it as MCP tools, to start agents in panes, read their replies and screens,
+message them, press keys for them when you say so, and keep the boards.
+Whenever an agent in the profile finishes a turn or blocks, the harness is told
+and tells you. Closing its tab does not lose it: the same button resumes the
+conversation.
+
+It is a session, not a service: billed to your subscription like any other,
+visible in a pane, resumable. Two things it needs. Agents report their inbox
+and their last reply through the hooks above, so a Claude without them is
+reached by typing into its terminal and read from its screen only. And a
+permission prompt an agent shows is yours to answer: the harness reads it to
+you and presses keys only as you say.
+
 ## Settings
 
 The cog, or `C-a g`. Five tabs, all server-side, in `~/.config/kururu` — so a

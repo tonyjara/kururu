@@ -170,6 +170,14 @@ The load-bearing invariants, one line each, with the argument behind the link:
   Postgres refuses the write; the viewer's switch sends `READ WRITE` for one
   run and no regex here decides what a query is. Postgres only, on purpose. →
   [layout](docs/layout.md#the-databases-on-the-row)
+- **The harness is a session, not a loop.** One Claude Code session per
+  profile, started by kururu with kururu's verbs as MCP tools (`POST /mcp`)
+  and a role; nothing in kururu generates text and no API key exists. Its
+  tools take a profile and workspace by id, never `active` — the `*In`
+  spellings in `workspaces.ts` — and it reaches a running Claude through the
+  inbox socket its hook reported, never by typing when it can help it. It is
+  told every `done`/`blocked` edge in its profile. A permission prompt is the
+  user's to answer, and the role says so. → [harness](docs/harness.md)
 
 ## Code style
 
@@ -199,6 +207,10 @@ Open, roughly in order — the argument for each is in `PLAN.md`:
    foreground layer is done; this is the other one.
 4. **The element picker** injected by the proxy: long-press an element, send the
    selector and source location to the agent. Waits on the preview pane.
+5. **Voice on the harness.** The harness exists (`docs/harness.md`); what it
+   lacks is a way to talk to it. Anthropic has no voice API, so this is a
+   vendor choice — a realtime speech model calling the same tools, or a
+   cascade around Claude — plus HTTPS for the phone's microphone.
 
 Smaller things owed: the Homebrew tap, and attributing a discovered dev server
 to the workspace that owns it — the machine-wide port scan still says nothing

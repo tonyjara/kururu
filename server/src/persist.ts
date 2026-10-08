@@ -28,6 +28,8 @@ import type { Profile, Workspace } from "../../shared/model";
 import { groupName, isLoginKey, isWorkspaceColor, mintLoginKey } from "../../shared/model";
 import { BOARD_TAB, docTab, isDocTab, parseDocTab, type LayoutNode, type ReaderDoc } from "../../shared/layout";
 import { adoptBoard, adoptProfileBoard, storedBoard, type Board } from "../../shared/board";
+import { adoptHarness } from "../../shared/harness";
+import type { HarnessState } from "../../shared/model";
 import { nextId } from "./workspaces";
 
 /** Bumped when the shape below changes; an older file is ignored, not migrated. */
@@ -90,6 +92,8 @@ interface StoredProfile {
   loginKey?: string;
   /** The profile's own cards, when it has any. See `Profile.board`. */
   board?: Board;
+  /** Its harness, as a conversation to resume — see `Profile.harness`. Never with a process id. */
+  harness?: HarnessState;
   workspaces: StoredWorkspace[];
   /** Index rather than id: ids are regenerated on the way back in. */
   activeWorkspace: number;
@@ -146,6 +150,9 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
       // Always, empty or not: its counter must survive a cold start so that a
       // number is not handed out twice, and its columns are a person's choice.
       board: storedBoard(profile.board),
+      // The conversation to resume and the launcher it ran on; the terminal
+      // it was in is a process and goes, the same as a card's run.
+      ...(profile.harness ? { harness: { ...profile.harness, agentId: null } } : {}),
       activeWorkspace: Math.max(
         0,
         profile.workspaces.findIndex((w) => w.id === profile.activeWorkspaceId),
@@ -344,6 +351,7 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
       // Likewise, and for the same reason: a row put away is a memory about a
       // process, and a cold start has none to remember.
       hiddenAgents: [],
+      harness: adoptHarness(stored.harness),
     });
   }
   if (profiles.length === 0) return null;

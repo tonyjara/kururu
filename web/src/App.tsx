@@ -664,6 +664,8 @@ export function App() {
           return api.openReader();
         case "open-board":
           return api.openBoard();
+        case "open-harness":
+          return api.openHarness();
         case "toggle-sidebar":
           return setSidebarOpen((open) => !open);
         case "toggle-files":
@@ -1196,6 +1198,7 @@ export function App() {
           onPrompt={setDialog}
           onSettings={() => setSettings("appearance")}
           onReach={() => setReach(true)}
+          onHarness={() => api.openHarness()}
           onBoard={() => {
             setProfileBoard(true);
             // On a phone the sidebar is a screen of its own, and the board goes

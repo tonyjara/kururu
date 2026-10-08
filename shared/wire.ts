@@ -710,6 +710,16 @@ export type ClientMessage =
   | { type: "set-profile-login"; profileId: string; loginKey: string | null }
 
   /**
+   * The profile's harness, brought to the screen — started if it has never
+   * been, resumed into its last conversation if its terminal has gone, and
+   * merely revealed if it is running. One verb for the three because the user
+   * means one thing by the button: "take me to the harness". `fresh` starts a
+   * new conversation instead of resuming, and `launcher` picks the model for a
+   * start; both are ignored when it is already running. See `shared/harness.ts`.
+   */
+  | { type: "open-harness"; id?: number; fresh?: boolean; launcher?: string }
+
+  /**
    * Put the server back on current source. It owns no ptys, so this costs a
    * reconnect and a repaint — the agents are in the pty host next door and the
    * arrangement is handed back by it. Ghosttown's prefix+B, minus the casualties.

@@ -661,6 +661,11 @@ kbd {
 .profile-board-count {
   font-variant-numeric: tabular-nums;
 }
+/* The harness button is lit while its session runs: the same ink the working
+   badge uses, so "somebody is home" reads the way it does everywhere else. */
+.profile-harness-live {
+  color: var(--working);
+}
 :root[data-narrow] .profile-board-btn {
   min-width: 36px;
   min-height: 36px;
