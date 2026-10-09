@@ -42,6 +42,15 @@ Things that fail with an error naming something other than the cause.
   `web/src/main.tsx` holds that reload on any non-loopback page, and the phone
   keeps the code it loaded until it is reloaded by hand. The tell is a live
   connection from a `100.x` address in `lsof -nP -iTCP:5173 -sTCP:ESTABLISHED`.
+- **Any process that has loaded Kokoro aborts when it exits.** `onnxruntime-node`
+  (1.21) fails in a static destructor on the way out (`libc++abi: terminating
+  … mutex lock failed: Invalid argument`), so the exit becomes SIGABRT and a
+  crash report, and `dispose()` first does not stop it. When Kokoro lived in
+  the server, this turned the exit 75 behind `C-a B` and the Share toggle into
+  a signal, and the server was left down. So Kokoro runs in `kokoro.mjs` and
+  only ever ends by SIGKILL, which runs no destructors. Do not import
+  `kokoro-js` or `@huggingface/transformers` into the server again. A `node`
+  crash report that aborts in `__cxa_finalize_ranges` means something did.
 - **`EADDRINUSE` on 7717 means a stale server**, usually from an earlier turn. Not
   a code bug: `pkill -f "server/run.mjs"; pkill -f "desktop/dist/server.mjs"`. The
   pty host is deliberately *not* in that list — killing it is the one thing that

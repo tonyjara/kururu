@@ -55,6 +55,7 @@ import { randomBytes } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { Sharing } from "../../shared/wire";
 import { readConfigFile, writeConfigFile } from "./config";
+import { supervised } from "./lifecycle";
 import { reach } from "./reach";
 
 const FILE = "access.json";
@@ -138,8 +139,9 @@ export function sharing(): Sharing {
     wanted: process.env.KURURU_BIND ? isShared() : load().share,
     token: token(),
     // Only a supervisor can start this process again, and `restart-server`
-    // already declines to do half the job without one.
-    restartable: process.env.KURURU_SUPERVISED === "1",
+    // already declines to do half the job without one — or with one that has
+    // since died, which the environment cannot tell you.
+    restartable: supervised(),
   };
 }
 

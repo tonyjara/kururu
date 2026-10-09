@@ -171,13 +171,15 @@
   --icon-board: "▥";
   --icon-grip: "⠿";
   --icon-panel: "⇥";
+  --icon-fold: "⊟";
+  --icon-unfold: "⊞";
 
   /* The icon strip a skin may bring instead of glyphs — every icon as one
      picture of `--icon-n` cells. `none` is the drawing. `--icon-n` is a
      constant the stylesheet needs for the arithmetic and is not a skin's to
      move: it is `ICON_NAMES.length`, and the test holds the two together. */
   --icon-sheet: none;
-  --icon-n: 23;
+  --icon-n: 25;
 
   /* ----------------------------------------------------------------------
      The parts: what a skin *paints*, three properties per region.
@@ -309,6 +311,8 @@
 .icon-board { --icon-svg: var(--icon-board-svg); --icon-glyph: var(--icon-board); --icon-i: 20; }
 .icon-grip { --icon-svg: var(--icon-grip-svg); --icon-glyph: var(--icon-grip); --icon-i: 21; }
 .icon-panel { --icon-svg: var(--icon-panel-svg); --icon-glyph: var(--icon-panel); --icon-i: 22; }
+.icon-fold { --icon-svg: var(--icon-fold-svg); --icon-glyph: var(--icon-fold); --icon-i: 23; }
+.icon-unfold { --icon-svg: var(--icon-unfold-svg); --icon-glyph: var(--icon-unfold); --icon-i: 24; }
 /* An icon strip, when a skin brought one: every icon is one cell of a single
    picture, `--icon-n` cells across, and `--icon-i` on each class says which.
    The strip is scaled so one cell is exactly the icon's box — which is what
@@ -349,7 +353,9 @@
 :root[data-glyphs~="git"] .icon-git::before,
 :root[data-glyphs~="board"] .icon-board::before,
 :root[data-glyphs~="grip"] .icon-grip::before,
-:root[data-glyphs~="panel"] .icon-panel::before {
+:root[data-glyphs~="panel"] .icon-panel::before,
+:root[data-glyphs~="fold"] .icon-fold::before,
+:root[data-glyphs~="unfold"] .icon-unfold::before {
   content: var(--icon-glyph);
   width: auto;
   height: auto;
@@ -803,6 +809,16 @@ kbd {
  */
 .side-section h2 .mini {
   transform: translateX(calc(50% - 5.5px));
+}
+
+/* The fold-everything button on the Workspaces and Agents headings. A heading
+   is laid out space-between for its one button, which would hang a second in
+   the middle of the line beside the Workspaces +; an auto margin takes the free
+   space before space-between sees any, so the pair sit together at the end and
+   the + keeps its place over the chips. On Agents it is alone and changes
+   nothing. */
+.side-fold-all {
+  margin-left: auto;
 }
 
 .ws-list,
@@ -3082,6 +3098,182 @@ a.button {
   font-weight: 500;
 }
 
+/* The talk key for a thumb. Quiet like the other buttons until it is doing
+   something, and then it is the one thing on the bar in a status colour: a
+   microphone that is open is the window's loudest fact. */
+.sb-mic {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  border-radius: var(--radius-md);
+  color: var(--dimmer);
+  flex: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.sb-mic:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+.sb-mic-listening,
+.sb-mic-listening:hover {
+  color: var(--on-danger);
+  background: var(--danger-bg);
+}
+.sb-mic-sending {
+  color: var(--blocked);
+}
+.sb-mic-speaking {
+  color: var(--working);
+}
+:root[data-narrow] .sb-mic {
+  width: 32px;
+  height: 28px;
+  color: var(--dim);
+}
+
+/* The pill: a level meter and a line, floating over the panes above the
+   status bar. See `VoicePill.tsx` for why it is a meter first and words
+   second. The bars' scale is an inline transform the component sets thirty
+   times a second, so the stylesheet keeps the shape and the component keeps
+   the number — and the token audit does not meet a property that is not one.
+   It takes the pointer, which it did not while it only talked: a pill that
+   can be dragged and shut is one a click can land on, and the drag is the
+   answer to it landing on what you were after. `touch-action: none` is what
+   lets a finger move it rather than pan the page under it. */
+.voice-pill {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--bar-h) + 14px);
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* As wide as what it says, up to the cap, wherever it is. Left to shrink to
+     fit, a fixed box is as wide as the window *less its `left`* — half the
+     window in its own spot, which on a phone wrapped Kuru a word a line, and
+     nothing at all once dragged to the right-hand edge. */
+  width: max-content;
+  max-width: min(92vw, 560px);
+  padding: 8px 14px;
+  border-radius: var(--radius-xl);
+  border: var(--border) var(--border-style) var(--line);
+  background: var(--chrome);
+  color: var(--text);
+  box-shadow: var(--elev-menu);
+  font-size: var(--fs-md);
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.voice-pill:active {
+  cursor: grabbing;
+}
+.app-zen .voice-pill {
+  bottom: 14px;
+}
+/* Once dragged, wherever it was left, as shares of the room it has to move
+   in — see `web/src/place.ts`. `left` is a share of the window and the
+   `translate` takes back the same share of the pill, so it is inside on both
+   axes at every size of either, with nothing measured. After the zen rule and
+   as specific, because that one pins the bottom, and a pill pinned at the top
+   and the bottom both is stretched between them. */
+.voice-pill.voice-pill-placed {
+  left: calc(var(--pill-x) * 100%);
+  top: calc(var(--pill-y) * 100%);
+  bottom: auto;
+  transform: translate(calc(var(--pill-x) * -100%), calc(var(--pill-y) * -100%));
+}
+.voice-pill-listening {
+  border-color: var(--danger);
+}
+.voice-pill-speaking {
+  border-color: var(--working);
+}
+.voice-pill-error {
+  border-color: var(--blocked);
+}
+.voice-meter {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+  flex: none;
+}
+.voice-bar {
+  display: block;
+  width: 3px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  background: var(--danger);
+  transform: scaleY(0.12);
+  transform-origin: center;
+  transition: transform 60ms linear;
+}
+.voice-pill-speaking .voice-bar {
+  background: var(--working);
+}
+.voice-pill-sending .voice-bar {
+  background: var(--blocked);
+}
+.voice-pill-heard .voice-bar {
+  background: var(--done);
+}
+.voice-pill-error .voice-bar {
+  background: var(--dimmer);
+}
+.voice-words {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.voice-label {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.voice-text {
+  color: var(--dim);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+/* Its ✕, which ends whatever the pill is saying — Kuru's sentence and the
+   rest of the reply, or the clip being recorded. Pulled into the pill's
+   padding so a short pill does not grow a wide right margin for it, and a
+   thumb's width on a phone, where it is the only way to stop Kuru that is not
+   holding the microphone button. */
+.voice-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-right: -6px;
+  border-radius: var(--radius-md);
+  color: var(--dim);
+  font-size: var(--fs-base);
+}
+.voice-close:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+:root[data-narrow] .voice-close {
+  width: 32px;
+  height: 32px;
+  margin: -6px -10px -6px 0;
+  font-size: var(--fs-lg);
+}
+
 .sb-help {
   font-family: var(--mono);
   font-size: var(--fs-sm);
@@ -3770,6 +3962,66 @@ a.button {
 .about-progress::-webkit-progress-value {
   background: var(--accent);
   border-radius: var(--radius-round);
+}
+
+/* The server's story: when it started, why, and the last lines of the record.
+   Read as a list rather than a table, newest first, with the time and the
+   writer in the terminal's face — they are values to be matched against a log,
+   the same class of fragment as the version above. Bounded for the release
+   notes' reason: a long record should not push Done off a laptop. */
+.about-life {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: var(--border) var(--border-style) var(--line);
+}
+
+.about-life-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 40vh;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  font-size: var(--fs-sm);
+}
+
+.about-life-row {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 2px 10px;
+  color: var(--dim);
+}
+
+.about-life-at,
+.about-life-by {
+  font-family: var(--mono);
+  color: var(--dimmer);
+  white-space: nowrap;
+}
+
+.about-life-why {
+  overflow-wrap: anywhere;
+}
+
+/* The error's own line and the folded stack sit under the sentence they
+   belong to, not under the time. */
+.about-life-more {
+  grid-column: 3;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.about-life-more summary {
+  cursor: pointer;
+  color: var(--dimmer);
+}
+
+.about-life-bad .about-life-why {
+  color: var(--danger);
 }
 
 /* --------------------------------------------------------------------------
@@ -5458,6 +5710,19 @@ a.button {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* Except in Done, where the argument above turns over: the part that says what
+   to do has been done, and a column of finished work is read for what is in
+   it, not worked from. So a done card keeps two lines of title and two of body
+   and the rest waits behind the edit, which still holds all of it — this is
+   paint, and nothing is cut from the card. The title too, because a long one
+   is the other half of what made the column hard to scan. */
+.board-card-in-done .board-card-title,
+.board-card-in-done .board-card-body {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
 
 /* When the card is for. Its ink is which side of today that is — the accent
    for what is happening now, the dimmest for what has passed — so a column can
@@ -6572,6 +6837,7 @@ a.button {
 
 .pane-btn,
 .tab-close,
+.voice-close,
 .cog,
 .sb-bars,
 .sb-panes,

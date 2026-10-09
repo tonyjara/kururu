@@ -39,6 +39,7 @@ import type { Action } from "./keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
 import type { LaunchSettings } from "./launchers";
 import type { OpenRouterStatus } from "./openrouter";
+import type { SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "./voice";
 import type { VpsStatus } from "./vps";
 import type { WorkspaceDatabase } from "./databases";
 import type { NotifyEvent, NotifySettings } from "./notify";
@@ -385,6 +386,30 @@ export type ServerMessage =
    * nothing. Never carries the key — see `shared/openrouter.ts`.
    */
   | { type: "openrouter"; openrouter: OpenRouterStatus | null }
+  /**
+   * Sent on connect and whenever the voice's settings, its programs or its
+   * model change: everything Settings → Voice draws, and what the talk key
+   * needs to know. Never carries audio — see `shared/voice.ts`.
+   */
+  | { type: "voice"; voice: VoiceStatus }
+  /**
+   * One sentence of something the harness is saying, ready to be fetched
+   * from `/api/speech`. An event like `notify`, and broadcast rather than
+   * addressed: the voice is the profile's, and every window and phone on it
+   * hears what Kuru says, the same way all of them see its terminal. The
+   * bytes are fetched rather than sent so the socket stays words.
+   */
+  | { type: "speech"; speech: SpeechChunk }
+  /**
+   * Somebody is talking to Kuru, on this client or any other, or nobody is
+   * any more. While `hushed`, a client starts no sentence: what arrives
+   * waits, and going quiet cuts off what was playing, the way the talk key
+   * does on the client it was pressed on. `drop` is utterances that a clip
+   * just delivered has superseded, never to be played — see
+   * `Voice.supersede`. Sent on connect, so a client arriving mid-sentence
+   * is quiet too.
+   */
+  | { type: "hush"; hushed: boolean; drop: string[] }
   /** Raw pty output, exactly as it arrived, for a terminal this client is watching. */
   | { type: "output"; agentId: string; data: string }
   /**
@@ -718,6 +743,12 @@ export type ClientMessage =
    * start; both are ignored when it is already running. See `shared/harness.ts`.
    */
   | { type: "open-harness"; id?: number; fresh?: boolean; launcher?: string }
+  /**
+   * Auto Swap, on or off, for a profile: whether the screen follows the agent
+   * its harness acts on. A switch rather than a verb the harness could call,
+   * because it is the user's screen — see `Profile.autoSwap`.
+   */
+  | { type: "set-auto-swap"; profileId: string; on: boolean }
 
   /**
    * Put the server back on current source. It owns no ptys, so this costs a
@@ -865,15 +896,13 @@ export type ClientMessage =
   | { type: "split-with-file"; root: string; path: string; paneId: string; dir: "row" | "col"; before: boolean }
 
   /**
-   * Show a markdown file, from the file tree.
+   * Show a markdown file, from the file tree, as a tab of the focused pane.
    *
-   * The server picks the pane rather than the client, because "the reader" is a
-   * question about the arrangement: the focused pane if it is showing a
-   * document, else any pane in the workspace that is, else a new one split off
-   * the focused pane. A client
-   * that chose would have to send a split and then an `open-doc` to a pane id it
-   * had not seen yet. `focus` is `open-reader`'s — a phone wants to be taken to
-   * the document, a desktop wants its keyboard left where it was.
+   * The server picks the pane rather than the client, because which pane is
+   * focused is the server's to know — a client that named one could be naming
+   * the pane it last drew rather than the one focus has since moved to.
+   * `focus` is `open-reader`'s — a phone wants to be taken to the document, a
+   * desktop wants its keyboard left where it was.
    */
   | { type: "show-doc"; root: string; path: string; focus?: boolean }
 
@@ -888,7 +917,7 @@ export type ClientMessage =
    * Open a file from the tree in nvim.
    *
    * `agentId` names the terminal whose nvim to use, from a `find-editors`
-   * answer; null asks for a new one, in a split off the focused pane. Either way
+   * answer; null asks for a new one, in a tab of the focused pane. Either way
    * the pane it lands in is focused, because a file opened somewhere you are not
    * looking has not been opened as far as you can tell. Replied to with the
    * agent id it went to.
@@ -1169,6 +1198,24 @@ export type ClientMessage =
    */
   | { type: "set-openrouter-key"; id: number; key: string }
   | { type: "clear-openrouter-key" }
+  /**
+   * The voice's settings, all at once, on `set-notify`'s reasoning. The
+   * words themselves never travel this way: a clip goes to `/api/voice/hear`
+   * as a WAV, and a sentence comes back from `/api/speech` as one.
+   */
+  | { type: "set-voice"; voice: VoiceSettings }
+  /** Audition a voice in a language. Replied to with the utterance to fetch, once it has been made. */
+  | { type: "voice-preview"; id: number; voice: VoiceChoice; lang: VoiceLang }
+  /** Fetch the speech model. Progress comes back as `voice` messages. */
+  | { type: "download-voice-model" }
+  /**
+   * This client is talking: from the talk key's press until its clip has
+   * been heard and delivered, or thrown away. The server holds every
+   * client's speech for as long as any one says so (`hush`), and forgets a
+   * client's say when its socket goes. Re-sent on a reconnect, on
+   * `looking`'s reasoning.
+   */
+  | { type: "talking"; talking: boolean }
   /**
    * The database viewer's three questions. Each names a database by the id
    * the server minted for it, never by a URL or a path, and the server reads

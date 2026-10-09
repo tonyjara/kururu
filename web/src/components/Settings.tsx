@@ -39,6 +39,7 @@ import { ProfileSettings } from "./SettingsProfiles";
 import { WorkspaceSettings } from "./SettingsWorkspaces";
 import { StyleSettings } from "./SettingsStyles";
 import { StudioSettings } from "./SettingsStudio";
+import { VoiceSettings } from "./SettingsVoice";
 import { VpsSettings } from "./SettingsVps";
 
 export type Tab =
@@ -51,6 +52,7 @@ export type Tab =
   | "agents"
   | "processes"
   | "notify"
+  | "voice"
   | "vps"
   | "openrouter"
   | "keys"
@@ -130,6 +132,12 @@ const SECTIONS: ReadonlyArray<{
    */
   { id: "notify", label: "Notifications", pages: [["notify", "Notifications"]] },
   /**
+   * How you talk to the harness and how it talks back. Beside Notifications
+   * because both are about the window reaching you when you are not reading
+   * it — one with a croak, the other with a sentence.
+   */
+  { id: "voice", label: "Voice", pages: [["voice", "Voice"]] },
+  /**
    * The sidebar's gauges of things that are not this machine — a server, an
    * account — each set up once and then only looked at in the sidebar.
    */
@@ -168,6 +176,7 @@ export function Settings({
   profiles,
   logins,
   activeProfileId,
+  autoSwap,
   workspaces,
   activeWorkspaceId,
   projects,
@@ -195,6 +204,8 @@ export function Settings({
   profiles: ProfileSummary[];
   logins: LoginSummary[];
   activeProfileId: string;
+  /** The active profile's Auto Swap, for the Agents page. */
+  autoSwap: boolean;
   /**
    * Which page this opening is about. Only the opening: the tab you move to
    * afterwards is this window's business and not the server's, which is the same
@@ -300,7 +311,12 @@ export function Settings({
               onEditing={onEditing}
             />
           ) : tab === "agents" ? (
-            <AgentSettings launch={launch} />
+            <AgentSettings
+              launch={launch}
+              profileId={activeProfileId}
+              profileName={profiles.find((p) => p.id === activeProfileId)?.name ?? "this profile"}
+              autoSwap={autoSwap}
+            />
           ) : tab === "workspaces" ? (
             <WorkspaceSettings
               workspaces={workspaces}
@@ -315,6 +331,8 @@ export function Settings({
             <NotifySettings notify={notify} />
           ) : tab === "vps" ? (
             <VpsSettings onEditing={onEditing} />
+          ) : tab === "voice" ? (
+            <VoiceSettings onEditing={onEditing} />
           ) : tab === "openrouter" ? (
             <OpenRouterSettings onEditing={onEditing} />
           ) : tab === "processes" ? (

@@ -238,13 +238,13 @@ export function Sidebar({
    * drawer's argument, and remembered per device on the foot sections' — see
    * `useFolded`.
    */
-  const [folded, toggleFolded] = useFolded();
+  const [folded, toggleFolded, foldAgents] = useFolded();
   /**
    * The groups of *workspaces* that are folded, by name. Per device for the
    * same reason the agent groups are, and kept apart from them because a
    * workspace id and a group name are two vocabularies that could collide.
    */
-  const [foldedGroups, toggleGroup] = useFolded("kururu.sidebar.groups.folded");
+  const [foldedGroups, toggleGroup, foldGroups] = useFolded("kururu.sidebar.groups.folded");
   /** The workspace group whose name is being typed, if any. */
   const [renamingGroup, setRenamingGroup] = useState<string | null>(null);
   /** Where a group heading's menu is open, and which group it is. */
@@ -388,6 +388,16 @@ export function Sidebar({
    */
   const tint = new Map(profile.workspaces.map((w) => [w.id, colorValue(w.color)] as const));
 
+  /**
+   * Whether the Agents heading's fold-everything button opens rather than
+   * folds: only when every group drawn is already shut, so a list with one
+   * group left open is still a list it would tidy. It asks of the groups on
+   * screen and acts on them alone — folding a workspace with nothing in it
+   * would hide the first agent it ever gets, which is the thing `useFolded` is
+   * careful not to do.
+   */
+  const agentsFolded = groups.length > 0 && groups.every((group) => folded.has(group.id));
+
   /** The row an open menu belongs to, and where it sits in the list. */
   const menuAt = menu ? profile.workspaces.findIndex((w) => w.id === menu.workspaceId) : -1;
   const menuWorkspace = menuAt === -1 ? null : profile.workspaces[menuAt]!;
@@ -407,6 +417,8 @@ export function Sidebar({
 
   /** Every group in the profile, in the order the list draws them. */
   const groupNames = [...new Set(profile.workspaces.flatMap((w) => (w.group === null ? [] : [w.group])))];
+  /** The Workspaces heading's answer to the same question, asked of the groups of workspaces. */
+  const groupsFolded = groupNames.length > 0 && groupNames.every((group) => foldedGroups.has(group));
 
   /**
    * File a workspace under a group that does not exist yet, and open the new
@@ -811,6 +823,21 @@ export function Sidebar({
       <section className="side-section">
         <h2>
           Workspaces
+          {/* Every group of workspaces folded at once, or opened again once
+              they all are. The workspace you are in stays standing under its
+              folded group, as it does when one heading is clicked. Drawn only
+              while there is a group to fold, on the drawer's argument: a button
+              that can do nothing is chrome saying that a feature exists. */}
+          {groupNames.length > 0 && (
+            <button
+              className="mini side-fold-all"
+              onClick={() => foldGroups(groupNames, !groupsFolded)}
+              title={groupsFolded ? "Show every group of workspaces" : "Fold every group of workspaces away"}
+              aria-label={groupsFolded ? "Show all groups" : "Fold all groups"}
+            >
+              <Icon name={groupsFolded ? "unfold" : "fold"} />
+            </button>
+          )}
           <button className="mini" onClick={() => onRun("new-workspace")} title="New workspace (C-a C)" aria-label="New workspace">
             <Icon name="add" />
           </button>
@@ -1037,7 +1064,20 @@ export function Sidebar({
       </section>
 
       <section className="side-section side-agents">
-        <h2>Agents</h2>
+        <h2>
+          Agents
+          {/* The same, for every workspace's group of agents. */}
+          {groups.length > 0 && (
+            <button
+              className="mini side-fold-all"
+              onClick={() => foldAgents(groups.map((group) => group.id), !agentsFolded)}
+              title={agentsFolded ? "Show every workspace's agents" : "Fold every workspace's agents away"}
+              aria-label={agentsFolded ? "Show all agents" : "Fold all agents"}
+            >
+              <Icon name={agentsFolded ? "unfold" : "fold"} />
+            </button>
+          )}
+        </h2>
         <ul className="agent-list">
           {shown.length === 0 && (
             <li className="muted sidebar-empty">
@@ -2200,8 +2240,15 @@ function useDisclosure(key: string, initial: boolean): [boolean, () => void] {
  * and cost nothing — they name no group, so nothing reads them.
  *
  * The workspace groups use it too, under their own key and by name.
+ *
+ * The third thing it hands back folds or opens many at once, for the button
+ * that does every group. It writes only the ids it is given, never the whole
+ * set: the key is per device rather than per profile, so "open everything"
+ * meaning "empty the set" would open the groups of profiles you are not in.
  */
-function useFolded(key = "kururu.sidebar.folded"): [ReadonlySet<string>, (id: string) => void] {
+function useFolded(
+  key = "kururu.sidebar.folded",
+): [ReadonlySet<string>, (id: string) => void, (ids: readonly string[], shut: boolean) => void] {
   const [folded, setFolded] = useState<ReadonlySet<string>>(() => {
     try {
       const saved: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
@@ -2210,10 +2257,10 @@ function useFolded(key = "kururu.sidebar.folded"): [ReadonlySet<string>, (id: st
       return new Set();
     }
   });
-  const toggle = (workspaceId: string) =>
+  const change = (edit: (next: Set<string>) => void) =>
     setFolded((was) => {
       const next = new Set(was);
-      if (!next.delete(workspaceId)) next.add(workspaceId);
+      edit(next);
       try {
         localStorage.setItem(key, JSON.stringify([...next]));
       } catch {
@@ -2221,7 +2268,18 @@ function useFolded(key = "kururu.sidebar.folded"): [ReadonlySet<string>, (id: st
       }
       return next;
     });
-  return [folded, toggle];
+  const toggle = (id: string) =>
+    change((next) => {
+      if (!next.delete(id)) next.add(id);
+    });
+  const setMany = (ids: readonly string[], shut: boolean) =>
+    change((next) => {
+      for (const id of ids) {
+        if (shut) next.add(id);
+        else next.delete(id);
+      }
+    });
+  return [folded, toggle, setMany];
 }
 
 /**

@@ -768,6 +768,22 @@ export interface Profile {
    * like a card's run.
    */
   harness: HarnessState | null;
+  /**
+   * Auto Swap: while this profile is on screen, the screen follows the agent
+   * its harness is acting on — a message sent, a screen read, a card run.
+   * The server does it, off the tool calls, rather than the role asking the
+   * harness to remember `reveal_agent`, because a model that forgets one turn
+   * in ten is a switch that works nine times in ten. When a swap may happen —
+   * not under your hands, not twice in a breath — is `SwapGate`'s, in
+   * `shared/harness.ts`.
+   *
+   * On the profile rather than on `harness`, which is null until a session has
+   * been started and would take the switch with it; and per profile because
+   * each profile has a harness of its own. The switch is in Settings → Agents,
+   * for the profile on screen. Off unless somebody turned it on, and kept
+   * across a cold start, since it is a preference and not a process.
+   */
+  autoSwap: boolean;
 }
 
 /** A profile's harness session: the conversation, the launcher it was started on, and the terminal it is in. */

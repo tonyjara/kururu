@@ -92,8 +92,16 @@ interface StoredProfile {
   loginKey?: string;
   /** The profile's own cards, when it has any. See `Profile.board`. */
   board?: Board;
-  /** Its harness, as a conversation to resume — see `Profile.harness`. Never with a process id. */
+  /**
+   * Its harness, as a conversation to resume — see `Profile.harness`. With the
+   * terminal it is in, because the terminal outlives this file's writer: the
+   * server restarts on every edit and the pty host does not, so the id is
+   * still the harness's when the server comes back. Checked against the
+   * host's live set at startup, like every tab.
+   */
   harness?: HarnessState;
+  /** Auto Swap, written only when on. See `Profile.autoSwap`. */
+  autoSwap?: boolean;
   workspaces: StoredWorkspace[];
   /** Index rather than id: ids are regenerated on the way back in. */
   activeWorkspace: number;
@@ -150,9 +158,15 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
       // Always, empty or not: its counter must survive a cold start so that a
       // number is not handed out twice, and its columns are a person's choice.
       board: storedBoard(profile.board),
-      // The conversation to resume and the launcher it ran on; the terminal
-      // it was in is a process and goes, the same as a card's run.
-      ...(profile.harness ? { harness: { ...profile.harness, agentId: null } } : {}),
+      // The conversation to resume, the launcher it ran on, and the terminal
+      // it is in. It used to drop the terminal as a card's run does — but a
+      // card's run is re-found through the card, and nothing re-found the
+      // harness, so every server restart forgot which agent it was and the
+      // status feed and the voice fell silent until it was reopened.
+      ...(profile.harness ? { harness: profile.harness } : {}),
+      // A preference rather than a process, so it survives the cold start
+      // the rest of this file is careful about.
+      ...(profile.autoSwap ? { autoSwap: true } : {}),
       activeWorkspace: Math.max(
         0,
         profile.workspaces.findIndex((w) => w.id === profile.activeWorkspaceId),
@@ -352,6 +366,7 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
       // process, and a cold start has none to remember.
       hiddenAgents: [],
       harness: adoptHarness(stored.harness),
+      autoSwap: stored.autoSwap === true,
     });
   }
   if (profiles.length === 0) return null;

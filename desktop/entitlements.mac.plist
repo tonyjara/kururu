@@ -30,5 +30,11 @@
        code signed by a different team, and a prebuilt binary is exactly that. -->
   <key>com.apple.security.cs.disable-library-validation</key>
   <true/>
+
+  <!-- The talk key opens the microphone in the renderer. Under the hardened
+       runtime the device is refused without this, and refused quietly: the
+       stream opens and carries silence. -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
 </dict>
 </plist>

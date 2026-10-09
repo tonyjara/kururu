@@ -10,6 +10,7 @@
   "dependencies": {
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/headless": "^6.0.0",
+    "kokoro-js": "^1.2.1",
     "markdown-it": "^15.0.2",
     "node-pty": "^1.1.0",
     "pg": "^8.23.1",

@@ -15,11 +15,15 @@
  * when there is no server there is genuinely nobody who can say, and this prints
  * that rather than inventing it.
  *
+ * Below both, the last few lines of `lifecycle.log`, read off the disk rather
+ * than asked of the server — because the time somebody most wants to know why
+ * the server went away is while it is still away.
+ *
  *   bun run status                    this machine
- *   bun run status http://vm:7717     a server elsewhere, host line still local
+ *   bun run status http://vm:7717     a server elsewhere, host and record still local
  */
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -27,6 +31,13 @@ const PORT = process.env.KURURU_PORT ?? 7717;
 const socket =
   process.env.KURURU_HOST_SOCK ||
   join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu", "ptyhost.sock");
+/** Where `server/src/lifecycle.ts` and `run.mjs` write, by the same rule. */
+const lifecycle = join(
+  process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu"),
+  "lifecycle.log",
+);
+/** How many lines of it to show: enough to see the last restart and what came before it. */
+const RECENT = 8;
 
 const argument = process.argv[2];
 const server = (argument || `http://127.0.0.1:${PORT}`).replace(/\/+$/, "");
@@ -66,6 +77,57 @@ function uptime(pid) {
   }
 }
 
+/**
+ * The last lines of the record, oldest first. Each line was written as JSON by
+ * one of three processes; one that does not parse is dropped rather than
+ * allowed to hide the others, which is what `parseLifecycle` does too.
+ */
+function recent(count) {
+  let text = "";
+  for (const path of [`${lifecycle}.1`, lifecycle]) {
+    try {
+      text += `${readFileSync(path, "utf8")}\n`;
+    } catch {
+      // Not written yet, or never moved aside.
+    }
+  }
+  const events = [];
+  for (const line of text.split("\n")) {
+    try {
+      const event = JSON.parse(line);
+      if (event && typeof event.at === "string" && typeof event.why === "string") events.push(event);
+    } catch {
+      // Blank, or torn.
+    }
+  }
+  return events.slice(-count);
+}
+
+/** A time that is today's as a time and anybody else's with its date. */
+function when(iso) {
+  const at = new Date(iso);
+  const time = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  if (at.toDateString() === new Date().toDateString()) return time;
+  return `${at.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+}
+
+function history() {
+  const events = recent(RECENT);
+  console.log();
+  if (!events.length) {
+    row("record", dim("nothing yet"), short(lifecycle));
+    return;
+  }
+  row("record", "", short(lifecycle));
+  const width = Math.max(...events.map((event) => when(event.at).length)) + 2;
+  for (const event of events) {
+    const bad = event.what === "crash" || event.what === "down" || event.what === "orphaned";
+    const what = String(event.what ?? "").padEnd(10);
+    console.log(`  ${dim(when(event.at).padEnd(width))}${String(event.by ?? "").padEnd(8)}${bad ? down(what) : what}${event.why}`);
+    if (event.error && !event.why.includes(event.error)) console.log(`  ${" ".repeat(width + 18)}${dim(event.error)}`);
+  }
+}
+
 async function ask(path) {
   try {
     const response = await fetch(`${server}${path}`, { signal: AbortSignal.timeout(2000) });
@@ -92,6 +154,7 @@ if (pid) {
 const health = await ask("/api/health");
 if (!health) {
   row("server", down("down"), `nothing answered at ${server}`);
+  history();
   console.log();
   console.log(
     pid
@@ -101,7 +164,13 @@ if (!health) {
   process.exit(pid ? 0 : 1);
 }
 
-row("server", up("up"), `${server}${remote ? "" : ` · dev servers ${health.devServers}`}`);
+const since = health.life?.startedAt ? ` · since ${when(health.life.startedAt)}` : "";
+row("server", up("up"), `${server}${since}${remote ? "" : ` · dev servers ${health.devServers}`}`);
+// A server that has lost its runner looks exactly like one that has not, until
+// a save fails to restart it — which is the whole reason to say it here.
+if (health.life?.orphaned) {
+  row("supervisor", down("gone"), "saves will not restart this server and prefix+B is refused — restart `bun run dev`");
+}
 // The host keeps the bundle it started with, so a server can be ahead of it —
 // silently, unless the handshake said so and somebody prints it. Only when it
 // is behind: a current host is the normal state and not worth a line.
@@ -127,7 +196,9 @@ if (agents.length) {
   }
 }
 
+history();
+
 if (remote) {
   console.log();
-  console.log(dim("The pty host line is this machine's; that server has its own."));
+  console.log(dim("The pty host and the record are this machine's; that server has its own."));
 }

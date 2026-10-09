@@ -58,8 +58,12 @@ async function bundle(entry, outfile) {
     sourcemap: true,
     define: { KURURU_VERSION: JSON.stringify(VERSION) },
     // Native, and resolved at runtime. `ws` could be bundled but is left external
-    // alongside it so the two are found the same way.
-    external: ["node-pty", "ws"],
+    // alongside it so the two are found the same way. The voice's stack is
+    // external for the same reason node-pty is — `onnxruntime-node` and
+    // `sharp` are native — and is imported dynamically by `voice.ts`, so a
+    // server that cannot find it falls back to `say` rather than failing to
+    // start.
+    external: ["node-pty", "ws", "kokoro-js", "@huggingface/transformers", "phonemizer", "onnxruntime-node", "onnxruntime-web", "sharp"],
     /**
      * A `require` for the CommonJS inside the bundle. `pg` is CommonJS and asks
      * for `events` and `net` with `require`, which esbuild leaves as a call
@@ -79,6 +83,10 @@ await bundle("server/src/index.ts", "dist/server.mjs");
 // What a Claude Code hook runs. Beside the server so `hooks.ts` can find it, and
 // bundled so the packaged app can run it with no checkout and no `bun`.
 await bundle("server/src/report-cli.ts", "dist/report.mjs");
+// Kokoro, which the server starts as a process of its own rather than loading:
+// see `server/src/kokoro.ts`. Beside the server because that is where
+// `voice.ts` looks, and inside `dist` so the app ships it with no new rule.
+await bundle("server/src/kokoro.ts", "dist/kokoro.mjs");
 
 /**
  * node-pty spawns a small helper binary rather than forking the host process,

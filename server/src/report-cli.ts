@@ -33,6 +33,7 @@
  * the one that makes `/clear` empty the ring the moment it happens.
  */
 import { isAgentStatus } from "../../shared/model";
+import { asksNothing } from "./hooks";
 import { STANDARD_WINDOW, readContext } from "./transcript";
 
 /** A turn must never wait on us. Long enough for a local socket, and no longer. */
@@ -94,10 +95,14 @@ async function main(): Promise<void> {
   // Not running inside kururu. The overwhelmingly common case, and not an error.
   if (!agent) return;
 
-  const asked = process.argv[2];
-  const status = asked && isAgentStatus(asked) ? asked : undefined;
-
   const payload = await readPayload();
+  // The idle reminder and its kind arrive on the `blocked` hook and are not
+  // questions. They still carry the context reading. See `asksNothing`.
+  const quiet = asksNothing(payload);
+
+  const asked = process.argv[2];
+  const status = asked && isAgentStatus(asked) && !quiet ? asked : undefined;
+
   const path = typeof payload?.transcript_path === "string" ? payload.transcript_path : "";
   /**
    * `SessionStart` is the one event where no file is still an answer. After
@@ -107,7 +112,7 @@ async function main(): Promise<void> {
    */
   const starting = payload?.hook_event_name === "SessionStart" && payload.source !== "resume";
   const context = (path ? await readContext(path) : null) ?? (starting ? { used: 0, window: STANDARD_WINDOW } : null);
-  const message = activityFrom(payload);
+  const message = quiet ? undefined : activityFrom(payload);
 
   // Nothing to say. The endpoint would answer 400, which is correct of it and
   // pointless to provoke.

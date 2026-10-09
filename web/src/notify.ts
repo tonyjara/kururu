@@ -75,6 +75,15 @@ function audio(): { ctx: AudioContext; gain: GainNode } | null {
 }
 
 /**
+ * The same context, for the voice. One per page is the whole argument above,
+ * and a second one for speech would be a second thing to unlock — so the
+ * player in `voice.ts` borrows this one and hangs its own gain off it.
+ */
+export function audioOutput(): { ctx: AudioContext; gain: GainNode } | null {
+  return audio();
+}
+
+/**
  * Let the page make a noise, at the first moment the browser will allow it.
  *
  * Autoplay policy needs a gesture and gives no way to ask whether one has

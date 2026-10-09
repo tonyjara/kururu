@@ -43,8 +43,56 @@ const EVENTS: [event: string, status: string | null][] = [
   ["UserPromptSubmit", "working"],
   ["PreToolUse", "working"],
   ["Stop", "done"],
+  // Only when it is a question; `asksNothing` drops the rest in the reporter.
   ["Notification", "blocked"],
 ];
+
+/**
+ * The notifications that are Claude Code asking somebody something.
+ *
+ * `Notification` is not one event but more than a dozen, told apart by the
+ * payload's `notification_type`, and `blocked` was being reported for all of them. The
+ * one that showed is `idle_prompt` — "Claude is waiting for your input", sent
+ * about a minute after a turn ends with nothing more to do — which turned
+ * every finished agent into a blocked one a minute later, a second card and a
+ * second line in the harness's feed for a turn it had already been told
+ * about. The others that are not questions are just as wrong as `blocked`: a
+ * login that worked, an elicitation that closed, computer use starting, a
+ * `PushNotification` Claude sent on purpose.
+ *
+ * So the questions are listed rather than the rest, because `blocked` is the
+ * one status that asks a person to go and look, and a type added in a later
+ * version should have to earn it. A dialog that names no type of its own —
+ * plan mode, a question from `AskUserQuestion` — is sent as
+ * `permission_prompt` (read out of 2.1.294), so it is on the list already.
+ */
+const ASKING: ReadonlySet<string> = new Set([
+  "permission_prompt",
+  "worker_permission_prompt",
+  "elicitation_dialog",
+  "elicitation_url_dialog",
+  "agent_needs_input",
+]);
+
+/**
+ * The idle reminder's words, for a Claude Code that sends no type. Every
+ * notification was `blocked` before the types existed, and of the two there
+ * were then, this is the one that was never a question.
+ */
+const IDLE_MESSAGE = "Claude is waiting for your input";
+
+/**
+ * Whether a hook payload is a `Notification` that asks nobody anything — in
+ * which case it reports no status and no words, so the dot stays `done` and
+ * the prompt stays on the row. Any other event is not this function's to judge.
+ * Pure, for the test.
+ */
+export function asksNothing(payload: Record<string, unknown> | null): boolean {
+  if (payload?.hook_event_name !== "Notification") return false;
+  const type = payload.notification_type;
+  if (typeof type === "string") return !ASKING.has(type);
+  return payload.message === IDLE_MESSAGE;
+}
 
 /** Single-quoted for `sh`, which is what runs a hook's command. */
 function quote(value: string): string {

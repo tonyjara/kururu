@@ -42,6 +42,7 @@ import type { LaunchSettings } from "../../shared/launchers";
 import type { MergeReply, MergeResolution, ProjectSettings, WorktreeOutcome, WorktreeStatus } from "../../shared/projects";
 import type { NotifySettings } from "../../shared/notify";
 import type { OpenRouterStatus } from "../../shared/openrouter";
+import type { Heard, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "../../shared/voice";
 import type { VpsEntry, VpsStatus } from "../../shared/vps";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { Grid } from "./grid";
@@ -83,6 +84,8 @@ export interface KururuState {
    * sent the same way. See `shared/databases.ts`.
    */
   databases: WorkspaceDatabase[];
+  /** The voice: its settings, its programs, its model, its voices. Null until the server has said. See `shared/voice.ts`. */
+  voice: VoiceStatus | null;
 }
 
 const RETRY_MS = [200, 500, 1000, 2000, 4000];
@@ -97,6 +100,7 @@ let state: KururuState = {
   vps: [],
   openrouter: null,
   databases: [],
+  voice: null,
 };
 
 const listeners = new Set<() => void>();
@@ -229,6 +233,7 @@ function connect(): void {
      * reach through a reconnect and reshape itself.
      */
     if (!atScreen) send({ type: "looking", looking: false });
+    if (amTalking) send({ type: "talking", talking: true });
     if (watched.size > 0 || warmed.size > 0) sendWatch();
     for (const open of sinks.values()) {
       for (const sink of open) deliver(() => sink.stale());
@@ -263,6 +268,17 @@ function connect(): void {
         break;
       case "openrouter":
         set({ openrouter: msg.openrouter });
+        break;
+      case "voice":
+        set({ voice: msg.voice });
+        break;
+      case "speech":
+        // An event, like `notify`, and wrapped the same way: the player must
+        // not take the socket's dispatch down with it.
+        if (speechListener) deliver(() => speechListener?.(msg.speech));
+        break;
+      case "hush":
+        if (hushListener) deliver(() => hushListener?.(msg.hushed === true, Array.isArray(msg.drop) ? msg.drop : []));
         break;
       case "databases":
         set({ databases: msg.databases });
@@ -314,6 +330,10 @@ function connect(): void {
     set({ connected: false });
     for (const [, waiting] of pending) waiting.reject(new Error("disconnected"));
     pending.clear();
+    // The server that said somebody was talking is gone, and the next one
+    // says again on connect. A hush nobody is left to lift would keep Kuru
+    // quiet on this page for good.
+    if (hushListener) deliver(() => hushListener?.(false, []));
     const delay = RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)]!;
     attempt++;
     setTimeout(connect, delay);
@@ -917,8 +937,8 @@ export function splitWithFile(root: string, path: string, paneId: string, dir: "
 }
 
 /**
- * Read a markdown file from the tree. The server decides which reader shows it —
- * see `show-doc` — and `focus` is for the window that can only see one pane.
+ * Read a markdown file from the tree, as a tab of the focused pane — see
+ * `show-doc` — and `focus` is for the window that can only see one pane.
  */
 export function showDoc(root: string, path: string, focus?: boolean): void {
   send({ type: "show-doc", root, path, focus });
@@ -930,8 +950,8 @@ export function findEditors(): Promise<EditorChoice[]> {
 }
 
 /**
- * Open a file in nvim: the one in that terminal, or a new one in a split when
- * `agentId` is null. Waits, because "nvim did not answer" is a real outcome and
+ * Open a file in nvim: the one in that terminal, or a new one in a tab of the
+ * focused pane when `agentId` is null. Waits, because "nvim did not answer" is a real outcome and
  * the next snapshot would not explain it.
  */
 export function openInEditor(root: string, path: string, agentId: string | null): Promise<string> {
@@ -1030,6 +1050,79 @@ export function clearOpenRouterKey(): void {
   send({ type: "clear-openrouter-key" });
 }
 
+// ---------------------------------------------------------------------------
+// The voice
+// ---------------------------------------------------------------------------
+
+let speechListener: ((chunk: SpeechChunk) => void) | null = null;
+
+/** Who plays what the harness says. One listener, like `onNotify`: the player in `voice.ts`. */
+export function onSpeech(listener: (chunk: SpeechChunk) => void): () => void {
+  speechListener = listener;
+  return () => {
+    if (speechListener === listener) speechListener = null;
+  };
+}
+
+let hushListener: ((hushed: boolean, drop: string[]) => void) | null = null;
+
+/** Who holds speech while somebody talks, and throws away what was superseded. The player in `voice.ts`, like `onSpeech`. */
+export function onHush(listener: (hushed: boolean, drop: string[]) => void): () => void {
+  hushListener = listener;
+  return () => {
+    if (hushListener === listener) hushListener = null;
+  };
+}
+
+/**
+ * This page is talking to Kuru, so nothing anywhere should speak over it.
+ * Deduped, and re-sent from `onopen` like `looking`: the server keeps no
+ * memory of a socket that went away, and a reconnect mid-sentence must not
+ * let the other windows start talking.
+ */
+let amTalking = false;
+
+export function talking(on: boolean): void {
+  if (on === amTalking) return;
+  amTalking = on;
+  send({ type: "talking", talking: on });
+}
+
+/** The voice's settings, all at once, on `setNotify`'s pattern. */
+export function setVoice(voice: VoiceSettings): void {
+  send({ type: "set-voice", voice });
+}
+
+/** Audition a voice. Resolves with the utterance to fetch; rejects with why it could not be made. */
+export function previewVoice(voice: VoiceChoice, lang: VoiceLang): Promise<{ utterance: string }> {
+  return request((id) => ({ type: "voice-preview", id, voice, lang })) as Promise<{ utterance: string }>;
+}
+
+export function downloadVoiceModel(): void {
+  send({ type: "download-voice-model" });
+}
+
+/**
+ * A clip to the server, as a WAV, for the profile on screen. A fetch and not
+ * the socket because it is a binary body of a few hundred kilobytes, which the
+ * socket carries as JSON strings and should not. Resolves with what was heard.
+ */
+export async function hearClip(profileId: string, wav: ArrayBuffer): Promise<Heard> {
+  const res = await fetch(`/api/voice/hear?profile=${encodeURIComponent(profileId)}`, {
+    method: "POST",
+    headers: { "content-type": "audio/wav" },
+    body: wav,
+  });
+  const body = (await res.json()) as Heard | { error: string };
+  if (!res.ok || "error" in body) throw new Error("error" in body ? body.error : `the server said ${res.status}`);
+  return body;
+}
+
+/** Where one sentence of an utterance is fetched from. */
+export function speechUrl(utterance: string, seq: number): string {
+  return `/api/speech?u=${encodeURIComponent(utterance)}&seq=${seq}`;
+}
+
 /**
  * The database viewer's three questions. Each rejects with what Postgres
  * said, in its own words, which the viewer shows where the answer would go.
@@ -1102,6 +1195,11 @@ export function revealAgent(agentId: string): void {
  */
 export function openHarness(options: { fresh?: boolean; launcher?: string } = {}): void {
   send({ type: "open-harness", ...options });
+}
+
+/** Auto Swap for a profile — the screen following what its harness acts on. The server does the following; this is only the switch. */
+export function setAutoSwap(profileId: string, on: boolean): void {
+  send({ type: "set-auto-swap", profileId, on });
 }
 
 // ---------------------------------------------------------------------------

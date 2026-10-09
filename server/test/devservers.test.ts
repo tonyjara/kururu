@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from "bun:test";
 import {
+  isKururu,
   matchDevCommand,
   parseListeners,
   parseProcTable,
@@ -144,5 +145,33 @@ describe("stopTargets", () => {
 
   it("finds nothing to end for a process that has already gone", () => {
     expect(stopTargets(999, table, spare)).toBeNull();
+  });
+});
+
+/**
+ * Kururu by the process, never by the port: its vite on 5173 is left out, and
+ * another project's vite on the same 5173 is not.
+ */
+describe("isKururu", () => {
+  const self = { pid: 100, webDir: "/Users/x/kururu/web" };
+
+  it("is this process, on any port it holds", () => {
+    expect(isKururu({ pid: 100 }, self)).toBe(true);
+    expect(isKururu({ pid: 100, cwd: "/anywhere" }, self)).toBe(true);
+  });
+
+  it("is a listener working in kururu's own web directory", () => {
+    expect(isKururu({ pid: 200, cwd: "/Users/x/kururu/web" }, self)).toBe(true);
+  });
+
+  it("is not another project's vite, nor a worktree of kururu", () => {
+    expect(isKururu({ pid: 200, cwd: "/Users/x/other/web" }, self)).toBe(false);
+    expect(isKururu({ pid: 200, cwd: "/Users/x/kururu/web/sub" }, self)).toBe(false);
+    expect(isKururu({ pid: 200, cwd: "/Users/x/kururu/.worktrees/card/web" }, self)).toBe(false);
+  });
+
+  it("does not guess when either side is unknown", () => {
+    expect(isKururu({ pid: 200 }, self)).toBe(false);
+    expect(isKururu({ pid: 200, cwd: "/Users/x/kururu/web" }, { pid: 100, webDir: null })).toBe(false);
   });
 });

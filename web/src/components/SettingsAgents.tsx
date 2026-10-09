@@ -13,6 +13,11 @@
  *
  * It holds nothing, like every page here: a tick sends a verb and the box draws
  * what the snapshot says, so the phone's menu changes with the desktop's.
+ *
+ * Auto Swap is the one row that is not about launching, and the one that is the
+ * profile's rather than the machine's — see `Profile.autoSwap`. It is here
+ * because this is where the agents are configured, and it says which profile
+ * it is for because nothing else on the page is per profile.
  */
 import {
   AGENT_CLIS,
@@ -25,7 +30,18 @@ import {
 } from "../../../shared/launchers";
 import * as api from "../session";
 
-export function AgentSettings({ launch }: { launch: LaunchSettings }) {
+export function AgentSettings({
+  launch,
+  profileId,
+  profileName,
+  autoSwap,
+}: {
+  launch: LaunchSettings;
+  /** The profile on screen, whose Auto Swap the switch below is. */
+  profileId: string;
+  profileName: string;
+  autoSwap: boolean;
+}) {
   const toggleCli = (cli: AgentCli, on: boolean) =>
     api.setLaunch({
       ...launch,
@@ -90,6 +106,21 @@ export function AgentSettings({ launch }: { launch: LaunchSettings }) {
           </section>
         );
       })}
+
+      <section className="set-section">
+        <h3 className="set-h">Harness</h3>
+        <label className="set-check set-check-row">
+          <input type="checkbox" checked={autoSwap} onChange={(event) => api.setAutoSwap(profileId, event.target.checked)} />
+          Auto Swap
+          <span className="set-note set-note-inline">— for {profileName}</span>
+        </label>
+        <p className="set-note">
+          Whenever the harness acts on an agent — sends it a message, reads it, starts it — the screen
+          goes to that agent. It waits while you are typing, gives way when you move somewhere yourself,
+          and holds each agent a few seconds rather than flicking between them. <code>C-a z</code> takes
+          you back.
+        </p>
+      </section>
 
       <p className="set-note set-note-under">
         The model list is written into kururu and refreshed by the <code>update-models</code> skill,
