@@ -5,10 +5,11 @@
  * here with the same status, and that the paths are quoted for `sh`: an app
  * lives under `/Applications/Some Name.app`, and a hook whose command splits on
  * the space fails silently on every turn — which is the failure this exists to
- * end.
+ * end. And that a `Notification` is only `blocked` when it is a question: the
+ * idle reminder a minute after every turn was the one that was not.
  */
 import { describe, expect, it } from "bun:test";
-import { hookSettings, runsReporter } from "../src/hooks";
+import { asksNothing, hookSettings, runsReporter } from "../src/hooks";
 
 type Settings = { hooks: Record<string, { hooks: { type: string; async: boolean; command: string }[] }[]> };
 
@@ -54,5 +55,42 @@ describe("runsReporter", () => {
     for (const settings of [{}, null, "hooks", { hooks: [] }, { hooks: { Stop: "x" } }, one(42)]) {
       expect(runsReporter(settings, script)).toBe(false);
     }
+  });
+});
+
+describe("asksNothing", () => {
+  const note = (fields: Record<string, unknown>) => ({ hook_event_name: "Notification", ...fields });
+
+  it("keeps blocked for the notifications that are questions", () => {
+    for (const type of [
+      "permission_prompt",
+      "worker_permission_prompt",
+      "elicitation_dialog",
+      "elicitation_url_dialog",
+      "agent_needs_input",
+    ]) {
+      expect(asksNothing(note({ notification_type: type, message: "Claude needs your permission to use Bash" }))).toBe(false);
+    }
+  });
+
+  it("drops the idle reminder, which is a turn that already ended", () => {
+    expect(asksNothing(note({ notification_type: "idle_prompt", message: "Claude is waiting for your input" }))).toBe(true);
+  });
+
+  it("drops the rest, and a type it has never heard of", () => {
+    for (const type of ["auth_success", "elicitation_complete", "computer_use_enter", "push_notification", "agent_completed", "some_new_type"]) {
+      expect(asksNothing(note({ notification_type: type, message: "x" }))).toBe(true);
+    }
+  });
+
+  it("goes by the words for a Claude Code that sends no type", () => {
+    expect(asksNothing(note({ message: "Claude is waiting for your input" }))).toBe(true);
+    expect(asksNothing(note({ message: "Claude needs your permission to use Bash" }))).toBe(false);
+  });
+
+  it("has nothing to say about any other event, or no payload", () => {
+    expect(asksNothing({ hook_event_name: "Stop", notification_type: "idle_prompt" })).toBe(false);
+    expect(asksNothing({ hook_event_name: "PreToolUse" })).toBe(false);
+    expect(asksNothing(null)).toBe(false);
   });
 });

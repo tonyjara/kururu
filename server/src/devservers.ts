@@ -275,6 +275,39 @@ export function stopTargets(
 }
 
 /**
+ * What kururu is, to its own scan.
+ *
+ * Kururu listens like a dev server and is started like one — `bun run dev`
+ * above the server, `bun run --cwd web dev` above the window's vite — so a scan
+ * that walks up looking for a name finds it every time, and a preview of kururu
+ * is only kururu again. Both are known by the process, never by the port: 5173
+ * is vite's default for every project on the machine, and another one's vite
+ * there is exactly what the list is for whenever kururu's is not running.
+ */
+export interface Self {
+  /** This process — the server on :7717 and every preview proxy it has opened. */
+  pid: number;
+  /**
+   * The directory kururu's web app is built from, as a real path, or null where
+   * there is none (a packaged app serves a built copy and runs no vite).
+   *
+   * The window's vite is a different process from ours, started by Electron
+   * rather than by us, so there is no pid to hold. Its working directory is the
+   * thing about it that is kururu's — `bun run --cwd web dev` is how both the
+   * window and `bun run dev:web` start it — and the kernel says what that is.
+   * Equality and not a prefix: a worktree of kururu has a `web` of its own,
+   * and its vite is a project under work like any other.
+   */
+  webDir: string | null;
+}
+
+/** Whether a listener is kururu itself. `cwd` is absent until it has been asked. */
+export function isKururu(listener: { pid: number; cwd?: string }, self: Self): boolean {
+  if (listener.pid === self.pid) return true;
+  return self.webDir !== null && listener.cwd === self.webDir;
+}
+
+/**
  * `ps -eo args` over a busy machine runs to a few hundred KB and lsof is no
  * smaller, so the default 1 MB ceiling is not the headroom it looks like:
  * overflowing it kills the child and the scan silently finds nothing.
@@ -297,7 +330,7 @@ function run(cmd: string[]): Promise<string> {
  * Every dev server listening right now, lowest port first — ports are what the
  * user recognises ("the one on 5173"), so that is the sort.
  */
-export async function scanDevServers(): Promise<DevServer[]> {
+export async function scanDevServers(self: Self): Promise<DevServer[]> {
   const [lsofOut, psOut] = await Promise.all([
     run(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pn"]),
     run(["ps", "-eo", "pid=,ppid=,args="]),
@@ -325,9 +358,10 @@ export async function scanDevServers(): Promise<DevServer[]> {
      *
      * Only this process, never its children: the pty host is a different pid,
      * and the dev servers running inside kururu's own terminals are the entire
-     * point of the scan.
+     * point of the scan. The window's vite is the other half of `isKururu`, and
+     * waits for the cwd below.
      */
-    if (pid === process.pid) continue;
+    if (isKururu({ pid }, self)) continue;
     const match = resolveDevCommand(pid, table);
     if (!match) continue;
     for (const port of ports) {
@@ -337,14 +371,15 @@ export async function scanDevServers(): Promise<DevServer[]> {
 
   // cwd is the label that tells two vite servers apart, so it is worth the
   // extra lsof — but only for the handful that matched. Same question a new tab
-  // asks about a terminal, so it is asked in one place: see `cwd.ts`.
+  // asks about a terminal, so it is asked in one place: see `cwd.ts`. It is also
+  // what tells kururu's own vite from the rest, so the filter waits for it.
   await Promise.all(
     found.map(async (server) => {
       server.cwd = await processCwd(server.pid);
     }),
   );
 
-  return found.sort((a, b) => a.port - b.port);
+  return found.filter((server) => !isKururu(server, self)).sort((a, b) => a.port - b.port);
 }
 
 /** How long a dev server is given to shut itself down before it is made to. */

@@ -228,7 +228,8 @@ agents make files.
 for people who already have an editor: kururu lists every nvim running in the
 workspace, nearest first, and `Enter` sends the file to that one with `:drop` —
 switching to it if it is already open. With no nvim running, the choice is a new
-one in a split. Right-click a file for *Open in nvim* on markdown too, or to copy
+one. A document or a new nvim lands as a tab of the pane you were last in, never
+a pane of its own. Right-click a file for *Open in nvim* on markdown too, or to copy
 its path. On a phone the tree is a full-screen sheet, and picking a file from it
 still opens it in the nvim on your desktop.
 
@@ -298,11 +299,36 @@ and tells you. Closing its tab does not lose it: the same button resumes the
 conversation.
 
 It is a session, not a service: billed to your subscription like any other,
-visible in a pane, resumable. Two things it needs. Agents report their inbox
-and their last reply through the hooks above, so a Claude without them is
-reached by typing into its terminal and read from its screen only. And a
+visible in a pane, resumable. What it sends an agent is typed into that
+agent's terminal, so the agent takes it as your own words — slash commands
+included — and kururu waits for the agent's turn to end, for a prompt to be
+answered, or for you to stop typing there before it goes in. Two things it
+needs. Agents report their turns and their last reply through the hooks
+above, so a Claude without them is timed and read from its screen only. And a
 permission prompt an agent shows is yours to answer: the harness reads it to
 you and presses keys only as you say.
+
+### Talking to it
+
+Hold the **right Control key** and speak; let go, and the words go to the
+harness. Tap it instead and the microphone stays open until the next tap;
+Escape drops the clip. What the harness says at the end of each turn is read
+aloud, whether you spoke or typed, and the microphone button in the status
+bar is the same key for a thumb. A pill over the panes shows the level while
+it listens, what it heard, and what is being said.
+
+Everything runs on your Mac and nothing leaves it. Hearing is Apple's
+on-device recogniser, through `yap`; speaking is Kokoro, a small model on the
+CPU, with the Mac's own voices until it is downloaded. English and Spanish,
+mixed if you like. Settings → Voice picks the key, the languages, the
+voices, and says what to install:
+
+```sh
+brew install yap        # the ears — macOS 26 or later
+brew install espeak-ng  # Spanish through Kokoro
+```
+
+On a phone the microphone needs https; see `docs/voice.md`.
 
 ## Settings
 

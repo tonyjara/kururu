@@ -62,10 +62,47 @@ extraResources:
       - prebuilds/darwin-x64/**
   - from: ../node_modules/ws
     to: node_modules/ws
+  # The voice's stack, so the packaged server can speak with Kokoro. Darwin
+  # binaries only, on node-pty's reasoning; `onnxruntime-node` carries Linux
+  # and Windows builds that would otherwise be signed for nothing. The server
+  # imports all of this lazily and falls back to the Mac's own voices if any
+  # of it is missing, so an incomplete copy costs a voice and not the app.
+  # UNVERIFIED in a built DMG as of 0.2.0 — see docs/voice.md.
+  - from: ../node_modules/kokoro-js
+    to: node_modules/kokoro-js
+  - from: ../node_modules/phonemizer
+    to: node_modules/phonemizer
+  - from: ../node_modules/@huggingface/transformers
+    to: node_modules/@huggingface/transformers
+  - from: ../node_modules/@huggingface/jinja
+    to: node_modules/@huggingface/jinja
+  - from: ../node_modules/onnxruntime-common
+    to: node_modules/onnxruntime-common
+  - from: ../node_modules/onnxruntime-web
+    to: node_modules/onnxruntime-web
+  - from: ../node_modules/onnxruntime-node
+    to: node_modules/onnxruntime-node
+    filter:
+      - package.json
+      - LICENSE
+      - dist/**
+      - bin/napi-v3/darwin/**
+  - from: ../node_modules/sharp
+    to: node_modules/sharp
+  - from: ../node_modules/@img
+    to: node_modules/@img
+    filter:
+      - sharp-darwin-*/**
+      - sharp-libvips-darwin-*/**
+      - colour/**
 
 mac:
   category: public.app-category.developer-tools
   icon: icon/kururu.icns
+  # The microphone. macOS refuses the device to an app whose Info.plist does
+  # not say why it wants it, silently, as a stream with no samples in it.
+  extendInfo:
+    NSMicrophoneUsageDescription: Kururu listens while you hold the talk key, so you can speak to the harness. Nothing is recorded otherwise.
   # Two DMGs rather than one universal binary. A universal Electron is both
   # copies of everything and about twice the download, paid by every arm64 user
   # to spare an Intel one a choice of two links — and a Homebrew cask picks the

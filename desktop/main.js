@@ -23,7 +23,7 @@
  */
 const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = require("electron");
 const { execFileSync, spawn } = require("node:child_process");
-const { existsSync, mkdirSync, openSync, closeSync } = require("node:fs");
+const { appendFileSync, existsSync, mkdirSync, openSync, closeSync, renameSync, statSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { candidates, forget, normalize, remember } = require("./servers");
@@ -154,7 +154,27 @@ let server = null;
 /** Set while we are ending it on purpose, so the exit is not read as a crash. */
 let serverStopping = false;
 
-function startServer() {
+/**
+ * One line of `lifecycle.log`, as `server/run.mjs` writes it and for the same
+ * reason: this is the supervisor, it is the only one that sees how the server
+ * ended from outside, and a packaged app has no terminal for that to scroll
+ * past. `shared/lifecycle.ts` says what the fields are.
+ */
+function record(what, why, extra = {}) {
+  try {
+    const dir =
+      process.env.KURURU_STATE_DIR ||
+      path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"), "kururu");
+    const file = path.join(dir, "lifecycle.log");
+    mkdirSync(dir, { recursive: true });
+    if (existsSync(file) && statSync(file).size > 256 * 1024) renameSync(file, `${file}.1`);
+    appendFileSync(file, `${JSON.stringify({ at: new Date().toISOString(), by: "app", pid: process.pid, what, why, ...extra })}\n`);
+  } catch {
+    // The record is for afterwards; it is not a reason to fail now.
+  }
+}
+
+function startServer(because = "the app started it") {
   const entry = path.join(process.resourcesPath, "server", "server.mjs");
   if (!existsSync(entry)) {
     console.error(`kururu: no server bundled at ${entry}`);
@@ -179,6 +199,7 @@ function startServer() {
       // How the server knows that asking to be restarted will get it restarted,
       // which is what `prefix+B` and the Share toggle both depend on.
       KURURU_SUPERVISED: "1",
+      KURURU_STARTED_BECAUSE: because,
       PATH: loginPath(),
       KURURU_WEB_DIST: path.join(process.resourcesPath, "web"),
       KURURU_ASSETS: path.join(process.resourcesPath, "assets", "spritesheets"),
@@ -189,11 +210,13 @@ function startServer() {
   closeSync(log);
 
   server.on("error", (err) => console.error("kururu: could not start the server —", err.message));
-  server.on("exit", (code) => {
+  const child = server;
+  server.on("exit", (code, signal) => {
     server = null;
     if (serverStopping) return;
     if (code === RESTART_EXIT_CODE) {
-      startServer();
+      record("restart", "the server asked to be restarted", { server: child.pid });
+      startServer("it asked to be restarted");
       return;
     }
     /**
@@ -201,7 +224,9 @@ function startServer() {
      * resurrects a server which cannot start is a loop, and the error in the log
      * is the useful part.
      */
-    console.error(`kururu: the server exited (${code}); not restarting it`);
+    const how = signal ? `was killed by ${signal}` : `exited with code ${code}`;
+    record("crash", `the server ${how}; not restarting it`, { server: child.pid, code, signal });
+    console.error(`kururu: the server ${how}; not restarting it`);
   });
 }
 

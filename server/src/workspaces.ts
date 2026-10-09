@@ -172,6 +172,8 @@ function adopt(profile: Profile): Profile {
     board: adoptProfileBoard(profile.board),
     // Absent before profiles had a harness, and null is "none started".
     harness: adoptHarness(profile.harness),
+    // Absent before Auto Swap existed, which is off.
+    autoSwap: profile.autoSwap === true,
     // `dev` is taken off rather than carried: a blob written while workspaces
     // remembered a dev command still has one, and a field the type no longer
     // names would ride along into every snapshot and back out to disk.
@@ -1068,25 +1070,21 @@ export class Workspaces {
   }
 
   /**
-   * Show a file in "the reader", making one if there is none.
+   * Show a file from the tree, as a tab of the focused pane.
    *
-   * Which pane is the whole question, and the answer is the one you are least
-   * surprised by: the focused pane if it is showing a document, else the first
-   * pane in the workspace that is, else a new one split off the focused pane.
-   * Reusing one is what makes clicking down a list of files in the tree open
-   * them as tabs of one pane rather than tiling the window with them — and
-   * what keeps a click from swapping out the terminal you were watching.
+   * Always that pane, whatever it is showing. It used to hunt for a pane
+   * already showing a document and split a new one off when there was none,
+   * which made the window's arrangement change under a click in a sidebar; a
+   * tab in the pane you were last in is the one place a file can land that
+   * you can always predict. The terminal it covers is a tab away, not gone,
+   * and clicking down a list of files still collects them in one strip.
    *
    * It pins, through `openDoc`, for the reason `open-doc` does: a file you
    * clicked on is a file you asked for, and an editor next door should not take
    * it off you. Returns the pane.
    */
   showDoc(root: string, path: string): string | null {
-    const layout = this.activeWorkspace.layout;
-    const focused = findPane(layout, this.focusedPaneId);
-    const reader = focused && showsDoc(focused) ? focused : panes(layout).find(showsDoc);
-    const paneId = reader?.id ?? this.openReader(this.focusedPaneId, null, root);
-    if (!paneId) return null;
+    const paneId = this.focusedPaneId;
     return this.openDoc(paneId, root, path) ? paneId : null;
   }
 
@@ -1313,6 +1311,13 @@ export class Workspaces {
   setHarness(profileId: string, harness: HarnessState | null): void {
     if (!this.profile(profileId)) return;
     this.replaceProfile(profileId, (p) => ({ ...p, harness }));
+  }
+
+  /** Whether the screen follows what this profile's harness acts on — see `Profile.autoSwap`. */
+  setAutoSwap(profileId: string, on: boolean): void {
+    const profile = this.profile(profileId);
+    if (!profile || profile.autoSwap === on) return;
+    this.replaceProfile(profileId, (p) => ({ ...p, autoSwap: on }));
   }
 
   /**
@@ -1635,6 +1640,7 @@ export class Workspaces {
       // And nothing has been put away, because nothing is running in it yet.
       hiddenAgents: [],
       harness: null,
+      autoSwap: false,
     };
   }
 

@@ -29,7 +29,7 @@
  * client of it exactly as the phone is.
  */
 import { randomUUID } from "node:crypto";
-import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, statSync } from "node:fs";
+import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { execFile, spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createNetServer } from "node:net";
@@ -88,6 +88,8 @@ import { scanDevServers, stopDevServer } from "./devservers";
 import { readHead, repoAt } from "./git";
 import { pollUsage, usageSnapshot } from "./usage";
 import { clearOpenRouterKey, openRouterSnapshot, pollOpenRouter, setOpenRouterKey } from "./openrouter";
+import { Voice } from "./voice";
+import { CLIP_MAX_BYTES } from "../../shared/voice";
 import { addVps, pollVps, pollVpsOne, removeVps, vpsSnapshot } from "./vps";
 import { closeDatabasePools, dbCatalog, dbQuery, dbRows, scanDatabases, type DatabaseScanInput } from "./databases";
 import { allowedRoots, allowRoot, findDocs, listDir, listDirs, readBytes, readFile, resolveInRoot } from "./files";
@@ -113,6 +115,7 @@ import {
 } from "./mascot";
 import { readKeys, writeKeys } from "./keys";
 import { agentLabel, agentSummary, basename } from "../../shared/labels";
+import { handsOf } from "../../shared/harness";
 import {
   adoptNotify,
   isNotifyEvent,
@@ -216,6 +219,18 @@ import { adoptAppearance, themeFor, type Appearance } from "../../shared/theme";
 import { isStyleId, skinFor } from "../../shared/skin";
 import { HOST_PROTOCOL, HostLink, type Port } from "./hostlink";
 import { connectToHost, hostSocketPath, type SocketPort } from "./hostsock";
+import {
+  hostEnding,
+  lifeNow,
+  lifecycleReport,
+  readTail,
+  record,
+  recordCrashes,
+  recordStart,
+  socketHeld,
+  supervised,
+  watchSupervisor,
+} from "./lifecycle";
 import { MouseEncoding } from "./mouseencoding";
 import { adoptReaders, readSnapshot, writeSnapshot } from "./persist";
 import { closeAllPreviews, closePreview, openPreview, openPreviews } from "./proxy";
@@ -224,6 +239,11 @@ import { smallestGrid, type Grid } from "./sizing";
 import { checkForUpdate } from "./update";
 import { VERSION } from "./version";
 import { orderAgents, Workspaces } from "./workspaces";
+
+// First, so that anything below which throws leaves a line with a time on it
+// rather than only a stack in somebody's scrollback. See `lifecycle.ts`.
+recordCrashes();
+watchSupervisor();
 
 const PORT = Number(process.env.KURURU_PORT ?? 7717);
 
@@ -242,6 +262,21 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * straight from the repo falls back to the source layout.
  */
 const WEB_DIST = process.env.KURURU_WEB_DIST || join(HERE, "../../web/dist");
+/**
+ * Where the web app is built *from*, which is where the window's vite runs —
+ * the one listener on the machine besides this process that is kururu, and so
+ * never a dev server (see `Self` in `devservers.ts`). From the source layout
+ * and not from `WEB_DIST`, because a packaged app's built copy has no source
+ * beside it and no vite either, and there this is null. Real, because the
+ * kernel's answer for a cwd always is.
+ */
+const WEB_SOURCE = (() => {
+  try {
+    return realpathSync(join(HERE, "../../web"));
+  } catch {
+    return null;
+  }
+})();
 
 /**
  * Extra directories the file browser may read, colon-separated. Agent cwds and
@@ -343,6 +378,8 @@ let host!: HostLink;
 let workspaces!: Workspaces;
 /** The harness's hands — built once the two above exist, at the foot of startup. See `harness.ts`. */
 let harness!: Harness;
+/** Its ears and mouth, built beside it. See `voice.ts`. */
+let voice!: Voice;
 const clients = new Map<WebSocket, ClientState>();
 
 const state = {
@@ -1107,10 +1144,11 @@ function announce(agent: AgentSnapshot, event: NotifyEvent): void {
   });
   const notification = { agentId: agent.id, event, ...text };
 
+  const isHarness = harness.isHarness(agent.id) !== null;
   let sent = false;
   for (const [ws, st] of clients) {
     const verdict = notifyGate(
-      { event, visible: st.watching.has(agent.id), isAgent: countsAsAgent(full) },
+      { event, visible: st.watching.has(agent.id), isAgent: countsAsAgent(full), isHarness },
       notify,
     );
     if (!verdict.pass) continue;
@@ -2003,6 +2041,9 @@ function dropClient(ws: WebSocket): void {
   clients.delete(ws);
   syncWatched();
   for (const agentId of st.proposals.keys()) applySize(agentId);
+  // A phone whose socket died with its key held must not keep Kuru quiet
+  // everywhere else.
+  voice.talk(ws, false);
   // The viewer cannot be open with nobody connected, and a connection to
   // somebody's production database is not a thing to keep for the company.
   if (clients.size === 0) void closeDatabasePools();
@@ -2113,7 +2154,7 @@ let devScanShown = 0;
 
 async function pollDevServers(): Promise<void> {
   const scan = ++devScansStarted;
-  const servers = await scanDevServers();
+  const servers = await scanDevServers({ pid: process.pid, webDir: WEB_SOURCE });
   /**
    * Never an older reading over a newer one. Stopping a server asks for a scan
    * at once, so the row goes when the server does, and a timer scan that began
@@ -2729,11 +2770,12 @@ async function editorsHere(): Promise<EditorChoice[]> {
  * reaches the editor: `files.ts` is the only thing that decides what a path from
  * a client means, and this one is about to be handed to a program.
  *
- * A new editor goes in a split off the focused pane, started in the project so
- * `:e` and every picker in somebody's config are relative to the right place,
- * and it drops into a shell when you quit it. The alternative — the pane ending
- * with the editor — is tmux's `split-window nvim`, and it means `:q` on the
- * wrong buffer closes a pane, which is not something `:q` does anywhere else.
+ * A new editor goes in a tab of the focused pane — a click in the tree adds to
+ * the pane you were last in rather than rearranging the window around it. It is
+ * started in the project so `:e` and every picker in somebody's config are
+ * relative to the right place, and it drops into a shell when you quit it. The
+ * alternative — the tab ending with the editor — means `:q` on the wrong buffer
+ * closes a tab, which is not something `:q` does anywhere else.
  */
 async function openInEditor(root: string, path: string, agentId: string | null): Promise<{ agentId: string }> {
   const full = resolveInRoot(root, path);
@@ -2753,9 +2795,7 @@ async function openInEditor(root: string, path: string, agentId: string | null):
     }
     return { agentId };
   }
-  const fresh = workspaces.split("row", workspaces.focusedPaneId);
-  if (!fresh) throw new Error("there is no pane to split");
-  const agent = await openTerminal(fresh, { cwd: root, command: nvimCommand(path), kind: "shell" });
+  const agent = await openTerminal(workspaces.focusedPaneId, { cwd: root, command: nvimCommand(path), kind: "shell" });
   return { agentId: agent.id };
 }
 
@@ -3010,6 +3050,14 @@ function handleMessage(ws: WebSocket, raw: string): void {
   } catch {
     return;
   }
+
+  // The user typing or moving about, from any client, is what an Auto Swap
+  // waits for or gives way to — see `handsOf`. Before the verb runs, so that a
+  // switch somebody just made is never followed by a swap that was waiting.
+  // Typing also names its terminal, which the harness does not type into
+  // while the user is.
+  const hands = handsOf(msg.type);
+  if (hands) harness.hands(hands, msg.type === "input" ? msg.agentId : undefined);
 
   switch (msg.type) {
     // --- terminals ---------------------------------------------------------
@@ -3426,6 +3474,11 @@ function handleMessage(ws: WebSocket, raw: string): void {
       return;
     }
 
+    case "set-auto-swap":
+      if (typeof msg.profileId !== "string") return;
+      workspaces.setAutoSwap(msg.profileId, msg.on === true);
+      return;
+
     case "set-project":
       saveProject(msg.root, msg.settings);
       return;
@@ -3460,6 +3513,28 @@ function handleMessage(ws: WebSocket, raw: string): void {
     case "clear-openrouter-key":
       clearOpenRouterKey();
       broadcast({ type: "openrouter", openrouter: null });
+      return;
+
+    // --- the voice ----------------------------------------------------------
+    case "set-voice":
+      voice.set(msg.voice);
+      return;
+
+    case "voice-preview":
+      void replyAsync(ws, msg.id, () => {
+        const lang = msg.lang === "es" ? "es" : "en";
+        const choice = msg.voice;
+        if (!choice || (choice.engine !== "kokoro" && choice.engine !== "system") || typeof choice.voice !== "string") throw new Error("not a voice");
+        return voice.preview({ engine: choice.engine, voice: choice.voice.slice(0, 80) }, lang);
+      });
+      return;
+
+    case "download-voice-model":
+      void voice.download();
+      return;
+
+    case "talking":
+      voice.talk(ws, msg.talking === true);
       return;
 
     // --- the database viewer ----------------------------------------------
@@ -3589,11 +3664,14 @@ function handleMessage(ws: WebSocket, raw: string): void {
        * specifically so that an ordinary crash is not mistaken for a request.
        * Unsupervised there is nobody to ask, and exiting would take the server
        * away rather than replace it — so it says so instead of doing half of it.
+       * That includes a server whose supervisor was there once and has since
+       * died, which is why this asks `supervised()` and not the environment.
        */
-      if (process.env.KURURU_SUPERVISED !== "1") {
+      if (!supervised()) {
         console.error("kururu: nothing is supervising this server, so there is nobody to restart it");
         return;
       }
+      record("stop", "a window asked for a restart (prefix+B)");
       void shutdown().then(() => process.exit(RESTART_EXIT_CODE));
       return;
 
@@ -4012,7 +4090,20 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       agents: host.agents.length,
       liveAgents: host.agents.filter(countsAsAgent).length,
       devServers: state.devServers.length,
+      // When and why this process started, and whether anything would start
+      // it again. Without the file: this is asked every few seconds.
+      life: lifeNow(),
     });
+    return;
+  }
+
+  /**
+   * Why the server last went away, for the About page. Read from the file at
+   * the moment of asking, because the lines that matter most were written by
+   * a process that no longer exists.
+   */
+  if (url.pathname === "/api/lifecycle") {
+    json(res, lifecycleReport());
     return;
   }
 
@@ -4123,6 +4214,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
        * connection that dropped for no reason it could explain.
        */
       if (wanted !== isShared() && next.restartable) {
+        record("stop", `sharing was switched ${wanted ? "on" : "off"}, and the socket has to be bound again`);
         setTimeout(() => process.exit(RESTART_EXIT_CODE), 250);
       }
       return;
@@ -4158,6 +4250,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       // The rest of the report is the harness's: where the transcript and the
       // inbox are, and what was last said. See `harness.ts`.
       harness.report(agentId, body as Record<string, unknown>);
+      // And when the reporter is a profile's harness, what it last said is
+      // read aloud — the one place Kuru's turn ending is heard about.
+      const spoken = harness.isHarness(agentId);
+      if (spoken && parsed.report.status === "done") voice.spoke(spoken, (body as Record<string, unknown>).reply);
       /**
        * The host is told the status and the context; the message stops here.
        * It is the one part of a report that says something about the work rather
@@ -4259,6 +4355,40 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    * self-inflicted enough that a reload is the right cost, where re-fetching
    * every notification sound on every page load is not.
    */
+  /**
+   * The voice's two doors. A clip in: a WAV the window recorded, for the
+   * profile it names, answered with what was heard and where it went — see
+   * `voice.ts`. A sentence out: one chunk of an utterance the socket
+   * announced, which every client of the profile fetches once. Not cached,
+   * since an utterance id is never reused and a reply is nobody's to keep.
+   */
+  if (url.pathname === "/api/voice/hear") {
+    if (req.method !== "POST") {
+      text(res, "POST only", 405);
+      return;
+    }
+    const asked = url.searchParams.get("profile") ?? "";
+    const profileId = workspaces.profile(asked) ? asked : workspaces.active.id;
+    try {
+      const wav = await readBody(req, CLIP_MAX_BYTES);
+      json(res, await voice.hear(profileId, wav));
+    } catch (err) {
+      json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+    return;
+  }
+  if (url.pathname === "/api/speech") {
+    const seq = Number(url.searchParams.get("seq") ?? "0");
+    const bytes = Number.isFinite(seq) && seq >= 0 ? voice.chunk(url.searchParams.get("u") ?? "", Math.floor(seq)) : null;
+    if (!bytes) {
+      text(res, "no such sentence\n", 404);
+      return;
+    }
+    res.writeHead(200, { "content-type": "audio/wav", "content-length": bytes.length, "cache-control": "no-store" });
+    res.end(bytes);
+    return;
+  }
+
   if (url.pathname === "/api/sound") {
     const sound = await soundBytes(url.searchParams.get("id") ?? "");
     if (!sound) {
@@ -4823,6 +4953,8 @@ server.on("upgrade", (req, socket, head) => {
     send(ws, { type: "usage", usage: usageSnapshot() });
     send(ws, { type: "vps", vps: vpsSnapshot() });
     send(ws, { type: "openrouter", openrouter: openRouterSnapshot() });
+    send(ws, { type: "voice", voice: voice.status() });
+    send(ws, voice.hush());
     // The first client through the door is also what starts the usage poll: it
     // is skipped while nothing is connected, so without this a freshly started
     // server would draw no bar for a minute.
@@ -4924,10 +5056,17 @@ async function attach(port: Port): Promise<void> {
     cwdFor: cwdForPaneIn,
     runCard: runCardAt,
     stopDev,
+    // Through the variable rather than the instance, because the voice is
+    // built on the next line and needs the harness to hand words to.
+    say: (profileId, text) => void voice.speak(profileId, text),
   });
+  voice = new Voice({ broadcast, deliver: (profileId, text) => harness.hear(profileId, text) });
   for (const agentId of workspaces.allAgents()) {
     if (!live.has(agentId)) workspaces.removeTab(agentId);
   }
+  // And which terminal each profile's harness is in, now that the dead tabs
+  // are gone: a harness outlives a server restart, and its record must too.
+  harness.adopt(live);
   // An agent the host has but no layout mentions would be running with nothing
   // pointing at it — put it somewhere rather than leave it unreachable.
   const placed = new Set(workspaces.allAgents());
@@ -4965,7 +5104,8 @@ async function attach(port: Port): Promise<void> {
    */
   if (!profiles && state.agents.length === 0) fillPane(workspaces.focusedPaneId);
 
-  server.listen(PORT, bindAddress(), () => {
+  listenOnce(() => {
+    recordStart(PORT, VERSION);
     const built = existsSync(join(WEB_DIST, "index.html"));
     console.log(`kururu server  http://localhost:${PORT}  (v${VERSION})`);
     console.log(`  agents       ${state.agents.length} held by the pty host`);
@@ -4976,6 +5116,40 @@ async function attach(port: Port): Promise<void> {
       `  reachable    ${isShared() ? "from other machines, with the token from the Share dialog" : "from this machine only"}`,
     );
   });
+}
+
+/** How long a port held by a server on its way out is waited for. */
+const PORT_WAIT_MS = 5_000;
+
+/**
+ * Listen, and wait out an older server that is leaving.
+ *
+ * This process links to the pty host before it listens, and the host lets go
+ * of the older of two servers when a second one connects. So a server started
+ * beside an older one, whether an orphan whose runner died or a second
+ * `bun run dev`, already holds the host at this point while the older one
+ * still holds the port and is only now being told to leave. Failing on
+ * `EADDRINUSE` here used to leave neither running: the older stepped aside a
+ * moment after this one had already crashed. So the port is asked for again
+ * for a few seconds, which is the Node documentation's own pattern. Anything
+ * still holding it after that is not a kururu on its way out, and the crash
+ * that follows says which port.
+ */
+function listenOnce(onListening: () => void): void {
+  const deadline = Date.now() + PORT_WAIT_MS;
+  const retry = (err: NodeJS.ErrnoException) => {
+    if (err.code !== "EADDRINUSE" || Date.now() > deadline) throw err;
+    setTimeout(() => {
+      server.close();
+      server.listen(PORT, bindAddress());
+    }, 250);
+  };
+  server.on("error", retry);
+  server.once("listening", () => {
+    server.off("error", retry);
+    onListening();
+  });
+  server.listen(PORT, bindAddress());
 }
 
 /**
@@ -4996,6 +5170,7 @@ async function attach(port: Port): Promise<void> {
  * it is not our child and does not go down with us. That is the whole point.
  */
 const SOCKET = hostSocketPath();
+const HOST_LOG = join(dirname(SOCKET), "ptyhost.log");
 
 /**
  * Start a host and wait for it to answer.
@@ -5003,13 +5178,18 @@ const SOCKET = hostSocketPath();
  * Its output goes to a file rather than to ours: it outlives this process by
  * design, so inheriting our stdio would leave it writing into a terminal that
  * has moved on, and a daemon nobody can see the logs of is one nobody can debug.
+ *
+ * Starting one means the last one is gone, and how it went is in the bottom of
+ * that same file, so it is read before the new host writes its first line
+ * there and the two go into the record together.
  */
 async function startPtyHost(): Promise<void> {
   const entry = process.env.KURURU_PTYHOSTD || fileURLToPath(new URL("./ptyhostd.mjs", import.meta.url));
   if (!existsSync(entry)) throw new Error(`no pty host to start at ${entry} — bun run build:server`);
 
+  const before = hostEnding(readTail(HOST_LOG));
   mkdirSync(dirname(SOCKET), { recursive: true });
-  const log = openSync(join(dirname(SOCKET), "ptyhost.log"), "a");
+  const log = openSync(HOST_LOG, "a");
   const child = spawn(process.execPath, [entry], {
     detached: true,
     stdio: ["ignore", log, log],
@@ -5019,6 +5199,8 @@ async function startPtyHost(): Promise<void> {
   });
   child.unref();
   closeSync(log);
+  const { how, ...detail } = before ?? { how: null };
+  record("host", `started a pty host (pid ${child.pid}) because none was answering${how ? `; the last one ${how}` : ""}`, detail);
 }
 
 /**
@@ -5044,7 +5226,7 @@ async function linkToHost(): Promise<SocketPort> {
       // Still coming up.
     }
   }
-  throw new Error(`the pty host did not come up at ${SOCKET} — see ${join(dirname(SOCKET), "ptyhost.log")}`);
+  throw new Error(`the pty host did not come up at ${SOCKET} — see ${HOST_LOG}`);
 }
 
 const link = await linkToHost();
@@ -5054,9 +5236,26 @@ const link = await linkToHost();
  * exiting. Every agent was in that process; what is left here is a layout full
  * of tabs pointing at terminals that no longer exist and a UI that would draw
  * them as though they did.
+ *
+ * Except that a dropped link does not always mean the host went away. The host
+ * keeps one server and lets go of the older when a second connects, so a
+ * second server started beside this one, by a second `bun run dev` or by a
+ * runner that started a replacement before this one had finished stopping,
+ * looks exactly the same from here. That one is not a crash and every agent is
+ * fine, so it is told apart before anything is written down that says
+ * otherwise.
  */
 link.onClose(() => {
   if (stopping) return;
+  if (socketHeld(SOCKET)) {
+    record("stop", "another server connected to the pty host, which lets go of the older of two; this one is stepping aside");
+    console.error("kururu: another server has taken over the pty host — this one is stepping aside");
+    // Zero, because nothing failed: this server is choosing to stop, and its
+    // supervisor should say so rather than report a crash.
+    process.exit(0);
+  }
+  const { how, ...detail } = hostEnding(readTail(HOST_LOG)) ?? { how: null };
+  record("crash", `the pty host went away, and every agent with it${how ? `: it ${how}` : ""}`, detail);
   console.error("kururu: the pty host went away — every agent went with it");
   process.exit(1);
 });
@@ -5082,6 +5281,8 @@ export function shutdown(): Promise<void> {
     if (workspaces) writeSnapshot(workspaces.all(), workspaces.active.id);
     closeAllPreviews();
     void closeDatabasePools();
+    // The Kokoro process, so it goes now rather than when it notices.
+    voice?.close();
     for (const ws of clients.keys()) {
       try { ws.terminate(); } catch { /* already gone */ }
     }
@@ -5095,6 +5296,10 @@ export function shutdown(): Promise<void> {
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
+    // Who sent it is not knowable from here. The supervisor writes its own
+    // line when it is the sender, so a signal with no such line above it came
+    // from somewhere else, and that is worth being able to see.
+    if (!stopping) record("stop", `stopped by ${signal}`, { signal });
     void shutdown().then(() => process.exit(0));
   });
 }

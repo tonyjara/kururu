@@ -57,10 +57,25 @@ to trim exactly that source. Both come back when the source does.
   is, which is not a detail: being taken somewhere by a notification is precisely
   when prefix+z has to still work. An id nothing holds moves nothing, because that
   is a card clicked after its terminal was closed.
+- **The harness's `done` is never announced; its `blocked` is.** The gate takes
+  `isHarness` and refuses the one pair, as `harness-done`. A harness finishing a
+  turn is the other half of a conversation you are in, and with the voice on its
+  reply is read aloud anyway, so the croak only says what you are about to hear.
+  A `blocked` is a permission prompt, the user's to answer and the one thing the
+  voice does not say. The unread mark is untouched: a dot on a harness you have
+  walked away from is still worth having, and it makes no noise.
 - **`status.ts` can never produce `blocked`.** Nothing in a byte stream
   distinguishes "waiting for you" from "thinking". It arrives only via
   `POST /api/report`, and one report disables the heuristic for that agent
   permanently — a process that knows its own state beats a guess forever after.
+- **And a report says `blocked` only for a question.** Claude Code's
+  `Notification` hook fires for an idle reminder a minute after every turn
+  ("Claude is waiting for your input"), for a login that worked, for an MCP
+  dialog closing; the reporter sent `blocked` for each, so every agent that
+  finished became one that "needs input" a minute later — a second card, and a
+  second line in the harness's feed. `asksNothing` in `server/src/hooks.ts`
+  reads `notification_type` and lets only the questions through. See
+  [harness](harness.md#hearing-back).
 
 ## Sounds
 

@@ -145,7 +145,9 @@ export type IconName =
   | "git"
   | "board"
   | "grip"
-  | "panel";
+  | "panel"
+  | "fold"
+  | "unfold";
 
 export type IconSet = Record<IconName, string>;
 
@@ -190,6 +192,13 @@ export const ICON_NAMES: readonly IconName[] = [
   "grip",
   /** Putting a side column away: the file tree, from its own header. */
   "panel",
+  /**
+   * Every group of agents in the sidebar folded at once, and the way back.
+   * Two names rather than one turned over, because the drawing that means
+   * "close these" is not the drawing that means "open them" upside down.
+   */
+  "fold",
+  "unfold",
 ];
 
 /**
@@ -744,6 +753,9 @@ export const BASE_ICONS: IconSet = {
   grip: "⠿",
   /** A column put away to the edge it lives on. */
   panel: "⇥",
+  /** Every group folded, and every group open: a tree view's own pair of boxes. */
+  fold: "⊟",
+  unfold: "⊞",
 };
 
 /**

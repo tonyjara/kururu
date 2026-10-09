@@ -57,8 +57,36 @@ Anything that would make `ptyhost.ts` need editing belongs on the server side.
   process it is running in. The server exits 75 and `server/run.mjs` reads that
   as "start me again" — distinguishable from a crash, which is left down on
   purpose, because a supervisor that resurrects a server which cannot start is
-  a loop that fills a terminal with one error forever. Unsupervised,
-  `restart-server` says so rather than doing half of it.
+  a loop that fills a terminal with one error forever. Under `--watch` the
+  runner stays and watches, so the save that finishes a half-made edit brings
+  the server back, as it does after a failed build. Without `--watch`, or on
+  exit 0, the runner leaves. Unsupervised, `restart-server` says so rather
+  than doing half of it.
+- **Every start, stop and restart is written down**, in `lifecycle.log` beside
+  `session.json` (one JSON object per line, moved aside to `.1` at 256 KB). The
+  server writes why *it* is stopping and any crash, with the stack.
+  `run.mjs`, or `desktop/main.js` in the app, writes what only a supervisor
+  sees: which file was saved, the signal that killed it, a build that failed.
+  The pty host is not changed to take part, because changing it ends every
+  agent. The server dates the host starting and going, and reads how it went
+  out of the bottom of `ptyhost.log`. Settings → About and `bun run status` show
+  the end of the file; the supervisor passes its reason in
+  `KURURU_STARTED_BECAUSE` so the server can say why it is the one running.
+- **The runner replaces one server at a time and waits for the old one to be
+  gone.** A save that lands mid-build becomes one more replacement after it, an
+  old server gets five seconds on SIGTERM and then SIGKILL, and only the current
+  child's exit is read as news. Each of those was a way a single runner ended
+  up with two servers, the older's late exit was taken for the newer's, and the
+  runner left. The newer then ran on with no watcher, and the next save did
+  nothing.
+- **A server notices its supervisor going.** Its `ppid` changes to 1, it writes
+  that down, and `supervised()` turns false. `restart-server` and the Share
+  toggle then refuse, because exiting would end it with nothing to bring it back.
+- **A newer server takes the host and an older one steps aside.** The host
+  keeps one link and drops the older, so a server whose link drops checks
+  whether anything still holds the socket before saying the host died. If
+  something does, it exits 0 as a stop. The newer server retries
+  `EADDRINUSE` for five seconds while that happens.
 - **A restarted server prefers the host's blob over the disk snapshot.** The
   blob is complete and a moment old, with every tab still pointing at a live
   pty; `session.json` is the cold-start fallback with processes deliberately
@@ -191,7 +219,10 @@ argument that keeps `tailscale` commands out of kururu.
   `npm run dev` names no port, and `vite --port 3001` lies the moment 3001 is
   taken. The process holding the port is often not the one that names the server
   (`bun run dev` → `bun run serve.ts`), so `resolveDevCommand` walks **up** the
-  process tree.
+  process tree. That walk finds kururu too, so `isKururu` leaves it out **by
+  process, never by port**: this pid (the server and its preview proxies) and
+  any listener whose cwd is kururu's own `web/` (the window's vite). Another
+  project's vite on 5173 still shows.
 - **`proxy.ts`: a port per preview, never a path prefix.** Dev servers emit
   absolute URLs (`/@vite/client`), so `/preview/<id>/` breaks on the first asset.
   The extra hop rewrites `Host` to the upstream's own — which is why no project

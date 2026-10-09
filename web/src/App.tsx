@@ -52,6 +52,9 @@ import { Reach } from "./components/Reach";
 import { Settings, TAB_NAMES as SETTINGS_TABS, type Tab as SettingsTab } from "./components/Settings";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
+import { VoicePill } from "./components/VoicePill";
+import { installSpeech, installTalkKey, setSpeechVolume, setVoiceProfile, talkDown, talkUp, useVoiceUi } from "./voice";
+import { DEFAULT_VOICE, keyCodeLabel } from "../../shared/voice";
 import {
   actionFor,
   isModifier,
@@ -199,7 +202,8 @@ function resumeSettings(): SettingsTab | null {
 }
 
 export function App() {
-  const { snapshot, connected, projects } = useKururu();
+  const { snapshot, connected, projects, voice } = useKururu();
+  const voiceUi = useVoiceUi();
 
   /**
    * Whether the window is narrow enough that the sidebar stops being a column
@@ -553,6 +557,30 @@ export function App() {
   }, []);
 
   /**
+   * The voice: the talk key on the window, and what Kuru says off the socket.
+   *
+   * Installed once and read through refs rather than re-installed on every
+   * change of settings or profile, for the prefix listener's reason in
+   * reverse: this one must *not* move to the back of the capture list, since
+   * a key held across a re-render would lose its key-up. The module holds the
+   * microphone and the player; see `voice.ts`.
+   */
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
+  const profileRef = useRef(snapshot?.profile.id ?? "");
+  profileRef.current = snapshot?.profile.id ?? "";
+  useEffect(() => {
+    setVoiceProfile(() => profileRef.current);
+    setSpeechVolume(() => voiceRef.current?.settings.volume ?? DEFAULT_VOICE.volume);
+    const stopKey = installTalkKey(() => voiceRef.current?.settings.talkKey ?? DEFAULT_VOICE.talkKey);
+    const stopSpeech = installSpeech();
+    return () => {
+      stopKey();
+      stopSpeech();
+    };
+  }, []);
+
+  /**
    * And let go of the emulators of terminals that no longer exist.
    *
    * An emulator is pooled for the life of its terminal now rather than the life
@@ -806,8 +834,9 @@ export function App() {
    * cannot know whether the nvim in the next pane is the one you are editing
    * in or one an agent left open, and a file opening in the wrong editor is a
    * buffer you then have to go and close. So the choice is a list with the
-   * nearest editor first — enter takes it — and a new split at the bottom,
-   * which is also the whole list when there is no nvim here at all.
+   * nearest editor first — enter takes it — and a new tab in the focused pane
+   * at the bottom, which is also the whole list when there is no nvim here at
+   * all.
    */
   const openInNvim = useCallback(
     async (root: string, path: string) => {
@@ -838,7 +867,7 @@ export function App() {
               hint: where(editor.paneId),
             };
           }),
-          { id: NEW_EDITOR, label: "New nvim in a split", hint: "" },
+          { id: NEW_EDITOR, label: "New nvim in a tab", hint: "" },
         ],
         onPick: (id) => {
           api
@@ -862,8 +891,8 @@ export function App() {
   );
 
   /**
-   * A click in the tree. Markdown is read, here; everything else is somebody
-   * else's to open. On a phone the tree is a sheet over the pane it is about to
+   * A click in the tree. Markdown is read, here, as a tab of the focused pane;
+   * everything else is somebody else's to open. On a phone the tree is a sheet over the pane it is about to
    * change, so it gets out of the way — and the reader is focused, because a
    * phone draws one pane and a document opened behind it did not open.
    */
@@ -1302,8 +1331,15 @@ export function App() {
           panes={narrow ? panes(workspace.layout).length : null}
           onLastPane={() => api.lastPane()}
           onHelp={() => setHelp(true)}
+          talk={{ phase: voiceUi.phase, key: keyCodeLabel(voice?.settings.talkKey ?? DEFAULT_VOICE.talkKey) }}
+          onTalkDown={talkDown}
+          onTalkUp={talkUp}
         />
       </div>
+
+      {/* Over everything, zen included: a microphone that is open must say so
+          wherever the status bar has gone. See `VoicePill.tsx`. */}
+      <VoicePill />
 
       {filesOpen && !zen && workspace && (
         <FileTree
@@ -1344,6 +1380,7 @@ export function App() {
           profiles={snapshot.profiles}
           logins={snapshot.logins}
           activeProfileId={profile.id}
+          autoSwap={profile.autoSwap}
           workspaces={profile.workspaces}
           activeWorkspaceId={profile.activeWorkspaceId}
           projects={projects}

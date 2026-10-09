@@ -7,7 +7,7 @@
  * drawn in a browser. So the tree splits files in two by what the window is
  * actually good at. Markdown it can draw, and does, in a reader. Everything
  * else goes to nvim: the one running in this workspace if there is one, a new
- * one in a split if there is not. A code view in here would be a third editor
+ * one in a tab if there is not. A code view in here would be a third editor
  * nobody asked for and a worse one than both of the others.
  *
  * It holds no files. It is a set of expanded directories, remembered per

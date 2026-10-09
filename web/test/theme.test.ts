@@ -105,6 +105,11 @@ const NOT_THEME = new Set([
   // a day is and how tall a row.
   "--days",
   "--rows",
+  // Where the voice pill was dragged to, set on it by `VoicePill.tsx`. Shares
+  // of the window, 0–1 — see `web/src/place.ts` — and a view state this
+  // browser keeps, on the reasoning `--sidebar-w` sets out.
+  "--pill-x",
+  "--pill-y",
   // The height of the window's bottom edge, which the status bar and the
   // sidebar's foot both have to be. A constant the stylesheet declares for
   // itself: it exists so those two cannot drift apart, and there is nothing in

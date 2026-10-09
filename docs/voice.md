@@ -1,0 +1,202 @@
+# The voice
+
+Talking to Kuru, the profile's harness, and hearing it answer. Hold the right
+Control key and speak; let go and the words go to the harness as a turn. When
+its turn ends, its last message is read aloud — whether you spoke or typed,
+and never while you are talking.
+Settings → Voice picks the key, the languages and the voices.
+
+The argument is in the header of `shared/voice.ts`: the voice is **not a
+second brain**. Speech-to-speech models in front of a coding agent give you
+two personalities and a bill per minute for the one that only talks. Kuru is
+the Claude Code session `harness.md` describes, and what is added is a pair
+of ears and a mouth around it. Nothing in between generates a word, and
+nothing leaves the machine.
+
+## The pieces
+
+| piece | where | what |
+|---|---|---|
+| The talk key | `web/src/voice.ts` | A capture-phase keydown/keyup pair on the window. Down starts recording at once; up within 320 ms is a tap and leaves the microphone open until the next tap; a longer hold sends on release. Escape drops the clip. The window losing focus with the key down sends what there is. |
+| The microphone | `web/src/voice.ts` | PCM off an `AudioWorklet`, 16 kHz mono, written as a WAV by hand (`encodeWav`) and posted to `/api/voice/hear`. Not a `MediaRecorder`: it writes WebM/Opus, which Apple's recogniser will not open. |
+| The ears | `server/src/voice.ts` → `yap` | Apple's on-device recogniser, one model per locale, through a Homebrew command line. The clip is transcribed once per language you speak, in parallel, and `pickTranscript` keeps the one with the language in it. |
+| The words in | `Harness.hear` | Prefixed `[voice]` so Kuru knows a name may be misheard, and typed into its terminal with `now`, as `send_agent` types: a harness mid-turn hears it between tool calls, one showing a prompt or with your hands in its terminal hears it after. Typed and not posted to its inbox, because Claude Code makes everything on the inbox another session's message — see [harness](harness.md#speaking-into-a-running-agent) — and these are your words. Not running, it is started, and the words wait for its first hook report. |
+| The words out | `index.ts` `/api/report` → `Voice.spoke` | The harness's own Stop report carries `last_assistant_message`; when the reporter is a profile's harness, that reply is spoken. The role prompt tells Kuru its final message is heard, not read. The `say` tool speaks one line mid-turn. |
+| The mouth | `server/src/voice.ts` → `kokoro.ts`, or `say` | Kokoro-82M on the CPU through `kokoro-js`, in a process of its own that the server forks on the first sentence and kills with it, a sentence at a time, each announced on the socket as a `speech` chunk the moment it is ready. The Mac's own `say` voices are the fallback that needs nothing. |
+| The player | `web/src/voice.ts` | Fetches each chunk from `/api/speech` and plays them in order on the page's one `AudioContext` (`notify.ts`). The talk key cuts Kuru off, and so does the pill's ✕. |
+| The hush | `server/src/voice.ts` `talk`, `supersede` | Nothing plays while anybody talks — see [below](#never-over-you). |
+| The pill | `VoicePill.tsx` | A level meter and a line, over the panes, zen included. Says which gesture ends the recording, what was heard and where it went, what Kuru is saying. Dragged anywhere in the window by mouse or finger and drawn where this device left it (`web/src/place.ts`); a double click puts it back. Its ✕ is `dismissVoice`: Kuru stops mid-word and the rest of the reply is dropped, a clip being recorded is thrown away, words lingering go. |
+| The button | `StatusBar.tsx` `sb-mic` | The key for a thumb: held, it records; tapped, it toggles. How a phone talks. |
+
+## Never over you
+
+While the talk key is down on any client, no client plays a word, and that
+lasts until the words have been heard and delivered — the length of the
+pill's "sending", not only of the key. A page says `talking` on the press
+and again once `/api/voice/hear` has answered or the clip was thrown away;
+the server tells every page `hush` while any one is talking. The press cuts
+off what was playing, on every page — the phone on the desk is as loud as
+the window — and a sentence that arrives during the hush waits in the
+queue. Sentences go on being made, so what waited is ready when the hush
+lifts.
+
+What happens to it then depends on whether the words got through.
+
+- **Delivered**, which is any of `typed`, `held` or `starting`: every reply
+  of that profile's harness made before the words went is **dropped**, and
+  the pill says "Dropped the reply it gave while you talked." Kuru is about
+  to answer what you just said with that reply in front of it, so hearing it
+  first is being talked over twice, and it would play ahead of the answer
+  you are waiting for. A superseded reply still being made is not made to
+  the end, which is what lets the new one start sooner. The text is in
+  Kuru's terminal. Another profile's harness was not spoken to and its
+  reply is not dropped.
+- **Not delivered** — Escape, the ✕, a clip too short, nothing heard, or a
+  failure: nothing was superseded, and what waited plays.
+
+The count of dropped replies the pill gives is the ones nobody heard begin.
+A reply the press cut off was heard begin, and cutting it off was what the
+press was for.
+
+## Two languages
+
+Kuru is spoken to in English and Spanish, sometimes in one sentence. Three
+things follow.
+
+- **Hearing** runs every ticked language's model over the clip and compares
+  the transcripts. The wrong model's output is recognisable — the Spanish
+  model hearing English writes Spanish-looking nonsense with none of the
+  language's function words; the English one hearing Spanish writes a row of
+  commas — so the one that uses more of its own language's commonest words,
+  per word, wins. A clip that is half and half goes to the longer half; the
+  other half is garbled either way, which is the recogniser's limit.
+- **Speaking** detects the reply's language the same way and uses the voice
+  chosen for it. Kokoro's voices are each of one language, so Settings
+  holds a pair.
+- **Spanish through Kokoro** needs `espeak-ng`. The library that wraps Kokoro
+  phonemises through an English-only port of espeak and refuses a Spanish
+  voice by name, although it ships three. Kokoro was trained on espeak-ng's
+  phonemes for every language but English, so the server runs the real
+  `espeak-ng`, applies the handful of substitutions the model's tokeniser
+  was trained against (`modelPhonemes`), and drives the model directly.
+  Punctuation is put back by hand, a clause at a time, because the command
+  line drops it and Kokoro's prosody lives in it. Without `espeak-ng`,
+  Spanish falls back to a Mac voice.
+
+## Installing
+
+```sh
+brew install yap        # the ears — macOS 26 or later
+brew install espeak-ng  # Spanish through Kokoro; English needs nothing
+```
+
+The model is a download of about 92 MB, once, into
+`~/.cache/kururu/models` (`KURURU_MODELS` overrides; `XDG_CACHE_HOME` is
+respected). Settings → Voice has the button, and picking a Kokoro voice
+fetches it too. Until it is there the Mac's voices speak. A recogniser
+locale's model is fetched by macOS the first time it is asked for; the
+first clip in a new accent can take ten seconds and say nothing, and the
+next is half a second.
+
+Settings → Voice says what is found and what to type when something is
+not. The server looks on its PATH and in Homebrew's two directories, since
+a server started from the app has a PATH no shell set.
+
+## The phone
+
+The server does the hearing and the speaking, so a phone only posts a WAV
+and plays one; the microphone button is in the status bar. One thing stands
+in the way: a browser opens the microphone only in a secure context, and a
+tailnet IP over plain http is not one. The Electron window loads
+`127.0.0.1`, which is. For the phone, `tailscale serve` can put the server
+behind the tailnet's https name — **that is the user's decision and is
+never run by kururu or by anybody working on it** (rule 4). Until then the
+button on the phone says why it did nothing.
+
+## What it is not
+
+- **Not a realtime model.** OpenAI Realtime or Gemini Live up front would
+  answer in under a second and could be interrupted mid-word, but the work
+  still waits on Claude Code's turns, you get two personalities, and the
+  brain moves off the subscription. Revisit if bantering with Kuru matters
+  more than directing it.
+- **Not cloud transcription or cloud voices**, although the module is shaped
+  so one could be added behind `VoiceEngine`: the user chose local for
+  privacy and for no key.
+- **Not in the pty host.** A reply is heard about through the same hook
+  report that already told the harness what was said. Nothing here costs
+  anybody a running agent.
+
+## Gotchas
+
+- **The talk key must not re-install on render.** `installTalkKey` is
+  installed once from `App` and reads the key and the profile through refs.
+  Re-adding a capture listener moves it to the back of the list and, worse,
+  a key held across the swap loses its key-up.
+- **`kokoro-js`'s `stream()` hangs on a string.** It never closes the
+  splitter, so the last sentence is never yielded. `sentencesOf` splits and
+  `generate` is called per sentence.
+- **Ten percent of a sentence is the model loading.** The Kokoro process is
+  started on the first sentence after a server start, which under
+  `bun run dev` is every save, and goes down with that server. The first
+  sentence after one costs a few hundred milliseconds more.
+- **Kokoro is a process because of how it exits.** Its ONNX runtime aborts any
+  process that loaded it when that process exits, which made every server
+  exit a SIGABRT and broke `C-a B` (see [gotchas](gotchas.md)). Moving it
+  out also took the model load off the server's thread. A test with the old
+  arrangement measured a 1.9 s stall; with the process it was 6 ms.
+- **The packaged app's copy of the voice stack is unverified.**
+  `electron-builder.yml` copies `kokoro-js` and its native dependencies
+  into `Resources/node_modules`, Darwin binaries only, but no DMG has been
+  built with it yet. The process is started lazily and a failure to start
+  or load it is caught, so a missing piece costs the voice and not the app:
+  the Mac's voices speak and Settings says Kokoro could not load. `kokoro.mjs`
+  ships in `Resources/server` with the rest of `dist`.
+- **The microphone in the packaged app** needs the usage string in
+  `Info.plist` (`extendInfo`) and the `audio-input` entitlement, both now in
+  the builder config, both unverified in a signed build. Without them the
+  stream opens and carries silence.
+- **The player is busy from the moment it shifts a chunk, not from the
+  moment it plays one.** `pump` fetches and decodes before it has a source
+  to set `playing` to, and a chunk arriving in that gap used to start a
+  fetch of its own and play over the one before it. While the server
+  still sent a reply's sentences all together, that played every
+  sentence at once. `loading` covers the gap.
+- **A sentence goes out the moment it is made, not when the reply is
+  done.** `render` announces each one as Kokoro finishes it, so Kuru
+  starts talking about a second after its turn ends, and the next
+  sentence is made while the one before it plays. A sentence the engine
+  chokes on is skipped and `seq` counts what was made, so a reply whose
+  last sentence failed never sends a chunk marked `last`. Nothing reads
+  `last`.
+- **The pill's place is a share of the window, not a pixel.** What is
+  kept is how far along the room it has to move in it sits, 0–1 on each
+  axis, and the stylesheet draws that as `left: x·100%` with a
+  `translate` back by `x·100%` of the pill — inside the window at every
+  size of either, with nothing measured. It needs `width: max-content`:
+  a fixed box left to shrink to fit is as wide as the window less its
+  `left`, which wrapped a pill near the right edge a word to a line.
+- **The pill takes the pointer now**, which it did not while it only
+  talked. A press on it prevents `mousedown`, the mic button's fix, so
+  dragging it or pressing its ✕ never takes the focus off a terminal.
+- **The ✕ on a clip still being opened waits for the microphone.** It is
+  `cancelTalk`, the same as Escape, and that closes what `open` made — so
+  pressed in the first moment it takes the pill down when the stream is
+  up, not before.
+- **A page's talks are counted, not flagged.** The key can go down again
+  while the last clip is still being heard, and the first one finishing
+  must not lift the second one's hush. Each recording ends its talk once,
+  in `close` or in `open`'s failure, never both.
+- **The hush acts on its edge, not its level.** Going quiet runs
+  `stopSpeaking` once; a second page pressing while this one already holds
+  a reply does not throw that reply away. Coming back runs `pump`.
+- **A dropped socket lifts the hush on both ends.** The server forgets a
+  client's say when its socket goes, and the page forgets the server's when
+  its socket goes, since the next server says again on connect; a page
+  still talking says so again from `onopen`. A client that stays connected
+  and never says it stopped is let go after three minutes (`TALK_MAX_MS`),
+  past the longest clip the server would take.
+- **`superseded` counts from before the words go, not after.** A reply that
+  lands while `deliver` is typing may be the turn that took the words in.
+- **`say` speaks at 22 kHz and Kokoro at 24.** Both are plain WAVs and the
+  browser's decoder resamples; nothing here cares.

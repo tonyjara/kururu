@@ -10,7 +10,8 @@ The detail that used to be in `CLAUDE.md`. That file is now the operational brie
 | [layout.md](layout.md) | Profiles, workspaces, panes, tabs, dragging, persistence, keys |
 | [styles.md](styles.md) | Themes, skins, parts, the registry, the studio, mascots |
 | [notifications.md](notifications.md) | The gate, the delivery, sounds — and the macOS signing saga |
-| [harness.md](harness.md) | The one session per profile that drives the others: kururu's verbs as MCP tools, the inbox socket, the status feed |
+| [harness.md](harness.md) | The one session per profile that drives the others: kururu's verbs as MCP tools, the user's words typed into a pty and why not the inbox, the status feed |
+| [voice.md](voice.md) | Talking to the harness and hearing it: the talk key, on-device transcription through `yap`, Kokoro on the CPU, two languages, the phone's https problem |
 | [packaging.md](packaging.md) | electron-builder, signing, notarizing, the updater, releases |
 | [gotchas.md](gotchas.md) | Errors that name something other than their cause |
 | [testing.md](testing.md) | What `bun test` covers, the isolated instance, what is verified |

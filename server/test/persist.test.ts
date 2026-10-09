@@ -56,6 +56,32 @@ describe("loginKey on disk", () => {
 });
 
 /**
+ * Auto Swap is a preference, not a process, so it is one of the few things
+ * about a profile that survives a cold start as it was — and only when on,
+ * so a file from before it existed reads as off.
+ */
+describe("Auto Swap on disk", () => {
+  it("is off for a new profile, and comes back on for one that had it on", () => {
+    const workspaces = new Workspaces();
+    workspaces.newProfile("work");
+    const [first, second] = workspaces.all();
+    expect(first!.autoSwap).toBe(false);
+    workspaces.setAutoSwap(second!.id, true);
+    writeSnapshot(workspaces.all(), workspaces.active.id);
+    expect(readSnapshot()!.profiles.map((p) => p.autoSwap)).toEqual([false, true]);
+  });
+
+  it("reads anything but true as off", () => {
+    const workspaces = new Workspaces();
+    writeSnapshot(workspaces.all(), workspaces.active.id);
+    const session = JSON.parse(readFileSync(snapshotPath(), "utf8"));
+    session.profiles[0].autoSwap = "yes";
+    writeFileSync(snapshotPath(), JSON.stringify(session));
+    expect(readSnapshot()!.profiles[0]!.autoSwap).toBe(false);
+  });
+});
+
+/**
  * The views a pane holds — the board and documents — come back in their order
  * and with the one that was showing still showing; the terminals beside them
  * do not, because they are processes. Both older shapes a reader has been

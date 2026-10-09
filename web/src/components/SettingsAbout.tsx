@@ -26,8 +26,14 @@
  * cupboard — it stays the link to GitHub it has always been. Note which way
  * round that is. The page does not decide it can install; it asks the runtime it
  * happens to be in, and takes the link for an answer.
+ *
+ * Below that is the server's own story — when it started, why, and the last
+ * lines of `lifecycle.log` — because "which kururu is this" is the question
+ * people bring here right after the window has reconnected, and the real
+ * question is why it did.
  */
 import { useCallback, useEffect, useState } from "react";
+import type { LifeEvent, LifecycleReport } from "../../../shared/lifecycle";
 import type { HostInfo } from "../../../shared/model";
 import type { UpdateCheck } from "../../../shared/wire";
 import { desktop, type UpdateState } from "../desktop";
@@ -84,6 +90,8 @@ export function AboutSettings({ host }: { host: HostInfo }) {
         <span className="set-note">{describe(check, asking)}</span>
       </div>
 
+      <ServerLife />
+
       {check?.newer && check.latest && (
         <section className="about-release">
           <header className="about-release-head">
@@ -108,6 +116,89 @@ export function AboutSettings({ host }: { host: HostInfo }) {
       )}
     </div>
   );
+}
+
+/**
+ * Why the server is the one it is: when it started, what its supervisor said
+ * when it started it, and what the record says happened before.
+ *
+ * Fetched when the page opens, like the update check and for a sharper reason:
+ * the lines that matter most were written by a process that is gone, so there
+ * is no event to push. Newest first, because the question is always about the
+ * last time. A crash's stack is folded away, there for whoever is going to
+ * file the bug and out of the way of whoever only wanted the sentence.
+ */
+function ServerLife() {
+  const [report, setReport] = useState<LifecycleReport | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void fetch("/api/lifecycle")
+      .then((response) => (response.ok ? (response.json() as Promise<LifecycleReport>) : null))
+      .then((answer) => {
+        if (live && answer) setReport(answer);
+      })
+      // A server from before the record existed, or one restarting right now.
+      // Either way there is nothing to say yet, and saying nothing is honest.
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (!report) return null;
+  const events = [...report.events].reverse();
+  return (
+    <section className="about-life">
+      <h4 className="about-release-title">Server</h4>
+      <p className="set-note">
+        Up since {when(report.startedAt)}
+        {report.because ? `, started because ${report.because}.` : "."}
+      </p>
+      {report.orphaned && (
+        <p className="set-note set-note-bad">
+          The process supervising it has gone, so a save will not restart it and prefix+B is refused rather than
+          ending it. Restart <code>bun run dev</code> to get the watcher back.
+        </p>
+      )}
+      {events.length > 0 && (
+        <ol className="about-life-list">
+          {events.map((event, i) => (
+            <LifeRow key={`${event.at}-${event.pid}-${i}`} event={event} />
+          ))}
+        </ol>
+      )}
+      <p className="set-note">
+        The whole record is <code>{report.file}</code>, and <code>bun run status</code> prints the end of it.
+      </p>
+    </section>
+  );
+}
+
+function LifeRow({ event }: { event: LifeEvent }) {
+  const bad = event.what === "crash" || event.what === "down" || event.what === "orphaned";
+  return (
+    <li className={bad ? "about-life-row about-life-bad" : "about-life-row"}>
+      <span className="about-life-at">{when(event.at)}</span>
+      <span className="about-life-by">{event.by}</span>
+      <span className="about-life-why">{event.why}</span>
+      {event.error && !event.why.includes(event.error) && <span className="about-life-more">{event.error}</span>}
+      {event.stack && (
+        <details className="about-life-more">
+          <summary>{event.what === "down" ? "What the build said" : "Stack"}</summary>
+          <pre className="about-notes-raw">{event.stack}</pre>
+        </details>
+      )}
+    </li>
+  );
+}
+
+/** Today's as a time, anybody else's with its date. */
+function when(iso: string): string {
+  const at = new Date(iso);
+  const time = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  if (at.toDateString() === new Date().toDateString()) return time;
+  return `${at.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
 }
 
 /**

@@ -9,6 +9,7 @@
  */
 import type { Profile, Workspace } from "../../../shared/model";
 import { PREFIX_LABEL } from "../keys";
+import type { VoicePhase } from "../voice";
 
 interface Props {
   profile: Profile;
@@ -46,6 +47,14 @@ interface Props {
   panes: number | null;
   onLastPane: () => void;
   onHelp: () => void;
+  /**
+   * The talk key, for a thumb: what the microphone is doing, and the key's
+   * name for the tooltip. Pressed and released like the key, so a phone —
+   * which has no right Control — holds the button instead.
+   */
+  talk: { phase: VoicePhase; key: string };
+  onTalkDown: () => void;
+  onTalkUp: () => void;
 }
 
 export function StatusBar({
@@ -63,6 +72,9 @@ export function StatusBar({
   panes,
   onLastPane,
   onHelp,
+  talk,
+  onTalkDown,
+  onTalkUp,
 }: Props) {
   const index = profile.workspaces.findIndex((w) => w.id === workspace.id);
   return (
@@ -138,6 +150,28 @@ export function StatusBar({
           <KeysIcon />
         </button>
       )}
+      {/* The talk key as a button. Held, it records; tapped, it toggles — the
+          same two gestures the key has, through `voice.ts`'s one state
+          machine, so a phone that has no right Control key talks the same
+          way. `mousedown` is prevented so a press never takes focus off the
+          terminal that was being typed into. The colour is the mode: red
+          while the microphone is open, the working colour while Kuru speaks. */}
+      <button
+        className={`sb-mic ${talk.phase === "listening" ? "sb-mic-listening" : talk.phase === "speaking" ? "sb-mic-speaking" : talk.phase === "sending" ? "sb-mic-sending" : ""}`}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          onTalkDown();
+        }}
+        onPointerUp={onTalkUp}
+        onPointerCancel={onTalkUp}
+        onMouseDown={(event) => event.preventDefault()}
+        onContextMenu={(event) => event.preventDefault()}
+        title={`Hold to talk to Kuru, tap to toggle (${talk.key})`}
+        aria-label="Talk to the harness"
+        aria-pressed={talk.phase === "listening"}
+      >
+        <MicIcon />
+      </button>
       {/* The tree's door, on the side the tree opens on — the bars at the far
           left open the column on the left, and this is the same gesture
           mirrored. Before the key hint rather than after it, so the hint stays
@@ -206,6 +240,20 @@ function KeysIcon() {
          strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="2" y="6" width="20" height="12" rx="2" />
       <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8" />
+    </svg>
+  );
+}
+
+/**
+ * A microphone, drawn here on `BarsIcon`'s reasoning: a picture of a physical
+ * object that means the same thing in any chrome.
+ */
+function MicIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" />
     </svg>
   );
 }

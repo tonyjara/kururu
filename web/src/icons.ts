@@ -57,6 +57,8 @@ const VECTORS: Record<IconName, string> = {
   board: /* square-kanban */ `<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M8 7v7"/><path d="M12 7v4"/><path d="M16 7v9"/>`,
   panel: /* panel-right-close */ `<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m8 9 3 3-3 3"/>`,
   grip: /* grip-vertical */ `<circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/>`,
+  fold: /* chevrons-down-up */ `<path d="m7 20 5-5 5 5"/><path d="m7 4 5 5 5-5"/>`,
+  unfold: /* chevrons-up-down */ `<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>`,
 };
 
 /**

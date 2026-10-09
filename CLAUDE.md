@@ -91,6 +91,9 @@ either and the agents carry on.
 **Ports:** 7717 server · 5173 vite · 7800+ preview proxies.
 **Socket:** `~/.local/state/kururu/ptyhost.sock`, with `ptyhost.log` beside it —
 the host is a daemon and its log is the only place its side of a bug shows up.
+`lifecycle.log` is there too: every server start, stop, restart and crash, and
+why. It is the answer to "why did the window just reconnect", and
+`bun run status` prints its end.
 
 Anything that writes config, installs a style, or acts as a second real client
 goes in an **isolated instance** — see
@@ -174,10 +177,29 @@ The load-bearing invariants, one line each, with the argument behind the link:
   profile, started by kururu with kururu's verbs as MCP tools (`POST /mcp`)
   and a role; nothing in kururu generates text and no API key exists. Its
   tools take a profile and workspace by id, never `active` — the `*In`
-  spellings in `workspaces.ts` — and it reaches a running Claude through the
-  inbox socket its hook reported, never by typing when it can help it. It is
-  told every `done`/`blocked` edge in its profile. A permission prompt is the
-  user's to answer, and the role says so. → [harness](docs/harness.md)
+  spellings in `workspaces.ts`. What it says to an agent is **typed into the
+  agent's pty as the user's words**, never posted to its inbox: Claude Code
+  makes everything on that socket another session's message, which agents
+  rightly refuse to take as the user's. `due` holds a message for the turn's
+  end, and nothing is typed into a prompt or under the user's hands. The
+  inbox carries only kururu's `[kururu]` notices to the harness, signed
+  `kururu (no reply)` because SendMessage resolves names by prefix and
+  "kururu" is the prefix of every session in this repo. It is told every
+  agent's `done`/`blocked` edge in its profile — never a shell's, and
+  `blocked` only when Claude is asking. A permission prompt is the user's to
+  answer, and the role says so. → [harness](docs/harness.md)
+- **The voice is ears and a mouth around that session, not a second brain.**
+  Speech becomes a `[voice]` turn typed into the harness's terminal; its last message
+  becomes speech, off the same Stop report. No client plays a word while any client
+  is talking (`hush`), and words that reach Kuru drop the older replies that
+  waited. Both halves are local — Apple's
+  recogniser through `yap`, Kokoro on the CPU with `say` as the fallback — and
+  nothing leaves the machine. Kokoro runs in a process of its own
+  (`server/src/kokoro.ts`) and is never imported into the server, because its
+  runtime turns the exit of whatever loaded it into a SIGABRT. The server hears and speaks for every client;
+  a window only posts a WAV and plays one. `web/src/voice.ts` holds the
+  microphone and installs the talk key once, through refs, never per render.
+  → [voice](docs/voice.md)
 
 ## Code style
 
@@ -207,10 +229,11 @@ Open, roughly in order — the argument for each is in `PLAN.md`:
    foreground layer is done; this is the other one.
 4. **The element picker** injected by the proxy: long-press an element, send the
    selector and source location to the agent. Waits on the preview pane.
-5. **Voice on the harness.** The harness exists (`docs/harness.md`); what it
-   lacks is a way to talk to it. Anthropic has no voice API, so this is a
-   vendor choice — a realtime speech model calling the same tools, or a
-   cascade around Claude — plus HTTPS for the phone's microphone.
+5. **The voice on the phone.** The voice is built (`docs/voice.md`) and the
+   phone's button is there; what the phone lacks is a secure context for its
+   microphone, which is `tailscale serve` and the user's decision. Also owed:
+   a verified DMG with the Kokoro stack in it, and the talk key system-wide
+   (a native key hook and Input Monitoring) rather than only in the window.
 
 Smaller things owed: the Homebrew tap, and attributing a discovered dev server
 to the workspace that owns it — the machine-wide port scan still says nothing
