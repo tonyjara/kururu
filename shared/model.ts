@@ -29,6 +29,7 @@ import type { KeyOverrides } from "./keys";
 import type { LayoutNode } from "./layout";
 import type { Board } from "./board";
 import type { LaunchSettings } from "./launchers";
+import type { MachinePin } from "./machines";
 import type { NotifySettings } from "./notify";
 import type { ProjectSettingsMap } from "./projects";
 import type { StyleLibrary } from "./styles";
@@ -626,6 +627,15 @@ export interface Workspace {
    * survives both restarts by the roads the layout already takes.
    */
   board: Board | null;
+  /**
+   * The machine this workspace's shells open on, and the folder there, or
+   * null for this Mac — see `MachinePin` in `shared/machines.ts`.
+   *
+   * Only a new *shell* goes there: the tab strip's terminal, `C-a T`, a
+   * split. Agents, nvim and everything that reads a disk stay here, and the
+   * pages that would otherwise draw an empty tree for it say so instead.
+   */
+  machine: MachinePin | null;
 }
 
 /** Long enough for a client's name and a word; a group heading is one line of a narrow column. */

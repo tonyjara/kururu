@@ -34,14 +34,22 @@ export interface FootProc {
   ppid: number;
   /** Bytes. `ps` prints kilobytes on macOS and Linux both. */
   rss: number;
+  /**
+   * When it started, as `ps` spells it. A pid alone names a process only until
+   * it exits, and the Processes page signals nvims by what it showed seconds
+   * earlier — so a process is the pid *and* this, and a recycled pid with a
+   * different start is a different process that nothing here will touch.
+   */
+  start: string;
   args: string;
 }
 
 export type FootTable = Map<number, FootProc>;
 
-const PS_LINE = /^\s*(\d+)\s+(\d+)\s+(\d+)\s?(.*)$/;
+/** `lstart` is fixed-format under the C locale: `Fri Oct  9 15:11:56 2026`. */
+const PS_LINE = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+([A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d\d:\d\d:\d\d\s+\d{4})\s?(.*)$/;
 
-/** `ps -eo pid=,ppid=,rss=,args=` into pid → process. */
+/** `ps -eo pid=,ppid=,rss=,lstart=,args=` into pid → process. */
 export function parseFootTable(out: string): FootTable {
   const table: FootTable = new Map();
   for (const line of out.split("\n")) {
@@ -53,8 +61,10 @@ export function parseFootTable(out: string): FootTable {
       pid,
       ppid: Number(m[2]) || 0,
       rss: (Number(m[3]) || 0) * 1024,
+      start: m[4]!.replace(/\s+/g, " "),
       // Only the head of a line names a program, and claude's runs to kilobytes.
-      args: m[4]!.slice(0, 300),
+      // ps pads `lstart` out to a column, so what follows it starts with spaces.
+      args: m[5]!.trimStart().slice(0, 300),
     });
   }
   return table;
@@ -162,11 +172,138 @@ export function hostPidOf(roots: Iterable<number>, table: FootTable): number | n
 
 const MAX_BUFFER = 8 * 1024 * 1024;
 
-/** The whole table, argv included. Empty when ps fails. */
+/**
+ * The whole table, argv and start times included. Empty when ps fails. The C
+ * locale because `lstart` is spelled in the user's language otherwise, and the
+ * parser reads English day and month names.
+ */
 export function readFootTable(): Promise<FootTable> {
   return new Promise((resolve) => {
-    execFile("ps", ["-eo", "pid=,ppid=,rss=,args="], { maxBuffer: MAX_BUFFER }, (err, stdout) => {
-      resolve(err && !stdout ? new Map() : parseFootTable(stdout));
-    });
+    execFile(
+      "ps",
+      ["-eo", "pid=,ppid=,rss=,lstart=,args="],
+      { maxBuffer: MAX_BUFFER, env: { ...process.env, LC_ALL: "C" } },
+      (err, stdout) => resolve(err && !stdout ? new Map() : parseFootTable(stdout)),
+    );
   });
+}
+
+// ---------------------------------------------------------------------------
+// Every nvim on the machine
+// ---------------------------------------------------------------------------
+
+/** An nvim the Processes page can show and close, wherever it is running. */
+export interface FoundNvim {
+  pid: number;
+  start: string;
+  args: string;
+  /** Its whole tree, top first: the UI, the core under it, its language servers. */
+  pids: number[];
+  rss: number;
+  /** The kururu pty it is in, by the pty's pid, or null when it is outside kururu. */
+  ptyRoot: number | null;
+  /** An agent program between that pty and the editor — the agent's `$EDITOR`. */
+  underAgent: boolean;
+  /** Outside kururu, the program at the top of its ancestry: the terminal app, tmux, sshd. */
+  app: string | null;
+}
+
+/** Whether a command line is an nvim — the program, not a file somebody named nvim. */
+function isNvimArgs(args: string): boolean {
+  const head = args.trim().split(/\s+/, 1)[0] ?? "";
+  return basename(head) === "nvim";
+}
+
+/**
+ * Not every process called nvim is an editor. `nvim --server … --remote-expr`
+ * is a client — kururu's own server runs one for every question it asks an
+ * editor — and the rest are one-shot queries that are gone before anybody
+ * could close them.
+ */
+const NOT_AN_EDITOR = /\s(--remote[\w-]*|--api-info|--version|-v)(\s|$)/;
+
+/** Ancestry is shallow; this bounds a walk through a table that is changing under it. */
+const MAX_ANCESTRY = 64;
+
+/**
+ * What to call the program an nvim outside kururu is running under, from the
+ * command line of the process at the top of its ancestry. An app bundle by its
+ * bundle name, outermost first — VS Code's helpers are bundles inside a bundle,
+ * and "Visual Studio Code" is the one a person knows it by. Another kururu's pty
+ * host says so, because "node" would be no help to anybody.
+ */
+export function appName(args: string): string | null {
+  const bundle = /\/([^/]+)\.app\//.exec(args);
+  if (bundle) return bundle[1]!;
+  if (args.includes("ptyhostd")) return "another kururu";
+  const head = args.trim().split(/\s+/, 1)[0] ?? "";
+  // `-zsh` is a login shell, `sshd:` is sshd renaming itself after the session.
+  return basename(head).replace(/^-|:$/g, "") || null;
+}
+
+/**
+ * Every nvim on the machine, once each, with what it costs and where it is.
+ *
+ * Once each means the topmost nvim in a chain: since 0.11 typing `nvim` gets a
+ * UI with the editor running under it as `nvim --embed`, and a plugin's
+ * `nvim --headless` job is the editor's business — so an nvim with an nvim above
+ * it is part of that one, and its memory is added to it with everything else
+ * underneath. An `nvim --embed` with no nvim above it is an editor somebody
+ * else is drawing (VS Code's extension, a GUI), and is one.
+ *
+ * Where is decided walking up: a pid in `ptyRoots` is a kururu terminal, and
+ * otherwise the walk runs to the top and names the app there.
+ */
+export function findNvims(
+  table: FootTable,
+  children: Map<number, FootProc[]>,
+  ptyRoots: ReadonlySet<number>,
+  names: string[] = DEFAULT_AGENT_COMMANDS,
+): FoundNvim[] {
+  const found: FoundNvim[] = [];
+  for (const proc of table.values()) {
+    if (!isNvimArgs(proc.args) || NOT_AN_EDITOR.test(` ${proc.args}`)) continue;
+    let ptyRoot: number | null = null;
+    let underAgent = false;
+    let top = proc;
+    let nested = false;
+    // Up to launchd and not onto it: the app is what launchd started, and an
+    // nvim whose terminal went away is adopted by launchd and has no app at all.
+    for (let up = table.get(proc.ppid), depth = 0; up && up.pid > 1 && depth < MAX_ANCESTRY; up = table.get(up.ppid), depth++) {
+      if (isNvimArgs(up.args)) {
+        nested = true;
+        break;
+      }
+      if (classify(up.args, names)?.kind === "agent") underAgent = true;
+      if (ptyRoots.has(up.pid)) {
+        ptyRoot = up.pid;
+        break;
+      }
+      top = up;
+    }
+    if (nested) continue;
+    const pids: number[] = [];
+    const seen = new Set<number>();
+    let rss = 0;
+    const stack = [proc];
+    while (stack.length > 0 && seen.size < MAX_VISITED) {
+      const next = stack.pop()!;
+      if (seen.has(next.pid)) continue;
+      seen.add(next.pid);
+      pids.push(next.pid);
+      rss += next.rss;
+      for (const kid of children.get(next.pid) ?? []) stack.push(kid);
+    }
+    found.push({
+      pid: proc.pid,
+      start: proc.start,
+      args: proc.args,
+      pids,
+      rss,
+      ptyRoot,
+      underAgent: ptyRoot !== null && underAgent,
+      app: ptyRoot === null && top !== proc ? appName(top.args) : null,
+    });
+  }
+  return found.sort((a, b) => b.rss - a.rss);
 }

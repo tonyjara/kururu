@@ -1,5 +1,6 @@
 /**
- * The Electron shell — a window onto a kururu server, and nothing else.
+ * The Electron shell — a window onto a kururu server, a frog in the menu bar
+ * that runs one, and the two things a served page cannot do.
  *
  * It used to be the whole application: it forked the server and the pty host as
  * utilityProcesses, watched the source and re-forked on save, and asked before
@@ -15,25 +16,38 @@
  * this costs a window. Your agents are somewhere else, still working, and the
  * phone never noticed you closed anything.
  *
- * So what is left here is small and deliberately so — find a server, draw it,
- * and hand the page the one capability a browser cannot give it. Anything that
- * knows what an agent is belongs on the other side of the HTTP boundary, because
- * that side is also what the phone talks to, and a thing only this file can do
- * is a thing the phone cannot.
+ * What came back is the *starting*, and it came back in the menu bar rather
+ * than in the window. An installed kururu has no terminal, so somebody has to
+ * run the runner, and a window is the wrong somebody: it is the least
+ * important of the three processes and the first to be closed. So the app
+ * keeps a tray icon with no window open (`tray.js`), starts `run.mjs` through
+ * `runner.js` — the same supervisor `bun run dev` is — and shows what the host
+ * and the server are up to. The window is one of the things the tray can
+ * open. Closing it hides the dock icon and leaves the frog.
+ *
+ * The other thing only this process can do is hear a key with the window
+ * unfocused, and show something over another application. `talkkey.js` is
+ * that: the native hook and the floating pill. Anything that knows what an
+ * agent is still belongs on the other side of the HTTP boundary, because that
+ * side is also what the phone talks to.
  */
 const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = require("electron");
 const { execFileSync, spawn } = require("node:child_process");
-const { appendFileSync, existsSync, mkdirSync, openSync, closeSync, renameSync, statSync } = require("node:fs");
+const { existsSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { readDesktop, writeDesktop } = require("./desktop");
+const { Runner, hostSocket } = require("./runner");
 const { candidates, forget, normalize, remember } = require("./servers");
+const { TalkKey } = require("./talkkey");
+const { createTray } = require("./tray");
 
 const DEV = process.env.KURURU_DEV === "1";
 /**
  * Whether this is a downloaded kururu or a checkout with `electron .` pointed at
- * it. The difference is one thing only and it is the whole of what packaging
- * changed: an installed kururu has a server inside it and is expected to start
- * one, while a checkout has `bun run dev` next door and must never fight it.
+ * it. An installed kururu has a server inside it and starts one at launch; a
+ * dev shell runs from the checkout it sits in and starts a server only when
+ * asked, because `bun run dev` is very often already running next door.
  */
 const PACKAGED = app.isPackaged;
 const PORT = Number(process.env.KURURU_PORT || 7717);
@@ -49,6 +63,14 @@ const LOCAL = `http://127.0.0.1:${PORT}`;
  */
 const VITE_URL = `http://127.0.0.1:${process.env.KURURU_VITE_PORT || 5173}`;
 const PICKER = path.join(__dirname, "connect.html");
+const PRELOAD = path.join(__dirname, "preload.js");
+
+/**
+ * An isolated instance keeps its own profile, or two apps would share one
+ * Chromium profile and one single-instance lock. `docs/testing.md` says
+ * where the rest of an isolated instance lives.
+ */
+if (process.env.KURURU_USER_DATA) app.setPath("userData", process.env.KURURU_USER_DATA);
 
 /** Where bun lives when it is not on PATH — a GUI launch inherits almost none. */
 const BUN_CANDIDATES = [
@@ -67,47 +89,24 @@ let win = null;
 let connected = null;
 
 // ---------------------------------------------------------------------------
-// The server, when this is the thing that has to start one
+// One of these at a time
 // ---------------------------------------------------------------------------
 
 /**
- * A downloaded kururu starts its own server; a checkout never does.
- *
- * This is the one thing packaging changed about the architecture, and it changed
- * less than it looks. The three processes are the same three: the window finds a
- * server and draws it, the server connects to a detached pty host, and the host
- * outlives both. What an installed kururu adds is somebody to *begin* that, which
- * in a checkout is a person typing `bun run dev` and in a .app is nobody at all —
- * a downloaded application that opened onto an address picker would be asking a
- * question only its author could answer.
- *
- * So the rule is: if something already answers on 7717, use it and start nothing.
- * That is not politeness, it is the one case that would otherwise be broken —
- * open the app on a machine where you are already running `bun run dev` and a
- * second server would take `EADDRINUSE` and die, or worse, take the port first
- * and leave the one you were working in homeless.
- *
- * The server is a child and dies with us, which is the shape you asked for and is
- * also the honest one: quit means quit. Nothing is lost by it — the ptys are in
- * the host below, which is detached and is nobody's child, so reopening kururu
- * finds every agent still working. What does stop is the phone, until you open
- * the window again.
+ * A second launch opens a window in the first rather than a second tray. Two
+ * trays would be two runners each wanting the port, and the one that lost
+ * would show "down" for a server that was up. The lock is per `userData`, so
+ * an isolated instance gets its own.
  */
-
-/** Kept in step with `RESTART_EXIT_CODE` in `server/src/index.ts`, which sends it. */
-const RESTART_EXIT_CODE = 75;
-
-/**
- * The pty host's socket, spelled exactly as `server/src/hostsock.ts` spells it.
- * Duplicated rather than imported because that file is TypeScript on the other
- * side of a process boundary, and the alternative — bundling a second copy of
- * the server's code into the window — is a much worse kind of duplication.
- */
-function hostSocket() {
-  if (process.env.KURURU_HOST_SOCK) return process.env.KURURU_HOST_SOCK;
-  const state = process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state");
-  return path.join(state, "kururu", "ptyhost.sock");
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
 }
+
+app.on("second-instance", () => openWindow());
+
+// ---------------------------------------------------------------------------
+// The PATH, and the runner
+// ---------------------------------------------------------------------------
 
 /**
  * The PATH a login shell would have, which is not the one a double-clicked app
@@ -150,113 +149,45 @@ function loginPath() {
   return cachedPath;
 }
 
-let server = null;
-/** Set while we are ending it on purpose, so the exit is not read as a crash. */
-let serverStopping = false;
+/**
+ * The server, through `run.mjs`. `runner.js` says how; what is decided here
+ * is only where from, which is the saved choice: this app's own bundle, or
+ * the checkout somebody pointed the menu at.
+ */
+const runner = new Runner({
+  packaged: PACKAGED,
+  resourcesPath: process.resourcesPath,
+  shellCheckout: PACKAGED ? null : path.join(__dirname, ".."),
+  port: PORT,
+  loginPath,
+});
+runner.configure(readDesktop());
 
 /**
- * One line of `lifecycle.log`, as `server/run.mjs` writes it and for the same
- * reason: this is the supervisor, it is the only one that sees how the server
- * ended from outside, and a packaged app has no terminal for that to scroll
- * past. `shared/lifecycle.ts` says what the fields are.
+ * The hook and the floating pill. The helper is built by
+ * `desktop/talkkey/build.mjs` into `dist/`, which the app ships beside the
+ * server; a build without it says so in the menu and the key works in the
+ * window as before.
  */
-function record(what, why, extra = {}) {
-  try {
-    const dir =
-      process.env.KURURU_STATE_DIR ||
-      path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"), "kururu");
-    const file = path.join(dir, "lifecycle.log");
-    mkdirSync(dir, { recursive: true });
-    if (existsSync(file) && statSync(file).size > 256 * 1024) renameSync(file, `${file}.1`);
-    appendFileSync(file, `${JSON.stringify({ at: new Date().toISOString(), by: "app", pid: process.pid, what, why, ...extra })}\n`);
-  } catch {
-    // The record is for afterwards; it is not a reason to fail now.
-  }
+const talk = new TalkKey({
+  // `KURURU_TALKKEY` points an isolated instance at another build of the
+  // hook, or at nothing, so a test can run with no permission prompt.
+  helperPath:
+    process.env.KURURU_TALKKEY ||
+    (PACKAGED ? path.join(process.resourcesPath, "server", "talkkey") : path.join(__dirname, "dist", "talkkey")),
+  preloadPath: PRELOAD,
+  dev: DEV,
+  debug: !PACKAGED,
+  viteUrl: VITE_URL,
+  saved: readDesktop(),
+  save: writeDesktop,
+});
+
+/** The pill follows the window's server, or the local one when there is no window. */
+function pointPill() {
+  talk.setServer(connected ?? (runner.health ? LOCAL : null));
 }
-
-function startServer(because = "the app started it") {
-  const entry = path.join(process.resourcesPath, "server", "server.mjs");
-  if (!existsSync(entry)) {
-    console.error(`kururu: no server bundled at ${entry}`);
-    return;
-  }
-
-  /**
-   * Its output goes to a file beside the host's, because a packaged app has no
-   * stdout anybody will ever see — and a server whose logs go nowhere is one
-   * nobody can debug from a bug report.
-   */
-  const dir = path.dirname(hostSocket());
-  mkdirSync(dir, { recursive: true });
-  const log = openSync(path.join(dir, "server.log"), "a");
-
-  server = spawn(process.execPath, [entry], {
-    stdio: ["ignore", log, log],
-    env: {
-      ...process.env,
-      // This binary is Electron; that is what makes it node instead.
-      ELECTRON_RUN_AS_NODE: "1",
-      // How the server knows that asking to be restarted will get it restarted,
-      // which is what `prefix+B` and the Share toggle both depend on.
-      KURURU_SUPERVISED: "1",
-      KURURU_STARTED_BECAUSE: because,
-      PATH: loginPath(),
-      KURURU_WEB_DIST: path.join(process.resourcesPath, "web"),
-      KURURU_ASSETS: path.join(process.resourcesPath, "assets", "spritesheets"),
-      KURURU_SOUNDS: path.join(process.resourcesPath, "assets", "sounds"),
-      KURURU_PTYHOSTD: path.join(process.resourcesPath, "server", "ptyhostd.mjs"),
-    },
-  });
-  closeSync(log);
-
-  server.on("error", (err) => console.error("kururu: could not start the server —", err.message));
-  const child = server;
-  server.on("exit", (code, signal) => {
-    server = null;
-    if (serverStopping) return;
-    if (code === RESTART_EXIT_CODE) {
-      record("restart", "the server asked to be restarted", { server: child.pid });
-      startServer("it asked to be restarted");
-      return;
-    }
-    /**
-     * Anything else is left down, on `run.mjs`'s reasoning: a supervisor that
-     * resurrects a server which cannot start is a loop, and the error in the log
-     * is the useful part.
-     */
-    const how = signal ? `was killed by ${signal}` : `exited with code ${code}`;
-    record("crash", `the server ${how}; not restarting it`, { server: child.pid, code, signal });
-    console.error(`kururu: the server ${how}; not restarting it`);
-  });
-}
-
-function stopServer() {
-  if (!server) return;
-  serverStopping = true;
-  server.kill();
-  server = null;
-}
-
-/**
- * The server this window is responsible for, if it is responsible for one.
- *
- * Null means "go to the picker", which is what a checkout always gets and what a
- * packaged build gets when its own server could not be started — in which case
- * the sweep is still running and will find it if it turns up late.
- */
-async function ownServer() {
-  if (!PACKAGED) return null;
-  // Somebody else's, and theirs to manage. Very often `bun run dev`.
-  if (await reachable(LOCAL)) return LOCAL;
-
-  startServer();
-  for (let attempt = 0; attempt < 60; attempt++) {
-    if (await reachable(LOCAL)) return LOCAL;
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  console.error("kururu: the bundled server did not come up");
-  return null;
-}
+runner.on("change", pointPill);
 
 /**
  * End every agent on this machine, by stopping the pty host.
@@ -493,6 +424,7 @@ async function connect(address) {
   remember(base);
   connected = base;
   startWatchingServer();
+  pointPill();
 
   if (DEV) {
     await startVite(base);
@@ -517,7 +449,7 @@ function showPicker() {
   connected = null;
   stopWatchingServer();
   buildMenu();
-  void win?.loadFile(PICKER);
+  if (win && !win.isDestroyed()) void win.loadFile(PICKER);
   startSweeping();
 }
 
@@ -526,18 +458,13 @@ function showPicker() {
 // ---------------------------------------------------------------------------
 
 /**
- * The menu bar.
+ * The menu bar at the top of the screen, when a window has the focus.
  *
- * "Restart Server" used to live here and does not any more: the server is not
- * this process's to restart, and a menu item that works only when the server
- * happens to be one kururu forked is worse than none. `prefix+B` still asks for
- * a restart; it now asks whatever is supervising the server, which is where the
- * answer actually lives. What replaces it is the thing this window *can* do,
- * which is point somewhere else.
- *
- * Everything else is Electron's own roles, spelled out only because replacing
- * the default menu replaces all of it. Edit is not decoration: a terminal
- * without copy and paste in the menu is a terminal whose ⌘C people distrust.
+ * "Restart Server" lives in the tray now, where it works whoever is
+ * supervising the server; this menu is Electron's own roles, spelled out only
+ * because replacing the default menu replaces all of it. Edit is not
+ * decoration: a terminal without copy and paste in the menu is a terminal
+ * whose ⌘C people distrust.
  */
 function buildMenu() {
   const isMac = process.platform === "darwin";
@@ -546,6 +473,7 @@ function buildMenu() {
     {
       label: "File",
       submenu: [
+        { label: "New Window", accelerator: "CmdOrCtrl+N", click: () => openWindow() },
         {
           label: "Connect to Server…",
           accelerator: "Shift+CmdOrCtrl+O",
@@ -577,6 +505,10 @@ function buildMenu() {
 }
 
 function createWindow() {
+  // Back in the dock for as long as there is a window; the tray is the app
+  // the rest of the time. Shown before the window so the window gets a menu
+  // bar, which an app with no dock presence is not given.
+  app.dock?.show();
   win = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -588,7 +520,7 @@ function createWindow() {
     // this is the same picture arriving by the only road those two have.
     icon: path.join(__dirname, "icon", "icon-1024.png"),
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
+      preload: PRELOAD,
       contextIsolation: true,
       nodeIntegration: false,
       /**
@@ -665,6 +597,25 @@ function createWindow() {
   return win;
 }
 
+/** Bring the window up, making one if there is none. The tray's "Open Window", the dock, and ⌘N. */
+function openWindow() {
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    app.focus({ steal: true });
+    return;
+  }
+  createWindow();
+  if (connected) void (DEV ? startVite(connected).then(() => win?.loadURL(VITE_URL)) : win.loadURL(connected));
+  else showPicker();
+  app.focus({ steal: true });
+}
+
+function closeWindow() {
+  if (win && !win.isDestroyed()) win.close();
+}
+
 // ---------------------------------------------------------------------------
 // Wiring
 // ---------------------------------------------------------------------------
@@ -698,6 +649,49 @@ ipcMain.handle("picker:forget", (_event, address) => {
   void sweep();
 });
 
+/**
+ * The voice, across the bridge. The window asks whether the hook is on and is
+ * told when that changes; it may switch the hook, and send a gesture to the
+ * pill. The pill's own channel — the keys in, its reports out — is tied to
+ * the panel's webContents and no other.
+ */
+ipcMain.handle("kururu:voice-global", () => talk.state());
+ipcMain.on("kururu:voice-set-global", (_event, on) => talk.setEnabled(on === true));
+ipcMain.on("kururu:voice-set-altspace", (_event, on) => talk.setAltSpace(on === true));
+ipcMain.on("kururu:voice-gesture", (_event, gesture) => talk.gesture(String(gesture)));
+ipcMain.on("kururu:voice-pause", (_event, on) => talk.pause(on === true));
+ipcMain.on("kururu:voice-open-settings", () => talk.openInputMonitoring());
+ipcMain.on("kururu:pill", (event, state) => {
+  const panel = talk.panelContents();
+  if (!panel || event.sender.id !== panel.id) return;
+  talk.report(state);
+});
+talk.on("change", (state) => {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send("kururu:voice-global", state);
+  }
+});
+
+/**
+ * Whether this launch should open a window at all.
+ *
+ * Opened at login, the app is the tray and nothing else: the Mac just came
+ * up, the agents are not running yet, and a window would be a window onto
+ * nothing in front of whatever the person was about to do. macOS says when
+ * it did the opening; when it does not — a login item registered through
+ * SMAppService has not always said — a launch inside the first minutes of
+ * uptime with the switch on is read the same way. Opening the window is one
+ * click on the frog either way.
+ */
+function launchedAtLogin() {
+  if (!PACKAGED) return false;
+  const login = app.getLoginItemSettings();
+  if (login.wasOpenedAtLogin) return true;
+  return login.openAtLogin && os.uptime() < 180;
+}
+
+let tray = null;
+
 app.whenReady().then(async () => {
   /**
    * A dev server that sends X-Frame-Options would otherwise refuse to render in
@@ -715,64 +709,84 @@ app.whenReady().then(async () => {
   });
 
   buildMenu();
-  createWindow();
+  tray = createTray({
+    runner,
+    talk,
+    version: app.getVersion(),
+    packaged: PACKAGED,
+    actions: {
+      openWindow,
+      closeWindow,
+      windowOpen: () => Boolean(win && !win.isDestroyed()),
+      quit: () => app.quit(),
+      serverChanged: pointPill,
+    },
+  });
+  runner.startProbing();
+
+  // The hook and the pill come up with the app if they were on when it last quit.
+  if (talk.enabled || talk.altSpace) {
+    talk.ensurePanel();
+    if (talk.enabled) talk.startHelper();
+    if (talk.altSpace) {
+      talk.altSpace = false;
+      talk.setAltSpace(true);
+    }
+  }
 
   /**
-   * A packaged kururu opens onto its own agents; a checkout opens onto the
-   * picker, exactly as it did. The picker is still the answer when the bundled
-   * server could not be started, and is still how you point this window at a
-   * machine that is not this one.
+   * A packaged kururu brings its own server up and opens a window onto it; a
+   * dev shell adopts one if `bun run dev` is running and otherwise opens the
+   * picker, exactly as it did, with Start a click away in the tray. Opened at
+   * login there is no window at all.
    */
-  const mine = await ownServer();
-  if (!mine || !(await connect(mine)).ok) showPicker();
+  const hidden = launchedAtLogin();
+  if (hidden) app.dock?.hide();
+  else createWindow();
+  // `KURURU_AUTOSTART` makes a dev shell start as the app does, which is how
+  // an isolated instance is driven with nobody to click the tray.
+  const mine = await runner.ensure(PACKAGED || process.env.KURURU_AUTOSTART === "1");
+  if (!hidden && (!mine || !(await connect(mine)).ok)) showPicker();
+  pointPill();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-      if (connected) void (DEV ? win.loadURL(VITE_URL) : win.loadURL(connected));
-      else showPicker();
-    }
+    if (BrowserWindow.getAllWindows().length === 0 || !win || win.isDestroyed()) openWindow();
   });
 });
 
 /**
- * Closing the last window quits, on every platform — which is a reversal, and
- * the reversal is the whole change.
+ * Closing the last window closes a window, and the app stays in the menu bar.
  *
- * It used to decline on macOS, on purpose: the agents were *in this app*, so
- * quitting ended them, and staying alive with no window was what let you shut
- * the window and leave them working. That guard bought a real thing and cost a
- * confusing one — an app running with no window, no tray icon and nothing to
- * say it was there.
- *
- * The agents are not in here any more. Nothing is: no ptys, no server, no state
- * worth a process. So there is nothing left for a windowless kururu to be doing,
- * and the honest behaviour is to go away. What used to need the guard now needs
- * nothing at all — close the window, quit the app, the server keeps serving and
- * the phone never drops.
+ * This reverses a reversal. The app used to stay open with no window because
+ * the agents were inside it; then it quit on the last window because nothing
+ * was inside it any more, and an app running with no window, no tray icon and
+ * nothing to say it was there was a confusing thing to leave behind. Now
+ * there is something to say it is there: the frog, with the live count beside
+ * it, running the server for the phone. The dock icon goes with the window.
  */
 app.on("window-all-closed", () => {
   stopSweeping();
   stopWatchingServer();
   stopVite();
-  app.quit();
+  app.dock?.hide();
 });
 
 /**
  * Quitting, and the one question worth asking on the way out.
  *
- * Vite is ours, and so is the server when this is a packaged build that started
- * one — but the pty host is nobody's, and that is the distinction the dialog
- * exists to make legible. Quitting stops a server; it does not stop work. People
- * should be told that in the moment rather than discover it later, in either
- * direction: somebody who assumed their agents died would not come back for
- * them, and somebody who assumed they were safe would be right, which is the
- * whole point of having built it this way.
+ * Vite is ours, and so is the server when this app started one — but the pty
+ * host is nobody's, and that is the distinction the dialog exists to make
+ * legible. Quitting stops a server; it does not stop work. People should be
+ * told that in the moment rather than discover it later, in either direction:
+ * somebody who assumed their agents died would not come back for them, and
+ * somebody who assumed they were safe would be right, which is the whole point
+ * of having built it this way.
  *
- * So the prompt offers both, and the destructive one is never the default. It is
- * only raised when this window is the thing holding the server *and* there is
- * something running — pointed at a machine in a cupboard, quitting is a window
- * closing and has nothing to ask about.
+ * So the prompt offers both, and the destructive one is never the default. It
+ * is only raised when this app is the thing holding the server *and* there is
+ * something running — pointed at a machine in a cupboard, or beside a
+ * `bun run dev` of your own, quitting is a window closing and has nothing to
+ * ask about.
  */
 let quitting = false;
 
@@ -781,20 +795,13 @@ app.on("before-quit", (event) => {
   stopWatchingServer();
   stopVite();
 
-  if (quitting || !server) return;
+  if (quitting || !runner.child) return;
   event.preventDefault();
   void confirmQuit();
 });
 
 async function confirmQuit() {
-  let live = 0;
-  try {
-    const response = await fetch(`${LOCAL}/api/health`, { signal: AbortSignal.timeout(1500) });
-    if (response.ok) live = Number((await response.json()).liveAgents) || 0;
-  } catch {
-    // A server that cannot answer has nothing running that we can name, and
-    // holding the app open to say so would be worse than letting it go.
-  }
+  const live = runner.ours() ? Number(runner.health?.liveAgents) || 0 : 0;
 
   if (live === 0) {
     finishQuit(false);
@@ -820,10 +827,16 @@ async function confirmQuit() {
 
 function finishQuit(alsoAgents) {
   quitting = true;
+  talk.dispose();
+  tray?.destroy();
+  tray = null;
   if (alsoAgents) endAgents();
-  stopServer();
-  app.quit();
+  void runner.stop("the app is quitting").finally(() => app.quit());
 }
+
+app.on("will-quit", () => {
+  talk.dispose();
+});
 
 // ---------------------------------------------------------------------------
 // Updating
@@ -840,16 +853,17 @@ function finishQuit(alsoAgents) {
  * process that knows it is a packaged .app, and the About tab drives it across
  * the bridge rather than the server driving anything at all.
  *
- * **It is offered only when this window started the server it is showing**, and
- * that condition is load bearing rather than cautious. About draws the
- * *server's* version, since that is what `/api/health` reports and what the
- * check compares against GitHub — and that number is this bundle's exactly when
- * the window launched the server out of its own Resources. Pointed at the box
- * in the cupboard, or at a `bun run dev` that answered on 7717 first, swapping
- * this .app would leave the page reporting the number it reported before, which
- * reads as an update that silently did not happen. Those cases get the link to
- * the release page, which is the honest answer for both and is also what a
- * browser and the phone have always got.
+ * **It is offered only when this app started the server it is showing, from
+ * its own bundle**, and that condition is load bearing rather than cautious.
+ * About draws the *server's* version, since that is what `/api/health` reports
+ * and what the check compares against GitHub — and that number is this
+ * bundle's exactly when the runner launched the server out of its own
+ * Resources. Pointed at the box in the cupboard, at a `bun run dev` that
+ * answered on 7717 first, or at a checkout the menu was pointed at, swapping
+ * this .app would leave the page reporting the number it reported before,
+ * which reads as an update that silently did not happen. Those cases get the
+ * link to the release page, which is the honest answer for all of them and is
+ * also what a browser and the phone have always got.
  *
  * Nothing downloads until somebody presses the button (`autoDownload = false`)
  * and nothing is applied until they press the second one. What a page can ask
@@ -906,7 +920,7 @@ function setUpdate(next) {
 
 /** Whether replacing this application is a thing this window can honestly offer. */
 function updatable() {
-  return PACKAGED && server !== null && connected === LOCAL && loadUpdater() !== null;
+  return PACKAGED && runner.ours() && runner.effectiveCheckout() === null && connected === LOCAL && loadUpdater() !== null;
 }
 
 async function downloadUpdate() {
@@ -946,7 +960,7 @@ async function downloadUpdate() {
  * install over a consequence that is not one.
  *
  * Which means everything `finishQuit` does has to be done here instead, and the
- * server especially: it is a child of this process rather than a thing that
+ * runner especially: it is a child of this process rather than a thing that
  * dies with it, so leaving it up would have the new version find 7717 already
  * taken by the old one.
  */
@@ -956,21 +970,22 @@ function installUpdate() {
   stopSweeping();
   stopWatchingServer();
   stopVite();
-  stopServer();
-  loadUpdater().quitAndInstall();
+  talk.dispose();
+  tray?.destroy();
+  tray = null;
+  void runner.stop("the app is restarting into an update").finally(() => loadUpdater().quitAndInstall());
 }
 
 ipcMain.handle("kururu:update-state", () => (updatable() ? update : { status: "unavailable" }));
 ipcMain.on("kururu:update-download", () => void downloadUpdate());
 ipcMain.on("kururu:update-install", () => installUpdate());
 
-
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
     // A signal is not somebody choosing, so it is not asked a question.
     quitting = true;
     stopVite();
-    stopServer();
-    app.quit();
+    talk.dispose();
+    void runner.stop(`the app was stopped by ${signal}`).finally(() => app.quit());
   });
 }

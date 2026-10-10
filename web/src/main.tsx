@@ -2,8 +2,17 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { Crash } from "./components/Crash";
+import { Pill } from "./components/Pill";
 import { isLoopback } from "./preview";
 import "./styles.css";
+
+/**
+ * The floating pill is this same build with a different root: the desktop
+ * loads `/?pill` into a small panel window and gets the voice and nothing
+ * else — see `components/Pill.tsx`. A query rather than a path so the server
+ * and vite serve it with no route of their own.
+ */
+const pill = new URLSearchParams(location.search).has("pill");
 
 /**
  * Vite's dev client reads a dropped socket as vite restarting: it polls until
@@ -31,8 +40,6 @@ if (import.meta.hot && !isLoopback(location.hostname)) {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Crash>
-      <App />
-    </Crash>
+    <Crash>{pill ? <Pill /> : <App />}</Crash>
   </StrictMode>,
 );

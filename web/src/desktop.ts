@@ -37,6 +37,63 @@ export interface DesktopBridge {
    * link, which is the same thing it drew before the updater existed.
    */
   update?: DesktopUpdater;
+  /**
+   * The talk key heard in every application, and the pill that floats over
+   * them. Optional for the same reason as `update`: a window from before
+   * this bridge keeps the key it has, which works while it is focused.
+   */
+  voice?: DesktopVoice;
+}
+
+/**
+ * What the native key hook is doing, as the main process reports it.
+ *
+ * `live` is the one that matters to `voice.ts`: while the hook is live the
+ * floating pill is the page that holds the microphone and this page sends
+ * its gestures there. Any other status leaves this page's own key handler
+ * in charge, so a hook that is denied or has died costs nothing but the
+ * everywhere. `phase` is the pill's, so a window can tell whether an Escape
+ * pressed in it is a clip being dropped.
+ */
+export interface VoiceGlobalState {
+  on: boolean;
+  live: boolean;
+  status: "off" | "starting" | "live" | "denied" | "missing" | "unsupported" | "crashed";
+  phase: "idle" | "listening" | "sending" | "heard" | "speaking" | "error";
+  altSpace: boolean;
+}
+
+/**
+ * A gesture on the talk key or the pill, as the hook and the window both
+ * spell them. `chord` is another key pressed during a hold, which is a
+ * shortcut for the application in front; `toggle` is ⌥Space, a tap with no
+ * key-up; `dismiss` is the pill's ✕.
+ */
+export type TalkGesture = "down" | "up" | "escape" | "chord" | "dismiss" | "toggle";
+
+/** What the pill page tells the main process: what it shows, how big it is, and which key the settings name. */
+export interface PillReport {
+  phase: VoiceGlobalState["phase"];
+  width: number;
+  height: number;
+  key: string;
+}
+
+export interface DesktopVoice {
+  global(): Promise<VoiceGlobalState>;
+  /** Told on every change. Returns the unsubscribe. */
+  onGlobal(listener: (state: VoiceGlobalState) => void): () => void;
+  setGlobal(on: boolean): void;
+  setAltSpace(on: boolean): void;
+  /** From the window, to whichever page holds the microphone. */
+  gesture(gesture: TalkGesture): void;
+  /** The settings page is capturing a new key, so the hook should ignore the press. */
+  pause(on: boolean): void;
+  openInputMonitoring(): void;
+  /** The pill page only: the hook's events, delivered to no other page. */
+  onKey(listener: (gesture: TalkGesture) => void): () => void;
+  /** The pill page only. */
+  report(state: PillReport): void;
 }
 
 /**

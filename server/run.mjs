@@ -21,8 +21,17 @@
  * is said — and that terminal is the one somebody has just typed `bun run dev`
  * into again, which is the moment the old answer scrolls away.
  *
+ * It is also what the installed app runs, out of its own Resources, which is
+ * why it can be told where the server is and not to build it: there is no
+ * checkout in an app to build from, and one supervisor shipped is one
+ * supervisor written. The menu bar reaches it the way a terminal does — a
+ * signal — and SIGUSR2 is "cycle now", for a server that is down with no
+ * save coming to mend it.
+ *
  *   node server/run.mjs            build, serve, restart on request
  *   node server/run.mjs --watch    ...and on every save, which is `bun run dev`
+ *   node server/run.mjs --no-build --entry <server.mjs>
+ *                                  serve a bundle somebody else built: the app
  */
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, watch } from "node:fs";
@@ -32,10 +41,13 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
-const ENTRY = join(root, "desktop/dist/server.mjs");
 const BUILD = join(root, "desktop/build.mjs");
 
 const watching = process.argv.includes("--watch");
+/** The app's case: a bundle that is already built, somewhere it says. */
+const building = !process.argv.includes("--no-build");
+const entryFlag = process.argv.indexOf("--entry");
+const ENTRY = entryFlag !== -1 && process.argv[entryFlag + 1] ? process.argv[entryFlag + 1] : join(root, "desktop/dist/server.mjs");
 
 /** Kept in step with `RESTART_EXIT_CODE` in `server/src/index.ts`, which is what sends it. */
 const RESTART_EXIT_CODE = 75;
@@ -231,17 +243,19 @@ async function replace(reason) {
     server = null;
     await stop(old);
   }
-  try {
-    await build();
-  } catch (err) {
-    const said = err.said ?? "";
-    record("down", `the build failed, so the server stays down until ${watching ? "the next save mends it" : "the runner is started again"}`, {
-      ...(reason.files?.length ? { file: reason.files[0] } : {}),
-      error: buildError(said) || err.message,
-      ...(said.trim() ? { stack: said.trim() } : {}),
-    });
-    console.error(`kururu: ${err.message} — leaving the server down`);
-    return;
+  if (building) {
+    try {
+      await build();
+    } catch (err) {
+      const said = err.said ?? "";
+      record("down", `the build failed, so the server stays down until ${watching ? "the next save mends it" : "the runner is started again"}`, {
+        ...(reason.files?.length ? { file: reason.files[0] } : {}),
+        error: buildError(said) || err.message,
+        ...(said.trim() ? { stack: said.trim() } : {}),
+      });
+      console.error(`kururu: ${err.message} — leaving the server down`);
+      return;
+    }
   }
   start(why);
 }
@@ -337,17 +351,44 @@ for (const signal of Object.keys(SIGNALS)) {
   });
 }
 
-const invoked = process.env.npm_lifecycle_event ? `bun run ${process.env.npm_lifecycle_event}` : "run.mjs";
-record("start", watching ? `${invoked} started, watching server/src and shared` : `${invoked} started`);
-try {
-  await build();
-} catch (err) {
-  const said = err.said ?? "";
-  record("down", "the first build failed, so there is no server to start", {
-    error: buildError(said) || err.message,
-    ...(said.trim() ? { stack: said.trim() } : {}),
-  });
-  console.error(`kururu: ${err.message}`);
+/**
+ * "Cycle now", from outside. A server that is down stays down until a save,
+ * and an installed app has no save coming; the menu bar sends this instead,
+ * and a person at a terminal can too. One replacement, through the same
+ * queue a save goes through, so it cannot start a second server beside one
+ * already being started.
+ */
+process.on("SIGUSR2", () => {
+  console.log("kururu: asked to restart the server (SIGUSR2)");
+  void cycle({ why: "it was asked to restart (SIGUSR2)", ...(server ? { server: server.pid } : {}) });
+});
+
+/**
+ * Who started this, for the record: `bun run dev` names itself through npm's
+ * variable, and the app says so in one of its own, since from inside a
+ * `.app` there is no command line worth quoting.
+ */
+const invoked = process.env.KURURU_RUNNER_LABEL
+  ? process.env.KURURU_RUNNER_LABEL
+  : process.env.npm_lifecycle_event
+    ? `bun run ${process.env.npm_lifecycle_event}`
+    : "run.mjs";
+record("start", watching ? `${invoked} started, watching server/src and shared` : `${invoked} started${building ? "" : `, serving ${ENTRY}`}`);
+if (building) {
+  try {
+    await build();
+  } catch (err) {
+    const said = err.said ?? "";
+    record("down", "the first build failed, so there is no server to start", {
+      error: buildError(said) || err.message,
+      ...(said.trim() ? { stack: said.trim() } : {}),
+    });
+    console.error(`kururu: ${err.message}`);
+    process.exit(1);
+  }
+} else if (!existsSync(ENTRY)) {
+  record("down", `there is no server at ${ENTRY}, so there is nothing to start`);
+  console.error(`kururu: no server at ${ENTRY}`);
   process.exit(1);
 }
 start(`${invoked} was started`);

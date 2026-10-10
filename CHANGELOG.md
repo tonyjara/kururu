@@ -15,6 +15,70 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **A frog in the menu bar runs kururu, and no terminal is needed.** Open the
+  app and the tray icon starts the pty host and the server; close the window
+  and the frog stays, the server keeps serving your phone, and the live agent
+  count sits beside the icon. Click it for whether the host and the server are
+  up, since when, which build each is (and a warning when the host is behind),
+  why the server last restarted, and the verbs: **Open Window**, **Restart**,
+  **Stop** and **Start Server**, and **Restart pty host…**, which names how
+  many agents it ends and asks first. **Logs** opens the restart log, the
+  server's output and the pty host's log. **Open at login** starts kururu with
+  the Mac as the frog only, no window. A `bun run dev` already on 7717 is
+  adopted rather than fought: the menu says whose it is and leaves stopping it
+  to the terminal.
+
+- **Run from a checkout, from the menu.** **Run from → Choose a checkout…**
+  points the app at a kururu you cloned and installed: it builds that
+  checkout's web app, runs its server with the file watcher exactly as
+  `bun run dev` does, and the window shows its code. For forks, with no
+  terminal. The app and `bun run dev` now share one supervisor, `run.mjs`.
+
+- **The talk key works in every app.** Settings → Voice → **Talk key works in
+  every app** (or the tray's switch): hold the key wherever you are and the
+  pill floats over whatever you are in — listening, what was heard, Kuru's
+  reply as it speaks — draggable, with the same ✕. macOS asks for Input
+  Monitoring once. Hold, tap and Escape are unchanged; a key pressed with the
+  talk key held is a shortcut for the app in front and drops the clip. ⌥Space
+  can toggle the microphone as a fallback that needs no permission, off by
+  default.
+
+- **Machines, and a shell on one.** The sidebar's VPS section is now
+  **Machines**: any computer you reach with `ssh` — a VPS, a PC on your
+  tailnet — with its CPU, memory and disk, added in Settings → Monitors →
+  **Machines**. Each row has a shell button that opens `ssh -t <host>` in a
+  tab. A workspace can **run on** a machine (Settings → General → Workspaces):
+  its new terminals then open there, in a folder you choose, inside a tmux
+  session that survives a dropped connection and reattaches by itself. Closing
+  the tab ends the session. Agents, the file tree, the reader, worktrees,
+  databases and dev servers stay on this Mac, and the + menu keeps a
+  **Terminal on this Mac**. The harness can open a shell on a machine and run
+  a command in it, in a tab you can watch.
+
+- **Copies made inside a program reach your clipboard, from any machine.** A
+  terminal now accepts OSC 52, the sequence a program uses to put text on the
+  clipboard of the terminal showing it. Text you drag out in tmux, or copy
+  inside Claude or nvim, lands on this Mac even when the program runs on
+  another machine. Only the window you are using takes the copy, and only
+  for a terminal on screen. A program can never read the clipboard back.
+  Where a program has taken the mouse (tmux with `mouse on`, nvim), hold
+  **Shift** while you drag to get kururu's own selection, which copies on
+  release and with ⌘C. A workspace's tmux sessions on a machine now let
+  wrapped copies through (`allow-passthrough`), on those sessions only.
+
+- **Every nvim on this Mac, and closing them.** Settings → Processes counts
+  every nvim running on the machine, whoever started it: kururu's tabs, ones
+  typed into a shell, ones in another terminal app. A list under the tiles
+  shows each one's memory (the editor, its UI and its language servers
+  together) and where it is running. **Close all** on the tile, or **Close**
+  on a row, asks first, saying how many, then sends each one `:qa`. An nvim
+  with unsaved changes refuses and stays open on the unsaved buffer, and the
+  page lists it with the files it is holding. **Force close** ends those after
+  a second yes: SIGTERM, which lets nvim write its swap files, then SIGKILL to
+  that nvim and what it started, never the shell or app around it. A tab
+  kururu opened as nvim closes with its nvim; a shell you typed nvim into
+  stays.
+
 - **A card can run in a worktree of its own.** Tick **Worktree** as you write a
   card (it is off by default) and pressing the robot starts the agent in
   `<repo>.worktrees/<card>`, on a branch

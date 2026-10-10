@@ -22,18 +22,30 @@
  * keep to the order it was told. A clip is a file in a temporary directory for the
  * half-second the recogniser takes, and is removed in a `finally`.
  *
- * **Nobody is spoken over.** A client says when its talk key goes down and
- * again once its words are delivered, and while any client is talking every
- * client is told to hold what it is sent (`hush`): the phone on the desk
- * must not answer over the window's microphone any more than the window
- * itself should. Sentences go on being made and announced, so a reply
- * waiting out somebody's sentence is ready the moment they stop. What
- * decides whether it is ever played is whether the words got through: a
- * clip delivered to a harness supersedes every reply of that harness made
- * before it (`superseded`), because Kuru is about to answer what was just
- * said with its earlier reply in front of it, and hearing the earlier one
- * first is being talked over a second time. A clip thrown away, or one
- * that held no words, supersedes nothing, and what waited plays.
+ * **Nobody is spoken over, and nothing said is lost.** A client says when its
+ * talk key goes down and again once its words are delivered, and while any
+ * client is talking every client is told to hold what it is sent (`hush`):
+ * the phone on the desk must not answer over the window's microphone any
+ * more than the window itself should. Sentences go on being made and
+ * announced, so a reply waiting out somebody's sentence is ready the moment
+ * they stop, and it plays then — ahead of the answer to what was just said,
+ * which is made after it — starting with "While you were talking" so it is
+ * not taken for that answer. It used to be dropped once the words got
+ * through, on the argument that Kuru would answer with it in front of it
+ * anyway. The reply that taught otherwise said a card had finished, and Kuru
+ * answering something else does not repeat news.
+ *
+ * **What was missed is decided here, from what the clients say.** Each says
+ * which replies it holds, which sentences it played to their end, and which
+ * replies it let go before their end. A reply whose last sentence somebody
+ * played was heard; one that every client holding it let go, or that nobody
+ * took up at all — no window open, none that could play — was missed
+ * (`fateOf`). The missed are kept as words in a file in the state directory,
+ * and from the moment they are said rather than the moment they are missed:
+ * a server that dies mid-reply, which under `bun run dev` is every save,
+ * leaves the reply missed and not forgotten. `replay` says them again, each
+ * starting "Earlier", and a replay heard to its end takes its reply off the
+ * list.
  *
  * **Spanish is the reason the model is driven by hand.** The library that
  * wraps Kokoro phonemises through an English-only port of espeak and refuses
@@ -48,9 +60,9 @@
  * because the Kokoro process goes down with the server that started it.
  */
 import { execFile, fork, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -58,7 +70,10 @@ import {
   CLIP_MIN_MS,
   KOKORO_MODEL,
   KOKORO_VOICES,
+  LEAD_INS,
+  adoptMissed,
   adoptVoice,
+  capMissed,
   clipMs,
   detectLanguage,
   kokoroVoice,
@@ -68,6 +83,8 @@ import {
   spokenText,
   systemFallback,
   type Heard,
+  type LeadIn,
+  type MissedReply,
   type ModelStatus,
   type SpeechChunk,
   type ToolStatus,
@@ -101,6 +118,14 @@ const KEEP_UTTERANCES = 24;
  * silent everywhere for good is worse than Kuru heard over a broken window.
  */
 const TALK_MAX_MS = 3 * 60_000;
+/**
+ * How long a reply nobody took up waits before it is missed. A client says
+ * it holds a reply once the first sentence reaches it, which for a reply of
+ * one sentence is a few milliseconds after that sentence was the last one
+ * made — so "done and nobody holds it" is true for a moment of every short
+ * reply, and counting it then would flash the badge for each of them.
+ */
+const UNHELD_GRACE_MS = 2_000;
 /** The sentence a voice is auditioned with, in each language. */
 const PREVIEW: Record<VoiceLang, string> = {
   en: "Three agents are running. The login card finished its turn, and one is waiting on you.",
@@ -156,26 +181,58 @@ type SpeakRequest = { voice: string; speed: number } & ({ text: string } | { pho
 
 export interface Utterance {
   id: string;
-  /** Its place in the order utterances were made, for telling older from newer. */
+  /** Its place in the order utterances were made. */
   n: number;
   /** Whose harness said it; empty for an audition. */
   profileId: string;
-  /** An audition, which only the window that asked hears. Never held, never superseded. */
+  /** An audition, which only the window that asked hears. Never held, never missed. */
   quiet: boolean;
+  /** What it says, as spoken — what the missed list keeps. */
+  text: string;
+  lang: VoiceLang;
   chunks: Buffer[];
   at: number;
-  /** A sentence of it was announced while nobody was talking, so somebody heard it begin. */
-  heard: boolean;
-  /** Superseded by words delivered after it: nothing more of it is made or announced. */
-  stale: boolean;
-  /** Every sentence has been made, or failed to be. */
+  /** Said while somebody was talking, so it waited, and starts by saying so. */
+  during: boolean;
+  /** What it starts with, when that is known before the first sentence: a replay's "Earlier". */
+  lead: LeadIn | null;
+  /** The missed reply this says again. A replay is never missed itself; its reply stays on the list instead. */
+  replays: string | null;
+  /** The clients that have it queued or playing, keyed as `talkers` are. */
+  holders: Set<object>;
+  /** Sentences somebody played to their end. */
+  played: Set<number>;
+  /** A client let it go before its end. With nobody else holding it, nothing more of it is made. */
+  dropped: boolean;
+  /** Every sentence has been made, or failed to be, or it was let go everywhere. */
   done: boolean;
+  doneAt: number;
+  /** What came of it, once that is known. Heard is final; missed becomes heard if a late client plays it out. */
+  fate: Fate | null;
+}
+
+export type Fate = "heard" | "missed";
+
+/** A missed reply as the server keeps it: pending while it may yet be heard, and the replay of it in flight. */
+interface Missed extends MissedReply {
+  pending: boolean;
+  replaying: string | null;
+}
+
+/** Where the missed list is kept: the state directory, since it is a thing kururu wants back and nobody chose. */
+function missedPath(): string {
+  const dir = process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
+  return join(dir, "missed.json");
 }
 
 export class Voice {
   private settings: VoiceSettings;
   private readonly utterances = new Map<string, Utterance>();
   private utteranceCount = 0;
+  /** Every reply not yet heard, the pending ones included, oldest first. */
+  private missed: Missed[];
+  /** When `review` looks again for a reply nobody took up. */
+  private reviewTimer: ReturnType<typeof setTimeout> | null = null;
   /** One utterance after another, so two replies landing together do not interleave sentences. */
   private queue: Promise<void> = Promise.resolve();
   private system: VoiceOption[] = [];
@@ -193,6 +250,15 @@ export class Voice {
   constructor(private readonly deps: VoiceDeps) {
     this.settings = adoptVoice(readConfigFile(FILE));
     this.model.state = existsSync(this.modelFile()) ? "ready" : "missing";
+    // What was pending when the last server went is missed now: whatever was
+    // playing it fetched its next sentence from a server that is not there.
+    let stored: unknown = null;
+    try {
+      stored = JSON.parse(readFileSync(missedPath(), "utf8"));
+    } catch {
+      // Nothing kept is nothing missed.
+    }
+    this.missed = adoptMissed(stored).map((entry) => ({ ...entry, pending: false, replaying: null }));
     void this.look();
   }
 
@@ -271,9 +337,9 @@ export class Voice {
     const yap = findTool("yap");
     if (!yap) {
       this.ears = { ok: false, detail: "Not installed. In a terminal: brew install yap" };
-      return { text: "", lang: null, outcome: "failed", why: "yap is not installed — brew install yap, then try again.", skipped: 0 };
+      return { text: "", lang: null, outcome: "failed", why: "yap is not installed — brew install yap, then try again." };
     }
-    if (clipMs(wav.length) < CLIP_MIN_MS) return { text: "", lang: null, outcome: "nothing", why: null, skipped: 0 };
+    if (clipMs(wav.length) < CLIP_MIN_MS) return { text: "", lang: null, outcome: "nothing", why: null };
     const dir = mkdtempSync(join(tmpdir(), "kururu-clip-"));
     let candidates: Transcript[];
     try {
@@ -299,15 +365,12 @@ export class Voice {
       rmSync(dir, { recursive: true, force: true });
     }
     const picked = pickTranscript(candidates, this.settings.languages);
-    if (!picked) return { text: "", lang: null, outcome: "nothing", why: null, skipped: 0 };
-    // Counted before the words go, not after: a reply that lands while they
-    // are being typed may be the turn that took them in, and is not older.
-    const through = this.utteranceCount;
+    if (!picked) return { text: "", lang: null, outcome: "nothing", why: null };
     try {
       const { outcome } = await this.deps.deliver(profileId, `[voice] ${picked.text}`);
-      return { text: picked.text, lang: picked.lang, outcome, why: null, skipped: this.supersede(profileId, through) };
+      return { text: picked.text, lang: picked.lang, outcome, why: null };
     } catch (err) {
-      return { text: picked.text, lang: picked.lang, outcome: "failed", why: err instanceof Error ? err.message : String(err), skipped: 0 };
+      return { text: picked.text, lang: picked.lang, outcome: "failed", why: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -326,29 +389,144 @@ export class Voice {
   }
 
   /** What every client is told, on connect and whenever it changes. */
-  hush(drop: string[] = []): ServerMessage {
-    return { type: "hush", hushed: this.hushed(), drop };
+  hush(): ServerMessage {
+    return { type: "hush", hushed: this.hushed() };
   }
 
   private hushed(): boolean {
     return this.talkers.size > 0;
   }
 
+  // ---------------------------------------------------------------------------
+  // What was missed
+  // ---------------------------------------------------------------------------
+
   /**
-   * Words reached a harness: what it said before them is stale. Marked so
-   * the rest of it is never made, and told to every client so what of it is
-   * waiting there is thrown away. Resolves to how many of those replies
-   * nobody had heard a word of, for the pill.
+   * A client has a reply queued or playing, or has let it go before its end.
+   * Letting go is the ✕, the talk key's press, or a sentence it could not
+   * load. A reply let go by everybody who held it is not made any further,
+   * which is what lets whatever is queued behind it start sooner.
    */
-  private supersede(profileId: string, through: number): number {
-    const { drop, skipped } = superseded(this.utterances.values(), profileId, through);
-    if (!drop.length) return 0;
-    for (const id of drop) {
-      const made = this.utterances.get(id);
-      if (made) made.stale = true;
+  held(who: object, utterance: string, on: boolean): void {
+    const made = this.utterances.get(utterance);
+    if (!made || made.quiet) return;
+    if (on) made.holders.add(who);
+    else if (made.holders.delete(who)) made.dropped = true;
+    this.review();
+  }
+
+  /** A client played one sentence of a reply to its end. */
+  played(utterance: string, seq: number): void {
+    const made = this.utterances.get(utterance);
+    if (!made || made.quiet || !Number.isFinite(seq) || seq < 0) return;
+    made.played.add(Math.floor(seq));
+    this.review();
+  }
+
+  /**
+   * A client went: it is no longer talking, and what it held is let go. Let
+   * go and not merely forgotten, because a page that comes back gets the
+   * sentences said after it returned and not the ones before.
+   */
+  leave(who: object): void {
+    this.talk(who, false);
+    for (const made of this.utterances.values()) {
+      if (made.holders.delete(who)) made.dropped = true;
     }
-    this.deps.broadcast(this.hush(drop));
-    return skipped;
+    this.review();
+  }
+
+  /** What every client is told, on connect and whenever it changes: every profile's, since the badge is drawn for whichever is on screen. */
+  missedMessage(): ServerMessage {
+    return { type: "missed", missed: this.missed.filter((entry) => !entry.pending).map(bare) };
+  }
+
+  /**
+   * Say every missed reply of a profile again, oldest first, each starting
+   * "Earlier". Resolves to what was queued, for the harness's tool to say what
+   * it played. A reply whose replay is still on its way is not queued twice.
+   * They stay on the list until a replay of them is heard to the end.
+   */
+  replay(profileId: string): MissedReply[] {
+    const queued: MissedReply[] = [];
+    for (const entry of this.missed) {
+      if (entry.profileId !== profileId || entry.pending || entry.replaying) continue;
+      const id = this.speak(profileId, entry.text, { lang: entry.lang, lead: "earlier", replays: entry.id, spoken: true });
+      if (!id) continue;
+      entry.replaying = id;
+      queued.push(bare(entry));
+    }
+    return queued;
+  }
+
+  /** Take a profile's missed replies off the list unheard: the person has read them, or does not care to. */
+  clear(profileId: string): void {
+    const before = this.missed.length;
+    this.missed = this.missed.filter((entry) => entry.profileId !== profileId || entry.pending);
+    if (this.missed.length === before) return;
+    this.saveMissed();
+    this.deps.broadcast(this.missedMessage());
+  }
+
+  /**
+   * Settle what can be settled: a reply heard leaves the list, one missed
+   * joins it. Called on every report a client makes and every reply that
+   * finishes being made, and again once the grace of a reply nobody took up
+   * has run.
+   */
+  private review(): void {
+    const now = Date.now();
+    let changed = false;
+    let wake = Infinity;
+    for (const made of this.utterances.values()) {
+      if (made.quiet || !made.profileId || made.fate === "heard") continue;
+      const fate = fateOf(made, now);
+      if (fate && fate !== made.fate) {
+        made.fate = fate;
+        this.settle(made);
+        changed = true;
+      } else if (!fate && made.done && made.holders.size === 0) {
+        wake = Math.min(wake, made.doneAt + UNHELD_GRACE_MS - now);
+      }
+    }
+    if (changed) {
+      this.saveMissed();
+      this.deps.broadcast(this.missedMessage());
+    }
+    if (wake < Infinity && !this.reviewTimer) {
+      this.reviewTimer = setTimeout(
+        () => {
+          this.reviewTimer = null;
+          this.review();
+        },
+        Math.max(50, wake),
+      ).unref();
+    }
+  }
+
+  /** What a reply's fate does to the list. A replay settles the reply it replays, never one of its own. */
+  private settle(made: Utterance): void {
+    const id = made.replays ?? made.id;
+    const entry = this.missed.find((e) => e.id === id);
+    if (!entry) return;
+    if (made.fate === "heard") this.missed = this.missed.filter((e) => e !== entry);
+    else if (made.replays) {
+      if (entry.replaying === made.id) entry.replaying = null;
+    } else entry.pending = false;
+  }
+
+  /** Written whole, through a temporary file, the way `persist.ts` writes. A list that could not be written is still the list until the next start. */
+  private saveMissed(): void {
+    this.missed = capMissed(this.missed);
+    const path = missedPath();
+    try {
+      mkdirSync(dirname(path), { recursive: true });
+      const temp = `${path}.tmp`;
+      writeFileSync(temp, `${JSON.stringify(this.missed.map((entry) => ({ ...bare(entry), pending: entry.pending })))}\n`, "utf8");
+      renameSync(temp, path);
+    } catch {
+      // See above.
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -367,26 +545,50 @@ export class Voice {
    * the socket as each is made. `choice` overrides the voice the language
    * would pick, for an audition; `quiet` keeps the sentences off the socket,
    * also for an audition, which only the window that asked should hear.
+   * `replays` and `lead` are a missed reply said again, and `spoken` says the
+   * text has been through `spokenText` already — a second pass would eat the
+   * underscores of a name the first one left alone.
    */
-  speak(profileId: string, text: string, options: { lang?: VoiceLang; choice?: VoiceChoice; quiet?: boolean } = {}): string | null {
-    const spoken = spokenText(text);
+  speak(
+    profileId: string,
+    text: string,
+    options: { lang?: VoiceLang; choice?: VoiceChoice; quiet?: boolean; lead?: LeadIn; replays?: string; spoken?: boolean } = {},
+  ): string | null {
+    const spoken = options.spoken ? text.trim() : spokenText(text);
     if (!spoken) return null;
     const lang = options.lang ?? detectLanguage(spoken, this.settings.languages);
     const n = ++this.utteranceCount;
     const id = `u${n}-${Date.now().toString(36)}`;
-    this.utterances.set(id, {
+    const quiet = options.quiet === true;
+    const made: Utterance = {
       id,
       n,
       profileId,
-      quiet: options.quiet === true,
+      quiet,
+      text: spoken,
+      lang,
       chunks: [],
       at: Date.now(),
-      heard: false,
-      stale: false,
+      during: this.hushed(),
+      lead: options.lead ?? null,
+      replays: options.replays ?? null,
+      holders: new Set(),
+      played: new Set(),
+      dropped: false,
       done: false,
-    });
+      doneAt: 0,
+      fate: null,
+    };
+    this.utterances.set(id, made);
+    // On the list from the start, pending, so a server that goes before it
+    // is heard leaves it there. Not an audition, and not a replay, whose
+    // reply is on the list already.
+    if (!quiet && profileId && !made.replays) {
+      this.missed.push({ id, profileId, text: spoken, lang, at: made.at, pending: true, replaying: null });
+      this.saveMissed();
+    }
     this.prune();
-    this.queue = this.queue.then(() => this.render(id, profileId, spoken, lang, options)).catch(() => {});
+    this.queue = this.queue.then(() => this.render(id, options)).catch(() => {});
     return id;
   }
 
@@ -405,22 +607,24 @@ export class Voice {
     return this.utterances.get(utterance)?.chunks[seq] ?? null;
   }
 
-  private async render(id: string, profileId: string, spoken: string, lang: VoiceLang, options: { choice?: VoiceChoice; quiet?: boolean }): Promise<void> {
+  private async render(id: string, options: { choice?: VoiceChoice }): Promise<void> {
     const made = this.utterances.get(id);
     if (!made) return;
+    const lang = made.lang;
     try {
       const choice = options.choice ?? (await this.resolve(lang));
       if (!choice) return;
-      const sentences = sentencesOf(spoken);
+      const sentences = sentencesOf(made.text);
       // Each sentence is announced as soon as it is made, not once the reply
       // is: Kokoro takes about a second a sentence, and waiting for the whole
       // of a six-sentence reply is six seconds of silence before the first
       // word. The client queues them, so the next one is made while the one
       // before it plays.
       for (const [index, sentence] of sentences.entries()) {
-        // Superseded part way through: the rest is nobody's, and the reply
-        // that superseded it is queued behind it, a second a sentence.
-        if (made.stale) return;
+        // Let go everywhere part way through: the rest is nobody's, and
+        // whatever is queued behind it waits a second a sentence. It is on
+        // the missed list, and a replay makes it again from the words.
+        if (abandoned(made)) return;
         let bytes: Buffer;
         try {
           bytes = await this.synthesize(sentence, choice, lang);
@@ -431,19 +635,41 @@ export class Voice {
           if (options.choice) this.model.error = err instanceof Error ? err.message : String(err);
           continue;
         }
-        // `seq` counts what was made rather than what was planned, so a skipped
-        // sentence leaves no hole for `/api/speech` to be asked about.
-        const seq = made.chunks.push(bytes) - 1;
-        if (options.quiet || made.stale) continue;
-        // Announced while somebody talks, it waits in every client's queue,
-        // and nobody has heard it begin until somebody has.
-        if (!this.hushed()) made.heard = true;
-        const chunk: SpeechChunk = { utterance: id, seq, last: index === sentences.length - 1, text: sentence, lang, profileId };
-        this.deps.broadcast({ type: "speech", speech: chunk });
+        if (abandoned(made)) return;
+        // The lead-in is decided at the last moment it can be: the first
+        // sentence is made and about to go out, and if anybody is talking it
+        // will wait for them, so it starts by saying it did. Its own
+        // sentence, made now, a fraction of a second for two words.
+        if (made.chunks.length === 0 && !made.quiet) {
+          const lead = made.lead ?? (made.during || this.hushed() ? "while" : null);
+          if (lead) {
+            const line = LEAD_INS[lead][lang];
+            try {
+              this.announce(made, await this.synthesize(line, choice, lang), line, false);
+            } catch {
+              // The reply without its lead-in beats no reply.
+            }
+          }
+        }
+        this.announce(made, bytes, sentence, index === sentences.length - 1);
       }
     } finally {
       made.done = true;
+      made.doneAt = Date.now();
+      this.review();
     }
+  }
+
+  /**
+   * One sentence, kept for `/api/speech` and told to every client. `seq`
+   * counts what was made rather than what was planned, so a skipped sentence
+   * leaves no hole for `/api/speech` to be asked about.
+   */
+  private announce(made: Utterance, bytes: Buffer, text: string, last: boolean): void {
+    const seq = made.chunks.push(bytes) - 1;
+    if (made.quiet) return;
+    const chunk: SpeechChunk = { utterance: made.id, seq, last, text, lang: made.lang, profileId: made.profileId };
+    this.deps.broadcast({ type: "speech", speech: chunk });
   }
 
   /**
@@ -642,13 +868,35 @@ export class Voice {
     this.tell();
   }
 
+  /** The oldest utterances go, and one going unsettled is missed: nobody can report on a reply that is no longer here. */
   private prune(): void {
+    let changed = false;
     while (this.utterances.size > KEEP_UTTERANCES) {
       const oldest = this.utterances.keys().next().value;
       if (oldest === undefined) break;
+      const made = this.utterances.get(oldest);
       this.utterances.delete(oldest);
+      if (made && !made.quiet && made.profileId && !made.fate) {
+        made.fate = "missed";
+        this.settle(made);
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.saveMissed();
+      this.deps.broadcast(this.missedMessage());
     }
   }
+}
+
+/** A missed reply as the wire carries it, without the server's bookkeeping. */
+function bare(entry: MissedReply): MissedReply {
+  return { id: entry.id, profileId: entry.profileId, text: entry.text, lang: entry.lang, at: entry.at };
+}
+
+/** Let go by everybody who held it: nothing more of it is worth making. */
+function abandoned(made: Utterance): boolean {
+  return made.dropped && made.holders.size === 0;
 }
 
 /**
@@ -678,25 +926,28 @@ export async function phonemesEs(sentence: string): Promise<string> {
 }
 
 /**
- * What words delivered to a profile's harness supersede: every reply of
- * that harness made up to `through`, the count before the words went. Not
- * another profile's, whose harness was not spoken to and will not answer
- * for it, and not an audition. Pure; see `Voice.supersede`.
+ * What has become of a reply, as far as can be told yet. Pure; see
+ * `Voice.review`.
  *
- * `skipped` is the ones nobody heard begin — the pill's "dropped the reply
- * it gave while you talked". A reply cut off by the talk key was heard
- * begin, and cutting it off was the point of the press; one that came to
- * nothing because every sentence failed was never going to be heard.
+ * Heard is somebody playing its last sentence to the end — the end, and not
+ * every sentence, because a page that opened half way through and played the
+ * rest is somebody who heard how it came out. Missed is everybody who held
+ * it letting it go, or nobody having taken it up once it was all made and
+ * the grace has run: no window was open, or none could play it. While anybody
+ * still holds it, it is neither. A reply none of whose sentences could be
+ * made is missed too, since its words are still worth reading.
  */
-export function superseded(said: Iterable<Utterance>, profileId: string, through: number): { drop: string[]; skipped: number } {
-  const drop: string[] = [];
-  let skipped = 0;
-  for (const made of said) {
-    if (made.quiet || made.stale || made.profileId !== profileId || made.n > through) continue;
-    drop.push(made.id);
-    if (!made.heard && !(made.done && made.chunks.length === 0)) skipped++;
-  }
-  return { drop, skipped };
+export function fateOf(
+  made: Pick<Utterance, "quiet" | "chunks" | "played" | "holders" | "dropped" | "done" | "doneAt">,
+  now: number,
+): Fate | null {
+  if (made.quiet) return null;
+  const last = made.chunks.length - 1;
+  if (made.done && last >= 0 && made.played.has(last)) return "heard";
+  if (made.holders.size > 0) return null;
+  if (made.dropped) return "missed";
+  if (made.done && now - made.doneAt >= UNHELD_GRACE_MS) return "missed";
+  return null;
 }
 
 /** espeak-ng's IPA, as the model's tokeniser was trained to see it. Pure; see `ESPEAK_TO_MODEL`. */

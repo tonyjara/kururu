@@ -53,7 +53,8 @@ import { Settings, TAB_NAMES as SETTINGS_TABS, type Tab as SettingsTab } from ".
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { VoicePill } from "./components/VoicePill";
-import { installSpeech, installTalkKey, setSpeechVolume, setVoiceProfile, talkDown, talkUp, useVoiceUi } from "./voice";
+import type { VoiceGlobalState } from "./desktop";
+import { installSpeech, installTalkKey, setSpeechVolume, setVoiceProfile, setVoiceRemote, talkDown, talkUp, useVoiceUi } from "./voice";
 import { DEFAULT_VOICE, keyCodeLabel } from "../../shared/voice";
 import {
   actionFor,
@@ -72,6 +73,7 @@ import { agentLabel, basename, tabLabel } from "./labels";
 import { applyAppearance } from "./theme";
 import { skinFor } from "../../shared/skin";
 import * as api from "./session";
+import type { MachinePin, MachineStatus } from "../../shared/machines";
 import { useKururu } from "./session";
 import * as terminals from "./terminals";
 
@@ -202,7 +204,7 @@ function resumeSettings(): SettingsTab | null {
 }
 
 export function App() {
-  const { snapshot, connected, projects, voice } = useKururu();
+  const { snapshot, connected, projects, voice, machines } = useKururu();
   const voiceUi = useVoiceUi();
 
   /**
@@ -574,9 +576,24 @@ export function App() {
     setSpeechVolume(() => voiceRef.current?.settings.volume ?? DEFAULT_VOICE.volume);
     const stopKey = installTalkKey(() => voiceRef.current?.settings.talkKey ?? DEFAULT_VOICE.talkKey);
     const stopSpeech = installSpeech();
+    /**
+     * In the desktop window, whether the key is hooked system-wide. While it
+     * is, the floating pill is the voice client and this page hands its
+     * gestures over; the moment the hook is denied or dies, this page's own
+     * handler is back, so the key never fires twice and never fires nowhere.
+     */
+    const bridge = desktop()?.voice ?? null;
+    const follow = (state: VoiceGlobalState) => setVoiceRemote(state.live && bridge ? (gesture) => bridge.gesture(gesture) : null, state.phase);
+    let stopGlobal = () => {};
+    if (bridge) {
+      void bridge.global().then(follow);
+      stopGlobal = bridge.onGlobal(follow);
+    }
     return () => {
       stopKey();
       stopSpeech();
+      stopGlobal();
+      setVoiceRemote(null);
     };
   }, []);
 
@@ -1277,6 +1294,7 @@ export function App() {
                overlay prints, so the two never disagree about where a split is. */
             keymap={keymap}
             launch={snapshot.launch}
+            runsOn={runsOn(workspace.machine, machines)}
             zen={zen}
             /* One pane at a time once there is no room to tile — the same
                number that turns the sidebar into a screen, for the same
@@ -1345,6 +1363,7 @@ export function App() {
         <FileTree
           workspaceId={workspace.id}
           project={projects.find((p) => p.workspaceId === workspace.id) ?? null}
+          runsOn={runsOn(workspace.machine, machines)}
           current={readerPathOf(workspace)}
           overlay={narrow}
           onOpen={openFromTree}
@@ -1643,6 +1662,11 @@ function tabsOf(layout: LayoutNode, agents: AgentSnapshot[]): TabEntry[] {
     });
   }
   return out;
+}
+
+/** The name of the machine a workspace's shells open on, or null when it is this Mac or the machine is gone. */
+function runsOn(pin: MachinePin | null, machines: readonly MachineStatus[]): string | null {
+  return (pin && machines.find((m) => m.id === pin.machineId)?.name) || null;
 }
 
 /** The file a reader in this workspace is showing, for the tree to mark. */

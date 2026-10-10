@@ -87,18 +87,25 @@ export function Menu({ at, items, onClose }: { at: MenuAt; items: MenuItem[]; on
  * possibility. What is actually shared is smaller than a menu and duller: where
  * the box goes when it does not fit, and the four ways it closes. Those are
  * exactly the parts that are easy to get subtly wrong twice.
+ *
+ * `closeOnScroll` is the escape hatch from the fourth way: a box with its own
+ * scrolling content (the missed-replies list) needs a wheel over *it* to
+ * scroll the list, not close the box — only a wheel over the backdrop, outside
+ * it, still means "the layout underneath moved."
  */
 export function Popover({
   at,
   onClose,
   className,
   role,
+  closeOnScroll = true,
   children,
 }: {
   at: MenuAt;
   onClose: () => void;
   className: string;
   role?: string;
+  closeOnScroll?: boolean;
   children: React.ReactNode;
 }) {
   const box = useRef<HTMLDivElement>(null);
@@ -139,7 +146,7 @@ export function Popover({
         event.preventDefault();
         onClose();
       }}
-      onWheel={onClose}
+      onWheel={closeOnScroll ? onClose : undefined}
     >
       <div
         ref={box}

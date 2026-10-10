@@ -55,6 +55,7 @@ import { installBoxDrawing } from "./boxdraw";
 import { type CursorRenderer, installCursorText } from "./cursortext";
 import { usableGrid } from "./grid";
 import { BUTTON_NONE, encodeMouse, type MouseModes, mouseModes, WHEEL_DOWN, WHEEL_UP } from "./mouse";
+import { clipboardScanner } from "./osc52";
 import { input, looking, proposeSize, rebuild, subscribeOutput, warm } from "./session";
 
 /**
@@ -298,6 +299,33 @@ export function fingerPointer(): boolean {
 }
 
 /**
+ * Put a program's copy on this machine's clipboard — an `OSC 52`, which is how
+ * tmux's copy mode and a TUI's own selection on another machine reach this
+ * one. `osc52.ts` reads it off the stream; this is who may act on it.
+ *
+ * Every client streaming a terminal is sent the sequence, the warm ones
+ * included, so *whose* clipboard is a real question: a phone and the window
+ * watching one agent both get the bytes. The answer is the window with the
+ * focus, because a copy is made by a hand on a mouse or a keyboard in front of
+ * one — and `navigator.clipboard` refuses a document without the focus
+ * anyway, so the check says so out loud rather than leaving it to a rejection.
+ * The caller adds that the terminal must be on screen: one nobody can see
+ * writing the clipboard is a program clobbering it, not a person copying.
+ *
+ * `navigator.clipboard` and nothing else. It is the path ghostty's own copy on
+ * mouseup takes, so wherever selecting copies, this does too. Its fallback —
+ * focus a textarea and `execCommand` — is not borrowed: on a phone focusing a
+ * textarea is a keyboard, and a phone over plain http is not a secure context
+ * and has no clipboard to write to by either route.
+ */
+function copyFromProgram(text: string): void {
+  if (!document.hasFocus() || !navigator.clipboard?.writeText) return;
+  navigator.clipboard.writeText(text).catch((err: unknown) => {
+    console.warn("kururu: a program's copy did not reach the clipboard —", err);
+  });
+}
+
+/**
  * Give the program the mouse when it has asked for one, hand it back when shift
  * is held — and make a finger a way of scrolling rather than a bad mouse.
  *
@@ -317,6 +345,11 @@ export function fingerPointer(): boolean {
  * event has already reached — only `stopImmediatePropagation` does, and only for
  * listeners registered after this one. If reporting ever starts fighting a
  * painted selection, that ordering is what broke.
+ *
+ * tmux with `mouse on` is the program this matters most for, because on a
+ * machine it is the default: every drag there is tmux's, and what tmux copies
+ * comes back as an `OSC 52` (see `copyFromProgram`) rather than as a selection
+ * kururu holds.
  *
  * What is deliberately *not* claimed is `pointerdown`, which is how `Panes.tsx`
  * focuses the pane you clicked. It is a different event, so taking the mouse
@@ -766,6 +799,8 @@ function create(agentId: string): Pooled {
   let color: string | null = null;
   /** See `CursorScan.carry`: a sequence cut in half by a read boundary. */
   let carry = "";
+  /** The same problem for `OSC 52`, whose sequences are as long as the copy. */
+  let readClipboard = clipboardScanner();
   let unsubscribe = () => {};
   let typed: { dispose(): void } | null = null;
   let observer: ResizeObserver | null = null;
@@ -825,6 +860,12 @@ function create(agentId: string): Pooled {
    * nothing on its side answers it — it copies on mouseup instead, which is not
    * the gesture anybody reaches for. Answering the event rather than the key is
    * what covers the menu too, and with no selection it stays out of the way.
+   *
+   * It copies kururu's selection and nothing else. One that tmux or nvim drew
+   * while it had the mouse is cells on a screen with nothing behind them to
+   * copy; the program copies that one itself, as an `OSC 52` that
+   * `copyFromProgram` answers, and Shift+drag is how to get one of kururu's
+   * over the top of it.
    */
   const onCopy = (event: ClipboardEvent) => {
     if (!terminal?.hasSelection() || !event.clipboardData) return;
@@ -1063,6 +1104,8 @@ function create(agentId: string): Pooled {
       write: (data: string) => {
         if (disposed || !data) return;
         readCursor(data);
+        const copied = readClipboard(data);
+        if (copied !== undefined && entry.attached) copyFromProgram(copied);
         em.write(data);
       },
       /**
@@ -1139,6 +1182,11 @@ function create(agentId: string): Pooled {
         shape = null;
         color = null;
         carry = "";
+        // A copy cut off by whatever made this rebuild necessary never
+        // finishes: the bytes after it are gone, and the ones that follow
+        // belong to something else. A serialized screen carries no `OSC 52`
+        // of its own, so a copy is never made twice by a reconnect either.
+        readClipboard = clipboardScanner();
         // Nothing to write is nothing to do, and would throw — see `write`.
         if (data) {
           readCursor(data);

@@ -49,11 +49,67 @@ building. Kururu is the other half.
 
 ## Running it
 
+### From the app
+
+Open **Kururu.app**. That is the whole of it: a frog appears in the menu bar,
+the app starts the pty host if none is running and a server in front of it, and
+a window opens onto them. No terminal is involved.
+
+The frog is where the three processes live from then on. Click it:
+
+- **Status.** Whether the server and the pty host are up, since when, which
+  version each is, why the server last restarted (from its restart log), how
+  many agents are running — that number is also beside the icon — and a warning
+  when the host is on an older build than the server.
+- **Open Window / Close Window.** The window is the least important process:
+  close it and the frog stays, the server keeps serving, the phone keeps
+  working. Quitting the app stops the server; the agents are in the pty host
+  below it and are still there when you open the app again.
+- **Restart Server**, **Stop Server**, **Start Server.** A restart costs a
+  reconnect and nothing else.
+- **Restart pty host…** The one thing in kururu that ends agents. It says how
+  many, asks, and defaults to no.
+- **Talk key in every app.** See [the harness](#talking-to-it).
+- **Run from.** This app, or a checkout — see below.
+- **Logs.** The restart log, the server's output, the pty host's log.
+- **Open at login.** The app starts with the Mac, as the frog only: no window
+  until you open one. macOS may ask you to approve it under System Settings →
+  General → Login Items the first time.
+
+If something is already serving on 7717 — a `bun run dev` in a terminal — the
+app adopts it rather than starting a second: the menu shows whose it is, lets
+you open a window onto it and restart it, and leaves stopping it to the
+terminal it came from.
+
+### From a checkout, without a terminal
+
+If you work on kururu itself, the app can run *your* code. Clone and install it
+once:
+
+```sh
+git clone https://github.com/tonyjara/kururu.git
+cd kururu && bun install
+```
+
+Then click the frog → **Run from** → **Choose a checkout…** and pick the folder.
+The app stops the server it was running, builds the checkout's web app, and
+starts the checkout's server with the file watcher — exactly what `bun run dev`
+does, with its output in the server log. Save a file under `server/src` or
+`shared` and the server restarts on your change; the window shows the
+checkout's web app. **Rebuild the web app** is in the same submenu for changes
+under `web/`. The choice is remembered, so Open at login brings up your
+checkout too. **Run from → This app** goes back.
+
+A change to a pty host file is never picked up by a save, by design: that is
+what **Restart pty host…** is for, and it ends every agent.
+
+### From a terminal
+
 ```sh
 bun install
 
 bun run dev              # your agents: serves on :7717, restarts itself on save
-bun run dev:desktop      # a window onto one
+bun run dev:desktop      # a window onto one, with the tray and hot reload for web/
 bun run start            # built, no watching
 ```
 
@@ -316,6 +372,16 @@ Escape drops the clip. What the harness says at the end of each turn is read
 aloud, whether you spoke or typed, and the microphone button in the status
 bar is the same key for a thumb. A pill over the panes shows the level while
 it listens, what it heard, and what is being said.
+
+**From any app.** Settings → Voice → **Talk key works in every app**, or the
+frog's menu. A small helper beside the app listens for the key wherever you
+are — macOS asks once for **Input Monitoring** — and the pill floats over
+whatever you are in: listening, what was heard, Kuru's answer as it speaks.
+Drag it where you like; its ✕ is the same ✕. Hold, tap and Escape work as in
+the window; a key pressed with the talk key held is a shortcut for the app in
+front, and the clip is dropped. If macOS has not allowed the helper yet the
+window's own key keeps working, and **⌥Space** can toggle the microphone from
+anywhere without a permission, off by default.
 
 Everything runs on your Mac and nothing leaves it. Hearing is Apple's
 on-device recogniser, through `yap`; speaking is Kokoro, a small model on the

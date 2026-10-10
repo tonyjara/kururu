@@ -39,8 +39,8 @@ import { ProfileSettings } from "./SettingsProfiles";
 import { WorkspaceSettings } from "./SettingsWorkspaces";
 import { StyleSettings } from "./SettingsStyles";
 import { StudioSettings } from "./SettingsStudio";
+import { MachineSettings } from "./SettingsMachines";
 import { VoiceSettings } from "./SettingsVoice";
-import { VpsSettings } from "./SettingsVps";
 
 export type Tab =
   | "appearance"
@@ -53,7 +53,7 @@ export type Tab =
   | "processes"
   | "notify"
   | "voice"
-  | "vps"
+  | "machines"
   | "openrouter"
   | "keys"
   | "about";
@@ -145,7 +145,7 @@ const SECTIONS: ReadonlyArray<{
     id: "monitors",
     label: "Monitors",
     pages: [
-      ["vps", "VPS"],
+      ["machines", "Machines"],
       ["openrouter", "OpenRouter"],
     ],
   },
@@ -329,8 +329,8 @@ export function Settings({
             <MascotSettings mascots={mascots} onEditing={onEditing} />
           ) : tab === "notify" ? (
             <NotifySettings notify={notify} />
-          ) : tab === "vps" ? (
-            <VpsSettings onEditing={onEditing} />
+          ) : tab === "machines" ? (
+            <MachineSettings onEditing={onEditing} />
           ) : tab === "voice" ? (
             <VoiceSettings onEditing={onEditing} />
           ) : tab === "openrouter" ? (

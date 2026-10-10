@@ -27,6 +27,12 @@
  * agent still in one — in the page rather than in a dialog over it, the way
  * deleting a profile asks: Settings is already modal, and a confirm over a
  * confirm is a stack.
+ *
+ * Above the repository, and per workspace rather than per repository, is
+ * where the workspace's shells run — this Mac or one of the machines. That
+ * one is the workspace's own, because a workspace pinned to a box usually has
+ * no repository here at all, which is also why the repository half then says
+ * why it is empty instead of asking for a terminal in one.
  */
 import { useState } from "react";
 import type { Card } from "../../../shared/board";
@@ -40,6 +46,7 @@ import {
 } from "../../../shared/projects";
 import type { WorkspaceProject } from "../../../shared/wire";
 import * as api from "../session";
+import { useKururu } from "../session";
 import { Text } from "./SettingsProfiles";
 
 export function WorkspaceSettings({
@@ -97,10 +104,21 @@ export function WorkspaceSettings({
         ))}
       </div>
 
+      {shown && <RunsOn key={shown.id} workspace={shown} onEditing={onEditing} />}
+
       {shown && !root && (
         <section className="set-section">
           <p className="set-note">
-            <strong>{shown.name}</strong> is not in a repository yet. Open a terminal in one and it appears here.
+            {shown.machine ? (
+              <>
+                <strong>{shown.name}</strong> has no repository on this Mac. kururu does not read another
+                machine's disk, so worktrees and these settings only apply to a terminal opened here.
+              </>
+            ) : (
+              <>
+                <strong>{shown.name}</strong> is not in a repository yet. Open a terminal in one and it appears here.
+              </>
+            )}
           </p>
         </section>
       )}
@@ -115,6 +133,87 @@ export function WorkspaceSettings({
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Where a workspace's new shells open: here, or on a machine from Settings →
+ * Machines, in a folder there, inside tmux.
+ *
+ * Buttons rather than a select, as the page's tabs are, because there are a
+ * handful and the one that is on should be visible without opening anything.
+ * The folder commits on blur like the rest of the page, and is the server's
+ * to refuse — it goes into a command line on the far side, and the sentence
+ * that comes back says which characters it will not put there.
+ */
+function RunsOn({ workspace, onEditing }: { workspace: Workspace; onEditing: (on: boolean) => void }) {
+  const { machines } = useKururu();
+  const pin = workspace.machine;
+  const machine = pin ? (machines.find((m) => m.id === pin.machineId) ?? null) : null;
+  const [error, setError] = useState<string | null>(null);
+  const pinTo = (machineId: string | null, dir: string) => {
+    setError(null);
+    api.pinWorkspace(workspace.id, machineId, dir).catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+  };
+
+  return (
+    <section className="set-section">
+      <h3 className="set-h">Runs on</h3>
+      <div className="set-row" role="radiogroup" aria-label={`Where ${workspace.name}'s shells run`}>
+        <button
+          role="radio"
+          aria-checked={!machine}
+          className={`set-choice ${!machine ? "set-choice-on" : ""}`}
+          onClick={() => machine && pinTo(null, "~")}
+        >
+          This Mac
+        </button>
+        {machines.map((m) => (
+          <button
+            key={m.id}
+            role="radio"
+            aria-checked={machine?.id === m.id}
+            className={`set-choice ${machine?.id === m.id ? "set-choice-on" : ""}`}
+            title={`ssh ${m.host}`}
+            onClick={() => machine?.id !== m.id && pinTo(m.id, "~")}
+          >
+            {m.name}
+          </button>
+        ))}
+      </div>
+      {machine && pin && (
+        <div className="set-row">
+          <span className="set-label">Folder</span>
+          <Text
+            className="set-text"
+            value={pin.dir}
+            placeholder="~"
+            onCommit={(dir) => pinTo(machine.id, dir)}
+            onEditing={onEditing}
+            aria-label={`Folder on ${machine.name}`}
+          />
+        </div>
+      )}
+      {error && <p className="set-warn">{error}</p>}
+      {machines.length === 0 ? (
+        <p className="set-note set-note-under">
+          Add a machine in Settings → Monitors → Machines to run this workspace's shells there.
+        </p>
+      ) : machine && pin ? (
+        <p className="set-note set-note-under">
+          A new terminal in <strong>{workspace.name}</strong> — the tab strip's, <span className="set-mono">C-a T</span>, a
+          split — opens on <strong>{machine.name}</strong> in <span className="set-mono">{pin.dir}</span>, inside a tmux
+          session named <span className="set-mono">kururu-…</span>, so a dropped connection reattaches instead of losing
+          it. Closing the tab ends the session. The + menu still has a terminal on this Mac. Only shells go there:
+          agents, nvim, the file tree, the reader, worktrees, databases and dev servers stay on this Mac.
+        </p>
+      ) : (
+        <p className="set-note set-note-under">
+          Pick a machine to open this workspace's new terminals there instead. Only shells move; agents and
+          everything that reads files stay on this Mac.
+        </p>
+      )}
+    </section>
   );
 }
 

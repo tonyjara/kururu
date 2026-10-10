@@ -31,19 +31,50 @@ import {
   type VoiceSettings,
   type VoiceStatus,
 } from "../../../shared/voice";
+import { desktop, type VoiceGlobalState } from "../desktop";
 import { audioOutput } from "../notify";
 import * as api from "../session";
 import { useKururu } from "../session";
+
+/** What the hook is doing, in a sentence under its switch. */
+function globalLine(state: VoiceGlobalState): string {
+  switch (state.status) {
+    case "live":
+      return "On. Hold the key in any app; the pill floats over whatever you are in, and Kuru answers there.";
+    case "starting":
+      return "Starting the hook…";
+    case "denied":
+      return "macOS has not allowed it yet. Switch Kururu on under Input Monitoring; no restart is needed.";
+    case "missing":
+      return "This build has no hook in it (it is compiled with Xcode). The key works while this window is focused.";
+    case "unsupported":
+      return "That key cannot be hooked system-wide. Pick another talk key.";
+    case "crashed":
+      return "The hook stopped. Switch it off and on again.";
+    default:
+      return "Off: the key works while this window is focused. On, a native hook hears it in every app — macOS asks for Input Monitoring once — and the pill floats over every app, draggable, with the same ✕.";
+  }
+}
 
 export function VoiceSettings({ onEditing }: { onEditing: (on: boolean) => void }) {
   const { voice } = useKururu();
   const [capturing, setCapturing] = useState(false);
   const [auditioning, setAuditioning] = useState<VoiceLang | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const bridge = desktop()?.voice ?? null;
+  const [global, setGlobal] = useState<VoiceGlobalState | null>(null);
+
+  useEffect(() => {
+    if (!bridge) return;
+    void bridge.global().then(setGlobal);
+    return bridge.onGlobal(setGlobal);
+  }, [bridge]);
 
   useEffect(() => {
     if (!capturing) return;
     onEditing(true);
+    // The press that picks the new key is not a word for Kuru.
+    bridge?.pause(true);
     const onKey = (event: KeyboardEvent) => {
       event.preventDefault();
       event.stopPropagation();
@@ -57,9 +88,10 @@ export function VoiceSettings({ onEditing }: { onEditing: (on: boolean) => void 
     window.addEventListener("keydown", onKey, true);
     return () => {
       window.removeEventListener("keydown", onKey, true);
+      bridge?.pause(false);
       onEditing(false);
     };
-  }, [capturing, onEditing, voice]);
+  }, [bridge, capturing, onEditing, voice]);
 
   if (!voice) {
     return (
@@ -132,6 +164,33 @@ export function VoiceSettings({ onEditing }: { onEditing: (on: boolean) => void 
           <input type="checkbox" checked={settings.speak} onChange={(event) => set({ speak: event.target.checked })} />
           Read Kuru's replies aloud
         </label>
+        {bridge && global && (
+          <>
+            <label className="set-check set-check-row">
+              <input type="checkbox" checked={global.on} onChange={(event) => bridge.setGlobal(event.target.checked)} />
+              Talk key works in every app
+            </label>
+            <p className="set-note">
+              {globalLine(global)}
+              {global.status === "denied" && (
+                <>
+                  {" "}
+                  <button className="set-choice set-reset" onClick={() => bridge.openInputMonitoring()}>
+                    Open System Settings
+                  </button>
+                </>
+              )}
+            </p>
+            <label className="set-check set-check-row">
+              <input type="checkbox" checked={global.altSpace} onChange={(event) => bridge.setAltSpace(event.target.checked)} />
+              ⌥Space toggles the microphone from any app
+            </label>
+            <p className="set-note">
+              A fallback that needs no permission. A shortcut has no key-up, so it is a tap: once to open the microphone, again
+              to send.
+            </p>
+          </>
+        )}
         <div className="set-row">
           <span className="set-label">Talk key</span>
           <span className="set-mono">{capturing ? "press a key…" : keyCodeLabel(settings.talkKey)}</span>

@@ -25,17 +25,24 @@
  * also what the level meter is read from, so there is one tap on the
  * microphone and not two.
  *
- * **Nothing plays while anybody talks.** From the press until the words are
- * with the server, this page is talking, and it says so (`api.talking`);
- * the server tells every page when any one is (`hush`). While either holds,
- * the player starts nothing and a sentence that arrives waits in the queue.
- * The press still cuts off what was already playing, and so does another
- * page's press. When the hush lifts, what waited plays — unless the words
- * reached Kuru, in which case the server has said what they superseded and
- * that was thrown away on the way in (`server/src/voice.ts` says why).
+ * **Nothing plays while anybody talks, and nothing is thrown away.** From
+ * the press until the words are with the server, this page is talking, and
+ * it says so (`api.talking`); the server tells every page when any one is
+ * (`hush`). While either holds, the player starts nothing and a sentence that
+ * arrives waits in the queue. The press still cuts off what was already
+ * playing, and so does another page's press. When the hush lifts, what
+ * waited plays, ahead of the answer to what was just said; the server put
+ * "While you were talking" at the front of it.
+ *
+ * **The player says what became of each reply**, because what was missed is
+ * the server's to decide and only a player knows: held, each sentence played
+ * to its end, or let go before it (`api.speechHeld`, `api.speechPlayed`).
+ * Whatever was cut off, dismissed or never loaded is on the list behind the
+ * harness button's badge.
  */
 import { useSyncExternalStore } from "react";
 import { CLIP_MIN_MS, CLIP_RATE, TAP_MS, downsample, encodeWav, type Heard, type SpeechChunk } from "../../shared/voice";
+import type { TalkGesture } from "./desktop";
 import { audioOutput } from "./notify";
 import * as api from "./session";
 
@@ -69,6 +76,85 @@ function subscribe(listener: () => void): () => void {
 
 export function useVoiceUi(): VoiceUi {
   return useSyncExternalStore(subscribe, () => ui);
+}
+
+// ---------------------------------------------------------------------------
+// The one voice client on this Mac
+// ---------------------------------------------------------------------------
+
+/**
+ * Where this page's gestures go when another page holds the microphone.
+ *
+ * With the talk key hooked system-wide, the page that records, posts and
+ * plays is the floating pill (`Pill.tsx`), because it is the one that exists
+ * when there is no window. This page then stops being a voice client: its
+ * key handler stands down, its mic button and its Escape are sent across the
+ * bridge, and the sentences it would have played are left to the pill. One
+ * client is one microphone, one player and one state — and it is also what
+ * keeps a key the hook *and* this window both saw from firing twice.
+ *
+ * `remotePhase` is the pill's phase, so Escape pressed here is swallowed
+ * only while there is a clip to drop, and reaches the prefix handler and the
+ * terminal otherwise.
+ */
+let remote: ((gesture: TalkGesture) => void) | null = null;
+let remotePhase: VoicePhase = "idle";
+
+export function setVoiceRemote(send: ((gesture: TalkGesture) => void) | null, phase: VoicePhase = "idle"): void {
+  const handingOver = Boolean(send) && !remote;
+  remote = send;
+  remotePhase = phase;
+  if (!handingOver) return;
+  // A clip this page was taking when the hook came on is sent rather than
+  // lost, and what it was saying is cut off: the pill is the mouth now.
+  if (recording || opening) void close(true);
+  stopSpeaking();
+}
+
+/** Whether another page is the voice client, for the pill and the status bar. */
+export function voiceIsRemote(): boolean {
+  return remote !== null;
+}
+
+/**
+ * A gesture from the hook, as the pill page receives it over the bridge.
+ * The grammar — hold, tap, Escape — is the same three functions the key
+ * handler calls, so nothing is decided twice. A chord is the one word the
+ * hook has that a window never needed: another key pressed during a hold is
+ * a shortcut for the application in front, so the clip is dropped and the
+ * release that follows is the chord's, not a send.
+ */
+let chordedHold = false;
+
+export function applyTalkGesture(gesture: TalkGesture): void {
+  switch (gesture) {
+    case "down":
+      chordedHold = false;
+      talkDown();
+      return;
+    case "up":
+      if (chordedHold) {
+        chordedHold = false;
+        return;
+      }
+      talkUp();
+      return;
+    case "chord":
+      chordedHold = true;
+      cancelTalk();
+      return;
+    case "escape":
+      cancelTalk();
+      return;
+    case "dismiss":
+      dismissVoice();
+      return;
+    case "toggle":
+      // ⌥Space has no key-up, so it is a tap: down and up in the same breath.
+      talkDown();
+      talkUp();
+      return;
+  }
 }
 
 /** How long a heard sentence or an error stays on screen once nothing else is happening. */
@@ -246,9 +332,7 @@ function tell(heard: Heard): void {
   } else {
     const where =
       heard.outcome === "typed" ? "Sent to Kuru." : heard.outcome === "held" ? "Kuru's terminal is busy; it will hear this next." : "Kuru is starting; it will hear this first.";
-    const dropped =
-      heard.skipped > 1 ? ` Dropped the ${heard.skipped} replies it gave while you talked.` : heard.skipped === 1 ? " Dropped the reply it gave while you talked." : "";
-    set({ phase: "heard", text: `“${heard.text}”`, detail: where + dropped });
+    set({ phase: "heard", text: `“${heard.text}”`, detail: where });
   }
   settle();
 }
@@ -259,6 +343,10 @@ function tell(heard: Heard): void {
 
 /** The talk key or the mic button went down. */
 export function talkDown(): void {
+  if (remote) {
+    remote("down");
+    return;
+  }
   pressedAt = performance.now();
   pressConsumed = false;
   if ((recording || opening) && mode === "toggle") {
@@ -275,6 +363,10 @@ export function talkDown(): void {
 
 /** …and came back up. */
 export function talkUp(): void {
+  if (remote) {
+    remote("up");
+    return;
+  }
   if (pressConsumed) {
     pressConsumed = false;
     return;
@@ -290,6 +382,10 @@ export function talkUp(): void {
 
 /** Throw the clip away. */
 export function cancelTalk(): void {
+  if (remote) {
+    remote("escape");
+    return;
+  }
   if (recording || opening) void close(false);
 }
 
@@ -307,6 +403,18 @@ export function isListening(): boolean {
  */
 export function installTalkKey(codeOf: () => string): () => void {
   const down = (event: KeyboardEvent) => {
+    if (remote) {
+      // The hook has the key; what is left to this window is to keep the
+      // key from typing, and to drop a clip the pill is taking.
+      if (event.key === "Escape" && remotePhase === "listening") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        remote("escape");
+        return;
+      }
+      if (event.code === codeOf()) event.preventDefault();
+      return;
+    }
     if (isListening() && event.key === "Escape") {
       // Immediate, because the prefix handler listens on this same window
       // and would otherwise take the Escape as well and close whatever it
@@ -323,6 +431,7 @@ export function installTalkKey(codeOf: () => string): () => void {
   const up = (event: KeyboardEvent) => {
     if (event.code !== codeOf()) return;
     event.preventDefault();
+    if (remote) return;
     talkUp();
   };
   // The key-up is lost when the window loses focus with the key down —
@@ -356,8 +465,16 @@ let playing: AudioBufferSourceNode | null = null;
  */
 let loading = false;
 let current: string | null = null;
-/** Utterances that were cut off or superseded: their later sentences are still announced, and are dropped on arrival. */
+/** Utterances that were cut off: their later sentences may still be announced, and are dropped on arrival. */
 const cancelled = new Set<string>();
+/**
+ * Utterances this page has told the server it holds and has not let go or
+ * played out — so a reply is held once, and let go only by a page that had
+ * it. A reply played to its last sentence leaves; one whose last sentence
+ * never came stays until it is pushed out, and letting go of it then is a
+ * word the server ignores, since it was heard.
+ */
+const held = new Set<string>();
 let speechGain: GainNode | null = null;
 let volumeOf: () => number = () => 1;
 
@@ -407,14 +524,19 @@ function endTalk(): void {
 /** Start taking what the harness says off the socket. Called once, by `App`. */
 export function installSpeech(): () => void {
   const stopSpeech = api.onSpeech((chunk) => {
+    // Another page is the mouth. Never held here, so never let go here, and
+    // the server counts it by what that page says.
+    if (remote) return;
     if (cancelled.has(chunk.utterance)) return;
+    if (!held.has(chunk.utterance)) {
+      held.add(chunk.utterance);
+      api.speechHeld(chunk.utterance, true);
+      trim(held);
+    }
     queue.push(chunk);
     void pump();
   });
-  const stopHush = api.onHush((on, drop) => {
-    // Before the hush can lift, so what was superseded is gone by the time
-    // the queue is played.
-    cancel(drop);
+  const stopHush = api.onHush((on) => {
     hush(() => {
       hushedByServer = on;
     });
@@ -437,7 +559,13 @@ async function pump(): Promise<void> {
   }
   if (cancelled.has(chunk.utterance)) return pump();
   const out = audioOutput();
-  if (!out) return;
+  if (!out) {
+    // Nothing to play anything on: everything held here is let go, so the
+    // server can count it missed rather than wait on this page for good.
+    cancel([chunk.utterance, ...queue.map((c) => c.utterance)]);
+    queue.length = 0;
+    return;
+  }
   // Before the first await, so the talk key going down mid-fetch cuts off
   // the sentence being fetched and not only the ones behind it.
   current = chunk.utterance;
@@ -452,12 +580,28 @@ async function pump(): Promise<void> {
   } finally {
     loading = false;
   }
-  if (!buffer || cancelled.has(chunk.utterance)) return pump();
+  if (cancelled.has(chunk.utterance)) return pump();
+  if (out.ctx.state !== "running") {
+    // A phone nobody has touched since the page loaded: the browser will not
+    // let it make a sound, and a source started now would wait there for
+    // good, holding the reply and every one behind it. Let them go, so they
+    // are missed rather than stuck; the next touch unlocks the next reply.
+    cancel([chunk.utterance, ...queue.map((c) => c.utterance)]);
+    queue.length = 0;
+    return;
+  }
+  if (!buffer) {
+    // A sentence that would not load is a hole in the reply, and a reply
+    // with a hole was not heard: let it go whole, and it is on the list.
+    cancel([chunk.utterance]);
+    return pump();
+  }
   if (!speechGain) {
     speechGain = out.ctx.createGain();
     speechGain.connect(out.ctx.destination);
   }
-  speechGain.gain.value = Math.min(1, Math.max(0, volumeOf()));
+  const volume = Math.min(1, Math.max(0, volumeOf()));
+  speechGain.gain.value = volume;
   const source = out.ctx.createBufferSource();
   source.buffer = buffer;
   source.connect(speechGain);
@@ -465,6 +609,12 @@ async function pump(): Promise<void> {
   set({ phase: "speaking", text: chunk.text, detail: "Kuru", level: 0, toggled: false });
   source.onended = () => {
     if (playing === source) playing = null;
+    // Played at no volume is not heard. Saying nothing leaves it to the
+    // server, which counts it missed once nobody else plays it.
+    if (volume > 0) {
+      api.speechPlayed(chunk.utterance, chunk.seq);
+      if (chunk.last) held.delete(chunk.utterance);
+    }
     void pump();
   };
   source.start();
@@ -487,21 +637,32 @@ export function stopSpeaking(): void {
   if (ui.phase === "speaking") set({ ...IDLE });
 }
 
-/** Utterances never to be played: the rest of their sentences are dropped on arrival, and whatever of them is queued when its turn comes. */
+/**
+ * Utterances never to be played here: the rest of their sentences are
+ * dropped on arrival, and whatever of them is queued when its turn comes.
+ * Each one this page held is let go, which is what puts it on the missed
+ * list.
+ */
 function cancel(ids: Iterable<string>): void {
-  for (const id of ids) cancelled.add(id);
-  // The set would grow one id per reply forever; nothing announced is older
-  // than the server keeps, so a few dozen is every id that can still arrive.
-  if (cancelled.size > 64) {
-    for (const id of [...cancelled].slice(0, cancelled.size - 32)) cancelled.delete(id);
+  for (const id of ids) {
+    cancelled.add(id);
+    if (held.delete(id)) api.speechHeld(id, false);
   }
+  trim(cancelled);
+}
+
+/** A set that would grow one id per reply forever: nothing announced is older than the server keeps, so a few dozen is every id that can still arrive. */
+function trim(ids: Set<string>): void {
+  if (ids.size <= 64) return;
+  for (const id of [...ids].slice(0, ids.size - 32)) ids.delete(id);
 }
 
 /**
  * The pill's ✕: stop whatever it is showing, now.
  *
  * While Kuru speaks that is `stopSpeaking` — the talk key's own cut-off,
- * without the microphone the key opens after it. While the microphone is open
+ * without the microphone the key opens after it. What it stops is not lost:
+ * the server puts it on the missed list. While the microphone is open
  * it is Escape, which a phone has no key for. Otherwise it is words lingering,
  * and the ✕ takes them down early — and still cuts Kuru off, because the pill
  * says "heard" in the gap between two sentences when the next is still being
@@ -509,6 +670,10 @@ function cancel(ids: Iterable<string>): void {
  * one pressed a moment before it.
  */
 export function dismissVoice(): void {
+  if (remote) {
+    remote("dismiss");
+    return;
+  }
   if (isListening()) {
     cancelTalk();
     return;

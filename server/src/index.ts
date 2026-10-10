@@ -67,8 +67,8 @@ import {
   GIT_SCAN_MS,
   OPENROUTER_POLL_MS,
   SAVE_DEBOUNCE_MS,
+  MACHINE_POLL_MS,
   USAGE_POLL_MS,
-  VPS_POLL_MS,
 } from "../../shared/wire";
 import {
   bindAddress,
@@ -83,22 +83,48 @@ import {
 } from "./access";
 import { parseReport } from "./agents/report";
 import { dump as dumpRecording, forget as forgetRecording, recordBacklog, recordInput, recordNote, recordOutput } from "./record";
-import { processCwd } from "./cwd";
+import { processCwd, processCwds } from "./cwd";
 import { scanDevServers, stopDevServer } from "./devservers";
 import { readHead, repoAt } from "./git";
 import { pollUsage, usageSnapshot } from "./usage";
 import { clearOpenRouterKey, openRouterSnapshot, pollOpenRouter, setOpenRouterKey } from "./openrouter";
 import { Voice } from "./voice";
 import { CLIP_MAX_BYTES } from "../../shared/voice";
-import { addVps, pollVps, pollVpsOne, removeVps, vpsSnapshot } from "./vps";
+import {
+  addMachine,
+  endSession,
+  findMachine,
+  machinesSnapshot,
+  pollMachine,
+  pollMachines,
+  removeMachine,
+  sessionsEnding,
+} from "./machines";
+import { remoteShellCommand, remoteShellOf, sessionName, validRemoteDir, type MachineEntry } from "../../shared/machines";
 import { closeDatabasePools, dbCatalog, dbQuery, dbRows, scanDatabases, type DatabaseScanInput } from "./databases";
 import { allowedRoots, allowRoot, findDocs, listDir, listDirs, readBytes, readFile, resolveInRoot } from "./files";
 import { parseFileOp, runFileOp } from "./fileops";
 import { renderMarkdown } from "./markdown";
 import { scanMemory } from "./memory";
-import { childIndex as footChildren, hostPidOf, readFootTable, readTree } from "./footprint";
-import type { Footprint, FootprintTerminal } from "../../shared/footprint";
-import { attach as attachEditor, findNvim, openFile } from "./nvim";
+import {
+  childIndex as footChildren,
+  findNvims,
+  hostPidOf,
+  readFootTable,
+  readTree,
+  type FootProc,
+  type FootTable,
+  type FoundNvim,
+} from "./footprint";
+import {
+  nvimWhere,
+  type Footprint,
+  type FootprintNvim,
+  type FootprintTerminal,
+  type NvimCloseReport,
+  type NvimPlace,
+} from "../../shared/footprint";
+import { attach as attachEditor, endHard, findNvim, isNvimTab, nvimCommand, openFile, quit as quitNvim } from "./nvim";
 import { readProcTable } from "./agents/procs";
 import { activeAgent, BOARD_TAB, findPane, isBoardTab, isDocTab, panes, paneWithAgent, showsDoc, terminalsOf } from "../../shared/layout";
 import {
@@ -228,6 +254,7 @@ import {
   recordCrashes,
   recordStart,
   socketHeld,
+  socketHolder,
   supervised,
   watchSupervisor,
 } from "./lifecycle";
@@ -1232,21 +1259,28 @@ async function followCwd(agentId: string): Promise<string | undefined> {
  */
 async function openTerminal(
   paneId: string,
-  options: { cwd?: string; command?: string; kind?: PtyKind; from?: string } = {},
+  options: { cwd?: string; command?: string; kind?: PtyKind; from?: string; local?: boolean } = {},
 ): Promise<AgentSnapshot> {
-  const agent = await host.create({
-    cwd: options.cwd ?? (await cwdForNewTab(options.from ?? paneId)),
-    command: options.command,
-    env: spawnEnv(),
-    /**
-     * A terminal unless the client insists otherwise. The window stopped
-     * offering "start me an agent" as a separate thing to click: it is one
-     * gesture fewer to open a terminal and type `claude` in it, and the tab ends
-     * up saying the same thing either way, because `procs.ts` reports what is
-     * actually running in there.
-     */
-    kind: options.kind ?? "shell",
-  });
+  const command = options.command ?? pinnedShell(workspaces.active.id, workspaces.activeWorkspace.id, options);
+  const remote = remoteShellOf(command) !== null;
+  // A shell on a machine starts where its folder is, over there; here, ssh
+  // just needs somewhere to run, and home is the place that is always there.
+  const cwd = remote ? homedir() : (options.cwd ?? (await cwdForNewTab(options.from ?? paneId)));
+  const agent = await spawnHolding(command, () =>
+    host.create({
+      cwd,
+      command,
+      env: spawnEnv(),
+      /**
+       * A terminal unless the client insists otherwise. The window stopped
+       * offering "start me an agent" as a separate thing to click: it is one
+       * gesture fewer to open a terminal and type `claude` in it, and the tab ends
+       * up saying the same thing either way, because `procs.ts` reports what is
+       * actually running in there.
+       */
+      kind: options.kind ?? "shell",
+    }),
+  );
   /**
    * Crossing the link takes long enough for the pane to have been closed in the
    * meantime — a split followed straight away by `C-a x` is all it takes. An
@@ -1254,11 +1288,12 @@ async function openTerminal(
    * goes wherever the focus ended up instead.
    */
   const target = workspaces.hasPane(paneId) ? paneId : workspaces.focusedPaneId;
-  workspaces.addTab(agent.id, agent.cwd, target);
+  workspaces.addTab(agent.id, remote ? undefined : agent.cwd, target);
   workspaces.focusPane(target);
   // The project an agent is working in is one you can browse; that is the
-  // whole basis on which the file tree decides what it may read.
-  allowRoot(agent.cwd);
+  // whole basis on which the file tree decides what it may read. A tab on a
+  // machine has no project here, and the `~` its ssh runs in is not one.
+  if (!remote) allowRoot(agent.cwd);
   return agent;
 }
 
@@ -1273,20 +1308,96 @@ async function openTerminalAt(
   profileId: string,
   workspaceId: string,
   paneId: string,
-  options: { cwd?: string; command?: string; kind?: PtyKind } = {},
+  options: { cwd?: string; command?: string; kind?: PtyKind; local?: boolean } = {},
 ): Promise<AgentSnapshot> {
-  const agent = await host.create({
-    cwd: options.cwd ?? (await cwdForPaneIn(profileId, workspaceId, paneId)),
-    command: options.command,
-    env: spawnEnvFor(profileId),
-    kind: options.kind ?? "shell",
-  });
+  const command = options.command ?? pinnedShell(profileId, workspaceId, options);
+  const remote = remoteShellOf(command) !== null;
+  const cwd = remote ? homedir() : (options.cwd ?? (await cwdForPaneIn(profileId, workspaceId, paneId)));
+  const agent = await spawnHolding(command, () =>
+    host.create({ cwd, command, env: spawnEnvFor(profileId), kind: options.kind ?? "shell" }),
+  );
   const workspace = workspaces.workspaceIn(profileId, workspaceId);
   if (!workspace) throw new Error("that workspace is gone");
   const target = workspaces.hasPaneIn(profileId, workspaceId, paneId) ? paneId : workspace.focusedPaneId;
-  workspaces.addTabIn(profileId, workspaceId, target, agent.id, agent.cwd);
-  allowRoot(agent.cwd);
+  workspaces.addTabIn(profileId, workspaceId, target, agent.id, remote ? undefined : agent.cwd);
+  if (!remote) allowRoot(agent.cwd);
   return agent;
+}
+
+/**
+ * What a plain shell in a workspace runs when the workspace is pinned to a
+ * machine: a tmux session there, in its folder. Undefined — the login shell
+ * here, as ever — for anything else.
+ *
+ * "Plain" is narrow on purpose. A command means somebody built a line for a
+ * reason (an agent, nvim, a card's dev server); a directory means a place on
+ * *this* disk (a worktree, the file tree's "open here"); `local` is the
+ * menu's "on this Mac". Only the tab strip's terminal, `C-a T` and the
+ * terminal a split opens have none of the three, and those are the shells a
+ * pinned workspace means. A pin to a machine since removed is no pin.
+ */
+function pinnedShell(
+  profileId: string,
+  workspaceId: string,
+  options: { cwd?: string; command?: string; kind?: PtyKind; local?: boolean },
+): string | undefined {
+  if (options.local || options.command !== undefined || options.cwd !== undefined || (options.kind ?? "shell") !== "shell") {
+    return undefined;
+  }
+  const workspace = workspaces.workspaceIn(profileId, workspaceId);
+  const pin = workspace?.machine;
+  const machine = pin ? findMachine(pin.machineId) : undefined;
+  if (!workspace || !pin || !machine) return undefined;
+  return sessionShell(machine, workspace.name, pin.dir);
+}
+
+/**
+ * Session names handed to a tab whose spawn has not come back yet. The host
+ * only lists a terminal once `create` returns, so two shells opened in the
+ * same breath — a split, then another — would otherwise both see the slot
+ * free and attach to one session, two tabs mirroring each other.
+ */
+const claimedSessions = new Set<string>();
+
+/**
+ * A shell on a machine in a tmux session of its own — see `sessionName` for
+ * why the first slot no tab holds. Every machine's sessions count against
+ * every other's, so two aliases for one box cannot hand out the same name.
+ */
+function sessionShell(machine: MachineEntry, workspaceName: string, dir: string, run?: string): string {
+  const taken = new Set([...sessionsEnding(), ...claimedSessions]);
+  for (const agent of host.agents) {
+    const session = remoteShellOf(agent.command)?.session;
+    if (session) taken.add(session);
+  }
+  const session = sessionName(workspaceName, taken);
+  claimedSessions.add(session);
+  return remoteShellCommand({ host: machine.host, session, dir, run });
+}
+
+/** Spawn, and let go of the session name it was holding once the host lists it — or has refused it. */
+async function spawnHolding(command: string | undefined, spawn: () => Promise<AgentSnapshot>): Promise<AgentSnapshot> {
+  try {
+    return await spawn();
+  } finally {
+    const session = remoteShellOf(command)?.session;
+    if (session) claimedSessions.delete(session);
+  }
+}
+
+/**
+ * The tmux session behind a tab on a machine, ended because the tab is being
+ * closed — see `endSession` for why closing and nothing else.
+ *
+ * Called from the doors a person closes a tab by (the tab, a pane, a
+ * workspace, the harness's stop on their say-so) and never from
+ * `reapExited`: a remote tab only ends on its own when ssh exits on purpose,
+ * and the one way that leaves a session standing is a detach, which is a
+ * person saying they want it kept.
+ */
+function endRemote(agentId: string): void {
+  const remote = remoteShellOf(host.find(agentId)?.command);
+  if (remote?.session) endSession(remote.host, remote.session);
 }
 
 /** `cwdForNewTab`, for a pane of any workspace: the terminal it shows, else what it remembers, else the workspace's newest. */
@@ -1826,6 +1937,7 @@ function newestAgentHere(): string | undefined {
  */
 function killAll(agentIds: string[]): void {
   for (const agentId of terminalsOf(agentIds)) {
+    endRemote(agentId);
     host.kill(agentId);
     // It must not be left as a tab pointing at a terminal that no longer exists.
     workspaces.removeTab(agentId);
@@ -2042,8 +2154,9 @@ function dropClient(ws: WebSocket): void {
   syncWatched();
   for (const agentId of st.proposals.keys()) applySize(agentId);
   // A phone whose socket died with its key held must not keep Kuru quiet
-  // everywhere else.
-  voice.talk(ws, false);
+  // everywhere else, and what it was going to play is not going to be heard
+  // there.
+  voice.leave(ws);
   // The viewer cannot be open with nobody connected, and a connection to
   // somebody's production database is not a thing to keep for the company.
   if (clients.size === 0) void closeDatabasePools();
@@ -2268,6 +2381,10 @@ function tabCwd(agentId: string): string | undefined {
     cwdSeen.delete(agentId);
     return undefined;
   }
+  // Somewhere kururu cannot read: the branch, the tree and the database scan
+  // are all about this disk, and the `~` the tab's ssh runs in is not a
+  // project. A pinned workspace whose tabs are all remote has no project here.
+  if (remoteShellOf(agent.command)) return undefined;
   const seen = cwdSeen.get(agentId);
   if (!seen || Date.now() - seen.at > CWD_CACHE_MS) {
     // Stamped before the look so a slow `lsof` is not asked again by every
@@ -2804,24 +2921,6 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-/**
- * The command line for a tab that is nvim rather than a shell that happens to
- * have nvim typed into it — the new-tab menu's row, and the file tree's.
- *
- * The title is set by hand first, because the tab is named from the terminal
- * title when there is one and from the command line when there is not — and
- * this command line, cut at its last slash, is `sh}" -l`. An nvim with
- * `set title` replaces it the moment it starts, and a shell that sets its own
- * takes it back when the editor exits; one that does not says "nvim" for a
- * while longer, which is at least where the tab came from. Dropping into a
- * shell on exit rather than ending the pty is the same choice `openInEditor`
- * makes below: `:q` should close a buffer, not a tab.
- */
-function nvimCommand(path?: string): string {
-  const arg = path ? ` -- ${shellQuote(path)}` : "";
-  return `printf '\\033]2;nvim\\007'; nvim${arg}; exec "\${SHELL:-/bin/sh}" -l`;
-}
-
 // ---------------------------------------------------------------------------
 // What each terminal is costing the machine
 // ---------------------------------------------------------------------------
@@ -2938,12 +3037,202 @@ async function footprint(): Promise<Footprint> {
     terminals,
     profiles,
     unplaced: terminals.filter((t) => !placed.has(t.agentId)).map((t) => t.agentId),
+    nvims: await nvimCensus(table, children),
     kururu: {
       server: table.get(process.pid)?.rss ?? null,
       host: hostPid === null ? null : (table.get(hostPid)?.rss ?? null),
     },
     machineTotal: totalmem(),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Every nvim on the machine, and ending them
+// ---------------------------------------------------------------------------
+
+/**
+ * How long the nvims that did not refuse `:qa` get to finish going — `VimLeave`
+ * autocmds, a shada write — before the ones still standing are reported as not
+ * having answered. Polled, because an exit in somebody else's terminal raises
+ * nothing out here.
+ */
+const NVIM_QUIT_MS = 2000;
+const NVIM_QUIT_POLL_MS = 150;
+/** After `endHard`, which has already waited out its own grace: long enough for the kernel to reap. */
+const NVIM_KILL_SETTLE_MS = 500;
+
+/** More than anybody has open, and a ceiling on what one message can set going. */
+const NVIM_CLOSE_LIMIT = 256;
+
+/** Every live terminal kururu holds, by the pid on the end of its pty — where `findNvims` stops walking up. */
+function ptyRoots(): Map<number, string> {
+  const roots = new Map<number, string>();
+  for (const agent of host?.agents ?? []) if (!agent.exited && agent.pid) roots.set(agent.pid, agent.id);
+  return roots;
+}
+
+/** A process is its pid and when it started; see `FootProc.start`. */
+function nvimId(nvim: { pid: number; start: string }): string {
+  return `${nvim.pid}@${nvim.start}`;
+}
+
+/** Whether the process an id named is still running, as itself, in this table. */
+function stillThere(nvim: FoundNvim, table: FootTable): boolean {
+  return table.get(nvim.pid)?.start === nvim.start;
+}
+
+/**
+ * Where an nvim is, for a person: the tab it is in and that tab's workspace, or
+ * the app it is running under. The tab is named as its strip names it — for an
+ * nvim, by its title, because the label alone is the command line cut at a
+ * slash and says `sh}" -l`.
+ */
+function placeOf(nvim: FoundNvim, roots: Map<number, string>): NvimPlace {
+  const agentId = nvim.ptyRoot === null ? undefined : roots.get(nvim.ptyRoot);
+  const agent = agentId === undefined ? undefined : host.find(agentId);
+  if (agentId === undefined || !agent) return { kind: "outside", app: nvim.app };
+  const shown = overlay(agent);
+  const workspace = workspaces
+    .all()
+    .flatMap((profile) => profile.workspaces)
+    .find((w) => panes(w.layout).some((pane) => pane.agentIds.includes(agentId)));
+  return {
+    kind: "kururu",
+    agentId,
+    tab: shown.titleOverride || agentSummary(shown) || agentLabel(shown),
+    workspace: workspace?.name ?? null,
+    nvimTab: isNvimTab(agent.command),
+    agent: nvim.underAgent,
+  };
+}
+
+/**
+ * Every nvim on the machine for the Processes page, placed and with its
+ * directory — one `lsof` for the lot. Machine-wide on purpose: the tile is about
+ * what the machine is paying for, and an nvim in another terminal app costs the
+ * same as one in a tab.
+ */
+async function nvimCensus(table: FootTable, children: Map<number, FootProc[]>): Promise<FootprintNvim[]> {
+  const roots = ptyRoots();
+  const found = findNvims(table, children, new Set(roots.keys()));
+  const cwds = await processCwds(found.map((nvim) => nvim.pid));
+  return found.map((nvim) => ({
+    id: nvimId(nvim),
+    pid: nvim.pid,
+    args: nvim.args,
+    rss: nvim.rss,
+    processes: nvim.pids.length,
+    cwd: cwds.get(nvim.pid) ?? null,
+    place: placeOf(nvim, roots),
+  }));
+}
+
+/**
+ * The nvims these ids name that are still those processes, in a table read now.
+ * An id is the page's word for what it showed, and only that is acted on: a
+ * pid that has since become another process, or an id that was never an nvim,
+ * names nothing here.
+ */
+function nvimsNamed(ids: unknown, table: FootTable, roots: Map<number, string>): FoundNvim[] {
+  if (!Array.isArray(ids)) throw new Error("which nvims?");
+  const wanted = new Set(ids.slice(0, NVIM_CLOSE_LIMIT).filter((id): id is string => typeof id === "string"));
+  return findNvims(table, footChildren(table), new Set(roots.keys())).filter((nvim) => wanted.has(nvimId(nvim)));
+}
+
+/** Read the table until none of these is still running, or the time is up, and hand back the last read. */
+async function untilGone(nvims: FoundNvim[], ms: number): Promise<FootTable> {
+  let table = await readFootTable();
+  const until = Date.now() + ms;
+  while (Date.now() < until && nvims.some((nvim) => stillThere(nvim, table))) {
+    await new Promise((resolve) => setTimeout(resolve, NVIM_QUIT_POLL_MS));
+    table = await readFootTable();
+  }
+  return table;
+}
+
+/**
+ * A tab kururu opened as nvim, once its nvim has gone, closed the way
+ * `close-tab` closes one — when what is left is a shell with nothing in it,
+ * which is what `nvimCommand` drops into. A shell somebody typed nvim into is a
+ * shell they wanted, and stays; so does an nvim tab where something else has
+ * been started from that shell since, which is theirs.
+ */
+function closeEmptiedTab(agentId: string, table: FootTable): void {
+  const agent = host.find(agentId);
+  if (!agent || !isNvimTab(agent.command)) return;
+  const tree = agent.exited || !agent.pid ? null : readTree(agent.pid, table, footChildren(table));
+  if (tree && (tree.agents.length > 0 || tree.devServers.length > 0 || tree.editors > 0)) return;
+  host.kill(agentId);
+  workspaces.reapTab(agentId);
+  forget(agentId);
+}
+
+/** Count what went, closing nvim tabs behind them, and list what did not with `why`. */
+function settle(
+  nvims: FoundNvim[],
+  table: FootTable,
+  roots: Map<number, string>,
+  why: (nvim: FoundNvim) => string,
+): NvimCloseReport {
+  const report: NvimCloseReport = { closed: 0, left: [] };
+  for (const nvim of nvims) {
+    if (stillThere(nvim, table)) {
+      const args = nvim.args.length > 60 ? `${nvim.args.slice(0, 59)}…` : nvim.args;
+      report.left.push({ id: nvimId(nvim), label: `${args} (${nvimWhere(placeOf(nvim, roots))})`, reason: why(nvim) });
+      continue;
+    }
+    report.closed++;
+    const agentId = nvim.ptyRoot === null ? undefined : roots.get(nvim.ptyRoot);
+    if (agentId !== undefined) closeEmptiedTab(agentId, table);
+  }
+  return report;
+}
+
+/**
+ * Settings → Processes' close buttons: `:qa` in each nvim the page showed,
+ * wherever it is running, and a moment for them to go.
+ *
+ * Gentle is all this does. `:qa` refuses unsaved work, and a refusal is
+ * reported and never escalated — ending what refused is `killNvims`, which the
+ * page asks for on a button of its own, so a signal is always a second yes.
+ * Whether one went is read off the process table rather than the socket,
+ * because an nvim that quits drops the socket in the middle of its answer — see
+ * `quit` in `nvim.ts`.
+ */
+async function closeNvims(ids: unknown): Promise<NvimCloseReport> {
+  const roots = ptyRoots();
+  const [before, procs] = await Promise.all([readFootTable(), readProcTable()]);
+  const targets = nvimsNamed(ids, before, roots);
+  const said = new Map<FoundNvim, string>();
+  await Promise.all(
+    targets.map(async (nvim) => {
+      const found = await findNvim(nvim.pid, procs);
+      const answer = found ? await quitNvim(found) : "kururu could not find its socket";
+      if (answer) said.set(nvim, answer);
+    }),
+  );
+  const table = await untilGone(targets.filter((nvim) => !said.has(nvim)), NVIM_QUIT_MS);
+  return settle(targets, table, roots, (nvim) => said.get(nvim) ?? "did not answer — it may be waiting at a prompt");
+}
+
+/**
+ * The second yes: end what refused `:qa`. SIGTERM and then SIGKILL to each
+ * one's own tree, and nothing above it — see `endHard`. The ids are checked
+ * exactly as `closeNvims` checks them, against a table read now.
+ */
+async function killNvims(ids: unknown): Promise<NvimCloseReport> {
+  const roots = ptyRoots();
+  const targets = nvimsNamed(ids, await readFootTable(), roots);
+  await endHard(targets.flatMap((nvim) => nvim.pids));
+  const table = await untilGone(targets, NVIM_KILL_SETTLE_MS);
+  return settle(targets, table, roots, (nvim) => {
+    try {
+      process.kill(nvim.pid, 0);
+      return "it survived SIGKILL";
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code === "EPERM" ? "it belongs to another user" : "it survived SIGKILL";
+    }
+  });
 }
 
 /**
@@ -2971,14 +3260,14 @@ async function pollAccountUsage(): Promise<void> {
 }
 
 /**
- * Sample every VPS the sidebar watches. Skipped while nobody is connected, on
- * the usage poll's argument: it leaves the machine, as the user, and doing that
+ * Sample every machine the sidebar watches. Skipped while nobody is connected,
+ * on the usage poll's argument: it leaves this Mac, as the user, and doing that
  * for a window that is not open is not a thing to do on a timer.
  */
 async function pollServers(): Promise<void> {
   if (clients.size === 0) return;
-  await pollVps();
-  broadcast({ type: "vps", vps: vpsSnapshot() });
+  await pollMachines();
+  broadcast({ type: "machines", machines: machinesSnapshot() });
 }
 
 /**
@@ -3007,7 +3296,7 @@ const timers = [
   setInterval(() => void pollEditors(), NVIM_SCAN_MS),
   setInterval(() => void pollMemory(), MEM_SCAN_MS),
   setInterval(() => void pollAccountUsage(), USAGE_POLL_MS),
-  setInterval(() => void pollServers(), VPS_POLL_MS),
+  setInterval(() => void pollServers(), MACHINE_POLL_MS),
   setInterval(() => void pollOpenRouterAccount(), OPENROUTER_POLL_MS),
 ];
 
@@ -3074,7 +3363,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
           return openTerminal(paneId, { cwd: msg.cwd, command: agentCommand(launcher), kind: "agent" });
         }
         if (msg.nvim) return openTerminal(paneId, { cwd: msg.cwd, command: nvimCommand(), kind: "shell" });
-        return openTerminal(paneId, { cwd: msg.cwd, command: msg.command, kind: msg.kind });
+        return openTerminal(paneId, { cwd: msg.cwd, command: msg.command, kind: msg.kind, local: msg.local === true });
       });
       return;
     }
@@ -3093,6 +3382,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
         // Closing a pane's last terminal closes the pane (`reapTab`), the same as
         // when its pty ends; the last pane of a workspace stays, empty.
         for (const id of terminalsOf([agentId])) {
+          endRemote(id);
           host.kill(id);
           workspaces.reapTab(id);
           forget(id);
@@ -3487,19 +3777,49 @@ function handleMessage(ws: WebSocket, raw: string): void {
       void replyAsync(ws, msg.id, () => retireWorktrees(msg.root));
       return;
 
-    case "add-vps":
+    case "add-machine":
       reply(ws, msg.id, () => {
-        const entry = addVps(msg);
-        broadcast({ type: "vps", vps: vpsSnapshot() });
-        void pollVpsOne(entry.id).then(() => broadcast({ type: "vps", vps: vpsSnapshot() }));
+        const entry = addMachine(msg);
+        broadcast({ type: "machines", machines: machinesSnapshot() });
+        void pollMachine(entry.id).then(() => broadcast({ type: "machines", machines: machinesSnapshot() }));
         return entry;
       });
       return;
 
-    case "remove-vps":
-      if (typeof msg.vpsId !== "string") return;
-      removeVps(msg.vpsId);
-      broadcast({ type: "vps", vps: vpsSnapshot() });
+    case "remove-machine":
+      if (typeof msg.machineId !== "string") return;
+      removeMachine(msg.machineId);
+      workspaces.unpinMachine(msg.machineId);
+      broadcast({ type: "machines", machines: machinesSnapshot() });
+      return;
+
+    case "open-machine-shell": {
+      const paneId = msg.paneId ?? workspaces.focusedPaneId;
+      void replyAsync(ws, msg.id, () => {
+        const machine = typeof msg.machineId === "string" ? findMachine(msg.machineId) : undefined;
+        if (!machine) throw new Error("That machine is not in the list any more.");
+        return openTerminal(paneId, { command: remoteShellCommand({ host: machine.host }), kind: "shell" });
+      });
+      return;
+    }
+
+    case "pin-workspace":
+      reply(ws, msg.id, () => {
+        if (typeof msg.workspaceId !== "string") throw new Error("No workspace named.");
+        if (msg.machineId === null) {
+          workspaces.setWorkspaceMachine(msg.workspaceId, null);
+          return null;
+        }
+        const machine = typeof msg.machineId === "string" ? findMachine(msg.machineId) : undefined;
+        if (!machine) throw new Error("That machine is not in the list any more.");
+        const dir = validRemoteDir(msg.dir);
+        if (dir === null) {
+          throw new Error("A folder is ~, ~/… or /…, in letters, digits, spaces and . _ - + @ , : = — nothing a shell would read as code.");
+        }
+        const pin = { machineId: machine.id, dir };
+        workspaces.setWorkspaceMachine(msg.workspaceId, pin);
+        return pin;
+      });
       return;
 
     case "set-openrouter-key":
@@ -3535,6 +3855,22 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "talking":
       voice.talk(ws, msg.talking === true);
+      return;
+
+    case "speech-held":
+      if (typeof msg.utterance === "string") voice.held(ws, msg.utterance, msg.held === true);
+      return;
+
+    case "speech-played":
+      if (typeof msg.utterance === "string" && typeof msg.seq === "number") voice.played(msg.utterance, msg.seq);
+      return;
+
+    case "play-missed":
+      if (typeof msg.profileId === "string") voice.replay(msg.profileId);
+      return;
+
+    case "clear-missed":
+      if (typeof msg.profileId === "string") voice.clear(msg.profileId);
       return;
 
     // --- the database viewer ----------------------------------------------
@@ -3667,12 +4003,10 @@ function handleMessage(ws: WebSocket, raw: string): void {
        * That includes a server whose supervisor was there once and has since
        * died, which is why this asks `supervised()` and not the environment.
        */
-      if (!supervised()) {
-        console.error("kururu: nothing is supervising this server, so there is nobody to restart it");
-        return;
+      {
+        const refused = requestRestart("a window asked for a restart (prefix+B)");
+        if (refused) console.error(`kururu: ${refused}`);
       }
-      record("stop", "a window asked for a restart (prefix+B)");
-      void shutdown().then(() => process.exit(RESTART_EXIT_CODE));
       return;
 
     // --- the board ---------------------------------------------------------
@@ -3884,6 +4218,14 @@ function handleMessage(ws: WebSocket, raw: string): void {
       void replyAsync(ws, msg.id, () => openInEditor(msg.root, msg.path, msg.agentId));
       return;
 
+    case "close-nvims":
+      void replyAsync(ws, msg.id, () => closeNvims(msg.ids));
+      return;
+
+    case "kill-nvims":
+      void replyAsync(ws, msg.id, () => killNvims(msg.ids));
+      return;
+
     case "open-doc":
       /**
        * Checked where every path from a client is checked, and a pick that does
@@ -4090,6 +4432,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       agents: host.agents.length,
       liveAgents: host.agents.filter(countsAsAgent).length,
       devServers: state.devServers.length,
+      pid: process.pid,
       // When and why this process started, and whether anything would start
       // it again. Without the file: this is asked every few seconds.
       life: lifeNow(),
@@ -4104,6 +4447,31 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    */
   if (url.pathname === "/api/lifecycle") {
     json(res, lifecycleReport());
+    return;
+  }
+
+  /**
+   * The two restarts, for a caller with no socket: the menu bar.
+   *
+   * The server's own restart is what `prefix+B` asks over the socket, and
+   * costs a reconnect. The host's is the one thing in kururu that ends
+   * agents, and it is a POST on loopback for the same reason `kill-agent`
+   * is a message any client may send: whatever can reach this server can
+   * already end a terminal, one at a time. What is kept out of reach is the
+   * *accident* — the dialog that names the count is the caller's, and
+   * nothing here runs without being asked. A 409 is a refusal with its
+   * reason, which is the honest answer to a request that cannot be finished.
+   */
+  if (url.pathname === "/api/restart" && req.method === "POST") {
+    const refused = requestRestart("the menu bar asked for a restart");
+    if (refused) json(res, { ok: false, error: refused }, 409);
+    else json(res, { ok: true });
+    return;
+  }
+  if (url.pathname === "/api/host/restart" && req.method === "POST") {
+    const refused = requestHostRestart();
+    if (refused) json(res, { ok: false, error: refused }, 409);
+    else json(res, { ok: true });
     return;
   }
 
@@ -4951,17 +5319,18 @@ server.on("upgrade", (req, socket, head) => {
     send(ws, { type: "projects", projects: state.projects });
     send(ws, { type: "databases", databases: state.databases });
     send(ws, { type: "usage", usage: usageSnapshot() });
-    send(ws, { type: "vps", vps: vpsSnapshot() });
+    send(ws, { type: "machines", machines: machinesSnapshot() });
     send(ws, { type: "openrouter", openrouter: openRouterSnapshot() });
     send(ws, { type: "voice", voice: voice.status() });
     send(ws, voice.hush());
+    send(ws, voice.missedMessage());
     // The first client through the door is also what starts the usage poll: it
     // is skipped while nothing is connected, so without this a freshly started
     // server would draw no bar for a minute.
     void pollAccountUsage();
-    // The VPS and OpenRouter polls the same way, but only for the first: a
-    // second window would otherwise buy every VPS an extra ssh round, and the
-    // account an extra request, for nothing.
+    // The machine and OpenRouter polls the same way, but only for the first: a
+    // second window would otherwise buy every machine an extra ssh round, and
+    // the account an extra request, for nothing.
     if (clients.size === 1) {
       void pollServers();
       void pollOpenRouterAccount();
@@ -5053,12 +5422,19 @@ async function attach(port: Port): Promise<void> {
     claudeDir: claudeDirOf,
     agentCommand: agentCommandFor,
     openTerminal: openTerminalAt,
+    machines: machinesSnapshot,
+    shellOn: sessionShell,
+    stopTerminal: (agentId) => {
+      endRemote(agentId);
+      host.kill(agentId);
+    },
     cwdFor: cwdForPaneIn,
     runCard: runCardAt,
     stopDev,
     // Through the variable rather than the instance, because the voice is
     // built on the next line and needs the harness to hand words to.
     say: (profileId, text) => void voice.speak(profileId, text),
+    replayMissed: (profileId) => voice.replay(profileId),
   });
   voice = new Voice({ broadcast, deliver: (profileId, text) => harness.hear(profileId, text) });
   for (const agentId of workspaces.allAgents()) {
@@ -5081,7 +5457,7 @@ async function attach(port: Port): Promise<void> {
       host.kill(agent.id);
       continue;
     }
-    workspaces.addTab(agent.id, agent.cwd);
+    workspaces.addTab(agent.id, remoteShellOf(agent.command) ? undefined : agent.cwd);
   }
 
   workspaces.onChange = () => {
@@ -5245,8 +5621,75 @@ const link = await linkToHost();
  * fine, so it is told apart before anything is written down that says
  * otherwise.
  */
+/**
+ * Exit so that whatever supervises this process starts a new one.
+ *
+ * Exiting *is* the restart: only a supervisor can bring a new server up, and
+ * `server/run.mjs` reads this exit code specifically, so that an ordinary
+ * crash is not mistaken for a request. Unsupervised there is nobody to ask,
+ * and exiting would take the server away rather than replace it — so this
+ * says so instead of doing half of it. That includes a server whose
+ * supervisor was there once and has since died, which is why it asks
+ * `supervised()` and not the environment. The reason given is what the
+ * record says, and is the caller's: a window's prefix+B, the menu bar.
+ *
+ * A moment's delay before the shutdown, so an HTTP caller has its answer
+ * before the socket it asked on is closed under it.
+ */
+function requestRestart(why: string): string | null {
+  if (!supervised()) return "nothing is supervising this server, so there is nobody to restart it";
+  record("stop", why);
+  setTimeout(() => void shutdown().then(() => process.exit(RESTART_EXIT_CODE)), 100);
+  return null;
+}
+
+/** Set once this server has asked the host to stop, so the link dropping is read as the restart it is. */
+let hostRestartAsked = false;
+
+/**
+ * Restart the pty host, which ends every agent, by asking it to stop and
+ * then restarting ourselves.
+ *
+ * This is the one thing in kururu that reaches for the host on purpose, and
+ * it is here rather than in whatever is supervising the server because this
+ * is the process that knows how to come back to a host: a server that
+ * starts and finds no host starts one. So the host is sent SIGTERM — it
+ * reaps its ptys and unlinks its socket on the way out — the link drops, and
+ * `link.onClose` below exits with the restart code rather than the crash
+ * one. The supervisor, whichever it is, starts a server, and that server
+ * starts a host from its own bundle. Which is also what makes this correct
+ * under `bun run dev` and under the app alike, and what puts the new host on
+ * the current build.
+ *
+ * The asking — the dialog that names the count — is the caller's. What is
+ * refused here is the case where the dance cannot finish: unsupervised, this
+ * server would end the host and then itself, and nothing would bring either
+ * back.
+ */
+function requestHostRestart(): string | null {
+  if (!supervised()) return "nothing is supervising this server, so nothing would start the new host";
+  const pid = socketHolder(SOCKET);
+  if (pid === null) return "nothing is holding the pty host's socket";
+  const live = host.agents.filter(countsAsAgent).length;
+  hostRestartAsked = true;
+  record("host", `asked the pty host (pid ${pid}) to stop, ending ${live} agent(s); this server restarts to start a new one`);
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch (err) {
+    hostRestartAsked = false;
+    return `could not signal the pty host: ${err instanceof Error ? err.message : String(err)}`;
+  }
+  return null;
+}
+
 link.onClose(() => {
   if (stopping) return;
+  if (hostRestartAsked) {
+    record("stop", "the pty host stopped as asked; this server is restarting to start a new one");
+    console.error("kururu: the pty host was stopped on request — restarting to start a new one");
+    void shutdown().then(() => process.exit(RESTART_EXIT_CODE));
+    return;
+  }
   if (socketHeld(SOCKET)) {
     record("stop", "another server connected to the pty host, which lets go of the older of two; this one is stepping aside");
     console.error("kururu: another server has taken over the pty host — this one is stepping aside");

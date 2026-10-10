@@ -16,6 +16,7 @@ in this folder.
 | `board.ts` | A workspace's cards, and what an agent's status does to the one it was handed. Also the profile's board, a card's dates, and the timeline's layout |
 | `days.ts` | Calendar days as strings, and the arithmetic over them. Why a card's date is not a timestamp |
 | `projects.ts` | What a repository has been told about itself, and how a card's worktree is named |
+| `machines.ts` | A machine, one sample of it, a workspace's pin to one, and the command line of a shell on it — built and read back. See [machines](machines.md) |
 | `keys.ts` | Every action, ghosttown's defaults, and a user's overrides |
 | `labels.ts` | What to call a terminal and what to say it is doing — three places must agree |
 | `notify.ts` | When kururu may interrupt you, and the words. Ported policy |
@@ -52,13 +53,13 @@ in this folder.
 | `src/access.ts` | Bind address, the one token, the Origin check |
 | `src/config.ts` | `~/.config/kururu`, and how the settings files are written |
 | `src/sizing.ts` | How big a terminal is when several panes have an opinion |
-| `src/cwd.ts` | Where a process *is*, not where it was spawned. One `lsof` |
+| `src/cwd.ts` | Where a process *is*, not where it was spawned. One `lsof` — or one for many, for the Processes page's nvims |
 | `src/memory.ts` | What each terminal costs the machine, off `ps`. Rounded first |
-| `src/footprint.ts` | Settings → Processes: each terminal's tree read with argv — agents, nvims, dev servers counted once each. Only when the page asks (`/api/footprint`, types in `shared/footprint.ts`) |
+| `src/footprint.ts` | Settings → Processes: each terminal's tree read with argv — agents, nvims, dev servers counted once each — and every nvim on the machine, placed in a tab or under an app. Processes are pid *and* start time. Only when the page asks (`/api/footprint`, types in `shared/footprint.ts`) |
 | `src/record.ts` | Rolling raw-stream tape per agent, for bugs you can't reproduce |
 | `src/transcript.ts` | How full a Claude Code window is, off its transcript. Ported |
 | `src/usage.ts` | The plan allowance, off a Claude credential — the machine's or the profile's. Read, never written |
-| `src/vps.ts` | The sidebar's VPSes: the user's own `ssh`, `BatchMode`, one fixed read-only script. A client names a host and nothing else (`shared/vps.ts`) |
+| `src/machines.ts` | The sidebar's machines (a VPS, a PC on the tailnet): the user's own `ssh`, `BatchMode`, one fixed read-only script, and `tmux kill-session` when a session tab is closed. A client names a host and nothing else (`shared/machines.ts`, [machines](machines.md)) |
 | `src/openrouter.ts` | The sidebar's OpenRouter balance and spend, read with a management key kept owner-only in `~/.config/kururu/openrouter.json`. GETs only; the key comes in once and never goes back out (`shared/openrouter.ts`) |
 | `src/databases.ts` | The database sheet: `DATABASE_URL` read out of the workspace's env files at the moment of connecting and never held, every query in a `READ ONLY` transaction unless the switch says otherwise, reads bounded through a cursor. Postgres only (`shared/databases.ts`) |
 | `src/report-cli.ts` | What a Claude Code hook runs. Not in `agents/` on purpose. Also carries the session's inbox socket, transcript path and last reply for the harness |
@@ -71,7 +72,7 @@ in this folder.
 | `src/files.ts` | Traversal-safe file listing and reading |
 | `src/fileops.ts` | The file tree's edits: new, rename, move, copy, Trash — the only writer |
 | `src/markdown.ts` | Markdown → markup with Shiki. `html: false` IS the sanitizer |
-| `src/nvim.ts` | The editor in a pane, found by its socket. An autocmd, not a poll; `:drop` for the tree |
+| `src/nvim.ts` | The editor in a pane, found by its socket. An autocmd, not a poll; `:drop` for the tree; `:qa` with a deadline for Processes' close buttons, and `endHard` (SIGTERM then SIGKILL, by pid, never a group) for the second yes. `nvimCommand` builds an nvim tab and `isNvimTab` knows one again |
 | `src/mouseencoding.ts` | How a terminal writes its mouse reports |
 | `src/reach.ts` | Which addresses this machine answers to, for the phone's QR |
 | `src/version.ts` | What version this is, stamped in by the bundler |
@@ -87,7 +88,7 @@ in this folder.
 | `src/projects.ts` | Per-repository settings, by root. Persistence only |
 | `src/worktree.ts` | A card's checkout: `git worktree add` on a click, and rebase, fast-forward, `worktree remove`, `branch -d` when it is retired — never forced. The one place kururu runs `git` |
 | `src/logins.ts` | Where a profile's logins live, and the two env vars. Makes, never deletes |
-| `run.mjs` | Builds, spawns and re-spawns the server, one at a time, and writes down why. What `C-a B` reaches |
+| `run.mjs` | Builds, spawns and re-spawns the server, one at a time, and writes down why. What `C-a B` reaches. Shipped in the app and run with `--no-build --entry`; `SIGUSR2` is "cycle now" |
 | `status.mjs` | The daemon has no face; this is it. Socket + `/api/agents`, then the end of `lifecycle.log` |
 | `kill-hosts.mjs` | Finds hosts by socket, asks, SIGTERMs |
 
@@ -145,11 +146,15 @@ open, and this is how loud the room is; dragged anywhere, ✕ to stop Kuru) · `
 
 | file | |
 |---|---|
-| `main.js` | Finds a server, draws it. And the one thing a served page can't do: replace the app |
+| `main.js` | Finds a server, draws it, keeps the tray with no window open. And the things a served page can't do: replace the app, hear a key unfocused |
+| `runner.js` | Starts `server/run.mjs` from the app or from a checkout, probes health, reads `lifecycle.log`, adopts a server already on the port, asks the server to restart itself or the host |
+| `tray.js` · `menu.js` | The frog in the menu bar and its clicks; the menu as data, with no Electron in it, so its sentences are tested |
+| `talkkey.js` · `talkkey/talkkey.swift` | The talk key in every app: the native listen-only event tap, its router, and the floating pill's panel window |
+| `desktop.js` | `desktop.json`: where the server runs from, whether the hook is on, where the pill was left |
 | `connect.html` | The one page kururu draws itself — the address picker |
 | `servers.js` | Addresses you have connected to, and what a typed one means |
-| `preload.js` | Two bridges in one file, split on `file:` |
-| `build.mjs` | `server/src` → `dist/{server,ptyhostd,report,kokoro}.mjs`; stamps the version |
+| `preload.js` | Two bridges in one file, split on `file:`; `voice` is the hook's half |
+| `build.mjs` | `server/src` → `dist/{server,ptyhostd,report,kokoro}.mjs`; stamps the version. `talkkey/build.mjs` compiles the hook beside them |
 | `brand.mjs` | postinstall: stamps and re-signs the Electron copy in `node_modules` |
 | `electron-builder.yml` · `entitlements.mac.plist` · `notarize.mjs` | see [packaging](packaging.md) |
 | `icon/` | Generated by `tools/icon.mjs`; committed |
