@@ -24,11 +24,22 @@
  * rest of the reply, and anything queued behind it, goes to the missed list
  * behind the harness button — which is what the talk key already does on its
  * way down, without opening a microphone to do it.
+ *
+ * **What became of your last message is never covered by Kuru.** A reply
+ * that waited for you to finish plays the moment the hush lifts, which is
+ * the moment your words are on their way — and it used to take the pill's
+ * one line with its first sentence, so "Could not send the clip" showed for
+ * a frame and a lost message looked like a sent one. While Kuru speaks, the
+ * pill keeps a line of its own for the message under Kuru's words, from the
+ * same outbox the list behind the harness button draws.
  */
 import { useEffect, useRef, useState } from "react";
+import type { OutboxEntry } from "../../../shared/voice";
 import { adoptPlace, placeAt, type Place } from "../place";
-import { dismissVoice, useVoiceUi } from "../voice";
+import { useKururu } from "../session";
+import { dismissVoice, useMine, useOutgoing, useVoiceUi, whereItWent, type Outgoing } from "../voice";
 import { Icon } from "./Icon";
+import { MicIcon } from "./VoiceIcons";
 
 const BARS = [0.35, 0.6, 0.85, 1, 0.85, 0.6, 0.35];
 
@@ -65,6 +76,10 @@ interface Held {
  */
 export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
   const ui = useVoiceUi();
+  const mineId = useMine();
+  const { outbox } = useKururu();
+  const outgoing = useOutgoing();
+  const mine: OutboxEntry | Outgoing | null = mineId ? (outbox.find((e) => e.id === mineId) ?? outgoing.find((c) => c.id === mineId) ?? null) : null;
   const [place, setPlace] = useState<Place | null>(storedPlace);
   const held = useRef<Held | null>(null);
 
@@ -86,16 +101,26 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
         ? "Listening — tap again to send, Esc to drop"
         : "Listening — let go to send, Esc to drop"
       : ui.phase === "sending"
-        ? "Hearing…"
+        ? sendingLabel(mine)
         : ui.phase === "speaking"
           ? "Kuru"
           : ui.phase === "heard"
             ? ui.detail
             : ui.text;
-  // No ✕ while the clip is on its way: the server has it, and there is
-  // nothing on this side left to stop.
+  // No ✕ while the clip is on its way, which is a moment — except when the
+  // server is not taking it, which can be as long as the server is down: then
+  // the ✕ puts the pill away and the clip goes on being sent without it.
+  const stuck = ui.phase === "sending" && mine !== null && !("state" in mine) && mine.error !== null;
   const dismiss =
-    ui.phase === "listening" ? "Drop the clip" : ui.phase === "speaking" ? "Stop Kuru" : ui.phase === "sending" ? null : "Dismiss";
+    ui.phase === "listening"
+      ? "Drop the clip"
+      : ui.phase === "speaking"
+        ? "Stop Kuru"
+        : ui.phase === "sending"
+          ? stuck
+            ? "Hide — it keeps trying, and it is in your messages"
+            : null
+          : "Dismiss";
 
   const onClose = (target: EventTarget) => target instanceof Element && target.closest(".voice-close") !== null;
 
@@ -160,6 +185,12 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
         {(ui.phase === "speaking" || ui.phase === "heard" || (ui.phase === "error" && ui.detail)) && (
           <span className="voice-text">{ui.phase === "error" ? ui.detail : ui.text}</span>
         )}
+        {ui.phase === "speaking" && mine && (
+          <span className={`voice-mine voice-mine-${mineState(mine)}`}>
+            <MicIcon />
+            {mineLine(mine)}
+          </span>
+        )}
       </span>
       {dismiss && (
         <button className="voice-close" onClick={dismissVoice} title={dismiss} aria-label={dismiss}>
@@ -168,6 +199,24 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
       )}
     </div>
   );
+}
+
+/** A message as the pill tells it: the outbox's states, and `saving` for one the server does not have yet. */
+function mineState(mine: OutboxEntry | Outgoing): string {
+  return "state" in mine ? mine.state : "saving";
+}
+
+/** Your last message, under Kuru's words. */
+function mineLine(mine: OutboxEntry | Outgoing): string {
+  if (!("state" in mine)) return mine.error ? "Your message: not with the server yet — kept here, retrying" : "Your message: saving…";
+  return `Your message: ${whereItWent(mine)}`;
+}
+
+/** What the pill says between the key coming up and the words being made. */
+function sendingLabel(mine: OutboxEntry | Outgoing | null): string {
+  if (!mine) return "Saving…";
+  if (!("state" in mine)) return mine.error ? "Not with the server yet — kept here, retrying" : "Saving…";
+  return mine.state === "transcribing" ? (mine.note ?? "Hearing…") : whereItWent(mine);
 }
 
 /** Where this device left it, or its own spot. Storage that will not answer is the latter. */

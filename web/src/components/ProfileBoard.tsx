@@ -27,13 +27,33 @@
  * It has two views, and the second is `Timeline.tsx`: the same cards by when
  * they are for. Which card is being edited is kept here rather than in either
  * view, so that a card opened in one is still open in the other.
+ *
+ * And it is where every board in the profile is seen from. A bar under the
+ * header lists this board first and then each workspace that has one, and
+ * picking a workspace draws *its* board here — `BoardView` itself, robot and
+ * worktrees and all, not a second rendering of it — without going to the
+ * workspace. That is the argument for the overlay again from the other side:
+ * a sheet over the window is somewhere the whole profile can be looked at from
+ * without the screen behind it changing, and a person who sends cards out
+ * from here wants to see them land and get worked on in the same place.
  */
-import { useEffect, useRef, useState } from "react";
-import { boardLanes, cardCode, columnCards, LANE_NAME_MAX, LANES_MAX, type BoardLane, type Card } from "../../../shared/board";
-import type { Profile } from "../../../shared/model";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  boardLanes,
+  cardCode,
+  columnCards,
+  emptyBoard,
+  LANE_NAME_MAX,
+  LANES_MAX,
+  type Board,
+  type BoardLane,
+  type Card,
+} from "../../../shared/board";
+import { visibleLaunchers } from "../../../shared/launchers";
+import { mascotFor, type Profile, type Workspace } from "../../../shared/model";
 import { colorValue } from "../colors";
 import * as api from "../session";
-import { CardWhen, Composer, dropDraft, useComposerInView } from "./Board";
+import { BoardView, CardWhen, Composer, dropDraft, useComposerInView } from "./Board";
 import { Icon } from "./Icon";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
 import { ColorPicker } from "./Sidebar";
@@ -57,9 +77,78 @@ const NEW_LANE = "\0new";
  */
 const LANE_MIME = "application/x-kururu-lane";
 
+/**
+ * Which board the sheet was last showing, per profile: a workspace's id, or
+ * no entry for the profile's own. Per device, on the sidebar's disclosures'
+ * argument — which board is on screen is a thing you do with your eyes, and
+ * a phone picking one must not change what the desktop opens on — and in
+ * storage rather than beside `lastView`, because the window is reloaded on
+ * every repaint and the phone's page whenever it wakes, and a pick that did
+ * not outlive either would be no memory at all. Ids are minted afresh on a
+ * cold start, so the map keeps only the last few profiles rather than every
+ * id the machine has had; an id that names nothing is the profile's board.
+ */
+const SHOWN_KEY = "kururu.profileBoard.shown";
+const SHOWN_MAX = 12;
+
+function readShown(): Record<string, string> {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(SHOWN_KEY) ?? "{}");
+    if (!saved || typeof saved !== "object" || Array.isArray(saved)) return {};
+    return Object.fromEntries(Object.entries(saved).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  } catch {
+    return {};
+  }
+}
+
+function useShown(profileId: string): [string | null, (workspaceId: string | null) => void] {
+  const [shown, setShownState] = useState<string | null>(() => readShown()[profileId] ?? null);
+  const setShown = (workspaceId: string | null) => {
+    setShownState(workspaceId);
+    const saved = readShown();
+    // Taken out and put back, so that the profile last used is the newest key
+    // and the oldest is the one trimmed.
+    delete saved[profileId];
+    if (workspaceId) saved[profileId] = workspaceId;
+    const keys = Object.keys(saved);
+    for (const key of keys.slice(0, Math.max(0, keys.length - SHOWN_MAX))) delete saved[key];
+    try {
+      localStorage.setItem(SHOWN_KEY, JSON.stringify(saved));
+    } catch {
+      // Not remembered; still shown.
+    }
+  };
+  return [shown, setShown];
+}
+
+/**
+ * Whether a workspace's board has anything pending: a card in progress or
+ * waiting for review. To do is not pending — those cards are reminders, and a
+ * board full of them is a board nobody is waiting on — and Done is finished.
+ * It is the one thing a workspace's entry in the bar says beyond its name, and
+ * what the bar is sorted by.
+ */
+function pending(board: Board | null): boolean {
+  return board?.cards.some((card) => card.column === "doing" || card.column === "review") === true;
+}
+
 export function ProfileBoard({ profile, onClose }: { profile: Profile; onClose: () => void }) {
   const board = profile.board;
   const lanes = boardLanes(board);
+  const { snapshot } = api.useKururu();
+  const [shown, setShown] = useShown(profile.id);
+  /**
+   * The workspaces with a board, after the profile's own: the ones with
+   * something pending first, then the rest, each in the sidebar's order — so
+   * the boards worth looking at are the ones in reach without scrolling.
+   */
+  const withBoard = profile.workspaces.filter((workspace) => workspace.board !== null);
+  const boards = [
+    ...withBoard.filter((workspace) => pending(workspace.board)),
+    ...withBoard.filter((workspace) => !pending(workspace.board)),
+  ];
+  /** The workspace whose board is drawn, or null for the profile's — which is also what a gone one falls back to. */
+  const picked = boards.find((workspace) => workspace.id === shown) ?? null;
   const [view, setViewState] = useState<View>(lastView);
   const setView = (next: View) => {
     lastView = next;
@@ -231,6 +320,24 @@ export function ProfileBoard({ profile, onClose }: { profile: Profile; onClose: 
 
   const addingList = useComposerInView(adding, adding ? columnCards(board, adding).length : 0);
 
+  /**
+   * The picked entry kept in sight, on opening as much as on a pick: a bar
+   * that remembers the eighth workspace and opens scrolled to the first says
+   * the wrong one is on — and when the sort moves it, which a card changing
+   * column on any board can do. Scrolled by hand rather than `scrollIntoView`,
+   * for `useComposerInView`'s reason: that would scroll the sheet's columns too.
+   */
+  const bar = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const strip = bar.current;
+    const tab = strip?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!strip || !tab) return;
+    const box = strip.getBoundingClientRect();
+    const at = tab.getBoundingClientRect();
+    if (at.left < box.left) strip.scrollLeft -= box.left - at.left;
+    else if (at.right > box.right) strip.scrollLeft += at.right - box.right;
+  }, [picked?.id, picked ? boards.indexOf(picked) : -1]);
+
   return (
     <div className="scrim profile-board-scrim" onPointerDown={onClose}>
       <div
@@ -243,32 +350,83 @@ export function ProfileBoard({ profile, onClose }: { profile: Profile; onClose: 
         <header className="profile-board-head">
           <Icon name="board" />
           <h2 className="dialog-title">{profile.name}</h2>
-          <span className="board-seg" role="tablist" aria-label="View">
-            {(["board", "timeline"] as const).map((name) => (
-              <button
-                key={name}
-                role="tab"
-                aria-selected={view === name}
-                className={`board-seg-btn ${view === name ? "board-seg-btn-on" : ""}`}
-                onClick={() => setView(name)}
-              >
-                {name === "board" ? "Board" : "Timeline"}
-              </button>
-            ))}
-          </span>
+          {/* The timeline is the profile's own cards by date and nobody
+              else's, so the views are offered on the profile's board only,
+              and come back as they were left when it is picked again. */}
+          {!picked && (
+            <span className="board-seg" role="tablist" aria-label="View">
+              {(["board", "timeline"] as const).map((name) => (
+                <button
+                  key={name}
+                  role="tab"
+                  aria-selected={view === name}
+                  className={`board-seg-btn ${view === name ? "board-seg-btn-on" : ""}`}
+                  onClick={() => setView(name)}
+                >
+                  {name === "board" ? "Board" : "Timeline"}
+                </button>
+              ))}
+            </span>
+          )}
           <span className="profile-board-note" role="status">
-            {sent ? `Sent: ${sent}` : "Cards for any workspace — send one to its board from the card's menu"}
+            {picked
+              ? `${picked.name}'s board — an agent started here opens in ${picked.name}`
+              : sent
+                ? `Sent: ${sent}`
+                : "Cards for any workspace — send one to its board from the card's menu"}
           </span>
           <button className="sidebar-close" onClick={onClose} aria-label="Close" title="Close">
             <Icon name="close" />
           </button>
         </header>
 
-        {view === "timeline" && (
+        {/* Every board in the profile, this one first. One strip at every
+            width, scrolled sideways rather than wrapped: a second row would
+            push the columns down by a row for every few workspaces, and on a
+            phone the columns are the screen. */}
+        <div
+          className="profile-board-bar"
+          role="tablist"
+          aria-label="Boards"
+          ref={bar}
+          // A mouse's wheel turns down, and a strip that only scrolls sideways
+          // would ignore it; a trackpad's sideways swipe is left to the browser.
+          onWheel={(event) => {
+            if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) event.currentTarget.scrollLeft += event.deltaY;
+          }}
+        >
+          <BoardTab on={!picked} name={profile.name} title="This profile's own board" onPick={() => setShown(null)} />
+          {boards.map((workspace) => (
+            <BoardTab
+              key={workspace.id}
+              on={picked?.id === workspace.id}
+              workspace={workspace}
+              name={workspace.name}
+              pending={pending(workspace.board)}
+              title={`${workspace.name}'s board, here — without going to ${workspace.name}`}
+              onPick={() => setShown(workspace.id)}
+            />
+          ))}
+        </div>
+
+        {picked && snapshot && (
+          <BoardView
+            key={picked.id}
+            workspaceId={picked.id}
+            workspaceName={picked.name}
+            board={picked.board ?? emptyBoard()}
+            agents={snapshot.agents}
+            mascot={mascotFor(snapshot.mascots, picked.mascotId)}
+            launchers={visibleLaunchers(snapshot.launch)}
+            onReveal={onClose}
+          />
+        )}
+
+        {!picked && view === "timeline" && (
           <Timeline profile={profile} editing={editing} onEdit={setEditing} onMenu={cardMenu} draft={draft} />
         )}
 
-        {view === "board" && (
+        {!picked && view === "board" && (
           <div className="board profile-board-cols">
             {lanes.map((lane, laneIndex) => {
               const column = lane.id;
@@ -494,6 +652,46 @@ export function ProfileBoard({ profile, onClose }: { profile: Profile; onClose: 
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * One entry in the bar: a board's name, and a dot after it when the board has
+ * something pending. A workspace's wears its tag colour, as its row in the
+ * sidebar does, so the two lists are read the same way; the profile's has the
+ * board icon the sidebar opens it with. No counts: they made every entry three
+ * words long, and the question the bar answers is which board to look at,
+ * not how much is on it.
+ */
+function BoardTab({
+  on,
+  workspace,
+  name,
+  pending = false,
+  title,
+  onPick,
+}: {
+  on: boolean;
+  workspace?: Workspace;
+  name: string;
+  pending?: boolean;
+  title: string;
+  onPick: () => void;
+}) {
+  const tag = workspace ? colorValue(workspace.color) : null;
+  return (
+    <button
+      role="tab"
+      aria-selected={on}
+      className={`profile-board-tab ${on ? "profile-board-tab-on" : ""}`}
+      style={tag ? ({ "--tag": tag } as React.CSSProperties) : undefined}
+      title={title}
+      onClick={onPick}
+    >
+      {workspace ? <span className="profile-board-tab-dot" aria-hidden="true" /> : <Icon name="board" />}
+      <span className="profile-board-tab-name">{name}</span>
+      {pending && <span className="profile-board-tab-pending" role="img" aria-label="Cards in progress or review" />}
+    </button>
   );
 }
 

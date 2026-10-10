@@ -13,7 +13,77 @@ shows, so it is written once and read in three places — see
 
 ## [Unreleased]
 
+Picking this up needs the pty host restarted, which ends the agents running in
+it: a terminal now opens with its profile's login environment, and the host
+says which build it is, so an old one shows as behind rather than failing
+quietly. The wire between window and server changed too — the boards, the
+harness, the voice, the machines — so a window and a server want to be on the
+same version.
+
 ### Added
+
+- **A harness: one Claude that drives the others.** The bot button beside the
+  profile's name, or `C-a H`, opens one Claude Code session per profile that
+  oversees every agent in it. Talk to it about all of them at once — "start an
+  agent on the migration card", "what did the API worker say", "is anybody
+  stuck" — and it uses kururu's own verbs, handed to it as MCP tools, to start
+  agents in panes, read their replies and screens, message them, press keys
+  when you say so, and keep the boards. Whenever an agent in the profile
+  finishes a turn or blocks, it is told and tells you. What it sends an agent
+  is typed into that agent's terminal as your own words, slash commands
+  included, and waits for the agent's turn to end, for a prompt to be
+  answered, or for you to stop typing there. A permission prompt stays yours:
+  it reads it to you and presses keys only as you say. It is a session, not a
+  service — billed to your subscription like any other, visible in a pane,
+  resumable; closing its tab loses nothing and the same button resumes the
+  conversation. **Auto Swap**, in Settings → Agents, brings whichever agent it
+  is dealing with onto the screen while it works, and `C-a z` takes you back.
+
+- **A voice for it, on your Mac and nowhere else.** Hold the right Control key
+  and speak; let go and the words go to the harness. Tap it to keep the
+  microphone open until the next tap; Escape drops the clip. What the harness
+  says at the end of each turn is read aloud, whether you spoke or typed. A
+  pill over the panes shows the level while it listens, what it heard and what
+  is being said, and the microphone in the status bar is the same key for a
+  thumb. Hearing is Apple's on-device recogniser, through `yap`; speaking is
+  Kokoro on the CPU, with the Mac's own voices until it is downloaded. English
+  and Spanish, mixed in one sentence if you like, each with a voice of its own.
+  Nothing plays while anybody is talking, on any client; the replies that
+  waited play afterwards, each starting "While you were talking", ahead of the
+  answer. Settings → Voice picks the key, the languages and the voices, and
+  says what to install.
+
+- **Nothing you say is lost, and nothing it says goes unheard.** A clip is kept
+  in the browser until the server has it on its disk, sent again after a
+  reconnect or a reload, and a long recording is rolled into a new clip every
+  five minutes, so there is no length past which it fails. On the server a
+  message stays on a list until the harness's own session confirms it took the
+  words; one that did not get through is typed once more and then marked
+  failed, with **Resend** and **Discard** on the list behind the harness
+  button, whose corner counts them in red. A reply nobody heard to the end —
+  you cut it off, no window or phone was listening, the server restarted
+  mid-sentence — is kept too: the count on the button's other corner opens the
+  list, **Play** says them again, each starting "Earlier", and asking the
+  harness "what did I miss?" does the same.
+
+- **The profile's board, and a timeline over it.** The icon beside the
+  profile's name opens a board that belongs to no workspace: To do, In progress
+  and Done to start, and columns you add, rename, recolour, reorder, fold and
+  delete from their headers. No robot — a card goes to work through **Send to
+  *workspace*** in its menu, which puts it on that workspace's board and makes
+  the board if there was none. A bar under the header lists every board in the
+  profile, those with a card in progress or in review first, and shows any of
+  them in the same sheet without moving what is behind it. A card can carry a
+  start and an end day; **Timeline** draws the dated ones as bars across five
+  weeks in their column's colour — drag a bar or its end to move the dates,
+  drop an undated card onto a day, double-click a day to write a card for it.
+  On a phone a tap opens the card and the dates are two fields.
+
+- **Stop a dev server from its row.** Each server listed under the agents has a
+  stop, which ends the command the row is named after and everything under
+  it — `next dev` and the server it forks, nodemon and whatever it was about
+  to restart — and never the agent that started it, even when the two share a
+  process group.
 
 - **A frog in the menu bar runs kururu, and no terminal is needed.** Open the
   app and the tray icon starts the pty host and the server; close the window
@@ -33,6 +103,11 @@ shows, so it is written once and read in three places — see
   checkout's web app, runs its server with the file watcher exactly as
   `bun run dev` does, and the window shows its code. For forks, with no
   terminal. The app and `bun run dev` now share one supervisor, `run.mjs`.
+  Save a file under `server/src` or `shared` and the server restarts on it;
+  save one under `web/` and the window and the floating pill show it at once,
+  through vite's hot reload, since the app runs the checkout's vite beside the
+  server. The phone keeps the server's built page: **Run from → Rebuild the
+  web app for the phone** rebuilds it, and the item says when it is behind.
 
 - **The talk key works in every app.** Settings → Voice → **Talk key works in
   every app** (or the tray's switch): hold the key wherever you are and the

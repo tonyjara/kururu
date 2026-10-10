@@ -41,19 +41,15 @@ class TalkKey extends EventEmitter {
    * @param {object} options
    * @param {string} options.helperPath  the compiled hook, which may be missing from a build without Xcode
    * @param {string} options.preloadPath
-   * @param {boolean} options.dev  the panel loads vite rather than the server
    * @param {boolean} options.debug  relay the pill page's console and its reports to stderr: a dev shell has one
-   * @param {string} options.viteUrl
    * @param {object} options.saved  `talkKeyEverywhere`, `altSpace`, `pill`, `talkKey` from `desktop.json`
    * @param {(patch: object) => void} options.save
    */
-  constructor({ helperPath, preloadPath, dev, debug = false, viteUrl, saved, save }) {
+  constructor({ helperPath, preloadPath, debug = false, saved, save }) {
     super();
     this.helperPath = helperPath;
     this.preloadPath = preloadPath;
-    this.dev = dev;
     this.debug = debug;
-    this.viteUrl = viteUrl;
     this.save = save;
 
     this.enabled = saved.talkKeyEverywhere === true;
@@ -69,7 +65,12 @@ class TalkKey extends EventEmitter {
     this.helperHeld = false;
     this.stoppingHelper = false;
     this.panel = null;
-    this.server = null;
+    /** The origin the pill's page comes from — a server, or a checkout's vite — or null while there is none. */
+    this.page = null;
+    /** What the panel last loaded, so a page that went away and came back is not loaded again. */
+    this.loaded = null;
+    /** A reload asked for while the pill was busy, done when it is idle. */
+    this.reloadOwed = false;
     this.moveTimer = null;
     this.placing = false;
   }
@@ -245,16 +246,38 @@ class TalkKey extends EventEmitter {
 
   // --- the panel --------------------------------------------------------------------
 
-  /** Which server the pill talks to. Null while there is none; the page reconnects on its own through a restart. */
-  setServer(base) {
-    if (base === this.server) return;
-    this.server = base;
-    if (!this.panel || !base) return;
-    void this.panel.loadURL(this.pillUrl(base));
+  /**
+   * Where the pill's page comes from: the server's own, or the checkout's
+   * vite in front of it, as `main.js` decides for the window too. Null while
+   * there is no server, which loads nothing, and the page already loaded is
+   * not loaded again when the same one comes back — a server restart is a
+   * reconnect for the pill as it is for the window, never a reload.
+   */
+  setPage(origin) {
+    this.page = origin;
+    if (!this.panel || !origin || origin === this.loaded) return;
+    this.load();
   }
 
-  pillUrl(base) {
-    return `${this.dev ? this.viteUrl : base}/?pill`;
+  load() {
+    if (!this.panel || !this.page) return;
+    this.loaded = this.page;
+    this.reloadOwed = false;
+    void this.panel.loadURL(`${this.page}/?pill`).catch(() => {});
+  }
+
+  /**
+   * The pill's ⌘R, which it cannot have of its own because it never takes
+   * the focus. Not while it is listening or speaking: a reload there drops
+   * the sentence, so it waits for the pill to go idle.
+   */
+  reloadPanel() {
+    if (!this.panel || !this.loaded) return;
+    if (this.phase !== "idle") {
+      this.reloadOwed = true;
+      return;
+    }
+    this.load();
   }
 
   ensurePanel() {
@@ -314,8 +337,9 @@ class TalkKey extends EventEmitter {
       if (this.panel === panel) this.panel = null;
     });
     this.panel = panel;
+    this.loaded = null;
     this.place();
-    if (this.server) void panel.loadURL(this.pillUrl(this.server));
+    this.load();
   }
 
   destroyPanel() {
@@ -374,6 +398,7 @@ class TalkKey extends EventEmitter {
     this.phase = phase;
     if (phase === "idle") {
       if (this.panel.isVisible()) this.panel.hide();
+      if (this.reloadOwed) this.load();
     } else {
       const width = Number.isFinite(state.width) ? Math.ceil(state.width) + PANEL_MARGIN * 2 : null;
       const height = Number.isFinite(state.height) ? Math.ceil(state.height) + PANEL_MARGIN * 2 : null;

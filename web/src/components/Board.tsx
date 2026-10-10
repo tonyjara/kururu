@@ -18,6 +18,12 @@
  * card draws the agent's own status dot when there is one, so the board and the
  * sidebar can never disagree about the same terminal, and falls back to the
  * recorded state when the terminal has gone.
+ *
+ * It is drawn in two places: a workspace's own pane, and the profile's board,
+ * which shows any workspace's board over the window without going there. The
+ * second is the same component with one thing added, `onReveal`, because
+ * everything a card does works on a workspace that is not on screen — only a
+ * terminal it opens is somewhere the sheet is in front of.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
@@ -108,6 +114,7 @@ export function BoardView({
   agents,
   mascot,
   launchers,
+  onReveal,
 }: {
   workspaceId: string;
   workspaceName: string;
@@ -115,6 +122,12 @@ export function BoardView({
   agents: AgentSnapshot[];
   mascot: MascotConfig;
   launchers: Launcher[];
+  /**
+   * Said after the board has taken somebody to a terminal, by a board drawn
+   * over the window — the profile's — so that it can get out of the way of
+   * what it just showed. A board in a pane has nothing in front of it.
+   */
+  onReveal?: () => void;
 }) {
   /** The column a new card is being written in, or null. One composer at a time. */
   const [adding, setAddingState] = useState<BoardColumn | null>(() => openComposers.get(workspaceId)?.adding ?? null);
@@ -175,6 +188,10 @@ export function BoardView({
     setErrors((all) => ({ ...all, [cardId]: err instanceof Error ? err.message : String(err) }));
   };
   const { devServers } = api.useKururu();
+  const reveal = (agentId: string) => {
+    api.revealAgent(agentId);
+    onReveal?.();
+  };
   /** Where a dragged card would land: a column and a place among its cards. */
   const [dropAt, setDropAt] = useState<{ column: BoardColumn; index: number } | null>(null);
 
@@ -444,7 +461,14 @@ export function BoardView({
         label: "Open a terminal in the worktree",
         hint: gone ? "worktree gone" : undefined,
         disabled: gone,
-        run: () => api.openWorktree(workspaceId, card.id).catch(failed(card.id)),
+        // In a pane the server focuses the new terminal itself. Over the
+        // window it may be in a workspace that is not on screen, and a
+        // terminal asked for and not shown is one that seems not to have come.
+        run: () =>
+          api
+            .openWorktree(workspaceId, card.id)
+            .then((agentId) => onReveal && reveal(agentId))
+            .catch(failed(card.id)),
       },
       {
         label: devOpen(card) ? "Restart the dev server" : "Start the dev server",
@@ -581,6 +605,7 @@ export function BoardView({
                     devServers={devServers}
                     onRestartDev={() => restartDev(card)}
                     onStopDev={() => stopDev(card)}
+                    onReveal={reveal}
                     mascot={mascot}
                     error={errors[card.id]}
                     working={working[card.id]}
@@ -685,6 +710,7 @@ function CardView({
   devServers,
   onRestartDev,
   onStopDev,
+  onReveal,
   mascot,
   error,
   working,
@@ -707,6 +733,8 @@ function CardView({
   devServers: DevServer[];
   onRestartDev: () => void;
   onStopDev: () => void;
+  /** Take the person to a terminal: the run's agent, or the dev server's log. */
+  onReveal: (agentId: string) => void;
   mascot: MascotConfig;
   error: string | undefined;
   /** What a slow git action on this card is doing right now, if one is. */
@@ -794,9 +822,10 @@ function CardView({
             servers={devServers}
             onRestart={onRestartDev}
             onStop={onStopDev}
+            onReveal={onReveal}
           />
         )}
-        {card.run && <RunLine run={card.run} agent={agent} mascot={mascot} />}
+        {card.run && <RunLine run={card.run} agent={agent} mascot={mascot} onReveal={onReveal} />}
         {error && <p className="board-card-error">{error}</p>}
         {working && (
           <p className="board-card-busy" role="status">
@@ -851,7 +880,17 @@ function CardView({
  * is a fact about this card that the terminal's `done` only says for as long as
  * nobody has typed into it.
  */
-function RunLine({ run, agent, mascot }: { run: CardRun; agent: AgentSnapshot | undefined; mascot: MascotConfig }) {
+function RunLine({
+  run,
+  agent,
+  mascot,
+  onReveal,
+}: {
+  run: CardRun;
+  agent: AgentSnapshot | undefined;
+  mascot: MascotConfig;
+  onReveal: (agentId: string) => void;
+}) {
   return (
     <div className={`board-run board-run-${run.state}`}>
       {agent ? <Status agent={agent} mascot={mascot} /> : <span className="board-run-mark" aria-hidden="true" />}
@@ -861,7 +900,7 @@ function RunLine({ run, agent, mascot }: { run: CardRun; agent: AgentSnapshot | 
       </span>
       {agent && (
         <span className="board-seg">
-          <button className="board-seg-btn" onClick={() => api.revealAgent(agent.id)} title="Go to this agent's terminal">
+          <button className="board-seg-btn" onClick={() => onReveal(agent.id)} title="Go to this agent's terminal">
             open
           </button>
         </span>
@@ -902,6 +941,7 @@ function DevLine({
   servers,
   onRestart,
   onStop,
+  onReveal,
 }: {
   dev: CardDev;
   worktree: CardWorktree;
@@ -909,6 +949,7 @@ function DevLine({
   servers: DevServer[];
   onRestart: () => void;
   onStop: () => void;
+  onReveal: (agentId: string) => void;
 }) {
   const found = serverIn(servers, worktree.path, dev.port);
   const url = terminal.exited
@@ -937,7 +978,7 @@ function DevLine({
             open <Icon name="external" />
           </a>
         )}
-        <button className="board-seg-btn" onClick={() => api.revealAgent(terminal.id)} title="Go to the dev server's terminal">
+        <button className="board-seg-btn" onClick={() => onReveal(terminal.id)} title="Go to the dev server's terminal">
           log
         </button>
         <button className="board-seg-btn" onClick={onRestart} title="Restart the dev server" aria-label="Restart the dev server">

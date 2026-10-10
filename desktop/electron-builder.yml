@@ -39,6 +39,7 @@ files:
   - servers.js
   - desktop.js
   - runner.js
+  - vite.js
   - menu.js
   - tray.js
   - talkkey.js

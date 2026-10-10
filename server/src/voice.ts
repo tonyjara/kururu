@@ -19,12 +19,14 @@
  * utterances are kept so a phone that was slow to fetch is not told about a
  * sentence that has gone. Utterances are rendered one after another, so the
  * socket carries them in the order they were said and the player only has to
- * keep to the order it was told. A clip is a file in a temporary directory for the
- * half-second the recogniser takes, and is removed in a `finally`.
+ * keep to the order it was told. A clip is not this module's to keep: it is
+ * the outbox's file (`outbox.ts`), kept until Kuru has the words, and the
+ * recogniser reads it where it lies.
  *
  * **Nobody is spoken over, and nothing said is lost.** A client says when its
- * talk key goes down and again once its words are delivered, and while any
- * client is talking every client is told to hold what it is sent (`hush`):
+ * talk key goes down and again once the server has its clip, the outbox says
+ * so for each clip until its words have reached Kuru, and while anybody is
+ * talking every client is told to hold what it is sent (`hush`):
  * the phone on the desk must not answer over the window's microphone any
  * more than the window itself should. Sentences go on being made and
  * announced, so a reply waiting out somebody's sentence is ready the moment
@@ -67,14 +69,13 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import {
-  CLIP_MIN_MS,
+  CLIP_ROLL_MS,
   KOKORO_MODEL,
   KOKORO_VOICES,
   LEAD_INS,
   adoptMissed,
   adoptVoice,
   capMissed,
-  clipMs,
   detectLanguage,
   kokoroVoice,
   parseSayVoices,
@@ -82,7 +83,6 @@ import {
   sentencesOf,
   spokenText,
   systemFallback,
-  type Heard,
   type LeadIn,
   type MissedReply,
   type ModelStatus,
@@ -103,21 +103,22 @@ const run = promisify(execFile);
 
 const FILE = "voice.json";
 
-/** How long the recogniser may take on one clip. It takes half a second; this is for a locale whose model is still downloading. */
+/** How long the recogniser may take on one clip, over the clip's own length. It takes half a second; this is for a locale whose model is still downloading. */
 const HEAR_TIMEOUT_MS = 60_000;
 /** How long one sentence of speech may take to make. Kokoro does a sentence in a second; `say` in less. */
 const SAY_TIMEOUT_MS = 30_000;
 /** How many utterances are kept for fetching. A phone that is slow to fetch gets the last few; nothing older is anybody's business. */
 const KEEP_UTTERANCES = 24;
 /**
- * How long a client may say it is talking before it is not believed. The
- * longest clip the server takes is a minute and a half (`CLIP_MAX_BYTES`)
- * and the recogniser may take one more on a new locale, so this is past
- * anything a working client does. A socket that goes takes its say with
- * it; this is for one that stays and never says it stopped, since Kuru
- * silent everywhere for good is worse than Kuru heard over a broken window.
+ * How long a client may say it is talking before it is not believed. A
+ * clip runs five minutes before the window rolls it into the next
+ * (`CLIP_ROLL_MS`), a long one takes the recogniser a while more and a new
+ * locale a minute on top, so this is past anything a working client does.
+ * A socket that goes takes its say with it; this is for one that stays and
+ * never says it stopped, since Kuru silent everywhere for good is worse
+ * than Kuru heard over a broken window.
  */
-const TALK_MAX_MS = 3 * 60_000;
+const TALK_MAX_MS = CLIP_ROLL_MS + 3 * 60_000;
 /**
  * How long a reply nobody took up waits before it is missed. A client says
  * it holds a reply once the first sentence reaches it, which for a reply of
@@ -159,8 +160,6 @@ const ESPEAK_TO_MODEL: readonly [string, string][] = [
 /** What `index.ts` lends this module. */
 export interface VoiceDeps {
   broadcast: (msg: ServerMessage) => void;
-  /** Hand words to a profile's harness, starting it if it is not running. See `Harness.hear`. */
-  deliver: (profileId: string, text: string) => Promise<{ outcome: Heard["outcome"] }>;
 }
 
 /**
@@ -325,53 +324,44 @@ export class Voice {
   // ---------------------------------------------------------------------------
 
   /**
-   * A clip, into words, into the harness.
+   * A clip on the disk, into words: what was said and in which language,
+   * null for a clip that held none, a rejection for a recogniser that could
+   * not run — which the outbox tries again, and which is not the same as
+   * hearing nothing.
    *
    * Transcribed once per language the user speaks, all at once — the
    * recogniser is one model per locale and cannot tell which was spoken —
-   * and the transcripts compared (`pickTranscript`). The words go to the
-   * profile's harness with a mark saying they were spoken, so it knows a
-   * misheard name is a thing that can happen to them.
+   * and the transcripts compared (`pickTranscript`). A locale whose model has
+   * not finished downloading says so on stderr and exits non-zero, and the
+   * other language's transcript is still an answer; only every locale
+   * failing is a failure. Where the words go is the outbox's business.
    */
-  async hear(profileId: string, wav: Buffer): Promise<Heard> {
+  async transcribe(path: string, ms: number): Promise<{ text: string; lang: VoiceLang } | null> {
     const yap = findTool("yap");
     if (!yap) {
       this.ears = { ok: false, detail: "Not installed. In a terminal: brew install yap" };
-      return { text: "", lang: null, outcome: "failed", why: "yap is not installed — brew install yap, then try again." };
+      throw new Error("yap is not installed — brew install yap");
     }
-    if (clipMs(wav.length) < CLIP_MIN_MS) return { text: "", lang: null, outcome: "nothing", why: null };
-    const dir = mkdtempSync(join(tmpdir(), "kururu-clip-"));
-    let candidates: Transcript[];
-    try {
-      const path = join(dir, "clip.wav");
-      writeFileSync(path, wav);
-      candidates = await Promise.all(
-        this.settings.languages.map(async (lang): Promise<Transcript> => {
-          try {
-            const { stdout } = await run(yap, ["transcribe", "--locale", this.settings.locales[lang], path, "--txt"], {
-              timeout: HEAR_TIMEOUT_MS,
-              maxBuffer: 1024 * 1024,
-            });
-            return { lang, text: stdout.replace(/\s+/g, " ").trim() };
-          } catch {
-            // A locale whose model has not finished downloading says so on
-            // stderr and exits non-zero; the other language's transcript is
-            // still an answer.
-            return { lang, text: "" };
-          }
-        }),
-      );
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    const picked = pickTranscript(candidates, this.settings.languages);
-    if (!picked) return { text: "", lang: null, outcome: "nothing", why: null };
-    try {
-      const { outcome } = await this.deps.deliver(profileId, `[voice] ${picked.text}`);
-      return { text: picked.text, lang: picked.lang, outcome, why: null };
-    } catch (err) {
-      return { text: picked.text, lang: picked.lang, outcome: "failed", why: err instanceof Error ? err.message : String(err) };
-    }
+    const failures: string[] = [];
+    const candidates = await Promise.all(
+      this.settings.languages.map(async (lang): Promise<Transcript | null> => {
+        try {
+          const { stdout } = await run(yap, ["transcribe", "--locale", this.settings.locales[lang], path, "--txt"], {
+            // Whole milliseconds: `execFile` throws on a fraction, and a clip's length is one.
+            timeout: HEAR_TIMEOUT_MS + Math.ceil(Number.isFinite(ms) ? Math.max(0, ms) : 0),
+            maxBuffer: 4 * 1024 * 1024,
+          });
+          return { lang, text: stdout.replace(/\s+/g, " ").trim() };
+        } catch (err) {
+          failures.push(err instanceof Error ? err.message.split("\n")[0]! : String(err));
+          return null;
+        }
+      }),
+    );
+    const ran = candidates.filter((c): c is Transcript => c !== null);
+    if (!ran.length) throw new Error(failures[0] ?? "the recogniser did not run");
+    const picked = pickTranscript(ran, this.settings.languages);
+    return picked ? { text: picked.text, lang: picked.lang } : null;
   }
 
   // ---------------------------------------------------------------------------

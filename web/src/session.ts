@@ -43,7 +43,7 @@ import type { LaunchSettings } from "../../shared/launchers";
 import type { MergeReply, MergeResolution, ProjectSettings, WorktreeOutcome, WorktreeStatus } from "../../shared/projects";
 import type { NotifySettings } from "../../shared/notify";
 import type { OpenRouterStatus } from "../../shared/openrouter";
-import type { Heard, MissedReply, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "../../shared/voice";
+import type { MissedReply, OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "../../shared/voice";
 import type { MachineEntry, MachinePin, MachineStatus } from "../../shared/machines";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { Grid } from "./grid";
@@ -89,6 +89,8 @@ export interface KururuState {
   voice: VoiceStatus | null;
   /** Kuru's replies nobody played to their end, every profile's, oldest first. The badge on the harness button. */
   missed: MissedReply[];
+  /** Your messages to Kuru, every profile's, in the order the server took them. The other list behind the harness button. */
+  outbox: OutboxEntry[];
 }
 
 const RETRY_MS = [200, 500, 1000, 2000, 4000];
@@ -105,6 +107,7 @@ let state: KururuState = {
   databases: [],
   voice: null,
   missed: [],
+  outbox: [],
 };
 
 const listeners = new Set<() => void>();
@@ -238,6 +241,7 @@ function connect(): void {
      */
     if (!atScreen) send({ type: "looking", looking: false });
     if (amTalking) send({ type: "talking", talking: true });
+    if (connectListener) deliver(() => connectListener?.());
     if (watched.size > 0 || warmed.size > 0) sendWatch();
     for (const open of sinks.values()) {
       for (const sink of open) deliver(() => sink.stale());
@@ -286,6 +290,10 @@ function connect(): void {
         break;
       case "missed":
         set({ missed: Array.isArray(msg.missed) ? msg.missed : [] });
+        break;
+      case "outbox":
+        set({ outbox: Array.isArray(msg.outbox) ? msg.outbox : [] });
+        if (outboxListener) deliver(() => outboxListener?.(state.outbox));
         break;
       case "databases":
         set({ databases: msg.databases });
@@ -1109,6 +1117,26 @@ export function onHush(listener: (hushed: boolean) => void): () => void {
   };
 }
 
+let connectListener: (() => void) | null = null;
+
+/** Who wants to know the socket is up again: the clips in `voice.ts` the server has not taken yet. */
+export function onConnect(listener: () => void): () => void {
+  connectListener = listener;
+  return () => {
+    if (connectListener === listener) connectListener = null;
+  };
+}
+
+let outboxListener: ((outbox: OutboxEntry[]) => void) | null = null;
+
+/** Who follows the messages on their way to Kuru, beyond the list that draws them: the pill, through `voice.ts`. */
+export function onOutbox(listener: (outbox: OutboxEntry[]) => void): () => void {
+  outboxListener = listener;
+  return () => {
+    if (outboxListener === listener) outboxListener = null;
+  };
+}
+
 /**
  * This page is talking to Kuru, so nothing anywhere should speak over it.
  * Deduped, and re-sent from `onopen` like `looking`: the server keeps no
@@ -1147,6 +1175,16 @@ export function clearMissed(profileId: string): void {
   send({ type: "clear-missed", profileId });
 }
 
+/** Send a failed message of yours again. */
+export function resendVoice(id: string): void {
+  send({ type: "voice-resend", id });
+}
+
+/** Take a failed message of yours off the list, audio and all. */
+export function discardVoice(id: string): void {
+  send({ type: "voice-discard", id });
+}
+
 /** The voice's settings, all at once, on `setNotify`'s pattern. */
 export function setVoice(voice: VoiceSettings): void {
   send({ type: "set-voice", voice });
@@ -1162,19 +1200,24 @@ export function downloadVoiceModel(): void {
 }
 
 /**
- * A clip to the server, as a WAV, for the profile on screen. A fetch and not
- * the socket because it is a binary body of a few hundred kilobytes, which the
- * socket carries as JSON strings and should not. Resolves with what was heard.
+ * A clip to the server, as a WAV, under the id this page minted for it. A
+ * fetch and not the socket because it is a binary body of up to ten
+ * megabytes, which the socket carries as JSON strings and should not.
+ * Resolves the moment the server has it on its disk, with the outbox's
+ * record of it — null for a clip too short to hold a word — and rejects with
+ * why it was not taken: the server down or restarting, or refusing it.
+ * Sending the same id twice is the same message, so a retry is always safe.
  */
-export async function hearClip(profileId: string, wav: ArrayBuffer): Promise<Heard> {
-  const res = await fetch(`/api/voice/hear?profile=${encodeURIComponent(profileId)}`, {
+export async function sendClip(clip: { id: string; profileId: string; at: number; wav: ArrayBuffer }): Promise<OutboxEntry | null> {
+  const query = new URLSearchParams({ profile: clip.profileId, id: clip.id, at: String(clip.at) });
+  const res = await fetch(`/api/voice/hear?${query}`, {
     method: "POST",
     headers: { "content-type": "audio/wav" },
-    body: wav,
+    body: clip.wav,
   });
-  const body = (await res.json()) as Heard | { error: string };
-  if (!res.ok || "error" in body) throw new Error("error" in body ? body.error : `the server said ${res.status}`);
-  return body;
+  const body = (await res.json().catch(() => ({ error: `the server said ${res.status}` }))) as { entry?: OutboxEntry | null; error?: string };
+  if (!res.ok || body.error !== undefined || body.entry === undefined) throw new Error(body.error ?? `the server said ${res.status}`);
+  return body.entry;
 }
 
 /** Where one sentence of an utterance is fetched from. */

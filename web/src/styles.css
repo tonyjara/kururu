@@ -708,6 +708,47 @@ kbd {
   line-height: 18px;
   font-size: var(--fs-base);
 }
+/* Your messages to Kuru, on the bottom corner: the other way round from the
+   count above it. A dot in the done ink once they all arrived, the working
+   ink while one is on its way, and a count on the danger button's ground
+   when some did not get through — the one state that asks something of you. */
+.profile-said {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  bottom: -3px;
+  right: -4px;
+  min-width: 9px;
+  height: 9px;
+  padding: 0;
+  border-radius: var(--radius-round);
+  background: var(--done);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  line-height: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.profile-said-moving {
+  background: var(--working);
+}
+.profile-said-failed {
+  bottom: -5px;
+  right: -6px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  background: var(--danger-bg);
+  color: var(--on-danger);
+}
+:root[data-narrow] .profile-said {
+  min-width: 12px;
+  height: 12px;
+}
+:root[data-narrow] .profile-said-failed {
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  font-size: var(--fs-base);
+}
 :root[data-narrow] .profile-board-btn {
   min-width: 36px;
   min-height: 36px;
@@ -3308,6 +3349,30 @@ html.pill-page #root {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
 }
+/* Your last message, under Kuru's words while Kuru speaks: a reply that
+   waited for you must never be the only thing the pill says. */
+.voice-mine {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-sm);
+  color: var(--working);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.voice-mine svg {
+  flex: none;
+}
+.voice-mine-saving {
+  color: var(--blocked);
+}
+.voice-mine-delivered {
+  color: var(--done);
+}
+.voice-mine-failed {
+  color: var(--danger);
+}
 /* Its ✕, which ends whatever the pill is saying — Kuru's sentence and the
    rest of the reply, or the clip being recorded. Pulled into the pill's
    padding so a short pill does not grow a wide right margin for it, and a
@@ -3651,6 +3716,69 @@ html.pill-page #root {
   border-top: var(--border) var(--border-style) var(--line);
 }
 .missed-actions .menu-item {
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+}
+/* The two lists in that box, each headed by which way the words went: a
+   microphone over yours, a speaker over Kuru's. */
+.voice-list + .voice-list {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: var(--border-thick) var(--border-style) var(--line);
+}
+.voice-list-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 4px 8px 2px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--dim);
+}
+.voice-list-head svg {
+  flex: none;
+}
+.said-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+/* What became of a message of yours, in the status inks the agents' badges
+   use: the same word means the same colour everywhere. */
+.said-state {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--working);
+}
+.said-state-recording,
+.said-state-failed {
+  color: var(--danger);
+}
+.said-state-saving {
+  color: var(--blocked);
+}
+.said-state-delivered {
+  color: var(--done);
+}
+.said-pending {
+  font-size: var(--fs-md);
+  color: var(--dimmer);
+  font-style: italic;
+}
+.said-note {
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.said-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+.said-actions .menu-item {
   flex: 1;
   align-items: center;
   justify-content: center;
@@ -7334,6 +7462,83 @@ html.pill-page #root {
   color: var(--dim);
   font-size: var(--fs-base);
 }
+/* Every board in the profile, the profile's own first — see `ProfileBoard.tsx`.
+   One row at every width, scrolled sideways once it outgrows the sheet. Not
+   `.set-tabs`' hidden scrollbar: there, overflow is a phone's problem and a
+   finger finds it, while this one overflows on a desktop as soon as there
+   are enough workspaces, and a thin rule is the only thing that says so. */
+.profile-board-bar {
+  flex: none;
+  display: flex;
+  gap: 4px;
+  padding: 2px 8px 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+  /* A swipe that runs out of boards stops, rather than becoming the browser's
+     back gesture with a sheet open on top of it. */
+  overscroll-behavior-x: contain;
+}
+.profile-board-tab {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 4px 10px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-md);
+  color: var(--dim);
+  font-size: var(--fs-base);
+  white-space: nowrap;
+  cursor: var(--cursor-pointer);
+}
+.profile-board-tab:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+/* The board on show, edged in its workspace's colour — the accent for the
+   profile's, which has none — so the bar says which one the columns are. */
+.profile-board-tab-on {
+  color: var(--text);
+  background: var(--chrome-high);
+  border-color: var(--tag, var(--accent));
+}
+.profile-board-tab .icon {
+  flex: none;
+}
+.profile-board-tab-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-round);
+  background: var(--tag, transparent);
+  border: var(--border) var(--border-style) var(--tag, var(--line-high));
+}
+.profile-board-tab-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+/* Something in progress or in review on that board. Smaller than the tag dot
+   and in the accent, so the two dots on an entry are never read as one thing
+   said twice: the first is which workspace, this one is that it wants a look. */
+.profile-board-tab-pending {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-round);
+  background: var(--accent);
+}
+/* A workspace's board, drawn here by `BoardView`: in a pane its parent is a
+   row and stretches it, and in this column it has to be told it may be
+   shorter than its cards, or the sheet clips them instead of the columns
+   scrolling. */
+.profile-board > .board {
+  min-height: 0;
+}
 /* A row rather than the board's grid, because a folded column is a strip and
    a grid's implicit columns are all one width. The open ones share what the
    strips leave, which is the grid's `minmax(220px, 1fr)` said in flex. */
@@ -7487,6 +7692,10 @@ html.pill-page #root {
   height: 100%;
   border-radius: 0;
   border: none;
+}
+:root[data-narrow] .profile-board-tab {
+  min-height: 36px;
+  font-size: var(--fs-md);
 }
 
 /* --------------------------------------------------------------------------

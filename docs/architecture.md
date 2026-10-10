@@ -188,13 +188,35 @@ no save coming to mend it.
   `~/.config/kururu/desktop.json` beside `servers.json`: this app or a checkout
   path. From a checkout the runner is `run.mjs --watch` in that directory on
   the app's own binary as node, so nothing needs node, bun or a terminal; the
-  checkout must have been `bun install`ed, which the menu checks and says. The
-  server serves the checkout's `web/dist`, which `bun run dev` never builds
-  (that is vite's job in `dev:desktop`), so `runner.js` runs the checkout's own
-  `vite build` first when it is missing or older than `web/src`, and offers
-  **Rebuild the web app**. The window stays the app's shell pointed at the
-  checkout's server, so a change under `desktop/` still wants `bun run
-  dev:desktop`.
+  checkout must have been `bun install`ed, which the menu checks and says.
+- **From a checkout the app is `bun run dev` and `bun run dev:desktop`
+  together.** Beside the runner it runs the checkout's vite (`desktop/vite.js`,
+  same binary, `KURURU_VITE_PORT` or 5173, proxying to the local server), and
+  the window and the floating pill load that rather than the server, so a
+  save under `web/` is on screen at once. One rule decides both (`pageFor` in
+  `main.js`): vite while it serves; the server's own page when there is no
+  checkout or vite failed; and *stay put* while vite is starting or was
+  stopped with its server, so a Stop does not flash a built page before the
+  picker. Vite starts once the checkout's server answers — window or not,
+  since the pill needs it — stops with Stop, a source switch and Quit, and is
+  untouched by a server restart, which is why a save under `server/src` is
+  still a reconnect and not a reload. A vite that dies moves both pages to the
+  built one and is not started again until Start or Restart Server. A kururu
+  vite already on the port, proxying to this same server, is adopted (a
+  `dev:desktop` beside the app, or an orphan); anything else there is refused
+  and named in the menu, never loaded. Outside the dev shell only the local
+  server gets the checkout's page — a remote one runs its own version — and
+  this vite binds loopback: `dev:desktop` binds every address because
+  somebody typed it, and an app starting one by itself has not been asked to
+  put a port on the network.
+- **The phone keeps the server's `web/dist`.** `bun run dev` never builds it
+  and nothing watches it, so it is built when missing — in the background,
+  never in front of a start — and otherwise by **Run from → Rebuild the web
+  app for the phone**, which says when it is behind `web/src`. A phone picks a
+  rebuild up on its next load: `index.html` goes out with no cache headers and
+  the assets are hashed, so a pull-to-refresh is enough, and nothing reloads it
+  for you. The window is still the app's shell, so a change under `desktop/`
+  still wants `bun run dev:desktop`, or a new build of the app.
 - **Closing the last window hides the dock icon and leaves the frog.** This
   reverses the rule that quitting on the last window was honest because nothing
   was running inside the app: now the frog says what is, and the server keeps

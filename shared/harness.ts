@@ -350,7 +350,7 @@ export function isCommand(text: string): boolean {
  * `tellsHarness`), so for one `when` cannot apply and everything is typed
  * as it comes, which is what typing into a shell always did.
  */
-export function due(held: readonly Held[], status: AgentStatus, isAgent: boolean): { type: string[]; rest: Held[] } {
+export function due<T extends Held>(held: readonly T[], status: AgentStatus, isAgent: boolean): { type: string[]; rest: T[] } {
   if (!isAgent) return { type: held.map((m) => m.text), rest: [] };
   if (status === "blocked") return { type: [], rest: [...held] };
   const between = status === "idle" || status === "done";

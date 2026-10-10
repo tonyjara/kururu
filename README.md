@@ -92,13 +92,20 @@ cd kururu && bun install
 ```
 
 Then click the frog → **Run from** → **Choose a checkout…** and pick the folder.
-The app stops the server it was running, builds the checkout's web app, and
-starts the checkout's server with the file watcher — exactly what `bun run dev`
-does, with its output in the server log. Save a file under `server/src` or
-`shared` and the server restarts on your change; the window shows the
-checkout's web app. **Rebuild the web app** is in the same submenu for changes
-under `web/`. The choice is remembered, so Open at login brings up your
-checkout too. **Run from → This app** goes back.
+The app stops the server it was running and starts the checkout's server with
+the file watcher, and the checkout's vite beside it — what `bun run dev` and
+`bun run dev:desktop` do together, with their output in the server log and the
+vite log. Save a file under `server/src` or `shared` and the server restarts on
+your change; save one under `web/` and the window and the floating pill show it
+at once, through vite's hot reload — ⌘R at most, which reloads the pill too.
+The menu says whether vite is serving; if it is not, the window shows the
+checkout's last build instead.
+
+The phone still loads the server's built web app, not vite. **Run from →
+Rebuild the web app for the phone** rebuilds it (the item says when it is behind
+`web/src`); reload the page on the phone afterwards to get it. The choice is
+remembered, so Open at login brings up your checkout too. **Run from → This
+app** goes back.
 
 A change to a pty host file is never picked up by a save, by design: that is
 what **Restart pty host…** is for, and it ends every agent.

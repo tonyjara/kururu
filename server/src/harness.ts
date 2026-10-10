@@ -140,6 +140,23 @@ export interface HarnessDeps {
 
 type WaitState = "done" | "blocked" | "exited";
 
+/**
+ * Word of what became of words for an agent, for whoever has to keep them
+ * until they arrive — the outbox (`outbox.ts`), which is why the voice's
+ * words survive a restart that this module's list of them does not.
+ */
+export interface HeldEvents {
+  /** Written into the terminal, Enter and all. Not yet taken: that is the agent's to say. */
+  typed: () => void;
+  /** The agent went before they were typed. */
+  dropped: () => void;
+}
+
+/** A message waiting to be typed, and who to tell when it is. */
+interface Waiting extends Held {
+  events?: HeldEvents;
+}
+
 /** Which agent a wait ended on, named when it ended — an exit is named before its tab is reaped, and not after. */
 interface Hit {
   agent: string;
@@ -186,7 +203,7 @@ export class Harness {
    * see `due` for until when. In memory only: a server restart forgets them,
    * which is the price of holding them here rather than in the session.
    */
-  private readonly held = new Map<string, Held[]>();
+  private readonly held = new Map<string, Waiting[]>();
   /** When the user last typed into each terminal, from any client. A message is never typed into the middle of their sentence. */
   private readonly keys = new Map<string, number>();
   /** The one writer per terminal: whatever is typing now, which the next waits behind, so two pastes never interleave. */
@@ -222,6 +239,7 @@ export class Harness {
   }
 
   forget(agentId: string): void {
+    for (const message of this.held.get(agentId) ?? []) message.events?.dropped();
     this.inboxes.delete(agentId);
     this.transcripts.delete(agentId);
     this.replies.delete(agentId);
@@ -259,6 +277,11 @@ export class Harness {
     }
   }
 
+  /** Where an agent's session keeps its transcript, as its hooks last said — for the outbox, which looks there for what it typed. */
+  transcriptOf(agentId: string): string | null {
+    return this.transcripts.get(agentId) ?? null;
+  }
+
   /** Which profile an agent is the harness of, or null — how `index.ts` knows a Stop report is Kuru's own and worth saying aloud. */
   isHarness(agentId: string): string | null {
     const profileId = this.deps.workspaces.profileOf(agentId);
@@ -277,15 +300,16 @@ export class Harness {
    * harness mid-turn hears them between tool calls. Not running, it is
    * started and the words wait for its first hook report, the sign its
    * session is up; a harness that never reports — hooks not installed — gets
-   * them typed after a while anyway.
+   * them typed after a while anyway. `events` says when they are typed, or
+   * dropped with a harness that went first; the outbox keeps them until then.
    */
-  async hear(profileId: string, text: string): Promise<{ outcome: "typed" | "held" | "starting"; agentId: string }> {
+  async hear(profileId: string, text: string, events?: HeldEvents): Promise<{ outcome: "typed" | "held" | "starting"; agentId: string }> {
     const ws = this.deps.workspaces;
     const profile = ws.profile(profileId);
     if (!profile) throw new Error("that profile is gone");
     const running = profile.harness?.agentId;
     if (running && this.deps.host.isLive(running) && !this.starting.has(running)) {
-      return { outcome: await this.speak(running, text, "now"), agentId: running };
+      return { outcome: await this.speak(running, text, "now", events), agentId: running };
     }
     const { agentId } = running && this.deps.host.isLive(running) ? { agentId: running } : await this.open(profileId);
     if (!this.starting.has(agentId)) {
@@ -296,7 +320,7 @@ export class Harness {
       timer.unref();
       this.starting.set(agentId, timer);
     }
-    this.hold(agentId, { text, when: "now" });
+    this.hold(agentId, { text, when: "now", events });
     return { outcome: "starting", agentId };
   }
 
@@ -315,14 +339,14 @@ export class Harness {
    * draft the user left in the prompt box and walked away from: the paste
    * joins it, and the Enter sends both.
    */
-  private async speak(agentId: string, text: string, when: When): Promise<"typed" | "held"> {
-    const message = { text, when };
+  private async speak(agentId: string, text: string, when: When, events?: HeldEvents): Promise<"typed" | "held"> {
+    const message: Waiting = { text, when, events };
     this.hold(agentId, message);
     await this.pump(agentId);
     return this.held.get(agentId)?.includes(message) ? "held" : "typed";
   }
 
-  private hold(agentId: string, message: Held): void {
+  private hold(agentId: string, message: Waiting): void {
     const queue = this.held.get(agentId);
     if (queue) queue.push(message);
     else this.held.set(agentId, [message]);
@@ -366,6 +390,7 @@ export class Harness {
       await sleep(ENTER_DELAY_MS);
       this.deps.host.write(agentId, "\r");
     }
+    for (const message of queue) if (!rest.includes(message)) message.events?.typed();
   }
 
   /**
