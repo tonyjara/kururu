@@ -13,10 +13,12 @@
  * Two sources, one shape. From the app the runner is told where the bundled
  * server is and not to build anything, because there is nothing to build
  * from. From a checkout it is `run.mjs --watch`, exactly as `bun run dev`
- * would run it, with the checkout's own esbuild and the checkout's own
- * `web/dist` — which this file builds first when it is missing or older
- * than `web/src`, since nothing else in a checkout does. Both run on this
- * app's own binary as node, so neither needs node, bun or a terminal.
+ * would run it, with the checkout's own esbuild — and beside it the
+ * checkout's own vite (`vite.js`), which is what the window and the pill
+ * load, so that a checkout from the menu is `bun run dev` and `bun run
+ * dev:desktop` together. Its `web/dist` is then only the phone's, built when
+ * it is missing and otherwise when somebody asks. All of it runs on this
+ * app's own binary as node, so none of it needs node, bun or a terminal.
  *
  * What it will not do is start beside a server that is already there. A
  * server answering on the port is adopted — shown, opened, restarted through
@@ -36,6 +38,7 @@ const { execFile, execFileSync, spawn } = require("node:child_process");
 const { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync } = require("node:fs");
 const { homedir } = require("node:os");
 const path = require("node:path");
+const { Vite } = require("./vite");
 
 /** How often the port is asked, and how long an answer gets. The window's own probe uses the same numbers. */
 const PROBE_EVERY_MS = 3000;
@@ -126,9 +129,11 @@ class Runner extends EventEmitter {
    * @param {string} options.resourcesPath
    * @param {string|null} options.shellCheckout  the checkout a dev shell (`electron .`) is running out of
    * @param {number} options.port
+   * @param {number} options.vitePort
+   * @param {string|null} options.viteHost  null binds what `web/vite.config.ts` says, which is every address
    * @param {() => string} options.loginPath  the PATH a login shell would have
    */
-  constructor({ packaged, resourcesPath, shellCheckout, port, loginPath }) {
+  constructor({ packaged, resourcesPath, shellCheckout, port, vitePort, viteHost, loginPath }) {
     super();
     this.packaged = packaged;
     this.resourcesPath = resourcesPath;
@@ -155,6 +160,21 @@ class Runner extends EventEmitter {
     this.probeTimer = null;
     this.probing = false;
     this.lastSummary = "";
+
+    /**
+     * The checkout's vite. Started when a checkout's server is up and
+     * something wants its page (`main.js` decides that, since it knows what
+     * the window and the pill show), stopped with the server, and left
+     * alone by a server restart — a save under `server/src` is a reconnect,
+     * and a vite started over would be a reload.
+     */
+    this.vite = new Vite({
+      port: vitePort,
+      host: viteHost,
+      env: () => this.childEnv(),
+      openLog: () => this.openLog(this.viteLog()),
+    });
+    this.vite.on("change", () => this.emit("change"));
   }
 
   configure({ source, checkout }) {
@@ -219,8 +239,11 @@ class Runner extends EventEmitter {
     return path.join(stateDir(), "server.log");
   }
 
-  openLog() {
-    const file = this.serverLog();
+  viteLog() {
+    return path.join(stateDir(), "vite.log");
+  }
+
+  openLog(file = this.serverLog()) {
     mkdirSync(path.dirname(file), { recursive: true });
     try {
       if (existsSync(file) && statSync(file).size > LOG_MAX_BYTES) renameSync(file, `${file}.1`);
@@ -251,10 +274,12 @@ class Runner extends EventEmitter {
 
   /**
    * `vite build`, with the checkout's own vite on this app's binary as node.
-   * The server serves `web/dist` to every client that is not a vite window,
-   * and `bun run dev` never builds it — in a checkout that job is vite's, in
-   * the window `bun run dev:desktop` starts. The menu bar runs no vite, so
-   * the build is its job.
+   * The server serves `web/dist` to every client that is not loading vite —
+   * the phone, a browser, and the window when vite would not start — and
+   * `bun run dev` never builds it. The window and the pill have the dev
+   * server and need no build, so this is the phone's: run when there is no
+   * `web/dist` at all, and otherwise from the menu, never in front of a
+   * start.
    */
   buildWeb(checkout) {
     if (this.building) return Promise.resolve(false);
@@ -292,7 +317,6 @@ class Runner extends EventEmitter {
   canStart() {
     if (this.child) return { ok: false, why: "it is already running" };
     if (this.health) return { ok: false, why: `a server already answers on :${this.port}` };
-    if (this.building) return { ok: false, why: "the web app is still building" };
     const checkout = this.effectiveCheckout();
     if (checkout) {
       const report = this.checkoutReport(checkout);
@@ -311,15 +335,14 @@ class Runner extends EventEmitter {
     const can = this.canStart();
     if (!can.ok) return can;
     this.lastExit = null;
+    this.vite.forgive();
 
     const checkout = this.effectiveCheckout();
     let args;
     let cwd;
     let env;
     if (checkout) {
-      if (this.webStale(checkout) && !(await this.buildWeb(checkout))) {
-        return { ok: false, why: this.buildError ?? "the web app could not be built" };
-      }
+      if (!existsSync(path.join(checkout, "web/dist/index.html"))) void this.buildWeb(checkout);
       cwd = checkout;
       args = [path.join(checkout, "server/run.mjs"), "--watch"];
       env = this.childEnv();
@@ -369,8 +392,18 @@ class Runner extends EventEmitter {
     return { ok: true };
   }
 
-  /** Stop the runner this app started, and wait until it has. An adopted server is not ours to stop. */
-  stop(why = "the menu bar stopped it") {
+  /**
+   * Stop the runner this app started, then its vite, and wait until both
+   * have. An adopted server is not ours to stop, but the vite in front of it
+   * is, so a stop with no runner still lets that go. The server goes first so
+   * the window is not moved onto a built page for the moment between.
+   */
+  async stop(why = "the menu bar stopped it") {
+    await this.stopRunner(why);
+    await this.vite.stop();
+  }
+
+  stopRunner(why) {
     const child = this.child;
     if (!child) return Promise.resolve();
     if (this.stopping) return this.stopping;
@@ -413,6 +446,7 @@ class Runner extends EventEmitter {
    * covered in a terminal. Nothing running at all is a start.
    */
   async restart() {
+    this.vite.forgive();
     if (this.health) {
       const answer = await fetchJson(`${this.local}/api/restart`, { method: "POST" }, 3000);
       if (!answer) return { ok: false, why: "the server did not answer" };
@@ -583,8 +617,10 @@ class Runner extends EventEmitter {
       checkout,
       checkoutOk: report.ok,
       checkoutProblem: report.problems[0] ?? null,
+      webStale: report.webStale,
       building: this.building,
       buildError: this.buildError,
+      vite: this.vite.view(),
       server: h
         ? {
             up: true,

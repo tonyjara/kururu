@@ -15,8 +15,10 @@ const base = {
   checkout: null,
   checkoutOk: true,
   checkoutProblem: null,
+  webStale: false,
   building: null,
   buildError: null,
+  vite: { status: "off", port: 5173, error: null },
   windowOpen: true,
   source: "app",
   savedCheckout: null,
@@ -117,8 +119,24 @@ describe("the tray menu", () => {
     const withCheckout = { ...base, savedCheckout: "/Users/x/Desktop/kururu", source: "checkout", checkout: "/Users/x/Desktop/kururu" };
     expect(byId(withCheckout, "source-checkout").label).toBe("~/Desktop/kururu");
     expect(byId(withCheckout, "source-checkout").checked).toBe(true);
-    expect(byId(withCheckout, "rebuild-web")).toBeDefined();
+    expect(byId(withCheckout, "rebuild-web").label).toBe("Rebuild the web app for the phone");
+    expect(byId({ ...withCheckout, webStale: true }, "rebuild-web").label).toBe("Rebuild the web app for the phone — behind web/src");
     expect(byId(base, "rebuild-web")).toBeUndefined();
+    expect(byId(withCheckout, "log-vite")).toBeDefined();
+    expect(byId(base, "log-vite")).toBeUndefined();
+  });
+
+  it("says what the window is showing from a checkout, and nothing about vite from the app", () => {
+    const checkout = { ...base, source: "checkout", checkout: "/Users/x/Desktop/kururu" };
+    expect(byId(base, "vite")).toBeUndefined();
+    expect(byId({ ...checkout, vite: { status: "up", port: 5173, error: null } }, "vite").label).toBe(
+      "● vite on :5173 — the window and the pill reload as web/ is saved",
+    );
+    expect(byId({ ...checkout, vite: { status: "adopted", port: 5173, error: null } }, "vite").label).toContain("already running");
+    expect(byId(checkout, "vite").label).toBe("○ vite down — it starts with the server");
+    const failed = { ...checkout, vite: { status: "failed", port: 5173, error: "something else answers on :5173" } };
+    expect(byId(failed, "vite").label).toBe("⚠ something else answers on :5173 — the window shows web/dist");
+    expect(byId(failed, "vite").enabled).toBe(false);
   });
 
   it("puts the live count in the tray title and nothing when there are none", () => {

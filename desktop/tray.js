@@ -28,7 +28,7 @@ const { hostSocket, stateDir } = require("./runner");
  * @param {import("./talkkey").TalkKey} options.talk
  * @param {string} options.version
  * @param {boolean} options.packaged
- * @param {object} options.actions  `openWindow`, `closeWindow`, `windowOpen`, `quit`, `serverChanged`
+ * @param {object} options.actions  `openWindow`, `closeWindow`, `windowOpen`, `quit`, `serverChanged`, `webRebuilt`
  */
 function createTray({ runner, talk, version, packaged, actions }) {
   const image = nativeImage.createFromPath(path.join(__dirname, "icon", "trayTemplate.png"));
@@ -79,15 +79,28 @@ function createTray({ runner, talk, version, packaged, actions }) {
   };
 
   /**
-   * Stop whatever this app is running, change the source, start again if it
-   * was running. An adopted server is left exactly where it is: the source
-   * is about what *this app* starts, not about who holds the port.
+   * Stop whatever this app is running, change the source, start again from
+   * the new one. The pty host is not involved: the new server connects to
+   * the host the old one was using, agents and all, and the menu says if
+   * that host is now behind the code it is serving.
+   *
+   * An adopted server is left exactly where it is. The source is about what
+   * *this app* starts, not about who holds the port, so with `bun run dev`
+   * on 7717 the choice is saved and takes effect the next time this app
+   * starts a server — and no dialog says it could not start one now, since
+   * it was not asked to. What does change at once is the page: the old
+   * source's vite is stopped either way, and the window and the pill move to
+   * the new source's page in front of whichever server is there.
    */
   const switchSource = async (next) => {
     const wasRunning = Boolean(runner.child);
-    if (wasRunning) await runner.stop("the source was changed");
+    await runner.stop("the source was changed");
     runner.configure(next);
     writeDesktop(next);
+    if (!wasRunning && runner.adopted()) {
+      actions.serverChanged();
+      return;
+    }
     if (wasRunning || packaged) failed("start the server", await runner.start("the source was changed"));
     actions.serverChanged();
   };
@@ -130,7 +143,8 @@ function createTray({ runner, talk, version, packaged, actions }) {
       app.focus({ steal: true });
       const picked = await dialog.showOpenDialog({
         title: "Choose a kururu checkout",
-        message: "A kururu checkout you have run `bun install` in. The server runs from it, with the file watcher, and the window shows its web app.",
+        message:
+          "A kururu checkout you have run `bun install` in. The server runs from it, with the file watcher, and the window and the floating pill load its web app through vite, so a change under web/ shows as it is saved.",
         properties: ["openDirectory"],
         buttonLabel: "Run from here",
       });
@@ -148,9 +162,11 @@ function createTray({ runner, talk, version, packaged, actions }) {
       if (!checkout) return;
       const built = await runner.buildWeb(checkout);
       if (!built) failed("build the web app", { ok: false, why: runner.buildError ?? "see server.log" });
+      else actions.webRebuilt();
     },
     "log-lifecycle": () => shell.openPath(path.join(stateDir(), "lifecycle.log")),
     "log-server": () => shell.openPath(runner.serverLog()),
+    "log-vite": () => shell.openPath(runner.viteLog()),
     "log-host": () => shell.openPath(path.join(path.dirname(hostSocket()), "ptyhost.log")),
     "log-reveal": () => shell.showItemInFolder(path.join(stateDir(), "lifecycle.log")),
     "open-at-login": () => {

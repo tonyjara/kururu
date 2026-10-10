@@ -18,25 +18,29 @@ nothing leaves the machine.
 | piece | where | what |
 |---|---|---|
 | The talk key | `web/src/voice.ts` | A capture-phase keydown/keyup pair on the window. Down starts recording at once; up within 320 ms is a tap and leaves the microphone open until the next tap; a longer hold sends on release. Escape drops the clip. The window losing focus with the key down sends what there is. |
-| The microphone | `web/src/voice.ts` | PCM off an `AudioWorklet`, 16 kHz mono, written as a WAV by hand (`encodeWav`) and posted to `/api/voice/hear`. Not a `MediaRecorder`: it writes WebM/Opus, which Apple's recogniser will not open. |
-| The ears | `server/src/voice.ts` → `yap` | Apple's on-device recogniser, one model per locale, through a Homebrew command line. The clip is transcribed once per language you speak, in parallel, and `pickTranscript` keeps the one with the language in it. |
-| The words in | `Harness.hear` | Prefixed `[voice]` so Kuru knows a name may be misheard, and typed into its terminal with `now`, as `send_agent` types: a harness mid-turn hears it between tool calls, one showing a prompt or with your hands in its terminal hears it after. Typed and not posted to its inbox, because Claude Code makes everything on the inbox another session's message — see [harness](harness.md#speaking-into-a-running-agent) — and these are your words. Not running, it is started, and the words wait for its first hook report. |
+| The microphone | `web/src/voice.ts` | PCM off an `AudioWorklet`, 16 kHz mono, written as a WAV by hand (`encodeWav`) and posted to `/api/voice/hear` under an id the page mints. Not a `MediaRecorder`: it writes WebM/Opus, which Apple's recogniser will not open. Five minutes in (`CLIP_ROLL_MS`) what there is goes as a message of its own and the recording carries on. |
+| The stash | `web/src/unsent.ts` | Every clip is written to IndexedDB before it is posted and dropped only once the server answers that it has it; sent again on a backoff, on every reconnect, and by the next page to load. See [nothing you say is lost](#nothing-you-say-is-lost). |
+| The outbox | `server/src/outbox.ts` | The clip on the server's disk the moment it arrives, its words beside it once they are made, handed to Kuru in order and kept until Kuru's own session says it took them. Survives restarts; retries a failed transcription and an unconfirmed delivery. |
+| The ears | `server/src/voice.ts` `transcribe` → `yap` | Apple's on-device recogniser, one model per locale, through a Homebrew command line, reading the outbox's file where it lies. The clip is transcribed once per language you speak, in parallel, and `pickTranscript` keeps the one with the language in it. |
+| The words in | `Harness.hear` | Prefixed `[voice]` so Kuru knows a name may be misheard, and typed into its terminal with `now`, as `send_agent` types: a harness mid-turn hears it between tool calls, one showing a prompt or with your hands in its terminal hears it after. Typed and not posted to its inbox, because Claude Code makes everything on the inbox another session's message — see [harness](harness.md#speaking-into-a-running-agent) — and these are your words. Not running, it is started, and the words wait for its first hook report. It tells the outbox when they are typed, or dropped with a harness that went first. |
 | The words out | `index.ts` `/api/report` → `Voice.spoke` | The harness's own Stop report carries `last_assistant_message`; when the reporter is a profile's harness, that reply is spoken. The role prompt tells Kuru its final message is heard, not read. The `say` tool speaks one line mid-turn. |
 | The mouth | `server/src/voice.ts` → `kokoro.ts`, or `say` | Kokoro-82M on the CPU through `kokoro-js`, in a process of its own that the server forks on the first sentence and kills with it, a sentence at a time, each announced on the socket as a `speech` chunk the moment it is ready. The Mac's own `say` voices are the fallback that needs nothing. |
 | The player | `web/src/voice.ts` | Fetches each chunk from `/api/speech` and plays them in order on the page's one `AudioContext` (`notify.ts`). The talk key cuts Kuru off, and so does the pill's ✕. Tells the server what became of each reply: held, each sentence played to its end, or let go before it. |
 | The hush | `server/src/voice.ts` `talk` | Nothing plays while anybody talks, and what waited plays after — see [below](#never-over-you). |
 | The missed list | `server/src/voice.ts` `review`, `replay` | Every reply nobody played to its end, kept as words in `~/.local/state/kururu/missed.json` — see [what you missed](#what-you-missed). |
-| The badge | `Sidebar.tsx` `MissedList` | The count on the harness button's corner, and the list behind it: read them, play them, or clear them. |
-| The pill | `VoicePill.tsx` | A level meter and a line, over the panes, zen included. Says which gesture ends the recording, what was heard and where it went, what Kuru is saying. Dragged anywhere in the window by mouse or finger and drawn where this device left it (`web/src/place.ts`); a double click puts it back. Its ✕ is `dismissVoice`: Kuru stops mid-word and the rest of the reply, and what was queued behind it, goes to the missed list; a clip being recorded is thrown away; words lingering go. |
+| The badges | `Sidebar.tsx` `VoiceLists` | Two, on the harness button's corners. Top: the count of Kuru's replies you missed. Bottom: your messages — a red count if any did not get through, the working colour while one is on its way, a quiet dot once they all arrived. Either opens one box with both lists, the clicked one first: **Your messages to Kuru** under a microphone, newest first, each with its state and Resend or Discard when it failed; **Kuru's replies you didn't hear** under a speaker, with Play and Clear. |
+| The pill | `VoicePill.tsx` | A level meter and a line, over the panes, zen included. Says which gesture ends the recording, what was heard and where it went, what Kuru is saying — and, while Kuru speaks, a line of its own for what became of your last message, so a reply that waited for you never covers it. Dragged anywhere in the window by mouse or finger and drawn where this device left it (`web/src/place.ts`); a double click puts it back. Its ✕ is `dismissVoice`: Kuru stops mid-word and the rest of the reply, and what was queued behind it, goes to the missed list; a clip being recorded is thrown away; words lingering go. |
 | The button | `StatusBar.tsx` `sb-mic` | The key for a thumb: held, it records; tapped, it toggles. How a phone talks. |
 
 ## Never over you
 
 While the talk key is down on any client, no client plays a word, and that
-lasts until the words have been heard and delivered — the length of the
+lasts until the words have been heard and handed to Kuru — the length of the
 pill's "sending", not only of the key. A page says `talking` on the press
-and again once `/api/voice/hear` has answered or the clip was thrown away;
-the server tells every page `hush` while any one is talking. The press cuts
+and again once the server has its clip on the disk, or the clip was thrown
+away; from there the outbox says it for that clip until its first attempt at
+Kuru is over (handed over, or failed), so the page can let go the moment its
+words are safe. The server tells every page `hush` while anybody is talking. The press cuts
 off what was playing, on every page — the phone on the desk is as loud as
 the window — and a sentence that arrives during the hush waits in the
 queue. Sentences go on being made, so what waited is ready when the hush
@@ -66,6 +70,60 @@ finding out an hour later.
 What the press cut off, and what was queued behind it on that page, is not
 replayed after the hush: cutting it off was what the press was for. It goes
 to the missed list instead.
+
+## Nothing you say is lost
+
+**What lost a message on 2026-10-09**, twice: its length. The server took a
+clip of at most 3 MB — a minute and thirty-eight seconds at 16 kHz — and
+refused a longer one by destroying the request mid-upload. The window saw a
+reset connection and said "Could not send the clip", and in the same moment
+lifted the hush, so Kuru's reply that had waited out the recording started
+and its first sentence took the pill's one line. The error was on screen for
+a frame. The audio had only ever been in the page's memory, and went with
+the failed upload. Of the hundred-odd voice turns that had reached Kuru, the
+longest was 241 words, about the length of that cap; "long-ass message" is
+what both lost ones were called. Kuru's reply did not cancel the message —
+it hid that it had failed.
+
+Every piece of that is now kept somewhere that survives it:
+
+1. **On the release**, the clip is written to IndexedDB (`unsent.ts`) and
+   posted under an id the page minted. A server that is down, restarting or
+   refusing is tried again — 1, 2, 5, 10, then every 30 seconds, and at once
+   on every reconnect — and a reloaded page finds its clips and sends them on
+   start. The id makes a repeat the same message. A clip has no length past
+   which it stops counting: the window rolls a recording into a new clip
+   every five minutes, and the server's cap (`CLIP_MAX_BYTES`, six minutes)
+   is a backstop it never reaches, answered with 413 and why when it is.
+2. **On arrival**, the outbox writes the audio, then its entry in
+   `~/.local/state/kururu/outbox/outbox.json`, and only then answers. The
+   page drops its copy on that answer.
+3. **Transcribing**: the recogniser reads the file. Failing to run is tried
+   again at 3, 10 and 30 seconds (`transcribeRetryMs`), then the message is
+   `failed` with its audio kept. Running and hearing nothing is `failed` at
+   once — "Nothing heard" — audio kept. Resend hears it again.
+4. **Queued**: the words are written into the entry, and the message is
+   handed to the harness once every earlier message of its profile is past
+   transcribing (`handable`), so Kuru gets them in the order they were said.
+   A busy, asking or starting Kuru holds them in its own list, which is
+   memory — and so the outbox hands every queued, untyped message over again
+   after a restart, not before the harness has adopted its terminals.
+5. **Typed** is not delivered. Kuru's `UserPromptSubmit` hook reports the
+   prompt it took, and its transcript records it — or the queue entry for a
+   message typed mid-turn — and either carrying the words (`promptCarries`)
+   is **delivered**; the audio is removed and the words stay on the list. A
+   typed message Kuru has had its chance at — between turns for fifteen
+   seconds since the typing, or not running — and does not have is typed
+   once more, then failed. Twice in the prompt box is better than never; a
+   third time would be a loop. A Kuru that exits holding words is started
+   again for them once, then they fail.
+
+The list keeps every message still on its way and every failed one, and the
+newest twenty delivered per profile (`OUTBOX_KEEP`). A failed one is the one
+with something to do: **Resend** (or **Listen again**, for one with no words
+yet) or **Discard**, which takes the audio off the disk too. The page adds
+two states of its own above the server's: `recording`, and `saving` for a
+clip the server does not have yet.
 
 ## What you missed
 
@@ -297,6 +355,34 @@ neither has been pressed in a DMG.
   `spokenText` eats underscores the first one left in names.
 - **Reload the window after a change here.** A page from before this change
   holds nothing and reports nothing, so every reply it plays looks unheard
-  to the server and lands on the list two seconds after it is made.
+  to the server and lands on the list two seconds after it is made. A page
+  from before the outbox posts with no id; the server mints one, keeps and
+  delivers the message all the same, and answers in the old shape as well
+  (`legacyHeard`) once its words are made — without that the old pill
+  quoted `undefined` and said Kuru was starting.
+- **The floating pill loads what the window loads.** From a checkout that
+  is the checkout's vite, so a change under `web/` reaches the pill as it is
+  saved; from the app it is the server's page. ⌘R in the window reloads the
+  pill too — once it is idle, if it is mid-sentence — and so does **Rebuild
+  the web app** when the pill is on the built page. A server restart is
+  still only a reconnect: the pill loads again only when the page it should
+  show is a different one. Its unsent clips are in IndexedDB, which is per
+  origin, so a clip saved while it was on one page is sent the next time it
+  is on that page, not on the other.
+- **A clip's length is a fraction and `execFile`'s timeout is not.** The
+  recogniser's timeout grows with the clip, and a timeout of 63029.06 ms
+  throws before `yap` starts — which read as a transcription failure on
+  every clip whose sample count was not a multiple of sixteen. The window's
+  own clips come in 128-sample blocks and never hit it; a clip from anywhere
+  else did. Rounded, in `transcribe` and in the entry.
+- **A refusal must be answered, not hung up on.** `readBody` destroys the
+  request at its cap, which suits an upload nobody reads the answer to. The
+  clip route reads its body to the end whatever its size (`readClip`) so a
+  window still uploading gets the 413 and the reason — the reset connection
+  is half of how the 2026-10-09 message was lost.
+- **The pill's line is not the only record.** Anything that happens to a
+  message after the pill has moved on — a retry, a failure at the
+  confirmation timeout — is on the list behind the harness button, and a
+  failure brings the pill back for fifteen seconds if nothing else holds it.
 - **`say` speaks at 22 kHz and Kokoro at 24.** Both are plain WAVs and the
   browser's decoder resamples; nothing here cares.

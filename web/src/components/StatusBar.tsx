@@ -10,6 +10,7 @@
 import type { Profile, Workspace } from "../../../shared/model";
 import { PREFIX_LABEL } from "../keys";
 import type { VoicePhase } from "../voice";
+import { MicIcon } from "./VoiceIcons";
 
 interface Props {
   profile: Profile;
@@ -240,20 +241,6 @@ function KeysIcon() {
          strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="2" y="6" width="20" height="12" rx="2" />
       <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8" />
-    </svg>
-  );
-}
-
-/**
- * A microphone, drawn here on `BarsIcon`'s reasoning: a picture of a physical
- * object that means the same thing in any chrome.
- */
-function MicIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="9" y="3" width="6" height="11" rx="3" />
-      <path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" />
     </svg>
   );
 }

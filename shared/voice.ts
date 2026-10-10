@@ -391,8 +391,23 @@ export function sentencesOf(text: string, max = 300): string[] {
 
 /** What the window records at. The recogniser is happy with anything; 16 kHz mono is what speech models expect and is 32 kB a second. */
 export const CLIP_RATE = 16_000;
-/** The most of a clip the server will take: a minute and a half at that rate, which is a speech, not a command. */
-export const CLIP_MAX_BYTES = 3 * 1024 * 1024;
+/**
+ * How long one clip runs before the window cuts it, sends it, and carries on
+ * recording into the next. A talk key held for twelve minutes is three
+ * messages, in order, and not a refusal: there is no length past which what
+ * you said stops counting.
+ */
+export const CLIP_ROLL_MS = 5 * 60_000;
+/**
+ * The most of a clip the server will take: a rolled clip and a minute over,
+ * at 32 kB a second. It was a flat 3 MB, a minute and thirty-eight seconds,
+ * and a clip past it was refused by resetting the connection mid-upload. The
+ * window said "Could not send the clip" for the moment before Kuru's queued
+ * reply took the pill over, and the audio was gone with the page's memory of
+ * it — which is how a long message was lost on 2026-10-09 and why the cap is
+ * now a backstop the window never reaches.
+ */
+export const CLIP_MAX_BYTES = 44 + ((CLIP_ROLL_MS + 60_000) / 1000) * CLIP_RATE * 2;
 /** Shorter than this and nothing was said — a tap in toggle mode let go before the microphone was warm. */
 export const CLIP_MIN_MS = 300;
 /** Held longer than this, the talk key is a hold and stops on release; shorter is a tap, which toggles. */
@@ -577,18 +592,158 @@ export interface SpeechChunk {
   profileId: string;
 }
 
-/** What came of a clip: what was heard, and what became of it. */
-export interface Heard {
-  text: string;
+// ---------------------------------------------------------------------------
+// What you said
+// ---------------------------------------------------------------------------
+
+/**
+ * Where one of your messages is on its way to Kuru — the outbox
+ * (`server/src/outbox.ts`), and the list of your messages beside the missed
+ * replies.
+ *
+ * `transcribing`: the audio is on the server's disk and the recogniser has
+ * it, or will again. `queued`: the words are on the disk too, waiting for
+ * Kuru — busy, asking something, starting, your hands in its terminal — or
+ * typed into its terminal and waiting for its session to say it took them.
+ * `delivered`: it did; its prompt hook or its transcript carried the words.
+ * `failed`: with a note, and the audio kept for Resend.
+ *
+ * The window adds two of its own that never reach the server: `recording`,
+ * and `saving` for a clip the server has not taken yet.
+ */
+export type OutboxState = "transcribing" | "queued" | "delivered" | "failed";
+
+export interface OutboxEntry {
+  /** Minted by the window that recorded it, so a retried upload is the same message and not a second one. */
+  id: string;
+  profileId: string;
+  /** When it was said — the release, by the recording client's clock. */
+  at: number;
+  /** How long the clip is. */
+  ms: number;
+  state: OutboxState;
+  /** The words, once the recogniser has made them. */
+  text: string | null;
   lang: VoiceLang | null;
-  /**
-   * `typed`: typed into the harness's terminal, as the user. `held`: waiting
-   * to be — it is showing a prompt, or the user is typing there. `starting`:
-   * the harness was not running and has been started; the words follow once
-   * it is listening. `nothing`: the clip held no words. `failed`: with `why`.
-   */
-  outcome: "typed" | "held" | "starting" | "nothing" | "failed";
-  why: string | null;
+  /** When it was typed into Kuru's terminal, while it waits for Kuru's session to say it took it. */
+  typedAt: number | null;
+  /** Why it failed, or what it is waiting on, in words for the list. */
+  note: string | null;
+}
+
+/**
+ * How many delivered messages each profile keeps on the list. Only the
+ * delivered age out: one still on its way is never dropped, and a failed one
+ * stays until it is sent again or discarded, since it is the one you have
+ * something to do about.
+ */
+export const OUTBOX_KEEP = 20;
+
+/** What a client may name a clip: what `crypto.randomUUID` makes, and a little either side. Checked before it is a file name. */
+export function isClipId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(value);
+}
+
+/**
+ * How long after its `attempt`th failure (from 1) a transcription is tried
+ * again, or null once it has had its tries and is `failed`, its audio kept.
+ * Short, because messages after it wait for it: they go to Kuru in the order
+ * they were said, and a few minutes of retrying would be a few minutes of
+ * everything said since sitting still.
+ */
+export function transcribeRetryMs(attempt: number): number | null {
+  return [3_000, 10_000, 30_000][attempt - 1] ?? null;
+}
+
+/**
+ * Whether something Kuru's session took in carries a message's words —
+ * which is how the outbox knows a message got through rather than assuming
+ * that typing it was enough. Whitespace is folded on both sides, since
+ * Claude Code wraps a long paste in tags and lines of its own, and only the
+ * first two hundred characters are looked for: enough to be the message and
+ * not a coincidence, short enough that a trailing space trimmed or a
+ * character the terminal took differently near the end does not make a
+ * delivered message look lost, which would type it twice.
+ */
+export function promptCarries(prompt: string, text: string): boolean {
+  const fold = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+  const needle = fold(text).slice(0, 200);
+  return needle.length > 0 && fold(prompt).includes(needle);
+}
+
+/**
+ * Messages from the disk, made whole: anything not shaped like one is
+ * dropped, and what the server keeps beside the wire's fields — its place in
+ * the order, the tries, where the transcript was — is read back as numbers
+ * and strings or not at all.
+ */
+export function adoptOutbox(value: unknown): StoredOutboxEntry[] {
+  if (!Array.isArray(value)) return [];
+  const out: StoredOutboxEntry[] = [];
+  const seen = new Set<string>();
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const str = (v: unknown, max: number) => (typeof v === "string" && v ? v.slice(0, max) : null);
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const r = raw as Record<string, unknown>;
+    if (!isClipId(r.id) || seen.has(r.id)) continue;
+    const profileId = str(r.profileId, 80);
+    const at = num(r.at);
+    const n = num(r.n);
+    if (!profileId || at === null || n === null) continue;
+    const state: OutboxState = r.state === "queued" || r.state === "delivered" || r.state === "failed" ? r.state : "transcribing";
+    const text = str(r.text, 20_000);
+    seen.add(r.id);
+    out.push({
+      id: r.id,
+      profileId,
+      at,
+      ms: Math.max(0, num(r.ms) ?? 0),
+      // Words are what make a message queued or delivered; one that says so without them goes back to being heard.
+      state: (state === "queued" || state === "delivered") && !text ? "transcribing" : state,
+      text,
+      lang: r.lang === "es" ? "es" : r.lang === "en" ? "en" : null,
+      typedAt: num(r.typedAt),
+      note: str(r.note, 400),
+      n,
+      attempts: Math.max(0, Math.floor(num(r.attempts) ?? 0)),
+      typings: Math.max(0, Math.floor(num(r.typings) ?? 0)),
+      transcript: str(r.transcript, 4096),
+    });
+  }
+  return capOutbox(out);
+}
+
+/** A message as the server keeps it on disk: the wire's fields and its own. */
+export interface StoredOutboxEntry extends OutboxEntry {
+  /** Its place in the order messages reached the server, which is the order they go to Kuru. */
+  n: number;
+  /** Transcriptions tried and failed since it was last sent. */
+  attempts: number;
+  /** Times it has been typed into Kuru's terminal. A second is the last: after that it is failed, not typed a third time. */
+  typings: number;
+  /** Kuru's transcript when it was typed, kept so a server that restarts can still look for it there. */
+  transcript: string | null;
+}
+
+/**
+ * In the order they reached the server, every delivered message past the
+ * newest `OUTBOX_KEEP` of its profile dropped and nothing else.
+ */
+export function capOutbox<T extends OutboxEntry & { n: number }>(list: readonly T[]): T[] {
+  const sorted = [...list].sort((a, b) => a.n - b.n);
+  const count = new Map<string, number>();
+  const kept: T[] = [];
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const entry = sorted[i]!;
+    if (entry.state === "delivered") {
+      const seen = count.get(entry.profileId) ?? 0;
+      if (seen >= OUTBOX_KEEP) continue;
+      count.set(entry.profileId, seen + 1);
+    }
+    kept.push(entry);
+  }
+  return kept.reverse();
 }
 
 // ---------------------------------------------------------------------------

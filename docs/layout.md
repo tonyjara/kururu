@@ -142,7 +142,11 @@ launcher up by id, exactly as the new-tab menu does, and `withPrompt` in
 place text somebody typed reaches `sh -c`. The agent lands in a pane *beside*
 the board's (`paneBesideBoard`) rather than as a tab in it, since a new tab is
 shown and would take the board away from the person pressing the robot; it is
-renamed after the card, and the focus goes back to the board.
+renamed after the card, and the focus goes back to the board. Any workspace of
+the profile on screen, not only the one on screen — the profile's board draws
+every workspace's board — and so for resume, the worktree's terminal and the dev
+server's ↻ too: off screen the terminal goes into that workspace's layout
+(`openTerminalAt`), beside its board, and nothing is focused.
 
 **The automation moves a card on an edge, and only out of the column it put it
 in.** `noteRun` runs for every agent on every host snapshot and compares
@@ -175,6 +179,22 @@ the card onto that workspace's board in one change (`transferCard` — new numbe
 there, same id, and its To do if it sat in a column the workspace does not
 have), making the board if the workspace had none. It rides the blob
 through `adopt()` and goes to disk beside the workspaces, counter included.
+
+**It is also where every board in the profile is seen from.** A bar under the
+sheet's header lists the profile's board first, then each workspace whose
+`board` is not null — those with a card in In progress or Review first, then
+the rest, each in the sidebar's order. An entry is its tag colour and its name,
+and a dot when it has such a card; To do does not count, being reminders, and
+there are no numbers. Picking one draws that workspace's board in
+the sheet with `BoardView` itself, not a second rendering of it, and the screen
+behind does not move: every card verb takes a workspace id, and the four that
+open a terminal take any workspace of the profile on screen (above). The one
+thing `BoardView` grew for it is `onReveal`, which the sheet answers by closing
+when a card takes somebody to a terminal. The timeline and the column tools are
+the profile board's, and are offered only while it is picked. Which board was
+last picked is kept per device in `localStorage`, by profile id, for the
+sidebar disclosures' reason; a cold start mints new ids and it falls back to the
+profile's board.
 
 **A card has dates, and they are days.** `Card.dates` is a start and an end as
 `2026-09-28` strings — one day is a range whose ends are the same — or null,

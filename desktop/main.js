@@ -32,8 +32,7 @@
  * side is also what the phone talks to.
  */
 const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = require("electron");
-const { execFileSync, spawn } = require("node:child_process");
-const { existsSync } = require("node:fs");
+const { execFileSync } = require("node:child_process");
 const os = require("node:os");
 const path = require("node:path");
 const { readDesktop, writeDesktop } = require("./desktop");
@@ -52,16 +51,8 @@ const DEV = process.env.KURURU_DEV === "1";
 const PACKAGED = app.isPackaged;
 const PORT = Number(process.env.KURURU_PORT || 7717);
 const LOCAL = `http://127.0.0.1:${PORT}`;
-/**
- * An address and never `localhost`, because `localhost` is two addresses and the
- * port is only ours on one of them. Our vite binds `0.0.0.0` for the phone, which
- * is IPv4 only, so another project's vite on its default `localhost` binds `[::1]`
- * on the *same port* without either one seeing `EADDRINUSE` — and `localhost`
- * resolves to `::1` first. The readiness probe below would get its 200 from the
- * other project and the window would load it. That is not hypothetical: it is
- * how a Platypost renderer turned up in this window.
- */
-const VITE_URL = `http://127.0.0.1:${process.env.KURURU_VITE_PORT || 5173}`;
+/** Where the checkout's vite listens — `web/vite.config.ts` reads the same variable. `vite.js` says why it is asked at `127.0.0.1`. */
+const VITE_PORT = Number(process.env.KURURU_VITE_PORT || 5173);
 const PICKER = path.join(__dirname, "connect.html");
 const PRELOAD = path.join(__dirname, "preload.js");
 
@@ -71,18 +62,6 @@ const PRELOAD = path.join(__dirname, "preload.js");
  * where the rest of an isolated instance lives.
  */
 if (process.env.KURURU_USER_DATA) app.setPath("userData", process.env.KURURU_USER_DATA);
-
-/** Where bun lives when it is not on PATH — a GUI launch inherits almost none. */
-const BUN_CANDIDATES = [
-  process.env.BUN_PATH,
-  path.join(process.env.HOME || "", ".bun/bin/bun"),
-  "/opt/homebrew/bin/bun",
-  "/usr/local/bin/bun",
-].filter(Boolean);
-
-function bunPath() {
-  return BUN_CANDIDATES.find((candidate) => existsSync(candidate)) || "bun";
-}
 
 let win = null;
 /** The server the window is showing, as an origin. Null while the picker is up. */
@@ -159,6 +138,10 @@ const runner = new Runner({
   resourcesPath: process.resourcesPath,
   shellCheckout: PACKAGED ? null : path.join(__dirname, ".."),
   port: PORT,
+  vitePort: VITE_PORT,
+  // `dev:desktop` binds every address, as it always has, so the phone can
+  // load vite too; the menu bar starting one by itself keeps it on loopback.
+  viteHost: DEV ? null : "127.0.0.1",
   loginPath,
 });
 runner.configure(readDesktop());
@@ -176,18 +159,105 @@ const talk = new TalkKey({
     process.env.KURURU_TALKKEY ||
     (PACKAGED ? path.join(process.resourcesPath, "server", "talkkey") : path.join(__dirname, "dist", "talkkey")),
   preloadPath: PRELOAD,
-  dev: DEV,
   debug: !PACKAGED,
-  viteUrl: VITE_URL,
   saved: readDesktop(),
   save: writeDesktop,
 });
 
-/** The pill follows the window's server, or the local one when there is no window. */
-function pointPill() {
-  talk.setServer(connected ?? (runner.health ? LOCAL : null));
+/**
+ * The checkout whose web app is shown for a server, or null for the server's
+ * own page.
+ *
+ * A checkout's UI belongs in front of a checkout's server, so outside the dev
+ * shell it is only ever the local one: a server on another machine runs its
+ * own version, and the checkout's page against it is a protocol mismatch
+ * waiting to happen. `dev:desktop` is for developing that page against
+ * anything and keeps doing so.
+ */
+function uiCheckout(base) {
+  const checkout = runner.effectiveCheckout();
+  if (!checkout) return null;
+  return DEV || base === LOCAL ? checkout : null;
 }
-runner.on("change", pointPill);
+
+/**
+ * What the window and the pill should be showing for a server, right now:
+ * the checkout's vite while it serves, the server's own page when there is no
+ * checkout or vite would not start, and null — stay put — while vite is on
+ * its way up or was stopped along with its server. The last is what keeps a
+ * Stop from flashing a built page before the picker, and a vite coming back on
+ * the same port reloads its own pages.
+ */
+function pageFor(base) {
+  const checkout = uiCheckout(base);
+  if (!checkout) return base;
+  const vite = runner.vite.urlFor(checkout, base);
+  if (vite) return vite;
+  return runner.vite.status === "failed" ? base : null;
+}
+
+/** The page to load for a server somebody is connecting to, starting vite for it if it should have one. */
+async function openPage(base) {
+  const checkout = uiCheckout(base);
+  if (!checkout) return base;
+  return (await runner.vite.ensure(checkout, base, { retry: true })) ?? base;
+}
+
+/**
+ * The pill follows the window's server, or the local one when there is no
+ * window — and is the reason a checkout's vite starts with no window open:
+ * the moment a checkout's server answers, it gets one in front of it.
+ */
+function pointPill() {
+  const base = connected ?? (runner.health ? LOCAL : null);
+  if (!base) {
+    talk.setPage(null);
+    return;
+  }
+  const checkout = uiCheckout(base);
+  if (checkout && base === LOCAL && runner.health) void runner.vite.ensure(checkout, base);
+  const page = pageFor(base);
+  if (page) talk.setPage(page);
+}
+
+/**
+ * Move the window to the page it should be on, when that is a different
+ * origin from the one it is on: onto vite once it serves, off it when it
+ * failed or the source stopped being a checkout. Never for a server restart,
+ * which changes neither, so the emulators survive a save exactly as they do
+ * under `dev:desktop`. Serialised, because changes come in bursts and two
+ * loads of one page is a reload nobody asked for.
+ */
+let following = Promise.resolve();
+
+function followPage() {
+  following = following.then(async () => {
+    const base = connected;
+    if (!base || !win || win.isDestroyed()) return;
+    const shown = originOf(win.webContents.getURL());
+    // The picker, or a window still on its way to its first page.
+    if (!shown?.startsWith("http")) return;
+    const want = pageFor(base);
+    if (!want || originOf(want) === shown) return;
+    if (want === base && !(await reachable(base))) return;
+    if (connected !== base || !win || win.isDestroyed()) return;
+    await win.loadURL(want).catch(() => {});
+  });
+  return following;
+}
+
+function originOf(url) {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+runner.on("change", () => {
+  pointPill();
+  void followPage();
+});
 
 /**
  * End every agent on this machine, by stopping the pty host.
@@ -363,57 +433,14 @@ function stopSweeping() {
 // ---------------------------------------------------------------------------
 
 /**
- * Vite, in development, pointed at whichever server was chosen.
- *
- * In dev the window loads vite rather than the server so that editing the UI is
- * instant, and vite proxies `/api` and `/ws` onwards — which is what keeps the
- * websocket same-origin and means the web app never has to know which of the two
- * arrangements it is in. The cost is that the *choice* of server is baked into
- * vite's config at startup, so switching servers restarts it. That is a second
- * or so, it happens when you deliberately change machines, and the alternative
- * is teaching the web app to talk cross-origin — which would need CORS on a
- * server that has no authentication, and that is not a trade worth making to
- * save a second.
- */
-let vite = null;
-let viteTarget = null;
-
-function stopVite() {
-  if (!vite) return;
-  vite.kill();
-  vite = null;
-  viteTarget = null;
-}
-
-async function startVite(target) {
-  if (vite && viteTarget === target) return;
-  stopVite();
-  viteTarget = target;
-  vite = spawn(bunPath(), ["run", "--cwd", path.join(__dirname, "../web"), "dev"], {
-    stdio: "inherit",
-    env: { ...process.env, KURURU_SERVER: target },
-  });
-  vite.on("error", (err) => console.error("kururu: could not start vite —", err.message));
-  // Without this the window loads before vite is listening and sits on
-  // ERR_CONNECTION_REFUSED, because a failed loadURL is not retried.
-  for (let attempt = 0; attempt < 100; attempt++) {
-    try {
-      const response = await fetch(VITE_URL, { signal: AbortSignal.timeout(600) });
-      if (response.ok) return;
-    } catch {
-      // Still coming up.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 150));
-  }
-  console.error("kururu: vite did not come up");
-}
-
-/**
  * Point the window at a server.
  *
  * Reachability is checked before anything is remembered or loaded, so a typo in
  * the box comes back as a sentence under it rather than as a blank window with
- * a Chromium error in it.
+ * a Chromium error in it. The page is the checkout's vite when this app runs
+ * from a checkout — or always, in the dev shell — and the server's own
+ * otherwise; `openPage` waits for vite to answer, because a failed `loadURL`
+ * is not retried and the window would sit on ERR_CONNECTION_REFUSED.
  */
 async function connect(address) {
   const base = normalize(address);
@@ -426,12 +453,8 @@ async function connect(address) {
   startWatchingServer();
   pointPill();
 
-  if (DEV) {
-    await startVite(base);
-    await win?.loadURL(VITE_URL);
-  } else {
-    await win?.loadURL(base);
-  }
+  const page = await openPage(base);
+  if (connected === base) await win?.loadURL(page);
   buildMenu();
   return { ok: true };
 }
@@ -488,8 +511,29 @@ function buildMenu() {
     {
       label: "View",
       submenu: [
-        { role: "reload", label: "Reload Window" },
-        { role: "forceReload", label: "Force Reload (clear cache)" },
+        /**
+         * The window and the floating pill, which cannot be focused and so
+         * has no ⌘R of its own. Under vite the pill takes a change by
+         * itself; this is for the change that would not hot-apply, and for
+         * a pill on a built page after a rebuild. One mid-sentence reloads
+         * once it is done.
+         */
+        {
+          label: "Reload Window",
+          accelerator: "CmdOrCtrl+R",
+          click: () => {
+            (BrowserWindow.getFocusedWindow() ?? win)?.webContents.reload();
+            talk.reloadPanel();
+          },
+        },
+        {
+          label: "Force Reload (clear cache)",
+          accelerator: "Shift+CmdOrCtrl+R",
+          click: () => {
+            (BrowserWindow.getFocusedWindow() ?? win)?.webContents.reloadIgnoringCache();
+            talk.reloadPanel();
+          },
+        },
         { type: "separator" },
         { role: "resetZoom" },
         { role: "zoomIn" },
@@ -607,8 +651,10 @@ function openWindow() {
     return;
   }
   createWindow();
-  if (connected) void (DEV ? startVite(connected).then(() => win?.loadURL(VITE_URL)) : win.loadURL(connected));
-  else showPicker();
+  if (connected) {
+    const base = connected;
+    void openPage(base).then((page) => connected === base && win?.loadURL(page));
+  } else showPicker();
   app.focus({ steal: true });
 }
 
@@ -719,7 +765,15 @@ app.whenReady().then(async () => {
       closeWindow,
       windowOpen: () => Boolean(win && !win.isDestroyed()),
       quit: () => app.quit(),
-      serverChanged: pointPill,
+      serverChanged: () => {
+        pointPill();
+        void followPage();
+      },
+      // The checkout's `web/dist` is the pill's page only when vite is not;
+      // vite's pages have the change already.
+      webRebuilt: () => {
+        if (talk.page === LOCAL) talk.reloadPanel();
+      },
     },
   });
   runner.startProbing();
@@ -767,7 +821,6 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => {
   stopSweeping();
   stopWatchingServer();
-  stopVite();
   app.dock?.hide();
 });
 
@@ -793,9 +846,13 @@ let quitting = false;
 app.on("before-quit", (event) => {
   stopSweeping();
   stopWatchingServer();
-  stopVite();
 
-  if (quitting || !runner.child) return;
+  if (quitting) return;
+  // Nothing to ask about, and nothing to wait for: vite goes on SIGTERM.
+  if (!runner.child) {
+    void runner.vite.stop();
+    return;
+  }
   event.preventDefault();
   void confirmQuit();
 });
@@ -969,7 +1026,6 @@ function installUpdate() {
   quitting = true;
   stopSweeping();
   stopWatchingServer();
-  stopVite();
   talk.dispose();
   tray?.destroy();
   tray = null;
@@ -984,7 +1040,6 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
     // A signal is not somebody choosing, so it is not asked a question.
     quitting = true;
-    stopVite();
     talk.dispose();
     void runner.stop(`the app was stopped by ${signal}`).finally(() => app.quit());
   });

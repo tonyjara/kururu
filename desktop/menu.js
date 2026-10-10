@@ -100,6 +100,9 @@ function menuTemplate(view) {
   } else {
     items.push({ id: "host", label: "○ pty host down — the next server starts one", enabled: false });
   }
+
+  // --- the checkout's vite -------------------------------------------------------
+  if (view.checkout && view.vite) items.push({ id: "vite", label: viteLine(view.vite), enabled: false });
   items.push({ type: "separator" });
 
   // --- actions ------------------------------------------------------------------
@@ -145,12 +148,19 @@ function menuTemplate(view) {
   }
   source.push({ type: "separator" });
   source.push({ id: "source-choose", label: "Choose a checkout…" });
-  if (view.checkout) source.push({ id: "rebuild-web", label: "Rebuild the web app", enabled: !view.building });
+  if (view.checkout) {
+    source.push({
+      id: "rebuild-web",
+      label: `Rebuild the web app for the phone${view.webStale ? " — behind web/src" : ""}`,
+      enabled: !view.building,
+    });
+  }
   items.push({ id: "source", label: "Run from", submenu: source });
 
   const logs = [
     { id: "log-lifecycle", label: "Restart log (lifecycle.log)" },
     { id: "log-server", label: "Server log (server.log)" },
+    ...(view.checkout ? [{ id: "log-vite", label: "Vite log (vite.log)" }] : []),
     { id: "log-host", label: "pty host log (ptyhost.log)" },
     { type: "separator" },
     { id: "log-reveal", label: "Show in Finder" },
@@ -172,6 +182,27 @@ function menuTemplate(view) {
   items.push({ type: "separator" });
   items.push({ id: "quit", label: "Quit Kururu" });
   return items;
+}
+
+/**
+ * The checkout's vite in one line. It is what the window and the pill are
+ * showing, so the line says that — and when it is not serving, what they show
+ * instead.
+ */
+function viteLine(vite) {
+  const port = `:${vite.port}`;
+  switch (vite.status) {
+    case "up":
+      return `● vite on ${port} — the window and the pill reload as web/ is saved`;
+    case "adopted":
+      return `● vite on ${port}, already running — the window and the pill reload as web/ is saved`;
+    case "starting":
+      return `○ vite starting on ${port}…`;
+    case "failed":
+      return `⚠ ${trim(vite.error ?? "vite stopped", 70)} — the window shows web/dist`;
+    default:
+      return "○ vite down — it starts with the server";
+  }
 }
 
 function trim(text, max) {

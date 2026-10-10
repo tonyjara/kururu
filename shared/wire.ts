@@ -39,7 +39,7 @@ import type { Action } from "./keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
 import type { LaunchSettings } from "./launchers";
 import type { OpenRouterStatus } from "./openrouter";
-import type { MissedReply, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "./voice";
+import type { MissedReply, OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "./voice";
 import type { MachineStatus } from "./machines";
 import type { WorkspaceDatabase } from "./databases";
 import type { NotifyEvent, NotifySettings } from "./notify";
@@ -416,6 +416,13 @@ export type ServerMessage =
    * played is not in it. See `Voice.review`.
    */
   | { type: "missed"; missed: MissedReply[] }
+  /**
+   * Your messages to Kuru, every profile's, in the order they reached the
+   * server — the other list behind the harness button, and the pill's word on
+   * whether the last one got through. Sent on connect and whenever one
+   * moves. See `outbox.ts`.
+   */
+  | { type: "outbox"; outbox: OutboxEntry[] }
   /** Raw pty output, exactly as it arrived, for a terminal this client is watching. */
   | { type: "output"; agentId: string; data: string }
   /**
@@ -1253,11 +1260,12 @@ export type ClientMessage =
   /** Fetch the speech model. Progress comes back as `voice` messages. */
   | { type: "download-voice-model" }
   /**
-   * This client is talking: from the talk key's press until its clip has
-   * been heard and delivered, or thrown away. The server holds every
-   * client's speech for as long as any one says so (`hush`), and forgets a
-   * client's say when its socket goes. Re-sent on a reconnect, on
-   * `looking`'s reasoning.
+   * This client is talking: from the talk key's press until the server has
+   * its clip on the disk, or the clip was thrown away. The server holds
+   * every client's speech for as long as any one says so (`hush`) — and for
+   * as long as a clip's words are on their way to Kuru, on the outbox's say —
+   * and forgets a client's say when its socket goes. Re-sent on a reconnect,
+   * on `looking`'s reasoning.
    */
   | { type: "talking"; talking: boolean }
   /**
@@ -1275,6 +1283,10 @@ export type ClientMessage =
   | { type: "play-missed"; profileId: string }
   /** Take a profile's missed replies off the list without hearing them: read is heard enough. */
   | { type: "clear-missed"; profileId: string }
+  /** Send a failed message of yours again: heard again if it has no words, handed to Kuru again if it has. */
+  | { type: "voice-resend"; id: string }
+  /** Take a failed message of yours off the list, and its audio off the disk. */
+  | { type: "voice-discard"; id: string }
   /**
    * The database viewer's three questions. Each names a database by the id
    * the server minted for it, never by a URL or a path, and the server reads

@@ -39,12 +39,25 @@
  * to its end, or let go before it (`api.speechHeld`, `api.speechPlayed`).
  * Whatever was cut off, dismissed or never loaded is on the list behind the
  * harness button's badge.
+ *
+ * **A clip is kept until the server has it, and then the server keeps it.**
+ * The moment the key comes up the clip is written to IndexedDB (`unsent.ts`)
+ * and sent under an id minted here; the server answers once it is on its
+ * disk, and only then is it dropped from this side. A server that is down
+ * or restarting is tried again, on a timer and on every reconnect, and a
+ * page reloaded in the meantime finds its clips and sends them on start. The
+ * id makes sending twice harmless. Past that point the clip is the outbox's
+ * (`server/src/outbox.ts`), and what this page knows of it comes back on the
+ * socket — which is also how the pill says whether the words got through
+ * while Kuru talks over the top of it, rather than losing that line to the
+ * first sentence of a reply.
  */
 import { useSyncExternalStore } from "react";
-import { CLIP_MIN_MS, CLIP_RATE, TAP_MS, downsample, encodeWav, type Heard, type SpeechChunk } from "../../shared/voice";
+import { CLIP_MIN_MS, CLIP_RATE, CLIP_ROLL_MS, TAP_MS, downsample, encodeWav, type OutboxEntry, type SpeechChunk } from "../../shared/voice";
 import type { TalkGesture } from "./desktop";
 import { audioOutput } from "./notify";
 import * as api from "./session";
+import { dropClip, keepClip, keptClips, type StoredClip } from "./unsent";
 
 export type VoicePhase = "idle" | "listening" | "sending" | "heard" | "speaking" | "error";
 
@@ -159,14 +172,16 @@ export function applyTalkGesture(gesture: TalkGesture): void {
 
 /** How long a heard sentence or an error stays on screen once nothing else is happening. */
 const LINGER_MS = 4000;
+/** …and a message of yours that did not get through, which is worth more than four seconds of anybody's attention. */
+const FAILED_LINGER_MS = 15_000;
 let linger: ReturnType<typeof setTimeout> | null = null;
 
-function settle(): void {
+function settle(ms = LINGER_MS): void {
   if (linger) clearTimeout(linger);
   linger = setTimeout(() => {
     linger = null;
     if (ui.phase === "heard" || ui.phase === "error") set({ ...IDLE });
-  }, LINGER_MS);
+  }, ms);
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +242,7 @@ async function open(): Promise<void> {
     return;
   }
   beginTalk();
+  setMine(null);
   set({ phase: "listening", level: 0, text: "", detail: "", toggled: false });
   opening = (async () => {
     try {
@@ -244,9 +260,17 @@ async function open(): Promise<void> {
       await ctx.audioWorklet.addModule(workletUrl);
       const node = new AudioWorkletNode(ctx, "kururu-pcm", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
       const chunks: Float32Array[] = [];
+      let held = 0;
       node.port.onmessage = (event: MessageEvent<Float32Array>) => {
         const block = event.data;
         chunks.push(block);
+        held += block.length;
+        // Five minutes in, what there is goes as a message of its own and the
+        // recording carries on into the next: a clip is never too long to send.
+        if ((held / ctx.sampleRate) * 1000 >= CLIP_ROLL_MS) {
+          held = 0;
+          void post(pcmOf(chunks.splice(0), ctx.sampleRate));
+        }
         // The worklet posts a block every few milliseconds; the meter wants
         // thirty frames a second, and React does not want more.
         const now = performance.now();
@@ -291,50 +315,228 @@ async function close(send: boolean): Promise<void> {
     return;
   }
   // Whoever took the recording ends the talk, once, however it goes — and
-  // not before the server has answered, because "until my message has been
-  // sent" is the hush's whole length.
+  // not before the server has the clip, so nothing plays in the gap between
+  // the key and the words being safe. From there the outbox holds Kuru quiet
+  // until they reach it.
   try {
     for (const track of rec.stream.getTracks()) track.stop();
     void rec.ctx.close().catch(() => {});
-    let length = 0;
-    for (const chunk of rec.chunks) length += chunk.length;
-    const samples = new Float32Array(length);
-    let at = 0;
-    for (const chunk of rec.chunks) {
-      samples.set(chunk, at);
-      at += chunk.length;
-    }
-    const pcm = downsample(samples, rec.rate, CLIP_RATE);
-    const ms = (pcm.length / CLIP_RATE) * 1000;
-    if (!send || ms < CLIP_MIN_MS) {
+    if (!send) {
       set({ ...IDLE });
       return;
     }
-    set({ phase: "sending", level: 0, text: "", detail: "", toggled: false });
-    try {
-      const heard = await api.hearClip(profileOf(), encodeWav(pcm, CLIP_RATE));
-      tell(heard);
-    } catch (err) {
-      set({ phase: "error", text: "Could not send the clip.", detail: err instanceof Error ? err.message : String(err) });
-      settle();
-    }
+    await post(pcmOf(rec.chunks, rec.rate));
   } finally {
     endTalk();
   }
 }
 
-/** What the server made of the clip, in the pill's words. */
-function tell(heard: Heard): void {
-  if (heard.outcome === "nothing") {
-    set({ phase: "error", text: "Nothing heard.", detail: "" });
-  } else if (heard.outcome === "failed") {
-    set({ phase: "error", text: heard.text ? `“${heard.text}”` : "Could not hear that.", detail: heard.why ?? "" });
-  } else {
-    const where =
-      heard.outcome === "typed" ? "Sent to Kuru." : heard.outcome === "held" ? "Kuru's terminal is busy; it will hear this next." : "Kuru is starting; it will hear this first.";
-    set({ phase: "heard", text: `“${heard.text}”`, detail: where });
+/** Samples at whatever rate the microphone gave, as one run at the clip's rate. */
+function pcmOf(chunks: readonly Float32Array[], rate: number): Float32Array {
+  let length = 0;
+  for (const chunk of chunks) length += chunk.length;
+  const samples = new Float32Array(length);
+  let at = 0;
+  for (const chunk of chunks) {
+    samples.set(chunk, at);
+    at += chunk.length;
   }
+  return downsample(samples, rate, CLIP_RATE);
+}
+
+/**
+ * A recording, as a message: kept, sent, and followed. Resolves once the
+ * server has it or the first try has failed — which is when the talk may end,
+ * the clip being safe either way.
+ */
+async function post(pcm: Float32Array): Promise<void> {
+  const ms = (pcm.length / CLIP_RATE) * 1000;
+  if (ms < CLIP_MIN_MS) {
+    if (ui.phase === "listening") set({ ...IDLE });
+    return;
+  }
+  const clip: StoredClip = { id: clipId(), profileId: profileOf(), at: Date.now(), ms, wav: encodeWav(pcm, CLIP_RATE) };
+  setMine(clip.id);
+  // A clip rolled over mid-recording leaves the pill listening.
+  if (!isListening()) set({ phase: "sending", level: 0, text: "", detail: "", toggled: false });
+  await hold(clip);
+}
+
+// ---------------------------------------------------------------------------
+// The clips the server has not taken yet
+// ---------------------------------------------------------------------------
+
+/** A clip on its way to the server, and how its last try went. */
+export interface Outgoing {
+  id: string;
+  profileId: string;
+  at: number;
+  ms: number;
+  /** Why the last try failed; null while the first is under way. */
+  error: string | null;
+}
+
+interface Sending {
+  clip: StoredClip;
+  error: string | null;
+  tries: number;
+  busy: boolean;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+/** How long after each failed try a clip is sent again. The last repeats: the server is down until it is not. */
+const RESEND_MS = [1000, 2000, 5000, 10_000, 30_000];
+
+const sending = new Map<string, Sending>();
+let outgoing: Outgoing[] = [];
+const outgoingListeners = new Set<() => void>();
+
+function told(): void {
+  outgoing = [...sending.values()].map(({ clip, error }) => ({ id: clip.id, profileId: clip.profileId, at: clip.at, ms: clip.ms, error }));
+  for (const listener of outgoingListeners) listener();
+}
+
+/** The clips this page holds that the server does not have yet — the "saving" end of your messages. */
+export function useOutgoing(): readonly Outgoing[] {
+  return useSyncExternalStore(
+    (listener) => {
+      outgoingListeners.add(listener);
+      return () => outgoingListeners.delete(listener);
+    },
+    () => outgoing,
+  );
+}
+
+/** Written down, then sent. A clip already held is not held twice: two pages of one origin both find it on start. */
+async function hold(clip: StoredClip): Promise<void> {
+  if (sending.has(clip.id)) return;
+  sending.set(clip.id, { clip, error: null, tries: 0, busy: false, timer: null });
+  told();
+  await keepClip(clip);
+  await ship(clip.id);
+}
+
+async function ship(id: string): Promise<void> {
+  const item = sending.get(id);
+  if (!item || item.busy) return;
+  if (item.timer) clearTimeout(item.timer);
+  item.timer = null;
+  item.busy = true;
+  try {
+    await api.sendClip(item.clip);
+    sending.delete(id);
+    void dropClip(id);
+    told();
+  } catch (err) {
+    item.tries++;
+    item.error = err instanceof Error ? err.message : String(err);
+    item.timer = setTimeout(() => void ship(id), RESEND_MS[Math.min(item.tries, RESEND_MS.length) - 1]!);
+    told();
+    if (mine === id) follow();
+  } finally {
+    item.busy = false;
+  }
+}
+
+/** An id for a clip, minted here so a retry is the same message. `randomUUID` wants a secure context, which a phone over the tailnet's http is not. */
+function clipId(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// ---------------------------------------------------------------------------
+// The last thing you said, as the pill tells it
+// ---------------------------------------------------------------------------
+
+/** This page's latest message, until the pill has said what became of it or is dismissed. */
+let mine: string | null = null;
+const mineListeners = new Set<() => void>();
+/** What the pill last said about it, so a broadcast that changes nothing about it says nothing again. */
+let mineSaid = "";
+/** The outbox as the server last sent it. */
+let lastOutbox: readonly OutboxEntry[] = [];
+
+function setMine(id: string | null): void {
+  mine = id;
+  mineSaid = "";
+  for (const listener of mineListeners) listener();
+}
+
+/** Which message is this page's latest, for the pill's line under Kuru's. */
+export function useMine(): string | null {
+  return useSyncExternalStore(
+    (listener) => {
+      mineListeners.add(listener);
+      return () => mineListeners.delete(listener);
+    },
+    () => mine,
+  );
+}
+
+/**
+ * The outbox moved: if this page's latest message did, the pill says so. Not
+ * over the microphone or over Kuru — the pill draws a line of its own for it
+ * then, from the same list — and only on a change, so every broadcast is not
+ * a fresh four seconds on screen. Getting through is said once; not getting
+ * through stays up longer, and brings the pill back if it had gone.
+ */
+function follow(): void {
+  if (!mine) return;
+  const entry = lastOutbox.find((e) => e.id === mine);
+  const unsent = sending.get(mine);
+  const said = entry ? `${entry.state}:${entry.typedAt ?? ""}:${entry.note ?? ""}` : unsent ? `unsent:${unsent.error ?? ""}` : "";
+  if (!said || said === mineSaid) return;
+  mineSaid = said;
+  if (ui.phase === "listening" || ui.phase === "speaking") return;
+  if (!entry) {
+    if (unsent?.error && ui.phase === "sending") {
+      set({ phase: "sending", text: "", detail: "" });
+    }
+    return;
+  }
+  if (entry.state === "transcribing") {
+    // Redrawn, since the pill's label reads the entry's note: "trying again".
+    if (ui.phase === "sending") set({ phase: "sending", text: "", detail: "" });
+    return;
+  }
+  if (entry.state === "failed") {
+    set({ phase: "error", text: "Your message did not get through.", detail: entry.note ?? "It is kept in your messages, behind the harness button." });
+    settle(FAILED_LINGER_MS);
+    return;
+  }
+  // Queued or delivered: said once, as the words and where they went.
+  if (ui.phase !== "sending" && ui.phase !== "heard") return;
+  set({ phase: "heard", text: `“${entry.text ?? ""}”`, detail: whereItWent(entry) });
   settle();
+}
+
+/** Where a message is, in the pill's words. */
+export function whereItWent(entry: OutboxEntry): string {
+  if (entry.state === "delivered") return "Kuru has it.";
+  if (entry.state === "failed") return entry.note ?? "Did not get through.";
+  if (entry.state === "transcribing") return entry.note ?? "Hearing…";
+  return entry.typedAt !== null ? "Sent to Kuru." : (entry.note ?? "Waiting for Kuru.");
+}
+
+/** Start following the outbox, and send whatever an earlier page left unsent. Called once, with `installSpeech`. */
+function installOutbox(): () => void {
+  const stopOutbox = api.onOutbox((outbox) => {
+    lastOutbox = outbox;
+    follow();
+  });
+  // Back from a dropped socket: whatever was waiting on a server goes now
+  // rather than at the end of its backoff.
+  const stopConnect = api.onConnect(() => {
+    for (const id of sending.keys()) void ship(id);
+  });
+  void keptClips().then((clips) => {
+    for (const clip of clips) void hold(clip);
+  });
+  return () => {
+    stopOutbox();
+    stopConnect();
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -541,9 +743,11 @@ export function installSpeech(): () => void {
       hushedByServer = on;
     });
   });
+  const stopOutbox = installOutbox();
   return () => {
     stopSpeech();
     stopHush();
+    stopOutbox();
   };
 }
 
@@ -683,5 +887,11 @@ export function dismissVoice(): void {
     clearTimeout(linger);
     linger = null;
   }
-  if (ui.phase === "heard" || ui.phase === "error") set({ ...IDLE });
+  // What became of your last message has been seen, or is waiting on a
+  // server that is not there and keeps trying without the pill; the list
+  // keeps it either way.
+  if (ui.phase === "heard" || ui.phase === "error" || ui.phase === "sending") {
+    setMine(null);
+    set({ ...IDLE });
+  }
 }

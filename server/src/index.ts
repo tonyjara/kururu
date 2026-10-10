@@ -89,7 +89,8 @@ import { readHead, repoAt } from "./git";
 import { pollUsage, usageSnapshot } from "./usage";
 import { clearOpenRouterKey, openRouterSnapshot, pollOpenRouter, setOpenRouterKey } from "./openrouter";
 import { Voice } from "./voice";
-import { CLIP_MAX_BYTES } from "../../shared/voice";
+import { Outbox, legacyHeard } from "./outbox";
+import { CLIP_MAX_BYTES, isClipId } from "../../shared/voice";
 import {
   addMachine,
   endSession,
@@ -407,6 +408,8 @@ let workspaces!: Workspaces;
 let harness!: Harness;
 /** Its ears and mouth, built beside it. See `voice.ts`. */
 let voice!: Voice;
+/** What you said, kept on the disk until Kuru has it. See `outbox.ts`. */
+let outbox!: Outbox;
 const clients = new Map<WebSocket, ClientState>();
 
 const state = {
@@ -1453,28 +1456,41 @@ function hooksFor(launcher: Launcher, profileId: string): string {
  * Hand a card to an agent: a terminal beside the board, running the chosen
  * launcher with the card as its first message.
  *
- * Only the workspace on screen, because a terminal is opened into a pane and
- * panes are only ever made in the active workspace — a board somebody is
- * pressing a robot on is the one they are looking at, and a stale client
- * naming another is refused rather than having an agent turn up somewhere it
- * cannot see. The focus is handed back to the board afterwards: the point of
- * handing work off is to carry on with the list, not to be taken to it.
+ * Any workspace of the profile on screen, not only the workspace on screen,
+ * because the profile's board draws every workspace's board over the window
+ * and a robot pressed there is pressed on a card somebody is looking at. The
+ * terminal goes into that workspace's layout, beside its board, and the screen
+ * stays where it is: the card's run line is the way to it. It used to refuse
+ * every workspace but the active one, when a workspace's board could only be
+ * seen in its own pane. On screen, the focus is handed back to the board
+ * afterwards: the point of handing work off is to carry on with the list, not
+ * to be taken to it.
  */
 async function runCard(workspaceId: string, cardId: string, launcherId: string): Promise<{ agentId: string }> {
-  if (workspaceId !== workspaces.activeWorkspace.id) throw new Error("that board is not on screen");
-  return runCardAt(workspaces.active.id, workspaceId, cardId, launcherId);
+  return runCardAt(workspaces.active.id, workspaceId, cardId, launcherId, true);
 }
 
 /**
  * The same, for a board that need not be on screen — the harness pressing the
  * robot on a workspace the user is not in. One difference, and it is on
- * purpose: a card's dev server is only started when the workspace is the one
- * on screen, because its terminal goes into a pane of whatever is on screen
- * and a server for a project you are not looking at, in a pane of the one you
- * are, is a surprise. The card's ↻ starts it when they get there.
+ * purpose: the harness's run starts a card's dev server only when the
+ * workspace is the one on screen, since nobody is looking at a card on any
+ * other and a server for a project you are not looking at is a process you
+ * did not ask for. The card's ↻ starts it when they get there. `shown` is the
+ * robot pressed on the profile's board, which is a card somebody *is* looking
+ * at whichever workspace it is in, and gets its server as the workspace's own
+ * board would — beside that workspace's board, never in the one on screen.
  */
-async function runCardAt(profileId: string, workspaceId: string, cardId: string, launcherId: string): Promise<{ agentId: string }> {
+async function runCardAt(
+  profileId: string,
+  workspaceId: string,
+  cardId: string,
+  launcherId: string,
+  shown = false,
+): Promise<{ agentId: string }> {
   const onScreen = profileId === workspaces.active.id && workspaceId === workspaces.activeWorkspace.id;
+  // `startDev` acts on the profile on screen, which a shown card's always is.
+  const seen = onScreen || (shown && profileId === workspaces.active.id);
   const workspace = workspaces.workspaceIn(profileId, workspaceId);
   if (!workspace) throw new Error("no such workspace");
   const found = workspaces.findCardIn(profileId, workspaceId, cardId);
@@ -1515,7 +1531,7 @@ async function runCardAt(profileId: string, workspaceId: string, cardId: string,
    * agree that it has, and it lives outside the worktree because a file in
    * there is an uncommitted change that would hold up the merge.
    */
-  const serve = onScreen && checkout && checkout.dev && !devOpen(found.card) ? { ...checkout, dev: checkout.dev } : null;
+  const serve = seen && checkout && checkout.dev && !devOpen(found.card) ? { ...checkout, dev: checkout.dev } : null;
   const ready = serve?.fresh && serve.setup ? join(tmpdir(), `kururu-setup-${cardId}-${Date.now()}`) : null;
   /*
    * The setup line runs in the agent's own terminal, ahead of it, rather than
@@ -1573,9 +1589,13 @@ async function runCardAt(profileId: string, workspaceId: string, cardId: string,
  * transcript is filed under the old path, so whether it finds it from the new
  * one is Claude's call, and the terminal is where it says so. The card goes
  * back to In progress, the same as any run, because it is being worked on.
+ * Any workspace of the profile on screen, for `runCard`'s reason.
  */
 async function resumeCard(workspaceId: string, cardId: string): Promise<{ agentId: string }> {
-  if (workspaceId !== workspaces.activeWorkspace.id) throw new Error("that board is not on screen");
+  const profileId = workspaces.active.id;
+  const workspace = workspaces.workspaceIn(profileId, workspaceId);
+  if (!workspace) throw new Error("no such workspace");
+  const onScreen = workspaceId === workspaces.activeWorkspace.id;
   const found = workspaces.findCard(workspaceId, cardId);
   if (!found) throw new Error("no such card");
   const run = found.card.run;
@@ -1586,14 +1606,17 @@ async function resumeCard(workspaceId: string, cardId: string): Promise<{ agentI
   const launcher = findLauncher(run.launcher);
   if (!launcher) throw new Error(`no such agent: ${run.launcher}`);
 
-  const boardPane = paneWithAgent(workspaces.activeWorkspace.layout, BOARD_TAB)?.id;
-  const target = workspaces.paneBesideBoard();
+  const boardPane = paneWithAgent(workspace.layout, BOARD_TAB)?.id;
+  const target = workspaces.paneBesideBoardIn(profileId, workspaceId);
   if (!target) throw new Error("nowhere to put the agent");
   const there = run.cwd && isDirectory(run.cwd) ? run.cwd : null;
-  const cwd = there ?? found.card.worktree?.root ?? (await cwdForNewTab(target));
+  const cwd = there ?? found.card.worktree?.root ?? (await cwdForPaneIn(profileId, workspaceId, target));
   const command = resumeCommand(launcher, launch, run.sessionId, there === null);
   if (!command) throw new Error("there is no conversation on this card to resume");
-  const agent = await openTerminal(target, { cwd, command: command + hooksFor(launcher, workspaces.active.id), kind: "agent" });
+  const options = { cwd, command: command + hooksFor(launcher, profileId), kind: "agent" as const };
+  const agent = onScreen
+    ? await openTerminal(target, options)
+    : await openTerminalAt(profileId, workspaceId, target, options);
   host.rename(agent.id, found.card.title.slice(0, 80));
   workspaces.editBoard(workspaceId, (board) =>
     startRun(board, cardId, {
@@ -1605,7 +1628,7 @@ async function resumeCard(workspaceId: string, cardId: string): Promise<{ agentI
       cwd: cwd ?? null,
     }),
   );
-  if (boardPane && workspaces.hasPane(boardPane)) workspaces.focusPane(boardPane);
+  if (onScreen && boardPane && workspaces.hasPane(boardPane)) workspaces.focusPane(boardPane);
   return { agentId: agent.id };
 }
 
@@ -1795,17 +1818,20 @@ async function mergeCard(workspaceId: string, cardId: string, resolve?: MergeRes
 
 /**
  * A shell in the card's worktree, beside the board — for whatever the four
- * verbs above do not cover. Only the workspace on screen, for `runCard`'s
- * reason: a terminal is opened into a pane, and panes are the active
- * workspace's.
+ * verbs above do not cover. Any workspace of the profile on screen, for
+ * `runCard`'s reason; off screen it lands beside that workspace's board, and
+ * the profile's board takes the person to it.
  */
 async function openWorktree(workspaceId: string, cardId: string): Promise<{ agentId: string }> {
-  if (workspaceId !== workspaces.activeWorkspace.id) throw new Error("that board is not on screen");
+  const profileId = workspaces.active.id;
   const { worktree } = worktreeOf(workspaceId, cardId);
   if (!worktreePresent(worktree.path)) throw new Error("the worktree is not there any more");
-  const target = workspaces.paneBesideBoard();
+  const target = workspaces.paneBesideBoardIn(profileId, workspaceId);
   if (!target) throw new Error("nowhere to put the terminal");
-  const agent = await openTerminal(target, { cwd: worktree.path });
+  const agent =
+    workspaceId === workspaces.activeWorkspace.id
+      ? await openTerminal(target, { cwd: worktree.path })
+      : await openTerminalAt(profileId, workspaceId, target, { cwd: worktree.path });
   return { agentId: agent.id };
 }
 
@@ -1841,19 +1867,23 @@ function devOpen(card: Card): boolean {
  * there has been one, the pane of the newest terminal in the workspace. Never
  * the board's own pane, since a new tab is shown and the board would be taken
  * away from somebody who pressed a robot on it; `paneBesideBoard` otherwise.
+ * The card's own workspace, which the profile's board means need not be the
+ * one on screen.
  */
-function devPane(): string | null {
-  const workspace = workspaces.activeWorkspace;
+function devPane(workspaceId: string): string | null {
+  const profileId = workspaces.active.id;
+  const workspace = workspaces.workspaceIn(profileId, workspaceId);
+  if (!workspace) return null;
   const layout = workspace.layout;
   const board = paneWithAgent(layout, BOARD_TAB);
   const servers = new Set((workspace.board?.cards ?? []).flatMap((card) => (card.dev?.agentId ? [card.dev.agentId] : [])));
-  const here = new Set(workspaces.agentsHere());
+  const here = new Set(workspaces.agentsInWorkspace(profileId, workspaceId));
   const newest = (ids: Set<string>) => host.agents.filter((agent) => ids.has(agent.id)).at(-1)?.id;
   for (const agentId of [newest(servers), newest(here)]) {
     const pane = agentId ? paneWithAgent(layout, agentId) : null;
     if (pane && pane.id !== board?.id && !showsDoc(pane)) return pane.id;
   }
-  return workspaces.paneBesideBoard();
+  return workspaces.paneBesideBoardIn(profileId, workspaceId);
 }
 
 /**
@@ -1873,7 +1903,8 @@ async function startDev(
   ready: string | null,
   pane?: string,
 ): Promise<{ agentId: string; port: number }> {
-  const target = pane && workspaces.hasPane(pane) ? pane : devPane();
+  const profileId = workspaces.active.id;
+  const target = pane && workspaces.hasPaneIn(profileId, workspaceId, pane) ? pane : devPane(workspaceId);
   if (!target) throw new Error("nowhere to put the dev server");
   // A worktree made before env files were copied in gets them here, on its
   // next start; one made since already has them and nothing is overwritten.
@@ -1882,11 +1913,11 @@ async function startDev(
   const wait = ready
     ? `echo 'waiting for the setup line in the agent’s terminal…'; until [ -e ${shellQuote(ready)} ]; do sleep 1; done; rm -f ${shellQuote(ready)}; `
     : "";
-  const agent = await openTerminal(target, {
-    cwd: worktree.path,
-    command: `${wait}export PORT=${port}; ${dev}`,
-    kind: "shell",
-  });
+  const options = { cwd: worktree.path, command: `${wait}export PORT=${port}; ${dev}`, kind: "shell" as const };
+  const agent =
+    workspaceId === workspaces.activeWorkspace.id
+      ? await openTerminal(target, options)
+      : await openTerminalAt(profileId, workspaceId, target, options);
   host.rename(agent.id, `dev · ${card.title}`.slice(0, 80));
   workspaces.editBoard(workspaceId, (board) => setDev(board, card.id, { agentId: agent.id, port }));
   return { agentId: agent.id, port };
@@ -1903,22 +1934,24 @@ function stopDev(workspaceId: string, cardId: string): void {
 /**
  * The card's ↻: end its dev server and start it again, in the pane it was in —
  * or start one for the first time, which is the same button on a card whose
- * server was never started or has been stopped. Only the workspace on screen,
- * for `runCard`'s reason, and only a card with a worktree and a project with
- * a dev line; the focus goes back to the board.
+ * server was never started or has been stopped. Any workspace of the profile
+ * on screen, for `runCard`'s reason, and only a card with a worktree and a
+ * project with a dev line; on screen, the focus goes back to the board.
  */
 async function restartDev(workspaceId: string, cardId: string): Promise<{ agentId: string; port: number }> {
-  if (workspaceId !== workspaces.activeWorkspace.id) throw new Error("that board is not on screen");
+  const workspace = workspaces.workspaceIn(workspaces.active.id, workspaceId);
+  if (!workspace) throw new Error("no such workspace");
+  const onScreen = workspaceId === workspaces.activeWorkspace.id;
   const { card, worktree } = worktreeOf(workspaceId, cardId);
   if (!worktreePresent(worktree.path)) throw new Error("the worktree is not there any more");
   const dev = projectSettingsFor(projects, worktree.root).dev;
   if (!dev) throw new Error("this project has no dev server line — Settings → Workspaces");
   const old = card.dev?.agentId;
-  const pane = old ? paneWithAgent(workspaces.activeWorkspace.layout, old)?.id : undefined;
+  const pane = old ? paneWithAgent(workspace.layout, old)?.id : undefined;
   stopDev(workspaceId, cardId);
-  const boardPane = paneWithAgent(workspaces.activeWorkspace.layout, BOARD_TAB)?.id;
+  const boardPane = paneWithAgent(workspace.layout, BOARD_TAB)?.id;
   const started = await startDev(workspaceId, card, worktree, dev, null, pane);
-  if (boardPane && workspaces.hasPane(boardPane)) workspaces.focusPane(boardPane);
+  if (onScreen && boardPane && workspaces.hasPane(boardPane)) workspaces.focusPane(boardPane);
   return started;
 }
 
@@ -3873,6 +3906,14 @@ function handleMessage(ws: WebSocket, raw: string): void {
       if (typeof msg.profileId === "string") voice.clear(msg.profileId);
       return;
 
+    case "voice-resend":
+      if (isClipId(msg.id)) outbox.resend(msg.id);
+      return;
+
+    case "voice-discard":
+      if (isClipId(msg.id)) outbox.discard(msg.id);
+      return;
+
     // --- the database viewer ----------------------------------------------
     // Each is a request, so a malformed one is answered rather than dropped: a
     // viewer left waiting on a reply that never comes is a spinner forever.
@@ -4027,7 +4068,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
     case "add-run-card":
       void replyAsync(ws, msg.id, async () => {
         if (typeof msg.launcher !== "string" || !findLauncher(msg.launcher)) throw new Error(`no such agent: ${String(msg.launcher)}`);
-        if (msg.workspaceId !== workspaces.activeWorkspace.id) throw new Error("that board is not on screen");
+        if (!workspaces.workspaceIn(workspaces.active.id, msg.workspaceId)) throw new Error("no such workspace");
         const cardId = mintCardId();
         workspaces.editBoard(msg.workspaceId, (board) =>
           addCard(board, { title: msg.title, body: msg.body, column: msg.column, isolate: msg.isolate }, cardId, Date.now()),
@@ -4312,6 +4353,32 @@ function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
       chunks.push(chunk);
     });
     req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+/** A clip past `CLIP_MAX_BYTES`, told apart so it can be answered as one. */
+class ClipTooLong extends Error {}
+
+/**
+ * A clip's body, read to its end even when it is past the cap, so the
+ * answer reaches a window still uploading. `readBody` destroys the request
+ * instead, which is right for a file nobody will look at the answer to, and
+ * was wrong here: a window told nothing but "connection reset" has nothing to
+ * tell the person who just spoke for two minutes.
+ */
+function readClip(req: IncomingMessage, limit: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size <= limit) chunks.push(chunk);
+    });
+    req.on("end", () => {
+      if (size > limit) reject(new ClipTooLong(`the clip is ${Math.round(size / 32_000)} s, past the ${Math.round(limit / 32_000)} s the server takes`));
+      else resolve(Buffer.concat(chunks));
+    });
     req.on("error", reject);
   });
 }
@@ -4622,6 +4689,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       // read aloud — the one place Kuru's turn ending is heard about.
       const spoken = harness.isHarness(agentId);
       if (spoken && parsed.report.status === "done") voice.spoke(spoken, (body as Record<string, unknown>).reply);
+      // A prompt Kuru took, which is how a message of yours is known to have
+      // arrived and not merely to have been typed. See `Outbox.prompted`.
+      if (spoken && parsed.report.message) outbox.prompted(spoken, parsed.report.message);
       /**
        * The host is told the status and the context; the message stops here.
        * It is the one part of a report that says something about the work rather
@@ -4725,10 +4795,16 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    */
   /**
    * The voice's two doors. A clip in: a WAV the window recorded, for the
-   * profile it names, answered with what was heard and where it went — see
-   * `voice.ts`. A sentence out: one chunk of an utterance the socket
-   * announced, which every client of the profile fetches once. Not cached,
-   * since an utterance id is never reused and a reply is nobody's to keep.
+   * profile it names, under the id the window minted for it, answered the
+   * moment it is on the disk with the outbox's record of it — see
+   * `outbox.ts` for the rest of its way to Kuru. A sentence out: one chunk
+   * of an utterance the socket announced, which every client of the profile
+   * fetches once. Not cached, since an utterance id is never reused and a
+   * reply is nobody's to keep.
+   *
+   * A clip past the cap is answered with 413 and why, after the body has
+   * been read to its end. It used to be refused by destroying the request,
+   * which the window saw as a dropped connection and nothing else.
    */
   if (url.pathname === "/api/voice/hear") {
     if (req.method !== "POST") {
@@ -4737,11 +4813,27 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
     const asked = url.searchParams.get("profile") ?? "";
     const profileId = workspaces.profile(asked) ? asked : workspaces.active.id;
+    const given = url.searchParams.get("id");
+    // A page from before the outbox sends no id, and its clip is still a message.
+    const id = isClipId(given) ? given : randomUUID();
+    const said = Number(url.searchParams.get("at"));
+    const at = Number.isFinite(said) && said > 0 ? said : Date.now();
+    let wav: Buffer;
     try {
-      const wav = await readBody(req, CLIP_MAX_BYTES);
-      json(res, await voice.hear(profileId, wav));
+      wav = await readClip(req, CLIP_MAX_BYTES);
     } catch (err) {
-      json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+      json(res, { error: err instanceof Error ? err.message : String(err) }, err instanceof ClipTooLong ? 413 : 400);
+      return;
+    }
+    try {
+      const entry = outbox.take(profileId, id, at, wav);
+      // A page from before the outbox holds the upload open for the words
+      // and reads them in the old shape; it gets both, once they are made.
+      if (isClipId(given)) json(res, { entry });
+      else json(res, { entry, ...legacyHeard(entry ? await outbox.firstPass(entry.id) : null) });
+    } catch (err) {
+      // Not on the disk is not taken: the window keeps it and sends again.
+      json(res, { error: `the clip could not be kept: ${err instanceof Error ? err.message : String(err)}` }, 500);
     }
     return;
   }
@@ -5324,6 +5416,7 @@ server.on("upgrade", (req, socket, head) => {
     send(ws, { type: "voice", voice: voice.status() });
     send(ws, voice.hush());
     send(ws, voice.missedMessage());
+    send(ws, outbox.message());
     // The first client through the door is also what starts the usage poll: it
     // is skipped while nothing is connected, so without this a freshly started
     // server would draw no bar for a minute.
@@ -5436,13 +5529,29 @@ async function attach(port: Port): Promise<void> {
     say: (profileId, text) => void voice.speak(profileId, text),
     replayMissed: (profileId) => voice.replay(profileId),
   });
-  voice = new Voice({ broadcast, deliver: (profileId, text) => harness.hear(profileId, text) });
+  voice = new Voice({ broadcast });
+  outbox = new Outbox({
+    broadcast,
+    transcribe: (path, ms) => voice.transcribe(path, ms),
+    deliver: (profileId, text, events) => harness.hear(profileId, text, events),
+    harness: (profileId) => {
+      const agentId = workspaces.profile(profileId)?.harness?.agentId;
+      const agent = agentId ? host.find(agentId) : undefined;
+      if (!agentId || !agent || agent.exited) return null;
+      return { agentId, status: agent.status, transcript: harness.transcriptOf(agentId) };
+    },
+    talk: (who, on) => voice.talk(who, on),
+  });
   for (const agentId of workspaces.allAgents()) {
     if (!live.has(agentId)) workspaces.removeTab(agentId);
   }
   // And which terminal each profile's harness is in, now that the dead tabs
   // are gone: a harness outlives a server restart, and its record must too.
   harness.adopt(live);
+  // Only now may words be handed to Kuru: before `adopt`, a harness that
+  // outlived the last server looks like none, and handing over would start a
+  // second one.
+  outbox.resume();
   // An agent the host has but no layout mentions would be running with nothing
   // pointing at it — put it somewhere rather than leave it unreachable.
   const placed = new Set(workspaces.allAgents());
@@ -5726,6 +5835,7 @@ export function shutdown(): Promise<void> {
     void closeDatabasePools();
     // The Kokoro process, so it goes now rather than when it notices.
     voice?.close();
+    outbox?.close();
     for (const ws of clients.keys()) {
       try { ws.terminate(); } catch { /* already gone */ }
     }

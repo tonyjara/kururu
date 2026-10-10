@@ -47,9 +47,13 @@ spellings that take the profile and workspace by id — `findCardIn`,
 `openTerminalAt`, `cwdForPaneIn`, `runCardAt`. The arrangement is still the
 server's; this only widens who may send a verb for it.
 
-One deliberate difference in `runCardAt`: a card's dev server is only started
-when its workspace is on screen, because the dev terminal goes into a pane of
-whatever *is* on screen. The card's ↻ starts it when the user gets there.
+One deliberate difference in `runCardAt`: the harness's run starts a card's dev
+server only when its workspace is on screen, since nobody is looking at a card
+anywhere else and a server for a project you are not looking at is a process you
+did not ask for. The card's ↻ starts it when the user gets there. A robot
+pressed on the profile's board, which draws any workspace's board over the
+window, passes `shown` and gets its server as the workspace's own board would —
+in a pane of *that* workspace (`devPane(workspaceId)`), never the one on screen.
 
 ## The tools
 

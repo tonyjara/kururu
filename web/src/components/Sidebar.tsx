@@ -59,7 +59,7 @@ import {
   runway,
   type OpenRouterReading,
 } from "../../../shared/openrouter";
-import type { MissedReply } from "../../../shared/voice";
+import type { MissedReply, OutboxEntry } from "../../../shared/voice";
 import { colorValue, colorValues } from "../colors";
 import { AGENT_MIME, GROUP_MIME, WORKSPACE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
 import type { Action } from "../keys";
@@ -71,6 +71,8 @@ import { limitLabel, limitMarks, limitTitle, resetIn, staleTitle } from "../usag
 import { Menu, Popover, type MenuItem } from "./Menu";
 import type { DialogState } from "./Dialog";
 import { Icon } from "./Icon";
+import { MicIcon, SpeakerIcon } from "./VoiceIcons";
+import { useOutgoing, useVoiceUi, voiceIsRemote, type Outgoing } from "../voice";
 import { Mascot, Status } from "./Status";
 
 /**
@@ -199,12 +201,18 @@ export function Sidebar({
    * the sidebar draws, and passing it through the app would mean two components
    * knowing about it so that one of them could forget.
    */
-  const { branches, databases, machines, missed } = useKururu();
+  const { branches, databases, machines, missed, outbox } = useKururu();
   const heads = new Map(branches.map((head) => [head.workspaceId, head] as const));
   /** Kuru's replies in this profile that nobody played to their end — the harness button's badge. See `Voice.review`. */
   const missedHere = missed.filter((reply) => reply.profileId === profile.id);
-  /** Where the list behind that badge is open. */
-  const [missedAt, setMissedAt] = useState<{ x: number; y: number } | null>(null);
+  /** Your messages to Kuru in this profile, newest first: the server's, and the ones this page has not got to it yet. See `outbox.ts`. */
+  const outgoing = useOutgoing();
+  const talk = useVoiceUi();
+  const saidHere = mineIn(profile.id, outbox, outgoing);
+  const failedHere = saidHere.filter((m) => m.state === "failed").length;
+  const movingHere = saidHere.some((m) => m.state !== "delivered" && m.state !== "failed");
+  /** Where the lists behind those badges are open, and which was asked for — it goes first. */
+  const [missedAt, setMissedAt] = useState<{ x: number; y: number; first: "mine" | "missed" } | null>(null);
   const dbCount = new Map<string, number>();
   for (const db of databases) dbCount.set(db.workspaceId, (dbCount.get(db.workspaceId) ?? 0) + 1);
   /**
@@ -826,12 +834,30 @@ export function Sidebar({
               className="profile-missed"
               onClick={(event) => {
                 const box = event.currentTarget.getBoundingClientRect();
-                setMissedAt({ x: box.left, y: box.bottom + 4 });
+                setMissedAt({ x: box.left, y: box.bottom + 4, first: "missed" });
               }}
               title={`${missedHere.length} ${missedHere.length === 1 ? "reply" : "replies"} from Kuru you did not hear`}
               aria-label={`${missedHere.length} missed ${missedHere.length === 1 ? "reply" : "replies"}`}
             >
               {missedHere.length}
+            </button>
+          )}
+          {/* Your messages to Kuru, on the other corner: the other way round
+              from the badge above it, and drawn so. A count only when some
+              did not get through, since that is the one you act on; a dot
+              while one is on its way, and a quiet one once they all arrived,
+              so the list is always a click away to see that one did. */}
+          {saidHere.length > 0 && (
+            <button
+              className={`profile-said${failedHere ? " profile-said-failed" : movingHere ? " profile-said-moving" : ""}`}
+              onClick={(event) => {
+                const box = event.currentTarget.getBoundingClientRect();
+                setMissedAt({ x: box.left, y: box.bottom + 4, first: "mine" });
+              }}
+              title={saidTitle(saidHere)}
+              aria-label={`Your messages to Kuru: ${saidTitle(saidHere)}`}
+            >
+              {failedHere > 0 ? failedHere : ""}
             </button>
           )}
         </span>
@@ -1342,9 +1368,12 @@ export function Sidebar({
         />
       )}
 
-      {missedAt && missedHere.length > 0 && (
-        <MissedList
+      {missedAt && (missedHere.length > 0 || saidHere.length > 0) && (
+        <VoiceLists
           at={missedAt}
+          first={missedAt.first}
+          mine={saidHere}
+          recording={talk.phase === "listening" && !voiceIsRemote()}
           replies={missedHere}
           onPlay={() => {
             api.playMissed(profile.id);
@@ -1408,34 +1437,135 @@ export function Sidebar({
 }
 
 /**
- * What Kuru said that nobody heard to the end, to read or to hear again.
- *
- * Both, because the two are for different moments: at a desk you read four
- * replies faster than they are said, and with your eyes on something else you
- * want them said. "Play" says them in order, each starting "Earlier", and
- * each leaves the list once it is heard to its end — the same thing asking
- * Kuru "what did I miss?" does through its `play_missed` tool. "Clear" is
- * having read them. Opening the list is not, since a glance is not reading.
+ * One of your messages as the list draws it: the outbox's, or a clip this
+ * page holds that the server has not taken yet (`saving`).
  */
-function MissedList({
+type Mine = Omit<OutboxEntry, "state"> & { state: OutboxEntry["state"] | "saving" };
+
+/** A profile's messages, newest first, the server's record winning over this page's for a clip both know. */
+function mineIn(profileId: string, outbox: readonly OutboxEntry[], outgoing: readonly Outgoing[]): Mine[] {
+  const known = new Set(outbox.map((e) => e.id));
+  const pending: Mine[] = outgoing
+    .filter((c) => c.profileId === profileId && !known.has(c.id))
+    .map((c) => ({
+      id: c.id,
+      profileId: c.profileId,
+      at: c.at,
+      ms: c.ms,
+      state: "saving",
+      text: null,
+      lang: null,
+      typedAt: null,
+      note: c.error ? `Not with the server yet (${c.error}). Kept on this device and sent again until it is.` : null,
+    }));
+  return [...outbox.filter((e) => e.profileId === profileId), ...pending].sort((a, b) => b.at - a.at);
+}
+
+/** What the corner button says when hovered: how many arrived, how many are on their way, how many did not. */
+function saidTitle(mine: readonly Mine[]): string {
+  const count = (state: (m: Mine) => boolean) => mine.filter(state).length;
+  const parts = [
+    [count((m) => m.state === "failed"), "did not get through"],
+    [count((m) => m.state !== "delivered" && m.state !== "failed"), "on the way"],
+    [count((m) => m.state === "delivered"), "delivered"],
+  ] as const;
+  return parts.filter(([n]) => n > 0).map(([n, what]) => `${n} ${what}`).join(", ");
+}
+
+const MINE_LABEL: Record<Mine["state"], string> = {
+  saving: "Saving",
+  transcribing: "Transcribing",
+  queued: "Queued",
+  delivered: "Delivered",
+  failed: "Failed",
+};
+
+/**
+ * The two lists behind the harness button: what you said to Kuru, and what
+ * Kuru said that you did not hear. One box, because they are the two halves
+ * of one conversation and the question that opens either is "did that get
+ * through?" — but two sections, each headed by which way the words went and
+ * drawn with who said them, a microphone or a speaker, because the one thing
+ * that must not happen is a reply read as a message of yours or the other way
+ * round. Whichever badge was clicked goes first.
+ *
+ * **Your messages**, newest first, each with what became of it: recording,
+ * saving (not with the server yet, kept on this device), transcribing,
+ * queued (waiting for Kuru, or typed and waiting for it to take it),
+ * delivered, failed. A failed one can be sent again — heard again if it has
+ * no words, handed to Kuru again if it has — or discarded with its audio.
+ *
+ * **Kuru's replies you missed**, oldest first, to read or hear again. "Play"
+ * says them in order, each starting "Earlier", and each leaves the list once
+ * it is heard to its end — the same thing asking Kuru "what did I miss?"
+ * does through its `play_missed` tool. "Clear" is having read them. Opening
+ * the list is not, since a glance is not reading.
+ */
+function VoiceLists({
   at,
+  first,
+  mine,
+  recording,
   replies,
   onPlay,
   onClear,
   onClose,
 }: {
   at: { x: number; y: number };
+  first: "mine" | "missed";
+  mine: readonly Mine[];
+  recording: boolean;
   replies: readonly MissedReply[];
   onPlay: () => void;
   onClear: () => void;
   onClose: () => void;
 }) {
-  // Scrolling the list is scrolling, not a hint to close — unlike the
-  // right-click menu's backdrop, which closes on a scroll because the row it
-  // points at may have just moved under it.
-  return (
-    <Popover at={at} onClose={onClose} className="menu missed" role="dialog" closeOnScroll={false}>
-      <ol className="missed-list" aria-label="Replies you did not hear">
+  const said = (mine.length > 0 || recording) && (
+    <section className="voice-list voice-list-mine" aria-label="Your messages to Kuru">
+      <h3 className="voice-list-head">
+        <MicIcon />
+        <span>Your messages to Kuru</span>
+      </h3>
+      <ol className="missed-list">
+        {recording && (
+          <li className="missed-item said-item">
+            <span className="said-meta">
+              <span className="said-state said-state-recording">Recording</span>
+            </span>
+          </li>
+        )}
+        {mine.map((m) => (
+          <li key={m.id} className="missed-item said-item">
+            <span className="said-meta">
+              <span className={`said-state said-state-${m.state}`}>{MINE_LABEL[m.state]}</span>
+              <time className="missed-at" dateTime={new Date(m.at).toISOString()}>
+                {saidAt(m.at)} · {clipLength(m.ms)}
+              </time>
+            </span>
+            {m.text ? <span className="missed-text">{m.text}</span> : <span className="said-pending">Not in words yet — the audio is kept.</span>}
+            {m.note && m.state !== "delivered" && <span className="said-note">{m.note}</span>}
+            {m.state === "failed" && (
+              <span className="said-actions">
+                <button className="menu-item" onClick={() => api.resendVoice(m.id)}>
+                  <span className="menu-label">{m.text ? "Resend" : "Listen again"}</span>
+                </button>
+                <button className="menu-item" onClick={() => api.discardVoice(m.id)}>
+                  <span className="menu-label">Discard</span>
+                </button>
+              </span>
+            )}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+  const missed = replies.length > 0 && (
+    <section className="voice-list voice-list-missed" aria-label="Kuru's replies you did not hear">
+      <h3 className="voice-list-head">
+        <SpeakerIcon />
+        <span>Kuru's replies you didn't hear</span>
+      </h3>
+      <ol className="missed-list">
         {replies.map((reply) => (
           <li key={reply.id} className="missed-item">
             <time className="missed-at" dateTime={new Date(reply.at).toISOString()}>
@@ -1454,8 +1584,23 @@ function MissedList({
           <span className="menu-label">Clear</span>
         </button>
       </div>
+    </section>
+  );
+  // Scrolling the list is scrolling, not a hint to close — unlike the
+  // right-click menu's backdrop, which closes on a scroll because the row it
+  // points at may have just moved under it.
+  return (
+    <Popover at={at} onClose={onClose} className="menu missed" role="dialog" closeOnScroll={false}>
+      {first === "mine" ? said : missed}
+      {first === "mine" ? missed : said}
     </Popover>
   );
+}
+
+/** How long a clip runs, as a clock: 0:07, 4:32. */
+function clipLength(ms: number): string {
+  const s = Math.max(1, Math.round(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
 /** The time a reply was said: the clock today, and the day before that. */
