@@ -82,6 +82,36 @@ describe("Auto Swap on disk", () => {
 });
 
 /**
+ * Where a workspace's shells run is a preference like its colour, so it comes
+ * back as it was — and is read as a command line's ingredients are, since that
+ * is what it becomes. Removing the machine brings every workspace on it home.
+ */
+describe("a workspace's machine on disk", () => {
+  it("goes round the trip, and a folder a shell would read as code does not", () => {
+    const workspaces = new Workspaces();
+    const id = workspaces.activeWorkspace.id;
+    expect(workspaces.activeWorkspace.machine).toBeNull();
+    workspaces.setWorkspaceMachine(id, { machineId: "m1", dir: "~/code" });
+    writeSnapshot(workspaces.all(), workspaces.active.id);
+    expect(readSnapshot()!.profiles[0]!.workspaces[0]!.machine).toEqual({ machineId: "m1", dir: "~/code" });
+
+    const session = JSON.parse(readFileSync(snapshotPath(), "utf8"));
+    session.profiles[0].workspaces[0].machine.dir = "~/x; rm -rf ~";
+    writeFileSync(snapshotPath(), JSON.stringify(session));
+    expect(readSnapshot()!.profiles[0]!.workspaces[0]!.machine).toBeNull();
+  });
+
+  it("is let go of everywhere when the machine is removed", () => {
+    const workspaces = new Workspaces();
+    workspaces.setWorkspaceMachine(workspaces.activeWorkspace.id, { machineId: "m1", dir: "~" });
+    workspaces.newProfile("work");
+    workspaces.setWorkspaceMachine(workspaces.activeWorkspace.id, { machineId: "m2", dir: "~" });
+    workspaces.unpinMachine("m1");
+    expect(workspaces.all().map((p) => p.workspaces[0]!.machine?.machineId ?? null)).toEqual([null, "m2"]);
+  });
+});
+
+/**
  * The views a pane holds — the board and documents — come back in their order
  * and with the one that was showing still showing; the terminals beside them
  * do not, because they are processes. Both older shapes a reader has been

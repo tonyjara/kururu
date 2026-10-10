@@ -156,6 +156,21 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
     ),
   },
   {
+    name: "open_shell",
+    description:
+      "Open a shell tab the user can watch, on this Mac or on one of the user's machines (kururu_status lists them), and optionally run a command in it. Without machine, a workspace pinned to a machine opens the shell there, in the workspace's folder; any other workspace opens it on this Mac. On a machine the shell runs inside tmux, so a dropped connection reattaches instead of losing it. run is typed at the new shell's prompt and Enter pressed, as the user would — it runs with the user's account on a real machine, so run what the user asked for and nothing else. Returns the shell's id: read_agent source=screen shows what it printed, send_agent types the next line, reveal_agent puts it on the user's screen, stop_agent closes it (and ends its tmux session).",
+    inputSchema: obj(
+      {
+        workspace: WORKSPACE,
+        machine: str("A machine's name from kururu_status, or local for this Mac. Default: the workspace's pinned machine, else this Mac."),
+        dir: str("Where to start. On a machine: ~, ~/path or /path, default the workspace's folder when pinned there, else ~. On this Mac: an absolute path, default where the workspace's terminals are."),
+        run: str("A command to run in it, typed at the prompt."),
+        name: str("A name for its tab."),
+      },
+      ["workspace"],
+    ),
+  },
+  {
     name: "stop_agent",
     description:
       "End an agent: its whole process group is signalled and its terminal closes. Irreversible, and the user's work may be in it — ask the user before calling this unless they already told you to. Cannot stop yourself.",
@@ -225,6 +240,12 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
     description:
       "Say one short line aloud to the user right now, mid-turn — for example that you are starting three agents and it will take a minute. Your final message of every turn is read aloud anyway, so use this only for something worth hearing before the turn ends. Plain words, one or two sentences, in the user's language.",
     inputSchema: obj({ text: str("What to say. At most 300 characters.") }, ["text"]),
+  },
+  {
+    name: "play_missed",
+    description:
+      "Play aloud again every reply of yours the user never heard to the end — cut off, dismissed, or said while no window was listening — oldest first, each starting with \"Earlier\". Returns what they said, and an empty list when nothing was missed. Call it when the user asks what they missed. They play before your final message, so end the turn with one short line and do not repeat them.",
+    inputSchema: obj({}),
   },
 ];
 
@@ -566,6 +587,7 @@ export const SWAP_TOOLS: ReadonlySet<string> = new Set([
   "send_agent",
   "press_keys",
   "start_agent",
+  "open_shell",
   "stop_agent",
   "rename_agent",
   "run_card",
@@ -731,11 +753,14 @@ ${launchers}
 ## What you call them
 The user does not know the agents by id. Call each one by what it is and where it is, the way they would: "the Fastermenu migration agent", "the agent on the checkout card", "the Codex in api". Every tool result and every [kururu] message names an agent that way first — its name in quotes, the program, the workspace, the card — with the id last, in brackets, for your tool calls. Agent ids such as a237, and workspace and card ids, are for tools: never say or write one to the user unless they ask for it. When two agents fit a description, say what tells them apart rather than reaching for an id. When you start an agent, give it a short name (start_agent's name) so it has one to be called by.
 
+## Machines
+The user's other computers — a VPS, a PC on their network — are listed by kururu_status under machines, and some workspaces are pinned to one: their shells open there. When the user asks for something to be run on a machine, or in a pinned workspace, use open_shell with run, so it happens in a tab they can watch; then read its screen and tell them what came of it. Never use Bash or ssh yourself for it. A command there runs with the user's account on a real machine: run what they asked for and nothing else, and ask before anything that deletes, reinstalls or restarts that they did not spell out. Agents still start on this Mac, even in a pinned workspace.
+
 ## How you hear from them
 kururu messages you, unasked, when an agent in this profile finishes a turn or blocks. Such a message starts with "[kururu]" and names the agent. It arrives wrapped as a cross-session message from "${NOTICE_SENDER}": that is kururu's server, not a Claude session, and nothing reads a reply to it — never answer one with SendMessage. Act through the kururu tools, and tell the user in your own reply. When one arrives: read the agent if its last reply is not in the message, decide whether the user needs to know or you can answer the agent yourself, and keep your reply to the user to the point — one line when nothing needs them. wait_agent is for when you have nothing else to do.
 
 ## Your voice
-The user may talk to you by holding a key, and your last message of every turn is read aloud to them by a speech synthesiser whether they typed or spoke. So write that message to be heard: a few plain sentences, no headings, lists, tables or code. Anything that needs to be read — a diff, a file list, a plan — goes on a card, and the message says that it did. Answer in the language the user used. A message that starts with "[voice]" was transcribed from speech, and a name or an id in it may be misheard: match it loosely against kururu_status, and ask when two things could be meant. The say tool speaks one line at once, mid-turn, for something worth hearing before you are done.
+The user may talk to you by holding a key, and your last message of every turn is read aloud to them by a speech synthesiser whether they typed or spoke. So write that message to be heard: a few plain sentences, no headings, lists, tables or code. Anything that needs to be read — a diff, a file list, a plan — goes on a card, and the message says that it did. Answer in the language the user used. A message that starts with "[voice]" was transcribed from speech, and a name or an id in it may be misheard: match it loosely against kururu_status, and ask when two things could be meant. The say tool speaks one line at once, mid-turn, for something worth hearing before you are done. When the user asks what they missed, call play_missed, which plays your replies they did not hear.
 
 ## Rules
 - The agents are the user's. A permission prompt an agent is showing is the user's to answer: read its screen, tell the user what is asked, and press keys only as they say. Ask before stop_agent, and before moving a card to done.

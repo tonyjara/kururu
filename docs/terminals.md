@@ -225,6 +225,37 @@ text colour. `.term textarea { caret-color: transparent }`. ghostty's own
 `opacity: 0` is supposed to cover this and does in an isolated page, so if the
 rule ever looks redundant, that is why it is not.
 
+## The clipboard
+
+Text leaves a pane three ways, and which one applies depends on who has the
+mouse.
+
+- **Kururu's own selection.** A drag paints ghostty-web's selection, and
+  ghostty copies it on mouseup through `navigator.clipboard`. ⌘C and Edit →
+  Copy answer the `copy` event in `terminals.ts`, because the selection is a
+  picture on a canvas and the browser's own copy finds nothing selected.
+- **The program has the mouse.** When a program turns tracking on — tmux with
+  `mouse on`, nvim, a TUI — a drag is *reported* to it (`wirePointer`), and the
+  selection it paints is its own: cells on the screen, which kururu cannot
+  copy and ⌘C does not see. **Shift** takes the drag back for kururu's
+  selection, as in every terminal since xterm. It is read at mousedown only, so
+  a drag that started as the program's stays the program's until release.
+- **OSC 52.** The program copies its own selection by writing
+  `ESC ] 52 ; c ; <base64> BEL` to its terminal; tmux does it when it copies,
+  Claude Code does it beside its own copy, and over ssh it is the only route a
+  copy has to this Mac. ghostty-web parses the sequence and hands nothing back,
+  so `web/src/osc52.ts` reads it off the live stream and `copyFromProgram`
+  writes it. Only in the window with the focus, only for a terminal on screen,
+  never a query (`Pd = ?` would read the clipboard back up the pty to whoever
+  asked), and never an empty payload taken as "clear". Never from a backlog: a
+  serialized screen carries none, and a rebuild resets the scanner so a copy
+  cut off by the gap does not land later as garbage. The scanner keeps state
+  rather than a carry, because a copy is as long as the selection and gluing
+  each chunk onto a carry would be quadratic in it.
+
+On a phone over plain http there is no secure context and so no clipboard API:
+none of the three reaches a phone's clipboard until the phone is on `https`.
+
 ## Other
 
 - **`mouse.ts`: the mouse as the program in the pty sees it.** Selection and

@@ -23,9 +23,11 @@ nothing leaves the machine.
 | The words in | `Harness.hear` | Prefixed `[voice]` so Kuru knows a name may be misheard, and typed into its terminal with `now`, as `send_agent` types: a harness mid-turn hears it between tool calls, one showing a prompt or with your hands in its terminal hears it after. Typed and not posted to its inbox, because Claude Code makes everything on the inbox another session's message — see [harness](harness.md#speaking-into-a-running-agent) — and these are your words. Not running, it is started, and the words wait for its first hook report. |
 | The words out | `index.ts` `/api/report` → `Voice.spoke` | The harness's own Stop report carries `last_assistant_message`; when the reporter is a profile's harness, that reply is spoken. The role prompt tells Kuru its final message is heard, not read. The `say` tool speaks one line mid-turn. |
 | The mouth | `server/src/voice.ts` → `kokoro.ts`, or `say` | Kokoro-82M on the CPU through `kokoro-js`, in a process of its own that the server forks on the first sentence and kills with it, a sentence at a time, each announced on the socket as a `speech` chunk the moment it is ready. The Mac's own `say` voices are the fallback that needs nothing. |
-| The player | `web/src/voice.ts` | Fetches each chunk from `/api/speech` and plays them in order on the page's one `AudioContext` (`notify.ts`). The talk key cuts Kuru off, and so does the pill's ✕. |
-| The hush | `server/src/voice.ts` `talk`, `supersede` | Nothing plays while anybody talks — see [below](#never-over-you). |
-| The pill | `VoicePill.tsx` | A level meter and a line, over the panes, zen included. Says which gesture ends the recording, what was heard and where it went, what Kuru is saying. Dragged anywhere in the window by mouse or finger and drawn where this device left it (`web/src/place.ts`); a double click puts it back. Its ✕ is `dismissVoice`: Kuru stops mid-word and the rest of the reply is dropped, a clip being recorded is thrown away, words lingering go. |
+| The player | `web/src/voice.ts` | Fetches each chunk from `/api/speech` and plays them in order on the page's one `AudioContext` (`notify.ts`). The talk key cuts Kuru off, and so does the pill's ✕. Tells the server what became of each reply: held, each sentence played to its end, or let go before it. |
+| The hush | `server/src/voice.ts` `talk` | Nothing plays while anybody talks, and what waited plays after — see [below](#never-over-you). |
+| The missed list | `server/src/voice.ts` `review`, `replay` | Every reply nobody played to its end, kept as words in `~/.local/state/kururu/missed.json` — see [what you missed](#what-you-missed). |
+| The badge | `Sidebar.tsx` `MissedList` | The count on the harness button's corner, and the list behind it: read them, play them, or clear them. |
+| The pill | `VoicePill.tsx` | A level meter and a line, over the panes, zen included. Says which gesture ends the recording, what was heard and where it went, what Kuru is saying. Dragged anywhere in the window by mouse or finger and drawn where this device left it (`web/src/place.ts`); a double click puts it back. Its ✕ is `dismissVoice`: Kuru stops mid-word and the rest of the reply, and what was queued behind it, goes to the missed list; a clip being recorded is thrown away; words lingering go. |
 | The button | `StatusBar.tsx` `sb-mic` | The key for a thumb: held, it records; tapped, it toggles. How a phone talks. |
 
 ## Never over you
@@ -40,23 +42,74 @@ the window — and a sentence that arrives during the hush waits in the
 queue. Sentences go on being made, so what waited is ready when the hush
 lifts.
 
-What happens to it then depends on whether the words got through.
+When it lifts, **what waited plays, in the order it was said**, and every
+reply that waited starts with "While you were talking." ("Mientras
+hablabas." in Spanish) so it is not taken for the answer to what you just
+said. That answer is made after them — utterances are made one at a time,
+in order — so it plays after them and nothing overlaps. Whether the words
+got through makes no difference to this: a clip thrown away with Escape
+leaves the replies that came during it just as unheard.
 
-- **Delivered**, which is any of `typed`, `held` or `starting`: every reply
-  of that profile's harness made before the words went is **dropped**, and
-  the pill says "Dropped the reply it gave while you talked." Kuru is about
-  to answer what you just said with that reply in front of it, so hearing it
-  first is being talked over twice, and it would play ahead of the answer
-  you are waiting for. A superseded reply still being made is not made to
-  the end, which is what lets the new one start sooner. The text is in
-  Kuru's terminal. Another profile's harness was not spoken to and its
-  reply is not dropped.
-- **Not delivered** — Escape, the ✕, a clip too short, nothing heard, or a
-  failure: nothing was superseded, and what waited plays.
+The lead-in is decided at the last moment it can be, when a reply's first
+sentence is made and about to go out: the reply was said while somebody was
+talking, or somebody is talking now. It is its own short sentence, made in
+the reply's language and voice, a fraction of a second for two words.
 
-The count of dropped replies the pill gives is the ones nobody heard begin.
-A reply the press cut off was heard begin, and cutting it off was what the
-press was for.
+It used to be otherwise. Words that reached Kuru **dropped** every reply of
+its made before them, on the argument that Kuru would answer with that reply
+in front of it, so hearing it first was being talked over twice. The reply
+that was dropped said the Pasapy poster generator was done, and Kuru
+answering something else does not repeat news. The cost of keeping them is
+a few seconds before the answer starts; the cost of dropping them was
+finding out an hour later.
+
+What the press cut off, and what was queued behind it on that page, is not
+replayed after the hush: cutting it off was what the press was for. It goes
+to the missed list instead.
+
+## What you missed
+
+A reply that **nobody played to its end** is kept, as words, on a list per
+profile. Three ways onto it:
+
+- **Let go** — the pill's ✕, the talk key's press, or a sentence a page
+  could not fetch. A reply with a hole in it was not heard.
+- **Nobody listening** — no window or phone open, or none that could play
+  (no audio output, or the speech volume at zero). It is counted missed two
+  seconds after its last sentence is made, if nobody has taken it up.
+- **The server went** while it was being said, which under `bun run dev` is
+  every save: the page's next fetch finds a new server that never made it.
+
+The server decides, from what the pages tell it. A page says it **holds** a
+reply when the first sentence reaches it, says each sentence it **played**
+to its end, and says when it **let go** of one before its end
+(`speech-held`, `speech-played`). A reply whose last sentence somebody
+played was heard — the end and not every sentence, since a page that came
+in half way heard how it came out. One that everybody holding it let go is
+missed at once, and nothing more of it is made, which lets whatever is
+queued behind it start sooner. A page that never says anything — one from
+before this change, or one with nothing to play on — has no say, which is
+why a reply nobody holds is missed and not "probably heard".
+
+The list is in the state directory (`missed.json`) and every reply is
+written to it, pending, the moment it is said, so a server that dies with a
+reply in flight leaves that reply missed rather than forgotten. Each profile
+keeps its newest thirty (`MISSED_MAX`).
+
+**Getting them back.** The harness button in the sidebar carries the count
+on its corner; clicking the count opens the list, oldest first, with when
+each was said. **Play** says them again, each starting "Earlier." **Clear**
+takes them off unheard — read is heard enough; opening the list is not,
+since a glance is not reading. Saying (or typing) "what did I miss?" to
+Kuru does the same as Play: the role tells it to call `play_missed`, which
+queues them and hands their words back to it so it ends its turn with a
+line rather than a retelling. A replay heard to its end takes its reply off
+the list; one cut off leaves it there, and a replay is never put on the
+list itself.
+
+A running harness keeps the tools and role it was started with (see
+[harness](harness.md#gotchas)); `play_missed` is there from its next start.
+The badge works without it.
 
 ## Two languages
 
@@ -112,6 +165,43 @@ tailnet IP over plain http is not one. The Electron window loads
 behind the tailnet's https name — **that is the user's decision and is
 never run by kururu or by anybody working on it** (rule 4). Until then the
 button on the phone says why it did nothing.
+
+## The talk key everywhere
+
+Settings → Voice → **Talk key works in every app**, or the same switch in the
+tray. Hold the key in any application; the pill floats over whatever you are
+in; Kuru answers there. Off by default; the window's own key works as it
+always has.
+
+| piece | where | what |
+|---|---|---|
+| The hook | `desktop/talkkey/talkkey.swift` → `dist/talkkey` | A session-level, **listen-only** `CGEventTap`, in a process of its own on Kokoro's reasoning: started and stopped by the app, it costs a key and not a window when it dies. It maps the same `KeyboardEvent.code` names Settings stores to keycodes (and, for a modifier, to the device bit that tells the right key from the left), and writes one JSON line per event: `ready`, `denied`, `unsupported`, `down`, `up`, `escape`, `chord`. Built by `desktop/talkkey/build.mjs` (needs Xcode's `swiftc`; without it the menu says so and the key stays window-only). Listen-only is the whole permission story: **Input Monitoring**, asked once with the system prompt, and nothing else. |
+| The router | `desktop/talkkey.js` | Spawns the hook on the key the pill reports, restarts it on a new key, and sends its events to the pill's webContents and no other. Owns the panel. Pushes `{on, live, status, phase}` to every window. |
+| The pill | `web/src/components/Pill.tsx`, loaded at `/?pill` | The same web build with a different root: the session, the voice module and `VoicePill` in its `floating` form — no panes, no emulators, no notifications. Reports its phase, its size and the talk key over the bridge. |
+| The panel | `desktop/talkkey.js` `ensurePanel` | A frameless, transparent, non-activating panel kept on top of every space including full-screen apps, sized to the pill and shown while the pill has something to say. Never focusable, so a press over another app moves no focus. Dragging it is `-webkit-app-region: drag`, which moves the window; its spot is kept in `desktop.json`. |
+| The grammar | `web/src/voice.ts` `applyTalkGesture` | Hold, tap and Escape are the same three functions the DOM key handler calls, fed by the hook's `down` and `up` — written once. **Chord** is the one word the hook has that the window never needed: another key pressed during a hold is a shortcut for the application in front, so the clip is dropped and the release that follows is not a send. |
+| The fallback | `desktop/talkkey.js` `setAltSpace` | ⌥Space through `globalShortcut`, which needs no permission and sees no key-up, so it is a tap: once to open the microphone, again to send. Off by default, offered when the hook is denied. |
+
+**One voice client on this Mac.** While the hook is live the pill is the page
+that records, posts, plays and reports held and played. The main window's
+`voice.ts` is told so across the bridge (`setVoiceRemote`): its key handler
+stands down, its mic button and its Escape-while-listening are sent to the
+pill, and sentences it would have played are left to the pill — one microphone,
+one player, one state. That is also what keeps a key the hook *and* a focused
+window both saw from firing twice. The moment the hook is denied, missing or
+dies, the bridge flips and the window's handler is back, so the key never fires
+nowhere. The phone keeps its own button and is unchanged.
+
+Two honest edges. Escape is seen, not swallowed, so it also reaches the app in
+front; swallowing it would need an active tap and Accessibility, which is not
+asked for. And the permission is granted per bundle, so the dev shell
+(`brand.mjs` re-signs it as its own) is approved once and the installed app
+once.
+
+Unverified as of 0.2.0: the hook under the signed, notarized app (it is a bare
+Mach-O in `Resources/server`, as node-pty's `spawn-helper` already is), and
+`type: "panel"` over a full-screen application. Both were built and typecheck;
+neither has been pressed in a DMG.
 
 ## What it is not
 
@@ -196,7 +286,17 @@ button on the phone says why it did nothing.
   still talking says so again from `onopen`. A client that stays connected
   and never says it stopped is let go after three minutes (`TALK_MAX_MS`),
   past the longest clip the server would take.
-- **`superseded` counts from before the words go, not after.** A reply that
-  lands while `deliver` is typing may be the turn that took the words in.
+- **A page holds a reply once and lets it go once.** `held` in
+  `web/src/voice.ts` is what it has told the server it holds; letting go of
+  one it never held says nothing, so a ✕ pressed after a reply was played
+  out does not mark it missed. The server ignores letting go of a reply
+  already heard for the same reason.
+- **A missed reply is replayed from its words, not its audio.** The audio is
+  in the last two dozen utterances and gone after; the words are on the
+  disk. `speak` is told they are `spoken` already, because a second pass of
+  `spokenText` eats underscores the first one left in names.
+- **Reload the window after a change here.** A page from before this change
+  holds nothing and reports nothing, so every reply it plays looks unheard
+  to the server and lands on the list two seconds after it is made.
 - **`say` speaks at 22 kHz and Kokoro at 24.** Both are plain WAVs and the
   browser's decoder resamples; nothing here cares.

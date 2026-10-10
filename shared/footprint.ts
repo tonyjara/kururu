@@ -56,9 +56,47 @@ export interface FootprintProfile {
   workspaces: FootprintWorkspace[];
 }
 
+/**
+ * One nvim on this machine, wherever it is running.
+ *
+ * Every one and not only kururu's, because the tile this feeds is about what
+ * the machine is paying for: an nvim left open in another terminal app a week
+ * ago costs the same memory as one in a tab, and is the one nobody would
+ * otherwise find.
+ */
+export interface FootprintNvim {
+  /** `pid@start`. What the close buttons send back: a pid alone could be a different process by the time one is pressed. */
+  id: string;
+  pid: number;
+  /** As it was started — `nvim README.md`. */
+  args: string;
+  /** Resident set of its whole tree — the UI, the editor under it, its language servers — in bytes. */
+  rss: number;
+  processes: number;
+  cwd: string | null;
+  place: NvimPlace;
+}
+
+export type NvimPlace =
+  | {
+      kind: "kururu";
+      agentId: string;
+      /** The tab's name, as its strip shows it. */
+      tab: string;
+      workspace: string | null;
+      /** A tab kururu opened *as* nvim, which closes when its nvim does. A shell somebody typed nvim into stays. */
+      nvimTab: boolean;
+      /** Opened by an agent in that tab, as its editor. */
+      agent: boolean;
+    }
+  /** Outside kururu: the app at the top of its ancestry — `Ghostty`, `tmux`, `sshd` — or null when nothing is. */
+  | { kind: "outside"; app: string | null };
+
 export interface Footprint {
   measuredAt: number;
   terminals: FootprintTerminal[];
+  /** Every nvim on the machine, heaviest first. */
+  nvims: FootprintNvim[];
   profiles: FootprintProfile[];
   /** Terminals the host holds that no tab in any profile does. */
   unplaced: string[];
@@ -90,6 +128,33 @@ export function tally(terminals: readonly FootprintTerminal[]): FootprintTally {
     if (!t.exited && t.agents.length === 0 && t.editors === 0 && t.devServers.length === 0) out.shells++;
   }
   return out;
+}
+
+/** Where an nvim is, in a few words: `pasapy › zsh`, `Ghostty`, `an agent in kururu › claude`. */
+export function nvimWhere(place: NvimPlace): string {
+  if (place.kind === "outside") return place.app ?? "no terminal";
+  const tab = place.workspace ? `${place.workspace} › ${place.tab}` : place.tab;
+  return place.agent ? `an agent's editor, ${tab}` : tab;
+}
+
+/** An nvim that was asked to go and is still running, and why. */
+export interface NvimLeft {
+  /** `FootprintNvim.id`. */
+  id: string;
+  label: string;
+  /** The unsaved buffers when there are any, else the editor's refusal, else what kururu could not do. */
+  reason: string;
+}
+
+/**
+ * What `close-nvims` or `kill-nvims` did. Ending what `close-nvims` left is
+ * `kill-nvims`, asked for separately; what `kill-nvims` left cannot be ended
+ * from here at all.
+ */
+export interface NvimCloseReport {
+  /** How many went. */
+  closed: number;
+  left: NvimLeft[];
 }
 
 /** Agent programs by name, counted: `{ claude: 3, codex: 1 }`. */

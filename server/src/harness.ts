@@ -81,8 +81,10 @@ import {
   type When,
 } from "../../shared/harness";
 import { findLauncher, visibleLaunchers, withPrompt, type LaunchSettings, type Launcher } from "../../shared/launchers";
+import { remoteShellOf, validRemoteDir, type MachineEntry, type MachineStatus } from "../../shared/machines";
 import type { AgentSnapshot, AgentStatus, HarnessState } from "../../shared/model";
 import { isNotifyEvent } from "../../shared/notify";
+import type { MissedReply } from "../../shared/voice";
 import type { McpResult } from "./mcp";
 import type { HostLink } from "./hostlink";
 import type { Workspaces } from "./workspaces";
@@ -108,13 +110,22 @@ export interface HarnessDeps {
   claudeDir: (profileId: string) => string;
   /** A launcher's full command line as a terminal in that profile would get it: flags, hooks and all. */
   agentCommand: (launcher: Launcher, profileId: string) => string;
-  /** Open a terminal into a pane of a workspace that need not be on screen. */
+  /**
+   * Open a terminal into a pane of a workspace that need not be on screen. A
+   * plain shell in a pinned workspace opens on its machine unless `local`.
+   */
   openTerminal: (
     profileId: string,
     workspaceId: string,
     paneId: string,
-    options: { cwd?: string; command?: string; kind?: "agent" | "shell" },
+    options: { cwd?: string; command?: string; kind?: "agent" | "shell"; local?: boolean },
   ) => Promise<AgentSnapshot>;
+  /** The user's machines, with whether the last look at each got in. See `shared/machines.ts`. */
+  machines: () => readonly MachineStatus[];
+  /** The command line of a tmux-session shell on a machine, in the first free slot, typing `run` there. */
+  shellOn: (machine: MachineEntry, workspaceName: string, dir: string, run?: string) => string;
+  /** End a terminal, and the tmux session behind it when it is a shell on a machine. */
+  stopTerminal: (agentId: string) => void;
   /** Where a new tab in that pane would start. */
   cwdFor: (profileId: string, workspaceId: string, paneId: string) => Promise<string | undefined>;
   /** Hand a card to an agent, on a board that need not be on screen. */
@@ -123,6 +134,8 @@ export interface HarnessDeps {
   stopDev: (workspaceId: string, cardId: string) => void;
   /** Say a line aloud to the user, as this profile's harness. See `voice.ts`. */
   say: (profileId: string, text: string) => void;
+  /** Play the profile's missed replies again; what was queued. See `Voice.replay`. */
+  replayMissed: (profileId: string) => MissedReply[];
 }
 
 type WaitState = "done" | "blocked" | "exited";
@@ -144,6 +157,8 @@ interface Waiter {
 const TRANSCRIPT_TAIL = 512 * 1024;
 /** How long typing waits before Enter, so a paste has been taken in by the program before it is submitted. */
 const ENTER_DELAY_MS = 350;
+/** How long `open_shell` waits for a new local shell's first prompt before typing anyway. */
+const SHELL_DRAWN_MS = 5000;
 /** How long after a `send` to watch for the agent to leave `done`, so a wait right after does not catch the stale state. */
 const SEND_SETTLE_MS = 2000;
 /** The same throttle `notify.ts` applies to a person: one posting per agent per little while. */
@@ -608,10 +623,52 @@ export class Harness {
         return ok(`Started ${launcher.label} as ${this.name(started)}, in ${agent.cwd}. It is working on the prompt; wait_agent or a message from kururu will tell you when it finishes.${nameFor ? "" : " It has no name yet — rename_agent gives it one the user can call it by."}`);
       }
 
+      case "open_shell": {
+        const workspaceId = workspaceArg(true)!;
+        const workspace = ws.workspaceIn(profileId, workspaceId)!;
+        const pane = ws.paneBesideBoardIn(profileId, workspaceId);
+        if (!pane) return fail("Nowhere to put a terminal in that workspace.");
+        const machines = this.deps.machines();
+        const asked = str(args.machine).trim().toLowerCase();
+        const here = /^(local|this mac|mac|here|localhost)$/.test(asked);
+        const named = asked && !here ? machines.find((m) => [m.name, m.host, m.id].some((v) => v.toLowerCase() === asked)) : undefined;
+        if (asked && !here && !named) return fail(`No machine "${str(args.machine)}". kururu_status lists them under machines.`);
+        const pin = workspace.machine;
+        const pinned = pin ? machines.find((m) => m.id === pin.machineId) : undefined;
+        const machine = here ? undefined : (named ?? pinned);
+        const dir = str(args.dir).trim();
+        const run = str(args.run);
+        let agent: AgentSnapshot;
+        let where: string;
+        if (machine) {
+          // The workspace's own folder when it is the workspace's own machine;
+          // anywhere else, home, since a folder on one box means nothing on another.
+          const folder = validRemoteDir(dir || (pin && machine.id === pinned?.id ? pin.dir : "~"));
+          if (folder === null) return fail("dir on a machine is ~, ~/… or /…, in letters, digits, spaces and . _ - + @ , : = only.");
+          const command = this.deps.shellOn(machine, workspace.name, folder, run || undefined);
+          agent = await this.deps.openTerminal(profileId, workspaceId, pane, { command, kind: "shell" });
+          where = `on ${machine.name}, in ${folder} (tmux session ${remoteShellOf(command)?.session ?? "?"})`;
+        } else {
+          if (dir && !dir.startsWith("/")) return fail("On this Mac, dir must be an absolute path.");
+          agent = await this.deps.openTerminal(profileId, workspaceId, pane, { cwd: dir || undefined, kind: "shell", local: true });
+          where = `on this Mac, in ${agent.cwd}`;
+          if (run) {
+            await this.drawn(agent.id);
+            await this.speak(agent.id, run, "now");
+          }
+        }
+        const nameFor = str(args.name);
+        if (nameFor) this.deps.host.rename(agent.id, nameFor.slice(0, 80));
+        follow(agent.id);
+        const opened = this.deps.host.find(agent.id) ?? agent;
+        const said = run ? ` Ran: ${run.length > 160 ? `${run.slice(0, 159)}…` : run}.` : "";
+        return ok(`Opened ${this.name(opened)} ${where}.${said} read_agent source=screen shows what it prints; reveal_agent puts it in front of the user.`);
+      }
+
       case "stop_agent": {
         const agent = agentArg();
         if (agent.id === selfId) return fail("That is you. The user closes the harness from its tab.");
-        this.deps.host.kill(agent.id);
+        this.deps.stopTerminal(agent.id);
         return ok(`Ending ${this.name(agent)}. Its terminal closes once the process is gone.`);
       }
 
@@ -718,6 +775,15 @@ export class Harness {
         return ok("Said.");
       }
 
+      case "play_missed": {
+        // The words go back to the model as well as out of the speaker, so it
+        // knows what was just played and does not say it a third time.
+        const queued = this.deps.replayMissed(profileId);
+        if (!queued.length) return ok("Nothing was missed: every reply you gave was heard to the end, or is playing now.");
+        const lines = queued.map((entry) => `- ${new Date(entry.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}: ${entry.text}`);
+        return ok(`Playing ${queued.length} missed ${queued.length === 1 ? "reply" : "replies"}, oldest first:\n${lines.join("\n")}`);
+      }
+
       default:
         return fail(`No such tool: ${name}`);
     }
@@ -810,6 +876,25 @@ export class Harness {
   // ---------------------------------------------------------------------------
   // Reading
   // ---------------------------------------------------------------------------
+
+  /**
+   * Wait, a few seconds at most, for a shell that was just opened to draw
+   * something — its prompt, as a rule. Keys typed into a login shell still
+   * reading its rc files are the tty's to keep and are usually kept, but not
+   * by everything an rc file runs first, and a command that vanished would
+   * be reported as run. On a machine none of this is needed: the line is
+   * handed to tmux there, which types it once the session exists.
+   */
+  private async drawn(agentId: string): Promise<void> {
+    const until = Date.now() + SHELL_DRAWN_MS;
+    while (Date.now() < until) {
+      const agent = this.deps.host.find(agentId);
+      if (!agent || agent.exited) return;
+      const { cols, rows } = this.deps.grid(agentId);
+      if ((await screenText(await this.deps.host.backlog(agentId), cols, rows, rows)).trim()) return;
+      await sleep(200);
+    }
+  }
 
   private async screen(agent: AgentSnapshot, lines: number): Promise<string> {
     const data = await this.deps.host.backlog(agent.id);
@@ -906,7 +991,18 @@ export class Harness {
       const ids = ws.agentsInWorkspace(profileId, workspace.id).filter((id) => this.deps.host.isLive(id));
       const board = workspace.board;
       const counts = board ? ["todo", "doing", "review", "done"].map((c) => `${c} ${board.cards.filter((k) => k.column === c).length}`).join(", ") : "no board";
-      out.push(`  - ${workspace.name} (${workspace.id}) · ${ids.length} agent${ids.length === 1 ? "" : "s"} · ${counts}${workspace.id === profile.activeWorkspaceId ? " · on screen" : ""}`);
+      const pin = workspace.machine;
+      const machine = pin ? this.deps.machines().find((m) => m.id === pin.machineId) : undefined;
+      const runsOn = pin && machine ? ` · shells run on ${machine.name} in ${pin.dir}` : "";
+      out.push(`  - ${workspace.name} (${workspace.id}) · ${ids.length} agent${ids.length === 1 ? "" : "s"} · ${counts}${runsOn}${workspace.id === profile.activeWorkspaceId ? " · on screen" : ""}`);
+    }
+    // By name, which is what open_shell takes and what the user says.
+    const machines = this.deps.machines();
+    out.push("", "machines (open_shell opens a shell on one):");
+    if (!machines.length) out.push("  (none — the user adds them in Settings → Machines)");
+    for (const m of machines) {
+      const state = m.error ? `last look failed: ${m.error}` : m.reading ? "reachable" : "not looked at yet";
+      out.push(`  - ${m.name}${m.name === m.host ? "" : ` (ssh ${m.host})`} · ${state}`);
     }
     // Each agent by `name` — what it is, where, and the id last — because
     // this list is where the harness learns what to call them.
@@ -979,11 +1075,13 @@ export class Harness {
       if (running) card = { code: cardCode(w.name, running.number), title: running.title };
       break;
     }
+    // A shell on a machine says which, since "run it there" is what it is for.
+    const host = remoteShellOf(agent.command)?.host;
     return agentName({
       id: agent.id,
       name: agent.titleOverride || null,
       doing: agent.title || this.deps.activity.get(agent.id) || null,
-      program: agent.agent ?? agent.lastAgent ?? (agent.kind === "shell" ? "shell" : "agent"),
+      program: agent.agent ?? agent.lastAgent ?? (agent.kind === "shell" ? (host ? `shell on ${host}` : "shell") : "agent"),
       workspace,
       card,
     });

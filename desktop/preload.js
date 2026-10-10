@@ -101,5 +101,37 @@ if (isPicker) {
       download: () => ipcRenderer.send("kururu:update-download"),
       install: () => ipcRenderer.send("kururu:update-install"),
     },
+    /**
+     * The talk key everywhere, and the pill that floats over every app.
+     *
+     * Two pages use this and they are the same build. The window asks whether
+     * the native hook is on, is told when that changes, may switch it, and
+     * sends its own gestures — the mic button, Escape — to be acted on by the
+     * one page that holds the microphone while the hook is on. That page is
+     * the floating pill, loaded with `?pill`, which is the only webContents
+     * `onKey` ever delivers to and the only one `report` is accepted from;
+     * `main.js` checks the sender. A served page in the window can therefore
+     * switch the hook and talk through it, which is the same thing its mic
+     * button already does, and nothing more.
+     */
+    voice: {
+      global: () => ipcRenderer.invoke("kururu:voice-global"),
+      onGlobal: (listener) => {
+        const relay = (_event, state) => listener(state);
+        ipcRenderer.on("kururu:voice-global", relay);
+        return () => ipcRenderer.removeListener("kururu:voice-global", relay);
+      },
+      setGlobal: (on) => ipcRenderer.send("kururu:voice-set-global", on === true),
+      setAltSpace: (on) => ipcRenderer.send("kururu:voice-set-altspace", on === true),
+      gesture: (gesture) => ipcRenderer.send("kururu:voice-gesture", String(gesture)),
+      pause: (on) => ipcRenderer.send("kururu:voice-pause", on === true),
+      openInputMonitoring: () => ipcRenderer.send("kururu:voice-open-settings"),
+      onKey: (listener) => {
+        const relay = (_event, gesture) => listener(String(gesture));
+        ipcRenderer.on("kururu:talk", relay);
+        return () => ipcRenderer.removeListener("kururu:talk", relay);
+      },
+      report: (state) => ipcRenderer.send("kururu:pill", state),
+    },
   });
 }

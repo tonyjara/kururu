@@ -147,7 +147,8 @@ export type IconName =
   | "grip"
   | "panel"
   | "fold"
-  | "unfold";
+  | "unfold"
+  | "terminal";
 
 export type IconSet = Record<IconName, string>;
 
@@ -199,6 +200,8 @@ export const ICON_NAMES: readonly IconName[] = [
    */
   "fold",
   "unfold",
+  /** A shell on one of the user's machines, from its row in the sidebar. */
+  "terminal",
 ];
 
 /**
@@ -756,6 +759,8 @@ export const BASE_ICONS: IconSet = {
   /** Every group folded, and every group open: a tree view's own pair of boxes. */
   fold: "⊟",
   unfold: "⊞",
+  /** A prompt: what every terminal icon is, and what the user sees once it opens. */
+  terminal: "❯",
 };
 
 /**

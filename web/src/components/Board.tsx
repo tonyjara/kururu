@@ -734,7 +734,7 @@ function CardView({
     <>
       {insertBefore && <span className="board-insert" aria-hidden="true" />}
       <article
-        className={`board-card ${card.run ? `board-card-${card.run.state}` : ""} ${card.column === "done" ? "board-card-in-done" : ""}`}
+        className={`board-card ${card.run ? `board-card-${card.run.state}` : ""}`}
         draggable
         onDragStart={(event) => {
           event.dataTransfer.setData(CARD_MIME, card.id);

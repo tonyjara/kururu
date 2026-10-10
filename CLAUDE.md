@@ -48,6 +48,7 @@ agents.** Quitting the window does not. Restarting the server does not.
 |---|---|
 | `web/`, `desktop/` | a repaint — ⌘R, or `C-a R` (a `desktop/` change wants the window relaunched, which is free) |
 | `server/src/` *except* the row below | a reconnect — `C-a B`, or automatic under `bun run dev` |
+| `server/run.mjs` | nothing, until a runner is next started — the one running keeps the copy it loaded |
 | `server/src/agents/`, `ptyhostd.ts`, `ptyhost.ts`, `hostlink.ts`, `hostsock.ts` | **every agent the user is running** |
 
 So batch changes to the host, and say so before asking for one to be restarted. A
@@ -81,12 +82,16 @@ bun run kill-ptyhosts  # THE destructive one: ends every agent. --list to dry-ru
 bun run typecheck      # root tsconfig + web tsconfig
 bun test               # pure functions only — see docs/testing.md
 bun run schema         # publish the token and part vocabulary to ../kururu-styles
-bun run build          # web → web/dist, server → desktop/dist/*.mjs
+bun run build          # web → web/dist, server → desktop/dist/*.mjs, the talk-key hook → desktop/dist/talkkey
+bun run build:talkkey  # just the hook (Swift, through xcrun; skipped with a warning without Xcode)
 bun run dist           # signed, notarized DMG + zip. `dist:unsigned` for testing
 ```
 
 `dev` is the half that holds your agents; `dev:desktop` is a window onto it. Kill
-either and the agents carry on.
+either and the agents carry on. **The installed app needs no terminal:** its
+menu-bar frog runs `run.mjs` itself, from the app or from a checkout picked in
+the menu — see [architecture](docs/architecture.md#the-runner-and-the-menu-bar).
+A `bun run dev` already on 7717 is adopted, never fought.
 
 **Ports:** 7717 server · 5173 vite · 7800+ preview proxies.
 **Socket:** `~/.local/state/kururu/ptyhost.sock`, with `ptyhost.log` beside it —
@@ -188,11 +193,22 @@ The load-bearing invariants, one line each, with the argument behind the link:
   agent's `done`/`blocked` edge in its profile — never a shell's, and
   `blocked` only when Claude is asking. A permission prompt is the user's to
   answer, and the role says so. → [harness](docs/harness.md)
+- **A shell on another machine is a command line, never a host change.** A
+  machine is an ssh host the user named (Settings → Machines, `vps.json`); its
+  shell is `ssh -t` in an ordinary pty, built and read back by
+  `shared/machines.ts`, so the pty host never learns there is a remote. A
+  workspace pinned to one opens its *shells* there, each in a named tmux
+  session (`new -A` semantics); agents and everything that reads a disk stay
+  local. Closing a tab
+  ends its session; a dropped link, a detach or a host restart do not. Host and
+  folder are grammars, not escapes. → [machines](docs/machines.md)
 - **The voice is ears and a mouth around that session, not a second brain.**
   Speech becomes a `[voice]` turn typed into the harness's terminal; its last message
   becomes speech, off the same Stop report. No client plays a word while any client
-  is talking (`hush`), and words that reach Kuru drop the older replies that
-  waited. Both halves are local — Apple's
+  is talking (`hush`); the replies that waited play after, ahead of the answer,
+  each starting "While you were talking", and nothing is dropped — a reply nobody
+  played to its end is on the missed list behind the harness button, which the
+  clients' `speech-held`/`speech-played` reports decide. Both halves are local — Apple's
   recogniser through `yap`, Kokoro on the CPU with `say` as the fallback — and
   nothing leaves the machine. Kokoro runs in a process of its own
   (`server/src/kokoro.ts`) and is never imported into the server, because its
@@ -200,6 +216,21 @@ The load-bearing invariants, one line each, with the argument behind the link:
   a window only posts a WAV and plays one. `web/src/voice.ts` holds the
   microphone and installs the talk key once, through refs, never per render.
   → [voice](docs/voice.md)
+- **`server/run.mjs` is the one supervisor, and the app ships it.** The
+  menu-bar frog (`desktop/tray.js`) starts it from the app's Resources with
+  `--no-build --entry`, or from a checkout with `--watch`, on the app's own
+  binary as node; a server already on the port is adopted and never stopped.
+  A host restart goes *through the server* (`POST /api/host/restart`: SIGTERM
+  the socket's holder, exit 75 when the link drops) so either runner comes
+  back to a fresh host; the tray's dialog names the agent count and defaults
+  to no. Where the server runs from is `~/.config/kururu/desktop.json`.
+  → [architecture](docs/architecture.md#the-runner-and-the-menu-bar)
+- **While the talk key is hooked system-wide, the floating pill is the only
+  voice client on this Mac.** `desktop/talkkey/talkkey.swift` is a listen-only
+  event tap (Input Monitoring, nothing else) whose events go to the panel's
+  webContents and no other; the window's `voice.ts` forwards its gestures
+  there (`setVoiceRemote`) so a key both saw fires once. A chord — another
+  key during the hold — drops the clip. → [voice](docs/voice.md#the-talk-key-everywhere)
 
 ## Code style
 
@@ -232,8 +263,9 @@ Open, roughly in order — the argument for each is in `PLAN.md`:
 5. **The voice on the phone.** The voice is built (`docs/voice.md`) and the
    phone's button is there; what the phone lacks is a secure context for its
    microphone, which is `tailscale serve` and the user's decision. Also owed:
-   a verified DMG with the Kokoro stack in it, and the talk key system-wide
-   (a native key hook and Input Monitoring) rather than only in the window.
+   a verified DMG with the Kokoro stack and the talk-key hook in it — the
+   system-wide key and the floating pill are built (`docs/voice.md`) and
+   unpressed in a signed build.
 
 Smaller things owed: the Homebrew tap, and attributing a discovered dev server
 to the workspace that owns it — the machine-wide port scan still says nothing

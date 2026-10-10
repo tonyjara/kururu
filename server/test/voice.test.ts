@@ -7,7 +7,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_VOICE,
+  LEAD_INS,
+  MISSED_MAX,
+  adoptMissed,
   adoptVoice,
+  capMissed,
   clipMs,
   detectLanguage,
   downsample,
@@ -18,8 +22,9 @@ import {
   sentencesOf,
   spokenText,
   systemFallback,
+  type MissedReply,
 } from "../../shared/voice";
-import { modelPhonemes, superseded, type Utterance } from "../src/voice";
+import { fateOf, modelPhonemes, type Utterance } from "../src/voice";
 
 describe("parseSayVoices", () => {
   const listing = [
@@ -211,46 +216,99 @@ describe("modelPhonemes", () => {
   });
 });
 
-describe("superseded", () => {
-  const said = (n: number, patch: Partial<Utterance> = {}): Utterance => ({
-    id: `u${n}`,
-    n,
+describe("fateOf", () => {
+  const said = (patch: Partial<Utterance> = {}): Utterance => ({
+    id: "u1",
+    n: 1,
     profileId: "p1",
     quiet: false,
-    chunks: [Buffer.from("x")],
+    text: "The poster generator is done.",
+    lang: "en",
+    chunks: [Buffer.from("a"), Buffer.from("b")],
     at: 0,
-    heard: true,
-    stale: false,
+    during: false,
+    lead: null,
+    replays: null,
+    holders: new Set(),
+    played: new Set(),
+    dropped: false,
     done: true,
+    doneAt: 1_000,
+    fate: null,
     ...patch,
   });
+  const window = {};
+  const phone = {};
 
-  test("words to a harness supersede what it said before them, and nothing else", () => {
-    const { drop } = superseded(
-      [said(1), said(2, { profileId: "p2" }), said(3, { quiet: true, profileId: "" }), said(4, { stale: true }), said(5), said(6)],
-      "p1",
-      5,
-    );
-    // Not another profile's, not an audition, not what is already stale,
-    // and not a reply made while the words were being typed.
-    expect(drop).toEqual(["u1", "u5"]);
+  test("heard is the last sentence played to its end, by anybody", () => {
+    expect(fateOf(said({ played: new Set([0, 1]) }), 1_000)).toBe("heard");
+    // A page that came in half way and played out the rest heard how it ended.
+    expect(fateOf(said({ played: new Set([1]), dropped: true }), 1_000)).toBe("heard");
+    // Not before the last sentence is known to be the last.
+    expect(fateOf(said({ played: new Set([0, 1]), done: false, holders: new Set([window]) }), 1_000)).toBeNull();
   });
 
-  test("skipped is the replies nobody heard begin", () => {
-    const { drop, skipped } = superseded(
-      [
-        said(1),
-        // Came while the key was down: every sentence waited.
-        said(2, { heard: false }),
-        // Still being made when the words went.
-        said(3, { heard: false, done: false, chunks: [] }),
-        // Every sentence failed; there was never anything to hear.
-        said(4, { heard: false, chunks: [] }),
-      ],
-      "p1",
-      4,
-    );
-    expect(drop).toEqual(["u1", "u2", "u3", "u4"]);
-    expect(skipped).toBe(2);
+  test("let go by everybody who held it is missed at once", () => {
+    // The ✕ or the talk key, part way through and still being made.
+    expect(fateOf(said({ dropped: true, done: false, played: new Set([0]) }), 1_000)).toBe("missed");
+    // The window let it go and the phone is still playing it.
+    expect(fateOf(said({ dropped: true, holders: new Set([phone]) }), 1_000)).toBeNull();
+  });
+
+  test("held and not yet played out is neither, however long it waits", () => {
+    // Waiting out somebody's sentence, or behind a long reply.
+    expect(fateOf(said({ holders: new Set([window]) }), 1_000_000)).toBeNull();
+  });
+
+  test("nobody taking it up is missed once the grace has run", () => {
+    expect(fateOf(said(), 1_000)).toBeNull();
+    expect(fateOf(said(), 1_000 + 60_000)).toBe("missed");
+    // Still being made: a page may yet take it up.
+    expect(fateOf(said({ done: false }), 1_000 + 60_000)).toBeNull();
+    // Nothing of it could be made; its words are still worth reading.
+    expect(fateOf(said({ chunks: [] }), 1_000 + 60_000)).toBe("missed");
+  });
+
+  test("an audition is nobody's business", () => {
+    expect(fateOf(said({ quiet: true, dropped: true }), 1_000_000)).toBeNull();
+  });
+});
+
+describe("the missed list", () => {
+  const entry = (id: string, at: number, patch: Record<string, unknown> = {}) => ({ id, profileId: "p1", text: `reply ${id}`, lang: "en", at, ...patch });
+
+  test("adoptMissed keeps what is shaped like a reply and nothing else", () => {
+    const adopted = adoptMissed([
+      entry("u1", 10, { pending: true }),
+      entry("u2", 20, { lang: "es" }),
+      entry("u2", 30),
+      entry("u3", Number.NaN),
+      entry("u4", 40, { text: "   " }),
+      entry("u5", 50, { profileId: 7 }),
+      "nonsense",
+      null,
+    ]);
+    expect(adopted.map((r) => r.id)).toEqual(["u1", "u2"]);
+    expect(adopted[0]!.pending).toBe(true);
+    expect(adopted[1]).toEqual({ id: "u2", profileId: "p1", text: "reply u2", lang: "es", at: 20, pending: false });
+    expect(adoptMissed({ not: "a list" })).toEqual([]);
+  });
+
+  test("capMissed keeps each profile's newest, oldest first", () => {
+    const many = Array.from({ length: MISSED_MAX + 5 }, (_, i) => entry(`a${i}`, 1_000 - i));
+    const other = entry("b0", 1, { profileId: "p2" });
+    const kept = capMissed([...many, other] as MissedReply[]);
+    expect(kept.filter((r) => r.profileId === "p1")).toHaveLength(MISSED_MAX);
+    expect(kept[0]!.id).toBe("b0");
+    // The five oldest of p1 went.
+    expect(kept.some((r) => r.id === `a${MISSED_MAX + 4}`)).toBe(false);
+    expect(kept.at(-1)!.id).toBe("a0");
+  });
+
+  test("the lead-ins are in both languages", () => {
+    for (const lead of ["while", "earlier"] as const) {
+      expect(LEAD_INS[lead].en.length).toBeGreaterThan(0);
+      expect(LEAD_INS[lead].es.length).toBeGreaterThan(0);
+    }
   });
 });

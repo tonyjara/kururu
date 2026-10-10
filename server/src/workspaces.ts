@@ -26,6 +26,7 @@
  */
 import { adoptBoard, adoptProfileBoard, emptyBoard, emptyProfileBoard, noteRun, transferCard, type Board, type Card, type CardWorktree } from "../../shared/board";
 import { adoptHarness } from "../../shared/harness";
+import { adoptPin, type MachinePin } from "../../shared/machines";
 import type { HarnessState, Profile, ProfileSummary, Workspace, WorkspaceColor } from "../../shared/model";
 import { gatherGroups, groupName, workspaceUnits, isLoginKey, isWorkspaceColor, mintLoginKey, WORKSPACE_COLORS } from "../../shared/model";
 import {
@@ -196,6 +197,9 @@ function adopt(profile: Profile): Profile {
       // typed and runs name processes, and an older blob has neither.
       board: adoptBoard(workspace.board),
       layout: adoptBoardPanes(workspace.layout),
+      // Absent before workspaces could run on a machine, which is here. It
+      // becomes a command line, so it is read as `adoptPin` reads a file.
+      machine: adoptPin(workspace.machine),
     }))),
   };
 }
@@ -587,7 +591,13 @@ export class Workspaces {
     return terminalsOf(pane.agentIds);
   }
 
-  addTab(agentId: string, cwd: string, paneId = this.focusedPaneId): void {
+  /**
+   * `cwd` is what the pane will remember as its project, and is left out for
+   * a terminal on another machine: the directory ssh was started in here is
+   * not a project, and remembering it would hand the next tab and the file
+   * tree a `~` nobody chose.
+   */
+  addTab(agentId: string, cwd: string | undefined, paneId = this.focusedPaneId): void {
     this.mutateWorkspace(this.activeWorkspace.id, (w) => ({
       ...w,
       layout: addTab(w.layout, paneId, agentId, cwd),
@@ -1250,7 +1260,7 @@ export class Workspaces {
   }
 
   /** `addTab`, into a pane of a workspace that need not be on screen. */
-  addTabIn(profileId: string, workspaceId: string, paneId: string, agentId: string, cwd: string): void {
+  addTabIn(profileId: string, workspaceId: string, paneId: string, agentId: string, cwd: string | undefined): void {
     this.mutate(profileId, workspaceId, (w) => ({ ...w, layout: addTab(w.layout, paneId, agentId, cwd) }));
   }
 
@@ -1451,6 +1461,25 @@ export class Workspaces {
     this.mutate(this.activeId, workspaceId, (w) => ({ ...w, mascotId: id }));
   }
 
+  /**
+   * Send a workspace's shells to a machine, or home with null. The caller has
+   * checked the machine exists and the folder is one `validRemoteDir` takes;
+   * this only stores it, as `setWorkspaceMascot` stores an id it does not
+   * know the meaning of. Tabs already open stay where they are.
+   */
+  setWorkspaceMachine(workspaceId: string, pin: MachinePin | null): void {
+    this.mutate(this.activeId, workspaceId, (w) => ({ ...w, machine: pin }));
+  }
+
+  /** A machine has been removed: every workspace in every profile that ran on it now runs here. */
+  unpinMachine(machineId: string): void {
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) {
+        if (workspace.machine?.machineId === machineId) this.mutate(profile.id, workspace.id, (w) => ({ ...w, machine: null }));
+      }
+    }
+  }
+
   /** Deletes it and says what was inside. The last workspace cannot be deleted. */
   deleteWorkspace(workspaceId: string): string[] {
     const profile = this.active;
@@ -1622,6 +1651,7 @@ export class Workspaces {
       group: null,
       // Nobody has asked for one yet — see `Workspace.board`.
       board: null,
+      machine: null,
     };
   }
 

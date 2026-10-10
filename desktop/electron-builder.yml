@@ -37,11 +37,26 @@ files:
   - preload.js
   - connect.html
   - servers.js
+  - desktop.js
+  - runner.js
+  - menu.js
+  - tray.js
+  - talkkey.js
   - icon/icon-1024.png
+  - icon/trayTemplate.png
+  - icon/trayTemplate@2x.png
 
 extraResources:
+  # `dist` holds the server, the host, the hook report, Kokoro — and the
+  # talk-key hook, a bare Mach-O beside them. node-pty's `spawn-helper` is
+  # the precedent for a bare binary in Resources being signed and notarized
+  # with the rest; that it holds for this one is UNVERIFIED as of 0.2.0.
   - from: dist
     to: server
+  # The supervisor, so the app runs the same one `bun run dev` does. Plain
+  # JavaScript with no imports outside node, run on the app's own binary.
+  - from: ../server/run.mjs
+    to: server/run.mjs
   - from: ../web/dist
     to: web
   - from: ../assets

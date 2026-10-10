@@ -148,7 +148,31 @@ export function watchSupervisor(): void {
 
 /** The cheap half of the report, with no file read: `/api/health` is asked often. */
 export function lifeNow(): Omit<LifecycleReport, "events" | "file"> {
-  return { startedAt, because, supervised: supervised(), orphaned: supervisor !== null && !supervised() };
+  return { startedAt, because, supervised: supervised(), orphaned: supervisor !== null && !supervised(), supervisor };
+}
+
+/**
+ * Who is holding the host's socket, or null.
+ *
+ * For the one thing this server does to the host on purpose: asking it to
+ * stop so a new one can be started (`/api/host/restart`). Found by the
+ * socket and never by name, on `kill-hosts.mjs`'s argument, and the command
+ * line is a guard rather than the search: something else holding a file of
+ * that name is not a process to signal.
+ */
+export function socketHolder(path: string): number | null {
+  if (!existsSync(path)) return null;
+  try {
+    const first = execFileSync("lsof", ["-t", path], { encoding: "utf8", timeout: 2_000, stdio: ["ignore", "pipe", "ignore"] })
+      .trim()
+      .split("\n")[0];
+    const pid = Number(first);
+    if (!Number.isInteger(pid) || pid <= 0) return null;
+    const command = execFileSync("ps", ["-ww", "-o", "command=", "-p", String(pid)], { encoding: "utf8", timeout: 2_000 });
+    return command.includes("ptyhost") ? pid : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The last lines of the record, the older generation first so a fresh file still has a past. */

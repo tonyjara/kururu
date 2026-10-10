@@ -427,6 +427,46 @@ write("web/public/icon-512.png", icon(512, { bleed: true }));
 write("desktop/icon/icon-1024.png", icon(1024));
 
 /**
+ * The menu bar's, which is a different kind of picture.
+ *
+ * A macOS template image is black and alpha and nothing else: the system
+ * paints it for the menu bar it is in, light or dark, and tints it when the
+ * menu is open. So the frog becomes a silhouette — every pixel of the sprite
+ * that is not transparent, in black at the sprite's own alpha — with its
+ * lighter pixels (the eyes) cut out, which is the one detail that keeps a
+ * sixteen-pixel frog reading as a frog and not a bean. Eighteen points
+ * square at 1x and 2x, the sprite at a whole-number scale in each, because
+ * the menu bar is where a blurred pixel-art frog would be most visible.
+ * The `Template` suffix in the name is what tells AppKit to treat it so.
+ */
+function trayTemplate(size) {
+  const factor = Math.max(1, Math.floor((size - 2) / frog.width));
+  const sprite = scale(frog, factor);
+  const out = image(size, size);
+  const x = Math.round((size - sprite.width) / 2);
+  const y = Math.round((size - sprite.height) / 2);
+  for (let row = 0; row < sprite.height; row++) {
+    for (let column = 0; column < sprite.width; column++) {
+      const from = (row * sprite.width + column) * 4;
+      const alpha = sprite.data[from + 3];
+      if (alpha === 0) continue;
+      // The sprite's own highlights: anything brighter than mid-grey is a
+      // hole in the silhouette rather than a part of it.
+      const bright = (sprite.data[from] + sprite.data[from + 1] + sprite.data[from + 2]) / 3 > 140;
+      if (bright) continue;
+      const to = ((y + row) * size + (x + column)) * 4;
+      out.data[to] = 0;
+      out.data[to + 1] = 0;
+      out.data[to + 2] = 0;
+      out.data[to + 3] = alpha;
+    }
+  }
+  return out;
+}
+write("desktop/icon/trayTemplate.png", trayTemplate(18));
+write("desktop/icon/trayTemplate@2x.png", trayTemplate(36));
+
+/**
  * And the bundle's. `iconutil` ships with macOS and is the only thing that
  * writes a `.icns` anybody trusts, so the iconset is built as a directory and
  * handed to it — and removed again, because it is a hundred kilobytes of the

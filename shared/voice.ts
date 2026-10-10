@@ -589,10 +589,81 @@ export interface Heard {
    */
   outcome: "typed" | "held" | "starting" | "nothing" | "failed";
   why: string | null;
-  /**
-   * Replies of Kuru's these words superseded before a sentence of them was
-   * heard: they came while the key was down, and they answer something
-   * older than what was just said. They are dropped, and the pill says so.
-   */
-  skipped: number;
+}
+
+// ---------------------------------------------------------------------------
+// What was missed
+// ---------------------------------------------------------------------------
+
+/**
+ * What a reply that is not the newest thing Kuru said starts with, so it is
+ * not taken for the answer to what was just said. `while`: it was said, or
+ * came out, while somebody was talking, and waited. `earlier`: it is a
+ * missed reply played again, on asking.
+ */
+export type LeadIn = "while" | "earlier";
+
+export const LEAD_INS: Record<LeadIn, Record<VoiceLang, string>> = {
+  while: { en: "While you were talking.", es: "Mientras hablabas." },
+  earlier: { en: "Earlier.", es: "Antes." },
+};
+
+/** One reply of Kuru's that nobody played to its end. Text and not audio: it is spoken again from the words, in whatever voice is chosen then. */
+export interface MissedReply {
+  /** The utterance it was. */
+  id: string;
+  profileId: string;
+  /** As it would have been heard: `spokenText` of the reply. */
+  text: string;
+  lang: VoiceLang;
+  /** When it was said, epoch ms. */
+  at: number;
+}
+
+/** The most missed replies kept per profile. A day away is a few dozen; older than that is the transcript's to hold. */
+export const MISSED_MAX = 30;
+
+/**
+ * Missed replies from the disk, made whole: anything not shaped like one is
+ * dropped rather than trusted, and each profile keeps its newest
+ * `MISSED_MAX`. `pending` is kept as it was written, for the server to decide
+ * what a reply in flight when the last one died has become.
+ */
+export function adoptMissed(value: unknown): (MissedReply & { pending: boolean })[] {
+  if (!Array.isArray(value)) return [];
+  const out: (MissedReply & { pending: boolean })[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const r = raw as Record<string, unknown>;
+    if (typeof r.id !== "string" || !r.id || seen.has(r.id)) continue;
+    if (typeof r.profileId !== "string" || !r.profileId) continue;
+    if (typeof r.text !== "string" || !r.text.trim()) continue;
+    if (typeof r.at !== "number" || !Number.isFinite(r.at)) continue;
+    seen.add(r.id);
+    out.push({
+      id: r.id.slice(0, 80),
+      profileId: r.profileId.slice(0, 80),
+      text: r.text.slice(0, SPOKEN_MAX),
+      lang: r.lang === "es" ? "es" : "en",
+      at: r.at,
+      pending: r.pending === true,
+    });
+  }
+  return capMissed(out);
+}
+
+/** The newest `MISSED_MAX` of each profile, in the order they were said. */
+export function capMissed<T extends MissedReply>(list: readonly T[]): T[] {
+  const sorted = [...list].sort((a, b) => a.at - b.at);
+  const count = new Map<string, number>();
+  const kept: T[] = [];
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const entry = sorted[i]!;
+    const n = count.get(entry.profileId) ?? 0;
+    if (n >= MISSED_MAX) continue;
+    count.set(entry.profileId, n + 1);
+    kept.push(entry);
+  }
+  return kept.reverse();
 }

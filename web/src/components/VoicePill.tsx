@@ -21,8 +21,9 @@
  * and is drawn wherever this device last left it (`web/src/place.ts` says
  * why that is kept as a share of the window and not in pixels). A double
  * click puts it back. The ✕ is `dismissVoice`: Kuru stops mid-word and the
- * rest of the reply is dropped, which is what the talk key already does on
- * its way down, without opening a microphone to do it.
+ * rest of the reply, and anything queued behind it, goes to the missed list
+ * behind the harness button — which is what the talk key already does on its
+ * way down, without opening a microphone to do it.
  */
 import { useEffect, useRef, useState } from "react";
 import { adoptPlace, placeAt, type Place } from "../place";
@@ -55,7 +56,14 @@ interface Held {
   moved: boolean;
 }
 
-export function VoicePill() {
+/**
+ * `floating` is the pill as a window of its own (`Pill.tsx`): laid out in
+ * flow rather than fixed, so the page is exactly the pill and the main
+ * process can size the panel to it, and dragged by the window system rather
+ * than by the pointer logic below — a window has no room to be placed in
+ * but the screen, and the screen is the main process's.
+ */
+export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
   const ui = useVoiceUi();
   const [place, setPlace] = useState<Place | null>(storedPlace);
   const held = useRef<Held | null>(null);
@@ -122,20 +130,20 @@ export function VoicePill() {
 
   return (
     <div
-      className={`voice-pill voice-pill-${ui.phase}${place ? " voice-pill-placed" : ""}`}
-      style={place ? ({ "--pill-x": String(place.x), "--pill-y": String(place.y) } as React.CSSProperties) : undefined}
+      className={`voice-pill voice-pill-${ui.phase}${floating ? " voice-pill-floating" : place ? " voice-pill-placed" : ""}`}
+      style={!floating && place ? ({ "--pill-x": String(place.x), "--pill-y": String(place.y) } as React.CSSProperties) : undefined}
       role="status"
       aria-live="polite"
-      onPointerDown={grab}
-      onPointerMove={drag}
-      onPointerUp={drop}
-      onPointerCancel={drop}
+      onPointerDown={floating ? undefined : grab}
+      onPointerMove={floating ? undefined : drag}
+      onPointerUp={floating ? undefined : drop}
+      onPointerCancel={floating ? undefined : drop}
       /* The status bar's mic button's fix: a press here never takes the focus
          off the terminal that was being typed into — the ✕ included, since
          the default being prevented is the press's and it bubbles. */
       onMouseDown={(event) => event.preventDefault()}
       onDoubleClick={(event) => {
-        if (!onClose(event.target)) setPlace(null);
+        if (!floating && !onClose(event.target)) setPlace(null);
       }}
     >
       <span className="voice-meter" aria-hidden="true">

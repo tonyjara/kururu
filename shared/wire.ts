@@ -39,8 +39,8 @@ import type { Action } from "./keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
 import type { LaunchSettings } from "./launchers";
 import type { OpenRouterStatus } from "./openrouter";
-import type { SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "./voice";
-import type { VpsStatus } from "./vps";
+import type { MissedReply, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "./voice";
+import type { MachineStatus } from "./machines";
 import type { WorkspaceDatabase } from "./databases";
 import type { NotifyEvent, NotifySettings } from "./notify";
 import type { MergeResolution, ProjectSettings } from "./projects";
@@ -366,12 +366,13 @@ export type ServerMessage =
    */
   | { type: "usage"; usage: AccountUsage | null }
   /**
-   * Sent on connect, after every VPS poll, and whenever the list changes: every
-   * VPS the sidebar watches, with its last reading. Whole, like `branches` —
-   * there are a handful, and the list and the numbers travel together so the
-   * settings page and the sidebar can never disagree about which exist.
+   * Sent on connect, after every machine poll, and whenever the list changes:
+   * every machine the sidebar watches, with its last reading. Whole, like
+   * `branches` — there are a handful, and the list and the numbers travel
+   * together so the settings page and the sidebar can never disagree about
+   * which exist.
    */
-  | { type: "vps"; vps: VpsStatus[] }
+  | { type: "machines"; machines: MachineStatus[] }
   /**
    * Sent on connect and whenever the scan finds the list changed: every
    * database every workspace's env files name, with the password left out.
@@ -403,13 +404,18 @@ export type ServerMessage =
   /**
    * Somebody is talking to Kuru, on this client or any other, or nobody is
    * any more. While `hushed`, a client starts no sentence: what arrives
-   * waits, and going quiet cuts off what was playing, the way the talk key
-   * does on the client it was pressed on. `drop` is utterances that a clip
-   * just delivered has superseded, never to be played — see
-   * `Voice.supersede`. Sent on connect, so a client arriving mid-sentence
-   * is quiet too.
+   * waits, and plays once the hush lifts, and going quiet cuts off what was
+   * playing, the way the talk key does on the client it was pressed on.
+   * Sent on connect, so a client arriving mid-sentence is quiet too.
    */
-  | { type: "hush"; hushed: boolean; drop: string[] }
+  | { type: "hush"; hushed: boolean }
+  /**
+   * Kuru's replies that nobody played to their end, every profile's, oldest
+   * first — the count on the harness button and the list behind it. Sent on
+   * connect and whenever it changes. A reply still on its way to being
+   * played is not in it. See `Voice.review`.
+   */
+  | { type: "missed"; missed: MissedReply[] }
   /** Raw pty output, exactly as it arrived, for a terminal this client is watching. */
   | { type: "output"; agentId: string; data: string }
   /**
@@ -492,6 +498,10 @@ export type ClientMessage =
    * `nvim` is the same menu's plain-editor row: a shell that starts nvim and
    * drops back to the shell when it quits, built server-side for the reason
    * `launcher` is an id rather than a command string — see `shared/launchers.ts`.
+   *
+   * A plain shell in a workspace pinned to a machine opens on the machine —
+   * see `Workspace.machine`. `local` is the menu's "on this Mac" row, the one
+   * way to ask for a shell here in such a workspace.
    */
   | {
       type: "new-tab";
@@ -501,6 +511,7 @@ export type ClientMessage =
       command?: string;
       launcher?: string;
       nvim?: boolean;
+      local?: boolean;
       paneId?: string;
     }
   /**
@@ -692,6 +703,13 @@ export type ClientMessage =
    * default, which is what makes deleting a mascot need no cleanup.
    */
   | { type: "set-workspace-mascot"; workspaceId: string; mascotId: string | null }
+  /**
+   * Pin a workspace's shells to a machine and a folder on it, or `machineId:
+   * null` to bring them home. The machine is an id the server looks up and
+   * the folder goes through `validRemoteDir`, both because they end up in a
+   * command line; a refusal is the reply's error, said on the settings page.
+   */
+  | { type: "pin-workspace"; id: number; workspaceId: string; machineId: string | null; dir: string }
   /** Deletes it and ends everything in it. The last workspace cannot go. */
   | { type: "delete-workspace"; workspaceId: string }
   /**
@@ -923,6 +941,25 @@ export type ClientMessage =
    * agent id it went to.
    */
   | { type: "open-in-editor"; id: number; root: string; path: string; agentId: string | null }
+  /**
+   * Ask nvims to `:qa` — Settings → Processes' buttons, for any nvim on the
+   * machine, in kururu or not.
+   *
+   * `ids` are `FootprintNvim.id`s, pid and start time, from what the page
+   * showed when the person said yes, and the server ends nothing else: each is
+   * looked up again and must still be that process, and an nvim. Gentle and
+   * only gentle — an editor that refuses is reported and never signalled. A tab
+   * kururu opened as nvim closes after its nvim; a shell somebody typed nvim
+   * into stays. Replied to with `NvimCloseReport`.
+   */
+  | { type: "close-nvims"; id: number; ids: string[] }
+  /**
+   * End nvims that refused `close-nvims`: SIGTERM to each one's own process
+   * tree, then SIGKILL for what is still there. Always a second yes, asked for
+   * on its own button; the same checks on `ids`, and never a process group.
+   * Replied to with `NvimCloseReport`.
+   */
+  | { type: "kill-nvims"; id: number; ids: string[] }
 
   // --- the board -----------------------------------------------------------
   /**
@@ -1183,13 +1220,20 @@ export type ClientMessage =
    */
   | { type: "retire-worktrees"; id: number; root: string }
   /**
-   * Watch a VPS from the sidebar. `host` is an ssh destination and is the only
-   * thing here that reaches a command line — `shared/vps.ts` holds it to a
-   * grammar with no room for an option, and the command run on the far side is
-   * the server's own. Replied to with the new entry, or with why it was refused.
+   * Watch a machine from the sidebar. `host` is an ssh destination and is the
+   * only thing here that reaches a command line — `shared/machines.ts` holds
+   * it to a grammar with no room for an option, and the command run on the far
+   * side is the server's own. Replied to with the new entry, or with why it
+   * was refused.
    */
-  | { type: "add-vps"; id: number; name: string; host: string; panel: string }
-  | { type: "remove-vps"; vpsId: string }
+  | { type: "add-machine"; id: number; name: string; host: string; panel: string }
+  /** Stop watching it. Every workspace pinned to it comes home. */
+  | { type: "remove-machine"; machineId: string }
+  /**
+   * The machine row's shell button: a tab in the focused pane running
+   * `ssh -t <host>`. By id, so the host it runs is the one the server has.
+   */
+  | { type: "open-machine-shell"; id: number; machineId: string; paneId?: string }
   /**
    * Give the server an OpenRouter management key. The one message in the
    * protocol that carries a secret, and it only ever travels this way: it is
@@ -1216,6 +1260,21 @@ export type ClientMessage =
    * `looking`'s reasoning.
    */
   | { type: "talking"; talking: boolean }
+  /**
+   * What became of a reply on this client, which is how the server knows
+   * what was missed. `held`: its first sentence arrived and it will be
+   * played here, now or once the hush lifts. Not `held`: it was let go
+   * before its end — the ✕, the talk key, a sentence that would not load.
+   * A client that never says either is no say in it, so an old page or one
+   * with no speaker leaves a reply nobody holds, and that is missed.
+   */
+  | { type: "speech-held"; utterance: string; held: boolean }
+  /** One sentence of a reply played to its end here. The last one is the reply heard. */
+  | { type: "speech-played"; utterance: string; seq: number }
+  /** Play a profile's missed replies again, oldest first — the badge's list. */
+  | { type: "play-missed"; profileId: string }
+  /** Take a profile's missed replies off the list without hearing them: read is heard enough. */
+  | { type: "clear-missed"; profileId: string }
   /**
    * The database viewer's three questions. Each names a database by the id
    * the server minted for it, never by a URL or a path, and the server reads
@@ -1291,11 +1350,11 @@ export const GIT_STATUS_MS = 10_000;
 export const USAGE_POLL_MS = 60_000;
 
 /**
- * How often each VPS is sampled. Fifteen seconds because this one *is* read for
- * movement — a RAM bar climbing while a migration runs — and because each poll
- * is a channel on a connection ssh already holds open, not a handshake.
+ * How often each machine is sampled. Fifteen seconds because this one *is* read
+ * for movement — a RAM bar climbing while a migration runs — and because each
+ * poll is a channel on a connection ssh already holds open, not a handshake.
  */
-export const VPS_POLL_MS = 15_000;
+export const MACHINE_POLL_MS = 15_000;
 
 /**
  * How often the OpenRouter balance is asked for. The usage bar's minute, for

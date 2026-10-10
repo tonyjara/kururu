@@ -96,6 +96,7 @@ function within(path: string, dir: string): boolean {
 export function FileTree({
   workspaceId,
   project,
+  runsOn,
   current,
   overlay,
   onOpen,
@@ -108,6 +109,12 @@ export function FileTree({
   workspaceId: string;
   /** Where this workspace is, or null while the server has not said. */
   project: WorkspaceProject | null;
+  /**
+   * The machine this workspace's shells run on, or null for this Mac. The
+   * tree only ever reads this disk, so a pinned workspace with no terminal
+   * here has nothing to draw, and says why rather than waiting forever.
+   */
+  runsOn: string | null;
   /** The file the reader in this workspace is showing, to mark its row. */
   current: string | null;
   overlay: boolean;
@@ -629,7 +636,16 @@ export function FileTree({
         {...longPress(null)}
         {...dropInto("")}
       >
-        {root ? rows("", 0) : <p className="tree-note">Waiting for a terminal to say where this workspace is.</p>}
+        {root ? (
+          rows("", 0)
+        ) : runsOn ? (
+          <p className="tree-note">
+            This workspace's shells run on {runsOn}, and the tree only reads this Mac. A terminal opened here — the
+            + menu's "Terminal on this Mac" — gives it a folder to show.
+          </p>
+        ) : (
+          <p className="tree-note">Waiting for a terminal to say where this workspace is.</p>
+        )}
       </div>
       {!overlay && <Grip onResize={onResize} onReset={onResetWidth} />}
       {menu && <Menu at={menu.at} items={menuItems(menu.entry)} onClose={() => setMenu(null)} />}

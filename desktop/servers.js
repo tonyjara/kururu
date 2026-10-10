@@ -20,7 +20,8 @@ const { homedir } = require("node:os");
 const path = require("node:path");
 
 const FILE = "servers.json";
-const LOCAL = "http://127.0.0.1:7717";
+/** The port `main.js` reads, so an isolated instance looks for its own server and never adopts the real one. */
+const LOCAL = `http://127.0.0.1:${Number(process.env.KURURU_PORT) || 7717}`;
 
 function configDir() {
   return path.join(process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"), "kururu");

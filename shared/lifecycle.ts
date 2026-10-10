@@ -82,6 +82,12 @@ export interface LifecycleReport {
   supervised: boolean;
   /** It had a supervisor and lost it, which is a different thing from never having had one. */
   orphaned: boolean;
+  /**
+   * The supervisor's pid, as this server was born with it, or null when
+   * nothing started it. How the menu bar tells the server its own runner
+   * holds from one it found on the port and adopted.
+   */
+  supervisor: number | null;
   /** Oldest first, as the file has them. */
   events: LifeEvent[];
   file: string;

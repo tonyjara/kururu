@@ -146,6 +146,69 @@ Anything that would make `ptyhost.ts` need editing belongs on the server side.
   off its link. Hence `/api/agents`, and hence `status.mjs` saying "nobody can
   list the agents" when no server is up rather than inventing an answer.
 
+## The runner, and the menu bar
+
+`server/run.mjs` is the one supervisor, and the app ships it. It used to have a
+twin inside `desktop/main.js` — a fork of `server.mjs` with the restart-on-75
+half of `run.mjs` and none of the rest — and two supervisors written apart drift
+apart. Now the app runs `run.mjs` out of its own Resources with `--no-build
+--entry`, and a checkout runs it with `--watch`, and the record both write says
+`runner` either way. `SIGUSR2` is "cycle now", for a server that is down with
+no save coming to mend it.
+
+- **The tray is `bun run status` as a menu, with `run.mjs`'s verbs as items.**
+  `desktop/runner.js` starts the runner, probes `/api/health` every three
+  seconds, and reads `lifecycle.log` off the disk on each click — so the last
+  restart and why still answer while the server is away. `desktop/menu.js`
+  turns that into sentences and knows nothing about Electron, which is what
+  makes the sentences testable (`desktop/test/menu.test.js`). The live agent
+  count is the tray's title.
+- **A server already on the port is adopted, never stopped.** `lifeNow()`
+  reports the supervisor's pid, and the runner compares it with its own child's:
+  equal is ours, anything else is somebody's — usually `bun run dev` in a
+  terminal, which the menu names. An adopted server is openable and restartable
+  (through `POST /api/restart`, which its own runner honours) and its Stop item
+  says where to stop it. One that goes away is left down until somebody clicks
+  Start, because a `bun run dev` being restarted is the port race the rule
+  exists to lose gracefully.
+- **Restart works whoever supervises, and after a crash.** A server that
+  answers is asked over HTTP and exits 75. One that does not, under our runner,
+  gets SIGUSR2. Nothing at all is a start.
+- **A host restart goes through the server.** `POST /api/host/restart` has the
+  server find the socket's holder (`socketHolder`, the `lsof` and `ps` guard
+  `kill-hosts.mjs` uses), send SIGTERM, and when its link drops exit 75 instead
+  of 1 because it asked. Whichever runner is behind it starts a server, and that
+  server finds no host and starts one from its own bundle — so a checkout gets
+  the checkout's host and the app gets the app's, under `bun run dev` and under
+  the app alike. The dialog that names the agent count is the tray's; the
+  endpoint refuses when unsupervised, since it would end the host and then
+  itself with nothing to bring either back. It is the same trust level as
+  `kill-agent` repeated, and it is on loopback.
+- **Where the server runs from is the app's setting**, in
+  `~/.config/kururu/desktop.json` beside `servers.json`: this app or a checkout
+  path. From a checkout the runner is `run.mjs --watch` in that directory on
+  the app's own binary as node, so nothing needs node, bun or a terminal; the
+  checkout must have been `bun install`ed, which the menu checks and says. The
+  server serves the checkout's `web/dist`, which `bun run dev` never builds
+  (that is vite's job in `dev:desktop`), so `runner.js` runs the checkout's own
+  `vite build` first when it is missing or older than `web/src`, and offers
+  **Rebuild the web app**. The window stays the app's shell pointed at the
+  checkout's server, so a change under `desktop/` still wants `bun run
+  dev:desktop`.
+- **Closing the last window hides the dock icon and leaves the frog.** This
+  reverses the rule that quitting on the last window was honest because nothing
+  was running inside the app: now the frog says what is, and the server keeps
+  serving the phone. Quit is the tray's, or ⌘Q, through the dialog that says the
+  agents carry on. A second launch opens a window in the first
+  (`requestSingleInstanceLock`). The dev shell gets the tray too, defaulting to
+  its own checkout and starting a server only when asked; `KURURU_AUTOSTART=1`
+  makes it start as the app does, for an isolated instance.
+- **Open at login** is `app.setLoginItemSettings`, offered only to the installed
+  app. Opened that way there is no window: macOS says so in
+  `wasOpenedAtLogin`, and when it does not — SMAppService has not always — a
+  launch with the switch on inside the first three minutes of uptime is read
+  the same way.
+
 ## Access
 
 The socket binds **loopback**, and being reachable is a decision. A downloadable

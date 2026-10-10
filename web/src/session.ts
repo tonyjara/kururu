@@ -38,12 +38,13 @@ import type {
 } from "../../shared/wire";
 import type { BoardColumn, CardDates } from "../../shared/board";
 import type { DbCatalog, DbResult, DbRows, WorkspaceDatabase } from "../../shared/databases";
+import type { NvimCloseReport } from "../../shared/footprint";
 import type { LaunchSettings } from "../../shared/launchers";
 import type { MergeReply, MergeResolution, ProjectSettings, WorktreeOutcome, WorktreeStatus } from "../../shared/projects";
 import type { NotifySettings } from "../../shared/notify";
 import type { OpenRouterStatus } from "../../shared/openrouter";
-import type { Heard, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "../../shared/voice";
-import type { VpsEntry, VpsStatus } from "../../shared/vps";
+import type { Heard, MissedReply, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "../../shared/voice";
+import type { MachineEntry, MachinePin, MachineStatus } from "../../shared/machines";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { Grid } from "./grid";
 import { claimAccess } from "./access";
@@ -74,8 +75,8 @@ export interface KururuState {
    * sidebar draws neither, and only one of them is an answer.
    */
   usage: AccountUsage | null;
-  /** Every VPS the sidebar watches, with its last reading. See `shared/vps.ts`. */
-  vps: VpsStatus[];
+  /** Every machine the sidebar watches, with its last reading. See `shared/machines.ts`. */
+  machines: MachineStatus[];
   /** The OpenRouter account, or null when no key has been given. See `shared/openrouter.ts`. */
   openrouter: OpenRouterStatus | null;
   /**
@@ -86,6 +87,8 @@ export interface KururuState {
   databases: WorkspaceDatabase[];
   /** The voice: its settings, its programs, its model, its voices. Null until the server has said. See `shared/voice.ts`. */
   voice: VoiceStatus | null;
+  /** Kuru's replies nobody played to their end, every profile's, oldest first. The badge on the harness button. */
+  missed: MissedReply[];
 }
 
 const RETRY_MS = [200, 500, 1000, 2000, 4000];
@@ -97,10 +100,11 @@ let state: KururuState = {
   branches: [],
   projects: [],
   usage: null,
-  vps: [],
+  machines: [],
   openrouter: null,
   databases: [],
   voice: null,
+  missed: [],
 };
 
 const listeners = new Set<() => void>();
@@ -263,8 +267,8 @@ function connect(): void {
       case "usage":
         set({ usage: msg.usage });
         break;
-      case "vps":
-        set({ vps: msg.vps });
+      case "machines":
+        set({ machines: msg.machines });
         break;
       case "openrouter":
         set({ openrouter: msg.openrouter });
@@ -278,7 +282,10 @@ function connect(): void {
         if (speechListener) deliver(() => speechListener?.(msg.speech));
         break;
       case "hush":
-        if (hushListener) deliver(() => hushListener?.(msg.hushed === true, Array.isArray(msg.drop) ? msg.drop : []));
+        if (hushListener) deliver(() => hushListener?.(msg.hushed === true));
+        break;
+      case "missed":
+        set({ missed: Array.isArray(msg.missed) ? msg.missed : [] });
         break;
       case "databases":
         set({ databases: msg.databases });
@@ -333,7 +340,7 @@ function connect(): void {
     // The server that said somebody was talking is gone, and the next one
     // says again on connect. A hush nobody is left to lift would keep Kuru
     // quiet on this page for good.
-    if (hushListener) deliver(() => hushListener?.(false, []));
+    if (hushListener) deliver(() => hushListener?.(false));
     const delay = RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)]!;
     attempt++;
     setTimeout(connect, delay);
@@ -528,7 +535,7 @@ export function proposeSize(agentId: string, cols: number, rows: number): void {
  * not explain.
  */
 export function newTab(
-  options: { kind?: PtyKind; cwd?: string; command?: string; launcher?: string; nvim?: boolean; paneId?: string } = {},
+  options: { kind?: PtyKind; cwd?: string; command?: string; launcher?: string; nvim?: boolean; local?: boolean; paneId?: string } = {},
 ): Promise<string> {
   return request((id) => ({ type: "new-tab", id, ...options })).then(
     (result) => (result as { id: string }).id,
@@ -961,6 +968,19 @@ export function openInEditor(root: string, path: string, agentId: string | null)
 }
 
 /**
+ * Ask these nvims to `:qa` — any on the machine, by `FootprintNvim.id`. Waits,
+ * because the answer is which of them refused and why.
+ */
+export function closeNvims(ids: string[]): Promise<NvimCloseReport> {
+  return request((id) => ({ type: "close-nvims", id, ids })) as Promise<NvimCloseReport>;
+}
+
+/** End nvims that refused `closeNvims` — the second yes. SIGTERM, then SIGKILL. */
+export function killNvims(ids: string[]): Promise<NvimCloseReport> {
+  return request((id) => ({ type: "kill-nvims", id, ids })) as Promise<NvimCloseReport>;
+}
+
+/**
  * The mascots, and the keyboard. Fire-and-forget like every other verb: the
  * snapshot that comes back is the answer, so Settings never holds a config of
  * its own and a second window sees the change without being told.
@@ -1032,13 +1052,28 @@ export function setNotify(notify: NotifySettings): void {
   send({ type: "set-notify", notify });
 }
 
-/** Watch a VPS. Rejects with the server's sentence when the host is not one it will run. */
-export function addVps(name: string, host: string, panel: string): Promise<VpsEntry> {
-  return request((id) => ({ type: "add-vps", id, name, host, panel })) as Promise<VpsEntry>;
+/** Watch a machine. Rejects with the server's sentence when the host is not one it will run. */
+export function addMachine(name: string, host: string, panel: string): Promise<MachineEntry> {
+  return request((id) => ({ type: "add-machine", id, name, host, panel })) as Promise<MachineEntry>;
 }
 
-export function removeVps(vpsId: string): void {
-  send({ type: "remove-vps", vpsId });
+/** Stop watching it, which also brings home every workspace pinned to it. */
+export function removeMachine(machineId: string): void {
+  send({ type: "remove-machine", machineId });
+}
+
+/** The machine row's shell button: `ssh -t <host>` in a tab of the focused pane. */
+export function openMachineShell(machineId: string): Promise<string> {
+  return request((id) => ({ type: "open-machine-shell", id, machineId })).then((result) => (result as { id: string }).id);
+}
+
+/**
+ * Pin a workspace's shells to a machine and a folder there, or bring them home
+ * with `null`. Rejects with the server's sentence about a folder it will not
+ * put in a command line.
+ */
+export function pinWorkspace(workspaceId: string, machineId: string | null, dir: string): Promise<MachinePin | null> {
+  return request((id) => ({ type: "pin-workspace", id, workspaceId, machineId, dir })) as Promise<MachinePin | null>;
 }
 
 /** Hand the server an OpenRouter key. Rejects with OpenRouter's reason, in a sentence, when it is refused. */
@@ -1064,10 +1099,10 @@ export function onSpeech(listener: (chunk: SpeechChunk) => void): () => void {
   };
 }
 
-let hushListener: ((hushed: boolean, drop: string[]) => void) | null = null;
+let hushListener: ((hushed: boolean) => void) | null = null;
 
-/** Who holds speech while somebody talks, and throws away what was superseded. The player in `voice.ts`, like `onSpeech`. */
-export function onHush(listener: (hushed: boolean, drop: string[]) => void): () => void {
+/** Who holds speech while somebody talks. The player in `voice.ts`, like `onSpeech`. */
+export function onHush(listener: (hushed: boolean) => void): () => void {
   hushListener = listener;
   return () => {
     if (hushListener === listener) hushListener = null;
@@ -1086,6 +1121,30 @@ export function talking(on: boolean): void {
   if (on === amTalking) return;
   amTalking = on;
   send({ type: "talking", talking: on });
+}
+
+/**
+ * What became of a reply here: held, to be played, or let go before its end.
+ * Not re-sent on a reconnect, since the server that comes back is usually a
+ * new one that never made the reply — see `Voice.leave`.
+ */
+export function speechHeld(utterance: string, held: boolean): void {
+  send({ type: "speech-held", utterance, held });
+}
+
+/** One sentence of a reply played to its end here. */
+export function speechPlayed(utterance: string, seq: number): void {
+  send({ type: "speech-played", utterance, seq });
+}
+
+/** Play a profile's missed replies again, oldest first. */
+export function playMissed(profileId: string): void {
+  send({ type: "play-missed", profileId });
+}
+
+/** Take a profile's missed replies off the list, read rather than heard. */
+export function clearMissed(profileId: string): void {
+  send({ type: "clear-missed", profileId });
 }
 
 /** The voice's settings, all at once, on `setNotify`'s pattern. */

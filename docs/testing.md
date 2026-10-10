@@ -54,6 +54,22 @@ XDG_CONFIG_HOME=/tmp/k2/config \
 KURURU_STYLES_URL=http://127.0.0.1:8899
 ```
 
+**The desktop app in isolation** takes three more, and is launched from
+`desktop/` with `env -u ELECTRON_RUN_AS_NODE` (see [gotchas](gotchas.md#running)):
+
+```sh
+KURURU_USER_DATA=/tmp/k2/ud      # its own Chromium profile and single-instance lock
+KURURU_AUTOSTART=1               # start the server as the app does, with nobody to click the tray
+KURURU_TALKKEY=/tmp/k2/none      # a hook that is "missing", so no Input Monitoring prompt
+```
+
+`servers.js` reads `KURURU_PORT` too, so the picker looks for the isolated
+server and never adopts the real one. The isolated dev shell runs *this*
+checkout's `run.mjs --watch`, which builds into the same `desktop/dist` the
+real runner uses — identical output, but do not save a server file while both
+are up, or two esbuilds race for one file. Its host lands at
+`/tmp/k2/ptyhost.sock`; `bun run kill-ptyhosts /tmp/k2` clears it up.
+
 Registry testing serves the sibling checkout with
 `python3 -m http.server 8899 --bind 127.0.0.1` from `../kururu-styles`, and a
 scratch copy under `/tmp` is where `build-index.mjs` is run — never in the
@@ -152,6 +168,28 @@ Kept short on purpose; the detail is in git history.
   found nothing newer; the same build packaged as 0.0.9 downloaded the real 0.1.0
   zip, 0% to 36% in four seconds, so `download-progress` genuinely fires.
 
+- **The menu-bar runner**, in an isolated dev shell (`KURURU_AUTOSTART=1`,
+  `KURURU_TALKKEY` pointed at nothing) on 7817 with its own host and config:
+  the app built the checkout's web app with its own `vite build` on Electron
+  as node (619 ms), started `run.mjs --watch` from the checkout, and the
+  server came up and spawned a host under `/tmp/k2`; `/api/health` reported
+  `supervisor` equal to the runner's pid and `because: the menu bar was
+  started`. `POST /api/restart` answered `{ok:true}` and the record read
+  *stop: the menu bar asked for a restart → runner: it asked to be restarted →
+  start*, with a new server pid under the same runner. `POST /api/host/restart`
+  answered `{ok:true}`, the host was SIGTERMed, the server exited 75, the
+  runner brought a new server that started a new host, and the record said
+  *the last one was stopped by SIGTERM with 0 agent(s) running*. The pill page
+  loaded at `/?pill` with the bridge and reported its phase. SIGTERM to the app
+  stopped the runner and the server and left the host holding its socket, which
+  `kill-ptyhosts /tmp/k2` then cleared; the real host on 7717 was never
+  touched. The menu's sentences are `desktop/test/menu.test.js`.
+
 **Not yet proven in place:** a card raised by the *heuristic* `done` rather than
 by a report, and a click on a real OS notification — neither can be driven from a
-script.
+script. Nor, for the menu bar: the tray's clicks themselves (the menu is built
+from tested data, but nobody has clicked it under a script), the native key hook
+under a signed build (it needs Input Monitoring, which is a prompt), **Open at
+login** and the no-window launch it implies, the panel floating over a
+full-screen app, and a checkout chosen through the dialog rather than written
+into `desktop.json`.

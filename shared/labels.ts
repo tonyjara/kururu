@@ -21,6 +21,7 @@
  * turn, and a row that puts the second where the first goes is a row whose top
  * line moves while you are reading it.
  */
+import { remoteShellOf } from "./machines";
 import type { AgentSnapshot } from "./model";
 
 /**
@@ -51,7 +52,14 @@ export function agentLabel(agent: AgentSnapshot): string {
    * that is not there.
    */
   if (agent.exited) return agent.lastAgent ?? "exited";
-  return agent.kind === "shell" ? basename(agent.command) : "starting…";
+  /**
+   * A shell on another machine is called after the machine. Its own command
+   * line is a loop around `ssh`, and cut at its last slash the way a local
+   * shell's is it would be a fragment of that loop; the host it is on is the
+   * thing that tells it apart from the shell beside it.
+   */
+  if (agent.kind === "shell") return remoteShellOf(agent.command)?.host ?? basename(agent.command);
+  return "starting…";
 }
 
 /**

@@ -103,6 +103,12 @@ interface Props {
   keymap: Record<string, Action>;
   /** Which agents the new-tab button offers besides a terminal. */
   launch: LaunchSettings;
+  /**
+   * The machine this workspace's shells open on, by name, or null for this
+   * Mac — so the new-tab menu can say where its terminal goes, and offer one
+   * here as well. See `Workspace.machine`.
+   */
+  runsOn: string | null;
   /** Zen: the focused pane takes the window and the rest are held out of sight. */
   zen: boolean;
   /**
@@ -155,6 +161,7 @@ export function Panes({
   mascot,
   keymap,
   launch,
+  runsOn,
   zen,
   solo,
   keyboard,
@@ -264,7 +271,7 @@ export function Panes({
           onClose={() => setMenu(null)}
           items={
             menu.of === "new"
-              ? newTabMenu(menu.paneId, launchers, keymap)
+              ? newTabMenu(menu.paneId, launchers, keymap, runsOn)
               : paneMenu({
                   paneId: menu.paneId,
                   all,
@@ -416,6 +423,13 @@ function paneMenu({
  * The new-tab button's menu: a terminal, nvim, a board, then an agent on a
  * model.
  *
+ * In a workspace that runs on a machine the terminal row says so, and a
+ * second one beside it opens here — the only door to a local shell in such a
+ * workspace, since the key and an empty pane both go to the machine. The rows
+ * that stay on this Mac whatever the pin, nvim and the agents, say that too:
+ * a menu that put "omarchy1" on its first row and nothing on the rest would
+ * read as though all of it went there.
+ *
  * The terminal stays first and keeps its key, because it is still what C-a T
  * opens and what a pane with nothing in it opens when clicked — the menu adds
  * choices to the button without changing what the other two doors do. Nvim is
@@ -425,23 +439,25 @@ function paneMenu({
  * "Open in nvim" uses. The agents are grouped by CLI with a rule between them,
  * in `LAUNCHERS` order.
  */
-function newTabMenu(paneId: string, launchers: Launcher[], keymap: Record<string, Action>): MenuItem[] {
+function newTabMenu(paneId: string, launchers: Launcher[], keymap: Record<string, Action>, runsOn: string | null): MenuItem[] {
   const first = keysByAction(keymap)["new-tab"]?.[0];
   const boardKey = keysByAction(keymap)["open-board"]?.[0];
+  const here = runsOn ? "this Mac" : undefined;
   return [
     {
-      label: "Terminal",
+      label: runsOn ? `Terminal on ${runsOn}` : "Terminal",
       hint: first ? `${PREFIX_LABEL} ${keyLabel(first)}` : undefined,
       run: () => void api.newTab({ paneId }),
     },
-    { label: "Nvim", run: () => void api.newTab({ paneId, nvim: true }) },
+    ...(runsOn ? [{ label: "Terminal on this Mac", run: () => void api.newTab({ paneId, local: true }) }] : []),
+    { label: "Nvim", hint: here, run: () => void api.newTab({ paneId, nvim: true }) },
     /* A tab here, moved from wherever it was if the workspace already has one:
        there is one board per workspace, so "a board in this pane" means this
        one. */
     { label: "Board", hint: boardKey ? `${PREFIX_LABEL} ${keyLabel(boardKey)}` : undefined, run: () => api.openBoard(paneId, true) },
     ...launchers.map((launcher, index) => ({
       label: launcher.label,
-      hint: launcher.model ? undefined : "default model",
+      hint: [launcher.model ? null : "default model", here].filter(Boolean).join(" · ") || undefined,
       sep: index === 0 || launchers[index - 1]?.cli !== launcher.cli,
       run: () => void api.newTab({ paneId, launcher: launcher.id }),
     })),

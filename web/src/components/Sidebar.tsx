@@ -37,19 +37,20 @@
  * prefix+W does — and they exist because a keymap is worth nothing until it has
  * been learnt, and a row has no room to print five buttons.
  */
-import { Fragment, useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { panes } from "../../../shared/layout";
 import type {
   AgentSnapshot,
   ContextUsage,
   MascotSet,
   Profile,
+  Workspace,
   WorkspaceColor,
 } from "../../../shared/model";
 import { defaultMascot, mascotFor, WORKSPACE_COLORS, workspaceUnits } from "../../../shared/model";
 import type { AccountUsage, DevServer, GitAction, RepoGit } from "../../../shared/wire";
 import type { WorkspaceDatabase } from "../../../shared/databases";
-import { formatBytes as formatSize, vpsSeverity, type VpsStatus, type VpsUsed } from "../../../shared/vps";
+import { formatBytes as formatSize, machineSeverity, type MachineStatus, type MachineUsed } from "../../../shared/machines";
 import {
   balanceOf,
   balanceSeverity,
@@ -58,6 +59,7 @@ import {
   runway,
   type OpenRouterReading,
 } from "../../../shared/openrouter";
+import type { MissedReply } from "../../../shared/voice";
 import { colorValue, colorValues } from "../colors";
 import { AGENT_MIME, GROUP_MIME, WORKSPACE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
 import type { Action } from "../keys";
@@ -197,8 +199,12 @@ export function Sidebar({
    * the sidebar draws, and passing it through the app would mean two components
    * knowing about it so that one of them could forget.
    */
-  const { branches, databases } = useKururu();
+  const { branches, databases, machines, missed } = useKururu();
   const heads = new Map(branches.map((head) => [head.workspaceId, head] as const));
+  /** Kuru's replies in this profile that nobody played to their end — the harness button's badge. See `Voice.review`. */
+  const missedHere = missed.filter((reply) => reply.profileId === profile.id);
+  /** Where the list behind that badge is open. */
+  const [missedAt, setMissedAt] = useState<{ x: number; y: number } | null>(null);
   const dbCount = new Map<string, number>();
   for (const db of databases) dbCount.set(db.workspaceId, (dbCount.get(db.workspaceId) ?? 0) + 1);
   /**
@@ -800,15 +806,35 @@ export function Sidebar({
             the profile's, over every workspace. One button whatever its state —
             start, resume or go to — because the user means one thing by it.
             Lit while it runs, so a glance says whether there is anybody home. */}
-        <button
-          className={`profile-board-btn profile-harness-btn${harnessLive ? " profile-harness-live" : ""}`}
-          onClick={onHarness}
-          title={harnessLive ? "Go to this profile's harness (C-a H)" : "Start this profile's harness (C-a H)"}
-          aria-label={`${profile.name}'s harness`}
-          aria-pressed={harnessLive}
-        >
-          <Icon name="bot" />
-        </button>
+        <span className="profile-harness">
+          <button
+            className={`profile-board-btn profile-harness-btn${harnessLive ? " profile-harness-live" : ""}`}
+            onClick={onHarness}
+            title={harnessLive ? "Go to this profile's harness (C-a H)" : "Start this profile's harness (C-a H)"}
+            aria-label={`${profile.name}'s harness`}
+            aria-pressed={harnessLive}
+          >
+            <Icon name="bot" />
+          </button>
+          {/* What Kuru said that nobody heard to the end: cut off, dismissed,
+              or said with no window listening. A button of its own on the
+              harness button's corner rather than a count inside it, because
+              the harness button goes to the harness and this goes to what
+              it said — two places, two targets. */}
+          {missedHere.length > 0 && (
+            <button
+              className="profile-missed"
+              onClick={(event) => {
+                const box = event.currentTarget.getBoundingClientRect();
+                setMissedAt({ x: box.left, y: box.bottom + 4 });
+              }}
+              title={`${missedHere.length} ${missedHere.length === 1 ? "reply" : "replies"} from Kuru you did not hear`}
+              aria-label={`${missedHere.length} missed ${missedHere.length === 1 ? "reply" : "replies"}`}
+            >
+              {missedHere.length}
+            </button>
+          )}
+        </span>
         {/* The way out of a full-screen sidebar. Drawn only when it is one: as a
             column, the panes next to it are already the way out, and a close
             button beside a thing with a keyboard shortcut and a status-bar
@@ -1041,7 +1067,7 @@ export function Sidebar({
                     >
                       {gitSaid.text}
                     </button>
-                  ) : head && (
+                  ) : head ? (
                     <span
                       className={`ws-branch ${head.detached ? "ws-branch-off" : ""}`}
                       title={
@@ -1052,6 +1078,13 @@ export function Sidebar({
                     >
                       {head.branch}
                     </span>
+                  ) : (
+                    /* A workspace pinned to a machine has no branch here — its
+                       shells are on the machine, and nothing reads that disk —
+                       so the line says where they are instead. A branch wins
+                       when there is one: an agent started here, in a repository,
+                       is the more specific fact. */
+                    pinnedTo(workspace, machines)
                   )}
                 </>
               )}
@@ -1187,7 +1220,7 @@ export function Sidebar({
 
       <Usage />
       <OpenRouter />
-      <Vps />
+      <Machines />
       <DevServers />
 
       {/* A new terminal used to be a button down here and is not one any more:
@@ -1309,6 +1342,21 @@ export function Sidebar({
         />
       )}
 
+      {missedAt && missedHere.length > 0 && (
+        <MissedList
+          at={missedAt}
+          replies={missedHere}
+          onPlay={() => {
+            api.playMissed(profile.id);
+            setMissedAt(null);
+          }}
+          onClear={() => {
+            api.clearMissed(profile.id);
+            setMissedAt(null);
+          }}
+          onClose={() => setMissedAt(null)}
+        />
+      )}
       {gitMenu && (
         <Menu
           at={gitMenu}
@@ -1357,6 +1405,64 @@ export function Sidebar({
       )}
     </aside>
   );
+}
+
+/**
+ * What Kuru said that nobody heard to the end, to read or to hear again.
+ *
+ * Both, because the two are for different moments: at a desk you read four
+ * replies faster than they are said, and with your eyes on something else you
+ * want them said. "Play" says them in order, each starting "Earlier", and
+ * each leaves the list once it is heard to its end — the same thing asking
+ * Kuru "what did I miss?" does through its `play_missed` tool. "Clear" is
+ * having read them. Opening the list is not, since a glance is not reading.
+ */
+function MissedList({
+  at,
+  replies,
+  onPlay,
+  onClear,
+  onClose,
+}: {
+  at: { x: number; y: number };
+  replies: readonly MissedReply[];
+  onPlay: () => void;
+  onClear: () => void;
+  onClose: () => void;
+}) {
+  // Scrolling the list is scrolling, not a hint to close — unlike the
+  // right-click menu's backdrop, which closes on a scroll because the row it
+  // points at may have just moved under it.
+  return (
+    <Popover at={at} onClose={onClose} className="menu missed" role="dialog" closeOnScroll={false}>
+      <ol className="missed-list" aria-label="Replies you did not hear">
+        {replies.map((reply) => (
+          <li key={reply.id} className="missed-item">
+            <time className="missed-at" dateTime={new Date(reply.at).toISOString()}>
+              {saidAt(reply.at)}
+            </time>
+            <span className="missed-text">{reply.text}</span>
+          </li>
+        ))}
+      </ol>
+      <div className="missed-actions">
+        <button className="menu-item" onClick={onPlay}>
+          <Icon name="play" />
+          <span className="menu-label">Play {replies.length === 1 ? "it" : `all ${replies.length}`}</span>
+        </button>
+        <button className="menu-item" onClick={onClear}>
+          <span className="menu-label">Clear</span>
+        </button>
+      </div>
+    </Popover>
+  );
+}
+
+/** The time a reply was said: the clock today, and the day before that. */
+function saidAt(at: number): string {
+  const when = new Date(at);
+  const time = when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return when.toDateString() === new Date().toDateString() ? time : `${when.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
 }
 
 /**
@@ -1690,7 +1796,7 @@ function Usage() {
           {account.stale && <span className="usage-stale" title={staleTitle(account.at)}>·</span>}
         </SectionToggle>
       </h2>
-      {/* Shut, every limit as a ring on one line, the VPS row's shape. It used
+      {/* Shut, every limit as a ring on one line, the machine row's shape. It used
           to be the session's bar alone, on the argument that the weeks move by
           a percent an afternoon; but a ring is small enough that the weeks cost
           nothing to keep in view, and the week is the one that ends an
@@ -1749,7 +1855,7 @@ function Usage() {
  * The shut usage row: whose allowance on the left, a ring per limit on the
  * right. Named "Claude" rather than left blank because the heading already says
  * "Usage", and what the row has to add is which account it is — the email is
- * the name's tooltip, as the host is a VPS name's.
+ * the name's tooltip, as the host is a machine name's.
  */
 function UsageRings({ account }: { account: AccountUsage }) {
   const marks = limitMarks(account.limits);
@@ -1790,7 +1896,7 @@ function UsageRings({ account }: { account: AccountUsage }) {
  * Shut, the balance and today's spend on one line, which is the glance. Open,
  * the week and the month under it, the pace in words, and which key is asking.
  *
- * Draws nothing until a key has been given in Settings, like the VPS section.
+ * Draws nothing until a key has been given in Settings, like the machines section.
  */
 function OpenRouter() {
   const { openrouter } = useKururu();
@@ -1877,67 +1983,98 @@ function OpenRouterBalance({ reading, stale, open }: { reading: OpenRouterReadin
 }
 
 /**
- * The VPSes somebody asked to watch, a bar each for CPU, memory and disk.
+ * The machines somebody asked to watch — a VPS, a PC on the tailnet — a bar
+ * each for CPU, memory and disk, and a button that opens a shell on one.
  *
  * Under the usage bars and drawn with their parts, because it is the same kind
  * of glance — a thing you notice on the way past rather than go and read — and
  * two gauges that look alike should mean alike: a fill is what is *spent*.
  *
  * Shut, one line per machine with the three percentages, which is enough to see
- * that nothing is on fire. Open, the bars, and the heaviest containers — which
- * on a Dokploy box are the apps and databases by name, and are the answer to
- * the question a climbing RAM bar asks.
+ * that nothing is on fire. Open, the bars.
+ *
+ * The shell button is on every row, reachable or not, and most of all when
+ * not: a row that says ssh could not get in is fixed by answering ssh once in
+ * a terminal — a host key, a passphrase, Tailscale's browser check — and the
+ * button is that terminal, already pointed at the host.
  *
  * Draws nothing until one has been added in Settings, like the dev servers: an
  * empty section on every window for a feature most people never use is noise.
+ * The disclosure keeps the key it had as the VPS section, so a section somebody
+ * shut stays shut across the rename.
  */
-function Vps() {
-  const { vps } = useKururu();
+/** "on omarchy1 · ~/code" under a pinned workspace's name, or nothing. */
+function pinnedTo(workspace: Workspace, machines: MachineStatus[]): ReactNode {
+  const pin = workspace.machine;
+  const machine = pin ? machines.find((m) => m.id === pin.machineId) : undefined;
+  if (!pin || !machine) return null;
+  return (
+    <span className="ws-branch" title={`New shells here open on ${machine.name} (ssh ${machine.host}), in ${pin.dir}, inside tmux`}>
+      on {machine.name} · {pin.dir}
+    </span>
+  );
+}
+
+function Machines() {
+  const { machines } = useKururu();
   const [open, toggle] = useDisclosure("kururu.sidebar.vps", true);
-  if (vps.length === 0) return null;
-  const failing = vps.some((server) => server.error);
+  if (machines.length === 0) return null;
+  const failing = machines.some((machine) => machine.error);
 
   return (
-    <section className="side-section side-vps">
+    <section className="side-section side-machines">
       <h2>
-        <SectionToggle open={open} onToggle={toggle} label="VPS">
+        <SectionToggle open={open} onToggle={toggle} label="Machines">
           {failing && (
-            <span className="usage-stale" title="A VPS could not be reached. Its numbers are the last ones read.">
+            <span className="usage-stale" title="A machine could not be reached. Its numbers are the last ones read.">
               ·
             </span>
           )}
         </SectionToggle>
       </h2>
-      <ul className="vps-list">
-        {vps.map((server) => (
-          <VpsRow key={server.id} server={server} open={open} />
+      <ul className="machine-list">
+        {machines.map((machine) => (
+          <MachineRow key={machine.id} server={machine} open={open} />
         ))}
       </ul>
     </section>
   );
 }
 
-function VpsRow({ server, open }: { server: VpsStatus; open: boolean }) {
+function MachineRow({ server, open }: { server: MachineStatus; open: boolean }) {
   const reading = server.reading;
   const title = [server.host, server.error && `Last attempt: ${server.error}`].filter(Boolean).join("\n");
   const name = server.panel ? (
-    <a className="vps-name" href={server.panel} target="_blank" rel="noreferrer noopener" title={`${title}\n→ ${server.panel}`}>
+    <a className="machine-name" href={server.panel} target="_blank" rel="noreferrer noopener" title={`${title}\n→ ${server.panel}`}>
       {server.name}
     </a>
   ) : (
-    <span className="vps-name" title={title}>
+    <span className="machine-name" title={title}>
       {server.name}
     </span>
+  );
+  const shell = (
+    <button
+      className="mini"
+      onClick={() => void api.openMachineShell(server.id)}
+      title={`Open a shell on ${server.name} in a new tab\nssh -t ${server.host}`}
+      aria-label={`Shell on ${server.name}`}
+    >
+      <Icon name="terminal" />
+    </button>
   );
 
   if (!reading) {
     return (
-      <li className="vps-item">
+      <li className="machine-item">
         <span className="usage-head">
           {name}
-          <span className="usage-used">{server.error ? "unreachable" : "…"}</span>
+          <span className="usage-used">
+            {server.error ? "unreachable" : "…"}
+            {shell}
+          </span>
         </span>
-        {server.error && <span className="vps-error">{server.error}</span>}
+        {server.error && <span className="machine-error">{server.error}</span>}
       </li>
     );
   }
@@ -1952,36 +2089,40 @@ function VpsRow({ server, open }: { server: VpsStatus; open: boolean }) {
      same colours as the bars, in one row's height rather than four. */
   if (!open) {
     return (
-      <li className={`vps-item gauge-item ${server.stale ? "vps-stale" : ""}`}>
+      <li className={`machine-item gauge-item ${server.stale ? "machine-stale" : ""}`}>
         {name}
         <span className="gauge-rings">
-          {cpu !== null && <VpsRing label="CPU" percent={cpu} figure={`${Math.round(cpu)}%`} />}
-          {mem !== null && <VpsRing label="RAM" percent={mem} figure={memFigure ?? ""} />}
-          {disk !== null && <VpsRing label="Disk" percent={disk} figure={diskFigure ?? ""} />}
+          {cpu !== null && <MachineRing label="CPU" percent={cpu} figure={`${Math.round(cpu)}%`} />}
+          {mem !== null && <MachineRing label="RAM" percent={mem} figure={memFigure ?? ""} />}
+          {disk !== null && <MachineRing label="Disk" percent={disk} figure={diskFigure ?? ""} />}
+          {shell}
         </span>
       </li>
     );
   }
 
   return (
-    <li className={`vps-item ${server.stale ? "vps-stale" : ""}`}>
-      {name}
-      {cpu !== null && <VpsMeter label="CPU" percent={cpu} figure={`${Math.round(cpu)}%`} />}
-      {mem !== null && memFigure && <VpsMeter label="RAM" percent={mem} figure={memFigure} />}
-      {disk !== null && diskFigure && <VpsMeter label="Disk" percent={disk} figure={diskFigure} />}
-      {server.error && <span className="vps-error">{server.error}</span>}
+    <li className={`machine-item ${server.stale ? "machine-stale" : ""}`}>
+      <span className="usage-head">
+        {name}
+        {shell}
+      </span>
+      {cpu !== null && <MachineMeter label="CPU" percent={cpu} figure={`${Math.round(cpu)}%`} />}
+      {mem !== null && memFigure && <MachineMeter label="RAM" percent={mem} figure={memFigure} />}
+      {disk !== null && diskFigure && <MachineMeter label="Disk" percent={disk} figure={diskFigure} />}
+      {server.error && <span className="machine-error">{server.error}</span>}
     </li>
   );
 }
 
-function VpsRing({ label, percent, figure }: { label: string; percent: number; figure: string }) {
+function MachineRing({ label, percent, figure }: { label: string; percent: number; figure: string }) {
   const rounded = Math.round(percent);
   return (
     <GaugeRing
       label={label}
       mark={label[0] ?? ""}
       percent={percent}
-      severity={vpsSeverity(percent)}
+      severity={machineSeverity(percent)}
       title={`${label} ${rounded}% used${figure && figure !== `${rounded}%` ? ` — ${figure}` : ""}`}
     />
   );
@@ -1989,7 +2130,7 @@ function VpsRing({ label, percent, figure }: { label: string; percent: number; f
 
 /**
  * One figure as a ring, the context ring's shape: the shut form of a bar, for a
- * VPS row and the usage row alike. The mark is a letter beside it rather than a
+ * machine row and the usage row alike. The mark is a letter beside it rather than a
  * word, because three words and three rings do not fit beside a name in a
  * sidebar; the tooltip carries the whole sentence.
  */
@@ -2033,9 +2174,9 @@ function GaugeRing({
   );
 }
 
-function VpsMeter({ label, percent, figure }: { label: string; percent: number; figure: string }) {
+function MachineMeter({ label, percent, figure }: { label: string; percent: number; figure: string }) {
   return (
-    <div className="vps-meter">
+    <div className="machine-meter">
       <span className="usage-head">
         <span className="usage-name">{label}</span>
         <span className="usage-used">{figure}</span>
@@ -2049,14 +2190,14 @@ function VpsMeter({ label, percent, figure }: { label: string; percent: number; 
         aria-valuemax={100}
         title={`${Math.round(percent)}% used`}
       >
-        <span className="usage-fill" data-severity={vpsSeverity(percent)} style={{ width: `${percent}%` }} />
+        <span className="usage-fill" data-severity={machineSeverity(percent)} style={{ width: `${percent}%` }} />
       </span>
     </div>
   );
 }
 
 /** Used as a percentage of total, or null when there is no total to be a share of. */
-function share(part: VpsUsed | null): number | null {
+function share(part: MachineUsed | null): number | null {
   if (!part || part.total <= 0) return null;
   return Math.min(100, (part.used / part.total) * 100);
 }

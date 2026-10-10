@@ -61,10 +61,12 @@ whatever *is* on screen. The card's ↻ starts it when the user gets there.
 | `press_keys` | enter, escape, arrows, ctrl-c, single characters — how a prompt is answered |
 | `wait_agent` | until one of the named agents is done, blocked or exited; returns at once for a state already reached unless `include_current=false` |
 | `start_agent` | a launcher with a prompt, in a pane beside the workspace's board |
-| `stop_agent` | kill; refuses itself |
+| `open_shell` | a shell tab on this Mac or on a machine, with a command typed into it; in a pinned workspace it goes to the workspace's machine by default — see [machines](machines.md) |
+| `stop_agent` | kill (and a remote shell's tmux session); refuses itself |
 | `reveal_agent`, `rename_agent` | the user's screen and the sidebar; with Auto Swap on the screen follows without being asked — see below |
 | `cards`, `add_card`, `edit_card`, `move_card`, `run_card`, `send_card_to_workspace` | the boards, workspace and profile; `add_card` with `run` is the robot |
 | `new_workspace` | a project, without switching the user to it |
+| `say`, `play_missed` | one line aloud mid-turn; every reply of its own the user never heard to the end, said again — see [voice](voice.md#what-you-missed) |
 
 Reads are capped (`READ_MAX`) and default small, on purpose: the orchestrator's
 own context is the scarce thing, and the role prompt tells it so.
@@ -103,8 +105,8 @@ it compacts. Off, nothing differs from before the switch existed.
 target, so it does the following, rather than the role asking the harness to
 call `reveal_agent` alongside everything — a model remembers that most of the
 time. The tools that follow are `SWAP_TOOLS`: `send_agent`, `read_agent`,
-`press_keys`, `start_agent`, `run_card` and `add_card` with `run` (the new
-agent), `stop_agent`, `rename_agent`. Not `wait_agent`, which names several and
+`press_keys`, `start_agent`, `open_shell`, `run_card` and `add_card` with
+`run` (the new terminal), `stop_agent`, `rename_agent`. Not `wait_agent`, which names several and
 does nothing to any; not `reveal_agent`, which moves the screen itself, at
 once, and resets the gate below so a waiting swap cannot undo it.
 

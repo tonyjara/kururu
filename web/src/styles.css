@@ -173,13 +173,14 @@
   --icon-panel: "⇥";
   --icon-fold: "⊟";
   --icon-unfold: "⊞";
+  --icon-terminal: "❯";
 
   /* The icon strip a skin may bring instead of glyphs — every icon as one
      picture of `--icon-n` cells. `none` is the drawing. `--icon-n` is a
      constant the stylesheet needs for the arithmetic and is not a skin's to
      move: it is `ICON_NAMES.length`, and the test holds the two together. */
   --icon-sheet: none;
-  --icon-n: 25;
+  --icon-n: 26;
 
   /* ----------------------------------------------------------------------
      The parts: what a skin *paints*, three properties per region.
@@ -313,6 +314,7 @@
 .icon-panel { --icon-svg: var(--icon-panel-svg); --icon-glyph: var(--icon-panel); --icon-i: 22; }
 .icon-fold { --icon-svg: var(--icon-fold-svg); --icon-glyph: var(--icon-fold); --icon-i: 23; }
 .icon-unfold { --icon-svg: var(--icon-unfold-svg); --icon-glyph: var(--icon-unfold); --icon-i: 24; }
+.icon-terminal { --icon-svg: var(--icon-terminal-svg); --icon-glyph: var(--icon-terminal); --icon-i: 25; }
 /* An icon strip, when a skin brought one: every icon is one cell of a single
    picture, `--icon-n` cells across, and `--icon-i` on each class says which.
    The strip is scaled so one cell is exactly the icon's box — which is what
@@ -355,7 +357,8 @@
 :root[data-glyphs~="grip"] .icon-grip::before,
 :root[data-glyphs~="panel"] .icon-panel::before,
 :root[data-glyphs~="fold"] .icon-fold::before,
-:root[data-glyphs~="unfold"] .icon-unfold::before {
+:root[data-glyphs~="unfold"] .icon-unfold::before,
+:root[data-glyphs~="terminal"] .icon-terminal::before {
   content: var(--icon-glyph);
   width: auto;
   height: auto;
@@ -672,6 +675,39 @@ kbd {
 .profile-harness-live {
   color: var(--working);
 }
+/* The harness button and, on its corner, the count of what Kuru said that
+   nobody heard to the end. A button of its own: the harness button goes to the
+   harness, and this goes to the list. In the accent, because it is the one
+   thing on the header that is news. */
+.profile-harness {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.profile-missed {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: var(--radius-round);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 15px;
+  font-variant-numeric: tabular-nums;
+}
+:root[data-narrow] .profile-missed {
+  top: -2px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  font-size: var(--fs-base);
+}
 :root[data-narrow] .profile-board-btn {
   min-width: 36px;
   min-height: 36px;
@@ -739,7 +775,7 @@ kbd {
    the list of agents is. */
 .side-usage,
 .side-openrouter,
-.side-vps,
+.side-machines,
 .side-dev {
   flex: none;
 }
@@ -1671,17 +1707,17 @@ kbd {
   color: var(--danger);
 }
 
-/* Last reading kept across a failed poll, as `.vps-stale` keeps one. */
+/* Last reading kept across a failed poll, as `.machine-stale` keeps one. */
 .or-stale {
   opacity: 0.55;
 }
 
-/* The VPS section, built out of the usage bar's parts — see `Vps` in
-   Sidebar.tsx for why the two gauges are drawn alike. Its own list because a
+/* The machines section, built out of the usage bar's parts — see `Machines`
+   in Sidebar.tsx for why the two gauges are drawn alike. Its own list because a
    machine is a group of bars rather than one, and because a few machines with
    their containers open is taller than a sidebar's foot should be: it scrolls
    inside a cap, in the dev list's idiom, rather than pushing the agents away. */
-.vps-list {
+.machine-list {
   list-style: none;
   margin: 0;
   padding: 0 12px 4px;
@@ -1692,13 +1728,13 @@ kbd {
   max-height: 35vh;
 }
 
-.vps-item {
+.machine-item {
   display: flex;
   flex-direction: column;
   gap: 5px;
 }
 
-.vps-name,
+.machine-name,
 .gauge-name {
   font-size: var(--fs-sm);
   color: var(--text);
@@ -1707,23 +1743,23 @@ kbd {
   text-overflow: ellipsis;
   text-decoration: none;
 }
-a.vps-name:hover {
+a.machine-name:hover {
   text-decoration: underline;
 }
 
 /* Last reading kept across a failed poll: still drawn, visibly not current. */
-.vps-stale {
+.machine-stale {
   opacity: 0.55;
 }
 
-.vps-error {
+.machine-error {
   font-size: var(--fs-xs);
   color: var(--dimmer);
   overflow-wrap: anywhere;
 }
 
-/* Shut, a VPS row or the usage row: the name, then the rings, on one line.
-   After `.vps-item` so its row beats that column. The name gives way first —
+/* Shut, a machine row or the usage row: the name, then the rings, on one line.
+   After `.machine-item` so its row beats that column. The name gives way first —
    the rings are the reason the row is there — and the rings wrap rather than
    run off the edge, since an account with a scoped week for two models is four
    of them, which a narrow sidebar does not have the width for. */
@@ -1734,7 +1770,7 @@ a.vps-name:hover {
   justify-content: space-between;
   gap: 8px;
 }
-.gauge-item .vps-name,
+.gauge-item .machine-name,
 .gauge-name {
   min-width: 0;
 }
@@ -3189,6 +3225,32 @@ a.button {
   bottom: auto;
   transform: translate(calc(var(--pill-x) * -100%), calc(var(--pill-y) * -100%));
 }
+/* The pill as a window of its own, over every app (`web/src/components/Pill.tsx`).
+   In flow rather than fixed, so the page is exactly the pill and the main
+   process sizes the panel to it; the room around it is for its shadow, and the
+   page behind it is clear so the panel is only the pill. Dragging it moves the
+   window, which is Electron's app-region, and the ✕ is carved out of that
+   region or it could never be pressed. */
+html.pill-page,
+html.pill-page body,
+html.pill-page #root {
+  background: transparent;
+  overflow: hidden;
+}
+.pill-page-root {
+  display: inline-block;
+  padding: 8px;
+}
+.voice-pill.voice-pill-floating {
+  position: static;
+  transform: none;
+  max-width: 560px;
+  cursor: default;
+  -webkit-app-region: drag;
+}
+.voice-pill-floating .voice-close {
+  -webkit-app-region: no-drag;
+}
 .voice-pill-listening {
   border-color: var(--danger);
 }
@@ -3546,6 +3608,52 @@ a.button {
   margin-top: 5px;
   border-top: var(--border) var(--border-style) var(--line);
   padding-top: 7px;
+}
+
+/* The missed replies behind the harness button's badge: the menu's box, with
+   words to read in it rather than items to pick. Each reply is whole — it is
+   there to be read — and the list scrolls when there are many. */
+.missed {
+  width: min(340px, calc(100vw - 16px));
+}
+.missed-list {
+  margin: 0;
+  padding: 2px 4px;
+  list-style: none;
+  max-height: min(360px, 60vh);
+  overflow-y: auto;
+}
+.missed-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 4px;
+}
+.missed-item + .missed-item {
+  border-top: var(--border) var(--border-style) var(--line);
+}
+.missed-at {
+  font-size: var(--fs-sm);
+  color: var(--dimmer);
+  font-variant-numeric: tabular-nums;
+}
+.missed-text {
+  font-size: var(--fs-md);
+  color: var(--text);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.missed-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: var(--border) var(--border-style) var(--line);
+}
+.missed-actions .menu-item {
+  flex: 1;
+  align-items: center;
+  justify-content: center;
 }
 
 .help-list {
@@ -4218,6 +4326,18 @@ a.button {
 .proc-tile-under {
   font-size: var(--fs-sm);
   color: var(--dimmer);
+}
+/* The nvim tile's "close all", under its figure: the count it acts on is the
+   one printed above it, so that is where the button goes. */
+.proc-tile-action {
+  align-self: flex-start;
+  margin-top: 6px;
+}
+/* What force-closing costs, said between the list of what refused and the
+   button that does it. Both classes, because `.set-retire-lead` zeroes the
+   margin further down and would otherwise win. */
+.set-retire-lead.proc-nvim-force {
+  margin-top: 8px;
 }
 .proc-profile {
   display: flex;
@@ -5699,9 +5819,10 @@ a.button {
   overflow-wrap: anywhere;
 }
 
-/* The whole body, however long: a card is as tall as its text and no taller
-   than the column scrolls to. Clamping it hid the end of a ticket behind a
-   double-click, which is a poor place to keep the part that says what to do. */
+/* Cards got long enough, in every column, that a board stopped being
+   something you could scan. So every card keeps two lines of title and two
+   of body and the rest waits behind the edit, which still holds all of
+   it — this is paint, and nothing is cut from the card. */
 .board-card-body {
   margin: 0;
   font-size: var(--fs-base);
@@ -5710,14 +5831,8 @@ a.button {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-/* Except in Done, where the argument above turns over: the part that says what
-   to do has been done, and a column of finished work is read for what is in
-   it, not worked from. So a done card keeps two lines of title and two of body
-   and the rest waits behind the edit, which still holds all of it — this is
-   paint, and nothing is cut from the card. The title too, because a long one
-   is the other half of what made the column hard to scan. */
-.board-card-in-done .board-card-title,
-.board-card-in-done .board-card-body {
+.board-card-title,
+.board-card-body {
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;

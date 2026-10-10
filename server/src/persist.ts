@@ -29,6 +29,7 @@ import { groupName, isLoginKey, isWorkspaceColor, mintLoginKey } from "../../sha
 import { BOARD_TAB, docTab, isDocTab, parseDocTab, type LayoutNode, type ReaderDoc } from "../../shared/layout";
 import { adoptBoard, adoptProfileBoard, storedBoard, type Board } from "../../shared/board";
 import { adoptHarness } from "../../shared/harness";
+import { adoptPin, type MachinePin } from "../../shared/machines";
 import type { HarnessState } from "../../shared/model";
 import { nextId } from "./workspaces";
 
@@ -69,6 +70,12 @@ interface StoredWorkspace {
   mascotId?: string | null;
   /** Likewise: a session written before workspaces could be grouped. */
   group?: string | null;
+  /**
+   * Which machine its shells open on, and where. A preference, like the
+   * colour, and not a process: the sessions on the machine are tmux's to keep,
+   * and the first shell opened after a cold start finds them again by name.
+   */
+  machine?: MachinePin;
   /**
    * The workspace's cards, when it has ever had a board. Unlike almost
    * everything else in here this is *content* rather than structure — text
@@ -176,6 +183,7 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
         color: workspace.color,
         mascotId: workspace.mascotId,
         group: workspace.group,
+        ...(workspace.machine ? { machine: workspace.machine } : {}),
         ...(workspace.board ? { board: storedBoard(workspace.board) } : {}),
         layout: strip(workspace.layout),
       })),
@@ -344,6 +352,7 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
         mascotId,
         group: groupName(w.group),
         board: adoptBoard(w.board),
+        machine: adoptPin(w.machine),
       };
       workspaces.push(workspace);
     }

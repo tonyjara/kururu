@@ -52,3 +52,38 @@ function lsofCwd(pid: number): Promise<string> {
     );
   });
 }
+
+/**
+ * `processCwd` for many processes in one `lsof`, for the Processes page's list
+ * of nvims, which wants every one's directory every few seconds while it is
+ * open. One process for the lot rather than one each; a pid missing from the
+ * answer is a process that went or is not ours to ask about.
+ */
+export async function processCwds(pids: number[]): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  const wanted = pids.filter((pid) => Number.isInteger(pid) && pid > 0);
+  if (wanted.length === 0) return out;
+  if (process.platform === "linux") {
+    await Promise.all(
+      wanted.map(async (pid) => {
+        const cwd = await readlink(`/proc/${pid}/cwd`).catch(() => undefined);
+        if (cwd) out.set(pid, cwd);
+      }),
+    );
+    return out;
+  }
+  const text = await new Promise<string>((resolve) => {
+    execFile(
+      "lsof",
+      ["-a", "-d", "cwd", "-p", wanted.join(","), "-F", "pn"],
+      { timeout: TIMEOUT_MS },
+      (err, stdout) => resolve(err && !stdout ? "" : stdout),
+    );
+  });
+  let pid = 0;
+  for (const line of text.split("\n")) {
+    if (line.startsWith("p")) pid = Number(line.slice(1)) || 0;
+    else if (line.startsWith("n/") && pid > 0) out.set(pid, line.slice(1));
+  }
+  return out;
+}
