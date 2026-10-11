@@ -21,25 +21,30 @@
  * and is drawn wherever this device last left it (`web/src/place.ts` says
  * why that is kept as a share of the window and not in pixels). A double
  * click puts it back. The ✕ is `dismissVoice`: Kuru stops mid-word and the
- * rest of the reply, and anything queued behind it, goes to the missed list
- * behind the harness button — which is what the talk key already does on its
- * way down, without opening a microphone to do it.
+ * rest of the reply, and anything queued behind it, is marked unheard in the
+ * Kuru drawer — which is what the talk key already does on its way down,
+ * without opening a microphone to do it. Escape is the same ✕ while Kuru
+ * speaks (`voiceEscape` in `voice.ts`). A plain click — one that travelled
+ * less than the drag's own slop, and landed outside the ✕ — opens that
+ * drawer at the reply the pill is showing: the full conversation is one tap
+ * away from a pill that only ever shows its last line, in the window or from
+ * the system-wide panel, which raises the main window with the drawer open
+ * rather than itself.
  *
- * **What became of your last message is never covered by Kuru.** A reply
- * that waited for you to finish plays the moment the hush lifts, which is
- * the moment your words are on their way — and it used to take the pill's
- * one line with its first sentence, so "Could not send the clip" showed for
- * a frame and a lost message looked like a sent one. While Kuru speaks, the
- * pill keeps a line of its own for the message under Kuru's words, from the
- * same outbox the list behind the harness button draws.
+ * **The pill is the live indicator and not the record.** Listening, hearing,
+ * heard and speaking are its; what became of every message and every reply
+ * is the drawer's — the pill no longer tracks your last message under
+ * Kuru's words, since a message that gets through does not need saying
+ * twice and one that does not is the drawer's job, with Resend.
  */
 import { useEffect, useRef, useState } from "react";
 import type { OutboxEntry } from "../../../shared/voice";
+import { desktop } from "../desktop";
+import { toggleKuru } from "../kuru";
 import { adoptPlace, placeAt, type Place } from "../place";
 import { useKururu } from "../session";
 import { dismissVoice, useMine, useOutgoing, useVoiceUi, whereItWent, type Outgoing } from "../voice";
 import { Icon } from "./Icon";
-import { MicIcon } from "./VoiceIcons";
 
 const BARS = [0.35, 0.6, 0.85, 1, 0.85, 0.6, 0.35];
 
@@ -82,6 +87,10 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
   const mine: OutboxEntry | Outgoing | null = mineId ? (outbox.find((e) => e.id === mineId) ?? outgoing.find((c) => c.id === mineId) ?? null) : null;
   const [place, setPlace] = useState<Place | null>(storedPlace);
   const held = useRef<Held | null>(null);
+  // Set by `drop` before it clears `held`, since the click that follows a
+  // pointerup needs to know a drag happened after the ref that recorded it is
+  // already gone.
+  const dragged = useRef(false);
 
   // Written as it moves, the way the sidebar's width is: a pill that unmounts
   // mid-drag, because Kuru finished, never sees the pointer come up.
@@ -115,7 +124,7 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
     ui.phase === "listening"
       ? "Drop the clip"
       : ui.phase === "speaking"
-        ? "Stop Kuru"
+        ? "Stop Kuru (Esc)"
         : ui.phase === "sending"
           ? stuck
             ? "Hide — it keeps trying, and it is in your messages"
@@ -150,7 +159,33 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
     setPlace(placeAt(from.left + dx, from.top + dy, box.width, box.height, room.clientWidth, room.clientHeight));
   };
   const drop = () => {
+    dragged.current = held.current?.moved ?? false;
     held.current = null;
+  };
+
+  /**
+   * The pill clicked: the Kuru drawer, at the reply the pill is showing — a
+   * pill that only ever shows its last line is one tap from the whole
+   * conversation. A second click puts it away, since a pill that only ever
+   * opened would be a one-way door onto a window the user is already in.
+   *
+   * The floating panel has to raise the *main* window — `desktop()?.show?.()`
+   * would raise the panel itself, which is non-focusable and may be all that
+   * is open — and whether that click opens or closes the drawer is decided
+   * in the main process (`desktop/main.js`'s `kururu:raise-main`), the one
+   * side that knows whether the window was already in front; it tells this
+   * page which of the two it meant, since only this page knows whether the
+   * drawer is already open. The in-window pill is already in the window, so
+   * there is nothing to raise and it toggles directly.
+   */
+  const openHarness = () => {
+    if (floating) {
+      desktop()?.raiseMain?.(ui.utterance);
+    } else {
+      toggleKuru(ui.utterance);
+      desktop()?.show?.();
+      window.focus();
+    }
   };
 
   return (
@@ -167,6 +202,14 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
          off the terminal that was being typed into — the ✕ included, since
          the default being prevented is the press's and it bubbles. */
       onMouseDown={(event) => event.preventDefault()}
+      onClick={(event) => {
+        if (onClose(event.target)) return;
+        if (dragged.current) {
+          dragged.current = false;
+          return;
+        }
+        openHarness();
+      }}
       onDoubleClick={(event) => {
         if (!floating && !onClose(event.target)) setPlace(null);
       }}
@@ -185,12 +228,6 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
         {(ui.phase === "speaking" || ui.phase === "heard" || (ui.phase === "error" && ui.detail)) && (
           <span className="voice-text">{ui.phase === "error" ? ui.detail : ui.text}</span>
         )}
-        {ui.phase === "speaking" && mine && (
-          <span className={`voice-mine voice-mine-${mineState(mine)}`}>
-            <MicIcon />
-            {mineLine(mine)}
-          </span>
-        )}
       </span>
       {dismiss && (
         <button className="voice-close" onClick={dismissVoice} title={dismiss} aria-label={dismiss}>
@@ -199,17 +236,6 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
       )}
     </div>
   );
-}
-
-/** A message as the pill tells it: the outbox's states, and `saving` for one the server does not have yet. */
-function mineState(mine: OutboxEntry | Outgoing): string {
-  return "state" in mine ? mine.state : "saving";
-}
-
-/** Your last message, under Kuru's words. */
-function mineLine(mine: OutboxEntry | Outgoing): string {
-  if (!("state" in mine)) return mine.error ? "Your message: not with the server yet — kept here, retrying" : "Your message: saving…";
-  return `Your message: ${whereItWent(mine)}`;
 }
 
 /** What the pill says between the key coming up and the words being made. */

@@ -27,11 +27,36 @@ Anything that would make `ptyhost.ts` need editing belongs on the server side.
 `~/.local/state/kururu/ptyhost.sock`, framed JSON (`hostsock.ts`), protocol in
 `hostlink.ts`.
 
-- **The host is spawned detached** — parent is pid 1, its own process group, no
-  controlling terminal. That is the difference between "my agents die when I
-  close the terminal" and "my agents are a thing on this machine". Nothing
-  reaps it; it is stopped on purpose, by its socket, and its log is a file
-  (`~/.local/state/kururu/ptyhost.log`) rather than somebody's stdout.
+- **The host is a launchd job** (`hostlaunch.ts`). Parent is pid 1, its own
+  process group, no controlling terminal — and its own *coalition*, which
+  detaching never gave it. That is the difference between "my agents die when I
+  close the terminal" and "my agents are a thing on this machine", and the
+  coalition is the half that was missing: a host spawned detached stayed in the
+  coalition of the app that started the chain, and a Dock force quit of that
+  app — or of a tile one of its agents' apps left behind — ended it and every
+  agent ([gotchas](gotchas.md#running)). The job is `RunAtLoad`, never
+  `KeepAlive`, `ProcessType` `Interactive`, with a new label per start; the
+  plist that started the running host is `ptyhost.plist` beside the socket.
+  Nothing reaps it; it is stopped on purpose, by its socket, and its log is a
+  file (`~/.local/state/kururu/ptyhost.log`) rather than somebody's stdout. A
+  server that cannot reach launchd spawns it detached as before and the record
+  says it shares a coalition; `bun run status` prints which kind is running.
+- **The host runs on kururu's own copy of the app.** The bundle the server is
+  on — or an installed Kururu.app, or the dev shell, in that order — is cloned
+  under `runtime/` beside the socket (`cp -c`: a third of a second, no space
+  while the original exists) and the host runs from the clone, so a
+  `dist:unsigned`, an update or a `bun install` cannot delete the binary under
+  it. Order matters because launchd makes the host its own *responsible
+  process* for macOS privacy: every agent can reach `~/Desktop` only if the
+  host's binary may. A clone of the server's own build has that build's grants;
+  an installed app nobody has allowed yet asks once, and the server waits for
+  the answer rather than giving up at five seconds.
+- **Every process says what it is.** `process.title` is what `ps` and Activity
+  Monitor show: `Kururu ptyhost - 12 agents`, `Kururu server :7717`,
+  `Kururu runner (run.mjs --watch)`, `Kururu voice (Kokoro)`. ASCII, because
+  `ps` cuts `comm` at sixteen bytes; and `ptyhost` and `run.mjs` stay in them
+  because the guards in `kill-ptyhosts`, `lifecycle.ts` and the runner match
+  those words.
 - **The two halves find each other at a path, not through a parent.** It was an
   Electron `MessagePort` once, which quietly made Electron the only thing that
   could arrange the split at all — with no Electron, `index.ts` built a host

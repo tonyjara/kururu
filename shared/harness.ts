@@ -100,7 +100,7 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
     inputSchema: obj(
       {
         agent: AGENT,
-        source: { type: "string", enum: ["reply", "transcript", "screen"], description: "Which view. Default reply." },
+        source: { type: "string", enum: ["reply", "transcript", "screen"], description: "Which view. Default reply; screen for an agent on a machine, which has no reply or transcript here." },
         lines: int(`Screen lines from the bottom, default ${SCREEN_LINES}.`),
         turns: int(`Transcript turns from the end, default ${TRANSCRIPT_TURNS}.`),
       },
@@ -143,13 +143,14 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "start_agent",
     description:
-      "Start a coding agent in a workspace, in a terminal of its own, with an opening prompt. Prefer add_card with run=true when the work is a task worth tracking; use this for a quick question or a one-off. Returns the new agent's id. The agent starts in the workspace's current directory unless cwd is given.",
+      "Start a coding agent in a workspace, in a terminal of its own, with an opening prompt. Prefer add_card with run=true when the work is a task worth tracking; use this for a quick question or a one-off. Returns the new agent's id. Without machine, a workspace pinned to a machine starts it there, in the workspace's folder, inside tmux; any other workspace starts it on this Mac in the workspace's current directory. On a machine its status is read off its screen and it has no transcript here.",
     inputSchema: obj(
       {
         workspace: WORKSPACE,
         prompt: str("The first message the agent is given."),
         launcher: str("Which agent and model, a launcher id from kururu_status. Default: Claude on its default model."),
-        cwd: str("An absolute directory to start in. Default: where the workspace's terminals are."),
+        machine: str("A machine's name from kururu_status, or local for this Mac. Default: the workspace's pinned machine, else this Mac."),
+        cwd: str("Where to start. On this Mac: an absolute directory, default where the workspace's terminals are. On a machine: ~, ~/path or /path, default the workspace's folder when pinned there, else ~."),
         name: str("A name for its tab."),
       },
       ["workspace", "prompt"],
@@ -236,6 +237,25 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
     inputSchema: obj({ name: str("The workspace's name.") }, ["name"]),
   },
   {
+    name: "search",
+    description:
+      "Full-text search over every card in this profile (titles and bodies, deleted ones included) and over the conversation history: what the user typed or said to you and what you answered, in every session, plus what each agent said when it finished a turn. Use it for \"when did we decide X\" and \"find the card about Y\" before asking the user. Accents are ignored; the last word matches as a prefix. Each hit says what it is, where, and the matching line.",
+    inputSchema: obj(
+      {
+        query: str("Words to look for."),
+        scope: { type: "string", enum: ["all", "cards", "turns"], description: "cards, turns (the conversations), or all. Default all." },
+        limit: int("At most this many hits, default 20, at most 50."),
+      },
+      ["query"],
+    ),
+  },
+  {
+    name: "card_history",
+    description:
+      "A card's history, oldest first: when it was made, every move between columns and who moved it (the user, you, or the run automation), edits, every run with its outcome, and deletion or restoration. Answers \"when did this go to Done\" and \"who moved it back\". Works for deleted cards too.",
+    inputSchema: obj({ card: str("The card id.") }, ["card"]),
+  },
+  {
     name: "say",
     description:
       "Say one short line aloud to the user right now, mid-turn — for example that you are starting three agents and it will take a minute. Your final message of every turn is read aloud anyway, so use this only for something worth hearing before the turn ends. Plain words, one or two sentences, in the user's language.",
@@ -293,13 +313,48 @@ export function keyBytes(keys: readonly string[]): { data: string } | { bad: str
 }
 
 /**
- * Text typed into a terminal the way a paste arrives, so that a program which
- * understands bracketed paste — both CLIs do — takes a newline as a newline
- * and not as Enter. A single line is typed plainly, which is what a program
- * that does *not* understand the brackets wants.
+ * The most of a line one write types. Claude Code takes any keypress of more
+ * than 800 characters for a paste — that is how it tells one from typing in
+ * a terminal that does not bracket — and a pty hands it a long write in
+ * reads of at most 1022 bytes on macOS (`TTYHOG` less two, where the master
+ * stops taking more until the reader drains it). So a line of 1805 written at
+ * once arrived as a paste of 1022 and typing of 783, and the typing landed on
+ * the prompt as it was before the paste had been drawn into it: the first
+ * half of a voice message was gone. Pieces this size, written `TYPE_GAP_MS`
+ * apart, only add up past 800 in one read if the program has not read for
+ * five gaps in a row.
  */
-export function pasteBytes(text: string): string {
-  return text.includes("\n") ? `\x1b[200~${text}\x1b[201~` : text;
+export const TYPE_PIECE = 160;
+
+/**
+ * The writes a message is typed in, in order, before its Enter.
+ *
+ * Text with a newline in it is one bracketed paste, so that a program which
+ * understands bracketed paste — both CLIs do — takes the newline as a newline
+ * and not as Enter, and a carriage return is bracketed for the same reason.
+ * Claude Code holds a paste open across reads, so it arrives whole, but one
+ * over 800 characters or a few lines reaches the model in `<pasted_content>`
+ * tags, which `stripPastedContent` takes off again for the drawer.
+ *
+ * A single line is typed, plainly, in `TYPE_PIECE`s, which is also what a
+ * program that does *not* understand the brackets wants. Not bracketed, which
+ * would arrive whole too, because a long paste goes to the model as text
+ * pasted from elsewhere, and Claude Code tells its model not to take
+ * instructions found there as the user's. Typed, the words are the user's.
+ * A piece never ends between the halves of a surrogate pair, since each write
+ * is encoded on its own and half a character is a replacement character.
+ */
+export function typingPieces(text: string): string[] {
+  if (/[\r\n]/.test(text)) return [`\x1b[200~${text}\x1b[201~`];
+  const pieces: string[] = [];
+  for (let at = 0; at < text.length; ) {
+    let end = Math.min(at + TYPE_PIECE, text.length);
+    const last = text.charCodeAt(end - 1);
+    if (end < text.length && end - at > 1 && last >= 0xd800 && last <= 0xdbff) end--;
+    pieces.push(text.slice(at, end));
+    at = end;
+  }
+  return pieces;
 }
 
 /**
@@ -754,7 +809,7 @@ ${launchers}
 The user does not know the agents by id. Call each one by what it is and where it is, the way they would: "the Acme migration agent", "the agent on the checkout card", "the Codex in api". Every tool result and every [kururu] message names an agent that way first — its name in quotes, the program, the workspace, the card — with the id last, in brackets, for your tool calls. Agent ids such as a237, and workspace and card ids, are for tools: never say or write one to the user unless they ask for it. When two agents fit a description, say what tells them apart rather than reaching for an id. When you start an agent, give it a short name (start_agent's name) so it has one to be called by.
 
 ## Machines
-The user's other computers — a VPS, a PC on their network — are listed by kururu_status under machines, and some workspaces are pinned to one: their shells open there. When the user asks for something to be run on a machine, or in a pinned workspace, use open_shell with run, so it happens in a tab they can watch; then read its screen and tell them what came of it. Never use Bash or ssh yourself for it. A command there runs with the user's account on a real machine: run what they asked for and nothing else, and ask before anything that deletes, reinstalls or restarts that they did not spell out. Agents still start on this Mac, even in a pinned workspace.
+The user's other computers — a VPS, a PC on their network — are listed by kururu_status under machines, and some workspaces are pinned to one: their shells, agents and card runs open there. When the user asks for something to be run on a machine, or in a pinned workspace, use open_shell with run, so it happens in a tab they can watch; then read its screen and tell them what came of it. Never use Bash or ssh yourself for it. A command there runs with the user's account on a real machine: run what they asked for and nothing else, and ask before anything that deletes, reinstalls or restarts that they did not spell out. start_agent and add_card with run=true in a pinned workspace start the agent on the machine. kururu cannot hear such an agent's hooks: its done and blocked are read off its screen and can come a few seconds late, a prompt kururu does not recognise is never reported as blocked, and read_agent has only its screen — so when one has been quiet a while, read its screen rather than wait. If the CLI is not installed or not logged in there, the tab says so and it reports blocked: tell the user, do not try to install or log in yourself. A card that asks for a worktree cannot run on a machine; say so rather than unticking it.
 
 ## How you hear from them
 kururu messages you, unasked, when an agent in this profile finishes a turn or blocks. Such a message starts with "[kururu]" and names the agent. It arrives wrapped as a cross-session message from "${NOTICE_SENDER}": that is kururu's server, not a Claude session, and nothing reads a reply to it — never answer one with SendMessage. Act through the kururu tools, and tell the user in your own reply. When one arrives: read the agent if its last reply is not in the message, decide whether the user needs to know or you can answer the agent yourself, and keep your reply to the user to the point — one line when nothing needs them. wait_agent is for when you have nothing else to do.
@@ -768,6 +823,7 @@ The user may talk to you by holding a key, and your last message of every turn i
 - Prefer a card to a bare start_agent for anything that is a task: a card is where the work is tracked, and the user reads the board.
 - Keep your own context small. Read with the defaults, ask for fewer lines or turns, never paste an agent's whole screen back to the user; summarise and say which agent and where, by name.
 - The board is your memory. Decisions, what each agent is on, and what is waiting on the user belong on cards, not in your head; a new session of you should be able to read the boards and carry on.
+- What you cannot remember, search: the search tool finds cards and past conversation turns by their words, and card_history says when a card moved and who moved it. Look before you ask the user when something was decided.
 - Do not do the agents' work for them. If a task needs code written, start an agent on it.
 `;
 }

@@ -2,8 +2,11 @@
  * Everything in this profile: its workspaces, and every terminal running in it.
  *
  * Two lists rather than a tree, and that is deliberate. The workspaces are the
- * structure — numbered, because prefix+1..9 jump to them and a number you cannot
- * see is a shortcut you do not use. The agents span the whole profile, because
+ * structure. They were numbered, because prefix+1..9 jump to them, and the
+ * numbers went once groups came: a number that skips across a folded group and
+ * stops at nine was counting something nobody could see, and the column it took
+ * was worth more to the names. The key is still in each row's tooltip. The
+ * agents span the whole profile, because
  * an agent is the thing you go looking for across a whole session, not inside
  * one layout: "where did the one that finished go" is a question about a
  * profile, not about a split tree.
@@ -36,6 +39,12 @@
  * rather than a second implementation — the rename sends the same message
  * prefix+W does — and they exist because a keymap is worth nothing until it has
  * been learnt, and a row has no room to print five buttons.
+ *
+ * Which is also why a row has one button and not two: the git and database
+ * buttons it carried are a menu behind ⋯ now, with the board and LazyGit, and
+ * the ⋯ waits for the pointer to be on the row. Buttons read every time you
+ * look at the sidebar and pressed a few times a day are the trade the row made
+ * once already, with the dev servers.
  */
 import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { panes } from "../../../shared/layout";
@@ -49,7 +58,6 @@ import type {
 } from "../../../shared/model";
 import { defaultMascot, mascotFor, WORKSPACE_COLORS, workspaceUnits } from "../../../shared/model";
 import type { AccountUsage, DevServer, GitAction, RepoGit } from "../../../shared/wire";
-import type { WorkspaceDatabase } from "../../../shared/databases";
 import { formatBytes as formatSize, machineSeverity, type MachineStatus, type MachineUsed } from "../../../shared/machines";
 import {
   balanceOf,
@@ -59,11 +67,10 @@ import {
   runway,
   type OpenRouterReading,
 } from "../../../shared/openrouter";
-import type { MissedReply, OutboxEntry } from "../../../shared/voice";
 import { colorValue, colorValues } from "../colors";
 import { AGENT_MIME, GROUP_MIME, WORKSPACE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
 import type { Action } from "../keys";
-import { agentLabel, agentSummary, shortenPath } from "../labels";
+import { agentLabel, agentSummary, remoteHost, remoteNote, shortenPath } from "../labels";
 import { previewLabel, previewUrl } from "../preview";
 import * as api from "../session";
 import { useKururu } from "../session";
@@ -71,8 +78,6 @@ import { limitLabel, limitMarks, limitTitle, resetIn, staleTitle } from "../usag
 import { Menu, Popover, type MenuItem } from "./Menu";
 import type { DialogState } from "./Dialog";
 import { Icon } from "./Icon";
-import { MicIcon, SpeakerIcon } from "./VoiceIcons";
-import { useOutgoing, useVoiceUi, voiceIsRemote, type Outgoing } from "../voice";
 import { Mascot, Status } from "./Status";
 
 /**
@@ -126,9 +131,9 @@ interface Props {
    */
   onDeleteWorkspace: (workspaceId: string) => void;
   /**
-   * The database button on a row: the workspace's env files name at least one,
-   * and the sheet that opens is the app's, like the profile's board — it goes
-   * over the window, and on a phone the sidebar is put away first.
+   * The row menu's Databases, there when the workspace's env files name at
+   * least one. The sheet that opens is the app's, like the profile's board — it
+   * goes over the window, and on a phone the sidebar is put away first.
    */
   onDatabases: (workspaceId: string) => void;
   /**
@@ -138,7 +143,7 @@ interface Props {
    */
   onEditing: (editing: boolean) => void;
   /**
-   * Put a question up — the commit message, for the git button. The dialog is
+   * Put a question up — the commit message, for the git rows. The dialog is
    * the app's, for the reason the delete confirmation is: while it is up no key
    * reaches a pty, and that is a promise only the app can keep.
    */
@@ -149,8 +154,6 @@ interface Props {
   onReach: () => void;
   /** Opens the profile's own board — see `ProfileBoard`. */
   onBoard: () => void;
-  /** Starts or goes to the profile's harness — see `shared/harness.ts`. */
-  onHarness: () => void;
   /**
    * Whether this is a column beside the panes or a screen in front of them.
    *
@@ -184,7 +187,6 @@ export function Sidebar({
   onEditing,
   onPrompt,
   onBoard,
-  onHarness,
   onSettings,
   onReach,
   overlay,
@@ -201,18 +203,8 @@ export function Sidebar({
    * the sidebar draws, and passing it through the app would mean two components
    * knowing about it so that one of them could forget.
    */
-  const { branches, databases, machines, missed, outbox } = useKururu();
+  const { branches, databases, machines } = useKururu();
   const heads = new Map(branches.map((head) => [head.workspaceId, head] as const));
-  /** Kuru's replies in this profile that nobody played to their end — the harness button's badge. See `Voice.review`. */
-  const missedHere = missed.filter((reply) => reply.profileId === profile.id);
-  /** Your messages to Kuru in this profile, newest first: the server's, and the ones this page has not got to it yet. See `outbox.ts`. */
-  const outgoing = useOutgoing();
-  const talk = useVoiceUi();
-  const saidHere = mineIn(profile.id, outbox, outgoing);
-  const failedHere = saidHere.filter((m) => m.state === "failed").length;
-  const movingHere = saidHere.some((m) => m.state !== "delivered" && m.state !== "failed");
-  /** Where the lists behind those badges are open, and which was asked for — it goes first. */
-  const [missedAt, setMissedAt] = useState<{ x: number; y: number; first: "mine" | "missed" } | null>(null);
   const dbCount = new Map<string, number>();
   for (const db of databases) dbCount.set(db.workspaceId, (dbCount.get(db.workspaceId) ?? 0) + 1);
   /**
@@ -269,12 +261,16 @@ export function Sidebar({
   const [renaming, setRenaming] = useState<string | null>(null);
   /** Where a context menu is open, and which row it belongs to. */
   const [menu, setMenu] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
-  /** Where a git button's menu is open, and whose checkout it acts on. */
-  const [gitMenu, setGitMenu] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
-  /** The workspace whose git verb is still running — its button says so, and takes no second one. */
+  /**
+   * Where a row's ⋯ menu is open, and whose. Apart from the right-click menu,
+   * which is about the row as a thing in a list; this one is about the work in
+   * it — its board, its git, its databases.
+   */
+  const [options, setOptions] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
+  /** The workspace whose git verb is still running — its ⋯ says so, and its git rows take no second one. */
   const [gitBusy, setGitBusy] = useState<string | null>(null);
   /**
-   * What the last git verb came to, in place of the branch line until it is
+   * What the last git verb came to, as the row's second line until it is
    * clicked away or a few seconds pass: what was committed and where it went,
    * or git's reason for not. A line on the row rather than a toast, the way a
    * card says what its merge came to — it is about this workspace, and a
@@ -366,8 +362,6 @@ export function Sidebar({
    * `has` per row, and tidying it away would cost a write per snapshot.
    */
   const openCards = profile.board.cards.filter((card) => card.column !== "done").length;
-  const harnessId = profile.harness?.agentId;
-  const harnessLive = harnessId !== undefined && harnessId !== null && agents.some((agent) => agent.id === harnessId && !agent.exited);
   const away = new Set(profile.hiddenAgents);
   const shown = listed.filter((agent) => !away.has(agent.id));
   const hidden = listed.filter((agent) => away.has(agent.id));
@@ -578,6 +572,70 @@ export function Sidebar({
   };
 
   /**
+   * A workspace's board, from its row: there, and the board you have where it
+   * is, or a new tab in the pane you were last in — the server decides which,
+   * against the layout it holds rather than the one this client last drew.
+   * `navigated` for the phone, where the sidebar is a sheet over the thing you
+   * just asked to see.
+   */
+  const openRowBoard = (workspaceId: string) => {
+    api.openBoard(undefined, false, workspaceId);
+    navigated();
+  };
+
+  /** The row an open ⋯ menu belongs to. */
+  const optionsWorkspace = options ? (profile.workspaces.find((w) => w.id === options.workspaceId) ?? null) : null;
+
+  /**
+   * The ⋯ menu: what is done *in* a workspace, as against the right-click
+   * menu's what is done *to* one. The two that go somewhere first, then the
+   * databases, then the main checkout's git under a line saying where it
+   * stands — which is what the git button's tooltip said, and a menu has no
+   * tooltip.
+   */
+  const optionItems = (workspace: Workspace): MenuItem[] => {
+    const git = heads.get(workspace.id)?.git ?? null;
+    const dbs = dbCount.get(workspace.id) ?? 0;
+    const busy = gitBusy === workspace.id;
+    const pin = workspace.machine;
+    const machine = pin ? machines.find((m) => m.id === pin.machineId) : undefined;
+    const items: MenuItem[] = [
+      { label: "Open board", run: () => openRowBoard(workspace.id) },
+      {
+        label: "Open LazyGit",
+        /* In the workspace's repository, or on its machine when it is pinned
+           to one — the server knows which, and what the folder is. */
+        hint: machine ? `on ${machine.name}` : undefined,
+        run: () => {
+          void api.newTab({ workspaceId: workspace.id, lazygit: true });
+          navigated();
+        },
+      },
+    ];
+    if (dbs > 0) items.push({ label: "Databases", hint: String(dbs), run: () => onDatabases(workspace.id) });
+    if (git) {
+      items.push({ label: gitTitle(git).split("\n")[0]!, sep: true, disabled: true, run: () => undefined });
+      const verbs = gitItems(git, (root, action, message) => {
+        const workspaceId = workspace.id;
+        setGitBusy(workspaceId);
+        setGitSaid(null);
+        api
+          .workspaceGit(workspaceId, root, action, message)
+          .then(
+            (text) => setGitSaid({ workspaceId, text, error: false }),
+            (err: unknown) =>
+              setGitSaid({ workspaceId, text: err instanceof Error ? err.message : String(err), error: true }),
+          )
+          .finally(() => setGitBusy((was) => (was === workspaceId ? null : was)));
+      }, onPrompt);
+      // A verb still running takes no second one, as the button that was
+      // disabled for it did; the rows stay listed so the menu keeps its shape.
+      items.push(...verbs.map((item) => (busy ? { ...item, disabled: true } : item)));
+    }
+    return items;
+  };
+
+  /**
    * One row of the agent list, drawn the same whichever of the two lists it is
    * in: the list proper, and the drawer of the ones put away. One function
    * rather than two, because a row in the drawer is the same row — the same
@@ -668,7 +726,7 @@ export function Sidebar({
         <button
           className={`agent-row ${agent.exited ? "agent-row-exited" : ""}`}
           onClick={() => show(agent.id)}
-          title={[agentLabel(agent), agentSummary(agent), agent.command, agent.cwd]
+          title={(remoteNote(agent) ? [agentLabel(agent), agentSummary(agent), remoteNote(agent)] : [agentLabel(agent), agentSummary(agent), agent.command, agent.cwd])
             .filter(Boolean)
             .join("\n")}
           draggable
@@ -707,6 +765,8 @@ export function Sidebar({
             {/* Not "new output" any more, which it was and which lit nine rows in ten:
                 this is the turn that ended, or the question that was asked, while you
                 were not looking at it. The server decides it — see its `unread`. */}
+            {/* Where it runs, when that is not here — see `remoteHost`. */}
+            {remoteHost(agent) && <span className="remote-mark">{remoteHost(agent)}</span>}
             {agent.unread && <span className="unread" aria-label="waiting for you" />}
             {hiddenHere && <span className="agent-name">{agentLabel(agent)}</span>}
           </span>
@@ -721,7 +781,9 @@ export function Sidebar({
               working is the next most useful thing we know for certain. */}
           <span className="agent-bottom">
             <span className="agent-activity">
-              {agentSummary(agent) || shortenPath(agent.cwd)}
+              {/* An agent on a machine has no directory here worth naming —
+                  its cwd is where the ssh was started — so the machine stands in. */}
+              {agentSummary(agent) || (remoteHost(agent) ? `on ${remoteHost(agent)}` : shortenPath(agent.cwd))}
             </span>
             {agent.rss ? <Memory bytes={agent.rss} /> : null}
             {agent.contextUsage && <ContextRing usage={agent.contextUsage} />}
@@ -810,57 +872,10 @@ export function Sidebar({
           <Icon name="board" />
           {openCards > 0 && <span className="profile-board-count">{openCards}</span>}
         </button>
-        {/* The profile's harness, beside its board for the same reason: it is
-            the profile's, over every workspace. One button whatever its state —
-            start, resume or go to — because the user means one thing by it.
-            Lit while it runs, so a glance says whether there is anybody home. */}
-        <span className="profile-harness">
-          <button
-            className={`profile-board-btn profile-harness-btn${harnessLive ? " profile-harness-live" : ""}`}
-            onClick={onHarness}
-            title={harnessLive ? "Go to this profile's harness (C-a H)" : "Start this profile's harness (C-a H)"}
-            aria-label={`${profile.name}'s harness`}
-            aria-pressed={harnessLive}
-          >
-            <Icon name="bot" />
-          </button>
-          {/* What Kuru said that nobody heard to the end: cut off, dismissed,
-              or said with no window listening. A button of its own on the
-              harness button's corner rather than a count inside it, because
-              the harness button goes to the harness and this goes to what
-              it said — two places, two targets. */}
-          {missedHere.length > 0 && (
-            <button
-              className="profile-missed"
-              onClick={(event) => {
-                const box = event.currentTarget.getBoundingClientRect();
-                setMissedAt({ x: box.left, y: box.bottom + 4, first: "missed" });
-              }}
-              title={`${missedHere.length} ${missedHere.length === 1 ? "reply" : "replies"} from Kuru you did not hear`}
-              aria-label={`${missedHere.length} missed ${missedHere.length === 1 ? "reply" : "replies"}`}
-            >
-              {missedHere.length}
-            </button>
-          )}
-          {/* Your messages to Kuru, on the other corner: the other way round
-              from the badge above it, and drawn so. A count only when some
-              did not get through, since that is the one you act on; a dot
-              while one is on its way, and a quiet one once they all arrived,
-              so the list is always a click away to see that one did. */}
-          {saidHere.length > 0 && (
-            <button
-              className={`profile-said${failedHere ? " profile-said-failed" : movingHere ? " profile-said-moving" : ""}`}
-              onClick={(event) => {
-                const box = event.currentTarget.getBoundingClientRect();
-                setMissedAt({ x: box.left, y: box.bottom + 4, first: "mine" });
-              }}
-              title={saidTitle(saidHere)}
-              aria-label={`Your messages to Kuru: ${saidTitle(saidHere)}`}
-            >
-              {failedHere > 0 ? failedHere : ""}
-            </button>
-          )}
-        </span>
+        {/* Kuru is not here any more. It was a bot button beside the board with
+            a count on each corner, and it is now a chip in the status bar and
+            a drawer behind it — see `StatusBar.tsx` and `KuruDrawer.tsx`. The
+            header is the profile's name and its board, which is what it was. */}
         {/* The way out of a full-screen sidebar. Drawn only when it is one: as a
             column, the panes next to it are already the way out, and a close
             button beside a thing with a keyboard shortcut and a status-bar
@@ -927,9 +942,9 @@ export function Sidebar({
                  nothing when pressed — the branch, and the gap either side of
                  it, are a third of the height of a row you are aiming at.
 
-                 A click that landed on the git button is not this: it means
-                 something else, and a workspace switch riding along behind it
-                 would be a side effect nobody asked for. The name's button is the
+                 A click that landed on the ⋯ is not this: it means something
+                 else, and a workspace switch riding along behind it would be a
+                 side effect nobody asked for. The name's button is the
                  exception rather than being listed, because it *is* this
                  gesture — which also keeps it working from the keyboard, where
                  Enter on the focused button produces exactly this click. */
@@ -1021,95 +1036,55 @@ export function Sidebar({
                       if (moved <= CLICK_SLOP) goTo(workspace.id);
                     }}
                   >
-                    <span className="ws-index">{index < 9 ? index + 1 : "\u00b7"}</span>
                     {mascotted && <WorkspaceMascot mascots={mascots} mascotId={workspace.mascotId} />}
                     <span className="ws-name">{workspace.name}</span>
+                    {head?.git && <GitMarks git={head.git} />}
                   </button>
 
-                  {/* The main checkout's git, as a control, at the end of the
-                      name's line — where the colour swatch was, which lives on
-                      in the row's menu and in the rail down its left edge.
-                      Its colour is the answer to "is there anything to commit",
-                      asked of the main checkout and never of a card's worktree:
-                      those are the board's to commit and merge, and a button
-                      that changed colour whenever focus crossed into one would
-                      be saying something about the wrong checkout.
+                  {/* The row's options, at the end of the name's line, where its
+                      git and database buttons were. Drawn only while the pointer
+                      is on the row (or the menu is open, or a git verb is still
+                      running) — see `.ws-more` for the touch screens that have
+                      no pointer to wait for. Outside the row's own button,
+                      because a button inside a button is not a thing the
+                      platform will give you. */}
+                  <button
+                    className={[
+                      "ws-more",
+                      options?.workspaceId === workspace.id ? "ws-more-open" : "",
+                      gitBusy === workspace.id ? "ws-more-busy" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    onClick={(event) => {
+                      const box = event.currentTarget.getBoundingClientRect();
+                      setOptions({ workspaceId: workspace.id, x: box.left, y: box.bottom + 4 });
+                    }}
+                    title="Options"
+                    aria-label={`${workspace.name}: options`}
+                    aria-haspopup="menu"
+                  >
+                    <Icon name="more" />
+                  </button>
 
-                      Only in a repository, since there is nothing for it to do
-                      anywhere else. Outside the row's own button, because a
-                      button inside a button is not a thing the platform will
-                      give you. */}
-                  {(head?.git || dbCount.get(workspace.id)) && (
-                    <span className="ws-tools">
-                      {/* The workspace's databases, to the left of git: drawn
-                          only when its env files name one, and the sheet it
-                          opens is the app's. The count is how many places,
-                          not how many files — two files pointing at one
-                          database are one database. */}
-                      {(dbCount.get(workspace.id) ?? 0) > 0 && (
-                        <button
-                          className="ws-db"
-                          onClick={() => onDatabases(workspace.id)}
-                          title={dbTitle(databases.filter((db) => db.workspaceId === workspace.id))}
-                          aria-label={`Databases: ${dbCount.get(workspace.id)}`}
-                        >
-                          <Icon name="database" />
-                        </button>
-                      )}
-                      {head?.git && (
-                        <button
-                          className={`ws-git ${gitTone(head.git)} ${gitBusy === workspace.id ? "ws-git-busy" : ""}`}
-                          disabled={gitBusy === workspace.id}
-                          onClick={(event) => {
-                            const box = event.currentTarget.getBoundingClientRect();
-                            setGitMenu({ workspaceId: workspace.id, x: box.left, y: box.bottom + 4 });
-                          }}
-                          title={gitTitle(head.git)}
-                          aria-label={`Git: ${gitTitle(head.git)}`}
-                        >
-                          <Icon name="git" />
-                        </button>
-                      )}
-                    </span>
-                  )}
-
-                  {/* What is checked out where this workspace works, on a line
-                      of its own under the name — and only when there is one, so
-                      a workspace outside a repository is a single line rather
-                      than a name with a blank under it.
-
-                      Text rather than a button, because there is nothing
-                      useful to do to it from here — switching branch under a
-                      running agent is a thing to do in the terminal, where you
-                      can see what it says. In the mono face for the reason a
-                      shell prompt uses one: it makes a word that could be
-                      anything read as a ref. It clips rather than wrapping,
-                      because branch names are somebody else's length. */}
+                  {/* A second line under the name only when there is something
+                      to say on it: what the last git verb from the ⋯ came to,
+                      until it is clicked away or a few seconds pass, or where a
+                      pinned workspace's shells open. The branch was here, every
+                      row, every time you looked; it went because everything
+                      happens on one branch, and it is still the first line of
+                      the ⋯ menu and of the marks' tooltip. In the mono face for
+                      the reason a shell prompt uses one, and clipped rather
+                      than wrapped, because what git says is git's length. */}
                   {gitSaid?.workspaceId === workspace.id ? (
                     <button
-                      className={`ws-branch ws-said ${gitSaid.error ? "ws-said-error" : ""}`}
+                      className={`ws-note ws-said ${gitSaid.error ? "ws-said-error" : ""}`}
                       onClick={() => setGitSaid(null)}
                       title={`${gitSaid.text}\nClick to dismiss`}
                     >
                       {gitSaid.text}
                     </button>
-                  ) : head ? (
-                    <span
-                      className={`ws-branch ${head.detached ? "ws-branch-off" : ""}`}
-                      title={
-                        head.detached
-                          ? `Detached at ${head.branch}\n${head.root}`
-                          : `Branch: ${head.branch}\n${head.root}`
-                      }
-                    >
-                      {head.branch}
-                    </span>
                   ) : (
-                    /* A workspace pinned to a machine has no branch here — its
-                       shells are on the machine, and nothing reads that disk —
-                       so the line says where they are instead. A branch wins
-                       when there is one: an agent started here, in a repository,
-                       is the more specific fact. */
                     pinnedTo(workspace, machines)
                   )}
                 </>
@@ -1283,17 +1258,9 @@ export function Sidebar({
           at={menu}
           onClose={() => setMenu(null)}
           items={[
-            /* First, because it is the one row here that goes somewhere: it
-               switches to this workspace and shows its board, making one if it
-               has never had one. `navigated` for the phone, where the sidebar
-               is a sheet over the thing you just asked to see. */
-            {
-              label: "Open the board",
-              run: () => {
-                api.openBoard(undefined, false, menuWorkspace.id);
-                navigated();
-              },
-            },
+            /* First, because it is the one row here that goes somewhere —
+               the same verb as the ⋯ menu's, which says what it does. */
+            { label: "Open the board", run: () => openRowBoard(menuWorkspace.id) },
             { label: "Rename", sep: true, run: () => setRenaming(menuWorkspace.id) },
             {
               label: "Colour…",
@@ -1368,41 +1335,11 @@ export function Sidebar({
         />
       )}
 
-      {missedAt && (missedHere.length > 0 || saidHere.length > 0) && (
-        <VoiceLists
-          at={missedAt}
-          first={missedAt.first}
-          mine={saidHere}
-          recording={talk.phase === "listening" && !voiceIsRemote()}
-          replies={missedHere}
-          onPlay={() => {
-            api.playMissed(profile.id);
-            setMissedAt(null);
-          }}
-          onClear={() => {
-            api.clearMissed(profile.id);
-            setMissedAt(null);
-          }}
-          onClose={() => setMissedAt(null)}
-        />
-      )}
-      {gitMenu && (
+      {options && optionsWorkspace && (
         <Menu
-          at={gitMenu}
-          onClose={() => setGitMenu(null)}
-          items={gitItems(heads.get(gitMenu.workspaceId)?.git ?? null, (root, action, message) => {
-            const workspaceId = gitMenu.workspaceId;
-            setGitBusy(workspaceId);
-            setGitSaid(null);
-            api
-              .workspaceGit(workspaceId, root, action, message)
-              .then(
-                (text) => setGitSaid({ workspaceId, text, error: false }),
-                (err: unknown) =>
-                  setGitSaid({ workspaceId, text: err instanceof Error ? err.message : String(err), error: true }),
-              )
-              .finally(() => setGitBusy((busy) => (busy === workspaceId ? null : busy)));
-          }, onPrompt)}
+          at={options}
+          onClose={() => setOptions(null)}
+          items={optionItems(optionsWorkspace)}
         />
       )}
 
@@ -1434,180 +1371,6 @@ export function Sidebar({
       )}
     </aside>
   );
-}
-
-/**
- * One of your messages as the list draws it: the outbox's, or a clip this
- * page holds that the server has not taken yet (`saving`).
- */
-type Mine = Omit<OutboxEntry, "state"> & { state: OutboxEntry["state"] | "saving" };
-
-/** A profile's messages, newest first, the server's record winning over this page's for a clip both know. */
-function mineIn(profileId: string, outbox: readonly OutboxEntry[], outgoing: readonly Outgoing[]): Mine[] {
-  const known = new Set(outbox.map((e) => e.id));
-  const pending: Mine[] = outgoing
-    .filter((c) => c.profileId === profileId && !known.has(c.id))
-    .map((c) => ({
-      id: c.id,
-      profileId: c.profileId,
-      at: c.at,
-      ms: c.ms,
-      state: "saving",
-      text: null,
-      lang: null,
-      typedAt: null,
-      note: c.error ? `Not with the server yet (${c.error}). Kept on this device and sent again until it is.` : null,
-    }));
-  return [...outbox.filter((e) => e.profileId === profileId), ...pending].sort((a, b) => b.at - a.at);
-}
-
-/** What the corner button says when hovered: how many arrived, how many are on their way, how many did not. */
-function saidTitle(mine: readonly Mine[]): string {
-  const count = (state: (m: Mine) => boolean) => mine.filter(state).length;
-  const parts = [
-    [count((m) => m.state === "failed"), "did not get through"],
-    [count((m) => m.state !== "delivered" && m.state !== "failed"), "on the way"],
-    [count((m) => m.state === "delivered"), "delivered"],
-  ] as const;
-  return parts.filter(([n]) => n > 0).map(([n, what]) => `${n} ${what}`).join(", ");
-}
-
-const MINE_LABEL: Record<Mine["state"], string> = {
-  saving: "Saving",
-  transcribing: "Transcribing",
-  queued: "Queued",
-  delivered: "Delivered",
-  failed: "Failed",
-};
-
-/**
- * The two lists behind the harness button: what you said to Kuru, and what
- * Kuru said that you did not hear. One box, because they are the two halves
- * of one conversation and the question that opens either is "did that get
- * through?" — but two sections, each headed by which way the words went and
- * drawn with who said them, a microphone or a speaker, because the one thing
- * that must not happen is a reply read as a message of yours or the other way
- * round. Whichever badge was clicked goes first.
- *
- * **Your messages**, newest first, each with what became of it: recording,
- * saving (not with the server yet, kept on this device), transcribing,
- * queued (waiting for Kuru, or typed and waiting for it to take it),
- * delivered, failed. A failed one can be sent again — heard again if it has
- * no words, handed to Kuru again if it has — or discarded with its audio.
- *
- * **Kuru's replies you missed**, oldest first, to read or hear again. "Play"
- * says them in order, each starting "Earlier", and each leaves the list once
- * it is heard to its end — the same thing asking Kuru "what did I miss?"
- * does through its `play_missed` tool. "Clear" is having read them. Opening
- * the list is not, since a glance is not reading.
- */
-function VoiceLists({
-  at,
-  first,
-  mine,
-  recording,
-  replies,
-  onPlay,
-  onClear,
-  onClose,
-}: {
-  at: { x: number; y: number };
-  first: "mine" | "missed";
-  mine: readonly Mine[];
-  recording: boolean;
-  replies: readonly MissedReply[];
-  onPlay: () => void;
-  onClear: () => void;
-  onClose: () => void;
-}) {
-  const said = (mine.length > 0 || recording) && (
-    <section className="voice-list voice-list-mine" aria-label="Your messages to Kuru">
-      <h3 className="voice-list-head">
-        <MicIcon />
-        <span>Your messages to Kuru</span>
-      </h3>
-      <ol className="missed-list">
-        {recording && (
-          <li className="missed-item said-item">
-            <span className="said-meta">
-              <span className="said-state said-state-recording">Recording</span>
-            </span>
-          </li>
-        )}
-        {mine.map((m) => (
-          <li key={m.id} className="missed-item said-item">
-            <span className="said-meta">
-              <span className={`said-state said-state-${m.state}`}>{MINE_LABEL[m.state]}</span>
-              <time className="missed-at" dateTime={new Date(m.at).toISOString()}>
-                {saidAt(m.at)} · {clipLength(m.ms)}
-              </time>
-            </span>
-            {m.text ? <span className="missed-text">{m.text}</span> : <span className="said-pending">Not in words yet — the audio is kept.</span>}
-            {m.note && m.state !== "delivered" && <span className="said-note">{m.note}</span>}
-            {m.state === "failed" && (
-              <span className="said-actions">
-                <button className="menu-item" onClick={() => api.resendVoice(m.id)}>
-                  <span className="menu-label">{m.text ? "Resend" : "Listen again"}</span>
-                </button>
-                <button className="menu-item" onClick={() => api.discardVoice(m.id)}>
-                  <span className="menu-label">Discard</span>
-                </button>
-              </span>
-            )}
-          </li>
-        ))}
-      </ol>
-    </section>
-  );
-  const missed = replies.length > 0 && (
-    <section className="voice-list voice-list-missed" aria-label="Kuru's replies you did not hear">
-      <h3 className="voice-list-head">
-        <SpeakerIcon />
-        <span>Kuru's replies you didn't hear</span>
-      </h3>
-      <ol className="missed-list">
-        {replies.map((reply) => (
-          <li key={reply.id} className="missed-item">
-            <time className="missed-at" dateTime={new Date(reply.at).toISOString()}>
-              {saidAt(reply.at)}
-            </time>
-            <span className="missed-text">{reply.text}</span>
-          </li>
-        ))}
-      </ol>
-      <div className="missed-actions">
-        <button className="menu-item" onClick={onPlay}>
-          <Icon name="play" />
-          <span className="menu-label">Play {replies.length === 1 ? "it" : `all ${replies.length}`}</span>
-        </button>
-        <button className="menu-item" onClick={onClear}>
-          <span className="menu-label">Clear</span>
-        </button>
-      </div>
-    </section>
-  );
-  // Scrolling the list is scrolling, not a hint to close — unlike the
-  // right-click menu's backdrop, which closes on a scroll because the row it
-  // points at may have just moved under it.
-  return (
-    <Popover at={at} onClose={onClose} className="menu missed" role="dialog" closeOnScroll={false}>
-      {first === "mine" ? said : missed}
-      {first === "mine" ? missed : said}
-    </Popover>
-  );
-}
-
-/** How long a clip runs, as a clock: 0:07, 4:32. */
-function clipLength(ms: number): string {
-  const s = Math.max(1, Math.round(ms / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
-
-/** The time a reply was said: the clock today, and the day before that. */
-function saidAt(at: number): string {
-  const when = new Date(at);
-  const time = when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return when.toDateString() === new Date().toDateString() ? time : `${when.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
 }
 
 /**
@@ -2154,7 +1917,7 @@ function pinnedTo(workspace: Workspace, machines: MachineStatus[]): ReactNode {
   const machine = pin ? machines.find((m) => m.id === pin.machineId) : undefined;
   if (!pin || !machine) return null;
   return (
-    <span className="ws-branch" title={`New shells here open on ${machine.name} (ssh ${machine.host}), in ${pin.dir}, inside tmux`}>
+    <span className="ws-note" title={`New shells here open on ${machine.name} (ssh ${machine.host}), in ${pin.dir}, inside tmux`}>
       on {machine.name} · {pin.dir}
     </span>
   );
@@ -2594,19 +2357,31 @@ function SectionToggle({
 }
 
 /**
- * The git button's colour: something to commit, something to push or pull,
- * or nothing. Uncommitted wins over the rest because it is the one a merge
- * or a push would leave behind.
+ * What the main checkout has not finished, at the end of the name's line:
+ * files not committed (`±`, the dirty mark shell prompts have long used), and
+ * commits not pushed (`↑`) or not pulled (`↓`) — the arrows the ⋯ menu's Push
+ * and Pull carry. Nothing at all when there is nothing, so a clean row is just
+ * its name.
+ *
+ * Counts rather than a coloured dot, which is what the git button was: a dot
+ * on a row in this list already means an agent is waiting for you, and "how
+ * much" is the next question anyway. Always drawn, unlike the ⋯, because it
+ * is the one thing on the row worth noticing without going to look. Ahead
+ * and behind only count against an upstream; a branch with none says so in
+ * the tooltip, not with a mark that would sit on every local-only repository
+ * for good. Inside the row's button, so it is part of what a click goes to.
  */
-/** The tooltip on the database button: one line per place, file first. */
-function dbTitle(dbs: WorkspaceDatabase[]): string {
-  return dbs.map((db) => `${db.files.join(", ")} → ${db.host}/${db.database}`).join("\n");
-}
-
-function gitTone(git: RepoGit): string {
-  if (git.changes) return "ws-git-dirty";
-  if (git.ahead || git.behind) return "ws-git-moved";
-  return "";
+function GitMarks({ git }: { git: RepoGit }) {
+  const ahead = git.upstream ? git.ahead : 0;
+  const behind = git.upstream ? git.behind : 0;
+  if (!git.changes && !ahead && !behind) return null;
+  return (
+    <span className="ws-marks" title={gitTitle(git)}>
+      {git.changes > 0 && <span className="ws-mark-dirty">±{git.changes}</span>}
+      {ahead > 0 && <span className="ws-mark-moved">↑{ahead}</span>}
+      {behind > 0 && <span className="ws-mark-moved">↓{behind}</span>}
+    </span>
+  );
 }
 
 function gitTitle(git: RepoGit): string {
@@ -2622,7 +2397,7 @@ function gitTitle(git: RepoGit): string {
 }
 
 /**
- * The git button's menu. The three that commit ask for a message first — and
+ * The ⋯ menu's git rows. The three that commit ask for a message first — and
  * only when there is something to commit: a clean tree with commits to merge
  * or push runs straight away, because a prompt for a message that will not be
  * used is a question with no answer. Merge is offered only when there is a

@@ -53,11 +53,12 @@ import { visibleLaunchers } from "../../../shared/launchers";
 import { mascotFor, type Profile, type Workspace } from "../../../shared/model";
 import { colorValue } from "../colors";
 import * as api from "../session";
-import { BoardView, CardWhen, Composer, dropDraft, useComposerInView } from "./Board";
+import { BoardView, CardBody, CardWhen, Composer, dropDraft, useComposerInView } from "./Board";
 import { Icon } from "./Icon";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
 import { ColorPicker } from "./Sidebar";
 import { PROFILE_CARD_MIME as CARD_MIME, Timeline } from "./Timeline";
+import { BoardSearch } from "./Search";
 
 /**
  * Which view the board was last left in, so that it opens in it. Out here for
@@ -132,11 +133,33 @@ function pending(board: Board | null): boolean {
   return board?.cards.some((card) => card.column === "doing" || card.column === "review") === true;
 }
 
-export function ProfileBoard({ profile, onClose }: { profile: Profile; onClose: () => void }) {
+export function ProfileBoard({
+  profile,
+  onClose,
+  show = null,
+}: {
+  profile: Profile;
+  onClose: () => void;
+  /**
+   * A card to open at: the board it is on, and the card itself. The Kuru
+   * drawer sends this for a card a reply named — the sheet opens on that
+   * workspace's board, or the profile's, with the card's composer open.
+   */
+  show?: { workspaceId: string | null; cardId: string } | null;
+}) {
   const board = profile.board;
   const lanes = boardLanes(board);
   const { snapshot } = api.useKururu();
   const [shown, setShown] = useShown(profile.id);
+  useEffect(() => {
+    if (!show) return;
+    setShown(show.workspaceId);
+    if (!show.workspaceId) setEditingState(show.cardId);
+    // Once, on the ask: the board the sheet is left on afterwards is the
+    // person's, and a re-render must not drag it back.
+  }, [show]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** The search row under the bar, shown on the header's button. Closed again on a pick, since the card is then on screen. */
+  const [searching, setSearching] = useState(false);
   /**
    * The workspaces with a board, after the profile's own: the ones with
    * something pending first, then the rest, each in the sidebar's order — so
@@ -375,10 +398,27 @@ export function ProfileBoard({ profile, onClose }: { profile: Profile; onClose: 
                 ? `Sent: ${sent}`
                 : "Cards for any workspace — send one to its board from the card's menu"}
           </span>
+          <button
+            className={`board-seg-btn board-search-toggle ${searching ? "board-seg-btn-on" : ""}`}
+            onClick={() => setSearching((on) => !on)}
+            aria-pressed={searching}
+            title="Search every board and the conversations"
+          >
+            Search
+          </button>
           <button className="sidebar-close" onClick={onClose} aria-label="Close" title="Close">
             <Icon name="close" />
           </button>
         </header>
+        {searching && (
+          <BoardSearch
+            profileId={profile.id}
+            onPickWorkspace={(workspaceId) => {
+              setShown(workspaceId);
+              setSearching(false);
+            }}
+          />
+        )}
 
         {/* Every board in the profile, this one first. One strip at every
             width, scrolled sideways rather than wrapped: a second row would
@@ -419,6 +459,7 @@ export function ProfileBoard({ profile, onClose }: { profile: Profile; onClose: 
             mascot={mascotFor(snapshot.mascots, picked.mascotId)}
             launchers={visibleLaunchers(snapshot.launch)}
             onReveal={onClose}
+            openCard={show && show.workspaceId === picked.id ? show.cardId : null}
           />
         )}
 
@@ -741,7 +782,7 @@ function ProfileCard({
             </button>
           </span>
         </div>
-        {card.body && <p className="board-card-body">{card.body}</p>}
+        {card.body && <CardBody text={card.body} />}
         {card.dates && <CardWhen dates={card.dates} />}
       </article>
     </>

@@ -13,14 +13,19 @@ in this folder.
 | `harness.ts` | The harness's vocabulary: the MCP tool catalogue, the role prompt, key and paste grammar, when a waiting message may be typed, the frames of a notice, transcript turns. Pure, tested |
 | `lifecycle.ts` | The line `lifecycle.log` is made of, and reading it back forgivingly. Three processes write it; two of them are plain JS and keep in step by hand |
 | `voice.ts` | The voice's vocabulary: settings, the voice catalogue, which language a text is in, which of two transcripts is real, what of a reply to say aloud, the WAV encoder. Pure, tested |
+| `kuru.ts` | The conversation with Kuru as one list: turns, your messages' states and each reply's fate merged, the chip's two counts, the card codes in a reply. Pure, tested |
 | `board.ts` | A workspace's cards, and what an agent's status does to the one it was handed. Also the profile's board, a card's dates, and the timeline's layout |
+| `store.ts` | The database's pure half: the keys a profile and a workspace are known by, a board change as events (`diffBoards`), a typed query as one FTS5 takes, the export's rows. See [data](data.md) |
+| `backup.ts` | What leaves the machine and what never does: the allow-list, the settings, the commit subject. See [data](data.md#backups) |
 | `days.ts` | Calendar days as strings, and the arithmetic over them. Why a card's date is not a timestamp |
 | `projects.ts` | What a repository has been told about itself, and how a card's worktree is named |
-| `machines.ts` | A machine, one sample of it, a workspace's pin to one, and the command line of a shell on it — built and read back. See [machines](machines.md) |
+| `machines.ts` | A machine, one sample of it, a workspace's pin to one, and the command line of a shell or an agent on it — built and read back, with the install-and-login check typed ahead of an agent. See [machines](machines.md) |
+| `onscreen.ts` | What a remote agent is doing, read off its screen: working, asking, missing, quiet — and the edges a hook would have reported. See [machines](machines.md#status-read-off-the-screen) |
 | `keys.ts` | Every action, ghosttown's defaults, and a user's overrides |
 | `labels.ts` | What to call a terminal and what to say it is doing — three places must agree |
 | `notify.ts` | When kururu may interrupt you, and the words. Ported policy |
 | `launchers.ts` | The agents and models the new-tab menu offers. Hand-kept; `/update-models` refreshes it |
+| `lazygit.ts` | LazyGit as a tab: the line here, the line typed on a machine, and the is-it-installed check ahead of both. A clean quit closes the tab |
 | `cursor.ts` | DECSCUSR + OSC 12 in both directions. One parser over one stream |
 | `theme.ts` | Every theme: the chrome's tokens and the emulator's ANSI palette |
 | `skin.ts` | The shape tokens, the icon glyphs, and the twelve paintable parts |
@@ -41,6 +46,7 @@ in this folder.
 | `src/agents/report.ts` | Parses what an agent says about itself |
 | `src/hostlink.ts` | The protocol between the halves, and the local pair for tests |
 | `src/hostsock.ts` | That protocol over a unix socket. The framing, nothing else |
+| `src/hostlaunch.ts` | Starting the host as a launchd job, in a coalition of its own, on a clone of Kururu.app under `runtime/`. Why a Force Quit used to end every agent |
 
 **The restartable half:**
 
@@ -48,7 +54,12 @@ in this folder.
 |---|---|
 | `src/index.ts` | HTTP, WS, static, one timer. The whole protocol surface |
 | `src/workspaces.ts` | Profiles, workspaces, focus. The arrangement lives HERE |
-| `src/persist.ts` | The arrangement on disk. Structure only — never respawns |
+| `src/persist.ts` | The arrangement on disk. Structure only — never respawns. Keys, never boards |
+| `src/store.ts` | The database: boards written through before memory takes them, every move as history, deleted cards kept, the conversation, the voice's lists, the search, the export and the restore's import. `node:sqlite`, under `~/.local/share/kururu`, made on the first start |
+| `src/export.ts` | The mirror: the database and the allowed config as a tree git can diff, and the tree read back for `restore` |
+| `src/backup.ts` | Every few minutes when something changed: mirror, commit, push to the user's private repository. Never forced |
+| `src/gitcmd.ts` | Running `git`, for the two files allowed to |
+| `src/backup-cli.ts`, `src/restore-cli.ts` | `bun run backup` and `bun run restore` |
 | `src/lifecycle.ts` | Why this server started and why the last one stopped, appended to `lifecycle.log`: its own start and stops, crashes through `uncaughtExceptionMonitor`, the host as seen from outside, and whether its supervisor is still alive (`supervised()`). `/api/lifecycle` |
 | `src/access.ts` | Bind address, the one token, the Origin check |
 | `src/config.ts` | `~/.config/kururu`, and how the settings files are written |
@@ -59,13 +70,15 @@ in this folder.
 | `src/record.ts` | Rolling raw-stream tape per agent, for bugs you can't reproduce |
 | `src/transcript.ts` | How full a Claude Code window is, off its transcript. Ported |
 | `src/usage.ts` | The plan allowance, off a Claude credential — the machine's or the profile's. Read, never written |
-| `src/machines.ts` | The sidebar's machines (a VPS, a PC on the tailnet): the user's own `ssh`, `BatchMode`, one fixed read-only script, and `tmux kill-session` when a session tab is closed. A client names a host and nothing else (`shared/machines.ts`, [machines](machines.md)) |
+| `src/machines.ts` | The sidebar's machines (a VPS, a PC on the tailnet): the user's own `ssh`, `BatchMode`, one fixed read-only script, `tmux ls` before a session that types something, and `tmux kill-session` when a session tab is closed. A client names a host and nothing else (`shared/machines.ts`, [machines](machines.md)) |
+| `src/onscreen.ts` | Reads each remote agent's screen every two seconds and posts the status through `host.report`, as a hook would have ([machines](machines.md#status-read-off-the-screen)) |
 | `src/openrouter.ts` | The sidebar's OpenRouter balance and spend, read with a management key kept owner-only in `~/.config/kururu/openrouter.json`. GETs only; the key comes in once and never goes back out (`shared/openrouter.ts`) |
 | `src/databases.ts` | The database sheet: `DATABASE_URL` read out of the workspace's env files at the moment of connecting and never held, every query in a `READ ONLY` transaction unless the switch says otherwise, reads bounded through a cursor. Postgres only (`shared/databases.ts`) |
 | `src/report-cli.ts` | What a Claude Code hook runs. Not in `agents/` on purpose. Also carries the session's inbox socket, transcript path and last reply for the harness |
 | `src/harness.ts` | The harness's hands: kururu's verbs as MCP tools for one profile, a terminal read as text, the user's words typed into a pty when it may take them, the status feed into the harness's inbox. Explicit targets, never `active` (`shared/harness.ts`) |
 | `src/mcp.ts` | Five methods of MCP over JSON-RPC, written out rather than the SDK. Pure; served at `POST /mcp` |
 | `src/voice.ts` | The harness's ears and mouth: a clip through `yap` once per language, the words into the harness; a reply through Kokoro (or `say`) a sentence at a time, Spanish phonemised by `espeak-ng`. `/api/voice/hear`, `/api/speech` (`shared/voice.ts`) |
+| `src/kuru.ts` | The conversation assembled for the drawer, from the store's turns, the outbox and the voice's missed list — the `kuru` message, `GET /api/kuru`, the counts on `/api/health` |
 | `src/kokoro.ts` | Kokoro in a process of its own (`dist/kokoro.mjs`), forked by `voice.ts` and talked to over IPC. Never exits the ordinary way: its ONNX runtime aborts on exit, so it ends by SIGKILL |
 | `src/devservers.ts` | lsof + ps discovery of what is listening, and what started it — and stopping one: the named command's tree, never a terminal's (`stopTargets`). Never kururu itself (`isKururu`) |
 | `src/proxy.ts` | Per-dev-server reverse proxy (HTTP + WS) for phone access |
@@ -86,7 +99,7 @@ in this folder.
 | `src/notify.ts` | When to interrupt somebody, as they left it. Persistence only |
 | `src/launch.ts` | Which agents the new-tab menu leaves out. Persistence only |
 | `src/projects.ts` | Per-repository settings, by root. Persistence only |
-| `src/worktree.ts` | A card's checkout: `git worktree add` on a click, and rebase, fast-forward, `worktree remove`, `branch -d` when it is retired — never forced. The one place kururu runs `git` |
+| `src/worktree.ts` | A card's checkout: `git worktree add` on a click, and rebase, fast-forward, `worktree remove`, `branch -d` when it is retired — never forced. The one place kururu runs `git` on the user's repositories |
 | `src/logins.ts` | Where a profile's logins live, and the two env vars. Makes, never deletes |
 | `run.mjs` | Builds, spawns and re-spawns the server, one at a time, and writes down why. What `C-a B` reaches. Shipped in the app and run with `--no-build --entry`; `SIGUSR2` is "cycle now" |
 | `status.mjs` | The daemon has no face; this is it. Socket + `/api/agents`, then the end of `lifecycle.log` |
@@ -109,11 +122,13 @@ in this folder.
 | `src/mouse.ts` | The mouse as the program in the pty sees it |
 | `src/boxdraw.ts` | Box-drawing glyphs painted to the cell |
 | `src/cursortext.ts` | The character under a block cursor, drawn again on top |
+| `src/frames.ts` | When an emulator paints: in a pane, and only when something changed |
 | `src/keybar.ts` | The keys a soft keyboard has not got, as events |
 | `src/drag.ts` | What is in flight, because `dataTransfer` can't be read on `dragover` |
 | `src/drop.ts` | A file dropped on a terminal → the path to type. Pure |
 | `src/notify.ts` | Making the noise and drawing the card. No policy |
 | `src/voice.ts` | The talk key (hold or tap), the microphone as PCM off a worklet, and the player for what the harness says. Module state, like `session.ts` |
+| `src/kuru.ts` | Whether the Kuru drawer is open and at which reply, for every door that opens it; what Kuru is doing in one word, for the chip and the drawer |
 | `src/mascot.ts` | Loads a sheet once per URL and reports its size |
 | `src/mermaid.ts` | The one thing the reader draws itself — a diagram needs a DOM |
 | `src/labels.ts` | How the window draws the answers `shared/labels.ts` decides |
@@ -135,12 +150,14 @@ for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` ·
 `aria-hidden` span) · `Dialog.tsx` (while one is up, no key reaches a pty) ·
 `Menu.tsx` · `Reader.tsx` (**the thing kururu was built for**; one draggable tab per document) ·
 `Board.tsx` (a workspace's cards; the robot hands one to an agent) ·
+`Search.tsx` (the search over every board and the conversations, and the deleted cards, in the profile board's sheet) ·
 `ProfileBoard.tsx` (the profile's own cards, in a sheet over the window) ·
 `Timeline.tsx` (that board by when its cards are for; holds only which weeks it is showing) ·
 `FileTree.tsx` (markdown to the reader, the rest to nvim; holds the reader's zoom) · `DocPicker.tsx` (an empty reader only) ·
 `Keybar.tsx` · `Reach.tsx` · `Crash.tsx` · `HelpOverlay.tsx` (printed from the
 keymap, so it cannot document a dead key) · `VoicePill.tsx` (the microphone is
-open, and this is how loud the room is; dragged anywhere, ✕ to stop Kuru) · `Settings*.tsx`.
+open, and this is how loud the room is; dragged anywhere, ✕ or Esc to stop Kuru, a tap opens the drawer) ·
+`KuruDrawer.tsx` (the conversation with Kuru: every message's state, every reply's fate, a composer; opened by the status bar's chip) · `Settings*.tsx`.
 
 ## `desktop/` — Electron main + preload, and the esbuild step
 

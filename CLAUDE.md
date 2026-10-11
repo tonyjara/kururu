@@ -57,7 +57,19 @@ the only thing in kururu that ends an agent by accident. **A host that is behind
 says so:** `hello` carries its version and `HOST_PROTOCOL`, and `/api/health`,
 `bun run status` and Settings → About report a server ahead of its host. Bump
 the protocol when a host change must be restarted into, and gate the feature on
-`HostInfo.current` rather than letting an old host drop the field in silence.
+`HostInfo.current` rather than letting an old host drop the field in silence —
+and only then, because bumping it switches those features off until the
+restart.
+
+**The other thing that ended agents by accident was macOS,** twice on
+2026-10-10, 27 agents. A host spawned detached still sat in the *coalition* of
+the app that started the chain, and a Dock force quit — which is what quitting
+a leftover tile is — ends a whole coalition. `server/src/hostlaunch.ts` starts
+the host as a launchd job instead, on a clone of Kururu.app it owns; never go
+back to spawning it as anybody's descendant. It is server code, so editing it
+costs a reconnect and changes only the *next* host. `bun run status` prints
+`coalition  shared` for a host started the old way. See
+[gotchas](docs/gotchas.md#running).
 
 **The trap, which has already cost a session:** a running `bun run dev` watches
 `server/src` and `shared`, so editing those restarts the user's server *while you
@@ -79,6 +91,8 @@ bun run dev            # the agents: builds, starts the host if needed, serves :
 bun run dev:desktop    # the window. Finds a server; starts vite for itself
 bun run status         # is the host up, is a server up, what are they holding
 bun run kill-ptyhosts  # THE destructive one: ends every agent. --list to dry-run
+bun run backup         # a backup now, through the server when one is up; --check lists what goes
+bun run restore <repo> # a new Mac put back from the backup; refuses while a server is up
 bun run typecheck      # root tsconfig + web tsconfig
 bun test               # pure functions only — see docs/testing.md
 bun run schema         # publish the token and part vocabulary to ../kururu-styles
@@ -96,9 +110,13 @@ A `bun run dev` already on 7717 is adopted, never fought.
 **Ports:** 7717 server · 5173 vite · 7800+ preview proxies.
 **Socket:** `~/.local/state/kururu/ptyhost.sock`, with `ptyhost.log` beside it —
 the host is a daemon and its log is the only place its side of a bug shows up.
+**Data:** `~/.local/share/kururu/kururu.db` — boards, conversations and the
+voice's lists, the one thing on the machine nobody can rebuild; `backup/`
+beside it is the mirror git pushes. See [data](docs/data.md).
 `lifecycle.log` is there too: every server start, stop, restart and crash, and
 why. It is the answer to "why did the window just reconnect", and
-`bun run status` prints its end.
+`bun run status` prints its end. `pill.log` beside it is the same for the
+floating pill: every place it was put, why, and the displays it chose between.
 
 Anything that writes config, installs a style, or acts as a second real client
 goes in an **isolated instance** — see
@@ -123,6 +141,15 @@ The load-bearing invariants, one line each, with the argument behind the link:
   [terminals](docs/terminals.md#no-gpu-context-in-a-pane)
 - **`persist.ts` restores structure, never processes.** Four restored agent tabs
   must not launch four agents. → [layout](docs/layout.md#persistence)
+- **Boards live in the database and nowhere else, and a file never moves or
+  deletes a card that is there.** A first start makes `kururu.db`, and there
+  is no other mode. Every change to a profile goes through `Store.syncProfile`
+  before memory takes it, the diff of the two boards is the history, and a
+  deleted card is a stamp. The layout file carries keys and never a board;
+  a card an old one or the host's blob carries that the database has never
+  seen is adopted — never the other way round. Profiles and workspaces are
+  known by `key`, not by their counter ids. A database that will not open is
+  a server that does not start. → [data](docs/data.md)
 - **Never write a hex or a px into `styles.css`.** Both axes are tokens and
   `web/test/theme.test.ts` fails on a drift. → [styles](docs/styles.md)
 - **A token has a floor, and the pairs are read out of the stylesheet.** Right
@@ -151,7 +178,9 @@ The load-bearing invariants, one line each, with the argument behind the link:
   list the server reads off the disk and refuses anything outside of; no path
   ever comes from a client. → [layout](docs/layout.md#profiles)
 - **A card's worktree is git's to refuse, never kururu's to force.**
-  `server/src/worktree.ts` is the only file that runs `git`: `worktree add` on
+  `server/src/worktree.ts` and `server/src/backup.ts` are the only files that
+  run `git`, through `gitcmd.ts` — the first on the user's repositories, the
+  second on the one repository kururu owns and nothing else. `worktree add` on
   a click, with a timeout, and on the way back out a rebase, a fast-forward,
   `worktree remove` and `branch -d` with no `--force` and no capital — a dirty
   worktree or a conflicting rebase stays standing and says why. The card's
@@ -159,6 +188,12 @@ The load-bearing invariants, one line each, with the argument behind the link:
   ends an agent or removes a checkout asks in place first. Project settings
   are keyed by repository root and the root is only ever one the server found
   itself. → [layout](docs/layout.md#worktrees)
+- **Backups leave the machine, and secrets never do.** What goes to the
+  private repository is an allow-list in `shared/backup.ts` — named config
+  files, the boards and the harness conversation as text, the memory folders —
+  and anything not named stays: the share token, the OpenRouter key,
+  `identities/`, every login. Never `--force`, never a rewrite; a push the
+  remote refuses stops and says so. → [data](docs/data.md#backups)
 - **The usage bar reads a Claude credential and never writes one** — the
   machine's, or the active profile's when profiles keep their own logins. It is
   the only thing in kururu that leaves the machine on the user's behalf:
@@ -197,18 +232,27 @@ The load-bearing invariants, one line each, with the argument behind the link:
   machine is an ssh host the user named (Settings → Machines, `vps.json`); its
   shell is `ssh -t` in an ordinary pty, built and read back by
   `shared/machines.ts`, so the pty host never learns there is a remote. A
-  workspace pinned to one opens its *shells* there, each in a named tmux
-  session (`new -A` semantics); agents and everything that reads a disk stay
-  local. Closing a tab
-  ends its session; a dropped link, a detach or a host restart do not. Host and
-  folder are grammars, not escapes. → [machines](docs/machines.md)
+  workspace pinned to one opens its terminals there — shells, nvim, agents,
+  card runs — each in a named tmux session (`new -A` semantics); everything
+  that reads a disk stays local. An agent there is typed in behind a check
+  that its CLI is installed and signed in, and its status is **read off its
+  screen** (`onscreen.ts`), because its hooks cannot reach kururu yet. Closing
+  a tab ends its session; a dropped link, a detach or a host restart do not.
+  Host and folder are grammars, not escapes. → [machines](docs/machines.md)
 - **The voice is ears and a mouth around that session, not a second brain.**
   Speech becomes a `[voice]` turn typed into the harness's terminal; its last message
   becomes speech, off the same Stop report. No client plays a word while any client
   is talking (`hush`); the replies that waited play after, ahead of the answer,
   each starting "While you were talking", and nothing is dropped — a reply nobody
-  played to its end is on the missed list behind the harness button, which the
-  clients' `speech-held`/`speech-played` reports decide. Both halves are local — Apple's
+  played to its end is marked unheard in the Kuru drawer and counted on the
+  status bar's chip, which the clients' `speech-held`/`speech-played` reports
+  decide, and seeing it in the open drawer counts as hearing it. **The
+  conversation has one home, the drawer** (`KuruDrawer.tsx`): every prompt and
+  reply out of the database's turns, your messages' states off the outbox,
+  each reply's fate off the missed list, merged once on the server
+  (`shared/kuru.ts`, `server/src/kuru.ts`) into the `kuru` message; its
+  composer types to Kuru through the same outbox a clip takes. The chip is the
+  only door, and the sidebar has no harness button. Both halves are local — Apple's
   recogniser through `yap`, Kokoro on the CPU with `say` as the fallback — and
   nothing leaves the machine. Kokoro runs in a process of its own
   (`server/src/kokoro.ts`) and is never imported into the server, because its

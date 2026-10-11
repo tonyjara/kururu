@@ -71,20 +71,22 @@ import {
   isCommand,
   keyBytes,
   mcpConfig,
-  pasteBytes,
   rolePrompt,
   tellsHarness,
   turnsFrom,
+  typingPieces,
   type Hands,
   type Held,
   type ModeClass,
   type When,
 } from "../../shared/harness";
-import { findLauncher, visibleLaunchers, withPrompt, type LaunchSettings, type Launcher } from "../../shared/launchers";
+import { findLauncher, launcherCommand, visibleLaunchers, withPrompt, type AgentCli, type LaunchSettings, type Launcher } from "../../shared/launchers";
 import { remoteShellOf, validRemoteDir, type MachineEntry, type MachineStatus } from "../../shared/machines";
 import type { AgentSnapshot, AgentStatus, HarnessState } from "../../shared/model";
 import { isNotifyEvent } from "../../shared/notify";
 import type { MissedReply } from "../../shared/voice";
+import { COLUMN_LABELS } from "../../shared/board";
+import type { CardEvent, SearchHit, SearchScope } from "../../shared/store";
 import type { McpResult } from "./mcp";
 import type { HostLink } from "./hostlink";
 import type { Workspaces } from "./workspaces";
@@ -123,7 +125,9 @@ export interface HarnessDeps {
   /** The user's machines, with whether the last look at each got in. See `shared/machines.ts`. */
   machines: () => readonly MachineStatus[];
   /** The command line of a tmux-session shell on a machine, in the first free slot, typing `run` there. */
-  shellOn: (machine: MachineEntry, workspaceName: string, dir: string, run?: string) => string;
+  shellOn: (machine: MachineEntry, workspaceName: string, dir: string, run?: string) => Promise<string>;
+  /** The same for an agent: `command` is the launcher's line, and kururu's install-and-login check goes ahead of it. */
+  agentOn: (machine: MachineEntry, workspaceName: string, dir: string, cli: AgentCli, command: string) => Promise<string>;
   /** End a terminal, and the tmux session behind it when it is a shell on a machine. */
   stopTerminal: (agentId: string) => void;
   /** Where a new tab in that pane would start. */
@@ -136,6 +140,9 @@ export interface HarnessDeps {
   say: (profileId: string, text: string) => void;
   /** Play the profile's missed replies again; what was queued. See `Voice.replay`. */
   replayMissed: (profileId: string) => MissedReply[];
+  /** The database: full text over the profile's cards and conversations, and a card's history. See `store.ts`. */
+  search: (profileId: string, query: string, scope: SearchScope, limit: number) => SearchHit[];
+  cardHistory: (cardId: string) => { card: Card; workspaceName: string | null; deleted: boolean; events: CardEvent[] } | null;
 }
 
 type WaitState = "done" | "blocked" | "exited";
@@ -174,6 +181,13 @@ interface Waiter {
 const TRANSCRIPT_TAIL = 512 * 1024;
 /** How long typing waits before Enter, so a paste has been taken in by the program before it is submitted. */
 const ENTER_DELAY_MS = 350;
+/**
+ * How long between the pieces of a long line, so each is its own read and
+ * none is a paste — see `TYPE_PIECE`. Six pieces must pile up to pass 800, so
+ * this is a program that has not read for a third of a second; a line of
+ * two thousand characters takes three quarters of one to type.
+ */
+const TYPE_GAP_MS = 60;
 /** How long `open_shell` waits for a new local shell's first prompt before typing anyway. */
 const SHELL_DRAWN_MS = 5000;
 /** How long after a `send` to watch for the agent to leave `done`, so a wait right after does not catch the stale state. */
@@ -386,7 +400,10 @@ export class Harness {
     else this.held.delete(agentId);
     for (const [i, text] of type.entries()) {
       if (i) await sleep(ENTER_DELAY_MS);
-      this.deps.host.write(agentId, pasteBytes(text));
+      for (const [j, piece] of typingPieces(text).entries()) {
+        if (j) await sleep(TYPE_GAP_MS);
+        this.deps.host.write(agentId, piece);
+      }
       await sleep(ENTER_DELAY_MS);
       this.deps.host.write(agentId, "\r");
     }
@@ -555,7 +572,9 @@ export class Harness {
 
       case "read_agent": {
         const agent = agentArg();
-        const source = str(args.source) || "reply";
+        // An agent on a machine has no reply or transcript here — its hooks do
+        // not reach kururu — so its screen is the only answer to give.
+        const source = str(args.source) || (remoteShellOf(agent.command)?.agent ? "screen" : "reply");
         if (source === "screen") return ok(await this.screen(agent, int(args.lines) ?? SCREEN_LINES));
         if (source === "transcript") return ok(await this.transcript(agent, int(args.turns) ?? TRANSCRIPT_TURNS));
         const reply = this.replies.get(agent.id);
@@ -631,21 +650,39 @@ export class Harness {
 
       case "start_agent": {
         const workspaceId = workspaceArg(true)!;
+        const workspace = ws.workspaceIn(profileId, workspaceId)!;
         const prompt = str(args.prompt);
         if (!prompt) return fail("A prompt is needed.");
         const launcher = this.launcher(str(args.launcher));
         const pane = ws.paneBesideBoardIn(profileId, workspaceId);
         if (!pane) return fail("Nowhere to put a terminal in that workspace.");
-        const asked = str(args.cwd);
-        if (asked && !asked.startsWith("/")) return fail("cwd must be an absolute path.");
-        const cwd = asked || (await this.deps.cwdFor(profileId, workspaceId, pane));
-        const command = withPrompt(this.deps.agentCommand(launcher, profileId), prompt);
-        const agent = await this.deps.openTerminal(profileId, workspaceId, pane, { cwd, command, kind: "agent" });
+        const place = this.place(str(args.machine), workspace, str(args.cwd));
+        if ("error" in place) return fail(place.error);
+        let agent: AgentSnapshot;
+        let where: string;
+        if (place.machine) {
+          // The launcher's own line, without the hooks a local agent gets:
+          // they name files on this Mac. See `remoteAgentRun`.
+          const line = withPrompt(launcherCommand(launcher, this.deps.launch()), prompt);
+          const command = await this.deps.agentOn(place.machine, workspace.name, place.folder, launcher.cli, line);
+          agent = await this.deps.openTerminal(profileId, workspaceId, pane, { command, kind: "agent" });
+          where = `on ${place.machine.name}, in ${place.folder}`;
+        } else {
+          const asked = str(args.cwd);
+          if (asked && !asked.startsWith("/")) return fail("On this Mac, cwd must be an absolute path.");
+          const cwd = asked || (await this.deps.cwdFor(profileId, workspaceId, pane));
+          const command = withPrompt(this.deps.agentCommand(launcher, profileId), prompt);
+          agent = await this.deps.openTerminal(profileId, workspaceId, pane, { cwd, command, kind: "agent" });
+          where = `in ${agent.cwd}`;
+        }
         const nameFor = str(args.name);
         if (nameFor) this.deps.host.rename(agent.id, nameFor.slice(0, 80));
         follow(agent.id);
         const started = this.deps.host.find(agent.id) ?? agent;
-        return ok(`Started ${launcher.label} as ${this.name(started)}, in ${agent.cwd}. It is working on the prompt; wait_agent or a message from kururu will tell you when it finishes.${nameFor ? "" : " It has no name yet — rename_agent gives it one the user can call it by."}`);
+        const remote = place.machine
+          ? ` On a machine kururu reads its status off its screen, as nothing there reports back: done and blocked can come a few seconds late, a prompt it does not recognise is not seen as blocked, and there is no transcript — read it with source=screen. If ${launcher.cli === "claude" ? "Claude Code" : "Codex"} is not installed or not logged in there, the tab says so and it is reported as blocked.`
+          : "";
+        return ok(`Started ${launcher.label} as ${this.name(started)}, ${where}. It is working on the prompt; wait_agent or a message from kururu will tell you when it finishes.${remote}${nameFor ? "" : " It has no name yet — rename_agent gives it one the user can call it by."}`);
       }
 
       case "open_shell": {
@@ -653,24 +690,16 @@ export class Harness {
         const workspace = ws.workspaceIn(profileId, workspaceId)!;
         const pane = ws.paneBesideBoardIn(profileId, workspaceId);
         if (!pane) return fail("Nowhere to put a terminal in that workspace.");
-        const machines = this.deps.machines();
-        const asked = str(args.machine).trim().toLowerCase();
-        const here = /^(local|this mac|mac|here|localhost)$/.test(asked);
-        const named = asked && !here ? machines.find((m) => [m.name, m.host, m.id].some((v) => v.toLowerCase() === asked)) : undefined;
-        if (asked && !here && !named) return fail(`No machine "${str(args.machine)}". kururu_status lists them under machines.`);
-        const pin = workspace.machine;
-        const pinned = pin ? machines.find((m) => m.id === pin.machineId) : undefined;
-        const machine = here ? undefined : (named ?? pinned);
         const dir = str(args.dir).trim();
+        const place = this.place(str(args.machine), workspace, dir);
+        if ("error" in place) return fail(place.error);
+        const machine = place.machine;
         const run = str(args.run);
         let agent: AgentSnapshot;
         let where: string;
         if (machine) {
-          // The workspace's own folder when it is the workspace's own machine;
-          // anywhere else, home, since a folder on one box means nothing on another.
-          const folder = validRemoteDir(dir || (pin && machine.id === pinned?.id ? pin.dir : "~"));
-          if (folder === null) return fail("dir on a machine is ~, ~/… or /…, in letters, digits, spaces and . _ - + @ , : = only.");
-          const command = this.deps.shellOn(machine, workspace.name, folder, run || undefined);
+          const folder = place.folder;
+          const command = await this.deps.shellOn(machine, workspace.name, folder, run || undefined);
           agent = await this.deps.openTerminal(profileId, workspaceId, pane, { command, kind: "shell" });
           where = `on ${machine.name}, in ${folder} (tmux session ${remoteShellOf(command)?.session ?? "?"})`;
         } else {
@@ -729,11 +758,13 @@ export class Harness {
         const id = mintCardId();
         const fields = { title, body: str(args.body), column: str(args.column) || undefined, isolate: typeof args.isolate === "boolean" ? args.isolate : undefined };
         if (!workspaceId) {
-          ws.editProfileBoard(profileId, (board) => addCard(board, fields, id, Date.now()));
+          ws.as("harness", () => ws.editProfileBoard(profileId, (board) => addCard(board, fields, id, Date.now())));
           return ok(`Added card ${id} "${title}" to the profile's board.`);
         }
-        ws.ensureBoardIn(profileId, workspaceId);
-        ws.editBoardIn(profileId, workspaceId, (board) => addCard(board, fields, id, Date.now()));
+        ws.as("harness", () => {
+          ws.ensureBoardIn(profileId, workspaceId);
+          ws.editBoardIn(profileId, workspaceId, (board) => addCard(board, fields, id, Date.now()));
+        });
         if (!ws.findCardIn(profileId, workspaceId, id)) return fail("The card was refused — an empty title, or a column that is not one.");
         if (args.run === true) {
           const launcher = this.launcher(str(args.launcher));
@@ -749,8 +780,10 @@ export class Harness {
         if (!cardId) return fail("A card id is needed.");
         const fields = { title: args.title === undefined ? undefined : str(args.title), body: args.body === undefined ? undefined : str(args.body) };
         const workspaceId = workspaceArg(false);
-        if (workspaceId) ws.editBoardIn(profileId, workspaceId, (board) => editCard(board, cardId, fields));
-        else ws.editProfileBoard(profileId, (board) => editCard(board, cardId, fields));
+        ws.as("harness", () => {
+          if (workspaceId) ws.editBoardIn(profileId, workspaceId, (board) => editCard(board, cardId, fields));
+          else ws.editProfileBoard(profileId, (board) => editCard(board, cardId, fields));
+        });
         return ok(`Edited card ${cardId}.`);
       }
 
@@ -760,10 +793,10 @@ export class Harness {
         if (!cardId || !column) return fail("A card id and a column are needed.");
         const workspaceId = workspaceArg(false);
         if (workspaceId) {
-          ws.editBoardIn(profileId, workspaceId, (board) => moveCard(board, cardId, column));
+          ws.as("harness", () => ws.editBoardIn(profileId, workspaceId, (board) => moveCard(board, cardId, column)));
           if (column === "done") this.deps.stopDev(workspaceId, cardId);
         } else {
-          ws.editProfileBoard(profileId, (board) => moveCard(board, cardId, column));
+          ws.as("harness", () => ws.editProfileBoard(profileId, (board) => moveCard(board, cardId, column)));
         }
         return ok(`Moved card ${cardId} to ${column}.`);
       }
@@ -782,7 +815,7 @@ export class Harness {
         const cardId = str(args.card);
         const workspaceId = workspaceArg(true)!;
         if (!cardId) return fail("A card id is needed.");
-        ws.sendProfileCard(profileId, cardId, workspaceId);
+        ws.as("harness", () => ws.sendProfileCard(profileId, cardId, workspaceId));
         return ok(`Sent card ${cardId} to the workspace's To do.`);
       }
 
@@ -791,6 +824,26 @@ export class Harness {
         if (!nameFor) return fail("A name is needed.");
         const id = ws.newWorkspaceIn(profileId, nameFor.slice(0, 60));
         return id ? ok(`Made workspace ${id} "${nameFor}".`) : fail("Could not make it.");
+      }
+
+      case "search": {
+        const query = str(args.query);
+        if (!query) return fail("Words to look for are needed.");
+        const scope = args.scope === "cards" || args.scope === "turns" ? args.scope : "all";
+        const hits = this.deps.search(profileId, query, scope, Math.min(50, int(args.limit) ?? 20));
+        if (!hits.length) return ok(`Nothing matches "${query}".`);
+        return ok(hits.map((hit) => this.hitLine(hit)).join("\n"));
+      }
+
+      case "card_history": {
+        const cardId = str(args.card);
+        if (!cardId) return fail("A card id is needed.");
+        const found = this.deps.cardHistory(cardId);
+        if (!found) return fail(`No card ${cardId} in the database.`);
+        const where = found.workspaceName ? `${found.workspaceName}'s board` : "the profile's board";
+        const head = `${found.workspaceName ? cardCode(found.workspaceName, found.card.number) : `#${found.card.number}`} "${found.card.title}" on ${where}, now in ${laneName(found.card.column)}${found.deleted ? " (deleted)" : ""}:`;
+        const lines = found.events.map((event) => `- ${stamp(event.at)} ${eventLine(event)}`);
+        return ok([head, ...lines].join("\n"));
       }
 
       case "say": {
@@ -1018,12 +1071,12 @@ export class Harness {
       const counts = board ? ["todo", "doing", "review", "done"].map((c) => `${c} ${board.cards.filter((k) => k.column === c).length}`).join(", ") : "no board";
       const pin = workspace.machine;
       const machine = pin ? this.deps.machines().find((m) => m.id === pin.machineId) : undefined;
-      const runsOn = pin && machine ? ` · shells run on ${machine.name} in ${pin.dir}` : "";
+      const runsOn = pin && machine ? ` · runs on ${machine.name} in ${pin.dir} (its shells, agents and card runs open there)` : "";
       out.push(`  - ${workspace.name} (${workspace.id}) · ${ids.length} agent${ids.length === 1 ? "" : "s"} · ${counts}${runsOn}${workspace.id === profile.activeWorkspaceId ? " · on screen" : ""}`);
     }
     // By name, which is what open_shell takes and what the user says.
     const machines = this.deps.machines();
-    out.push("", "machines (open_shell opens a shell on one):");
+    out.push("", "machines (open_shell and start_agent open on one):");
     if (!machines.length) out.push("  (none — the user adds them in Settings → Machines)");
     for (const m of machines) {
       const state = m.error ? `last look failed: ${m.error}` : m.reading ? "reachable" : "not looked at yet";
@@ -1040,9 +1093,10 @@ export class Harness {
         any = true;
         const ctx = agent.contextUsage ? ` · context ${Math.round((agent.contextUsage.used / agent.contextUsage.window) * 100)}%` : "";
         const doing = this.deps.activity.get(id);
+        const remote = remoteShellOf(agent.command)?.agent ? " · status read off its screen, no transcript" : "";
         out.push(
-          `  - ${id === selfId ? "you: " : ""}${this.name(agent)} · ${agent.exited ? "exited" : agent.status}${ctx}` +
-            (doing ? ` · last told: ${doing.slice(0, 120)}` : "") +
+          `  - ${id === selfId ? "you: " : ""}${this.name(agent)} · ${agent.exited ? "exited" : agent.status}${ctx}${remote}` +
+            (doing ? ` · ${remote ? "on screen" : "last told"}: ${doing.slice(0, 120)}` : "") +
             (this.inboxes.has(id) ? "" : agent.agent === "claude" ? " · not heard from its hooks yet" : "") +
             (this.held.has(id) ? ` · ${this.held.get(id)!.length} message${this.held.get(id)!.length === 1 ? "" : "s"} from you waiting to be typed` : ""),
         );
@@ -1088,6 +1142,18 @@ export class Harness {
    * and the nearest thing to a name an unnamed agent has, then what it was
    * last told. Never the id alone, which is the habit this replaced.
    */
+  /** One search hit as a line the harness can repeat: what it is, where, when, and the words that matched. */
+  private hitLine(hit: SearchHit): string {
+    if (hit.kind === "card") {
+      const code = hit.workspaceName ? cardCode(hit.workspaceName, hit.number) : `#${hit.number}`;
+      const where = hit.workspaceName ? `${hit.workspaceName}, ${laneName(hit.column)}` : `profile board, ${laneName(hit.column)}`;
+      const moved = hit.movedAt ? `, moved ${stamp(hit.movedAt)}` : "";
+      return `card ${code} "${hit.title}" (${where}${moved}${hit.deleted ? ", deleted" : ""}; id ${hit.id}) — ${hit.snippet}`;
+    }
+    const who = hit.role === "you" ? (hit.via === "voice" ? "you (spoken)" : "you") : hit.role === "kuru" ? "you (Kuru)" : "an agent";
+    return `${who} ${stamp(hit.at)} — ${hit.snippet}`;
+  }
+
   private name(agent: AgentSnapshot): string {
     const ws = this.deps.workspaces;
     const profileId = ws.profileOf(agent.id);
@@ -1100,13 +1166,16 @@ export class Harness {
       if (running) card = { code: cardCode(w.name, running.number), title: running.title };
       break;
     }
-    // A shell on a machine says which, since "run it there" is what it is for.
-    const host = remoteShellOf(agent.command)?.host;
+    // A terminal on a machine says which, since "run it there" is what it is for.
+    const remote = remoteShellOf(agent.command);
+    const host = remote?.host;
     return agentName({
       id: agent.id,
       name: agent.titleOverride || null,
       doing: agent.title || this.deps.activity.get(agent.id) || null,
-      program: agent.agent ?? agent.lastAgent ?? (agent.kind === "shell" ? (host ? `shell on ${host}` : "shell") : "agent"),
+      program: remote?.agent
+        ? `${remote.agent} on ${remote.host}`
+        : (agent.agent ?? agent.lastAgent ?? (agent.kind === "shell" ? (host ? `shell on ${host}` : "shell") : "agent")),
       workspace,
       card,
     });
@@ -1116,6 +1185,33 @@ export class Harness {
   private nameOf(agentId: string): string {
     const agent = this.deps.host.find(agentId);
     return agent ? this.name(agent) : `an agent that has gone (id ${agentId})`;
+  }
+
+  /**
+   * Where `open_shell` and `start_agent` open: the machine asked for by name,
+   * host or id, `local` for this Mac, or — asked nothing — the workspace's
+   * pin. On a machine, `dir` is a folder there, defaulting to the pin's when
+   * it is the workspace's own machine and home anywhere else, since a folder
+   * on one box means nothing on another. Here, `folder` is unused and the
+   * caller reads its own directory argument.
+   */
+  private place(
+    asked: string,
+    workspace: { machine: { machineId: string; dir: string } | null },
+    dir: string,
+  ): { machine: MachineStatus; folder: string } | { machine: null } | { error: string } {
+    const machines = this.deps.machines();
+    const wanted = asked.trim().toLowerCase();
+    const here = /^(local|this mac|mac|here|localhost)$/.test(wanted);
+    const named = wanted && !here ? machines.find((m) => [m.name, m.host, m.id].some((v) => v.toLowerCase() === wanted)) : undefined;
+    if (wanted && !here && !named) return { error: `No machine "${asked}". kururu_status lists them under machines.` };
+    const pin = workspace.machine;
+    const pinned = pin ? machines.find((m) => m.id === pin.machineId) : undefined;
+    const machine = here ? undefined : (named ?? pinned);
+    if (!machine) return { machine: null };
+    const folder = validRemoteDir(dir || (pin && machine.id === pinned?.id ? pin.dir : "~"));
+    if (folder === null) return { error: "A folder on a machine is ~, ~/… or /…, in letters, digits, spaces and . _ - + @ , : = only." };
+    return { machine, folder };
   }
 
   private launcher(id: string | undefined): Launcher {
@@ -1169,6 +1265,47 @@ function int(value: unknown): number | undefined {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** A column by the name a person sees, for the fixed four; a profile board's own columns are named by their id, which is all a tool has. */
+function laneName(column: string): string {
+  return (COLUMN_LABELS as Record<string, string>)[column] ?? column;
+}
+
+function stamp(at: number): string {
+  return new Date(at).toISOString().slice(0, 16).replace("T", " ");
+}
+
+/** One event of a card's history as a sentence. */
+function eventLine(event: CardEvent): string {
+  const by = event.actor === "user" ? "the user" : event.actor === "harness" ? "you" : event.actor === "automation" ? "the run automation" : "an import";
+  const detail = event.detail ?? {};
+  switch (event.kind) {
+    case "created":
+      return `made by ${by} in ${laneName(event.toColumn ?? "")}`;
+    case "imported":
+      return `imported from the layout file, in ${laneName(event.toColumn ?? "")}`;
+    case "moved":
+      return `moved by ${by} from ${laneName(event.fromColumn ?? "")} to ${laneName(event.toColumn ?? "")}`;
+    case "sent":
+      return `sent by ${by} to another board, into ${laneName(event.toColumn ?? "")}`;
+    case "edited": {
+      const fields = Array.isArray(detail.fields) ? (detail.fields as string[]).join(", ") : "fields";
+      const title = detail.title as { from?: string; to?: string } | undefined;
+      return `edited by ${by} (${fields})${title ? `: title "${title.from}" → "${title.to}"` : ""}`;
+    }
+    case "run": {
+      const state = typeof detail.state === "string" ? detail.state : "";
+      const launcher = typeof detail.launcher === "string" ? ` (${detail.launcher})` : "";
+      return state === "started" ? `handed to an agent by ${by}${launcher}` : `run ${state}${launcher}`;
+    }
+    case "deleted":
+      return `deleted by ${by} from ${laneName(event.fromColumn ?? "")}`;
+    case "restored":
+      return `restored by ${by} into ${laneName(event.toColumn ?? "")}`;
+    default:
+      return event.kind;
+  }
 }
 
 export type { HarnessState };

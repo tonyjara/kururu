@@ -171,3 +171,34 @@ describe("view tabs on disk", () => {
     expect(panes(again[0]!.workspaces[0]!.layout)[0]!.agentIds).toEqual(pane!.agentIds);
   });
 });
+
+/**
+ * Boards are the database's, so the file carries the keys it knows them by
+ * and never a card. A file from a build before the database still has
+ * boards in it, and those are read — for `Store.attach` to adopt, never to
+ * write back.
+ */
+describe("boards and the layout file", () => {
+  it("writes keys and never a board, and reads an old file's boards and keyless workspaces", () => {
+    const workspaces = new Workspaces();
+    workspaces.openBoard(workspaces.focusedPaneId);
+    writeSnapshot(workspaces.all(), workspaces.active.id);
+    const stored = JSON.parse(readFileSync(snapshotPath(), "utf8"));
+    expect(stored.profiles[0].key).toBe(workspaces.active.key);
+    expect(stored.profiles[0].workspaces[0].key).toBe(workspaces.active.workspaces[0]!.key);
+    expect(stored.profiles[0].board).toBeUndefined();
+    expect(stored.profiles[0].workspaces[0].board).toBeUndefined();
+    const back = readSnapshot()!;
+    expect(back.profiles[0]!.key).toBe(workspaces.active.key);
+    expect(back.profiles[0]!.workspaces[0]!.key).toBe(workspaces.active.workspaces[0]!.key);
+
+    // As a build from before the database wrote it: boards, and no keys.
+    delete stored.profiles[0].key;
+    delete stored.profiles[0].workspaces[0].key;
+    stored.profiles[0].workspaces[0].board = { next: 2, cards: [{ id: "c1", number: 1, title: "from an older server", column: "todo" }] };
+    writeFileSync(snapshotPath(), JSON.stringify(stored));
+    const old = readSnapshot()!;
+    expect(old.profiles[0]!.key).toMatch(/^pk[0-9a-f]{12}$/);
+    expect(old.profiles[0]!.workspaces[0]!.board!.cards.map((c) => c.title)).toEqual(["from an older server"]);
+  });
+});

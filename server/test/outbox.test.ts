@@ -1,13 +1,12 @@
 /**
  * The outbox's pure half: what may go to Kuru now, what counts as Kuru having
- * it, and what the disk is trusted for. The rest of `outbox.ts` is files and
+ * it, and how many are kept. The rest of `outbox.ts` is files and
  * timers around these, and these are where a message would be lost, sent
  * twice, or sent out of order.
  */
 import { describe, expect, test } from "bun:test";
 import {
   OUTBOX_KEEP,
-  adoptOutbox,
   capOutbox,
   isClipId,
   promptCarries,
@@ -19,7 +18,7 @@ import { handable, legacyHeard, takenSince } from "../src/outbox";
 function entry(n: number, patch: Partial<StoredOutboxEntry> = {}): StoredOutboxEntry {
   return {
     id: `clip-${String(n).padStart(4, "0")}`,
-    profileId: "p1",
+    profileKey: "pk000000000001",
     at: 1_000 + n,
     ms: 2_000,
     state: "queued",
@@ -61,7 +60,7 @@ describe("handable", () => {
   });
 
   test("one profile's slow message does not hold up another's", () => {
-    const list = [entry(1, { state: "transcribing", text: null }), entry(2, { profileId: "p2" })];
+    const list = [entry(1, { state: "transcribing", text: null }), entry(2, { profileKey: "pk000000000002" })];
     expect(handable(list, new Set()).map((e) => e.n)).toEqual([2]);
   });
 });
@@ -108,29 +107,7 @@ describe("takenSince", () => {
   });
 });
 
-describe("the outbox on disk", () => {
-  test("keeps what is shaped like a message and drops the rest", () => {
-    const kept = adoptOutbox([
-      entry(1),
-      { ...entry(2), id: "../../etc/passwd" },
-      { ...entry(3), at: Number.NaN },
-      { ...entry(4), profileId: "" },
-      entry(1),
-      "nonsense",
-    ]);
-    expect(kept.map((e) => e.n)).toEqual([1]);
-  });
-
-  test("a message that says it has words and has none is heard again", () => {
-    const [kept] = adoptOutbox([{ ...entry(1), state: "delivered", text: null }]);
-    expect(kept?.state).toBe("transcribing");
-  });
-
-  test("an unknown state is read as still being heard, never as delivered", () => {
-    const [kept] = adoptOutbox([{ ...entry(1), state: "sent" }]);
-    expect(kept?.state).toBe("transcribing");
-  });
-
+describe("the outbox kept", () => {
   test("only delivered messages age out, the newest kept", () => {
     const list = [
       ...Array.from({ length: OUTBOX_KEEP + 5 }, (_, i) => entry(i + 1, { state: "delivered" })),

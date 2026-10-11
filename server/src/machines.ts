@@ -9,8 +9,9 @@
  * which `validHost` holds to a grammar with no room for an option, and the
  * command that runs on the far side is `SCRIPT` below and nothing else. It
  * only reads — `/proc` and `df` — because it runs as whoever the user's ssh
- * config logs in as, which on a fresh VPS is root. The one other line this
- * file sends is `tmux kill-session` on a session name `sessionName` made.
+ * config logs in as, which on a fresh VPS is root. The two other lines this
+ * file sends are `tmux kill-session` on a session name `sessionName` made,
+ * and `tmux ls`, which only reads.
  *
  * **Nothing is ever asked for.** `BatchMode` means ssh fails rather than
  * prompting for a passphrase or a host key nobody is there to confirm: the
@@ -204,6 +205,36 @@ const ending = new Set<string>();
 /** Names not to give a new session yet. */
 export function sessionsEnding(): string[] {
   return [...ending];
+}
+
+/** A tmux listing is a second's work; past this the machine is answered for by the tab instead. */
+const LIST_TIMEOUT_MS = 6000;
+
+/**
+ * kururu's tmux sessions on a machine, or null when it could not be asked.
+ *
+ * For a tab that types something into a new session — an agent, nvim, the
+ * harness's `run` — and so must not be handed the name of one that is
+ * already there: `REMOTE_SCRIPT` attaches to an existing session and types
+ * nothing, which is right for a reconnect and wrong for "start Claude",
+ * where the agent asked for would silently be somebody else's. The tabs
+ * kururu holds name most of the taken slots, but after a pty-host restart the
+ * sessions outlive their tabs, and only the machine knows them. A plain shell
+ * does not ask: reattaching what was left in its slot is the point of it.
+ *
+ * Null — unreachable, no tmux, a slow answer — means the caller goes by its
+ * own tabs, as it always did. A machine that cannot be reached is about to be
+ * said so by the tab's own ssh anyway.
+ */
+export function sessionsOn(host: string): Promise<string[] | null> {
+  if (!validHost(host)) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const args = [...batchArgs(), "--", host, `tmux ls -F '#{session_name}' 2>/dev/null; true`];
+    execFile("ssh", args, { timeout: LIST_TIMEOUT_MS, maxBuffer: 256 * 1024 }, (err, stdout) => {
+      if (err) return resolve(null);
+      resolve(String(stdout).split("\n").map((line) => line.trim()).filter((name) => /^kururu-[a-z0-9-]{1,40}$/.test(name)));
+    });
+  });
 }
 
 /**

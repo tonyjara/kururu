@@ -14,8 +14,35 @@
  */
 import type { AgentSnapshot } from "../../shared/model";
 import { agentLabel, agentSummary, basename } from "../../shared/labels";
+import { remoteShellOf } from "../../shared/machines";
 
 export { agentLabel, agentSummary, basename };
+
+/**
+ * The machine an agent tab runs on, or null for one on this Mac — what the
+ * tab and the sidebar row put beside its name.
+ *
+ * Agents only. A shell on a machine is already called after it
+ * (`agentLabel`), and a mark beside a name that says the same thing is the
+ * name twice. An agent is called "claude" wherever it runs, and the two are
+ * not the same thing to have: one here reports through its hooks, one there
+ * is read off its screen, and the person deciding whether to trust a dot is
+ * owed the difference.
+ */
+export function remoteHost(agent: AgentSnapshot): string | null {
+  const remote = remoteShellOf(agent.command);
+  return remote?.agent ? remote.host : null;
+}
+
+/** The tooltip's word on an agent on a machine: where it is, and what kururu cannot know about it from here. */
+export function remoteNote(agent: AgentSnapshot): string | null {
+  const host = remoteHost(agent);
+  if (!host) return null;
+  return (
+    `Runs on ${host}, in tmux. Its status is read off its screen — kururu gets no hook reports from another machine yet — ` +
+    "so done and blocked can come a few seconds late, a prompt it does not recognise is missed, and there is no context ring or transcript."
+  );
+}
 
 /**
  * What a tab is called, which is one line for both questions.

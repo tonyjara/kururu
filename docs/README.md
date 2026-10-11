@@ -10,6 +10,7 @@ The detail that used to be in `CLAUDE.md`. That file is now the operational brie
 | [layout.md](layout.md) | Profiles, workspaces, panes, tabs, dragging, persistence, keys |
 | [styles.md](styles.md) | Themes, skins, parts, the registry, the studio, mascots |
 | [notifications.md](notifications.md) | The gate, the delivery, sounds — and the macOS signing saga |
+| [data.md](data.md) | The database boards and conversations live in, the keys that name a profile across cold starts, the history of every move, the search, the one road in from an old `session.json`, and backups to a private repository |
 | [harness.md](harness.md) | The one session per profile that drives the others: kururu's verbs as MCP tools, the user's words typed into a pty and why not the inbox, the status feed |
 | [machines.md](machines.md) | The user's other computers: the sidebar's gauges, a shell on one as a command line rather than a host change, workspaces pinned to one, tmux sessions and what ends them |
 | [voice.md](voice.md) | Talking to the harness and hearing it: the talk key, on-device transcription through `yap`, Kokoro on the CPU, two languages, the phone's https problem |

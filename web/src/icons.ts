@@ -60,6 +60,7 @@ const VECTORS: Record<IconName, string> = {
   fold: /* chevrons-down-up */ `<path d="m7 20 5-5 5 5"/><path d="m7 4 5 5 5-5"/>`,
   unfold: /* chevrons-up-down */ `<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>`,
   terminal: /* terminal */ `<path d="M12 19h8"/><path d="m4 17 6-6-6-6"/>`,
+  more: /* ellipsis */ `<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>`,
 };
 
 /**

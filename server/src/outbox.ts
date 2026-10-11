@@ -40,16 +40,24 @@
  *
  * On the restartable side, which is the point: what a restart interrupts is
  * picked up by the next server from the disk (`resume`).
+ *
+ * **The list is kept in the database** (`server/src/store.ts`), through an
+ * index `index.ts` lends, and names a profile by its *key*, never its id.
+ * The id is a counter minted on every cold start, and the list used to be
+ * keyed by it: three host restarts in one morning orphaned every message on
+ * it. The wire still says `profileId`, resolved from the key at the moment
+ * of sending.
  */
-import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { open, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { spokenMessage } from "../../shared/kuru";
 import type { AgentStatus } from "../../shared/model";
+import { VOICE_PREFIX } from "../../shared/store";
 import {
   CLIP_MIN_MS,
-  adoptOutbox,
   capOutbox,
   clipMs,
   promptCarries,
@@ -81,9 +89,19 @@ export interface KuruNow {
   transcript: string | null;
 }
 
-/** What `index.ts` lends this module. */
+/** Where the list is kept between servers. `load` once at start; `save` the whole list on every change; `remove` on discard. */
+export interface OutboxIndex {
+  load(): StoredOutboxEntry[];
+  save(entries: readonly StoredOutboxEntry[]): void;
+  remove(id: string): void;
+}
+
+/** What `index.ts` lends this module. Profiles are named by key throughout; `index.ts` maps ids at its edge. */
 export interface OutboxDeps {
   broadcast: (msg: ServerMessage) => void;
+  index: OutboxIndex;
+  /** This session's id for a profile key, for the wire; null for a key no profile holds, whose messages are kept but shown to nobody. */
+  profileIdOf: (profileKey: string) => string | null;
   /** The recogniser — `Voice.transcribe`: words and their language, null for a clip that held none, a rejection when it could not run. */
   transcribe: (path: string, ms: number) => Promise<{ text: string; lang: VoiceLang } | null>;
   /**
@@ -92,18 +110,18 @@ export interface OutboxDeps {
    * and `dropped` if the harness goes before they are.
    */
   deliver: (
-    profileId: string,
+    profileKey: string,
     text: string,
     events: { typed: () => void; dropped: () => void },
   ) => Promise<{ outcome: "typed" | "held" | "starting" }>;
   /** The profile's harness, or null when none is running. */
-  harness: (profileId: string) => KuruNow | null;
+  harness: (profileKey: string) => KuruNow | null;
   /** Hold every client's speech while `who` is talking — `Voice.talk`. */
   talk: (who: object, on: boolean) => void;
 }
 
-/** Where the messages are kept: the state directory, beside `missed.json`. */
-function outboxDir(): string {
+/** Where the audio is kept: the state directory, since a clip is a thing kururu wants back and nobody chose. */
+export function outboxDir(): string {
   const state = process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
   return join(state, "outbox");
 }
@@ -130,20 +148,79 @@ export class Outbox {
   private checking = false;
 
   constructor(private readonly deps: OutboxDeps) {
-    let stored: unknown = null;
-    try {
-      stored = JSON.parse(readFileSync(this.indexPath(), "utf8"));
-    } catch {
-      // Nothing kept is nothing owed.
+    const loaded = capOutbox(deps.index.load());
+    // A clip with no words in it was once left behind as a red "failed"
+    // entry, from before silence stopped being treated as a failure. Any
+    // still on a profile's list from before this fix are swept now, not
+    // shown once more and then swept.
+    this.entries = loaded.filter((entry) => !isSilentFailure(entry));
+    for (const entry of loaded) {
+      if (isSilentFailure(entry)) {
+        this.removeAudio(entry.id);
+        this.deps.index.remove(entry.id);
+      }
     }
-    this.entries = adoptOutbox(stored);
     this.seq = this.entries.reduce((max, entry) => Math.max(max, entry.n), 0);
     this.sweep();
   }
 
-  /** What every client is told, on connect and whenever it changes: every profile's, as the missed list is. */
+  /** What every client is told, on connect and whenever it changes: every profile's, for the pill's line under Kuru's words. */
   message(): ServerMessage {
-    return { type: "outbox", outbox: this.entries.map(bare) };
+    return { type: "outbox", outbox: this.entries.map((entry) => this.wire(entry)) };
+  }
+
+  /** A profile's messages as the server holds them, for the drawer's merge (`shared/kuru.ts`). */
+  entriesOf(profileKey: string): StoredOutboxEntry[] {
+    return this.entries.filter((entry) => entry.profileKey === profileKey);
+  }
+
+  /**
+   * A message typed in the drawer's composer, from `kuru-say`: the voice's
+   * road without the clip. It joins the list as `queued` with its words
+   * already made, so it goes to Kuru in order with whatever was said before
+   * it, is confirmed by Kuru's own hook the way a clip is, and is typed again
+   * once or failed on the same rules. No audio, so nothing to hear and
+   * nothing to sweep; `ms` is zero, which is how the two are told apart
+   * (`spokenMessage`). A message already here is answered with what it has
+   * become, as `take` answers a clip sent twice.
+   */
+  say(profileKey: string, id: string, at: number, text: string): OutboxEntry {
+    const known = this.entries.find((entry) => entry.id === id);
+    if (known) return this.wire(known);
+    const entry: StoredOutboxEntry = {
+      id,
+      profileKey,
+      at,
+      ms: 0,
+      state: "queued",
+      text,
+      lang: null,
+      typedAt: null,
+      note: this.ready ? null : "Waiting for the server to find Kuru's terminal.",
+      n: ++this.seq,
+      attempts: 0,
+      typings: 0,
+      transcript: null,
+    };
+    this.entries.push(entry);
+    this.changed();
+    this.flow();
+    return this.wire(entry);
+  }
+
+  /** A message as the wire carries it: the profile's id for this session, and none of the server's bookkeeping. */
+  private wire(entry: StoredOutboxEntry): OutboxEntry {
+    return {
+      id: entry.id,
+      profileId: this.deps.profileIdOf(entry.profileKey) ?? "",
+      at: entry.at,
+      ms: entry.ms,
+      state: entry.state,
+      text: entry.text,
+      lang: entry.lang,
+      typedAt: entry.typedAt,
+      note: entry.note,
+    };
   }
 
   /**
@@ -153,7 +230,7 @@ export class Outbox {
    * and sends again does not say it twice. Null for one too short to hold a
    * word, which nothing is kept for.
    */
-  take(profileId: string, id: string, at: number, wav: Buffer): OutboxEntry | null {
+  take(profileKey: string, id: string, at: number, wav: Buffer): OutboxEntry | null {
     const known = this.entries.find((entry) => entry.id === id);
     if (known) {
       // Listed, but the file went with a server that died between the two
@@ -162,7 +239,7 @@ export class Outbox {
         this.writeAudio(id, wav);
         this.hear(known);
       }
-      return bare(known);
+      return this.wire(known);
     }
     const ms = Math.round(clipMs(wav.length));
     if (ms < CLIP_MIN_MS) return null;
@@ -171,7 +248,7 @@ export class Outbox {
     this.writeAudio(id, wav);
     const entry: StoredOutboxEntry = {
       id,
-      profileId,
+      profileKey,
       at,
       ms,
       state: "transcribing",
@@ -190,7 +267,7 @@ export class Outbox {
     this.hush.set(id, who);
     this.deps.talk(who, true);
     this.hear(entry);
-    return bare(entry);
+    return this.wire(entry);
   }
 
   /**
@@ -215,7 +292,7 @@ export class Outbox {
   firstPass(id: string, within = 90_000): Promise<OutboxEntry | null> {
     const now = () => {
       const entry = this.entries.find((e) => e.id === id);
-      return entry ? bare(entry) : null;
+      return entry ? this.wire(entry) : null;
     };
     if (!this.hush.has(id)) return Promise.resolve(now());
     return new Promise((resolve) => {
@@ -256,16 +333,22 @@ export class Outbox {
   discard(id: string): void {
     const entry = this.entries.find((e) => e.id === id);
     if (!entry || entry.state !== "failed") return;
+    this.drop(entry);
+  }
+
+  /** Off the list and the disk, with nothing shown for it — used for Discard, and for a clip nothing was heard in. */
+  private drop(entry: StoredOutboxEntry): void {
     this.entries = this.entries.filter((e) => e !== entry);
-    this.removeAudio(id);
-    this.quiet(id);
+    this.removeAudio(entry.id);
+    this.deps.index.remove(entry.id);
+    this.quiet(entry.id);
     this.changed();
   }
 
   /** A prompt Kuru's session took, off its `UserPromptSubmit` report. Whatever typed message it carries is delivered. */
-  prompted(profileId: string, prompt: string): void {
+  prompted(profileKey: string, prompt: string): void {
     for (const entry of this.entries) {
-      if (entry.profileId === profileId && entry.state === "queued" && entry.typedAt !== null && entry.text && promptCarries(prompt, entry.text)) {
+      if (entry.profileKey === profileKey && entry.state === "queued" && entry.typedAt !== null && entry.text && promptCarries(prompt, entry.text)) {
         this.delivered(entry);
       }
     }
@@ -290,7 +373,9 @@ export class Outbox {
         const heard = await this.deps.transcribe(this.audioPath(entry.id), entry.ms);
         if (entry.state !== "transcribing") return;
         if (!heard) {
-          this.fail(entry, "Nothing heard in it. The audio is kept: Resend listens again.");
+          // Silence or noise is not a failure — it never said anything, so
+          // there is nothing to resend and no reason for a red mark.
+          this.drop(entry);
           return;
         }
         entry.text = heard.text;
@@ -331,7 +416,9 @@ export class Outbox {
     if (!entry.text) return;
     this.handed.add(entry.id);
     try {
-      const { outcome } = await this.deps.deliver(entry.profileId, `[voice] ${entry.text}`, {
+      // The prefix tells Kuru a name may be misheard, which is true of a clip
+      // and not of a line typed in the drawer.
+      const { outcome } = await this.deps.deliver(entry.profileKey, spokenMessage(entry) ? `${VOICE_PREFIX} ${entry.text}` : entry.text, {
         typed: () => this.typed(entry),
         dropped: () => {
           // Kuru exited holding it: it goes back to the next one, once.
@@ -359,7 +446,7 @@ export class Outbox {
     if (entry.state !== "queued") return;
     entry.typedAt = Date.now();
     entry.typings++;
-    entry.transcript = this.deps.harness(entry.profileId)?.transcript ?? entry.transcript;
+    entry.transcript = this.deps.harness(entry.profileKey)?.transcript ?? entry.transcript;
     entry.note = "Typed into Kuru's terminal; waiting for it to take it.";
     this.busySince.delete(entry.id);
     this.changed();
@@ -426,10 +513,10 @@ export class Outbox {
     try {
       const typed = this.entries.filter((e) => e.state === "queued" && e.typedAt !== null);
       const byProfile = new Map<string, StoredOutboxEntry[]>();
-      for (const entry of typed) byProfile.set(entry.profileId, [...(byProfile.get(entry.profileId) ?? []), entry]);
+      for (const entry of typed) byProfile.set(entry.profileKey, [...(byProfile.get(entry.profileKey) ?? []), entry]);
       const now = Date.now();
-      for (const [profileId, waiting] of byProfile) {
-        const kuru = this.deps.harness(profileId);
+      for (const [profileKey, waiting] of byProfile) {
+        const kuru = this.deps.harness(profileKey);
         const since = Math.min(...waiting.map((e) => e.typedAt!)) - CLOCK_SLOP_MS;
         const paths = new Set([kuru?.transcript, ...waiting.map((e) => e.transcript)].filter((p): p is string => Boolean(p)));
         const taken: string[] = [];
@@ -469,16 +556,7 @@ export class Outbox {
 
   private changed(): void {
     this.entries = capOutbox(this.entries);
-    const path = this.indexPath();
-    try {
-      mkdirSync(outboxDir(), { recursive: true });
-      const temp = `${path}.tmp`;
-      writeFileSync(temp, `${JSON.stringify(this.entries)}\n`, "utf8");
-      renameSync(temp, path);
-    } catch (err) {
-      // The list in memory is still the list; the next change writes it again.
-      console.error("kururu: the outbox could not be written", err);
-    }
+    this.deps.index.save(this.entries);
     this.deps.broadcast(this.message());
   }
 
@@ -490,10 +568,6 @@ export class Outbox {
     }, ms);
     timer.unref();
     this.timers.set(id, timer);
-  }
-
-  private indexPath(): string {
-    return join(outboxDir(), "outbox.json");
   }
 
   private audioPath(id: string): string {
@@ -531,7 +605,7 @@ export class Outbox {
     const kept = new Set(this.entries.filter((e) => e.state !== "delivered").map((e) => `${e.id}.wav`));
     for (const name of names) {
       if (!name.endsWith(".wav") && !name.endsWith(".tmp")) continue;
-      if (kept.has(name) || name === "outbox.json.tmp") continue;
+      if (kept.has(name)) continue;
       const path = join(outboxDir(), name);
       try {
         if (Date.now() - statSync(path).mtimeMs > ORPHAN_MS) rmSync(path, { force: true });
@@ -542,19 +616,14 @@ export class Outbox {
   }
 }
 
-/** A message as the wire carries it, without the server's bookkeeping. */
-function bare(entry: OutboxEntry): OutboxEntry {
-  return {
-    id: entry.id,
-    profileId: entry.profileId,
-    at: entry.at,
-    ms: entry.ms,
-    state: entry.state,
-    text: entry.text,
-    lang: entry.lang,
-    typedAt: entry.typedAt,
-    note: entry.note,
-  };
+/**
+ * A failed entry that is really a clip nothing was said in, from a server
+ * before silence stopped being treated as a failure — `isSilentFailure` is
+ * how both the one-time sweep in the constructor and `legacyHeard` recognise
+ * one left over from before the fix. Pure.
+ */
+function isSilentFailure(entry: Pick<StoredOutboxEntry, "state" | "text" | "note">): boolean {
+  return entry.state === "failed" && !entry.text && (entry.note?.startsWith("Nothing heard") ?? false);
 }
 
 /** What `/api/voice/hear` answered before the outbox, which a page loaded before it still reads. */
@@ -575,7 +644,7 @@ export interface LegacyHeard {
 export function legacyHeard(entry: OutboxEntry | null): LegacyHeard {
   if (!entry) return { text: "", lang: null, outcome: "nothing", why: null };
   const text = entry.text ?? "";
-  if (entry.state === "failed" && !entry.text && entry.note?.startsWith("Nothing heard")) return { text, lang: null, outcome: "nothing", why: null };
+  if (isSilentFailure(entry)) return { text, lang: null, outcome: "nothing", why: null };
   if (entry.state === "failed" || entry.state === "transcribing") {
     return { text, lang: entry.lang, outcome: "failed", why: entry.note ?? "Not heard yet; the audio is kept, in your messages." };
   }
@@ -591,13 +660,16 @@ export function legacyHeard(entry: OutboxEntry | null): LegacyHeard {
  * said. A failed one holds nothing up, and nor does one already typed —
  * it is in Kuru's terminal ahead of whatever is typed next.
  */
-export function handable<T extends OutboxEntry & { n: number }>(entries: readonly T[], handed: ReadonlySet<string>): T[] {
+export function handable<T extends Pick<StoredOutboxEntry, "id" | "profileKey" | "state" | "typedAt" | "text" | "n">>(
+  entries: readonly T[],
+  handed: ReadonlySet<string>,
+): T[] {
   const blocked = new Set<string>();
   const out: T[] = [];
   for (const entry of [...entries].sort((a, b) => a.n - b.n)) {
-    if (blocked.has(entry.profileId)) continue;
+    if (blocked.has(entry.profileKey)) continue;
     if (entry.state === "transcribing") {
-      blocked.add(entry.profileId);
+      blocked.add(entry.profileKey);
       continue;
     }
     if (entry.state === "queued" && entry.typedAt === null && entry.text && !handed.has(entry.id)) out.push(entry);

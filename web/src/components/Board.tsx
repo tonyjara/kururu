@@ -115,6 +115,7 @@ export function BoardView({
   mascot,
   launchers,
   onReveal,
+  openCard,
 }: {
   workspaceId: string;
   workspaceName: string;
@@ -128,10 +129,16 @@ export function BoardView({
    * what it just showed. A board in a pane has nothing in front of it.
    */
   onReveal?: () => void;
+  /**
+   * A card to open on arrival — the one a reply of Kuru's named, clicked in
+   * its drawer. Its composer is opened, which is as close to "at that card"
+   * as a board of columns gets.
+   */
+  openCard?: string | null;
 }) {
   /** The column a new card is being written in, or null. One composer at a time. */
   const [adding, setAddingState] = useState<BoardColumn | null>(() => openComposers.get(workspaceId)?.adding ?? null);
-  const [editing, setEditingState] = useState<string | null>(() => openComposers.get(workspaceId)?.editing ?? null);
+  const [editing, setEditingState] = useState<string | null>(() => openCard ?? openComposers.get(workspaceId)?.editing ?? null);
   // A composer put away on purpose takes its draft with it; one the board was
   // unmounted from underneath keeps it, which is the whole point of `drafts`.
   const setAdding = (column: BoardColumn | null) => {
@@ -802,7 +809,7 @@ function CardView({
             </button>
           </span>
         </div>
-        {card.body && <p className="board-card-body">{card.body}</p>}
+        {card.body && <CardBody text={card.body} />}
         {card.dates && <CardWhen dates={card.dates} />}
         {card.worktree ? (
           <TreeLine worktree={card.worktree} />
@@ -1018,6 +1025,53 @@ function ago(at: number): string {
  */
 export function CardWhen({ dates }: { dates: CardDates }) {
   return <span className={`board-card-when board-card-when-${datesTense(dates)}`}>{datesLabel(dates)}</span>;
+}
+
+/**
+ * A card's message, clamped to two lines until a "More" opens it in place.
+ * The toggle only appears on a card whose text is actually cut off — a
+ * `ResizeObserver` on the clamped paragraph is what knows that, since the
+ * same text clamps or doesn't depending on the column's width. Clicks on the
+ * toggle stop there: the card underneath it is still draggable and still
+ * opens its editor on a double-click, so the toggle must not pass either
+ * gesture up to it.
+ */
+export function CardBody({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [clamped, setClamped] = useState(false);
+  const body = useRef<HTMLParagraphElement | null>(null);
+
+  useLayoutEffect(() => {
+    const node = body.current;
+    if (!node || expanded) return;
+    const check = () => setClamped(node.scrollHeight - node.clientHeight > 1);
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [text, expanded]);
+
+  return (
+    <div className="board-card-body-wrap">
+      <p ref={body} className={`board-card-body ${expanded ? "board-card-body-open" : ""}`}>
+        {text}
+      </p>
+      {(clamped || expanded) && (
+        <button
+          type="button"
+          className="board-card-more"
+          draggable={false}
+          onClick={(event) => {
+            event.stopPropagation();
+            setExpanded((was) => !was);
+          }}
+          onDoubleClick={(event) => event.stopPropagation()}
+        >
+          {expanded ? "Less" : "More"}
+        </button>
+      )}
+    </div>
+  );
 }
 
 export function Composer({

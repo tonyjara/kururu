@@ -226,15 +226,18 @@ it. A new tab opens where the terminal you were just in *is*, read from the pty.
 
 ### The sidebar
 
-Workspaces are numbered because the number is the shortcut. Double-click to
-rename; right-click for colour, mascot, reorder, new, and delete. The colour
-swatch tags a workspace and every terminal in it gets a rule down its left in that
-colour.
+Double-click a workspace to rename it; right-click for colour, mascot, reorder,
+groups, new, and delete. `C-a 1`…`9` still jump to the first nine, and the row's
+tooltip says which key is its. After the name, `±3` is files not committed and
+`↑2` `↓1` commits to push and pull. Hover a row for its **⋯** — the board,
+LazyGit in the workspace's repository, its databases, and commit, merge, pull
+and push; on a touch screen the ⋯ is always there. The colour tags a workspace and every
+terminal in it gets a rule down its left in that colour.
 
 The list below is **agents**, not terminals — the test is "has an agent ever been
 seen in here", so a row does not flicker out while claude is between things, and
 an exited agent stays listed with its screen and a `✕` to dismiss it. Every
-terminal is still in its tab strip, and `C-a a` finds all of them.
+terminal is still in its tab strip, and `C-a f` finds all of them.
 
 Each row is two lines:
 
@@ -350,7 +353,7 @@ over its own copy, so nothing is reported twice.
 
 ## The harness
 
-The bot button beside the profile's board, or `C-a H`, opens the profile's
+The bot button beside the profile's board, or `C-a a`, opens the profile's
 **harness**: one Claude Code session that oversees every agent in the profile.
 Talk to it as you would to any Claude, about all of them at once — "start an
 agent on the migration card", "what did the API worker say", "tell it to use
@@ -415,6 +418,7 @@ change reaches a second window and the phone without being told.
 | **Profiles** | the sessions, and the workspaces in each of them |
 | **Mascot** | what the badge does while an agent is working |
 | **Keys** | what each key does after the prefix |
+| **Backups** | a private git repository the boards, conversations, settings and memory go to, every few minutes when something changed — never the secrets |
 
 ### Appearance
 

@@ -42,6 +42,14 @@ export function agentLabel(agent: AgentSnapshot): string {
   if (agent.titleOverride) return agent.titleOverride;
   if (agent.agent) return agent.agent;
   /**
+   * An agent on another machine is the CLI it was started as. The process
+   * table here holds only the ssh that reaches it, so there is nothing for
+   * `agent` to find, and its own command line is the one place it says —
+   * alive or exited, since what it was is the same either way.
+   */
+  const remote = remoteShellOf(agent.command)?.agent;
+  if (remote) return remote;
+  /**
    * A dead pty reports no program, because there is no process to find one in.
    * What it *was* is then the only true thing left to call it, and it is a far
    * better label than "exited" — the dot and the strikethrough already say it is

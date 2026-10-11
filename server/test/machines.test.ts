@@ -7,10 +7,12 @@ import { afterAll, describe, expect, it } from "bun:test";
 import {
   adoptMachineList,
   adoptPin,
+  AGENT_CHECK,
   formatBytes,
   LOOP_SCRIPT,
   MACHINE_SEP,
   parseMachineSample,
+  remoteAgentRun,
   remoteShellCommand,
   remoteShellOf,
   REMOTE_SCRIPT,
@@ -138,9 +140,29 @@ describe("sessionName", () => {
 
 describe("remoteShellCommand", () => {
   it("is read back as the machine and session it was built for", () => {
-    expect(remoteShellOf(remoteShellCommand({ host: "devbox" }))).toEqual({ host: "devbox", session: null });
+    expect(remoteShellOf(remoteShellCommand({ host: "devbox" }))).toEqual({ host: "devbox", session: null, agent: null });
     const line = remoteShellCommand({ host: "me@box", session: "kururu-api-2", dir: "~/code", run: "echo 'hi'" });
-    expect(remoteShellOf(line)).toEqual({ host: "me@box", session: "kururu-api-2" });
+    expect(remoteShellOf(line)).toEqual({ host: "me@box", session: "kururu-api-2", agent: null });
+  });
+
+  it("carries the agent it was started as, last, where an older reader never looks", () => {
+    const run = remoteAgentRun("codex", "codex --model gpt-5.5 'fix it'", "devbox");
+    const line = remoteShellCommand({ host: "devbox", session: "kururu-api-3", dir: "~/code", run, agent: "codex" });
+    expect(remoteShellOf(line)).toEqual({ host: "devbox", session: "kururu-api-3", agent: "codex" });
+    // The loop and the remote line are where they always were, so a server
+    // from before agents went to machines still reads host and session.
+    expect(line.startsWith(remoteShellCommand({ host: "devbox", session: "kururu-api-3", dir: "~/code", run }).replace(/'[^']*'$/, ""))).toBe(true);
+  });
+
+  it("will not put an agent on a plain ssh, or name one it does not start", () => {
+    expect(() => remoteShellCommand({ host: "box", agent: "claude" })).toThrow();
+    expect(() => remoteShellCommand({ host: "box", session: "kururu-a-1", agent: "sh" as never })).toThrow();
+  });
+
+  it("types a card's tab as spaces, since a typed tab is a completion", () => {
+    expect(remoteAgentRun("claude", "claude 'a\tb'", "box").endsWith("&& claude 'a  b'")).toBe(true);
+    // And the machine's name is cut to what needs no quoting anywhere.
+    expect(remoteAgentRun("claude", "claude", "my box; rm -rf ~").includes("'my box rm -rf'")).toBe(true);
   });
 
   it("is not seen in a shell somebody typed ssh into, or in anything else", () => {
@@ -158,7 +180,7 @@ describe("remoteShellCommand", () => {
   it("keeps both scripts free of the two characters that would change meaning in fish's quotes", () => {
     // The remote script rides in single quotes through whatever the login
     // shell is; the loop must be one quoted word for remoteShellOf to find.
-    for (const script of [REMOTE_SCRIPT, LOOP_SCRIPT]) {
+    for (const script of [REMOTE_SCRIPT, LOOP_SCRIPT, AGENT_CHECK]) {
       expect(script).not.toContain("'");
       expect(script).not.toContain("\\");
     }
@@ -167,6 +189,13 @@ describe("remoteShellCommand", () => {
   it("names the tab after the machine", () => {
     const tab = { kind: "shell", command: remoteShellCommand({ host: "devbox", session: "kururu-x-1" }), titleOverride: null, agent: null, exited: false } as unknown as AgentSnapshot;
     expect(agentLabel(tab)).toBe("devbox");
+  });
+
+  it("names an agent's tab after its CLI, which the process table here cannot see", () => {
+    const command = remoteShellCommand({ host: "devbox", session: "kururu-x-1", run: remoteAgentRun("claude", "claude", "devbox"), agent: "claude" });
+    const tab = { kind: "agent", command, titleOverride: null, agent: null, exited: false } as unknown as AgentSnapshot;
+    expect(agentLabel(tab)).toBe("claude");
+    expect(agentLabel({ ...tab, exited: true })).toBe("claude");
   });
 });
 
@@ -239,6 +268,17 @@ describe("the line, run", () => {
     ]);
   });
 
+  it("lets an agent's title out, and only an agent's", () => {
+    writeFileSync(log, "");
+    const line = remoteShellCommand({ host: "devbox", session: "kururu-api-1", run: "claude", agent: "claude" });
+    const result = spawnSync("/bin/zsh", ["-c", line], { env: { PATH: `${bin}:/usr/bin:/bin`, HOME: home, LOG: log }, encoding: "utf8" });
+    expect(result.status).toBe(0);
+    const calls = readFileSync(log, "utf8").split("\n").filter(Boolean);
+    expect(calls).toContain("set-option|-t|=kururu-api-1:|set-titles|on|");
+    expect(calls).toContain("set-option|-t|=kururu-api-1:|set-titles-string|#T|");
+    expect(calls.at(-1)).toBe("attach-session|-t|=kururu-api-1|");
+  });
+
   it("starts at home, and says so, when the folder is not there", () => {
     writeFileSync(log, "");
     const line = remoteShellCommand({ host: "devbox", session: "kururu-api-1", dir: "~/gone" });
@@ -246,5 +286,97 @@ describe("the line, run", () => {
     expect(result.stderr).toContain("there is no folder");
     expect(readFileSync(log, "utf8")).toContain(`new-session|-d|-s|kururu-api-1|-c|${home}|`);
     expect(readFileSync(log, "utf8")).not.toContain("send-keys");
+  });
+});
+
+/**
+ * The check typed ahead of an agent on a machine, run for real under both
+ * shells against a fake `claude` and `codex` that write down how they were
+ * called. What matters most is the third case: a CLI too old to have the
+ * status subcommand must never be asked it, because it would take
+ * `auth status` for a prompt and start a session on it.
+ */
+describe("the agent check, run", () => {
+  const dir = mkdtempSync(join(tmpdir(), "kururu-agentcheck-"));
+  const bin = join(dir, "bin");
+  const home = join(dir, "home");
+  const log = join(dir, "log");
+  mkdirSync(bin);
+  mkdirSync(home);
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const fake = (name: string, body: string, where = bin) => {
+    writeFileSync(join(where, name), `#!/bin/sh\necho "${name} $*" >> "$LOG"\n${body}\n`);
+    chmodSync(join(where, name), 0o755);
+  };
+  fake(
+    "claude",
+    `case "$*" in
+  "auth --help") if [ -n "$OLD" ]; then echo "Usage: claude [options] [command] [prompt]"; else echo "Usage: claude auth [options] [command]"; fi;;
+  "auth status") if [ -n "$OUT" ]; then printf '{\\n  "loggedIn": false,\\n  "authMethod": "none"\\n}\\n'; exit 1; else printf '{\\n  "loggedIn": true\\n}\\n'; fi;;
+  *) echo STARTED;;
+esac`,
+  );
+  fake(
+    "codex",
+    `case "$*" in
+  "login --help") echo "  status  Show login status";;
+  "login status") if [ -n "$OUT" ]; then echo "Not logged in"; exit 1; else echo "Logged in using ChatGPT"; fi;;
+  *) echo STARTED;;
+esac`,
+  );
+  const run = (shell: string, line: string, env: Record<string, string> = {}, path = `${bin}:/usr/bin:/bin`) => {
+    writeFileSync(log, "");
+    const result = spawnSync(shell, ["-c", line], { env: { PATH: path, HOME: home, LOG: log, ...env }, encoding: "utf8", timeout: 10_000 });
+    return { ...result, calls: readFileSync(log, "utf8").split("\n").filter(Boolean) };
+  };
+
+  for (const shell of ["/bin/zsh", "/bin/bash"]) {
+    it(`starts a signed-in Claude with its prompt intact, under ${shell}`, () => {
+      const result = run(shell, remoteAgentRun("claude", `claude --model claude-opus-5-5 'it'\\''s "$HOME"'`, "devbox"));
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("STARTED");
+      expect(result.calls).toEqual(["claude auth --help", "claude auth status", `claude --model claude-opus-5-5 it's "$HOME"`]);
+    });
+
+    it(`says which machine has no Claude, and starts nothing, under ${shell}`, () => {
+      const result = run(shell, remoteAgentRun("claude", "claude", "devbox"), {}, "/usr/bin:/bin");
+      expect(result.status).toBe(127);
+      expect(result.stdout).toContain("kururu: Claude Code is not installed on devbox. There is no claude on the PATH here.");
+      expect(result.calls).toEqual([]);
+    });
+  }
+
+  it("says a Claude is signed out, and does not start it", () => {
+    const result = run("/bin/zsh", remoteAgentRun("claude", "claude", "devbox"), { OUT: "1" });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("kururu: Claude Code is not logged in on devbox.");
+    expect(result.stdout).toContain("Run claude auth login here");
+    expect(result.calls).toEqual(["claude auth --help", "claude auth status"]);
+  });
+
+  it("never asks an old Claude for auth status, which it would take for a prompt", () => {
+    const result = run("/bin/bash", remoteAgentRun("claude", "claude --model x", "devbox"), { OLD: "1", OUT: "1" });
+    expect(result.status).toBe(0);
+    expect(result.calls).toEqual(["claude auth --help", "claude --model x"]);
+  });
+
+  it("finds the alias-only install Claude Code used to make", () => {
+    const local = join(home, ".claude", "local");
+    mkdirSync(local, { recursive: true });
+    fake("claude", `[ "$*" != "auth --help" ] || echo "Usage: claude auth"; [ "$*" != "auth status" ] || echo '{"loggedIn":false}'`, local);
+    const result = run("/bin/bash", remoteAgentRun("claude", "claude", "devbox"), {}, "/usr/bin:/bin");
+    rmSync(join(home, ".claude"), { recursive: true, force: true });
+    // Found, asked, and its compact JSON read as signed out.
+    expect(result.stdout).toContain("kururu: Claude Code is not logged in on devbox.");
+    expect(result.calls).toEqual(["claude auth --help", "claude auth status"]);
+  });
+
+  it("asks Codex the same way", () => {
+    const out = run("/bin/zsh", remoteAgentRun("codex", "codex --model gpt-5.5", "box"), { OUT: "1" });
+    expect(out.status).toBe(1);
+    expect(out.stdout).toContain("kururu: Codex is not logged in on box.");
+    expect(out.stdout).toContain("Run codex login here");
+    const ok = run("/bin/zsh", remoteAgentRun("codex", "codex --model gpt-5.5", "box"));
+    expect(ok.calls).toEqual(["codex login --help", "codex login status", "codex --model gpt-5.5"]);
   });
 });

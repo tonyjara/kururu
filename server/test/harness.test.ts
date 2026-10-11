@@ -29,6 +29,7 @@ import {
   SWAP_STALE_MS,
   SWAP_TOOLS,
   SwapGate,
+  TYPE_PIECE,
   adoptHarness,
   agentName,
   clip,
@@ -39,10 +40,10 @@ import {
   isCommand,
   keyBytes,
   mcpConfig,
-  pasteBytes,
   rolePrompt,
   tellsHarness,
   turnsFrom,
+  typingPieces,
 } from "../../shared/harness";
 import { countsAsAgent, type AgentSnapshot } from "../../shared/model";
 import { Harness, screenText, type HarnessDeps } from "../src/harness";
@@ -224,9 +225,30 @@ describe("keys and pastes", () => {
     expect(keyBytes(["rm -rf"])).toEqual({ bad: "rm -rf" });
   });
 
-  it("brackets a paste only when there is a newline to protect", () => {
-    expect(pasteBytes("one line")).toBe("one line");
-    expect(pasteBytes("two\nlines")).toBe("\x1b[200~two\nlines\x1b[201~");
+  it("brackets a paste only when there is a line break to protect", () => {
+    expect(typingPieces("one line")).toEqual(["one line"]);
+    expect(typingPieces("two\nlines")).toEqual(["\x1b[200~two\nlines\x1b[201~"]);
+    expect(typingPieces("a\rb")).toEqual(["\x1b[200~a\rb\x1b[201~"]);
+    expect(typingPieces("")).toEqual([]);
+  });
+
+  it("types a long line in pieces Claude Code never takes for a paste", () => {
+    // The shape of the clip that lost its first half: one line of 1805.
+    const said = `[voice] ${"I want to make a few changes on the sidebar, ".repeat(40)}`.trim();
+    const pieces = typingPieces(said);
+    expect(pieces.join("")).toBe(said);
+    expect(pieces.length).toBeGreaterThan(1);
+    expect(pieces.every((piece) => piece.length <= TYPE_PIECE)).toBe(true);
+    // Over 800 in one read is a paste, so five that pile up are still typing.
+    expect(5 * TYPE_PIECE).toBeLessThanOrEqual(800);
+  });
+
+  it("never ends a piece on half a character", () => {
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    const text = `${"a".repeat(TYPE_PIECE - 1)}${"😀".repeat(200)}`;
+    const pieces = typingPieces(text);
+    expect(pieces.join("")).toBe(text);
+    for (const piece of pieces) expect(lone.test(piece)).toBe(false);
   });
 });
 
@@ -488,6 +510,7 @@ describe("the user's words", () => {
   function rig(terminals: AgentSnapshot[]) {
     const all = new Map(terminals.map((t) => [t.id, t]));
     const typed = new Map<string, string>();
+    const writes: { id: string; data: string; at: number }[] = [];
     const deps = {
       workspaces: {
         profileOf: () => "p",
@@ -499,6 +522,7 @@ describe("the user's words", () => {
         find: (id: string) => all.get(id),
         write: (id: string, data: string) => {
           typed.set(id, (typed.get(id) ?? "") + data);
+          writes.push({ id, data, at: Date.now() });
           // An Enter starts a turn, as it would; it also spares the test the
           // two seconds `settled` would otherwise wait for one.
           const agent = all.get(id);
@@ -515,7 +539,7 @@ describe("the user's words", () => {
       all.set(id, agent);
       return agent;
     };
-    return { harness, typed, send, set };
+    return { harness, typed, writes, send, set };
   }
 
   async function until(check: () => boolean, ms = 3000): Promise<void> {
@@ -528,6 +552,20 @@ describe("the user's words", () => {
     const result = await send("a1", "put dev:prod on the shared Mailpit");
     expect(result).toContain("Typed into");
     expect(typed.get("a1")).toBe("put dev:prod on the shared Mailpit\r");
+  });
+
+  it("types a long line as pieces written apart, and presses Enter after the last", async () => {
+    const { typed, writes, send } = rig([terminal("a1", "agent", "claude")]);
+    const said = `[voice] ${"I want to make a few changes on the sidebar, ".repeat(40)}`.trim();
+    expect(await send("a1", said)).toContain("Typed into");
+    expect(typed.get("a1")).toBe(`${said}\r`);
+    const mine = writes.filter((w) => w.id === "a1");
+    expect(mine.at(-1)?.data).toBe("\r");
+    const pieces = mine.slice(0, -1);
+    expect(pieces.length).toBeGreaterThan(1);
+    expect(pieces.every((w) => w.data.length <= TYPE_PIECE)).toBe(true);
+    // Apart, so that each is a read of its own and not one paste of them all.
+    for (let i = 1; i < pieces.length; i++) expect(pieces[i]!.at - pieces[i - 1]!.at).toBeGreaterThanOrEqual(30);
   });
 
   it("holds next for the end of the turn, and types it then", async () => {

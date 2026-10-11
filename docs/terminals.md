@@ -25,6 +25,30 @@ back empty, and — because the *set* of visible terminals had not changed —
 nothing asked for the history to refill it. Dragging a pane aside made its agent
 vanish until it happened to repaint.
 
+## Painting
+
+**An emulator paints only while it is in a pane, and only when something it
+draws changed** (`web/src/frames.ts`). ghostty-web's own `open()` starts a
+`requestAnimationFrame` loop that renders every frame for ever, and with
+`cursorBlink` on it redraws the cursor's row every frame too — in every pooled
+emulator, on screen or not, through a `getLine` that parses the whole viewport
+to return one row. Twelve of those idle cost a fifth of a core in the renderer
+and as much in the GPU process; six agents working took the renderer past half
+a core. That was the fan, on 2026-10-11.
+
+So `installFrames` stops that loop after `open()` and runs one shared loop that
+asks first: dirty rows, cursor, blink phase, selection, hovered link, viewport,
+scrollbar, canvas size. It is woken rather than run — by the sink's bytes, the
+blink timer, and any input in the window for a quarter-second — so an idle
+window schedules no frames at all. A detached emulator is still **fed**; only
+its picture waits, and `borrow` draws it in full before the pane is painted.
+An unfocused pane does not blink a cursor it does not draw (`applyCursor`).
+
+It leans on ghostty-web's private shape, as `cursortext.ts` and `boxdraw.ts`
+do. A version it does not recognise gets the library's loop back — slower,
+never frozen. A picture that lags until the next byte means `render` has grown
+an input `changed` does not read: look there first.
+
 ## No GPU context in a pane
 
 This turned the whole window black, twice, and is why the renderer was replaced

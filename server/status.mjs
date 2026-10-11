@@ -137,12 +137,42 @@ async function ask(path) {
   }
 }
 
+/**
+ * Whether launchd started the host, which is whether it has a coalition of its
+ * own, from `launchctl list`. A host started any other way shares the coalition
+ * of the app that started it, and a Force Quit of that app — including the one
+ * the Dock does when you quit a tile whose process has gone — ends it and every
+ * agent. That is invisible until it happens, so it is printed: see
+ * `server/src/hostlaunch.ts` and its label prefix, which this matches.
+ */
+function launchedByLaunchd(pid) {
+  if (process.platform !== "darwin") return null;
+  try {
+    const list = execFileSync("launchctl", ["list"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return list.split("\n").some((line) => {
+      const [first, , label] = line.trim().split(/\s+/);
+      return first === String(pid) && Boolean(label?.startsWith("io.github.tonyjara.kururu.ptyhost."));
+    });
+  } catch {
+    return null;
+  }
+}
+
 // --- the host, which is this machine's question ------------------------------
 
 const pid = holder();
 if (pid) {
   const age = uptime(pid);
   row("pty host", up("up"), `pid ${pid}${age ? `, up ${age}` : ""} · ${short(socket)}`);
+  const own = launchedByLaunchd(pid);
+  if (own === true) row("coalition", up("its own"), "started by launchd — no app quitting or force-quitting reaches it");
+  if (own === false) {
+    row(
+      "coalition",
+      down("shared"),
+      "started inside an app's — a Force Quit of that app, or of a tile an agent's app left behind, ends every agent; the next host start moves it out",
+    );
+  }
 } else if (existsSync(socket)) {
   row("pty host", down("stale"), `a socket with nobody behind it · ${short(socket)} — the next server clears it`);
 } else {

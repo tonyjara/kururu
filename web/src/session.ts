@@ -43,7 +43,10 @@ import type { LaunchSettings } from "../../shared/launchers";
 import type { MergeReply, MergeResolution, ProjectSettings, WorktreeOutcome, WorktreeStatus } from "../../shared/projects";
 import type { NotifySettings } from "../../shared/notify";
 import type { OpenRouterStatus } from "../../shared/openrouter";
-import type { MissedReply, OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "../../shared/voice";
+import type { BackupStatus } from "../../shared/backup";
+import type { SearchHit, SearchScope } from "../../shared/store";
+import type { KuruConversation, KuruPage } from "../../shared/kuru";
+import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "../../shared/voice";
 import type { MachineEntry, MachinePin, MachineStatus } from "../../shared/machines";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { Grid } from "./grid";
@@ -79,6 +82,8 @@ export interface KururuState {
   machines: MachineStatus[];
   /** The OpenRouter account, or null when no key has been given. See `shared/openrouter.ts`. */
   openrouter: OpenRouterStatus | null;
+  /** Where the backups stand, or null until the server has said. See `shared/backup.ts`. */
+  backup: BackupStatus | null;
   /**
    * Every database every workspace's env files name, for the button on the
    * row and the viewer behind it. Found by the walk that finds `branches`, and
@@ -87,9 +92,13 @@ export interface KururuState {
   databases: WorkspaceDatabase[];
   /** The voice: its settings, its programs, its model, its voices. Null until the server has said. See `shared/voice.ts`. */
   voice: VoiceStatus | null;
-  /** Kuru's replies nobody played to their end, every profile's, oldest first. The badge on the harness button. */
-  missed: MissedReply[];
-  /** Your messages to Kuru, every profile's, in the order the server took them. The other list behind the harness button. */
+  /**
+   * The conversation with Kuru, every profile's: the newest items of each,
+   * with the two counts the status bar's chip wears. The drawer draws it;
+   * `fetchKuru` pages back through what is older. See `shared/kuru.ts`.
+   */
+  kuru: KuruConversation[];
+  /** Your messages to Kuru, every profile's, in the order the server took them: the pill's line under Kuru's words. The drawer reads them merged into `kuru`. */
   outbox: OutboxEntry[];
 }
 
@@ -104,9 +113,10 @@ let state: KururuState = {
   usage: null,
   machines: [],
   openrouter: null,
+  backup: null,
   databases: [],
   voice: null,
-  missed: [],
+  kuru: [],
   outbox: [],
 };
 
@@ -277,6 +287,9 @@ function connect(): void {
       case "openrouter":
         set({ openrouter: msg.openrouter });
         break;
+      case "backup":
+        set({ backup: msg.backup });
+        break;
       case "voice":
         set({ voice: msg.voice });
         break;
@@ -288,8 +301,8 @@ function connect(): void {
       case "hush":
         if (hushListener) deliver(() => hushListener?.(msg.hushed === true));
         break;
-      case "missed":
-        set({ missed: Array.isArray(msg.missed) ? msg.missed : [] });
+      case "kuru":
+        set({ kuru: Array.isArray(msg.kuru) ? msg.kuru : [] });
         break;
       case "outbox":
         set({ outbox: Array.isArray(msg.outbox) ? msg.outbox : [] });
@@ -543,7 +556,17 @@ export function proposeSize(agentId: string, cols: number, rows: number): void {
  * not explain.
  */
 export function newTab(
-  options: { kind?: PtyKind; cwd?: string; command?: string; launcher?: string; nvim?: boolean; local?: boolean; paneId?: string } = {},
+  options: {
+    kind?: PtyKind;
+    cwd?: string;
+    command?: string;
+    launcher?: string;
+    nvim?: boolean;
+    lazygit?: boolean;
+    local?: boolean;
+    paneId?: string;
+    workspaceId?: string;
+  } = {},
 ): Promise<string> {
   return request((id) => ({ type: "new-tab", id, ...options })).then(
     (result) => (result as { id: string }).id,
@@ -881,9 +904,9 @@ export function mergeCard(workspaceId: string, cardId: string, resolve?: MergeRe
   return request((id) => ({ type: "merge-card", id, workspaceId, cardId, ...(resolve ? { resolve } : {}) })) as Promise<MergeReply>;
 }
 /**
- * A verb on a workspace's git button, on its main checkout. Waits, for the
- * card verbs' reason, and resolves to the line to show — what was committed,
- * pushed or merged — or rejects with git's reason for not.
+ * A verb on a workspace's git, from its row's menu, on its main checkout.
+ * Waits, for the card verbs' reason, and resolves to the line to show — what
+ * was committed, pushed or merged — or rejects with git's reason for not.
  */
 export function workspaceGit(workspaceId: string, root: string, action: GitAction, message?: string): Promise<string> {
   return request((id) => ({ type: "workspace-git", id, workspaceId, root, action, message })).then(
@@ -1094,6 +1117,52 @@ export function clearOpenRouterKey(): void {
 }
 
 // ---------------------------------------------------------------------------
+// The database and the backups
+// ---------------------------------------------------------------------------
+
+/** The backup settings, all at once. Rejects with git's reason when the repository does not answer. */
+export function setBackup(settings: { url: string | null; enabled: boolean; intervalMin: number }): Promise<BackupStatus> {
+  return request((id) => ({ type: "set-backup", id, ...settings })) as Promise<BackupStatus>;
+}
+
+export function backupNow(): Promise<BackupStatus> {
+  return request((id) => ({ type: "backup-now", id })) as Promise<BackupStatus>;
+}
+
+/** A deleted card of the profile on screen, back onto its board. */
+export function restoreCard(cardId: string): Promise<unknown> {
+  return request((id) => ({ type: "restore-card", id, cardId }));
+}
+
+export interface DeletedCardRow {
+  id: string;
+  number: number;
+  title: string;
+  column: string;
+  deletedAt: number;
+  workspaceKey: string | null;
+  workspaceName: string | null;
+  workspaceId: string | null;
+}
+
+export function deletedCards(profileId: string): Promise<DeletedCardRow[]> {
+  return request((id) => ({ type: "deleted-cards", id, profileId })) as Promise<DeletedCardRow[]>;
+}
+
+/**
+ * Full text over the profile's cards and conversations, off `/api/search`.
+ * A fetch rather than a message: the answer is for the page that asked and
+ * nobody else, and a GET is what a search is.
+ */
+export async function search(profileId: string, query: string, scope: SearchScope = "all"): Promise<SearchHit[]> {
+  const params = new URLSearchParams({ q: query, scope, profile: profileId });
+  const response = await fetch(`/api/search?${params}`);
+  if (!response.ok) throw new Error(`search answered ${response.status}`);
+  const body = (await response.json()) as { hits?: SearchHit[] };
+  return Array.isArray(body.hits) ? body.hits : [];
+}
+
+// ---------------------------------------------------------------------------
 // The voice
 // ---------------------------------------------------------------------------
 
@@ -1170,9 +1239,52 @@ export function playMissed(profileId: string): void {
   send({ type: "play-missed", profileId });
 }
 
-/** Take a profile's missed replies off the list, read rather than heard. */
+/** Take a profile's unheard replies off the list, read rather than heard — the drawer's "Mark all heard". */
 export function clearMissed(profileId: string): void {
   send({ type: "clear-missed", profileId });
+}
+
+/** These replies have been in view in the open drawer long enough to count as read. */
+export function kuruSeen(profileId: string, utterances: string[]): void {
+  send({ type: "kuru-seen", profileId, utterances });
+}
+
+/** Say one unheard reply again. */
+export function kuruReplay(profileId: string, utterance: string): void {
+  send({ type: "kuru-replay", profileId, utterance });
+}
+
+/**
+ * A line for Kuru from the drawer's composer. Minted an id here, as a clip
+ * is, so that the server can tell a retry from a second message; what comes
+ * back is the outbox's record of it, on the socket, merged into the
+ * conversation like a spoken one.
+ */
+export function kuruSay(profileId: string, text: string): string {
+  const id = mintId();
+  send({ type: "kuru-say", profileId, id, text, at: Date.now() });
+  return id;
+}
+
+/** The conversation before a moment, oldest first, and whether there is more before that. */
+export async function fetchKuru(profileId: string, before: number | null): Promise<KuruPage> {
+  const params = new URLSearchParams({ profile: profileId });
+  if (before !== null) params.set("before", String(before));
+  const response = await fetch(`/api/kuru?${params}`);
+  if (!response.ok) throw new Error(`the conversation answered ${response.status}`);
+  const body = (await response.json()) as Partial<KuruPage>;
+  return { items: Array.isArray(body.items) ? body.items : [], more: body.more === true };
+}
+
+/**
+ * An id for a message — a clip or a typed line — minted on this side so a
+ * retry is the same message and not a second one. `randomUUID` wants a
+ * secure context, which a phone over the tailnet's http is not.
+ */
+export function mintId(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** Send a failed message of yours again. */

@@ -18,12 +18,20 @@
  * hidden as it is. The talk key it names is the server's setting, which is
  * how the hook learns which key to listen for.
  */
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { DEFAULT_VOICE } from "../../../shared/voice";
 import { desktop } from "../desktop";
 import { useKururu } from "../session";
 import { applyTalkGesture, installSpeech, setSpeechVolume, setVoiceProfile, useVoiceUi } from "../voice";
 import { VoicePill } from "./VoicePill";
+
+/**
+ * How long the tray's Reset shows a pill that has nothing to say. The pill
+ * is only up while it is talking, so a reset that did not show it moved an
+ * invisible window and looked like it had done nothing. Long enough to see
+ * where it went and take hold of it.
+ */
+const HERE_MS = 5000;
 
 export function Pill() {
   const { snapshot, voice } = useKururu();
@@ -33,6 +41,7 @@ export function Pill() {
   const voiceRef = useRef(voice);
   voiceRef.current = voice;
   const root = useRef<HTMLDivElement>(null);
+  const [here, setHere] = useState(false);
 
   useEffect(() => {
     document.documentElement.classList.add("pill-page");
@@ -40,11 +49,20 @@ export function Pill() {
     setSpeechVolume(() => voiceRef.current?.settings.volume ?? DEFAULT_VOICE.volume);
     const stopSpeech = installSpeech();
     const stopKeys = desktop()?.voice?.onKey(applyTalkGesture) ?? (() => {});
+    let hereTimer: ReturnType<typeof setTimeout> | undefined;
+    const stopLocate =
+      desktop()?.voice?.onLocate?.(() => {
+        setHere(true);
+        clearTimeout(hereTimer);
+        hereTimer = setTimeout(() => setHere(false), HERE_MS);
+      }) ?? (() => {});
     // Said once, for the dev shell's terminal: the panel is a window nobody can open the devtools of.
     console.log(`up${desktop()?.voice ? "" : ", with no bridge"}`);
     return () => {
       stopSpeech();
       stopKeys();
+      stopLocate();
+      clearTimeout(hereTimer);
       document.documentElement.classList.remove("pill-page");
     };
   }, []);
@@ -60,12 +78,30 @@ export function Pill() {
     if (!bridge) return;
     const pill = root.current?.querySelector(".voice-pill");
     const box = pill?.getBoundingClientRect();
-    bridge.report({ phase: ui.phase, width: box?.width ?? 0, height: box?.height ?? 0, key });
-  }, [ui.phase, ui.text, ui.detail, ui.toggled, key]);
+    bridge.report({ phase: ui.phase, width: box?.width ?? 0, height: box?.height ?? 0, key, locating: here });
+  }, [ui.phase, ui.text, ui.detail, ui.toggled, key, here]);
 
   return (
     <div className="pill-page-root" ref={root}>
-      <VoicePill floating />
+      {ui.phase === "idle" && here ? <PillHere /> : <VoicePill floating />}
+    </div>
+  );
+}
+
+/**
+ * Reset's answer when the pill has nothing to say: where it is now, and that
+ * it can be moved. Nothing on it is carved out of the drag, since there is
+ * nothing on it to press — the whole of it is the handle.
+ */
+function PillHere() {
+  return (
+    <div className="voice-pill voice-pill-floating voice-pill-here" role="status" aria-live="polite">
+      <span className="voice-meter" aria-hidden="true">
+        {Array.from({ length: 7 }, (_, i) => (
+          <span key={i} className="voice-bar" />
+        ))}
+      </span>
+      <span className="voice-label">Kuru's pill is here — drag it anywhere</span>
     </div>
   );
 }

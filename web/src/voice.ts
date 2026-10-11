@@ -19,6 +19,13 @@
  * clip is sent. Escape throws the clip away. The window losing focus while
  * the key is down sends what there is, because the key-up is never coming.
  *
+ * **Escape is the voice's only while the voice is doing something.** It
+ * drops a clip being taken, and stops Kuru mid-reply exactly as the pill's ✕
+ * does — and while neither is happening it is not the voice's at all, and
+ * goes on to the terminal, the dialog or the prefix as it always has. Taken
+ * when it is the voice's, because the same Escape reaching an agent's
+ * terminal would interrupt the agent too (`voiceEscape`).
+ *
  * **PCM, not a MediaRecorder.** The browser's recorder writes WebM/Opus,
  * which Apple's recogniser will not open, so the samples are taken off an
  * `AudioWorklet` and written as a WAV by hand (`shared/voice.ts`). It is
@@ -37,8 +44,8 @@
  * **The player says what became of each reply**, because what was missed is
  * the server's to decide and only a player knows: held, each sentence played
  * to its end, or let go before it (`api.speechHeld`, `api.speechPlayed`).
- * Whatever was cut off, dismissed or never loaded is on the list behind the
- * harness button's badge.
+ * Whatever was cut off, dismissed or never loaded is marked unheard in the
+ * Kuru drawer, and counted on the status bar's chip.
  *
  * **A clip is kept until the server has it, and then the server keeps it.**
  * The moment the key comes up the clip is written to IndexedDB (`unsent.ts`)
@@ -55,6 +62,7 @@
 import { useSyncExternalStore } from "react";
 import { CLIP_MIN_MS, CLIP_RATE, CLIP_ROLL_MS, TAP_MS, downsample, encodeWav, type OutboxEntry, type SpeechChunk } from "../../shared/voice";
 import type { TalkGesture } from "./desktop";
+import { isSynthetic } from "./keybar";
 import { audioOutput } from "./notify";
 import * as api from "./session";
 import { dropClip, keepClip, keptClips, type StoredClip } from "./unsent";
@@ -71,9 +79,11 @@ export interface VoiceUi {
   detail: string;
   /** Recording was toggled on by a tap, so the pill can say which gesture ends it. */
   toggled: boolean;
+  /** The reply being said, or just said, so a tap on the pill's words opens the drawer at it. */
+  utterance: string | null;
 }
 
-const IDLE: VoiceUi = { phase: "idle", level: 0, text: "", detail: "", toggled: false };
+const IDLE: VoiceUi = { phase: "idle", level: 0, text: "", detail: "", toggled: false, utterance: null };
 let ui: VoiceUi = IDLE;
 const listeners = new Set<() => void>();
 
@@ -107,8 +117,8 @@ export function useVoiceUi(): VoiceUi {
  * keeps a key the hook *and* this window both saw from firing twice.
  *
  * `remotePhase` is the pill's phase, so Escape pressed here is swallowed
- * only while there is a clip to drop, and reaches the prefix handler and the
- * terminal otherwise.
+ * only while there is a clip to drop or a reply to stop, and reaches the
+ * prefix handler and the terminal otherwise.
  */
 let remote: ((gesture: TalkGesture) => void) | null = null;
 let remotePhase: VoicePhase = "idle";
@@ -136,6 +146,10 @@ export function voiceIsRemote(): boolean {
  * hook has that a window never needed: another key pressed during a hold is
  * a shortcut for the application in front, so the clip is dropped and the
  * release that follows is the chord's, not a send.
+ *
+ * The hook says `escape` for every Escape in every application, since it
+ * knows nothing of what the voice is doing; this page is the one that does,
+ * and `voiceEscape` lets all but the ones meant for it pass by.
  */
 let chordedHold = false;
 
@@ -157,7 +171,7 @@ export function applyTalkGesture(gesture: TalkGesture): void {
       cancelTalk();
       return;
     case "escape":
-      cancelTalk();
+      voiceEscape();
       return;
     case "dismiss":
       dismissVoice();
@@ -438,11 +452,9 @@ async function ship(id: string): Promise<void> {
   }
 }
 
-/** An id for a clip, minted here so a retry is the same message. `randomUUID` wants a secure context, which a phone over the tailnet's http is not. */
+/** An id for a clip, minted here so a retry is the same message — the same mint a typed line gets. */
 function clipId(): string {
-  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return api.mintId();
 }
 
 // ---------------------------------------------------------------------------
@@ -501,7 +513,7 @@ function follow(): void {
     return;
   }
   if (entry.state === "failed") {
-    set({ phase: "error", text: "Your message did not get through.", detail: entry.note ?? "It is kept in your messages, behind the harness button." });
+    set({ phase: "error", text: "Your message did not get through.", detail: entry.note ?? "It is kept in the Kuru drawer, with Resend." });
     settle(FAILED_LINGER_MS);
     return;
   }
@@ -597,6 +609,48 @@ export function isListening(): boolean {
 }
 
 /**
+ * Whether Kuru is in the middle of a reply on this page: a sentence playing,
+ * or the moment before its next one is ready (`between`). The phase rather
+ * than the player, because the phase is what the pill reports and every
+ * window reads, and a window and the pill must agree on whether an Escape
+ * is the voice's.
+ */
+export function isSpeaking(): boolean {
+  return ui.phase === "speaking";
+}
+
+/**
+ * Escape, wherever it was pressed: a clip being taken is dropped, and Kuru
+ * mid-reply is stopped — through `dismissVoice`, the ✕ itself rather than a
+ * copy of it, so the reply and what was queued behind it are let go and land
+ * unheard in the drawer exactly as they do from the pill. Returns whether the
+ * key was the voice's, so a key handler knows to keep it from the terminal,
+ * where the same Escape would interrupt an agent; a false is a key nothing
+ * here touched.
+ *
+ * With another page as the voice client this page's own state is idle, and
+ * the question is that page's phase. The key is forwarded and not acted on,
+ * so the pill decides by what it is doing at the moment it gets there, and
+ * the hook having sent it the same key already makes the second one nothing.
+ */
+export function voiceEscape(): boolean {
+  if (remote) {
+    if (remotePhase !== "listening" && remotePhase !== "speaking") return false;
+    remote("escape");
+    return true;
+  }
+  if (isListening()) {
+    cancelTalk();
+    return true;
+  }
+  if (isSpeaking()) {
+    dismissVoice();
+    return true;
+  }
+  return false;
+}
+
+/**
  * The key, on the window, both ways, in the capture phase — before the
  * terminal's own listener, which sees a bare modifier and sends nothing for
  * it anyway. `code` rather than `key`, because the right Control key and
@@ -605,25 +659,23 @@ export function isListening(): boolean {
  */
 export function installTalkKey(codeOf: () => string): () => void {
   const down = (event: KeyboardEvent) => {
-    if (remote) {
-      // The hook has the key; what is left to this window is to keep the
-      // key from typing, and to drop a clip the pill is taking.
-      if (event.key === "Escape" && remotePhase === "listening") {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        remote("escape");
-        return;
-      }
-      if (event.code === codeOf()) event.preventDefault();
-      return;
-    }
-    if (isListening() && event.key === "Escape") {
+    // The phone's key bar, typing into a terminal: its esc is the agent's,
+    // pressed on purpose on a bar that exists to reach the terminal, and the
+    // pill's ✕ is beside it for Kuru. No talk key ever comes this way.
+    if (isSynthetic(event)) return;
+    if (event.key === "Escape" && voiceEscape()) {
       // Immediate, because the prefix handler listens on this same window
       // and would otherwise take the Escape as well and close whatever it
-      // thinks it is for.
+      // thinks it is for — and the terminal is downstream of all of it, and
+      // an Escape that reached it would interrupt the agent in it.
       event.preventDefault();
       event.stopImmediatePropagation();
-      cancelTalk();
+      return;
+    }
+    if (remote) {
+      // The hook has the key; what is left to this window is to keep the
+      // key from typing.
+      if (event.code === codeOf()) event.preventDefault();
       return;
     }
     if (event.code !== codeOf() || event.repeat) return;
@@ -667,6 +719,33 @@ let playing: AudioBufferSourceNode | null = null;
  */
 let loading = false;
 let current: string | null = null;
+/**
+ * A reply between two of its sentences: the one that just ended was not its
+ * last, and the next is still being made. The pill used to drop to `heard`
+ * in that gap, looking no different, and an Escape pressed in it — at a
+ * Kuru who to anybody listening had not finished — would not have been the
+ * voice's and would have gone on to the terminal and the agent in it. So
+ * the reply is still `speaking` until its last sentence ends, or until
+ * `GAP_MS` passes with nothing more of it: a reply whose last sentence the
+ * engine choked on never sends one marked last, and a phase that waited on
+ * it for good would take every Escape after it.
+ */
+let between: string | null = null;
+let betweenTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * Longer than the next sentence ever takes to make once the one before it
+ * has played — they are made while the one before plays, so the gap is a
+ * long sentence after a short one — and short enough that a reply that will
+ * never finish holds Escape for a few seconds, under the pill still showing
+ * its words.
+ */
+const GAP_MS = 5000;
+
+function awaitNoMore(): void {
+  between = null;
+  if (betweenTimer) clearTimeout(betweenTimer);
+  betweenTimer = null;
+}
 /** Utterances that were cut off: their later sentences may still be announced, and are dropped on arrival. */
 const cancelled = new Set<string>();
 /**
@@ -748,6 +827,19 @@ export function installSpeech(): () => void {
     stopSpeech();
     stopHush();
     stopOutbox();
+    // A recording never outlives the page's hold on the voice, because
+    // nothing could end it after: the key listeners go with this cleanup,
+    // and the pill draws the next install's state, which is idle. That is
+    // what a hot reload of this module did on 2026-10-11 — the copy it
+    // replaced was mid-sentence, the key-up went to the new one, and the old
+    // one recorded the room for a quarter of an hour, sending Kuru a clip
+    // every `CLIP_ROLL_MS`, until the page was reloaded. So what it has is
+    // sent now, as the key coming up would have, and the microphone closes;
+    // the words after this moment are the ones lost, which is the price of
+    // a reload mid-sentence. Sent rather than dropped, since `close` keeps
+    // it on the disk first and the next install's outbox ships it if this
+    // copy cannot.
+    if (recording || opening) void close(true);
   };
 }
 
@@ -755,20 +847,29 @@ async function pump(): Promise<void> {
   if (playing || loading || hushed()) return;
   const chunk = queue.shift();
   if (!chunk) {
-    if (ui.phase === "speaking") {
-      set({ phase: "heard", level: 0 });
-      settle();
+    if (ui.phase !== "speaking") return;
+    if (between && !cancelled.has(between)) {
+      betweenTimer ??= setTimeout(() => {
+        betweenTimer = null;
+        between = null;
+        void pump();
+      }, GAP_MS);
+      return;
     }
+    set({ phase: "heard", level: 0 });
+    settle();
     return;
   }
+  awaitNoMore();
   if (cancelled.has(chunk.utterance)) return pump();
   const out = audioOutput();
   if (!out) {
     // Nothing to play anything on: everything held here is let go, so the
     // server can count it missed rather than wait on this page for good.
+    // Pumped once more, empty, so a pill that was speaking says it stopped.
     cancel([chunk.utterance, ...queue.map((c) => c.utterance)]);
     queue.length = 0;
-    return;
+    return pump();
   }
   // Before the first await, so the talk key going down mid-fetch cuts off
   // the sentence being fetched and not only the ones behind it.
@@ -792,7 +893,7 @@ async function pump(): Promise<void> {
     // are missed rather than stuck; the next touch unlocks the next reply.
     cancel([chunk.utterance, ...queue.map((c) => c.utterance)]);
     queue.length = 0;
-    return;
+    return pump();
   }
   if (!buffer) {
     // A sentence that would not load is a hole in the reply, and a reply
@@ -810,7 +911,7 @@ async function pump(): Promise<void> {
   source.buffer = buffer;
   source.connect(speechGain);
   playing = source;
-  set({ phase: "speaking", text: chunk.text, detail: "Kuru", level: 0, toggled: false });
+  set({ phase: "speaking", text: chunk.text, detail: "Kuru", level: 0, toggled: false, utterance: chunk.utterance });
   source.onended = () => {
     if (playing === source) playing = null;
     // Played at no volume is not heard. Saying nothing leaves it to the
@@ -819,15 +920,17 @@ async function pump(): Promise<void> {
       api.speechPlayed(chunk.utterance, chunk.seq);
       if (chunk.last) held.delete(chunk.utterance);
     }
+    between = chunk.last ? null : chunk.utterance;
     void pump();
   };
   source.start();
 }
 
-/** Cut Kuru off. The talk key does this on its way down, and the pill's ✕ through `dismissVoice`. */
+/** Cut Kuru off. The talk key does this on its way down, and the pill's ✕ and Escape through `dismissVoice`. */
 export function stopSpeaking(): void {
   cancel([...(current ? [current] : []), ...queue.map((chunk) => chunk.utterance)]);
   queue.length = 0;
+  awaitNoMore();
   if (playing) {
     const source = playing;
     playing = null;
@@ -862,7 +965,8 @@ function trim(ids: Set<string>): void {
 }
 
 /**
- * The pill's ✕: stop whatever it is showing, now.
+ * The pill's ✕: stop whatever it is showing, now. Escape is this too, while
+ * Kuru speaks (`voiceEscape`).
  *
  * While Kuru speaks that is `stopSpeaking` — the talk key's own cut-off,
  * without the microphone the key opens after it. What it stops is not lost:

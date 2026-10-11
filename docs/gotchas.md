@@ -60,6 +60,26 @@ Things that fail with an error naming something other than the cause.
   no limit and reads exactly like a bug in the caller. `hostsock.ts` checks the
   length and says so; a `KURURU_HOST_SOCK` pointing somewhere deep is how you find
   out.
+- **A Dock "Quit" can end every agent, and did, twice on 2026-10-10.** macOS
+  puts every process in its parent's *coalition*, a coalition outlives the app
+  it was made for, and a force quit ends the whole coalition. A Dock Quit on a
+  tile whose process has already gone *is* a force quit (`Calling force quit
+  asn=…` from the Dock, `[pid] force quit (caller responsible for termination)`
+  from libquit, in `log show`). At 07:03 that was a Ghostty ten seconds after
+  it had exited, and a host died of SIGTERM with 15 agents in the same second —
+  by every sign one a `bun run dev` in it had started, though its coalition was
+  not recorded. At 23:10 it was an "Electron" with the stock icon: another
+  project's dev app, started from a kururu terminal into the coalition of a Kururu app
+  quit three hours before (its check-in says `coalition=116121`, the app's),
+  which had itself exited thirteen seconds after it started and left the tile:
+  12 agents. The tile lingers
+  *because* the coalition is still alive, which is what makes it look like
+  litter. `hostlaunch.ts` starts the host as a launchd job so it has a
+  coalition of its own; `bun run status` says `coalition  shared` for a host
+  started the old way, which only a host restart changes. The tell, after the
+  fact: `the pty host went away … stopped by SIGTERM` in `lifecycle.log` with no
+  `the app is quitting` line before it, and a `Calling force quit` from the
+  Dock in the same second. `lsappinfo list` shows a process's `coalition:`.
 - **`pkill -f ptyhostd` is not reliable here.** macOS `pgrep -f` was observed
   matching two scratch hosts while consistently skipping the real one, with
   `ps -ww` showing an identical command line for all three. A `pkill` that

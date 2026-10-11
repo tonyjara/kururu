@@ -11,6 +11,7 @@ import { describe, expect, it } from "bun:test";
 import { BOARD_TAB, docTab, docsOf, findPane, panes, showingDoc } from "../../shared/layout";
 import { Workspaces, nextColor, nextId, orderAgents } from "../src/workspaces";
 import { LOGIN_KEY, WORKSPACE_COLORS, gatherGroups, groupName, type Profile } from "../../shared/model";
+import { addCard, moveCard } from "../../shared/board";
 
 describe("split", () => {
   it("returns the pane it made, and it is in the tree", () => {
@@ -922,5 +923,132 @@ describe("setProfileLogin", () => {
     workspaces.onChange = () => changes++;
     workspaces.setProfileLogin(workspaces.active.id, workspaces.active.loginKey);
     expect(changes).toBe(0);
+  });
+});
+
+/**
+ * The write-through: every change to a profile reaches the store before
+ * memory takes it, with who made it, and a change the store refuses is not
+ * made at all — memory never holds a board the file does not.
+ */
+describe("the store behind the arrangement", () => {
+  const fakeStore = () => {
+    const calls: { before: string | null; after: string | null; actor: string }[] = [];
+    let refuse = false;
+    return {
+      calls,
+      refuse: (on: boolean) => {
+        refuse = on;
+      },
+      syncProfile(before: Profile | null, after: Profile | null, actor: string) {
+        if (refuse) throw new Error("disk full");
+        calls.push({ before: before?.name ?? null, after: after?.name ?? null, actor });
+      },
+    };
+  };
+
+  it("hands every board change over first, as whoever made it", () => {
+    const ws = new Workspaces();
+    const store = fakeStore();
+    ws.attachStore(store, ws.all());
+    const workspaceId = ws.activeWorkspace.id;
+    ws.openBoard(ws.focusedPaneId);
+    ws.editBoard(workspaceId, (board) => addCard(board, { title: "x" }, "c1", 1));
+    ws.as("harness", () => ws.editBoard(workspaceId, (board) => moveCard(board, "c1", "doing")));
+    expect(store.calls.map((c) => c.actor)).toContain("user");
+    expect(store.calls.at(-1)!.actor).toBe("harness");
+    // Back to a client's verb once the harness's is over.
+    ws.editBoard(workspaceId, (board) => moveCard(board, "c1", "review"));
+    expect(store.calls.at(-1)!.actor).toBe("user");
+  });
+
+  it("keeps the board it had when the store refuses, and the rename too", () => {
+    const ws = new Workspaces();
+    const store = fakeStore();
+    ws.attachStore(store, ws.all());
+    const workspaceId = ws.activeWorkspace.id;
+    ws.openBoard(ws.focusedPaneId);
+    ws.editBoard(workspaceId, (board) => addCard(board, { title: "kept" }, "c1", 1));
+    store.refuse(true);
+    ws.editBoard(workspaceId, (board) => moveCard(board, "c1", "done"));
+    expect(ws.activeWorkspace.board!.cards[0]!.column).toBe("todo");
+    ws.renameProfile(ws.active.id, "renamed");
+    expect(ws.active.name).toBe("main");
+    const before = ws.all().length;
+    ws.newProfile("second");
+    expect(ws.all().length).toBe(before);
+    store.refuse(false);
+    ws.editBoard(workspaceId, (board) => moveCard(board, "c1", "done"));
+    expect(ws.activeWorkspace.board!.cards[0]!.column).toBe("done");
+  });
+
+  it("mints a key for every profile and workspace, kept as it was out of a blob", () => {
+    const ws = new Workspaces();
+    const profile = ws.active;
+    expect(profile.key).toMatch(/^pk[0-9a-f]{12}$/);
+    expect(profile.workspaces[0]!.key).toMatch(/^wk[0-9a-f]{12}$/);
+    const again = new Workspaces(JSON.parse(JSON.stringify(ws.all())) as Profile[]);
+    expect(again.active.key).toBe(profile.key);
+    expect(again.active.workspaces[0]!.key).toBe(profile.workspaces[0]!.key);
+    const old = JSON.parse(JSON.stringify(ws.all())) as Profile[];
+    delete (old[0] as Partial<Profile>).key;
+    const minted = new Workspaces(old);
+    expect(minted.active.key).toMatch(/^pk[0-9a-f]{12}$/);
+    expect(minted.active.key).not.toBe(profile.key);
+  });
+});
+
+/**
+ * A workspace row's "Open board": the board where it is when it is open, and
+ * otherwise a tab in the pane last used — never the split beside it that the
+ * key makes, and never in the workspace that happened to be on screen.
+ */
+describe("openBoardFromRow", () => {
+  it("goes to the workspace and makes the board a tab in the pane you were last in there", () => {
+    const workspaces = new Workspaces();
+    const first = workspaces.activeWorkspace.id;
+    const home = workspaces.focusedPaneId;
+    workspaces.addTab("a1", "/tmp", home);
+    const other = workspaces.split("row", home)!;
+    workspaces.addTab("a2", "/tmp", other);
+    workspaces.focusPane(home);
+    workspaces.newWorkspace("elsewhere");
+
+    expect(workspaces.openBoardFromRow(first)).toBe(home);
+    expect(workspaces.activeWorkspace.id).toBe(first);
+    expect(panes(workspaces.activeWorkspace.layout)).toHaveLength(2);
+    const pane = findPane(workspaces.activeWorkspace.layout, home)!;
+    expect(pane.agentIds).toEqual(["a1", BOARD_TAB]);
+    expect(pane.activeIdx).toBe(1);
+    expect(workspaces.focusedPaneId).toBe(home);
+    expect(workspaces.activeWorkspace.board).not.toBeNull();
+  });
+
+  it("shows the board where it already is rather than moving it to the pane you were in", () => {
+    const workspaces = new Workspaces();
+    const first = workspaces.activeWorkspace.id;
+    const home = workspaces.focusedPaneId;
+    workspaces.addTab("a1", "/tmp", home);
+    const other = workspaces.split("row", home)!;
+    workspaces.addTab("a2", "/tmp", other);
+    workspaces.openBoard(other, true);
+    workspaces.selectTab(other, 0);
+    workspaces.focusPane(home);
+    workspaces.newWorkspace("elsewhere");
+
+    expect(workspaces.openBoardFromRow(first)).toBe(other);
+    expect(findPane(workspaces.activeWorkspace.layout, home)!.agentIds).toEqual(["a1"]);
+    const pane = findPane(workspaces.activeWorkspace.layout, other)!;
+    expect(pane.agentIds).toEqual(["a2", BOARD_TAB]);
+    expect(pane.activeIdx).toBe(1);
+    expect(workspaces.focusedPaneId).toBe(other);
+  });
+
+  it("opens nothing for a workspace that has gone", () => {
+    const workspaces = new Workspaces();
+    const here = workspaces.activeWorkspace.id;
+    expect(workspaces.openBoardFromRow("no-such-workspace")).toBeNull();
+    expect(workspaces.activeWorkspace.id).toBe(here);
+    expect(workspaces.activeWorkspace.board).toBeNull();
   });
 });

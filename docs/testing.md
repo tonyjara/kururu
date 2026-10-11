@@ -19,7 +19,7 @@ and every check applied to a manifest a stranger wrote — no network, no disk),
 `layout` (asserting *through* `JSON.stringify`), `days` (that a day no calendar
 has is refused rather than rolled into the next month, and that a change of
 clocks is not a day), `board` (the run automation, and a card's dates and the
-timeline's window), `markdown` (the reader's whole
+timeline's window), `store` (the database against a temp directory: boards written through and read back, the history, deleted cards kept and restored, the file never taking a card off the database, keys matched back by name, and the mirror written and read back as the same database), `markdown` (the reader's whole
 security story: that raw HTML cannot be emitted and that no `href` or `src`
 carries a scheme the browser would run — the one test that drives a real
 dependency, since Shiki's wasm has to load), and the pane tree in `web/test`,
@@ -50,6 +50,7 @@ client resizes their live agents; an install writes into their `~/.config/kururu
 KURURU_PORT=7817 \
 KURURU_HOST_SOCK=/tmp/k2/ptyhost.sock \
 KURURU_STATE_DIR=/tmp/k2 \
+KURURU_DATA_DIR=/tmp/k2/data \
 XDG_CONFIG_HOME=/tmp/k2/config \
 KURURU_STYLES_URL=http://127.0.0.1:8899
 ```
@@ -184,6 +185,42 @@ Kept short on purpose; the detail is in git history.
   stopped the runner and the server and left the host holding its socket, which
   `kill-ptyhosts /tmp/k2` then cleared; the real host on 7717 was never
   touched. The menu's sentences are `desktop/test/menu.test.js`.
+- **Agents on a machine**, in an isolated instance on 7817 whose `PATH` held a
+  fake `ssh` (it runs the far side here, under `/bin/sh`), a fake `claude`
+  that draws Claude Code 2.1's working, done and permission screens, and a
+  fake `codex` that is signed out; `TMUX_TMPDIR` gave it a tmux server of its
+  own, and `SHELL` was a two-line wrapper, because macOS's login profile puts
+  `/usr/bin` ahead of everything and the real `ssh` (and a real `claude`)
+  would have won. Pinned to the fake machine, `new-tab` with a launcher came
+  back `working` within a second, `done` two seconds after the turn stopped,
+  `blocked` with "Do you want to proceed?" as its activity, `working` again on
+  the answer and `done` after; Claude's window title reached the tab through
+  tmux. Codex came back `blocked` with "Codex is not logged in on fakebox".
+  Closing each tab ended its session. The check itself runs under bash and zsh
+  in `machines.test.ts`. A real machine with a real Claude — and the + menu and
+  the chip in a real window — have not been tried.
+- **The host as a launchd job** (`hostlaunch.ts`), on macOS 26. Probe jobs
+  first: each got a resource and a jetsam coalition of its own, named after its
+  label (`launchctl print`, and `proc_pidinfo(PROC_PIDCOALITIONINFO)` through
+  Python's ctypes), with `spawn type = interactive`; no Background Task
+  Management item and no Dock tile, though `process.title` registers it with
+  LaunchServices under that name; open-file limits, process limits and umask
+  the same as an agent's today; a pty spawned through node-pty under the job,
+  on a clone of the release build, listed a folder under `~/Desktop` with no prompt; and
+  an Electron launched from the job, which quit itself after three seconds,
+  left no tile in `lsappinfo visibleProcessList`, with and without the title.
+  Then the real code, isolated under `/tmp/k2` on 7817: a server on the
+  release binary cloned the bundle (308 ms), started the host through launchd
+  and recorded *through launchd, in a coalition of its own, on a copy of …*;
+  the host answered `hello`, ran `sleep 30` and three `cat`s, and retitled
+  itself `Kururu ptyhost - 3 agents`; `kill-ptyhosts /tmp/k2` stopped it and
+  launchd left it `not running`, `runs = 1`; the next start booted out the
+  stale job and swept the unused clone. A clone of the Developer-ID
+  `/Applications/Kururu.app` ran fine with its entry in `/tmp` and **blocked in
+  `open()` with its entry under `~/Desktop`** — the privacy prompt for an app
+  that had not been allowed there, which is why `linkToHost` waits for a
+  running job. Not tried: a Dock force quit of a *live* app an agent launched,
+  under the new arrangement, and the real host restarted into it.
 
 **Not yet proven in place:** a card raised by the *heuristic* `done` rather than
 by a report, and a click on a real OS notification — neither can be driven from a

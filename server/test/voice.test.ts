@@ -9,7 +9,6 @@ import {
   DEFAULT_VOICE,
   LEAD_INS,
   MISSED_MAX,
-  adoptMissed,
   adoptVoice,
   capMissed,
   clipMs,
@@ -23,6 +22,7 @@ import {
   spokenText,
   systemFallback,
   type MissedReply,
+  type StoredMissed,
 } from "../../shared/voice";
 import { fateOf, modelPhonemes, type Utterance } from "../src/voice";
 
@@ -220,7 +220,7 @@ describe("fateOf", () => {
   const said = (patch: Partial<Utterance> = {}): Utterance => ({
     id: "u1",
     n: 1,
-    profileId: "p1",
+    profileKey: "pk000000000001",
     quiet: false,
     text: "The poster generator is done.",
     lang: "en",
@@ -275,30 +275,13 @@ describe("fateOf", () => {
 });
 
 describe("the missed list", () => {
-  const entry = (id: string, at: number, patch: Record<string, unknown> = {}) => ({ id, profileId: "p1", text: `reply ${id}`, lang: "en", at, ...patch });
-
-  test("adoptMissed keeps what is shaped like a reply and nothing else", () => {
-    const adopted = adoptMissed([
-      entry("u1", 10, { pending: true }),
-      entry("u2", 20, { lang: "es" }),
-      entry("u2", 30),
-      entry("u3", Number.NaN),
-      entry("u4", 40, { text: "   " }),
-      entry("u5", 50, { profileId: 7 }),
-      "nonsense",
-      null,
-    ]);
-    expect(adopted.map((r) => r.id)).toEqual(["u1", "u2"]);
-    expect(adopted[0]!.pending).toBe(true);
-    expect(adopted[1]).toEqual({ id: "u2", profileId: "p1", text: "reply u2", lang: "es", at: 20, pending: false });
-    expect(adoptMissed({ not: "a list" })).toEqual([]);
-  });
+  const entry = (id: string, at: number, patch: Record<string, unknown> = {}) => ({ id, profileKey: "pk000000000001", text: `reply ${id}`, lang: "en", at, ...patch });
 
   test("capMissed keeps each profile's newest, oldest first", () => {
     const many = Array.from({ length: MISSED_MAX + 5 }, (_, i) => entry(`a${i}`, 1_000 - i));
-    const other = entry("b0", 1, { profileId: "p2" });
-    const kept = capMissed([...many, other] as MissedReply[]);
-    expect(kept.filter((r) => r.profileId === "p1")).toHaveLength(MISSED_MAX);
+    const other = entry("b0", 1, { profileKey: "pk000000000002" });
+    const kept = capMissed([...many, other] as StoredMissed[]);
+    expect(kept.filter((r) => r.profileKey === "pk000000000001")).toHaveLength(MISSED_MAX);
     expect(kept[0]!.id).toBe("b0");
     // The five oldest of p1 went.
     expect(kept.some((r) => r.id === `a${MISSED_MAX + 4}`)).toBe(false);

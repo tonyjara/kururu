@@ -103,6 +103,13 @@ describe("the tray menu", () => {
     expect(byId(missing, "talk-global").label).toContain("no key hook");
   });
 
+  it("offers Reset Pill Position only while something floats a pill, and the pill's log always", () => {
+    expect(byId(base, "reset-pill").enabled).toBe(false);
+    expect(byId({ ...base, talk: { on: true, status: "live", altSpace: false } }, "reset-pill").enabled).toBe(true);
+    expect(byId({ ...base, talk: { on: false, status: "off", altSpace: true } }, "reset-pill").enabled).toBe(true);
+    expect(byId(base, "log-pill").label).toContain("pill.log");
+  });
+
   it("offers the window the right way round, and login only to the installed app", () => {
     expect(byId(base, "close-window")).toBeDefined();
     expect(byId(base, "open-window")).toBeUndefined();
@@ -143,6 +150,31 @@ describe("the tray menu", () => {
     expect(trayTitle(base)).toBe("3");
     expect(trayTitle({ server: { up: true, liveAgents: 0 } })).toBe("");
     expect(trayTitle({ server: { up: false } })).toBe("");
+  });
+
+  it("adds the unheard count after the agents, and never the failed one", () => {
+    const news = { ...base, server: { ...base.server, kuru: { unheard: 2, undelivered: 1, profileId: "p1" } } };
+    expect(trayTitle(news)).toBe("3 · 2 unheard");
+    expect(trayTitle({ server: { up: true, liveAgents: 0, kuru: { unheard: 1, undelivered: 0 } } })).toBe("1 unheard");
+    expect(trayTitle({ server: { up: true, liveAgents: 2, kuru: { unheard: 0, undelivered: 3 } } })).toBe("2");
+    expect(trayTitle({ server: { up: false, kuru: { unheard: 2, undelivered: 0 } } })).toBe("");
+  });
+
+  it("offers Kuru's lines only when there is news, with Play for the unheard and Open for both", () => {
+    expect(byId(base, "kuru")).toBeUndefined();
+    expect(byId({ ...base, server: { ...base.server, kuru: { unheard: 0, undelivered: 0 } } }, "kuru-open")).toBeUndefined();
+    const heard = { ...base, server: { ...base.server, kuru: { unheard: 1, undelivered: 0 } } };
+    expect(byId(heard, "kuru").label).toBe("Kuru: 1 unheard reply");
+    expect(byId(heard, "kuru").enabled).toBe(false);
+    expect(byId(heard, "kuru-play").label).toBe("    Play");
+    expect(byId(heard, "kuru-open").label).toBe("    Open the conversation");
+    expect(byId(heard, "kuru-failed")).toBeUndefined();
+    const lost = { ...base, server: { ...base.server, kuru: { unheard: 0, undelivered: 2 } } };
+    expect(byId(lost, "kuru-failed").label).toBe("2 messages did not get through to Kuru");
+    expect(byId(lost, "kuru-play")).toBeUndefined();
+    expect(byId(lost, "kuru-open").label).toBe("    Open the conversation");
+    // A server down has nothing to say about Kuru, whatever it last said.
+    expect(byId({ ...base, server: { up: false, starting: false, downSince: null, lastExit: null, kuru: { unheard: 3, undelivered: 0 } } }, "kuru")).toBeUndefined();
   });
 
   it("reads ps's elapsed time as words", () => {

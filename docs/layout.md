@@ -132,7 +132,9 @@ the only verb that makes one — and rides the host's blob and `persist.ts` like
 the rest of the workspace, which is why none of this cost an edit to the pty
 host. The doors: `C-a K` and a pane menu's **Open the board** show the one you
 have or make one beside that pane; the new-tab menu's **Board** puts it *in*
-that pane; a workspace row's right-click switches there and shows it. On disk a card keeps its run's history but not
+that pane; a workspace row's menus — the ⋯ and the right-click — switch there
+and show the one it has where it is, or with none open make it a tab in the
+pane last used there (decided on the server, against the layout it holds). On disk a card keeps its run's history but not
 its `agentId`: that is a process, and a cold start reads a run with no process
 behind it as `ended`.
 
@@ -440,6 +442,13 @@ An entry at the defaults is not written.
 
 ## Persistence
 
+**Boards are the database's, not this file's.** They rode in `session.json`
+for a version, and that file's rules lost them; see [data](data.md). What
+the file carries for them now is each profile's and workspace's `key`, kept
+across a cold start as `loginKey` is, so the database can find their boards
+again. A board in an old file is read only for the database to adopt its
+cards, and never written back.
+
 **`persist.ts` restores structure, never processes.** A snapshot with four agent
 tabs must not launch four agents on the next start — that spends four context
 windows before anybody asked. Panes come back with their views — the board and
@@ -592,46 +601,77 @@ rearranging a palette somebody had arranged by hand.
 **Where you see it is the rail**: a two-pixel edge down the left of the
 workspace's row, in the same `--tag` every agent living in that workspace wears.
 It is changed from the row's menu, **Colour…**. A round chip at the end of the
-name's line did that job until the git button took its place.
+name's line did that job until the git button took its place, and that is the
+⋯ now.
 
 ## The workspace row
 
-One line — the number, the name, and in a repository the git button at the end
-of it — and a second under the name only when the workspace is in a repository,
-holding its branch. The row used to carry a dev server's ↯, ↻ and ■ and a
+One line — the name, the git marks after it when there is anything unfinished,
+and the ⋯ at the end while the pointer is on the row. A second line only while
+there is something to say on it: what a git verb from the ⋯ came to, or where a
+pinned workspace's shells open. The branch was that second line, on every row;
+it went once everything happened on one branch, and lives on as the first line
+of the ⋯ menu's git rows and of the marks' tooltip. The row used to carry a dev server's ↯, ↻ and ■ and a
 Supabase ▤ as well, and they went because a row read every time you look at the
 sidebar is the wrong place for buttons pressed twice a day: the dev servers are
-listed under the agents, and starting one is a line in a terminal.
+listed under the agents, and starting one is a line in a terminal. The git and
+database buttons went the same way, into the ⋯.
 
-**The git button is about the main checkout, never a card's worktree.** Its
-colour says whether that checkout has anything uncommitted (`--blocked`), has
-drifted from its upstream with a clean tree (`--accent`), or neither. The
-worktrees are left out on purpose: they are the board's to commit and merge,
-and a button that changed colour whenever focus crossed into one would be
-describing the wrong checkout. Its menu is **Commit…**, **Commit & merge into
-`main`…**, **Commit & push…**, then Pull, Push and Fetch; the three that commit
-ask for a message in the app's prompt, and only when there is something to
-commit. Merge is a fast-forward of the default branch — `origin/HEAD`, else
+**No number.** The name used to sit behind its index, the shortcut prefix+1..9
+goes by. Groups ended it: a count that runs across folded groups and stops at
+nine counts things nobody can see, and the column was worth more to the names.
+The keys still go by position, and the name's tooltip says which is its.
+
+**The ⋯ waits for a hover, except where there is none.** `display: none` until
+the pointer is on the row, so a long name has the whole line; up while its menu
+is open and while a git verb from it runs; up for a keyboard on the row
+(`:has(:focus-visible)`, not `:focus-within`, which a click would leave on the
+last row clicked). Under `@media (hover: none)` it is on every row, as a tab's
+✕ is — every row, because tapping a row on a phone navigates and puts the
+sidebar away. Each row is its own two-column grid, so the one row whose ⋯ is
+showing is the only name that gives way.
+
+**The ⋯ menu is what is done *in* a workspace**, the right-click menu what is
+done *to* one. **Open board**; **Open LazyGit**, a tab in the workspace's
+focused pane in its main checkout (`new-tab` with `workspaceId` and `lazygit`,
+the folder found by the server — on a pinned workspace, on the machine);
+**Databases** when the env files name one; then a disabled line saying where
+the main checkout stands, which was the git button's tooltip, and the git verbs.
+
+**The marks say what the main checkout has not finished**, always drawn and
+only when there is something: `±3` files uncommitted (`--blocked`), `↑2`
+commits to push and `↓1` to pull (`--accent`), counted against the upstream
+only — a branch with none would carry a mark for good. Counts rather than the
+coloured dot the git button was, because a dot on a sidebar row already means
+an agent is waiting for you (`GitMarks` in `Sidebar.tsx`).
+
+**The marks and the git verbs are about the main checkout, never a card's
+worktree.** The worktrees are left out on purpose: they are the board's to
+commit and merge, and marks that changed whenever focus crossed into one would
+be describing the wrong checkout. The
+verbs are **Commit…**, **Commit & merge into `main`…**, **Commit & push…**, then
+Pull, Push and Fetch; the three that commit ask for a message in the app's
+prompt, and only when there is something to commit. Merge is a fast-forward of the default branch — `origin/HEAD`, else
 `main`, else `master` — to the branch that is out, by `fetch . branch:main`,
 without leaving the branch; a `main` that has moved on is refused with "rebase
 first", never merged with a knot. Pull is `--ff-only`, Push never forces and
-sets the upstream the first time. What each came to replaces the branch line
+sets the upstream the first time. What each came to is the row's second line
 until clicked away.
 
 `git status` is a subprocess, so it is not on the four-second branch poll: it
 runs every `GIT_STATUS_MS` per main checkout, one at a time, with
 `--no-optional-locks` so it can never take the `index.lock` an agent committing
-in the same checkout needs — and at once after any of the button's own verbs.
+in the same checkout needs — and at once after any of the menu's own verbs.
 The walk that finds the checkout follows focus, which the next section argues
 is no way to choose what a button acts on; so the client sends back the root it
 was showing and the server refuses a verb whose walk has since landed elsewhere.
 The root is compared, never used.
 
 **The whole row switches workspace, both lines of it, and the name's button does
-not.** A branch line under the name's button is a strip along the bottom of the
+not.** A second line under the name's button is a strip along the bottom of the
 row that lights up on hover exactly like the rest, and would do nothing when
 pressed if the button were the target. The handler is on the `li`; a click that
-landed on the git button is not let through to it, and the name's button is the one exception because it *is*
+landed on the ⋯ is not let through to it, and the name's button is the one exception because it *is*
 this gesture, which is also what keeps Enter working on a focused row.
 
 **And a row that is dragged is a row that cannot be clicked.** A `draggable`
@@ -643,9 +683,10 @@ is where it is read back: a drag whose `dropEffect` is still `none` and which
 finished within `CLICK_SLOP` of where it started was a click, and is handed back
 as one.
 
-`.ws-list` is one grid and every row a `subgrid` slice of it — the name's track
-and the button's — so the buttons stand in one column down the list whatever
-the names are.
+`.ws-list` was one grid with every row a `subgrid` slice of it, so the git
+buttons stood in one column whatever the names. A ⋯ on one row at a time has
+nothing to line up with, and a shared track would narrow every name in the list
+each time the pointer crossed a row, so each row has its own.
 
 ## Workspace groups
 
@@ -659,7 +700,7 @@ member — onto a name in use the two merge, onto null the group disbands.
 through `gatherGroups`, which brings each group's members together where the
 first of them stands and leaves every loose workspace where it was — so a group
 can sit anywhere in the list, between two workspaces as readily as at the end,
-and the number beside a row is still the index prefix+1..9 jumps to. (Groups
+and a row's place in it is still the index prefix+1..9 jumps to. (Groups
 were gathered below every loose workspace for a version; it could not express
 a group in the middle, which was the first thing asked of it.) A new group
 starts where its workspace already stands, joining puts a workspace last in a
@@ -683,12 +724,13 @@ and down, a step past whichever unit is beside it.
 drawer's argument. A folded group still shows the workspace you are in, and its
 heading carries the unread mark when something under it is waiting.
 
-## The branch on the row
+## The branch
 
-Under the name, because the sidebar names a workspace after the work
-rather than after the repository — which is right, and leaves out the one fact
-that changes under you with nothing on screen moving. An agent that has been
-running for twenty minutes is on whatever branch you were on when you started it.
+It was a line under every row's name, because the sidebar names a workspace
+after the work rather than after the repository. It is not drawn on the row any
+more (see the workspace row, above), but the walk that reads it is still what
+finds the checkout the marks and the git verbs are about, and the branch is
+still the first line of the ⋯ menu's git rows. What follows is about that walk.
 
 **Read out of `.git/HEAD`, never by running `git`.** A subprocess per workspace
 every four seconds is a lot of forking for one line; `git` in a repo it dislikes
@@ -730,8 +772,8 @@ looks at.
 
 ## The databases on the row
 
-Left of the git button, when the workspace's env files name at least one, and
-it opens a sheet over the window — `Databases.tsx` — with the connections on
+The row's ⋯ menu offers **Databases** when the workspace's env files name at
+least one, and it opens a sheet over the window — `Databases.tsx` — with the connections on
 the left, their schemas and tables under them, and a page of rows or a query box
 on the right. An overlay rather than a pane for the profile board's reason: it
 is the workspace's and no arrangement's, and it is the same sheet on the phone.
