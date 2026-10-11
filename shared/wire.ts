@@ -39,7 +39,9 @@ import type { Action } from "./keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
 import type { LaunchSettings } from "./launchers";
 import type { OpenRouterStatus } from "./openrouter";
-import type { MissedReply, OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "./voice";
+import type { BackupStatus } from "./backup";
+import type { KuruConversation } from "./kuru";
+import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "./voice";
 import type { MachineStatus } from "./machines";
 import type { WorkspaceDatabase } from "./databases";
 import type { NotifyEvent, NotifySettings } from "./notify";
@@ -184,10 +186,10 @@ export interface WorkspaceBranch {
   /** HEAD names a commit rather than a branch: a tag, a sha, or a rebase. */
   detached: boolean;
   /**
-   * The repository's *main* checkout, for the git button on the row — which is
-   * about that checkout even when the workspace is looking at a card's
-   * worktree, because the worktrees are the board's to commit and merge and
-   * the button would otherwise change colour every time focus crossed into one.
+   * The repository's *main* checkout, for the git rows of the row's ⋯ menu —
+   * which are about that checkout even when the workspace is looking at a
+   * card's worktree, because the worktrees are the board's to commit and merge
+   * and the ⋯ would otherwise change colour every time focus crossed into one.
    * Null until the first `git status` has come back, and for a repository git
    * itself will not read.
    */
@@ -221,7 +223,7 @@ export interface RepoGit {
 }
 
 /**
- * The verbs on a workspace's git button. The three that commit take the
+ * The git verbs in a workspace row's ⋯ menu. The three that commit take the
  * message the person typed; `commit-merge` then fast-forwards `base` to the
  * branch, and `commit-push` pushes it. Nothing here forces, and nothing
  * merges that is not a fast-forward — git's refusal is the reply.
@@ -388,6 +390,13 @@ export type ServerMessage =
    */
   | { type: "openrouter"; openrouter: OpenRouterStatus | null }
   /**
+   * Where the backups stand: the settings, the last commit and push, and
+   * what went wrong. Sent on connect, after every run and whenever the
+   * settings change. Never the repository's credentials — git holds those,
+   * and kururu only ever runs it. See `shared/backup.ts`.
+   */
+  | { type: "backup"; backup: BackupStatus }
+  /**
    * Sent on connect and whenever the voice's settings, its programs or its
    * model change: everything Settings → Voice draws, and what the talk key
    * needs to know. Never carries audio — see `shared/voice.ts`.
@@ -410,17 +419,20 @@ export type ServerMessage =
    */
   | { type: "hush"; hushed: boolean }
   /**
-   * Kuru's replies that nobody played to their end, every profile's, oldest
-   * first — the count on the harness button and the list behind it. Sent on
-   * connect and whenever it changes. A reply still on its way to being
-   * played is not in it. See `Voice.review`.
+   * The conversation with Kuru, every profile's: what you said and what it
+   * answered as one list, with each message's state and each reply's fate,
+   * and the two counts the status bar's chip wears. Sent on connect and
+   * whenever a turn lands, a message moves or a reply is heard, missed or
+   * seen. The newest `KURU_RECENT` items of each; the rest is `/api/kuru`.
+   * See `shared/kuru.ts`.
    */
-  | { type: "missed"; missed: MissedReply[] }
+  | { type: "kuru"; kuru: KuruConversation[] }
   /**
    * Your messages to Kuru, every profile's, in the order they reached the
-   * server — the other list behind the harness button, and the pill's word on
-   * whether the last one got through. Sent on connect and whenever one
-   * moves. See `outbox.ts`.
+   * server — the pill's word on whether the last one got through, under
+   * Kuru's own words. The drawer reads the same messages merged into the
+   * conversation above. Sent on connect and whenever one moves. See
+   * `outbox.ts`.
    */
   | { type: "outbox"; outbox: OutboxEntry[] }
   /** Raw pty output, exactly as it arrived, for a terminal this client is watching. */
@@ -505,10 +517,19 @@ export type ClientMessage =
    * `nvim` is the same menu's plain-editor row: a shell that starts nvim and
    * drops back to the shell when it quits, built server-side for the reason
    * `launcher` is an id rather than a command string — see `shared/launchers.ts`.
+   * `lazygit` is its sibling, which closes its tab on a clean quit instead —
+   * see `shared/lazygit.ts`.
    *
-   * A plain shell in a workspace pinned to a machine opens on the machine —
-   * see `Workspace.machine`. `local` is the menu's "on this Mac" row, the one
-   * way to ask for a shell here in such a workspace.
+   * In a workspace pinned to a machine the plain shell, `nvim`, `lazygit` and
+   * every `launcher` open on the machine — see `Workspace.machine`. A `cwd`
+   * keeps the tab here, being a place on this disk, and so does `local`, which
+   * the menu no longer sends: a pinned workspace's menu is the machine's.
+   *
+   * `workspaceId` is a workspace row's menu, and switches there first, as
+   * `open-board`'s does; the tab goes into that workspace's focused pane. A
+   * `lazygit` sent with it starts in the workspace's repository — the main
+   * checkout the row's git verbs act on — rather than wherever that pane's
+   * terminal is standing, which is what the new-tab menu's row means.
    */
   | {
       type: "new-tab";
@@ -518,8 +539,10 @@ export type ClientMessage =
       command?: string;
       launcher?: string;
       nvim?: boolean;
+      lazygit?: boolean;
       local?: boolean;
       paneId?: string;
+      workspaceId?: string;
     }
   /**
    * End a terminal and take its tab with it. Defaults to the focused tab.
@@ -976,7 +999,9 @@ export type ClientMessage =
    * The board is a tab (`BOARD_TAB` in `shared/layout.ts`). Without `here` this
    * shows the one you have, or puts a new one beside `paneId`; with it — the
    * new-tab menu — the tab goes *into* `paneId`, moved from wherever it was.
-   * `workspaceId` is a workspace row's menu, and switches there first.
+   * `workspaceId` is a workspace row's menu, and switches there first; then it
+   * shows the board where it is, or makes it a new tab in the pane you were
+   * last in there. `paneId` and `here` are not read with it.
    */
   | { type: "open-board"; paneId?: string; here?: boolean; workspaceId?: string }
 
@@ -1104,9 +1129,9 @@ export type ClientMessage =
   | { type: "restart-card-dev"; id: number; workspaceId: string; cardId: string }
   | { type: "stop-card-dev"; id: number; workspaceId: string; cardId: string }
   /**
-   * The workspace's git button. Names the workspace, and the server finds the
-   * main checkout by walking up from where its terminals are — the path is
-   * never the client's. `root` is the checkout the button was showing, sent
+   * A git verb from a workspace row's ⋯. Names the workspace, and the server
+   * finds the main checkout by walking up from where its terminals are — the
+   * path is never the client's. `root` is the checkout the menu was showing, sent
    * back only to be compared: the walk follows focus, and a verb that landed
    * on another repository because a pane was clicked in between is refused
    * rather than run. Replied to with what git said, or why it said no.
@@ -1250,6 +1275,23 @@ export type ClientMessage =
   | { type: "set-openrouter-key"; id: number; key: string }
   | { type: "clear-openrouter-key" }
   /**
+   * The backup settings, all at once. A remote that cannot be reached is a
+   * refusal with git's reason, and the settings are not changed: a switch
+   * turned on against a repository nobody can push to would fail quietly
+   * every five minutes.
+   */
+  | { type: "set-backup"; id: number; url: string | null; enabled: boolean; intervalMin: number }
+  /** Back up now, whether or not anything changed. Replied to with the status once the run is over. */
+  | { type: "backup-now"; id: number }
+  /**
+   * Put a deleted card back on its board, in the column it was deleted
+   * from. Only a card of the profile on screen; the reply says if it is not
+   * one. Deleting never removed its row — see `shared/store.ts`.
+   */
+  | { type: "restore-card"; id: number; cardId: string }
+  /** The deleted cards of a profile, newest first, for the list that offers to restore them. */
+  | { type: "deleted-cards"; id: number; profileId: string }
+  /**
    * The voice's settings, all at once, on `set-notify`'s reasoning. The
    * words themselves never travel this way: a clip goes to `/api/voice/hear`
    * as a WAV, and a sentence comes back from `/api/speech` as one.
@@ -1279,10 +1321,26 @@ export type ClientMessage =
   | { type: "speech-held"; utterance: string; held: boolean }
   /** One sentence of a reply played to its end here. The last one is the reply heard. */
   | { type: "speech-played"; utterance: string; seq: number }
-  /** Play a profile's missed replies again, oldest first — the badge's list. */
+  /** Play a profile's unheard replies again, oldest first — the drawer's header button. */
   | { type: "play-missed"; profileId: string }
-  /** Take a profile's missed replies off the list without hearing them: read is heard enough. */
+  /** Take a profile's unheard replies off the list without hearing them: read is heard enough. */
   | { type: "clear-missed"; profileId: string }
+  /**
+   * These replies were in view in the open drawer for long enough to have
+   * been read (`KURU_SEEN_MS`), so they stop counting as unheard. The count's
+   * job is to bring you to the drawer; once you are there it has done it.
+   */
+  | { type: "kuru-seen"; profileId: string; utterances: string[] }
+  /** Say one reply again, from the drawer's Play on that reply. */
+  | { type: "kuru-replay"; profileId: string; utterance: string }
+  /**
+   * A message typed in the drawer's composer, for Kuru: the voice's road
+   * without the clip. Through the outbox, so it gets the same queued, sent,
+   * delivered and failed states and the same retries a spoken one does, and
+   * typed into Kuru's terminal as the user's words. The id is the client's,
+   * as a clip's is, so a retried send is one message.
+   */
+  | { type: "kuru-say"; profileId: string; id: string; text: string; at: number }
   /** Send a failed message of yours again: heard again if it has no words, handed to Kuru again if it has. */
   | { type: "voice-resend"; id: string }
   /** Take a failed message of yours off the list, and its audio off the disk. */
@@ -1342,9 +1400,9 @@ export const DEV_SCAN_MS = 3000;
 export const GIT_SCAN_MS = 4000;
 /**
  * How often a main checkout's `git status` is asked for, for the colour of the
- * workspace's git button. Slower than the branch because it is a subprocess
+ * workspace row's ⋯. Slower than the branch because it is a subprocess
  * and a walk of the working tree, where the branch is one small read; and the
- * button is redrawn at once after any of its own verbs, so the only change
+ * colour is redrawn at once after any of the menu's own verbs, so the only change
  * this is late for is one an agent or a terminal made.
  */
 export const GIT_STATUS_MS = 10_000;

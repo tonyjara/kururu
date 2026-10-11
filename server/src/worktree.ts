@@ -1,5 +1,7 @@
 /**
- * The checkout a card gets to itself, and the one place kururu runs `git`.
+ * The checkout a card gets to itself, and the one place kururu runs `git` on
+ * a repository of the user's — `backup.ts` runs it on kururu's own, and
+ * `gitcmd.ts` is how both do.
  *
  * `git.ts` reads `HEAD` off the disk on purpose and says why: a poll every four
  * seconds is no place for a subprocess that can take an unbounded time to say
@@ -23,55 +25,14 @@
  * making one costs a checkout and nothing else, and the branch it makes is
  * already where `git merge` will look for it.
  */
-import { execFile } from "node:child_process";
 import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { CardWorktree } from "../../shared/board";
 import { worktreeBranch, worktreeDir, worktreeName, type MergeBlock, type WorktreeStatus } from "../../shared/projects";
 import { readHead, repoAt } from "./git";
+import { git, gitStatus } from "./gitcmd";
 
-/**
- * A checkout of a large repository is seconds; thirty is a git that is hanging
- * on a prompt or a lock, and the card should say so rather than spin.
- */
-const GIT_TIMEOUT_MS = 30_000;
-
-/**
- * Run git and get stdout, or the first line of what it said on stderr as the
- * error. `GIT_TERMINAL_PROMPT=0` because there is no terminal: a git that wants
- * a credential would otherwise sit there until the timeout and then report the
- * timeout, which is the wrong thing to show.
- */
-export function git(args: string[], cwd: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      "git",
-      args,
-      { cwd, timeout: GIT_TIMEOUT_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, maxBuffer: 1 << 20 },
-      (err, stdout, stderr) => {
-        if (!err) return resolve(stdout);
-        const said = String(stderr).split("\n").find((line) => line.trim()) ?? err.message;
-        reject(new Error(`git: ${said.replace(/^fatal:\s*/, "")}`));
-      },
-    );
-  });
-}
-
-/**
- * Run git for its exit status, when the status is the answer: `merge-tree`
- * says "clean" with 0, "conflicts" with 1 and anything else for a question it
- * could not take, and `git()` above folds the last two into one rejection.
- */
-function gitStatus(args: string[], cwd: string): Promise<number> {
-  return new Promise((resolve) => {
-    execFile(
-      "git",
-      args,
-      { cwd, timeout: GIT_TIMEOUT_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, maxBuffer: 1 << 20 },
-      (err) => resolve(err ? (typeof err.code === "number" ? err.code : -1) : 0),
-    );
-  });
-}
+export { git };
 
 /**
  * Whether a recorded worktree is still one: its directory holds the `.git`
@@ -423,7 +384,7 @@ export async function stashAll(path: string, label: string): Promise<string[]> {
 }
 
 // ---------------------------------------------------------------------------
-// The main checkout, for the workspace's git button
+// The main checkout, for the git verbs in a workspace row's menu
 // ---------------------------------------------------------------------------
 
 /**

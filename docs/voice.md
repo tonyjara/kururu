@@ -17,7 +17,7 @@ nothing leaves the machine.
 
 | piece | where | what |
 |---|---|---|
-| The talk key | `web/src/voice.ts` | A capture-phase keydown/keyup pair on the window. Down starts recording at once; up within 320 ms is a tap and leaves the microphone open until the next tap; a longer hold sends on release. Escape drops the clip. The window losing focus with the key down sends what there is. |
+| The talk key | `web/src/voice.ts` | A capture-phase keydown/keyup pair on the window. Down starts recording at once; up within 320 ms is a tap and leaves the microphone open until the next tap; a longer hold sends on release. Escape drops the clip, and stops Kuru mid-reply — see [Escape](#escape). The window losing focus with the key down sends what there is. |
 | The microphone | `web/src/voice.ts` | PCM off an `AudioWorklet`, 16 kHz mono, written as a WAV by hand (`encodeWav`) and posted to `/api/voice/hear` under an id the page mints. Not a `MediaRecorder`: it writes WebM/Opus, which Apple's recogniser will not open. Five minutes in (`CLIP_ROLL_MS`) what there is goes as a message of its own and the recording carries on. |
 | The stash | `web/src/unsent.ts` | Every clip is written to IndexedDB before it is posted and dropped only once the server answers that it has it; sent again on a backoff, on every reconnect, and by the next page to load. See [nothing you say is lost](#nothing-you-say-is-lost). |
 | The outbox | `server/src/outbox.ts` | The clip on the server's disk the moment it arrives, its words beside it once they are made, handed to Kuru in order and kept until Kuru's own session says it took them. Survives restarts; retries a failed transcription and an unconfirmed delivery. |
@@ -25,11 +25,13 @@ nothing leaves the machine.
 | The words in | `Harness.hear` | Prefixed `[voice]` so Kuru knows a name may be misheard, and typed into its terminal with `now`, as `send_agent` types: a harness mid-turn hears it between tool calls, one showing a prompt or with your hands in its terminal hears it after. Typed and not posted to its inbox, because Claude Code makes everything on the inbox another session's message — see [harness](harness.md#speaking-into-a-running-agent) — and these are your words. Not running, it is started, and the words wait for its first hook report. It tells the outbox when they are typed, or dropped with a harness that went first. |
 | The words out | `index.ts` `/api/report` → `Voice.spoke` | The harness's own Stop report carries `last_assistant_message`; when the reporter is a profile's harness, that reply is spoken. The role prompt tells Kuru its final message is heard, not read. The `say` tool speaks one line mid-turn. |
 | The mouth | `server/src/voice.ts` → `kokoro.ts`, or `say` | Kokoro-82M on the CPU through `kokoro-js`, in a process of its own that the server forks on the first sentence and kills with it, a sentence at a time, each announced on the socket as a `speech` chunk the moment it is ready. The Mac's own `say` voices are the fallback that needs nothing. |
-| The player | `web/src/voice.ts` | Fetches each chunk from `/api/speech` and plays them in order on the page's one `AudioContext` (`notify.ts`). The talk key cuts Kuru off, and so does the pill's ✕. Tells the server what became of each reply: held, each sentence played to its end, or let go before it. |
+| The player | `web/src/voice.ts` | Fetches each chunk from `/api/speech` and plays them in order on the page's one `AudioContext` (`notify.ts`). The talk key cuts Kuru off, and so do the pill's ✕ and Escape. Tells the server what became of each reply: held, each sentence played to its end, or let go before it. |
 | The hush | `server/src/voice.ts` `talk` | Nothing plays while anybody talks, and what waited plays after — see [below](#never-over-you). |
-| The missed list | `server/src/voice.ts` `review`, `replay` | Every reply nobody played to its end, kept as words in `~/.local/state/kururu/missed.json` — see [what you missed](#what-you-missed). |
-| The badges | `Sidebar.tsx` `VoiceLists` | Two, on the harness button's corners. Top: the count of Kuru's replies you missed. Bottom: your messages — a red count if any did not get through, the working colour while one is on its way, a quiet dot once they all arrived. Either opens one box with both lists, the clicked one first: **Your messages to Kuru** under a microphone, newest first, each with its state and Resend or Discard when it failed; **Kuru's replies you didn't hear** under a speaker, with Play and Clear. |
-| The pill | `VoicePill.tsx` | A level meter and a line, over the panes, zen included. Says which gesture ends the recording, what was heard and where it went, what Kuru is saying — and, while Kuru speaks, a line of its own for what became of your last message, so a reply that waited for you never covers it. Dragged anywhere in the window by mouse or finger and drawn where this device left it (`web/src/place.ts`); a double click puts it back. Its ✕ is `dismissVoice`: Kuru stops mid-word and the rest of the reply, and what was queued behind it, goes to the missed list; a clip being recorded is thrown away; words lingering go. |
+| The missed list | `server/src/voice.ts` `review`, `replay`, `seen` | Every reply nobody played to its end, kept as words in the database (see [data](data.md)) — see [what you missed](#what-you-missed). Not a message of its own: it is merged into the conversation below. |
+| The conversation | `shared/kuru.ts`, `server/src/kuru.ts` | The harness's turns out of the database, your messages out of the outbox and each reply's fate off the missed list, as one list per profile with two counts — the `kuru` message, sent on connect and on every change, and paged back through `GET /api/kuru`. See [the drawer](#the-drawer). |
+| The drawer | `KuruDrawer.tsx` | The conversation, over the panes on a desktop and the whole screen on a phone: every message of yours with its state, every reply with its fate, a live row for what Kuru is doing, and a composer that types to Kuru through the outbox. Opened by the chip, the harness key, a tap on the pill, the floating pill and the menu bar. |
+| The chip | `StatusBar.tsx` `sb-kuru` | The one door onto the drawer, beside the mic. Its mark is what Kuru is doing — a dim dot, the mascot hopping while it thinks, the speaker glyph while it speaks, the blocked ink and "asking" on a prompt, "off" when not running — and its news is text inside it: an accent count with the speaker for unheard replies, a red one with the mic for messages that did not get through. In flight and all delivered are not news and get no mark. |
+| The pill | `VoicePill.tsx` | A level meter and a line, over the panes, zen included. Says which gesture ends the recording, what was heard and where it went, what Kuru is saying. Dragged anywhere in the window by mouse or finger and drawn where this device left it (`web/src/place.ts`); a double click puts it back. Its ✕ is `dismissVoice`: Kuru stops mid-word and the rest of the reply, and what was queued behind it, is marked unheard; a clip being recorded is thrown away; words lingering go. Escape is the same ✕ while Kuru speaks. A plain click — one that travelled less than the drag's own slop, and landed outside the ✕ — toggles the drawer at the reply the pill is showing: open it unless it is already open, in which case this closes it, so a pill that only ever shows its last line is one tap from the whole conversation and one tap back. The pill is the live indicator; the drawer is the record. |
 | The button | `StatusBar.tsx` `sb-mic` | The key for a thumb: held, it records; tapped, it toggles. How a phone talks. |
 
 ## Never over you
@@ -71,6 +73,46 @@ What the press cut off, and what was queued behind it on that page, is not
 replayed after the hush: cutting it off was what the press was for. It goes
 to the missed list instead.
 
+## Escape
+
+Escape is the voice's in two moments and no others: while a clip is being
+taken, which it drops, and while Kuru is mid-reply, which it stops. Stopping
+is the pill's ✕ itself — `voiceEscape` calls `dismissVoice` — so the reply
+and everything queued behind it are let go, land unheard in the drawer and
+on the chip's count, and nothing more of them is made. Any other Escape is
+not the voice's and goes where it always went: to the terminal, the dialog,
+the drawer, the prefix. Escape for something else while Kuru talks — closing
+a dialog, leaving insert mode — stops Kuru first, and the next Escape does
+what it was for.
+
+"Mid-reply" is the phase `speaking`, and it lasts through the moment between
+two sentences while the next is still being made (`between`), since to
+anybody listening Kuru has not finished. It is held for at most `GAP_MS`,
+five seconds, because a reply whose last sentence the engine choked on never
+says it was the last. The phase rather than the player, because the phase is
+what the pill reports to every window, and the window and the pill must
+agree on whether an Escape was the voice's.
+
+Where it is heard, and what else gets it:
+
+| the talk key | where Escape is pressed | Kuru | the app in front |
+|---|---|---|---|
+| everywhere, hook live | another application | stopped — the hook's `escape` reaches the pill | **gets it too**: the tap only listens. An agent in another terminal app is interrupted |
+| everywhere, hook live | Kururu's window | stopped — by the hook, and by the window forwarding it | does not: the window takes it in the capture phase, before the prefix and the terminal |
+| window only | Kururu's window | stopped | does not, as above |
+| window only | another application | not heard | gets it, as ever |
+| any | the phone's key bar **esc** | not heard | gets it: that bar exists to reach the terminal, and the pill's ✕ is there for Kuru |
+
+In the window the decision is made from the pill's phase as last reported
+(`remotePhase`), a few milliseconds old: an Escape in the instant Kuru
+finishes can be taken and do nothing, and the next one goes through. The
+key the window forwards and the key the hook sent are the same press, and
+the second finds nothing to stop.
+
+Swallowing Escape in other applications would need an active tap, which
+needs Accessibility; the hook asks for Input Monitoring and nothing else, so
+this does not.
+
 ## Nothing you say is lost
 
 **What lost a message on 2026-10-09**, twice: its length. The server took a
@@ -96,7 +138,7 @@ Every piece of that is now kept somewhere that survives it:
    every five minutes, and the server's cap (`CLIP_MAX_BYTES`, six minutes)
    is a backstop it never reaches, answered with 413 and why when it is.
 2. **On arrival**, the outbox writes the audio, then its entry in
-   `~/.local/state/kururu/outbox/outbox.json`, and only then answers. The
+   the database ([data](data.md)), and only then answers. The
    page drops its copy on that answer.
 3. **Transcribing**: the recogniser reads the file. Failing to run is tried
    again at 3, 10 and 30 seconds (`transcribeRetryMs`), then the message is
@@ -121,17 +163,26 @@ Every piece of that is now kept somewhere that survives it:
 The list keeps every message still on its way and every failed one, and the
 newest twenty delivered per profile (`OUTBOX_KEEP`). A failed one is the one
 with something to do: **Resend** (or **Listen again**, for one with no words
-yet) or **Discard**, which takes the audio off the disk too. The page adds
-two states of its own above the server's: `recording`, and `saving` for a
-clip the server does not have yet.
+yet) or **Discard**, which takes the audio off the disk too — both inline on
+the message in the drawer. The page adds two states of its own above the
+server's: `recording`, and `saving` for a clip the server does not have yet.
+
+**A line typed in the drawer's composer takes the same road** (`kuru-say`,
+`Outbox.say`): it joins the list as `queued` with its words already made, goes
+to Kuru in order with whatever was said before it, is confirmed by Kuru's own
+prompt hook, and is typed again once or failed on the same rules. No clip, so
+nothing to hear and `ms` is zero, which is how the two are told apart
+(`spokenMessage`); it is typed without the `[voice]` prefix, since nothing in
+it was misheard. This is how the phone talks to Kuru today: playback works
+over plain http, and only the microphone needs the secure context.
 
 ## What you missed
 
 A reply that **nobody played to its end** is kept, as words, on a list per
 profile. Three ways onto it:
 
-- **Let go** — the pill's ✕, the talk key's press, or a sentence a page
-  could not fetch. A reply with a hole in it was not heard.
+- **Let go** — the pill's ✕ or Escape, the talk key's press, or a sentence
+  a page could not fetch. A reply with a hole in it was not heard.
 - **Nobody listening** — no window or phone open, or none that could play
   (no audio output, or the speech volume at zero). It is counted missed two
   seconds after its last sentence is made, if nobody has taken it up.
@@ -149,25 +200,80 @@ queued behind it start sooner. A page that never says anything — one from
 before this change, or one with nothing to play on — has no say, which is
 why a reply nobody holds is missed and not "probably heard".
 
-The list is in the state directory (`missed.json`) and every reply is
+The list is in the database, keyed by the profile's key rather than its
+session id — three host restarts in one morning once orphaned every entry
+keyed by id — and every reply is
 written to it, pending, the moment it is said, so a server that dies with a
 reply in flight leaves that reply missed rather than forgotten. Each profile
 keeps its newest thirty (`MISSED_MAX`).
 
-**Getting them back.** The harness button in the sidebar carries the count
-on its corner; clicking the count opens the list, oldest first, with when
-each was said. **Play** says them again, each starting "Earlier." **Clear**
-takes them off unheard — read is heard enough; opening the list is not,
-since a glance is not reading. Saying (or typing) "what did I miss?" to
-Kuru does the same as Play: the role tells it to call `play_missed`, which
-queues them and hands their words back to it so it ends its turn with a
-line rather than a retelling. A replay heard to its end takes its reply off
-the list; one cut off leaves it there, and a replay is never put on the
-list itself.
+**Getting them back.** The chip in the status bar carries the count; the
+drawer behind it marks each unheard reply where it sits in the conversation,
+with a **Play** of its own, and its header has **Play unheard** for all of
+them, oldest first, each starting "Earlier." Saying (or typing) "what did I
+miss?" to Kuru does the same as Play: the role tells it to call
+`play_missed`, which queues them and hands their words back to it so it ends
+its turn with a line rather than a retelling. A replay heard to its end takes
+its reply off the list; one cut off leaves it there, and a replay is never
+put on the list itself.
+
+**Unheard means neither heard nor seen.** A reply also leaves the list when
+it has been in view in the open drawer for about two seconds
+(`KURU_SEEN_MS`, the `kuru-seen` verb, `Voice.seen`) — the count's job is to
+bring you to the drawer, and once you are there it has done it; a count that
+survived reading would teach you to ignore it. Opening the drawer is not
+seeing: a glance at a long list is not reading the reply at the top of it,
+so the drawer watches which replies are actually on screen. **Mark all
+heard** stays for when you will not scroll.
 
 A running harness keeps the tools and role it was started with (see
 [harness](harness.md#gotchas)); `play_missed` is there from its next start.
-The badge works without it.
+The chip and the drawer work without it.
+
+## The drawer
+
+One place, one timeline: `KuruDrawer.tsx`, over the panes, anchored to the
+right edge, about 420px wide and the height of the window above the status
+bar. It does not dim the terminals, because you read Kuru's answer while
+watching the agent it talks about; a click outside closes it and lands where
+you clicked, and `Esc` closes it from anywhere but its composer. On a narrow
+window it is a full-screen sheet with the usual close button, one sheet at a
+time, like the board and the databases. The harness key (`C-a a`) opens and
+shuts it; **Terminal** in its header is the old `open-harness` — started,
+resumed or revealed.
+
+What is in it is the server's `kuru` message, merged once on the server
+(`shared/kuru.ts` `mergeConversation`, tested) from three things it already
+keeps: the harness's turns in the database — every prompt Kuru took and every
+reply it gave — your messages' states from the outbox, and each reply's fate
+from the missed list. A delivered clip and the turn it became are one item,
+linked by the turn's `voiceId`; a message still on its way stands on its own
+until it arrives. A reply named for its utterance is `heard`, `unheard` or
+`speaking` by the missed list's word, and one that was never spoken has no
+fate to show. A line said mid-turn through `say` is a turn of its own
+(`via: "kururu"`), drawn smaller. A fresh session is a mark on the timeline,
+not a different list. The socket carries the newest `KURU_RECENT` of each
+profile and everything on the two lists with something to do about it;
+**Show earlier** pages back through `GET /api/kuru`.
+
+The live row at the foot says what Kuru is doing now — the mascot hopping
+with "thinking", "asking something in its terminal" with **Open terminal**,
+"not running" with **Start** — and the chip says the same in a glyph, from
+the same function (`kuruLive` in `web/src/kuru.ts`), so the two cannot
+disagree. A card code in a reply (`KUR-67`) is a door onto the profile board
+at that card, resolved against the boards the profile actually has; a word
+shaped like one that is not a card is left as a word.
+
+**The background presence is the menu bar**, not the pill: a persistent
+count floating over every application would be intrusive, so the frog's title
+gains the unheard count after the agent count (`3 · 2 unheard`), and its menu
+gets Kuru's lines when there is news — "Kuru: 2 unheard replies" with
+**Play** (`POST /api/kuru/play`) and **Open the conversation**, and "1
+message did not get through to Kuru" with Open. The counts ride on
+`/api/health`, which the runner already polls; a click on the floating pill's
+words raises the main window and opens the drawer at that reply — or, if the
+window was already in front with the drawer already open, closes it
+(`kururu:raise-main` with the utterance, `kururu:open-kuru` back to the page).
 
 ## Two languages
 
@@ -235,8 +341,8 @@ always has.
 |---|---|---|
 | The hook | `desktop/talkkey/talkkey.swift` → `dist/talkkey` | A session-level, **listen-only** `CGEventTap`, in a process of its own on Kokoro's reasoning: started and stopped by the app, it costs a key and not a window when it dies. It maps the same `KeyboardEvent.code` names Settings stores to keycodes (and, for a modifier, to the device bit that tells the right key from the left), and writes one JSON line per event: `ready`, `denied`, `unsupported`, `down`, `up`, `escape`, `chord`. Built by `desktop/talkkey/build.mjs` (needs Xcode's `swiftc`; without it the menu says so and the key stays window-only). Listen-only is the whole permission story: **Input Monitoring**, asked once with the system prompt, and nothing else. |
 | The router | `desktop/talkkey.js` | Spawns the hook on the key the pill reports, restarts it on a new key, and sends its events to the pill's webContents and no other. Owns the panel. Pushes `{on, live, status, phase}` to every window. |
-| The pill | `web/src/components/Pill.tsx`, loaded at `/?pill` | The same web build with a different root: the session, the voice module and `VoicePill` in its `floating` form — no panes, no emulators, no notifications. Reports its phase, its size and the talk key over the bridge. |
-| The panel | `desktop/talkkey.js` `ensurePanel` | A frameless, transparent, non-activating panel kept on top of every space including full-screen apps, sized to the pill and shown while the pill has something to say. Never focusable, so a press over another app moves no focus. Dragging it is `-webkit-app-region: drag`, which moves the window; its spot is kept in `desktop.json`. |
+| The pill | `VoicePill.tsx` | A level meter and a line, over the panes, zen included. Says which gesture ends the recording, what was heard and where it went, what Kuru is saying. Dragged anywhere in the window by mouse or finger and drawn where this device left it (`web/src/place.ts`); a double click puts it back. Its ✕ is `dismissVoice`: Kuru stops mid-word and the rest of the reply, and what was queued behind it, is marked unheard; a clip being recorded is thrown away; words lingering go. Escape is the same ✕ while Kuru speaks. A plain click — one that travelled less than the drag's own slop, and landed outside the ✕ — toggles the drawer at the reply the pill is showing: open it unless it is already open, in which case this closes it, so a pill that only ever shows its last line is one tap from the whole conversation and one tap back. The pill is the live indicator; the drawer is the record. |
+| The panel | `desktop/talkkey.js` `ensurePanel` | A frameless, transparent, non-activating panel kept on top of every space including full-screen apps, sized to the pill and shown while the pill has something to say. Never focusable, so a press over another app moves no focus. Dragging it is `-webkit-app-region: drag`, which moves the window; its spot is kept in `desktop.json` as a share of whichever display it was on, not a pixel, so a monitor switched away from does not strand it — see the gotcha below. A draggable region ignores every pointer event that lands in it, not only the ones that become a drag, so the ✕ and the words are both carved out as `no-drag` or neither could be pressed; a click on the words is the drawer: it raises the *main* window (`kururu:raise-main` with the reply's utterance, making one if there is none) rather than the panel itself — the panel is never focusable, so `kururu:show`'s "raise whichever window sent this" would raise nothing useful — and tells the page to open the drawer at that reply, or to toggle it instead when the window was already in front before this click raised it, so a click that finds the window already there with the drawer already open is the one that closes it (`kururu:open-kuru`, the flag decided in the main process since only it knows whether the window needed raising, kept by the preload for a page still mounting). The tray's **Reset Pill Position** forgets the drag, puts it at its own spot on the display under the cursor, and shows it there for five seconds whether or not it has anything to say (`PillHere` in `Pill.tsx`). Every decision about where it goes is a line in `pill.log` (tray → Logs). |
 | The grammar | `web/src/voice.ts` `applyTalkGesture` | Hold, tap and Escape are the same three functions the DOM key handler calls, fed by the hook's `down` and `up` — written once. **Chord** is the one word the hook has that the window never needed: another key pressed during a hold is a shortcut for the application in front, so the clip is dropped and the release that follows is not a send. |
 | The fallback | `desktop/talkkey.js` `setAltSpace` | ⌥Space through `globalShortcut`, which needs no permission and sees no key-up, so it is a tap: once to open the microphone, again to send. Off by default, offered when the hook is denied. |
 
@@ -250,9 +356,11 @@ window both saw from firing twice. The moment the hook is denied, missing or
 dies, the bridge flips and the window's handler is back, so the key never fires
 nowhere. The phone keeps its own button and is unchanged.
 
-Two honest edges. Escape is seen, not swallowed, so it also reaches the app in
-front; swallowing it would need an active tap and Accessibility, which is not
-asked for. And the permission is granted per bundle, so the dev shell
+Two honest edges. Escape is seen, not swallowed, so the one that drops a clip
+or stops Kuru also reaches the app in front — unless that app is Kururu's
+window, which keeps it from its terminals; see [Escape](#escape). Swallowing
+it everywhere would need an active tap and Accessibility, which is not asked
+for. And the permission is granted per bundle, so the dev shell
 (`brand.mjs` re-signs it as its own) is approved once and the installed app
 once.
 
@@ -260,6 +368,17 @@ Unverified as of 0.2.0: the hook under the signed, notarized app (it is a bare
 Mach-O in `Resources/server`, as node-pty's `spawn-helper` already is), and
 `type: "panel"` over a full-screen application. Both were built and typecheck;
 neither has been pressed in a DMG.
+
+Unverified as of 0.3.0: clicking the panel's words to open the harness —
+typechecks and the `no-drag` carve-out matches Electron's documented
+behaviour for the ✕, but it has not been clicked for real over another
+application, and raising the main window from a non-focusable panel
+(`kururu:raise-main`) has not been pressed either. Also unverified: the
+panel's recovery after a real monitor change. **Reset Pill Position**
+showing the pill, the reload of a page that does not answer it, and the
+settle passes after a display event were driven in an isolated Electron
+against a stub page, on one display; no second display has been plugged in
+or pulled. `pill.log` is how the next try is read.
 
 ## What it is not
 
@@ -281,6 +400,16 @@ neither has been pressed in a DMG.
   installed once from `App` and reads the key and the profile through refs.
   Re-adding a capture listener moves it to the back of the list and, worse,
   a key held across the swap loses its key-up.
+- **A hot reload is a swap the code cannot refuse.** Vite re-runs
+  `voice.ts` when it or `session.ts` changes, the page's effect cleanup
+  takes the old copy's listeners away, and the new copy is idle. On
+  2026-10-11 the old copy was mid-sentence: the key-up went to the new
+  one, and the old one recorded the room for a quarter of an hour, a clip to
+  Kuru every five minutes, under a pill showing nothing. `installSpeech`'s
+  cleanup now sends what a recording holds and closes the microphone — the
+  words after the reload are lost, not the ones before. The cleanup that
+  runs is the *old* copy's, so the guard protects from the reload after the
+  one that delivered it.
 - **`kokoro-js`'s `stream()` hangs on a string.** It never closes the
   splitter, so the last sentence is never yielded. `sentencesOf` splits and
   `generate` is called per sentence.
@@ -324,6 +453,58 @@ neither has been pressed in a DMG.
   size of either, with nothing measured. It needs `width: max-content`:
   a fixed box left to shrink to fit is as wide as the window less its
   `left`, which wrapped a pill near the right edge a word to a line.
+- **The panel's place is the same idea, one level up.** `desktop/talkkey.js`
+  keeps a share of whichever *display* it was dragged on (`{ displayId, x, y }`
+  in `desktop.json`'s `pill`), not a pixel pair — a pixel is nonsense the
+  moment that display is unplugged. `place()` reapplies the share to the
+  same display when `screen.getAllDisplays()` still has it, or to whichever
+  is home (the cursor's display, else the primary one) when it does not,
+  which is what puts a pill back on screen after a monitor is switched away
+  from rather than leaving it stranded at a coordinate nothing answers to.
+  `screen`'s `display-added`, `display-removed` and `display-metrics-changed`
+  all call `place()` again, so a monitor unplugged while the pill is merely
+  hidden is already fixed by the time it is next shown. An older build's raw
+  pixel pair reads as a share past 1 and is dropped on load rather than
+  honoured. The tray's **Reset Pill Position** forgets the share and puts it
+  back at its own spot, for a pill that drifted somewhere unhelpful without a
+  display ever changing.
+- **Placing once, at the event, was not enough.** KUR-68 called `place()`
+  on each display event and the pill still went missing after a monitor
+  change, for two reasons. The event is where a change starts: macOS goes on
+  moving the windows that were on a display that left, and `screen` can
+  answer with the old arrangement for a moment, so `displaysChanged` places
+  it at once and again at 600 ms and 2.5 s (`SETTLE_MS`), and a move inside
+  that window is the system's and never pins it. And a pill that was up when
+  the change happened was moved but never shown again: now a pill that is up
+  is shown again on every pass (`reveal` — `showInactive` is
+  `orderFrontRegardless`, so again is not a no-op — plus `invalidate()` for
+  a transparent panel that lost its frame). Whether it is up is the file's
+  own `shown`, not `isVisible()`, which answers yes for exactly the panel
+  that is shown where nobody can see it. `place()` also holds the result
+  inside the chosen display's work area, skips displays Electron says are
+  not `detected`, and reads the bounds back: a panel whose middle is on no
+  display is put on the primary one and the log says so.
+- **A reset that moved a hidden window looked like no reset.** The panel is
+  only up while the pill is talking, so the first Reset put an invisible
+  window in the right place and showed nothing. Reset now sends
+  `kururu:pill-locate` (kept by the preload for a page still mounting); the
+  page draws `PillHere` for five seconds and reports `locating`, which
+  `report` shows like a phase but keeps out of the phase every window is
+  told, since a window reads Escape by it. A page that does not answer in
+  2 s is loaded again and asked again — a wedged or dead page is the other
+  way a pill disappears, and a renderer that dies is reloaded too, once per
+  30 s at most.
+- **`pill.log` is the only witness.** The panel has no devtools and an
+  installed app's stderr goes nowhere, so every `place()` writes one JSON
+  line to `~/.local/state/kururu/pill.log` — why it ran, which display it
+  chose and how (pinned, under the cursor, nearest, primary), the cursor,
+  the target and the bounds read back, whether it landed on a display, and
+  every display it chose between — beside each display event, reset, drag
+  pin, failed load and renderer death. Moved aside at 256 KB, as
+  `lifecycle.log` is. The tray's Logs menu opens it.
+- **The pill takes the pointer now**, which it did not while it only
+  talked. A press on it prevents `mousedown`, the mic button's fix, so
+  dragging it or pressing its ✕ never takes the focus off a terminal.
 - **The pill takes the pointer now**, which it did not while it only
   talked. A press on it prevents `mousedown`, the mic button's fix, so
   dragging it or pressing its ✕ never takes the focus off a terminal.
@@ -335,6 +516,13 @@ neither has been pressed in a DMG.
   while the last clip is still being heard, and the first one finishing
   must not lift the second one's hush. Each recording ends its talk once,
   in `close` or in `open`'s failure, never both.
+- **Between two sentences is still speaking.** The pill used to drop to
+  `heard` when a sentence ended before the next was made, looking no
+  different, so an Escape in that gap was not the voice's and went on to the
+  terminal and the agent in it. `between` holds `speaking` until the
+  reply's last sentence, or `GAP_MS`. The two places the player gives up
+  for want of an output pump once more, empty, so a phase left `speaking`
+  with nothing playing does not take every Escape after it.
 - **The hush acts on its edge, not its level.** Going quiet runs
   `stopSpeaking` once; a second page pressing while this one already holds
   a reply does not throw that reply away. Coming back runs `pump`.
@@ -382,7 +570,7 @@ neither has been pressed in a DMG.
   is half of how the 2026-10-09 message was lost.
 - **The pill's line is not the only record.** Anything that happens to a
   message after the pill has moved on — a retry, a failure at the
-  confirmation timeout — is on the list behind the harness button, and a
+  confirmation timeout — is in the drawer, with Resend on a failed one, and a
   failure brings the pill back for fifteen seconds if nothing else holds it.
 - **`say` speaks at 22 kHz and Kokoro at 24.** Both are plain WAVs and the
   browser's decoder resamples; nothing here cares.

@@ -27,10 +27,11 @@ import { dirname, join } from "node:path";
 import type { Profile, Workspace } from "../../shared/model";
 import { groupName, isLoginKey, isWorkspaceColor, mintLoginKey } from "../../shared/model";
 import { BOARD_TAB, docTab, isDocTab, parseDocTab, type LayoutNode, type ReaderDoc } from "../../shared/layout";
-import { adoptBoard, adoptProfileBoard, storedBoard, type Board } from "../../shared/board";
+import { adoptBoard, adoptProfileBoard, type Board } from "../../shared/board";
 import { adoptHarness } from "../../shared/harness";
 import { adoptPin, type MachinePin } from "../../shared/machines";
 import type { HarnessState } from "../../shared/model";
+import { isStoreKey, mintProfileKey, mintWorkspaceKey } from "../../shared/store";
 import { nextId } from "./workspaces";
 
 /** Bumped when the shape below changes; an older file is ignored, not migrated. */
@@ -63,6 +64,14 @@ type StoredNode =
 
 interface StoredWorkspace {
   name: string;
+  /**
+   * How the database knows this workspace — see `shared/store.ts`. Kept as
+   * it is across a cold start for `loginKey`'s reason: it names something
+   * outside this process. Optional because a file from before keys has
+   * none; that workspace is given a fresh key, which the database then
+   * matches back to its board by name.
+   */
+  key?: string;
   layout: StoredNode;
   /** Optional because sessions written before colours existed do not have one. */
   color?: string | null;
@@ -77,12 +86,11 @@ interface StoredWorkspace {
    */
   machine?: MachinePin;
   /**
-   * The workspace's cards, when it has ever had a board. Unlike almost
-   * everything else in here this is *content* rather than structure — text
-   * somebody wrote — and it is kept for that reason: a board that emptied on
-   * every quit would be a list nobody could keep. What it does not keep is
-   * which agent a card was handed to; that is a process, and `storedBoard`
-   * takes it off.
+   * The workspace's cards, from a file written before boards lived in the
+   * database — or by a build from before it, run against this one. Only
+   * read: a card in here the database has never seen is adopted into it at
+   * start (`Store.attach`), and nothing here moves or deletes one that is
+   * there. Nothing writes it, so the next save leaves it out.
    */
   board?: Board;
 }
@@ -97,7 +105,9 @@ interface StoredProfile {
    * true of it.
    */
   loginKey?: string;
-  /** The profile's own cards, when it has any. See `Profile.board`. */
+  /** The profile's key for the database, on the workspace's reasoning above. */
+  key?: string;
+  /** The profile's own cards, on the workspace's terms above: only read, adopted, never written. */
   board?: Board;
   /**
    * Its harness, as a conversation to resume — see `Profile.harness`. With the
@@ -155,6 +165,12 @@ function strip(node: LayoutNode): StoredNode {
   return { type: "split", dir: node.dir, ratio: node.ratio, a: strip(node.a), b: strip(node.b) };
 }
 
+/**
+ * The structure, with the keys the database knows each profile and
+ * workspace by and no boards: those are the database's, written through
+ * as they change (`store.ts`), and a second copy here would be a second
+ * truth for the next start to pick between.
+ */
 export function writeSnapshot(profiles: Profile[], activeProfileId: string): void {
   const session: StoredSession = {
     version: VERSION,
@@ -162,9 +178,7 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
     profiles: profiles.map((profile) => ({
       name: profile.name,
       loginKey: profile.loginKey,
-      // Always, empty or not: its counter must survive a cold start so that a
-      // number is not handed out twice, and its columns are a person's choice.
-      board: storedBoard(profile.board),
+      key: profile.key,
       // The conversation to resume, the launcher it ran on, and the terminal
       // it is in. It used to drop the terminal as a card's run does — but a
       // card's run is re-found through the card, and nothing re-found the
@@ -180,11 +194,11 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
       ),
       workspaces: profile.workspaces.map((workspace) => ({
         name: workspace.name,
+        key: workspace.key,
         color: workspace.color,
         mascotId: workspace.mascotId,
         group: workspace.group,
         ...(workspace.machine ? { machine: workspace.machine } : {}),
-        ...(workspace.board ? { board: storedBoard(workspace.board) } : {}),
         layout: strip(workspace.layout),
       })),
     })),
@@ -341,6 +355,10 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
       const mascotId = typeof w.mascotId === "string" ? w.mascotId : null;
       const workspace: Workspace = {
         id: nextId("w"),
+        // Kept when it is one; minted otherwise, and the database matches a
+        // minted key back to its board by name. Checked because it is a
+        // row's key, the way `loginKey` is checked because it is a path.
+        key: isStoreKey(w.key) ? w.key : mintWorkspaceKey(),
         name: w.name,
         layout,
         focusedPaneId: first,
@@ -351,6 +369,8 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
         color,
         mascotId,
         group: groupName(w.group),
+        // Only from an old file, and only for `Store.attach` to adopt; what
+        // the database holds replaces it before anything is drawn.
         board: adoptBoard(w.board),
         machine: adoptPin(w.machine),
       };
@@ -360,6 +380,7 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
     const at = Math.min(Math.max(0, stored.activeWorkspace ?? 0), workspaces.length - 1);
     profiles.push({
       id: nextId("p"),
+      key: isStoreKey(stored.key) ? stored.key : mintProfileKey(),
       name: stored.name,
       // Checked rather than trusted, because it becomes a path: see `logins.ts`.
       loginKey: isLoginKey(stored.loginKey) ? stored.loginKey : mintLoginKey(),

@@ -17,7 +17,11 @@ as custom properties and hands the second to every pooled emulator.
 colour is a rule that stays one colour while the window changes around it.
 `web/test/theme.test.ts` fails on one, and also fails if a token the CSS asks for
 is one no theme answers — that seam is held together by a string on both sides
-and drifting it is invisible in the default theme.
+and drifting it is invisible in the default theme. Enforcement: every
+declaration outside `:root` whose property matches
+`color|background|shadow|border|fill|stroke` is checked for a literal `#hex`,
+`rgb()` or `hsl()`; the QR code's quiet zone (`#fff`, on the reasoning written
+beside it) is the one value let through.
 
 **Never write a px either.** A rule naming `border-radius: 6px` or
 `font-size: 11px` is the same bug in a different dimension, which is what a
@@ -29,6 +33,21 @@ asks for, and on a `:root` default that has drifted from the default skin — th
 last one matters more than its theme equivalent, because a stale shape in `:root`
 reflows every pane the moment the snapshot lands, and a reflow costs the agents a
 SIGWINCH rather than a wrong colour for a frame.
+
+That rule is also enforced directly, on exactly the properties `SkinTokens`
+covers and nothing wider: `border-radius`, `border` and its four sides,
+`border-width`, `outline`, `outline-width` and `font-size`. A literal `px` or
+`#hex` in one of those outside `:root` fails the build, reported with its line.
+Padding, margin, gap, width and height are deliberately **not** checked —
+`SkinTokens` never tokenized them, they are facts about an element's own
+layout rather than a shape a skin gets a vote on, and checking them would turn
+the exception list into most of the stylesheet instead of a short one.
+`SHAPE_KNOWN` in the test is that short list: today it holds exactly one entry,
+the `16px` iOS Safari zooms the page to whenever an editable element's
+computed font size is under it on focus, and does not zoom back out, so
+`.term`'s focus-catching textarea cannot take its size from `--fs-xl` — a skin
+is entitled to make that eight pixels, which would silently bring the zoom
+back.
 
 **A theme that is spelled right can still be unreadable, and that is checked
 too.** Both rules above pass happily on a palette whose label is dark grey on

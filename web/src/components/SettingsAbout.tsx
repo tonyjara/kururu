@@ -90,6 +90,8 @@ export function AboutSettings({ host }: { host: HostInfo }) {
         <span className="set-note">{describe(check, asking)}</span>
       </div>
 
+      <DataHome />
+
       <ServerLife />
 
       {check?.newer && check.latest && (
@@ -116,6 +118,54 @@ export function AboutSettings({ host }: { host: HostInfo }) {
       )}
     </div>
   );
+}
+
+/** What `/api/data` answers: the database's file, and its size with the write-ahead log. */
+interface DataReport {
+  path: string;
+  bytes: number;
+}
+
+/**
+ * Where the boards are. One file, and nothing to do about it here: a first
+ * start makes it, every change is written through as it happens, and the
+ * backups are their own page. Asked when the page opens, like the
+ * lifecycle, since nobody watches it grow.
+ */
+function DataHome() {
+  const [report, setReport] = useState<DataReport | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void fetch("/api/data")
+      .then((response) => (response.ok ? (response.json() as Promise<DataReport>) : null))
+      .then((answer) => {
+        if (live && answer) setReport(answer);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (!report) return null;
+  return (
+    <section className="set-section">
+      <h4 className="set-h">Data</h4>
+      <p className="set-note">
+        Boards, conversations and the voice's lists live in <code>{report.path}</code>, {fileSize(report.bytes)}.
+        Nothing in it is ever deleted outright: a deleted card is marked, and every move is on its history.
+      </p>
+    </section>
+  );
+}
+
+/** `412_000` → `402 KB`, `5_400_000` → `5.1 MB`: kilobytes until they stop being readable. */
+function fileSize(bytes: number): string {
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.max(1, Math.round(kb))} KB`;
+  const mb = kb / 1024;
+  return mb < 10 ? `${mb.toFixed(1)} MB` : `${Math.round(mb)} MB`;
 }
 
 /**

@@ -32,6 +32,26 @@ export interface DesktopBridge {
    */
   show?(): void;
   /**
+   * Raise the main window specifically, rather than whichever window called
+   * this — the floating pill's click needs that distinction, since the panel
+   * it runs in is never the window to raise and may be all that is open.
+   * Makes a window if there is none, and toggles the Kuru drawer in it, at
+   * the reply named when one is: open it unless the window was already in
+   * front with the drawer already open, in which case the second click is
+   * the one that puts it away. Optional for the same reason as `show`.
+   */
+  raiseMain?(focus?: string | null): void;
+  /**
+   * The main process wants the Kuru drawer touched in this window — the
+   * floating pill was clicked, or the menu bar's Open. Told with the reply to
+   * show, or null for the newest, and whether to toggle rather than only
+   * open: the main process knows whether the window was already in front,
+   * this page knows whether the drawer is already open, and the flag is how
+   * the two halves of that decision meet. Returns the unsubscribe. Optional:
+   * a window from before the drawer has nothing to open.
+   */
+  onOpenKuru?(listener: (focus: string | null, toggle: boolean) => void): () => void;
+  /**
    * Replacing this application, when this application is one that can be
    * replaced. Optional so a window older than this bridge simply draws the
    * link, which is the same thing it drew before the updater existed.
@@ -53,7 +73,8 @@ export interface DesktopBridge {
  * its gestures there. Any other status leaves this page's own key handler
  * in charge, so a hook that is denied or has died costs nothing but the
  * everywhere. `phase` is the pill's, so a window can tell whether an Escape
- * pressed in it is a clip being dropped.
+ * pressed in it is the voice's — a clip being dropped, or Kuru being stopped
+ * mid-reply — and kept from the terminal, or the terminal's.
  */
 export interface VoiceGlobalState {
   on: boolean;
@@ -77,6 +98,12 @@ export interface PillReport {
   width: number;
   height: number;
   key: string;
+  /**
+   * Showing itself for the tray's Reset rather than for anything said: the
+   * panel is up while this is true, idle or not. Apart from `phase`, which
+   * every window is told and reads Escape by.
+   */
+  locating?: boolean;
 }
 
 export interface DesktopVoice {
@@ -94,6 +121,12 @@ export interface DesktopVoice {
   onKey(listener: (gesture: TalkGesture) => void): () => void;
   /** The pill page only. */
   report(state: PillReport): void;
+  /**
+   * The pill page only: the tray's Reset asking it to show where it now is,
+   * whether or not it has anything to say. Returns the unsubscribe. Optional:
+   * an app from before Reset showed anything never asks.
+   */
+  onLocate?(listener: () => void): () => void;
 }
 
 /**

@@ -230,12 +230,14 @@ const MAX_ANCESTRY = 64;
  * command line of the process at the top of its ancestry. An app bundle by its
  * bundle name, outermost first — VS Code's helpers are bundles inside a bundle,
  * and "Visual Studio Code" is the one a person knows it by. Another kururu's pty
- * host says so, because "node" would be no help to anybody.
+ * host says so, because "node" would be no help to anybody — by its entry, or
+ * by the title a host has set itself since it started naming itself
+ * (`Kururu ptyhost - 3 agents`), which replaces its command line in `ps`.
  */
 export function appName(args: string): string | null {
   const bundle = /\/([^/]+)\.app\//.exec(args);
   if (bundle) return bundle[1]!;
-  if (args.includes("ptyhostd")) return "another kururu";
+  if (args.includes("ptyhost")) return "another kururu";
   const head = args.trim().split(/\s+/, 1)[0] ?? "";
   // `-zsh` is a login shell, `sshd:` is sshd renaming itself after the session.
   return basename(head).replace(/^-|:$/g, "") || null;

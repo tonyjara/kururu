@@ -127,6 +127,11 @@ const NOT_THEME = new Set([
   // be a theme that could put the strip anywhere in the window's tonal range,
   // including on the wrong side of the two surfaces it is meant to sit between.
   "--strip",
+  // How wide `.tab-actions` is, measured off the box by `Panes.tsx` so that
+  // `.tab-new`'s sticky offset cannot fall out of step with a skin's button
+  // size or a solo pane's "2/3". A length read off the DOM, like `--sidebar-w`
+  // and `--depth`, and nobody's to theme or skin.
+  "--actions-w",
 ]);
 
 /**
@@ -141,6 +146,32 @@ const SKIN_TOKENS = new Set([
 ]);
 
 const asked = new Set(Array.from(css.matchAll(/var\((--[a-z0-9-]+)/g), (m) => m[1]!));
+
+/**
+ * The shape half of the no-literals rule, for exactly the properties
+ * `shared/skin.ts`'s `SkinTokens` tokenizes: a radius, a border's width or
+ * style, an outline's width, a type size. Padding, margin, gap, width and
+ * height are deliberately not checked here — they were never part of that
+ * vocabulary, and `docs/styles.md` says why: those are facts about an
+ * element's own layout, not a shape a skin gets a vote on, and flagging them
+ * would mean an exception for most of the stylesheet rather than a short list.
+ */
+const SHAPE_PROPS =
+  /^(border-radius|border|border-top|border-right|border-bottom|border-left|border-width|outline|outline-width|font-size)$/;
+
+/**
+ * A literal this check is told to let through, each because the argument for
+ * "never a px" does not reach it. Kept beside the check rather than in the
+ * stylesheet, so that someone adding a *different* literal sees this list
+ * before assuming it covers them too.
+ */
+const SHAPE_KNOWN: { near: string; property: string; value: string }[] = [
+  // iOS Safari zooms the whole page when an editable element's computed font
+  // size is under 16px on focus, and does not zoom back out — see the comment
+  // on `.term textarea` itself. 16 is the browser's threshold, not a size the
+  // type ramp chose, so it cannot come from `--fs-xl`.
+  { near: ".term textarea", property: "font-size", value: "16px" },
+];
 
 /** The `:root` declarations, as name → value. */
 function rootBlock(): Map<string, string> {
@@ -279,6 +310,35 @@ describe("the stylesheet and the themes", () => {
       // token: a dark-themed code with a dark border is one a scanner cannot
       // find the edges of.
       .filter((value) => value !== "#fff");
+    expect(strays).toEqual([]);
+  });
+
+  /**
+   * The same bug in the other dimension: `border-radius: 6px` or
+   * `font-size: 11px` is a rule that stays one shape while a skin changes the
+   * rest of the window around it — which is what a hundred and eighty of
+   * these did until `shared/skin.ts` existed, and this is CLAUDE.md's "never
+   * write a px" actually enforced rather than only claimed.
+   */
+  it("has no radius, border or type size hardcoded outside :root", () => {
+    const body = css.slice(css.indexOf("* {"));
+    const strays: string[] = [];
+    for (const m of body.matchAll(/(?:^|[{;])\s*([a-z-]+)\s*:\s*([^;}]+)/gm)) {
+      const prop = m[1]!;
+      if (!SHAPE_PROPS.test(prop)) continue;
+      const value = m[2]!.trim();
+      if (!/\d*\.?\d+px\b|#[0-9a-f]{3,8}\b/i.test(value)) continue;
+      const idx = m.index!;
+      const known = SHAPE_KNOWN.some(
+        (k) =>
+          k.property === prop &&
+          k.value === value &&
+          body.slice(Math.max(0, idx - 1500), idx).includes(k.near),
+      );
+      if (known) continue;
+      const line = css.slice(0, css.indexOf("* {") + idx).split("\n").length;
+      strays.push(`styles.css:${line} — ${prop}: ${value}; use a token, or add to SHAPE_KNOWN with why`);
+    }
     expect(strays).toEqual([]);
   });
 });

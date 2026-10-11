@@ -21,6 +21,7 @@ const path = require("node:path");
 const { readDesktop, writeDesktop } = require("./desktop");
 const { menuTemplate, trayTitle } = require("./menu");
 const { hostSocket, stateDir } = require("./runner");
+const { pillLog } = require("./talkkey");
 
 /**
  * @param {object} options
@@ -53,8 +54,7 @@ function createTray({ runner, talk, version, packaged, actions }) {
   };
 
   const title = () => {
-    const h = runner.health;
-    tray.setTitle(trayTitle({ server: { up: Boolean(h), liveAgents: Number(h?.liveAgents) || 0 } }));
+    tray.setTitle(trayTitle(runner.view()));
   };
   runner.on("change", title);
   title();
@@ -108,6 +108,17 @@ function createTray({ runner, talk, version, packaged, actions }) {
   const clicks = {
     "open-window": () => actions.openWindow(),
     "close-window": () => actions.closeWindow(),
+    // Kuru's lines. Play asks the server, which has the voice; Open is the
+    // window with the drawer up. Both are the profile on screen's.
+    "kuru-play": async () => {
+      try {
+        const res = await fetch(`${runner.local}/api/kuru/play`, { method: "POST", signal: AbortSignal.timeout(3000) });
+        if (!res.ok) failed("play Kuru's unheard replies", { ok: false, why: `the server said ${res.status}` });
+      } catch (err) {
+        failed("play Kuru's unheard replies", { ok: false, why: err instanceof Error ? err.message : String(err) });
+      }
+    },
+    "kuru-open": () => actions.openKuru(),
     "restart-server": async () => failed("restart the server", await runner.restart()),
     "stop-server": () => runner.stop(),
     "start-server": async () => failed("start the server", await runner.start()),
@@ -134,6 +145,7 @@ function createTray({ runner, talk, version, packaged, actions }) {
     "talk-global": () => talk.setEnabled(!talk.enabled),
     "talk-permission": () => talk.openInputMonitoring(),
     "talk-altspace": () => talk.setAltSpace(!talk.altSpace),
+    "reset-pill": () => talk.resetPlace(),
     "source-app": () => switchSource({ source: "app", checkout: readDesktop().checkout }),
     "source-checkout": () => {
       const { checkout } = readDesktop();
@@ -168,6 +180,7 @@ function createTray({ runner, talk, version, packaged, actions }) {
     "log-server": () => shell.openPath(runner.serverLog()),
     "log-vite": () => shell.openPath(runner.viteLog()),
     "log-host": () => shell.openPath(path.join(path.dirname(hostSocket()), "ptyhost.log")),
+    "log-pill": () => shell.openPath(pillLog()),
     "log-reveal": () => shell.showItemInFolder(path.join(stateDir(), "lifecycle.log")),
     "open-at-login": () => {
       if (!packaged) return;

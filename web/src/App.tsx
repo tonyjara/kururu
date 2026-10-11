@@ -53,6 +53,8 @@ import { Settings, TAB_NAMES as SETTINGS_TABS, type Tab as SettingsTab } from ".
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { VoicePill } from "./components/VoicePill";
+import { KuruDrawer } from "./components/KuruDrawer";
+import { closeKuru, kuruLive, openKuru, toggleKuru, useKuruDrawer } from "./kuru";
 import type { VoiceGlobalState } from "./desktop";
 import { installSpeech, installTalkKey, setSpeechVolume, setVoiceProfile, setVoiceRemote, talkDown, talkUp, useVoiceUi } from "./voice";
 import { DEFAULT_VOICE, keyCodeLabel } from "../../shared/voice";
@@ -204,8 +206,17 @@ function resumeSettings(): SettingsTab | null {
 }
 
 export function App() {
-  const { snapshot, connected, projects, voice, machines } = useKururu();
+  const { snapshot, connected, projects, voice, machines, kuru } = useKururu();
   const voiceUi = useVoiceUi();
+  /**
+   * The Kuru drawer: open or not, and the reply to open at. Module state
+   * (`kuru.ts`) rather than a flag here, because the pill, the chip, the
+   * harness key and the desktop bridge all open it, and not all of them are
+   * under this component.
+   */
+  const kuruDrawer = useKuruDrawer();
+  /** A card a reply of Kuru's named, clicked: the profile board opens at it. */
+  const [boardShow, setBoardShow] = useState<{ workspaceId: string | null; cardId: string } | null>(null);
 
   /**
    * Whether the window is narrow enough that the sidebar stops being a column
@@ -366,6 +377,8 @@ export function App() {
     () => (snapshot && workspace ? mascotFor(snapshot.mascots, workspace.mascotId) : null),
     [snapshot, workspace],
   );
+  /** This profile's conversation, as the server last sent it. */
+  const kuruHere = useMemo(() => kuru.find((c) => c.profileId === profile?.id) ?? null, [kuru, profile?.id]);
 
   /**
    * Wear whatever the server says. The chrome's tokens go onto the root element
@@ -470,6 +483,25 @@ export function App() {
   useEffect(() => {
     if (narrow) setFilesSheet(false);
   }, [narrow]);
+
+  /**
+   * One sheet at a time on a phone: the drawer opening puts the sidebar and
+   * the tree away, as the board does. On a desktop it is a panel beside
+   * them and nothing moves.
+   */
+  useEffect(() => {
+    if (!narrow || !kuruDrawer.open) return;
+    setSidebarOpen(false);
+    setFilesSheet(false);
+  }, [narrow, kuruDrawer.open]);
+
+  /**
+   * The desktop asking for the drawer: the floating pill was clicked, or the
+   * menu bar's Open. The bridge answers at once with an ask that arrived
+   * before this page was listening, so a window opened for the purpose opens
+   * on it.
+   */
+  useEffect(() => desktop()?.onOpenKuru?.((focus, toggle) => (toggle ? toggleKuru(focus) : openKuru(focus))), []);
 
   const resizeFiles = useCallback((px: number) => {
     setFilesWidth(Math.round(Math.min(FILES_MAX, Math.max(FILES_MIN, px))));
@@ -709,8 +741,11 @@ export function App() {
           return api.openReader();
         case "open-board":
           return api.openBoard();
+        // The harness key opens the conversation, not the terminal: the
+        // drawer is where the conversation is, and Terminal is a button in its
+        // header for the times the pty itself is wanted.
         case "open-harness":
-          return api.openHarness();
+          return toggleKuru();
         case "toggle-sidebar":
           return setSidebarOpen((open) => !open);
         case "toggle-files":
@@ -1055,6 +1090,16 @@ export function App() {
         return;
       }
 
+      // The Kuru drawer is not modal — you type to an agent while reading
+      // what Kuru said about it — so only Escape is its, and not from inside
+      // its composer, where Escape is the composer's own way out: it gives
+      // the keyboard back, and the next Escape closes the drawer.
+      if (kuruDrawer.open && keyName(event) === "escape" && !(event.target instanceof HTMLElement && event.target.closest(".kuru-composer"))) {
+        take();
+        closeKuru();
+        return;
+      }
+
       /**
        * Resize mode is modal over the ptys but not over the prefix: hjkl push
        * the divider until esc or enter, and the prefix arms out of it, the way
@@ -1146,7 +1191,7 @@ export function App() {
 
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [prefixArmed, resizeMode, dialog, editing, help, settings, reach, profileMenu, profileBoard, databasesFor, workspace, keymap, run, arm, disarm]);
+  }, [prefixArmed, resizeMode, dialog, editing, help, settings, reach, profileMenu, profileBoard, databasesFor, kuruDrawer.open, workspace, keymap, run, arm, disarm]);
 
   /**
    * A file dropped anywhere that is not a terminal does nothing.
@@ -1244,7 +1289,6 @@ export function App() {
           onPrompt={setDialog}
           onSettings={() => setSettings("appearance")}
           onReach={() => setReach(true)}
-          onHarness={() => api.openHarness()}
           onBoard={() => {
             setProfileBoard(true);
             // On a phone the sidebar is a screen of its own, and the board goes
@@ -1352,12 +1396,45 @@ export function App() {
           talk={{ phase: voiceUi.phase, key: keyCodeLabel(voice?.settings.talkKey ?? DEFAULT_VOICE.talkKey) }}
           onTalkDown={talkDown}
           onTalkUp={talkUp}
+          kuru={{
+            live: kuruLive(profile, agents, kuruHere, voiceUi.phase === "speaking"),
+            unheard: kuruHere?.unheard ?? 0,
+            undelivered: kuruHere?.undelivered ?? 0,
+            open: kuruDrawer.open,
+            mascot,
+          }}
+          onKuru={toggleKuru}
         />
       </div>
 
       {/* Over everything, zen included: a microphone that is open must say so
           wherever the status bar has gone. See `VoicePill.tsx`. */}
       <VoicePill />
+
+      {/* The conversation with Kuru, over the panes on a desktop and the whole
+          screen on a phone. Not dimmed behind, because you read Kuru's answer
+          while watching the agent it talks about. See `KuruDrawer.tsx`. */}
+      {kuruDrawer.open && (
+        <KuruDrawer
+          profile={profile}
+          agents={agents}
+          mascot={mascot}
+          sheet={narrow}
+          focus={kuruDrawer.focus}
+          asked={kuruDrawer.asked}
+          onClose={closeKuru}
+          onEditing={setEditing}
+          onTerminal={() => {
+            api.openHarness();
+            if (narrow) closeKuru();
+          }}
+          onCard={(workspaceId, cardId) => {
+            setBoardShow({ workspaceId, cardId });
+            setProfileBoard(true);
+            if (narrow) closeKuru();
+          }}
+        />
+      )}
 
       {filesOpen && !zen && workspace && (
         <FileTree
@@ -1379,7 +1456,16 @@ export function App() {
       )}
 
       {help && <HelpOverlay keymap={keymap} onClose={() => setHelp(false)} />}
-      {profileBoard && <ProfileBoard profile={profile} onClose={() => setProfileBoard(false)} />}
+      {profileBoard && (
+        <ProfileBoard
+          profile={profile}
+          show={boardShow}
+          onClose={() => {
+            setProfileBoard(false);
+            setBoardShow(null);
+          }}
+        />
+      )}
       {databasesFor && (
         <Databases
           workspaceId={databasesFor}

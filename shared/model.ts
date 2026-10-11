@@ -554,6 +554,13 @@ export function isWorkspaceColor(value: unknown): value is WorkspaceColor {
 /** One split tree with a name. What prefix+1..9 switch between. */
 export interface Workspace {
   id: string;
+  /**
+   * How the store knows this workspace across cold starts, when `id` is a
+   * counter minted afresh on each — see `shared/store.ts`. Minted once when
+   * the workspace is made, written to the layout file and the blob as
+   * `loginKey` is, and never changed. Boards hang off it, never off `id`.
+   */
+  key: string;
   name: string;
   layout: LayoutNode;
   focusedPaneId: string;
@@ -709,6 +716,11 @@ export interface Profile {
    * never as somebody else.
    */
   loginKey: string;
+  /**
+   * The profile's key for the store, on `Workspace.key`'s reasoning — and
+   * not `loginKey`, which two profiles may share. See `shared/store.ts`.
+   */
+  key: string;
   workspaces: Workspace[];
   /**
    * Cards that belong to the profile rather than to any one workspace — the

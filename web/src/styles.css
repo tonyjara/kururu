@@ -174,13 +174,14 @@
   --icon-fold: "⊟";
   --icon-unfold: "⊞";
   --icon-terminal: "❯";
+  --icon-more: "⋯";
 
   /* The icon strip a skin may bring instead of glyphs — every icon as one
      picture of `--icon-n` cells. `none` is the drawing. `--icon-n` is a
      constant the stylesheet needs for the arithmetic and is not a skin's to
      move: it is `ICON_NAMES.length`, and the test holds the two together. */
   --icon-sheet: none;
-  --icon-n: 26;
+  --icon-n: 27;
 
   /* ----------------------------------------------------------------------
      The parts: what a skin *paints*, three properties per region.
@@ -315,6 +316,7 @@
 .icon-fold { --icon-svg: var(--icon-fold-svg); --icon-glyph: var(--icon-fold); --icon-i: 23; }
 .icon-unfold { --icon-svg: var(--icon-unfold-svg); --icon-glyph: var(--icon-unfold); --icon-i: 24; }
 .icon-terminal { --icon-svg: var(--icon-terminal-svg); --icon-glyph: var(--icon-terminal); --icon-i: 25; }
+.icon-more { --icon-svg: var(--icon-more-svg); --icon-glyph: var(--icon-more); --icon-i: 26; }
 /* An icon strip, when a skin brought one: every icon is one cell of a single
    picture, `--icon-n` cells across, and `--icon-i` on each class says which.
    The strip is scaled so one cell is exactly the icon's box — which is what
@@ -358,7 +360,8 @@
 :root[data-glyphs~="panel"] .icon-panel::before,
 :root[data-glyphs~="fold"] .icon-fold::before,
 :root[data-glyphs~="unfold"] .icon-unfold::before,
-:root[data-glyphs~="terminal"] .icon-terminal::before {
+:root[data-glyphs~="terminal"] .icon-terminal::before,
+:root[data-glyphs~="more"] .icon-more::before {
   content: var(--icon-glyph);
   width: auto;
   height: auto;
@@ -670,85 +673,6 @@ kbd {
 .profile-board-count {
   font-variant-numeric: tabular-nums;
 }
-/* The harness button is lit while its session runs: the same ink the working
-   badge uses, so "somebody is home" reads the way it does everywhere else. */
-.profile-harness-live {
-  color: var(--working);
-}
-/* The harness button and, on its corner, the count of what Kuru said that
-   nobody heard to the end. A button of its own: the harness button goes to the
-   harness, and this goes to the list. In the accent, because it is the one
-   thing on the header that is news. */
-.profile-harness {
-  position: relative;
-  display: inline-flex;
-  flex: none;
-}
-.profile-missed {
-  -webkit-app-region: no-drag;
-  position: absolute;
-  top: -5px;
-  right: -6px;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 4px;
-  border-radius: var(--radius-round);
-  background: var(--accent);
-  color: var(--on-accent);
-  font-size: var(--fs-sm);
-  font-weight: 700;
-  line-height: 15px;
-  font-variant-numeric: tabular-nums;
-}
-:root[data-narrow] .profile-missed {
-  top: -2px;
-  right: -4px;
-  min-width: 18px;
-  height: 18px;
-  line-height: 18px;
-  font-size: var(--fs-base);
-}
-/* Your messages to Kuru, on the bottom corner: the other way round from the
-   count above it. A dot in the done ink once they all arrived, the working
-   ink while one is on its way, and a count on the danger button's ground
-   when some did not get through — the one state that asks something of you. */
-.profile-said {
-  -webkit-app-region: no-drag;
-  position: absolute;
-  bottom: -3px;
-  right: -4px;
-  min-width: 9px;
-  height: 9px;
-  padding: 0;
-  border-radius: var(--radius-round);
-  background: var(--done);
-  font-size: var(--fs-xs);
-  font-weight: 700;
-  line-height: 13px;
-  font-variant-numeric: tabular-nums;
-}
-.profile-said-moving {
-  background: var(--working);
-}
-.profile-said-failed {
-  bottom: -5px;
-  right: -6px;
-  min-width: 13px;
-  height: 13px;
-  padding: 0 3px;
-  background: var(--danger-bg);
-  color: var(--on-danger);
-}
-:root[data-narrow] .profile-said {
-  min-width: 12px;
-  height: 12px;
-}
-:root[data-narrow] .profile-said-failed {
-  min-width: 18px;
-  height: 18px;
-  line-height: 18px;
-  font-size: var(--fs-base);
-}
 :root[data-narrow] .profile-board-btn {
   min-width: 36px;
   min-height: 36px;
@@ -911,18 +835,17 @@ kbd {
 }
 
 /**
- * The workspace list is one grid and every row is a slice of it: the name in
- * the first column, the colour in the second, so the swatches stand in one
- * column down the list whatever the names are.
+ * The workspace list is a column of rows, and each row is a grid of its own:
+ * the name, and the ⋯ after it — see `.ws-item`.
  *
- * `minmax(0, 1fr)` on the name's track rather than `1fr`, because an `fr`
- * floors at its content: one `feature/the-whole-sentence` on the branch line
- * would push the grid wider than the sidebar instead of being clipped by it,
- * and it is the whole list that would widen rather than the one row.
+ * `minmax(0, 1fr)` on the track rather than `1fr`, because an `fr` floors at
+ * its content: one long git error on the row's second line would push
+ * the grid wider than the sidebar instead of being clipped by it, and it is the
+ * whole list that would widen rather than the one row.
  */
 .ws-list {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
 }
 .ws-list li,
@@ -941,7 +864,14 @@ kbd {
    of how the sidebar says which agents belong to which workspace. It replaced a
    10×3px mark tucked under the number, which was a tag you had to already know
    was there; a rail the height of the row is the one thing on a list of a dozen
-   that can be read without reading. */
+   that can be read without reading.
+
+   Its two columns are its own. They were a `subgrid` slice of the list's, so
+   the git and database buttons stood in one column down it whatever the names;
+   a ⋯ drawn on one row at a time has nothing to line up with, and a shared
+   track would take its width from every name in the list each time the pointer
+   crossed a row. Its own, only the row under the pointer gives way, and only
+   when its name was long enough to reach. */
 .ws-list .ws-item {
   position: relative;
   /* The whole row switches workspace, not just the name's line — see the
@@ -951,7 +881,7 @@ kbd {
   cursor: var(--cursor-pointer);
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: subgrid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   border-left: var(--border-thick) var(--border-style) var(--tag, transparent);
   border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
@@ -970,18 +900,37 @@ kbd {
   color: var(--dim);
 }
 
-/* The branch, under the name and starting where the name starts — past the
-   number, so the number stays the only thing in its column. The 26px is the
-   row's own padding, the number's width and the gap after it. `min-width: 0` is
-   what makes the ellipsis work at all: a grid item will not shrink below its
-   content without it, and a long name would be clipped by the window rather
-   than by its own column. */
-.ws-branch {
+/* What the main checkout has not finished, at the end of the name's line —
+   see `GitMarks`. Pushed to the end by its margin, so the name keeps every
+   pixel up to it and clips there; the ⋯ shows past it on hover, and only that
+   row's name gives way. Uncommitted in the "wants a human" colour, because it
+   is exactly that; the arrows in the accent, because they are only drift. */
+.ws-marks {
+  flex: none;
+  display: inline-flex;
+  gap: 5px;
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+.ws-mark-dirty {
+  color: var(--blocked);
+}
+.ws-mark-moved {
+  color: var(--accent);
+}
+
+/* The row's second line, when it has one — what a git verb came to, or where
+   a pinned workspace's shells open. Under the name and starting where the
+   name starts. `min-width: 0` is what makes the ellipsis work at all: a grid
+   item will not shrink below its content without it, and a long line would
+   be clipped by the window rather than by its own column. */
+.ws-note {
   grid-column: 1 / -1;
   grid-row: 2;
   min-width: 0;
   margin-top: -4px;
-  padding: 0 8px 5px 26px;
+  padding: 0 8px 5px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -989,46 +938,30 @@ kbd {
   font-size: var(--fs-sm);
   color: var(--dimmer);
 }
-.ws-list li:hover .ws-branch {
+.ws-list li:hover .ws-note {
   color: var(--dim);
 }
 /* With a mascot column in the list the name starts one badge and one gap
-   further in, and the branch follows it there rather than sitting under the
-   sprite: 26px as above, plus the 16px badge and the row's 8px gap. */
-.ws-list-mascots .ws-branch {
-  padding-left: 50px;
-}
-/* Detached: a sha, a tag, or the middle of a rebase. Said rather than hidden,
-   because it is exactly the state in which somebody commits work and then
-   cannot find it — and said in the colour the rest of the window uses for
-   "this wants a human" rather than in red, because it is not an error. */
-.ws-branch-off,
-.ws-list li:hover .ws-branch-off {
-  color: var(--blocked);
-  font-style: italic;
+   further in, and the line follows it there rather than sitting under the
+   sprite: the row's 8px, the 16px badge and the row's 8px gap. */
+.ws-list-mascots .ws-note {
+  padding-left: 32px;
 }
 
-/* The main checkout's git, where the colour swatch was — the rail is still
-   the colour's display, and the row's menu is still the way to change it. Quiet
-   when there is nothing to do; in the "wants a human" colour when there are
-   uncommitted changes, because that is exactly what it is; in the accent when
-   the tree is clean but the branch and its upstream have drifted apart. */
-/* The row's buttons, at the end of the name's line: databases, then git. One
-   cell of the row's grid rather than one per button, so a second button does
-   not need a third column that every row without it would leave empty. */
-.ws-tools {
+/* The row's ⋯, at the end of the name's line, where the git and database
+   buttons were. Out of the way until the pointer is on the row: `display:
+   none` rather than transparent, so a long name has the whole line until then.
+   Kept up while its menu is open — the menu's backdrop takes the hover off the
+   row — and while a git verb from it is still running, and for a keyboard on
+   the row, which has no pointer to bring it. A click leaves the row's button
+   focused, which is why that last is `:focus-visible` and not `:focus-within`:
+   the ⋯ would otherwise stay on whichever row was clicked last. */
+.ws-more {
   grid-column: 2;
   grid-row: 1;
-  justify-self: end;
-  display: inline-flex;
+  display: none;
   align-items: center;
-  gap: 2px;
   margin-right: 4px;
-}
-.ws-git,
-.ws-db {
-  display: inline-flex;
-  align-items: center;
   padding: 2px;
   border: none;
   border-radius: var(--radius-sm);
@@ -1037,32 +970,36 @@ kbd {
   color: var(--dimmer);
   font-size: var(--fs-sm);
 }
-.ws-git:hover,
-.ws-git:focus-visible,
-.ws-db:hover,
-.ws-db:focus-visible {
+.ws-list .ws-item:hover .ws-more,
+.ws-list .ws-item:has(:focus-visible) .ws-more,
+.ws-more-open,
+.ws-more-busy {
+  display: inline-flex;
+}
+.ws-more:hover,
+.ws-more:focus-visible,
+.ws-more-open {
   outline: none;
   background: var(--chrome-high);
   color: var(--dim);
 }
-.ws-git-moved,
-.ws-git-moved:hover,
-.ws-git-moved:focus-visible {
-  color: var(--accent);
-}
-.ws-git-dirty,
-.ws-git-dirty:hover,
-.ws-git-dirty:focus-visible {
-  color: var(--blocked);
-}
-.ws-git-busy {
+.ws-more-busy {
   cursor: progress;
   opacity: 0.5;
 }
+/* A touch screen has no hover to wait for, so the ⋯ is on every row there, as
+   a tab's ✕ is. Not only the row you are in: on a phone, tapping a row goes
+   to that workspace and puts the sidebar away, so a ⋯ that needed the row
+   tapped first would be a menu two trips away. */
+@media (hover: none) {
+  .ws-more {
+    display: inline-flex;
+  }
+}
 
-/* What the git button's last verb came to, in the branch line's place until it
-   is clicked away. A button because it is dismissed by pressing it; styled as
-   the line it stands in for, so the row does not change shape to say it. */
+/* What the last git verb from the ⋯ came to, as the row's second line until
+   it is clicked away. A button because it is dismissed by pressing it; styled
+   as the line, which a pinned workspace's place stands aside for. */
 .ws-said {
   border: none;
   background: none;
@@ -1084,18 +1021,6 @@ kbd {
 }
 .ws-row-on {
   color: var(--text);
-}
-.ws-row-on .ws-index {
-  color: var(--accent);
-}
-
-/* The number is the shortcut. A key you cannot see is a key you do not press. */
-.ws-index {
-  font-family: var(--mono);
-  font-size: var(--fs-sm);
-  color: var(--dimmer);
-  width: 10px;
-  flex: none;
 }
 .ws-name {
   font-size: var(--fs-md);
@@ -2095,8 +2020,8 @@ a.machine-name:hover {
 :root[data-narrow] .side-section h2 .mini {
   transform: translateX(calc(50% - 9px));
 }
-:root[data-narrow] .ws-git {
-  padding: 4px;
+:root[data-narrow] .ws-more {
+  padding: 6px;
   font-size: var(--fs-md);
 }
 
@@ -2583,10 +2508,24 @@ a.button {
   background: var(--strip);
   flex: none;
   overflow-x: auto;
-  scrollbar-width: none;
+  /* Visible rather than `none`: the strip is the only way to the `+` once the
+     tabs outgrow it, and a scrollbar you cannot see is a control you cannot
+     find. Thin, and coloured like every other line in the chrome. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
 }
 .tabstrip::-webkit-scrollbar {
-  display: none;
+  height: 6px;
+}
+.tabstrip::-webkit-scrollbar-track {
+  background: transparent;
+}
+.tabstrip::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: var(--radius-sm);
+}
+.tabstrip::-webkit-scrollbar-thumb:hover {
+  background: var(--line-high);
 }
 
 .tab {
@@ -2621,6 +2560,25 @@ a.button {
   font-family: var(--mono);
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* An agent on another machine: the machine's name beside its own, in the tab
+   and in the sidebar row. Outlined rather than filled, because it is a fact
+   about where the agent is and not a state of it — the dot beside it is the
+   state, and a second filled shape would read as a second status. The tooltip
+   is where it says what kururu cannot know from here. */
+.remote-mark {
+  flex: none;
+  max-width: 10ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 0.4em;
+  border: var(--border) var(--border-style) var(--line-high);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--dim);
 }
 
 /* A tab's name as a field, where the name was — the sidebar's rename at the
@@ -2679,12 +2637,42 @@ a.button {
   }
 }
 
+/* Pinned beside `.tab-actions` rather than inside it, so a pane with room to
+   spare still shows it right after the last tab — grouping it with the pane's
+   own controls would drag it all the way to the far edge even when nothing has
+   overflowed yet. Sticky rather than absolute: with room to spare there is
+   nothing to stick to, and it sits exactly where it always has.
+
+   `right` is `--actions-w`, `.tab-actions`'s own width, with no fallback of
+   its own: that width is a skin's button size and, on a solo pane, a "2/3" of
+   varying length, so it is read off the box in `Panes.tsx` rather than written
+   down a second time here where it could fall out of step. */
 .tab-new {
   display: flex;
   align-items: center;
   color: var(--dimmer);
   padding: 3px 7px;
   font-size: var(--fs-md);
+  position: sticky;
+  right: var(--actions-w);
+  flex: none;
+  background: var(--strip);
+}
+.pane-on .tab-new {
+  background: var(--chrome-high);
+}
+.tab-new::before {
+  content: "";
+  position: absolute;
+  right: 100%;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  background: linear-gradient(to right, transparent, var(--strip));
+  pointer-events: none;
+}
+.pane-on .tab-new::before {
+  background: linear-gradient(to right, transparent, var(--chrome-high));
 }
 
 .tab-spacer {
@@ -3212,6 +3200,101 @@ a.button {
   color: var(--dim);
 }
 
+/* Kuru's chip, beside the mic: the one door onto the drawer, and the one
+   place its news is. Each control has one subject — the mic is you, the chip
+   is Kuru — which is the rule that replaced the counts on the old bot
+   button's corners. Quiet, it is a dim dot and the word; thinking, the
+   mascot hops in it; speaking, the speaker glyph in the working ink; asking,
+   the blocked ink and the word; off, a hollow dot and the word. News is text
+   inside the chip and never a corner: an accent count with the speaker for
+   unheard replies, a red one with the mic for messages that did not get
+   through. In flight and all delivered are not news and get no mark. */
+.sb-kuru {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px 0 5px;
+  border-radius: var(--radius-md);
+  color: var(--dimmer);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  flex: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.sb-kuru:hover,
+.sb-kuru-on {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+.sb-kuru-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.sb-kuru-mark svg {
+  width: 14px;
+  height: 14px;
+}
+.sb-kuru-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-round);
+  background: currentColor;
+}
+.sb-kuru-asking {
+  color: var(--blocked);
+}
+.sb-kuru-speaking {
+  color: var(--working);
+}
+.sb-kuru-off .sb-kuru-dot {
+  background: transparent;
+  border: var(--border) var(--border-style) currentColor;
+}
+.sb-kuru-word {
+  font-weight: 500;
+}
+.sb-kuru-news {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 15px;
+  padding: 0 5px;
+  /* `--radius-round` is 50%, which ellipses rather than rounds once the icon
+     and a second digit widen this past its height — `--radius-md` is the same
+     corner `.sb-kuru` and `.sb-badge` wear, so icon and count read as one chip
+     at any width instead of a circle stretched to fit them. */
+  border-radius: var(--radius-md);
+  line-height: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.sb-kuru-news svg {
+  width: 11px;
+  height: 11px;
+}
+.sb-kuru-unheard {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.sb-kuru-failed {
+  background: var(--danger-bg);
+  color: var(--on-danger);
+}
+/* A thumb's height on a phone, and the word dropped: the marks are the news. */
+:root[data-narrow] .sb-kuru {
+  height: 28px;
+  padding: 0 8px;
+  color: var(--dim);
+}
+:root[data-narrow] .sb-kuru-name {
+  display: none;
+}
+
 /* The pill: a level meter and a line, floating over the panes above the
    status bar. See `VoicePill.tsx` for why it is a meter first and words
    second. The bars' scale is an inline transform the component sets thirty
@@ -3270,8 +3353,12 @@ a.button {
    In flow rather than fixed, so the page is exactly the pill and the main
    process sizes the panel to it; the room around it is for its shadow, and the
    page behind it is clear so the panel is only the pill. Dragging it moves the
-   window, which is Electron's app-region, and the ✕ is carved out of that
-   region or it could never be pressed. */
+   window, which is Electron's app-region, and a draggable region ignores
+   every pointer event that lands in it — not only the ones that become a
+   drag — so the ✕ and the words (`openHarness`, on a click) are both carved
+   out of it as `no-drag`, or neither could ever be pressed. What is left
+   draggable is the meter and the pill's own padding, which is enough to move
+   it by. */
 html.pill-page,
 html.pill-page body,
 html.pill-page #root {
@@ -3291,6 +3378,19 @@ html.pill-page #root {
 }
 .voice-pill-floating .voice-close {
   -webkit-app-region: no-drag;
+}
+.voice-pill-floating .voice-words {
+  -webkit-app-region: no-drag;
+  cursor: pointer;
+}
+/* The tray's Reset showing where the panel went (`PillHere` in `Pill.tsx`):
+   a pill with nothing to say, in the accent rather than a phase's colour so
+   it is never read as listening. */
+.voice-pill-here {
+  border-color: var(--accent);
+}
+.voice-pill-here .voice-bar {
+  background: var(--accent);
 }
 .voice-pill-listening {
   border-color: var(--danger);
@@ -3348,30 +3448,6 @@ html.pill-page #root {
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
-}
-/* Your last message, under Kuru's words while Kuru speaks: a reply that
-   waited for you must never be the only thing the pill says. */
-.voice-mine {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: var(--fs-sm);
-  color: var(--working);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.voice-mine svg {
-  flex: none;
-}
-.voice-mine-saving {
-  color: var(--blocked);
-}
-.voice-mine-delivered {
-  color: var(--done);
-}
-.voice-mine-failed {
-  color: var(--danger);
 }
 /* Its ✕, which ends whatever the pill is saying — Kuru's sentence and the
    rest of the reply, or the clip being recorded. Pulled into the pill's
@@ -3675,113 +3751,339 @@ html.pill-page #root {
   padding-top: 7px;
 }
 
-/* The missed replies behind the harness button's badge: the menu's box, with
-   words to read in it rather than items to pick. Each reply is whole — it is
-   there to be read — and the list scrolls when there are many. */
-.missed {
-  width: min(340px, calc(100vw - 16px));
-}
-.missed-list {
-  margin: 0;
-  padding: 2px 4px;
-  list-style: none;
-  max-height: min(360px, 60vh);
-  overflow-y: auto;
-}
-.missed-item {
+/* --------------------------------------------------------------------------
+   The Kuru drawer
+   -------------------------------------------------------------------------- */
+
+/* The conversation with Kuru, over the panes: a panel on the right edge, the
+   height of the window above the status bar, and nothing dimmed behind it —
+   you read Kuru's answer while watching the agent it talks about. See
+   `KuruDrawer.tsx` for why a panel and not a column. Above the sidebar as an
+   overlay (40) and under the dialogs (50): a card opened from a reply draws
+   its sheet over this. */
+.kuru-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: var(--bar-h);
+  width: min(420px, 100%);
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 5px 4px;
+  min-height: 0;
+  background: var(--chrome);
+  border-left: var(--border) var(--border-style) var(--line);
+  box-shadow: var(--elev-menu);
+  z-index: 45;
 }
-.missed-item + .missed-item {
+.app-zen .kuru-drawer {
+  bottom: 0;
+}
+/* On a phone it is the screen, like the board and the databases. */
+.kuru-sheet {
+  inset: 0;
+  width: 100%;
+  border-left: none;
+  box-shadow: none;
+}
+.kuru-head {
+  -webkit-app-region: no-drag;
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  padding: 8px 8px 6px 12px;
+  border-bottom: var(--border) var(--border-style) var(--line);
+}
+.kuru-head .dialog-title {
+  margin: 0;
+}
+.kuru-head-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--working);
+}
+/* What Kuru is doing, in a word, in the status inks the agents' badges use. */
+.kuru-head-state {
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.kuru-head-state-thinking,
+.kuru-head-state-speaking {
+  color: var(--working);
+}
+.kuru-head-state-asking {
+  color: var(--blocked);
+}
+.kuru-head-state-off {
+  color: var(--dimmer);
+}
+.kuru-head-spacer {
+  flex: 1;
+}
+.kuru-head-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--radius-md);
+  border: var(--border) var(--border-style) var(--line);
+  color: var(--dim);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+.kuru-head-btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--line-high);
+  background: var(--chrome-high);
+}
+.kuru-head-btn:disabled {
+  opacity: 0.5;
+}
+.kuru-close {
+  margin-left: 0;
+  width: 28px;
+  height: 28px;
+}
+:root[data-narrow] .kuru-close {
+  width: 36px;
+  height: 36px;
+}
+/* The quiet mark: a dot, filled in the blocked ink when Kuru is asking and
+   hollow when it is not running — exited is an absence, as `.status-exited`
+   draws it. */
+.kuru-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-round);
+  background: var(--dimmer);
+  flex: none;
+}
+.kuru-dot-asking {
+  background: var(--blocked);
+}
+.kuru-dot-off {
+  background: transparent;
+  border: var(--border) var(--border-style) var(--dimmer);
+}
+
+/* The timeline, oldest at the top. A column with gaps rather than a list
+   with rules, so a message and its reply read as a pair. */
+.kuru-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 8px 12px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.kuru-earlier {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 4px;
+}
+/* A new session began here. */
+.kuru-mark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  font-size: var(--fs-xs);
+  color: var(--dimmer);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.kuru-mark::before,
+.kuru-mark::after {
+  content: "";
+  flex: 1;
   border-top: var(--border) var(--border-style) var(--line);
 }
-.missed-at {
+.kuru-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 10px;
+  border-radius: var(--radius-lg);
+}
+/* Yours sit to the right on a tinted ground; Kuru's to the left on none. The
+   glyph in the meta line says the same thing again, because which way the
+   words went is the one thing a line must not get wrong. */
+.kuru-you {
+  align-self: flex-end;
+  max-width: 92%;
+  background: var(--chrome-high);
+}
+.kuru-reply {
+  align-self: stretch;
+  padding-left: 0;
+}
+/* An unheard reply wears a rule in the accent, the colour the chip counts
+   it in; the one the pill was showing when it was tapped is lit for a
+   moment so the eye finds it. */
+.kuru-fate-unheard {
+  box-shadow: inset var(--border-thick) 0 0 var(--accent);
+  padding-left: 10px;
+}
+.kuru-marked {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.kuru-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--fs-sm);
   color: var(--dimmer);
   font-variant-numeric: tabular-nums;
 }
-.missed-text {
-  font-size: var(--fs-md);
-  color: var(--text);
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-.missed-actions {
-  display: flex;
-  gap: 4px;
-  margin-top: 4px;
-  padding-top: 4px;
-  border-top: var(--border) var(--border-style) var(--line);
-}
-.missed-actions .menu-item {
-  flex: 1;
-  align-items: center;
-  justify-content: center;
-}
-/* The two lists in that box, each headed by which way the words went: a
-   microphone over yours, a speaker over Kuru's. */
-.voice-list + .voice-list {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: var(--border-thick) var(--border-style) var(--line);
-}
-.voice-list-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  padding: 4px 8px 2px;
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  color: var(--dim);
-}
-.voice-list-head svg {
+.kuru-meta svg {
   flex: none;
+  width: 13px;
+  height: 13px;
 }
-.said-meta {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-/* What became of a message of yours, in the status inks the agents' badges
-   use: the same word means the same colour everywhere. */
-.said-state {
-  font-size: var(--fs-sm);
+/* What became of a line, in the status inks the agents' badges use: the same
+   word means the same colour everywhere. */
+.kuru-state {
   font-weight: 700;
   color: var(--working);
 }
-.said-state-recording,
-.said-state-failed {
+.kuru-state-recording,
+.kuru-state-failed {
   color: var(--danger);
 }
-.said-state-saving {
+.kuru-state-saving,
+.kuru-state-transcribing {
   color: var(--blocked);
 }
-.said-state-delivered {
-  color: var(--done);
+.kuru-state-unheard {
+  color: var(--accent);
 }
-.said-pending {
+.kuru-state-speaking {
+  color: var(--working);
+}
+.kuru-text {
+  margin: 0;
   font-size: var(--fs-md);
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* A line said mid-turn through the say tool, smaller: an aside, not an answer. */
+.kuru-aside .kuru-text {
+  font-size: var(--fs-base);
+  color: var(--dim);
+}
+.kuru-pending {
   color: var(--dimmer);
   font-style: italic;
 }
-.said-note {
+.kuru-note {
+  margin: 0;
   font-size: var(--fs-sm);
   color: var(--dim);
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
-.said-actions {
+.kuru-actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   margin-top: 2px;
 }
-.said-actions .menu-item {
+/* A card code in a reply is a door onto the board, in the mono face for the
+   branch line's reason: it makes a word that could be anything read as a
+   name. */
+.kuru-card {
+  display: inline;
+  padding: 0 3px;
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.kuru-card:hover {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+/* What Kuru is doing now, at the foot of the list. */
+.kuru-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+  font-size: var(--fs-base);
+  color: var(--dim);
+}
+.kuru-live-asking {
+  color: var(--blocked);
+}
+
+/* Typing to Kuru, and the mic beside it — the status bar's, for a thumb that
+   is already here. Clear of the home indicator for the status bar's reason:
+   on a phone the sheet is the bottom edge of the window. */
+.kuru-composer {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 8px 10px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+  border-top: var(--border) var(--border-style) var(--line);
+}
+.kuru-field {
   flex: 1;
+  min-width: 0;
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  resize: none;
+  border-radius: var(--radius-md);
+  border: var(--border) var(--border-style) var(--line);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-md);
+  line-height: 1.4;
+}
+.kuru-field:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.kuru-send,
+.kuru-mic {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-md);
+  color: var(--dim);
+  flex: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.kuru-send:hover:not(:disabled),
+.kuru-mic:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+.kuru-send:disabled {
+  opacity: 0.4;
+}
+.kuru-mic-listening,
+.kuru-mic-listening:hover {
+  color: var(--on-danger);
+  background: var(--danger-bg);
 }
 
 .help-list {
@@ -4667,7 +4969,7 @@ html.pill-page #root {
   gap: 8px;
   padding: 10px 12px;
   border: var(--border) var(--border-style) var(--line);
-  border-left: 3px solid transparent;
+  border-left: var(--border-thick) var(--border-style) transparent;
   border-radius: var(--radius-xl);
   background: var(--chrome-high);
 }
@@ -5965,6 +6267,32 @@ html.pill-page #root {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+}
+
+/* The body and its toggle, as one column: a card whose text does not clamp
+   never grows this wrapper's gap, because the toggle is absent entirely
+   rather than hidden. */
+.board-card-body-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--radius-sm);
+}
+/* Read in full, in place — the same paint as the clamped paragraph, just not
+   cut off. `display: block` is what drops the clamp: `-webkit-line-clamp`
+   only does anything inside `display: -webkit-box`. */
+.board-card-body.board-card-body-open {
+  display: block;
+  overflow: visible;
+}
+.board-card-more {
+  padding: 0;
+  font-size: var(--fs-xs);
+  color: var(--dimmer);
+  cursor: var(--cursor-pointer);
+}
+.board-card-more:hover {
+  color: var(--text);
 }
 
 /* When the card is for. Its ink is which side of today that is — the accent
@@ -8475,4 +8803,115 @@ html.pill-page #root {
 }
 :root[data-narrow] .db-grid td {
   max-width: 240px;
+}
+/* ---------------------------------------------------------------------------
+   The database: the search over every board, and the Backups and Data pages
+   --------------------------------------------------------------------------- */
+
+/* The search row sits between the sheet's bar and its columns, and its
+   results take the room the columns would — a list, not a board, because a
+   hit from a conversation has no column to be drawn in. */
+.board-search {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 8px 6px;
+  max-height: min(50vh, 420px);
+  overflow-y: auto;
+}
+.board-search-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.board-search-field {
+  flex: 1;
+  min-width: 0;
+}
+.board-search-toggle {
+  margin-left: 4px;
+}
+.search-hits {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.search-hit {
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-md);
+  background: var(--chrome-high);
+}
+.search-hit-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: var(--cursor-pointer);
+}
+.search-hit-btn:hover {
+  background: var(--chrome);
+}
+.search-hit-deleted {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 6px 8px;
+}
+.search-hit-deleted .set-choice {
+  margin-left: auto;
+}
+.search-hit-kind {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--dimmer);
+}
+.search-hit-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.search-hit-where {
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.search-hit-snip {
+  font-size: var(--fs-base);
+  color: var(--dim);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.search-none {
+  padding: 6px 8px;
+  font-size: var(--fs-base);
+  color: var(--dim);
+}
+
+/* The two lists on the Backups page: a plain list in a note's voice, each item
+   a path and a reason. */
+.backup-list {
+  margin: 4px 0 8px;
+  padding-left: 18px;
+  line-height: 1.5;
+}
+.backup-list li + li {
+  margin-top: 2px;
+}
+.set-text-short {
+  width: 72px;
+  flex: none;
 }

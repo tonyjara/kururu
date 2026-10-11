@@ -53,6 +53,7 @@ import {
 } from "../../shared/theme";
 import { installBoxDrawing } from "./boxdraw";
 import { type CursorRenderer, installCursorText } from "./cursortext";
+import { type Frames, installFrames } from "./frames";
 import { usableGrid } from "./grid";
 import { BUTTON_NONE, encodeMouse, type MouseModes, mouseModes, WHEEL_DOWN, WHEEL_UP } from "./mouse";
 import { clipboardScanner } from "./osc52";
@@ -713,6 +714,12 @@ interface Pooled {
    */
   measure(): void;
   /**
+   * It went into a pane or came out of one, which decides whether it is
+   * *drawn* — never whether it is fed. See `frames.ts`. A no-op until the
+   * emulator exists, which reads `attached` for itself.
+   */
+  shown(on: boolean): void;
+  /**
    * Wear whatever `palette` and `type` now say. A no-op until the emulator
    * exists, which costs nothing: one built after a theme change reads the same
    * two module variables in its constructor and comes up already wearing it.
@@ -804,6 +811,7 @@ function create(agentId: string): Pooled {
   let unsubscribe = () => {};
   let typed: { dispose(): void } | null = null;
   let observer: ResizeObserver | null = null;
+  let frames: Frames | null = null;
   let settle: ReturnType<typeof setTimeout> | null = null;
 
   // Registered now rather than after `open()`, because being the first capture
@@ -887,6 +895,7 @@ function create(agentId: string): Pooled {
     measure: () => {},
     restyle: () => {},
     applyCursor: () => {},
+    shown: (on) => frames?.show(on),
     focus: () => terminal?.focus(),
     dispose: () => {
       if (disposed) return;
@@ -898,6 +907,7 @@ function create(agentId: string): Pooled {
       unsubscribe();
       typed?.dispose();
       observer?.disconnect();
+      frames?.dispose();
       terminal?.dispose();
       terminal = null;
       element.remove();
@@ -914,7 +924,8 @@ function create(agentId: string): Pooled {
       // Right from the start rather than corrected a beat later: a pane that is
       // not the focused one must never paint a cursor, not even for a frame.
       cursorStyle: entry.showsCursor ? type.cursorStyle : CURSOR_HIDDEN,
-      cursorBlink: type.cursorBlink,
+      // And a blink only where there is a cursor to blink — see `applyCursor`.
+      cursorBlink: entry.showsCursor && type.cursorBlink,
       // History lives on the server too, but only what it has been asked for is
       // sent; this is what the emulator itself keeps once it is open.
       scrollback: 10000,
@@ -999,6 +1010,14 @@ function create(agentId: string): Pooled {
         }),
       });
     }
+    /**
+     * And from here on kururu decides when it paints, rather than the
+     * library's loop painting every frame: only while it is in a pane, and only
+     * when something it draws has changed. That loop was most of the window's
+     * CPU — `frames.ts` has the measurements and the reasons.
+     */
+    frames = installFrames(em);
+    frames.show(entry.attached);
     // The same gate `setFocused` applies, for the emulator that was not there
     // yet when the pane asked. Without it, the very first terminal of a session
     // opens the keyboard on a phone before anybody has touched anything.
@@ -1107,6 +1126,7 @@ function create(agentId: string): Pooled {
         const copied = readClipboard(data);
         if (copied !== undefined && entry.attached) copyFromProgram(copied);
         em.write(data);
+        frames?.wake();
       },
       /**
        * The shape the server says this terminal is. The one place a pooled
@@ -1125,6 +1145,7 @@ function create(agentId: string): Pooled {
         if (cols < 2 || rows < 2) return;
         if (cols === em.cols && rows === em.rows) return;
         em.resize(cols, rows);
+        frames?.wake();
       },
       /**
        * The socket came back. What that costs depends on whether anybody can
@@ -1144,10 +1165,11 @@ function create(agentId: string): Pooled {
        * reset its idea of what changed did not cover cells the renderer was
        * still holding, and the picture stayed wrong exactly where the agent
        * never writes again. This renderer draws the viewport from the WASM
-       * buffer on a loop of its own. It does track dirty rows — the loop passes
-       * `forceAll = false` — but replacing a whole screen dirties a whole
-       * screen, so the repaint follows from the write rather than having to be
-       * asked for. If a backlog ever does land looking half-painted, that is the
+       * buffer on a loop — `frames.ts`'s now, rather than its own. It does
+       * track dirty rows — the loop passes `forceAll = false` — but replacing
+       * a whole screen dirties a whole screen, so the repaint follows from the
+       * write rather than having to be asked for. If a backlog ever does land
+       * looking half-painted, that is the
        * assumption that was wrong, and `restyle` next door is the worked example
        * of the case where it does not hold.
        */
@@ -1238,7 +1260,13 @@ function create(agentId: string): Pooled {
     entry.applyCursor = () => {
       if (disposed) return;
       const want = entry.showsCursor ? (shape?.style ?? type.cursorStyle) : CURSOR_HIDDEN;
-      const blink = shape?.blink ?? type.cursorBlink;
+      /**
+       * A blink only where there is a cursor to blink. An unfocused pane draws
+       * none, blinking or not — and a blinking one still redraws the row
+       * under it on every flip, in every pane, for nothing. Focus coming back
+       * starts it again with the cursor showing, which is also when you look.
+       */
+      const blink = entry.showsCursor && (shape?.blink ?? type.cursorBlink);
       if (em.options.cursorStyle === want && em.options.cursorBlink === blink) return;
       em.options.cursorBlink = blink;
       em.options.cursorStyle = want;
@@ -1361,6 +1389,7 @@ export function borrow(agentId: string, mount: HTMLElement): void {
   // away in the same breath, because nothing had yet said it was on screen.
   entry.attached = true;
   if (entry.element.parentNode !== mount) mount.appendChild(entry.element);
+  entry.shown(true);
   if (fresh) {
     evict();
     announce();
@@ -1383,6 +1412,7 @@ export function release(agentId: string, mount: HTMLElement): void {
   if (!entry || entry.element.parentNode !== mount) return;
   entry.element.remove();
   entry.attached = false;
+  entry.shown(false);
 }
 
 /**

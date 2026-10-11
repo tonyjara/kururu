@@ -1,6 +1,6 @@
 /**
  * The user's other computers: what one is to kururu, how a sample of it is
- * read, and the command line that opens a shell on it.
+ * read, and the command line that opens a shell — or an agent — on it.
  *
  * This began as the VPS row — a machine somebody rents to hold their
  * databases, which they want to glance at from the same sidebar that shows
@@ -41,10 +41,18 @@
  * session. The line is the record because the server forgets everything on a
  * restart and the host never does.
  *
+ * An agent on a machine is the same line with the agent's command typed into
+ * the session instead of a plain prompt, and the CLI's name on the end so the
+ * tab knows what it is. It gets one thing a shell does not: a check, typed
+ * ahead of it, that the CLI is there and signed in (`AGENT_CHECK`), because
+ * "command not found" and a login screen are what a missing one looks like
+ * otherwise, and neither says which machine or what to do about it.
+ *
  * Pure, and in `shared/` rather than beside the ssh call, because the parse
  * and the quoting are the parts worth testing and the wire types are the part
  * both halves import.
  */
+import { AGENT_CLIS, type AgentCli } from "./launchers";
 
 /** One machine as the user entered it. Kept in `~/.config/kururu/vps.json`. */
 export interface MachineEntry {
@@ -248,15 +256,17 @@ export function formatBytes(n: number): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Where a workspace's shells run, when it is not here: a machine by id, and a
- * folder on it.
+ * Where a workspace's terminals run, when it is not here: a machine by id, and
+ * a folder on it.
  *
- * Only shells, and that is the whole of the first step. An agent, the file
- * tree, the reader, worktrees, the database scan and dev-server discovery all
- * read this Mac's disk and this Mac's process table, and a remote one of each
- * is a remote filesystem kururu does not have — so they stay local, and the
- * pages that show them say so rather than drawing an empty tree as though
- * there were nothing on the machine.
+ * Terminals, and nothing that reads a disk. What the new-tab menu opens — a
+ * shell, nvim, an agent — and a card's run are command lines, and a command
+ * line can be run anywhere ssh reaches. The file tree, the reader, worktrees,
+ * the database scan and dev-server discovery all read this Mac's disk and this
+ * Mac's process table, and a remote one of each is a remote filesystem kururu
+ * does not have — so they stay local, and the pages that show them say so
+ * rather than drawing an empty tree as though there were nothing on the
+ * machine.
  *
  * An id rather than the host, so that renaming the alias in Settings is not
  * re-pinning every workspace; an id that names no machine reads as no pin, on
@@ -337,8 +347,9 @@ export function sessionName(workspaceName: string, taken: Iterable<string>): str
 const SESSION = /^kururu-[a-z0-9-]{1,40}$/;
 
 /**
- * The script run on the machine, with the session, the folder and the
- * command to type as `$1 $2 $3`.
+ * The script run on the machine, with the session, the folder, the command to
+ * type and the agent CLI the tab runs as `$1 $2 $3 $4` (the last empty for
+ * anything but an agent).
  *
  * It is a constant, for `server/src/machines.ts`'s reason, and it is quoted
  * once and handed to `sh -c` there rather than typed at the login shell, so
@@ -377,18 +388,68 @@ const SESSION = /^kururu-[a-z0-9-]{1,40}$/;
  * provider), and that is the user's to turn on in their own config, not
  * kururu's to change for them under every other session they have.
  *
+ * An agent's session also passes its window title out, which tmux keeps to
+ * itself unless `set-titles` is on. Claude Code writes a summary of its task
+ * there, and on this Mac that title is what an agent's tab is called by
+ * (`agentSummary`); without it every remote agent would be a tab that says
+ * "claude". Both are *session* options, so `-t "=$S:"` scopes them to this
+ * session and no other — the bare `=$S` that `has-session` takes is refused
+ * by `set-option` — and a shell's session is left as it was, because a
+ * shell's title is its prompt's business and the tab is named after the
+ * machine instead.
+ *
  * The command arrives base64'd, which is the one encoding that survives a
  * local shell, ssh, a remote login shell and `sh -c` without any of them
  * having an opinion about it.
  */
 export const REMOTE_SCRIPT = [
-  `S=$1; D=$2; R=$3`,
+  `S=$1; D=$2; R=$3; A=$4`,
   `case $D in ""|"~") D=$HOME;; "~/"*) D=$HOME/\${D#"~/"};; esac`,
   `[ -d "$D" ] || { echo "kururu: there is no folder $D here, so this starts in $HOME" >&2; D=$HOME; }`,
   `if ! command -v tmux >/dev/null 2>&1; then echo "kururu: tmux is not installed here, so this shell ends when the connection does" >&2; cd "$D" || exit 1; [ -z "$R" ] || "\${SHELL:-/bin/sh}" -lc "$(printf %s "$R" | base64 -d)"; exec "\${SHELL:-/bin/sh}" -l; fi`,
   `if ! tmux has-session -t "=$S" 2>/dev/null; then tmux new-session -d -s "$S" -c "$D" || exit 1; [ -z "$R" ] || { tmux send-keys -t "=$S:" -l -- "$(printf %s "$R" | base64 -d)"; tmux send-keys -t "=$S:" Enter; }; fi`,
   `tmux set-option -w -t "=$S:" allow-passthrough on 2>/dev/null; tmux set-hook -t "=$S:" after-new-window "set-option -w allow-passthrough on" 2>/dev/null`,
+  `[ -z "$A" ] || { tmux set-option -t "=$S:" set-titles on; tmux set-option -t "=$S:" set-titles-string "#T"; } 2>/dev/null`,
   `exec tmux attach-session -t "=$S"`,
+].join("; ");
+
+/**
+ * What is typed ahead of an agent on a machine, with the CLI and the
+ * machine's name as `$1 $2`: is it there, and is it signed in.
+ *
+ * Typed into the session's shell rather than run by `REMOTE_SCRIPT`, because
+ * the question is whether the *interactive* shell can find the CLI — the one
+ * the agent is about to be started in. ssh runs `REMOTE_SCRIPT` under a
+ * non-interactive login, and on most accounts that never reads the rc file
+ * where `~/.local/bin`, nvm or bun put themselves on the PATH; a check from
+ * there would call a working install missing. The `sh -c` here inherits the
+ * interactive shell's PATH, and `&&` after it means the agent's own line runs
+ * only when the answer was yes. An install from before Claude Code's native
+ * one is an alias to `~/.claude/local/claude`, which no child process can
+ * see, so that path is looked at by name.
+ *
+ * Signed in is asked of the CLI itself — `claude auth status`, `codex login
+ * status` — because only it knows every way it can be (a subscription, a key
+ * in the environment, a key helper, a cloud provider). Each says so when it is
+ * not — Codex as "Not logged in", Claude Code as `"loggedIn": false` — and
+ * only that is taken as no: a crash, a timeout or a word it did not say is a
+ * yes, and the agent starts and says whatever it says. Asked only once the CLI's own help shows it has the
+ * subcommand, because an old Claude Code or Codex reads `auth status` as a
+ * *prompt*, and would start a session on it — the one thing a check must
+ * never do. `--help` starts nothing in either.
+ *
+ * Nothing in here may hold a single quote or a backslash: it is typed as one
+ * single-quoted word into whatever the account's shell is, fish included,
+ * which disagrees with bash about backslashes in quotes. The test says so.
+ */
+export const AGENT_CHECK = [
+  `c=$1; m=$2`,
+  `case $c in claude) n="Claude Code"; g="Usage: claude auth"; set -- auth status; l="Run claude auth login here, or claude and then /login";; *) n=Codex; g="Show login status"; set -- login status; l="Run codex login here";; esac`,
+  `p=$(command -v "$c" 2>/dev/null) || p=`,
+  `[ -n "$p" ] || [ "$c" != claude ] || [ ! -x "$HOME/.claude/local/claude" ] || p=$HOME/.claude/local/claude`,
+  `if [ -z "$p" ]; then echo; echo "kururu: $n is not installed on $m. There is no $c on the PATH here."; echo "kururu: install it in this tab, then start it again from the + menu."; exit 127; fi`,
+  `t=; command -v timeout >/dev/null 2>&1 && t="timeout 20"`,
+  `if "$p" "$1" --help 2>/dev/null | grep -q "$g"; then case $($t "$p" "$@" 2>&1 </dev/null) in *"Not logged in"*|*loggedIn??false*|*loggedIn???false*) echo; echo "kururu: $n is not logged in on $m."; echo "kururu: $l, then start it again from the + menu."; exit 1;; esac; fi`,
 ].join("; ");
 
 /**
@@ -441,6 +502,12 @@ function base64(text: string): string {
  * it the first time; that is what a workspace pinned to the machine opens,
  * and what the harness opens when it is asked to run something there.
  *
+ * `agent` says the tab is that CLI rather than a shell, and is the last word
+ * on the line, after everything an older `remoteShellOf` reads — so a server
+ * from before agents could go to machines still knows these tabs for remote
+ * ones, and this one still knows the tabs that server left. `run` is then the
+ * line `remoteAgentRun` made.
+ *
  * Both go through `LOOP_SCRIPT`, under `/bin/sh` by path, so that what the
  * user's login shell is — the host runs every command line through it — has
  * no say in what the loop means.
@@ -449,18 +516,44 @@ function base64(text: string): string {
  * already checked, and a line built from an unchecked one is the thing those
  * grammars exist to rule out.
  */
-export function remoteShellCommand(options: { host: string; session?: string; dir?: string; run?: string }): string {
-  const { host, session } = options;
+export function remoteShellCommand(options: { host: string; session?: string; dir?: string; run?: string; agent?: AgentCli }): string {
+  const { host, session, agent } = options;
   if (!validHost(host)) throw new Error(`not an ssh host: ${String(host)}`);
+  if (agent !== undefined && !AGENT_CLIS.includes(agent)) throw new Error(`not an agent kururu starts: ${String(agent)}`);
+  if (agent !== undefined && session === undefined) throw new Error("an agent on a machine runs in a session");
   let remote = "";
   if (session !== undefined) {
     if (!SESSION.test(session)) throw new Error(`not a session name: ${session}`);
     const dir = validRemoteDir(options.dir ?? "~");
     if (dir === null) throw new Error(`not a folder kururu will put in a command line: ${String(options.dir)}`);
     const run = options.run ? base64(options.run) : "";
-    remote = `exec sh -c ${quote(REMOTE_SCRIPT)} kururu ${quote(session)} ${quote(dir)} ${quote(run)}`;
+    remote = `exec sh -c ${quote(REMOTE_SCRIPT)} kururu ${quote(session)} ${quote(dir)} ${quote(run)}${agent ? ` ${agent}` : ""}`;
   }
-  return `exec /bin/sh -c ${quote(LOOP_SCRIPT)} ${MARK} ${quote(host)} ${quote(session ?? "")} ${quote(remote)}`;
+  return `exec /bin/sh -c ${quote(LOOP_SCRIPT)} ${MARK} ${quote(host)} ${quote(session ?? "")} ${quote(remote)}${agent ? ` ${quote(agent)}` : ""}`;
+}
+
+/**
+ * The line typed into an agent's session: `AGENT_CHECK`, then the agent.
+ *
+ * `command` is the launcher's line as `launcherCommand` and `withPrompt` made
+ * it, without the hook settings a local agent gets — those name files on this
+ * Mac and post to a port on this Mac, and on the machine they would be a
+ * Claude that fails to read its own settings. `where` is what the check
+ * calls the machine, cut to characters that need no quoting in any shell.
+ *
+ * A tab in a card's prompt becomes two spaces. This line is *typed*, and a
+ * tab typed at bash or zsh is a completion, which would rewrite the prompt
+ * under the agent; a newline is safe, because inside the prompt's quotes the
+ * shell reads it as part of the word and waits for the rest.
+ */
+export function remoteAgentRun(cli: AgentCli, command: string, where: string): string {
+  if (!AGENT_CLIS.includes(cli)) throw new Error(`not an agent kururu starts: ${String(cli)}`);
+  return `sh -c ${quote(AGENT_CHECK)} kururu ${cli} ${quote(checkName(where))} && ${command.replace(/\t/g, "  ")}`;
+}
+
+/** What a check typed on a machine calls it: its name, cut to characters no shell quotes. */
+export function checkName(where: string): string {
+  return where.replace(/[^A-Za-z0-9 ._@-]/g, "").trim().slice(0, 40) || "this machine";
 }
 
 /** What a remote tab is, read back out of its command line. */
@@ -468,6 +561,8 @@ export interface RemoteShell {
   host: string;
   /** The tmux session it attaches to, or null for a plain `ssh -t`. */
   session: string | null;
+  /** The agent CLI it was started as, or null for a shell. */
+  agent: AgentCli | null;
 }
 
 /**
@@ -483,7 +578,9 @@ export interface RemoteShell {
  * the server that opened it: a version with different words in the loop must
  * still know the tabs an older one left in the host. That shape is one
  * single-quoted word, which holds for as long as `LOOP_SCRIPT` has no quote
- * of its own in it — the test says so.
+ * of its own in it — the test says so. The agent is a quoted word of letters
+ * at the very end, which the remote line before it can never be: quoted for
+ * the second time, it ends `'\''` and a quote.
  */
 export function remoteShellOf(command: string | null | undefined): RemoteShell | null {
   if (!command) return null;
@@ -491,5 +588,7 @@ export function remoteShellOf(command: string | null | undefined): RemoteShell |
   if (!match || !validHost(match[1])) return null;
   const session = match[2] || null;
   if (session !== null && !SESSION.test(session)) return null;
-  return { host: match[1], session };
+  const tail = / '([a-z]+)'$/.exec(command)?.[1];
+  const agent = session !== null && tail !== undefined ? (AGENT_CLIS.find((cli) => cli === tail) ?? null) : null;
+  return { host: match[1], session, agent };
 }

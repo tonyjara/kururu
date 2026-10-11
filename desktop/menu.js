@@ -45,6 +45,14 @@ function ending(count) {
   return count === 1 ? "ends 1 agent" : `ends ${count} agents`;
 }
 
+function unheard(count) {
+  return count === 1 ? "1 unheard reply" : `${count} unheard replies`;
+}
+
+function undelivered(count) {
+  return count === 1 ? "1 message did not get through" : `${count} messages did not get through`;
+}
+
 /**
  * @param view  the runner's `view()` plus the app's own facts:
  *   `appVersion`, `packaged`, `windowOpen`, `talk` ({ on, status, altSpace }),
@@ -105,6 +113,25 @@ function menuTemplate(view) {
   if (view.checkout && view.vite) items.push({ id: "vite", label: viteLine(view.vite), enabled: false });
   items.push({ type: "separator" });
 
+  // --- Kuru --------------------------------------------------------------------
+  // The background presence of the conversation, for a Mac with no window
+  // open: a persistent count floating over every app would be intrusive, so
+  // it is here, and in the title beside the frog. Only when there is news —
+  // the quiet state is nothing, as on the chip.
+  const kuru = server.up ? server.kuru : null;
+  if (kuru && (kuru.unheard > 0 || kuru.undelivered > 0)) {
+    if (kuru.unheard > 0) {
+      items.push({ id: "kuru", label: `Kuru: ${unheard(kuru.unheard)}`, enabled: false });
+      items.push({ id: "kuru-play", label: "    Play" });
+      items.push({ id: "kuru-open", label: "    Open the conversation" });
+    }
+    if (kuru.undelivered > 0) {
+      items.push({ id: "kuru-failed", label: `${undelivered(kuru.undelivered)} to Kuru`, enabled: false });
+      items.push({ id: "kuru-open", label: "    Open the conversation" });
+    }
+    items.push({ type: "separator" });
+  }
+
   // --- actions ------------------------------------------------------------------
   items.push(view.windowOpen ? { id: "close-window", label: "Close Window" } : { id: "open-window", label: "Open Window" });
   items.push({ id: "restart-server", label: "Restart Server", enabled: server.up || server.starting || view.canStart.ok });
@@ -138,6 +165,8 @@ function menuTemplate(view) {
   items.push({ id: "talk-global", label: talkLabel, type: "checkbox", checked: talk.on });
   if (talk.status === "denied") items.push({ id: "talk-permission", label: "    Open System Settings → Input Monitoring…" });
   items.push({ id: "talk-altspace", label: "⌥Space toggles the microphone", type: "checkbox", checked: talk.altSpace });
+  // There is no pill to put anywhere while neither of the two things that float one is on.
+  items.push({ id: "reset-pill", label: "Reset Pill Position", enabled: talk.on || talk.altSpace });
   items.push({ type: "separator" });
 
   // --- where it runs from ---------------------------------------------------------
@@ -162,6 +191,7 @@ function menuTemplate(view) {
     { id: "log-server", label: "Server log (server.log)" },
     ...(view.checkout ? [{ id: "log-vite", label: "Vite log (vite.log)" }] : []),
     { id: "log-host", label: "pty host log (ptyhost.log)" },
+    { id: "log-pill", label: "Floating pill log (pill.log)" },
     { type: "separator" },
     { id: "log-reveal", label: "Show in Finder" },
   ];
@@ -213,10 +243,19 @@ function shortPath(full, home) {
   return home && full.startsWith(home) ? `~${full.slice(home.length)}` : full;
 }
 
-/** The tray's title beside the icon: the live agent count, or nothing. */
+/**
+ * The tray's title beside the icon: the live agent count, then the unheard
+ * count after it when there is one — `3 · 2 unheard` — or nothing. The
+ * failed count stays in the menu: a message that did not get through is a
+ * thing to act on in the drawer, not a number to watch.
+ */
 function trayTitle(view) {
   const count = view.server.up ? view.server.liveAgents : 0;
-  return count > 0 ? String(count) : "";
+  const missed = view.server.up ? view.server.kuru?.unheard ?? 0 : 0;
+  const parts = [];
+  if (count > 0) parts.push(String(count));
+  if (missed > 0) parts.push(`${missed} unheard`);
+  return parts.join(" · ");
 }
 
-module.exports = { menuTemplate, trayTitle, uptimeWords, when };
+module.exports = { menuTemplate, trayTitle, unheard, undelivered, uptimeWords, when };

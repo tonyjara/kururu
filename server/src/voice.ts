@@ -42,12 +42,16 @@
  * replies it let go before their end. A reply whose last sentence somebody
  * played was heard; one that every client holding it let go, or that nobody
  * took up at all — no window open, none that could play — was missed
- * (`fateOf`). The missed are kept as words in a file in the state directory,
- * and from the moment they are said rather than the moment they are missed:
- * a server that dies mid-reply, which under `bun run dev` is every save,
- * leaves the reply missed and not forgotten. `replay` says them again, each
- * starting "Earlier", and a replay heard to its end takes its reply off the
- * list.
+ * (`fateOf`). The missed are kept as words in the database, and from the
+ * moment they are said rather than the moment they are missed: a server that
+ * dies mid-reply, which under `bun run dev` is every save, leaves the reply
+ * missed and not forgotten. `replay` says them again, each starting
+ * "Earlier", and a replay heard to its end takes its reply off the list; so
+ * does `seen`, which the Kuru drawer sends for a reply that has been in view
+ * long enough to have been read — unheard means neither heard nor seen, and a
+ * count that survived reading would teach people to ignore it. The list is
+ * not a message of its own any more: it is merged into the conversation the
+ * drawer draws (`kuru.ts`), which `deps.changed` tells to redraw.
  *
  * **Spanish is the reason the model is driven by hand.** The library that
  * wraps Kokoro phonemises through an English-only port of espeak and refuses
@@ -62,9 +66,9 @@
  * because the Kokoro process goes down with the server that started it.
  */
 import { execFile, fork, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -73,7 +77,6 @@ import {
   KOKORO_MODEL,
   KOKORO_VOICES,
   LEAD_INS,
-  adoptMissed,
   adoptVoice,
   capMissed,
   detectLanguage,
@@ -85,6 +88,7 @@ import {
   systemFallback,
   type LeadIn,
   type MissedReply,
+  type StoredMissed,
   type ModelStatus,
   type SpeechChunk,
   type ToolStatus,
@@ -157,9 +161,20 @@ const ESPEAK_TO_MODEL: readonly [string, string][] = [
   [`ɔ${TIE}ɪ`, "Y"],
 ];
 
-/** What `index.ts` lends this module. */
+/** Where the missed list is kept between servers: the database, through the index `index.ts` lends. */
+export interface MissedIndex {
+  load(): StoredMissed[];
+  save(list: readonly StoredMissed[]): void;
+}
+
+/** What `index.ts` lends this module. Profiles are named by key throughout; `index.ts` maps ids at its edge. */
 export interface VoiceDeps {
   broadcast: (msg: ServerMessage) => void;
+  index: MissedIndex;
+  /** This session's id for a profile key, for the wire. */
+  profileIdOf: (profileKey: string) => string | null;
+  /** The missed list moved — a reply heard, missed, seen or cleared — so the conversation the drawer draws is stale. See `kuru.ts`. */
+  changed: () => void;
 }
 
 /**
@@ -182,8 +197,8 @@ export interface Utterance {
   id: string;
   /** Its place in the order utterances were made. */
   n: number;
-  /** Whose harness said it; empty for an audition. */
-  profileId: string;
+  /** Whose harness said it, by the profile's key; empty for an audition. */
+  profileKey: string;
   /** An audition, which only the window that asked hears. Never held, never missed. */
   quiet: boolean;
   /** What it says, as spoken — what the missed list keeps. */
@@ -212,16 +227,9 @@ export interface Utterance {
 
 export type Fate = "heard" | "missed";
 
-/** A missed reply as the server keeps it: pending while it may yet be heard, and the replay of it in flight. */
-interface Missed extends MissedReply {
-  pending: boolean;
+/** A missed reply as the server holds it: the stored shape, and the replay of it in flight. */
+interface Missed extends StoredMissed {
   replaying: string | null;
-}
-
-/** Where the missed list is kept: the state directory, since it is a thing kururu wants back and nobody chose. */
-function missedPath(): string {
-  const dir = process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
-  return join(dir, "missed.json");
 }
 
 export class Voice {
@@ -251,13 +259,7 @@ export class Voice {
     this.model.state = existsSync(this.modelFile()) ? "ready" : "missing";
     // What was pending when the last server went is missed now: whatever was
     // playing it fetched its next sentence from a server that is not there.
-    let stored: unknown = null;
-    try {
-      stored = JSON.parse(readFileSync(missedPath(), "utf8"));
-    } catch {
-      // Nothing kept is nothing missed.
-    }
-    this.missed = adoptMissed(stored).map((entry) => ({ ...entry, pending: false, replaying: null }));
+    this.missed = deps.index.load().map((entry) => ({ ...entry, pending: false, replaying: null }));
     void this.look();
   }
 
@@ -427,8 +429,37 @@ export class Voice {
   }
 
   /** What every client is told, on connect and whenever it changes: every profile's, since the badge is drawn for whichever is on screen. */
-  missedMessage(): ServerMessage {
-    return { type: "missed", missed: this.missed.filter((entry) => !entry.pending).map(bare) };
+  missedFor(profileKey: string): StoredMissed[] {
+    return this.missed.filter((entry) => entry.profileKey === profileKey);
+  }
+
+  /**
+   * These replies were read in the drawer: off the list, as if heard. Only
+   * ones that are settled — a reply still being said may yet be heard out,
+   * and a glance at the words of something playing is not having read it.
+   */
+  seen(profileKey: string, utterances: readonly string[]): void {
+    const ids = new Set(utterances);
+    const before = this.missed.length;
+    this.missed = this.missed.filter((entry) => entry.profileKey !== profileKey || entry.pending || !ids.has(entry.id));
+    if (this.missed.length === before) return;
+    this.saveMissed();
+    this.deps.changed();
+  }
+
+  /** One missed reply said again, from the drawer's Play on that reply — `replay` for one. Whether there was one to say. */
+  replayOne(profileKey: string, utterance: string): boolean {
+    const entry = this.missed.find((e) => e.id === utterance && e.profileKey === profileKey);
+    if (!entry || entry.pending || entry.replaying) return false;
+    const id = this.speak(profileKey, entry.text, { lang: entry.lang, lead: "earlier", replays: entry.id, spoken: true });
+    if (!id) return false;
+    entry.replaying = id;
+    return true;
+  }
+
+  /** A missed reply as the wire carries it: the profile's id for this session, and none of the server's bookkeeping. */
+  private wire(entry: StoredMissed): MissedReply {
+    return { id: entry.id, profileId: this.deps.profileIdOf(entry.profileKey) ?? "", text: entry.text, lang: entry.lang, at: entry.at };
   }
 
   /**
@@ -437,25 +468,25 @@ export class Voice {
    * it played. A reply whose replay is still on its way is not queued twice.
    * They stay on the list until a replay of them is heard to the end.
    */
-  replay(profileId: string): MissedReply[] {
+  replay(profileKey: string): MissedReply[] {
     const queued: MissedReply[] = [];
     for (const entry of this.missed) {
-      if (entry.profileId !== profileId || entry.pending || entry.replaying) continue;
-      const id = this.speak(profileId, entry.text, { lang: entry.lang, lead: "earlier", replays: entry.id, spoken: true });
+      if (entry.profileKey !== profileKey || entry.pending || entry.replaying) continue;
+      const id = this.speak(profileKey, entry.text, { lang: entry.lang, lead: "earlier", replays: entry.id, spoken: true });
       if (!id) continue;
       entry.replaying = id;
-      queued.push(bare(entry));
+      queued.push(this.wire(entry));
     }
     return queued;
   }
 
   /** Take a profile's missed replies off the list unheard: the person has read them, or does not care to. */
-  clear(profileId: string): void {
+  clear(profileKey: string): void {
     const before = this.missed.length;
-    this.missed = this.missed.filter((entry) => entry.profileId !== profileId || entry.pending);
+    this.missed = this.missed.filter((entry) => entry.profileKey !== profileKey || entry.pending);
     if (this.missed.length === before) return;
     this.saveMissed();
-    this.deps.broadcast(this.missedMessage());
+    this.deps.changed();
   }
 
   /**
@@ -469,7 +500,7 @@ export class Voice {
     let changed = false;
     let wake = Infinity;
     for (const made of this.utterances.values()) {
-      if (made.quiet || !made.profileId || made.fate === "heard") continue;
+      if (made.quiet || !made.profileKey || made.fate === "heard") continue;
       const fate = fateOf(made, now);
       if (fate && fate !== made.fate) {
         made.fate = fate;
@@ -481,7 +512,7 @@ export class Voice {
     }
     if (changed) {
       this.saveMissed();
-      this.deps.broadcast(this.missedMessage());
+      this.deps.changed();
     }
     if (wake < Infinity && !this.reviewTimer) {
       this.reviewTimer = setTimeout(
@@ -505,28 +536,26 @@ export class Voice {
     } else entry.pending = false;
   }
 
-  /** Written whole, through a temporary file, the way `persist.ts` writes. A list that could not be written is still the list until the next start. */
+  /** The whole list, to wherever it is kept. */
   private saveMissed(): void {
     this.missed = capMissed(this.missed);
-    const path = missedPath();
-    try {
-      mkdirSync(dirname(path), { recursive: true });
-      const temp = `${path}.tmp`;
-      writeFileSync(temp, `${JSON.stringify(this.missed.map((entry) => ({ ...bare(entry), pending: entry.pending })))}\n`, "utf8");
-      renameSync(temp, path);
-    } catch {
-      // See above.
-    }
+    this.deps.index.save(this.missed);
   }
 
   // ---------------------------------------------------------------------------
   // Speaking
   // ---------------------------------------------------------------------------
 
-  /** A harness's reply, if replies are spoken. What `index.ts` calls on the harness's own Stop report. */
-  spoke(profileId: string, reply: unknown): void {
-    if (!this.settings.speak || typeof reply !== "string") return;
-    void this.speak(profileId, reply);
+  /**
+   * A harness's reply, if replies are spoken. What `index.ts` calls on the
+   * harness's own Stop report; the utterance id comes back so the turn the
+   * reply is written down as can name it, and the drawer can put the reply's
+   * fate beside its words. Null when replies are not spoken, or there was
+   * nothing to say.
+   */
+  spoke(profileKey: string, reply: unknown): string | null {
+    if (!this.settings.speak || typeof reply !== "string") return null;
+    return this.speak(profileKey, reply);
   }
 
   /**
@@ -540,7 +569,7 @@ export class Voice {
    * underscores of a name the first one left alone.
    */
   speak(
-    profileId: string,
+    profileKey: string,
     text: string,
     options: { lang?: VoiceLang; choice?: VoiceChoice; quiet?: boolean; lead?: LeadIn; replays?: string; spoken?: boolean } = {},
   ): string | null {
@@ -553,7 +582,7 @@ export class Voice {
     const made: Utterance = {
       id,
       n,
-      profileId,
+      profileKey,
       quiet,
       text: spoken,
       lang,
@@ -573,8 +602,8 @@ export class Voice {
     // On the list from the start, pending, so a server that goes before it
     // is heard leaves it there. Not an audition, and not a replay, whose
     // reply is on the list already.
-    if (!quiet && profileId && !made.replays) {
-      this.missed.push({ id, profileId, text: spoken, lang, at: made.at, pending: true, replaying: null });
+    if (!quiet && profileKey && !made.replays) {
+      this.missed.push({ id, profileKey, text: spoken, lang, at: made.at, pending: true, replaying: null });
       this.saveMissed();
     }
     this.prune();
@@ -658,7 +687,7 @@ export class Voice {
   private announce(made: Utterance, bytes: Buffer, text: string, last: boolean): void {
     const seq = made.chunks.push(bytes) - 1;
     if (made.quiet) return;
-    const chunk: SpeechChunk = { utterance: made.id, seq, last, text, lang: made.lang, profileId: made.profileId };
+    const chunk: SpeechChunk = { utterance: made.id, seq, last, text, lang: made.lang, profileId: this.deps.profileIdOf(made.profileKey) ?? "" };
     this.deps.broadcast({ type: "speech", speech: chunk });
   }
 
@@ -866,7 +895,7 @@ export class Voice {
       if (oldest === undefined) break;
       const made = this.utterances.get(oldest);
       this.utterances.delete(oldest);
-      if (made && !made.quiet && made.profileId && !made.fate) {
+      if (made && !made.quiet && made.profileKey && !made.fate) {
         made.fate = "missed";
         this.settle(made);
         changed = true;
@@ -874,15 +903,12 @@ export class Voice {
     }
     if (changed) {
       this.saveMissed();
-      this.deps.broadcast(this.missedMessage());
+      this.deps.changed();
     }
   }
 }
 
-/** A missed reply as the wire carries it, without the server's bookkeeping. */
-function bare(entry: MissedReply): MissedReply {
-  return { id: entry.id, profileId: entry.profileId, text: entry.text, lang: entry.lang, at: entry.at };
-}
+
 
 /** Let go by everybody who held it: nothing more of it is worth making. */
 function abandoned(made: Utterance): boolean {

@@ -40,6 +40,17 @@ if (isPicker) {
     },
   });
 } else {
+  /** An open-the-drawer ask that landed before the page subscribed: `undefined` is none. */
+  let pendingKuru;
+  ipcRenderer.on("kururu:open-kuru", (_event, focus, toggle) => {
+    if (ipcRenderer.listenerCount("kururu:open-kuru") === 1)
+      pendingKuru = { focus: typeof focus === "string" ? focus : null, toggle: Boolean(toggle) };
+  });
+  /** The tray's Reset, landed on a pill page still mounting — which is what a page loaded again for not answering one is. */
+  let pendingLocate = false;
+  ipcRenderer.on("kururu:pill-locate", () => {
+    if (ipcRenderer.listenerCount("kururu:pill-locate") === 1) pendingLocate = true;
+  });
   contextBridge.exposeInMainWorld("kururu", {
     /** True in the Electron window, absent in a browser or on the phone. */
     desktop: true,
@@ -51,6 +62,32 @@ if (isPicker) {
      * it is the whole of what it can do.
      */
     show: () => ipcRenderer.send("kururu:show"),
+    /**
+     * Raise the *main* window, for a click on the floating pill — which may be
+     * sent from the panel's own webContents, so `show()` (whichever window sent
+     * it) is the wrong half to reuse: the panel is non-focusable and was never
+     * the window to raise. Makes one if there is none.
+     */
+    raiseMain: (focus) => ipcRenderer.send("kururu:raise-main", typeof focus === "string" ? focus : null),
+    /**
+     * The main process wants the Kuru drawer touched here — the floating
+     * pill was clicked, or the menu bar's Open — with the reply to show, or
+     * null for the newest, and whether this is a toggle (the window was
+     * already in front, so a second click means close) rather than only an
+     * open. An ask that arrives before the page is listening is kept and
+     * handed to the first listener: a window opened for the purpose gets the
+     * message while React is still mounting.
+     */
+    onOpenKuru: (listener) => {
+      const relay = (_event, focus, toggle) => listener(typeof focus === "string" ? focus : null, Boolean(toggle));
+      ipcRenderer.on("kururu:open-kuru", relay);
+      if (pendingKuru !== undefined) {
+        const pending = pendingKuru;
+        pendingKuru = undefined;
+        listener(pending.focus, pending.toggle);
+      }
+      return () => ipcRenderer.removeListener("kururu:open-kuru", relay);
+    },
     /**
      * Where a file dropped onto the window actually is on disk.
      *
@@ -132,6 +169,15 @@ if (isPicker) {
         return () => ipcRenderer.removeListener("kururu:talk", relay);
       },
       report: (state) => ipcRenderer.send("kururu:pill", state),
+      onLocate: (listener) => {
+        const relay = () => listener();
+        ipcRenderer.on("kururu:pill-locate", relay);
+        if (pendingLocate) {
+          pendingLocate = false;
+          listener();
+        }
+        return () => ipcRenderer.removeListener("kururu:pill-locate", relay);
+      },
     },
   });
 }

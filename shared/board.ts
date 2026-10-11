@@ -827,7 +827,8 @@ function adoptWorktree(value: unknown): CardWorktree | null {
 /**
  * A port the kernel could have handed out, or nothing. The terminal id is kept
  * when there is one, since this is also how the board crosses a server restart
- * with its terminals still running; `storedBoard` is what drops it.
+ * with its terminals still running; the store drops it at a cold start, when
+ * the host no longer has that terminal.
  */
 function adoptDev(value: unknown): CardDev | null {
   if (!value || typeof value !== "object") return null;
@@ -868,16 +869,4 @@ function adoptRun(value: unknown): CardRun | null {
  */
 export function canResume(run: CardRun | null, open: boolean): boolean {
   return run !== null && !open && (run.sessionId !== null || run.launcher.startsWith("codex"));
-}
-
-/**
- * The board as `persist.ts` writes it: every card, and no process ids. A dev
- * server is nothing *but* a process, so it goes entirely — a cold start has
- * no terminal to point at, and the next robot press starts a fresh one.
- */
-export function storedBoard(board: Board): Board {
-  return {
-    ...board,
-    cards: board.cards.map((card) => ({ ...card, run: card.run ? { ...card.run, agentId: null } : null, dev: null })),
-  };
 }

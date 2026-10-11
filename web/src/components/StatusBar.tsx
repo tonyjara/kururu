@@ -7,10 +7,12 @@
  * tell whether the next key will split a pane or go into your shell. So the bar
  * says, and it stops saying when the prefix times out.
  */
-import type { Profile, Workspace } from "../../../shared/model";
+import type { MascotConfig, Profile, Workspace } from "../../../shared/model";
 import { PREFIX_LABEL } from "../keys";
+import type { KuruLive } from "../kuru";
 import type { VoicePhase } from "../voice";
-import { MicIcon } from "./VoiceIcons";
+import { Mascot } from "./Status";
+import { MicIcon, SpeakerIcon } from "./VoiceIcons";
 
 interface Props {
   profile: Profile;
@@ -56,6 +58,14 @@ interface Props {
   talk: { phase: VoicePhase; key: string };
   onTalkDown: () => void;
   onTalkUp: () => void;
+  /**
+   * Kuru, beside the mic, because the two are the halves of one conversation
+   * and the status bar is the one strip on every device a thumb can reach.
+   * What Kuru is doing, the two counts that are news, and whether its drawer
+   * is up. The mascot is the one that hops while it thinks.
+   */
+  kuru: { live: KuruLive; unheard: number; undelivered: number; open: boolean; mascot: MascotConfig };
+  onKuru: () => void;
 }
 
 export function StatusBar({
@@ -76,6 +86,8 @@ export function StatusBar({
   talk,
   onTalkDown,
   onTalkUp,
+  kuru,
+  onKuru,
 }: Props) {
   const index = profile.workspaces.findIndex((w) => w.id === workspace.id);
   return (
@@ -151,6 +163,52 @@ export function StatusBar({
           <KeysIcon />
         </button>
       )}
+      {/* Kuru's chip: the one door onto its drawer, beside the mic because the
+          two are the halves of one conversation. Each control has one subject
+          — the mic is you, the chip is Kuru — which is the rule that replaced
+          the badges on the old button's corners. Quiet, it is a dim dot and
+          the word; thinking, the mascot hops; speaking, the speaker glyph in
+          the working ink; asking, the blocked ink and the word; off, dim and
+          the word. News is text inside the chip and never a corner: an accent
+          count with the speaker for unheard replies, a red one with the mic
+          for messages that did not get through. In flight and all delivered
+          are not news and get no mark. On a narrow bar the word Kuru is
+          dropped and the marks stay. `mousedown` is prevented for the mic's
+          reason: opening the drawer must not take the focus off a terminal. */}
+      <button
+        className={`sb-kuru sb-kuru-${kuru.live} ${kuru.open ? "sb-kuru-on" : ""}`}
+        onClick={onKuru}
+        onMouseDown={(event) => event.preventDefault()}
+        title={kuruTitle(kuru)}
+        aria-label={kuruTitle(kuru)}
+        aria-expanded={kuru.open}
+      >
+        <span className="sb-kuru-mark" aria-hidden="true">
+          {kuru.live === "thinking" ? (
+            <span className="status status-working">
+              <Mascot config={kuru.mascot} clip={kuru.mascot.working} />
+            </span>
+          ) : kuru.live === "speaking" ? (
+            <SpeakerIcon />
+          ) : (
+            <span className="sb-kuru-dot" />
+          )}
+        </span>
+        <span className="sb-kuru-name">Kuru</span>
+        {(kuru.live === "asking" || kuru.live === "off") && <span className="sb-kuru-word">{kuru.live}</span>}
+        {kuru.unheard > 0 && (
+          <span className="sb-kuru-news sb-kuru-unheard">
+            <SpeakerIcon />
+            {kuru.unheard}
+          </span>
+        )}
+        {kuru.undelivered > 0 && (
+          <span className="sb-kuru-news sb-kuru-failed">
+            <MicIcon />
+            {kuru.undelivered}
+          </span>
+        )}
+      </button>
       {/* The talk key as a button. Held, it records; tapped, it toggles — the
           same two gestures the key has, through `voice.ts`'s one state
           machine, so a phone that has no right Control key talks the same
@@ -191,6 +249,25 @@ export function StatusBar({
       </button>
     </footer>
   );
+}
+
+/** What the chip says when hovered: the state, then whatever is news. */
+function kuruTitle(kuru: Props["kuru"]): string {
+  const state =
+    kuru.live === "off"
+      ? "Kuru is not running"
+      : kuru.live === "thinking"
+        ? "Kuru is thinking"
+        : kuru.live === "asking"
+          ? "Kuru is asking something in its terminal"
+          : kuru.live === "speaking"
+            ? "Kuru is speaking"
+            : "Kuru";
+  const news = [
+    kuru.unheard > 0 ? `${kuru.unheard} ${kuru.unheard === 1 ? "reply" : "replies"} you did not hear` : null,
+    kuru.undelivered > 0 ? `${kuru.undelivered} ${kuru.undelivered === 1 ? "message" : "messages"} did not get through` : null,
+  ].filter(Boolean);
+  return `${state}${news.length ? ` · ${news.join(", ")}` : ""} — ${kuru.open ? "close" : "open"} the conversation (C-a a)`;
 }
 
 /**

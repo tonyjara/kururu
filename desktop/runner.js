@@ -71,6 +71,17 @@ function run(command, args) {
   }
 }
 
+/**
+ * Kuru's two counts off `/api/health`, made whole: whole numbers or nothing.
+ * Null from a server that does not send them, which the menu reads as
+ * "nothing to say" and not as zero.
+ */
+function kuruCounts(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const whole = (v) => (Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+  return { unheard: whole(raw.unheard), undelivered: whole(raw.undelivered), profileId: typeof raw.profileId === "string" ? raw.profileId : null };
+}
+
 async function fetchJson(url, options = {}, timeout = PROBE_TIMEOUT_MS) {
   try {
     const response = await fetch(url, { ...options, signal: AbortSignal.timeout(timeout) });
@@ -545,9 +556,11 @@ class Runner extends EventEmitter {
 
   summary() {
     const h = this.health;
+    const kuru = kuruCounts(h?.kuru);
     return [
       h ? "up" : "down",
       h?.liveAgents ?? "",
+      kuru ? `${kuru.unheard}/${kuru.undelivered}` : "",
       h?.host?.current ?? "",
       this.ours() ? "ours" : "",
       this.child ? "child" : "",
@@ -633,6 +646,10 @@ class Runner extends EventEmitter {
             devServers: Number(h.devServers) || 0,
             supervised: h.life?.supervised === true,
             orphaned: h.life?.orphaned === true,
+            // Kuru's two counts for the profile on screen, for the menu and
+            // the title: what it said that nobody heard, and what did not
+            // reach it. Null from a server older than the counts.
+            kuru: kuruCounts(h.kuru),
           }
         : { up: false, starting: Boolean(this.child), downSince: this.downSince, lastExit: this.lastExit },
       host: {

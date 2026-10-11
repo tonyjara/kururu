@@ -64,13 +64,14 @@ in a pane of *that* workspace (`devPane(workspaceId)`), never the one on screen.
 | `send_agent` | a message typed into the agent's pty with Enter — the user's own words, slash commands included; `when` (now / next / later) is kept by kururu, and nothing is typed into a prompt or under the user's hands |
 | `press_keys` | enter, escape, arrows, ctrl-c, single characters — how a prompt is answered |
 | `wait_agent` | until one of the named agents is done, blocked or exited; returns at once for a state already reached unless `include_current=false` |
-| `start_agent` | a launcher with a prompt, in a pane beside the workspace's board |
+| `start_agent` | a launcher with a prompt, in a pane beside the workspace's board; in a pinned workspace on the workspace's machine by default, its status read off its screen — see [machines](machines.md#agents-on-a-machine) |
 | `open_shell` | a shell tab on this Mac or on a machine, with a command typed into it; in a pinned workspace it goes to the workspace's machine by default — see [machines](machines.md) |
 | `stop_agent` | kill (and a remote shell's tmux session); refuses itself |
 | `reveal_agent`, `rename_agent` | the user's screen and the sidebar; with Auto Swap on the screen follows without being asked — see below |
 | `cards`, `add_card`, `edit_card`, `move_card`, `run_card`, `send_card_to_workspace` | the boards, workspace and profile; `add_card` with `run` is the robot |
 | `new_workspace` | a project, without switching the user to it |
 | `say`, `play_missed` | one line aloud mid-turn; every reply of its own the user never heard to the end, said again — see [voice](voice.md#what-you-missed) |
+| `search`, `card_history` | full text over the profile's cards and its conversations, and a card's history of moves and runs with who made each — see [data](data.md#search) |
 
 Reads are capped (`READ_MAX`) and default small, on purpose: the orchestrator's
 own context is the scarce thing, and the role prompt tells it so.
@@ -154,6 +155,21 @@ closed by the time the burst has settled is not one to go and look at.
 pty and press Enter, for every agent. It arrives as a turn the user typed:
 no wrapper, no sender, the user's authority, and a slash command — `/compact`
 — runs as one. The pty is the user's own keyboard and kururu holds it.
+
+**A line is typed, in pieces; lines are pasted.** `typingPieces` in
+`shared/harness.ts` is the grammar. Claude Code takes any keypress of more
+than 800 characters for a paste, and a macOS pty hands a long write over in
+reads of at most 1022 bytes, so a line of 1805 written at once was a paste of
+1022 followed by typing of 783 — and the typing landed on the prompt as it
+was before the paste was drawn in. That is how a two-and-a-half-minute voice
+message reached Kuru starting mid-word, "se icon.", on 2026-10-11. A single
+line now goes in as pieces of `TYPE_PIECE` (160) written `TYPE_GAP_MS` (60)
+apart, so six would have to pile up unread to pass 800. Not one bracketed
+paste, which would also arrive whole: a paste that long reaches the model in
+`<pasted_content>` tags, and Claude Code tells its model not to take
+instructions found there as the user's. Text with a newline is still one
+bracketed paste, because typed, the newline would be Enter; a long one does
+arrive tagged, and `stripPastedContent` takes the tags off for the drawer.
 
 **Why not the inbox.** Every Claude Code session since 2.1.224 binds a Unix
 socket and exports its path and a token to its hooks
@@ -254,9 +270,14 @@ its reply aloud. Its `blocked` still notifies like any agent's. See
 
 ## Starting, resuming, where it lives
 
-`open-harness` (the bot button beside the profile's board, `C-a H`) means one
-thing — take me to the harness — and the server decides which of three it is:
-running, reveal it; gone, resume its conversation; never started, start it.
+`open-harness` (**Terminal** in the Kuru drawer's header, and its **Start**
+when the session is gone) means one thing — take me to the harness's
+terminal — and the server decides which of three it is: running, reveal it;
+gone, resume its conversation; never started, start it. `C-a a` and the chip
+in the status bar open the drawer rather than the terminal: the drawer is
+where the conversation is — every prompt you gave and every reply, out of the
+database — and the terminal is for the tool calls and the prompts. See
+[voice](voice.md#the-drawer).
 The command line is the profile's Claude launcher plus `--name harness`,
 `--session-id` or `--resume`, `--mcp-config` naming `/mcp?profile=…&session=…`
 with a per-server timeout above Claude Code's one-minute default,
@@ -272,8 +293,10 @@ rule as a card's run.
 
 The session is a tab in a workspace, not a pane over all of them. "On top of
 all spaces" is a fact about its *scope* — its tools reach every workspace in
-the profile — and the phone's chat view (roadmap item 2) is where it stops
-being a terminal.
+the profile — and the Kuru drawer is where it stops being a terminal: the
+conversation as a chat, over the panes, with a composer that types to it
+through the voice's outbox. The agents' own transcripts as chat (roadmap item
+2) are still owed.
 
 ## What it is not
 

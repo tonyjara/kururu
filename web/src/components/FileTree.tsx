@@ -110,7 +110,7 @@ export function FileTree({
   /** Where this workspace is, or null while the server has not said. */
   project: WorkspaceProject | null;
   /**
-   * The machine this workspace's shells run on, or null for this Mac. The
+   * The machine this workspace's terminals run on, or null for this Mac. The
    * tree only ever reads this disk, so a pinned workspace with no terminal
    * here has nothing to draw, and says why rather than waiting forever.
    */
@@ -640,8 +640,8 @@ export function FileTree({
           rows("", 0)
         ) : runsOn ? (
           <p className="tree-note">
-            This workspace's shells run on {runsOn}, and the tree only reads this Mac. A terminal opened here — the
-            + menu's "Terminal on this Mac" — gives it a folder to show.
+            This workspace runs on {runsOn}, and the tree only reads this Mac, so there is nothing here for it to show. Unpin
+            the workspace in Settings → General → Workspaces to browse a folder on this Mac.
           </p>
         ) : (
           <p className="tree-note">Waiting for a terminal to say where this workspace is.</p>

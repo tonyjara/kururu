@@ -33,7 +33,6 @@ import {
   transferCard,
   setWorktree,
   startRun,
-  storedBoard,
   type Board,
 } from "../../shared/board";
 import { findLauncher, resumeCommand, withPrompt } from "../../shared/launchers";
@@ -120,7 +119,7 @@ describe("runs", () => {
 });
 
 describe("on disk and in the blob", () => {
-  it("writes no process ids, and reads a run with none as ended", () => {
+  it("reads a run whose terminal is gone as ended", () => {
     const b = noteRun(
       startRun(board("a", "b"), "c1", { agentId: "a1", launcher: "claude", label: "Claude", startedAt: 0 }),
       "a1",
@@ -128,7 +127,8 @@ describe("on disk and in the blob", () => {
       false,
       1,
     );
-    const back = adoptBoard(JSON.parse(JSON.stringify(storedBoard(b))));
+    const gone = { ...b, cards: b.cards.map((card) => (card.run ? { ...card, run: { ...card.run, agentId: null } } : card)) };
+    const back = adoptBoard(JSON.parse(JSON.stringify(gone)));
     expect(back!.cards[1]!.run).toMatchObject({ agentId: null, state: "ended" });
   });
 
@@ -140,7 +140,7 @@ describe("on disk and in the blob", () => {
   it("keeps a session id and cwd across a cold start, and drops ones that could not be", () => {
     const id = "0b6c2f1e-8d7a-4c3b-9e2f-1a2b3c4d5e6f";
     const b = startRun(board("a"), "c0", { agentId: "a1", launcher: "claude", label: "Claude", startedAt: 0, sessionId: id, cwd: "/w" });
-    expect(adoptBoard(JSON.parse(JSON.stringify(storedBoard(b))))!.cards[0]!.run).toMatchObject({ sessionId: id, cwd: "/w" });
+    expect(adoptBoard(JSON.parse(JSON.stringify(b)))!.cards[0]!.run).toMatchObject({ sessionId: id, cwd: "/w" });
     const bad = adoptBoard({ cards: [{ id: "k", title: "t", run: { launcher: "claude", sessionId: "x; rm -rf ~", cwd: "rel" } }] });
     expect(bad!.cards[0]!.run).toMatchObject({ sessionId: null, cwd: null });
   });
@@ -155,7 +155,7 @@ describe("on disk and in the blob", () => {
     expect(b.cards.map((c) => c.number)).toEqual([1, 2, 3]);
     const again = addCard(removeCard(b, "c2"), { title: "d" }, "c3", 0);
     expect(again.cards.map((c) => c.number)).toEqual([1, 2, 4]);
-    expect(adoptBoard(JSON.parse(JSON.stringify(storedBoard(again))))).toEqual(again);
+    expect(adoptBoard(JSON.parse(JSON.stringify(again)))).toEqual(again);
   });
 
   it("numbers a board from before numbers by when its cards were written, after any it has", () => {
@@ -194,7 +194,7 @@ describe("on disk and in the blob", () => {
     const b = addCard(emptyBoard(), { title: "a", isolate: true }, "c0", 0);
     expect(b.cards[0]!.isolate).toBe(true);
     expect(addCard(emptyBoard(), { title: "a", isolate: "yes" }, "c0", 0).cards[0]!.isolate).toBe(false);
-    expect(adoptBoard(JSON.parse(JSON.stringify(storedBoard(b))))!.cards[0]!.isolate).toBe(true);
+    expect(adoptBoard(JSON.parse(JSON.stringify(b)))!.cards[0]!.isolate).toBe(true);
     expect(editCard(b, "c0", { isolate: false }).cards[0]!.isolate).toBe(false);
     expect(editCard(b, "c0", { title: "b" }).cards[0]!.isolate).toBe(true);
     const tree = { root: "/r/app", path: "/r/app.worktrees/fix-c0", branch: "kururu/fix-c0", base: "main" };
@@ -209,7 +209,7 @@ describe("on disk and in the blob", () => {
   it("keeps a card's worktree across the disk, and drops one with a field missing", () => {
     const tree = { root: "/r/app", path: "/r/app.worktrees/fix-c0", branch: "kururu/fix-c0", base: "main" };
     const b = setWorktree(board("a"), "c0", tree);
-    const back = adoptBoard(JSON.parse(JSON.stringify(storedBoard(b))));
+    const back = adoptBoard(JSON.parse(JSON.stringify(b)));
     expect(back!.cards[0]!.worktree).toEqual(tree);
     const half = adoptBoard({ cards: [{ id: "k", title: "ok", worktree: { root: "/r", path: "rel", branch: "b", base: "m" } }] });
     expect(half!.cards[0]!.worktree).toBeNull();
@@ -436,7 +436,7 @@ describe("the profile's columns", () => {
     const old = adoptProfileBoard({ cards: [{ id: "c1", title: "a", column: "doing" }] });
     expect(boardLanes(old).map((l) => l.id)).toEqual(["todo", "doing", "done"]);
     expect(old.cards[0]!.column).toBe("doing");
-    const made = adoptProfileBoard(storedBoard(addLane(withCards(), "Someday", "k1")));
+    const made = adoptProfileBoard(addLane(withCards(), "Someday", "k1"));
     expect(boardLanes(made).map((l) => l.id)).toEqual(["todo", "doing", "done", "k1"]);
     const orphan = adoptProfileBoard({ columns: [{ id: "k1", name: "Only" }], cards: [{ id: "c1", title: "a", column: "gone" }] });
     expect(orphan.cards[0]!.column).toBe("k1");
@@ -482,7 +482,7 @@ describe("a card's dates", () => {
 
   it("keeps them to disk and back, and across being sent to a workspace", () => {
     const b = addCard(emptyProfileBoard(), { title: "a", dates: week }, "c0", 0);
-    expect(adoptProfileBoard(JSON.parse(JSON.stringify(storedBoard(b)))).cards[0]!.dates).toEqual(week);
+    expect(adoptProfileBoard(JSON.parse(JSON.stringify(b))).cards[0]!.dates).toEqual(week);
     expect(adoptBoard({ cards: [{ id: "c1", title: "old" }] })!.cards[0]!.dates).toBeNull();
     expect(adoptBoard({ cards: [{ id: "c1", title: "edited", dates: { start: "2026-13-01" } }] })!.cards[0]!.dates).toBeNull();
     expect(transferCard(b, emptyBoard(), "c0").to.cards[0]!.dates).toEqual(week);
@@ -591,7 +591,7 @@ describe("a column's colour", () => {
   it("keeps a chosen colour and a chosen none to disk and back, and drops what is not one", () => {
     let b = colorLane(emptyProfileBoard(), "todo", null);
     b = colorLane(b, "done", "rose");
-    expect(colors(adoptProfileBoard(JSON.parse(JSON.stringify(storedBoard(b)))))).toEqual([null, "amber", "rose"]);
+    expect(colors(adoptProfileBoard(JSON.parse(JSON.stringify(b))))).toEqual([null, "amber", "rose"]);
     expect(colors(adoptProfileBoard({ columns: [{ id: "k1", name: "Edited", color: "javascript:1" }], cards: [] }))).toEqual([null]);
   });
 
@@ -626,7 +626,7 @@ describe("a folded column", () => {
 
   it("stays folded to disk and back, and a hand-edited truthy is not folded", () => {
     const b = collapseLane(emptyProfileBoard(), "done", true);
-    expect(folded(adoptProfileBoard(JSON.parse(JSON.stringify(storedBoard(b)))))).toEqual([false, false, true]);
+    expect(folded(adoptProfileBoard(JSON.parse(JSON.stringify(b))))).toEqual([false, false, true]);
     expect(folded(adoptProfileBoard({ columns: [{ id: "k1", name: "Edited", collapsed: "yes" }], cards: [] }))).toEqual([false]);
   });
 });

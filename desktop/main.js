@@ -648,7 +648,7 @@ function openWindow() {
     win.show();
     win.focus();
     app.focus({ steal: true });
-    return;
+    return false;
   }
   createWindow();
   if (connected) {
@@ -656,6 +656,32 @@ function openWindow() {
     void openPage(base).then((page) => connected === base && win?.loadURL(page));
   } else showPicker();
   app.focus({ steal: true });
+  return true;
+}
+
+/**
+ * Touch the Kuru drawer in the window, at a reply when one is named. The
+ * window is told over IPC and `App` acts on it; a window that is still
+ * loading — one `openWindow` just made, or one mid-reload — is told once its
+ * page is there, and the preload keeps the ask for a page that has not
+ * subscribed yet. `fresh` is `openWindow`'s word that it made the window,
+ * whose load has not started when this runs.
+ *
+ * `toggle` is the other half of the pill's click meaning close as well as
+ * open: it is true only when the caller already knew the window was in
+ * front *before* raising it, which only `kururu:raise-main` can know, so
+ * this function never computes it itself. The page decides what a toggle
+ * actually does, since whether the drawer is already open is never this
+ * process's to know.
+ */
+function openKuru(focus, fresh, toggle = false) {
+  const target = win;
+  if (!target || target.isDestroyed()) return;
+  const tell = () => {
+    if (!target.isDestroyed()) target.webContents.send("kururu:open-kuru", typeof focus === "string" ? focus : null, toggle);
+  };
+  if (fresh || target.webContents.isLoading()) target.webContents.once("did-finish-load", tell);
+  else tell();
 }
 
 function closeWindow() {
@@ -686,6 +712,31 @@ ipcMain.on("kururu:show", (event) => {
   win.show();
   win.focus();
   app.focus({ steal: true });
+});
+
+/**
+ * The floating pill was clicked, so bring up the one window kururu has — or
+ * make one, if the pill is all that is open — with the Kuru drawer touched
+ * in it, at the reply the pill was showing.
+ *
+ * `kururu:show` cannot do this: it raises whichever window sent it, and the
+ * sender here is the panel, which is non-focusable and was never the window
+ * to raise. `openWindow` is already "the tray's Open Window, the dock, and
+ * ⌘N" — the same three words mean the same thing from the pill.
+ *
+ * Whether this click opens the drawer or closes it rides on a fact only this
+ * handler can see: `front` is whether the window was already in front
+ * *before* `openWindow` touches it — `openWindow` itself focuses the window,
+ * so asking after would always say yes. A window that was not already in
+ * front is being raised by this very click, which is never the click that
+ * also means "close"; only a click that found the window already there, and
+ * found the drawer already open, is that second click. The second half of
+ * that sentence is the page's to answer, so `front` crosses the bridge as a
+ * flag and `App` decides with it.
+ */
+ipcMain.on("kururu:raise-main", (_event, focus) => {
+  const front = Boolean(win && !win.isDestroyed() && !win.isMinimized() && win.isFocused());
+  openKuru(focus, openWindow(), front);
 });
 
 ipcMain.on("picker:ready", () => pushPickerState());
@@ -763,6 +814,8 @@ app.whenReady().then(async () => {
     actions: {
       openWindow,
       closeWindow,
+      // The menu's Open under Kuru's lines: the window, with the drawer up.
+      openKuru: () => openKuru(null, openWindow()),
       windowOpen: () => Boolean(win && !win.isDestroyed()),
       quit: () => app.quit(),
       serverChanged: () => {

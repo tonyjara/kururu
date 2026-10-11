@@ -29,6 +29,7 @@ import { adoptHarness } from "../../shared/harness";
 import { adoptPin, type MachinePin } from "../../shared/machines";
 import type { HarnessState, Profile, ProfileSummary, Workspace, WorkspaceColor } from "../../shared/model";
 import { gatherGroups, groupName, workspaceUnits, isLoginKey, isWorkspaceColor, mintLoginKey, WORKSPACE_COLORS } from "../../shared/model";
+import { isStoreKey, mintProfileKey, mintWorkspaceKey, type Actor } from "../../shared/store";
 import {
   activeTerminal,
   addTab,
@@ -156,6 +157,11 @@ function adopt(profile: Profile): Profile {
     // it existed has no logins of its own yet, and a fresh key says exactly
     // that. Checked rather than trusted, because it becomes a path.
     loginKey: isLoginKey(profile.loginKey) ? profile.loginKey : mintLoginKey(),
+    // The same rule for the same reason, one step on: a key names rows in
+    // the database, and a profile from before keys has none yet. The
+    // database matches a fresh key back to its board by name — see
+    // `Store.attach`.
+    key: isStoreKey(profile.key) ? profile.key : mintProfileKey(),
     // Read as defensively as everything else out of a blob: this one is a list
     // rather than a field, so a hand-edited or older blob could
     // put anything in it. Anything that is not a string is dropped instead of
@@ -180,6 +186,7 @@ function adopt(profile: Profile): Profile {
     // names would ride along into every snapshot and back out to disk.
     workspaces: gatherGroups(profile.workspaces.map(({ dev: _dev, ...workspace }: Workspace & { dev?: unknown }) => ({
       ...workspace,
+      key: isStoreKey(workspace.key) ? workspace.key : mintWorkspaceKey(),
       color: isWorkspaceColor(workspace.color) ? workspace.color : null,
       // A field this version has and the blob may not, like the three below.
       // It is deliberately not checked against the layout: a pane that has gone
@@ -272,9 +279,23 @@ export function orderAgents(ids: string[], order: string[]): string[] {
 
 export type ChangeHandler = () => void;
 
+/**
+ * What the arrangement writes through to: `Store.syncProfile`, lent by
+ * `index.ts`. Every change to a profile goes here *before* it is kept in
+ * memory, and one the disk refuses is not kept at all — memory never holds
+ * a board the file does not. Null only until `index.ts` attaches it at
+ * start, and in tests. See `server/src/store.ts`.
+ */
+export interface ProfileStore {
+  syncProfile(before: Profile | null, after: Profile | null, actor: Actor): void;
+}
+
 export class Workspaces {
   private profiles: Profile[] = [];
   private activeId: string;
+  private store: ProfileStore | null = null;
+  /** Who is making the change in flight, for the history. A client's verb unless `as` says otherwise. */
+  private actor: Actor = "user";
 
   /**
    * Called after anything here changes. The server pushes a snapshot; `persist.ts`
@@ -292,6 +313,58 @@ export class Workspaces {
     if (restored?.length) adoptSeq(restored);
     this.profiles = restored?.length ? restored.map(adopt) : [this.blankProfile("main")];
     this.activeId = this.profiles[0]!.id;
+  }
+
+  /**
+   * Replace every profile with what the database attached — boards read in,
+   * keys recovered — before anything is wired to `onChange`. The active id
+   * is kept, since ids are this session's and the database never touches
+   * them. Only at start; afterwards every change goes through the store.
+   */
+  attachStore(store: ProfileStore, profiles: Profile[]): void {
+    if (profiles.length) this.profiles = profiles;
+    if (!this.profiles.some((p) => p.id === this.activeId)) this.activeId = this.profiles[0]!.id;
+    this.store = store;
+  }
+
+  /** Run a change as somebody other than a client: the harness's tools, or the run automation. */
+  as<T>(actor: Actor, fn: () => T): T {
+    const was = this.actor;
+    this.actor = actor;
+    try {
+      return fn();
+    } finally {
+      this.actor = was;
+    }
+  }
+
+  /** A profile by the key the database knows it by, or null. */
+  profileByKey(key: string): Profile | null {
+    return this.profiles.find((p) => p.key === key) ?? null;
+  }
+
+  /** The database's key for a profile id, or null for an id that names nothing. */
+  keyOf(profileId: string): string | null {
+    return this.profiles.find((p) => p.id === profileId)?.key ?? null;
+  }
+
+  /** This session's id for a profile key, or null when no profile holds it. */
+  profileIdOf(key: string): string | null {
+    return this.profileByKey(key)?.id ?? null;
+  }
+
+  /**
+   * A board put back from the database — a restored card — into memory
+   * without going through the store, since the database is where it came
+   * from. The one road a board takes in that direction.
+   */
+  replaceBoard(profileKey: string, workspaceKey: string | null, board: Board): void {
+    this.profiles = this.profiles.map((p) => {
+      if (p.key !== profileKey) return p;
+      if (workspaceKey === null) return { ...p, board };
+      return { ...p, workspaces: p.workspaces.map((w) => (w.key === workspaceKey ? { ...w, board } : w)) };
+    });
+    this.onChange();
   }
 
   // -------------------------------------------------------------------------
@@ -1144,6 +1217,26 @@ export class Workspaces {
     return at;
   }
 
+  /**
+   * A workspace's board, from its row in the sidebar: that workspace, and then
+   * the board where it is, or with none open a new tab in the pane you were
+   * last in there.
+   *
+   * A tab rather than the split beside it that `openBoard` makes for the key,
+   * because the key is pressed in a pane and a row's menu is not aimed at any:
+   * the pane you left is the one you would have opened it from. Decided here,
+   * against the layout the server holds, rather than by a client from the one
+   * it last drew — two clients a beat apart would otherwise move a board the
+   * other had just opened. A row for a workspace that has gone opens nothing,
+   * rather than the board of whichever one is on screen.
+   */
+  openBoardFromRow(workspaceId: string): string | null {
+    if (!this.active.workspaces.some((w) => w.id === workspaceId)) return null;
+    this.switchWorkspace(workspaceId);
+    const open = paneWithAgent(this.activeWorkspace.layout, BOARD_TAB) !== null;
+    return this.openBoard(this.focusedPaneId, !open);
+  }
+
   /** Change the active workspace's board. A workspace with none is left without one. */
   editBoard(workspaceId: string, fn: (board: Board) => Board): void {
     const workspace = this.active.workspaces.find((w) => w.id === workspaceId);
@@ -1346,7 +1439,7 @@ export class Workspaces {
         const board = workspace.board;
         if (!board || !board.cards.some((card) => card.run?.agentId === agentId)) continue;
         const next = noteRun(board, agentId, status, exited, now);
-        if (next !== board) this.mutate(profile.id, workspace.id, (w) => ({ ...w, board: next }));
+        if (next !== board) this.as("automation", () => this.mutate(profile.id, workspace.id, (w) => ({ ...w, board: next })));
       }
     }
   }
@@ -1576,6 +1669,7 @@ export class Workspaces {
 
   newProfile(name: string): string {
     const profile = this.blankProfile(name.trim() || `profile ${this.profiles.length + 1}`);
+    if (!this.keep(null, profile)) return this.activeId;
     this.profiles = [...this.profiles, profile];
     this.activeId = profile.id;
     this.onChange();
@@ -1592,7 +1686,11 @@ export class Workspaces {
   renameProfile(profileId: string, name: string): void {
     const trimmed = name.trim();
     if (!trimmed) return;
-    this.profiles = this.profiles.map((p) => (p.id === profileId ? { ...p, name: trimmed } : p));
+    const before = this.profiles.find((p) => p.id === profileId);
+    if (!before) return;
+    const after = { ...before, name: trimmed };
+    if (!this.keep(before, after)) return;
+    this.profiles = this.profiles.map((p) => (p.id === profileId ? after : p));
     this.onChange();
   }
 
@@ -1621,6 +1719,7 @@ export class Workspaces {
     const doomed = this.profiles.find((p) => p.id === profileId);
     if (!doomed) return [];
     const agents = this.agentsIn(profileId);
+    if (!this.keep(doomed, null)) return [];
     this.profiles = this.profiles.filter((p) => p.id !== profileId);
     if (this.activeId === profileId) this.activeId = this.profiles[0]!.id;
     this.onChange();
@@ -1642,6 +1741,7 @@ export class Workspaces {
     const pane = makePane(id("n"));
     return {
       id: id("w"),
+      key: mintWorkspaceKey(),
       name,
       layout: pane,
       focusedPaneId: pane.pane.id,
@@ -1659,6 +1759,7 @@ export class Workspaces {
     const workspace = this.blankWorkspace("main", []);
     return {
       id: id("p"),
+      key: mintProfileKey(),
       name,
       loginKey: mintLoginKey(),
       workspaces: [workspace],
@@ -1675,8 +1776,30 @@ export class Workspaces {
   }
 
   private replaceProfile(profileId: string, fn: (profile: Profile) => Profile): void {
-    this.profiles = this.profiles.map((p) => (p.id === profileId ? fn(p) : p));
+    const before = this.profiles.find((p) => p.id === profileId);
+    if (!before) return;
+    const after = fn(before);
+    if (after !== before && !this.keep(before, after)) return;
+    this.profiles = this.profiles.map((p) => (p.id === profileId ? after : p));
     this.onChange();
+  }
+
+  /**
+   * Hand a change to the store before memory takes it. True when it was
+   * written, or there is no store yet; false when the disk refused — then
+   * the caller keeps what it had, and says nothing new to the clients,
+   * which is the honest snapshot. The refusal is logged once, with the
+   * reason, since a disk that refuses once will refuse the next verb too.
+   */
+  private keep(before: Profile | null, after: Profile | null): boolean {
+    if (!this.store) return true;
+    try {
+      this.store.syncProfile(before, after, this.actor);
+      return true;
+    } catch (err) {
+      console.error(`kururu: the database refused a change, so it was not made: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
   }
 
   private mutate(profileId: string, workspaceId: string, fn: (w: Workspace) => Workspace): void {

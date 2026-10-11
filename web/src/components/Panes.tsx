@@ -39,7 +39,7 @@
  * over the rebuild in the first place. Neither a tab switch nor a layout change
  * rebuilds anything now.
  */
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { keysByAction, type Action } from "../../../shared/keys";
 import {
   activeAgent,
@@ -75,7 +75,7 @@ import {
   useDragging,
 } from "../drag";
 import { keyLabel, PREFIX_LABEL } from "../keys";
-import { shortenPath, tabLabel } from "../labels";
+import { remoteHost, remoteNote, shortenPath, tabLabel } from "../labels";
 import * as api from "../session";
 import { ReaderView } from "./Reader";
 import { BoardView } from "./Board";
@@ -104,9 +104,9 @@ interface Props {
   /** Which agents the new-tab button offers besides a terminal. */
   launch: LaunchSettings;
   /**
-   * The machine this workspace's shells open on, by name, or null for this
-   * Mac — so the new-tab menu can say where its terminal goes, and offer one
-   * here as well. See `Workspace.machine`.
+   * The machine this workspace's terminals open on, by name, or null for this
+   * Mac — so the new-tab menu can say where everything in it goes. See
+   * `Workspace.machine`.
    */
   runsOn: string | null;
   /** Zen: the focused pane takes the window and the rest are held out of sight. */
@@ -420,15 +420,15 @@ function paneMenu({
 }
 
 /**
- * The new-tab button's menu: a terminal, nvim, a board, then an agent on a
- * model.
+ * The new-tab button's menu: a terminal, LazyGit, nvim, a board, then an agent
+ * on a model.
  *
- * In a workspace that runs on a machine the terminal row says so, and a
- * second one beside it opens here — the only door to a local shell in such a
- * workspace, since the key and an empty pane both go to the machine. The rows
- * that stay on this Mac whatever the pin, nvim and the agents, say that too:
- * a menu that put "omarchy1" on its first row and nothing on the rest would
- * read as though all of it went there.
+ * In a workspace that runs on a machine every row that opens a terminal opens
+ * it there — the server routes them by the pin, so the rows are the same rows
+ * — and one line at the head says where, rather than the name on every row.
+ * There is no "on this Mac" row: a pinned workspace is one piece of work on
+ * one machine, and a local shell is a workspace that is not pinned. The board
+ * is a view of this workspace's cards wherever its terminals run.
  *
  * The terminal stays first and keeps its key, because it is still what C-a T
  * opens and what a pane with nothing in it opens when clicked — the menu adds
@@ -436,28 +436,30 @@ function paneMenu({
  * a shell with `nvim` already typed into it rather than a launcher — it is
  * not a coding agent and has no model to pick, so it builds no `Launcher` row;
  * the server turns the `nvim` flag into the same command line the file tree's
- * "Open in nvim" uses. The agents are grouped by CLI with a rule between them,
- * in `LAUNCHERS` order.
+ * "Open in nvim" uses. LazyGit is the same kind of row (`shared/lazygit.ts`),
+ * and above nvim because it is opened more often — it was being reached
+ * through nvim. The agents are grouped by CLI with a rule between them, in
+ * `LAUNCHERS` order.
  */
 function newTabMenu(paneId: string, launchers: Launcher[], keymap: Record<string, Action>, runsOn: string | null): MenuItem[] {
   const first = keysByAction(keymap)["new-tab"]?.[0];
   const boardKey = keysByAction(keymap)["open-board"]?.[0];
-  const here = runsOn ? "this Mac" : undefined;
   return [
+    ...(runsOn ? [{ label: `On ${runsOn}`, disabled: true, run: () => {} }] : []),
     {
-      label: runsOn ? `Terminal on ${runsOn}` : "Terminal",
+      label: "Terminal",
       hint: first ? `${PREFIX_LABEL} ${keyLabel(first)}` : undefined,
       run: () => void api.newTab({ paneId }),
     },
-    ...(runsOn ? [{ label: "Terminal on this Mac", run: () => void api.newTab({ paneId, local: true }) }] : []),
-    { label: "Nvim", hint: here, run: () => void api.newTab({ paneId, nvim: true }) },
+    { label: "LazyGit", run: () => void api.newTab({ paneId, lazygit: true }) },
+    { label: "Nvim", run: () => void api.newTab({ paneId, nvim: true }) },
     /* A tab here, moved from wherever it was if the workspace already has one:
        there is one board per workspace, so "a board in this pane" means this
        one. */
     { label: "Board", hint: boardKey ? `${PREFIX_LABEL} ${keyLabel(boardKey)}` : undefined, run: () => api.openBoard(paneId, true) },
     ...launchers.map((launcher, index) => ({
       label: launcher.label,
-      hint: [launcher.model ? null : "default model", here].filter(Boolean).join(" · ") || undefined,
+      hint: launcher.model ? undefined : "default model",
       sep: index === 0 || launchers[index - 1]?.cli !== launcher.cli,
       run: () => void api.newTab({ paneId, launcher: launcher.id }),
     })),
@@ -625,6 +627,38 @@ function Pane({
     if (renaming !== null && !pane.agentIds.includes(renaming)) setRenaming(null);
   }, [renaming, pane.agentIds]);
 
+  /** The strip, for scrolling it by hand — a wheel has no horizontal axis of
+   *  its own, and a tab switch should bring the tab along with it. */
+  const stripRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    stripRef.current?.querySelector(".tab-on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [pane.activeIdx, pane.agentIds.length]);
+  // A mouse's wheel turns down, and a strip that only scrolls sideways would
+  // ignore it; a trackpad's sideways swipe is left to the browser.
+  const onStripWheel = (event: React.WheelEvent<HTMLElement>) => {
+    if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) event.currentTarget.scrollLeft += event.deltaY;
+  };
+  /**
+   * `.tab-new` sticks just clear of `.tab-actions` — but how wide that block is
+   * depends on a skin's button size and, on a solo pane, a "2/3" of varying
+   * width, so a written-down number is a second fact about the same box that
+   * only agrees with it by chance. Read instead of guessed: `--actions-w` is
+   * the block's own measured width, kept current by the `ResizeObserver` a
+   * pooled terminal is already watched by (`terminals.ts`), and `.tab-new`'s
+   * `right` in `styles.css` is that variable with no fallback of its own.
+   */
+  const actionsRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const strip = stripRef.current;
+    const actions = actionsRef.current;
+    if (!strip || !actions) return;
+    const measure = () => strip.style.setProperty("--actions-w", `${actions.offsetWidth}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(actions);
+    return () => observer.disconnect();
+  }, []);
+
   const overTab = (event: React.DragEvent, index: number) => {
     if (!takesTabs) return;
     allowDrop(event);
@@ -673,7 +707,9 @@ function Pane({
       onPointerDown={() => api.focusPane(pane.id)}
     >
       <header
+        ref={stripRef}
         className={`tabstrip ${lifted ? "tabstrip-lifted" : ""}`}
+        onWheel={onStripWheel}
         /* The pane's own drag handle — but `dragstart` bubbles up from every
            tab in here, so only claim the drag when the strip itself is what was
            grabbed. Without this, picking up a tab would put the pane in flight.
@@ -745,7 +781,12 @@ function Pane({
                 /* The label leads, because a tab is 180px wide and a summary an
                    agent wrote is usually longer than that — the tooltip is the
                    only place the whole sentence fits. */
-                title={[tabLabel(agent), agent.command, agent.cwd, "Right-click to rename"].join("\n")}
+                /* An agent on a machine says so in place of the command — a
+                   loop around ssh with a base64 blob in it — and the cwd, which
+                   is only where that ssh runs here. */
+                title={(remoteNote(agent) ? [tabLabel(agent), remoteNote(agent)] : [tabLabel(agent), agent.command, agent.cwd])
+                  .concat("Right-click to rename")
+                  .join("\n")}
                 /* The strip and not the terminal: a right-click inside the pane
                    belongs to whatever is running there, and the emulator takes
                    it for itself (`terminals.ts`). */
@@ -764,6 +805,7 @@ function Pane({
               >
                 <Status agent={agent} mascot={mascot} />
                 <span className="tab-label">{tabLabel(agent)}</span>
+                {remoteHost(agent) && <span className="remote-mark">{remoteHost(agent)}</span>}
                 {agent.unread && <span className="unread" aria-label="waiting for you" />}
                 <span
                   className="tab-close"
@@ -817,7 +859,7 @@ function Pane({
             while — two splits, the switcher and close — and a corner that holds
             every control a pane will ever grow is a corner that runs out of
             room; `paneMenu` is the list that does not. */}
-        <span className="tab-actions">
+        <span className="tab-actions" ref={actionsRef}>
           <PaneMenuButton solo={solo} onOpen={onMenu} />
           <button
             className="pane-btn"

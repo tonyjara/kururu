@@ -49,6 +49,11 @@ const building = !process.argv.includes("--no-build");
 const entryFlag = process.argv.indexOf("--entry");
 const ENTRY = entryFlag !== -1 && process.argv[entryFlag + 1] ? process.argv[entryFlag + 1] : join(root, "desktop/dist/server.mjs");
 
+// Named for `ps` and Activity Monitor, beside the server and the host — see
+// `server/src/ptyhostd.ts`. `run.mjs` stays in it because that is how the
+// window's runner recognises a supervisor that is not its own.
+process.title = `Kururu runner (run.mjs${watching ? " --watch" : ""})`;
+
 /** Kept in step with `RESTART_EXIT_CODE` in `server/src/index.ts`, which is what sends it. */
 const RESTART_EXIT_CODE = 75;
 

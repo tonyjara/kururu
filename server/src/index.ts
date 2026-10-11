@@ -90,6 +90,12 @@ import { pollUsage, usageSnapshot } from "./usage";
 import { clearOpenRouterKey, openRouterSnapshot, pollOpenRouter, setOpenRouterKey } from "./openrouter";
 import { Voice } from "./voice";
 import { Outbox, legacyHeard } from "./outbox";
+import { Kuru } from "./kuru";
+import { KURU_PAGE, KURU_SAY_MAX } from "../../shared/kuru";
+import { Backup } from "./backup";
+import { Store, dataDir, dbPath } from "./store";
+import { isSearchScope, sessionOfTranscript, type Actor, type SearchHit } from "../../shared/store";
+import { configDir } from "./config";
 import { CLIP_MAX_BYTES, isClipId } from "../../shared/voice";
 import {
   addMachine,
@@ -100,8 +106,11 @@ import {
   pollMachines,
   removeMachine,
   sessionsEnding,
+  sessionsOn,
 } from "./machines";
-import { remoteShellCommand, remoteShellOf, sessionName, validRemoteDir, type MachineEntry } from "../../shared/machines";
+import { remoteAgentRun, remoteShellCommand, remoteShellOf, sessionName, validRemoteDir, type MachineEntry } from "../../shared/machines";
+import { lazygitCommand, lazygitRun } from "../../shared/lazygit";
+import { OnScreen } from "./onscreen";
 import { closeDatabasePools, dbCatalog, dbQuery, dbRows, scanDatabases, type DatabaseScanInput } from "./databases";
 import { allowedRoots, allowRoot, findDocs, listDir, listDirs, readBytes, readFile, resolveInRoot } from "./files";
 import { parseFileOp, runFileOp } from "./fileops";
@@ -194,6 +203,7 @@ import {
   launcherCommand,
   resumeCommand,
   withPrompt,
+  type AgentCli,
   type Launcher,
   type LaunchSettings,
 } from "../../shared/launchers";
@@ -246,6 +256,7 @@ import { adoptAppearance, themeFor, type Appearance } from "../../shared/theme";
 import { isStyleId, skinFor } from "../../shared/skin";
 import { HOST_PROTOCOL, HostLink, type Port } from "./hostlink";
 import { connectToHost, hostSocketPath, type SocketPort } from "./hostsock";
+import { hostJobRunning, hostRuntime, launchHost } from "./hostlaunch";
 import {
   hostEnding,
   lifeNow,
@@ -260,7 +271,7 @@ import {
   watchSupervisor,
 } from "./lifecycle";
 import { MouseEncoding } from "./mouseencoding";
-import { adoptReaders, readSnapshot, writeSnapshot } from "./persist";
+import { adoptReaders, readSnapshot, snapshotPath, writeSnapshot } from "./persist";
 import { closeAllPreviews, closePreview, openPreview, openPreviews } from "./proxy";
 import { reach } from "./reach";
 import { smallestGrid, type Grid } from "./sizing";
@@ -274,6 +285,10 @@ recordCrashes();
 watchSupervisor();
 
 const PORT = Number(process.env.KURURU_PORT ?? 7717);
+
+// Named for `ps` and Activity Monitor, where the window, the runner, this and
+// the host were otherwise four of the same "Kururu". See `ptyhostd.ts`.
+process.title = `Kururu server :${PORT}`;
 
 /**
  * The exit code that means "start me again", as opposed to the ones that mean
@@ -410,6 +425,13 @@ let harness!: Harness;
 let voice!: Voice;
 /** What you said, kept on the disk until Kuru has it. See `outbox.ts`. */
 let outbox!: Outbox;
+/** The conversation with Kuru as the drawer draws it, assembled from the store, the outbox and the voice. See `kuru.ts`. */
+let kuru!: Kuru;
+/** What an agent on a machine is doing, read off its screen since nothing there reports. See `onscreen.ts`. */
+let screens!: OnScreen;
+/** The database: boards, conversations and the voice's lists. Opened in `attach()`, before anything is served. See `store.ts`. */
+let store!: Store;
+let backup!: Backup;
 const clients = new Map<WebSocket, ClientState>();
 
 const state = {
@@ -1333,11 +1355,14 @@ async function openTerminalAt(
  * here, as ever — for anything else.
  *
  * "Plain" is narrow on purpose. A command means somebody built a line for a
- * reason (an agent, nvim, a card's dev server); a directory means a place on
- * *this* disk (a worktree, the file tree's "open here"); `local` is the
- * menu's "on this Mac". Only the tab strip's terminal, `C-a T` and the
- * terminal a split opens have none of the three, and those are the shells a
- * pinned workspace means. A pin to a machine since removed is no pin.
+ * reason, and the callers that build one for the machine — the new-tab
+ * menu's nvim and agents, a card's run — have already asked `pinOf` and built
+ * the remote line themselves; the rest (a card's dev server, the harness's
+ * own session) are about this Mac. A directory means a place on *this* disk
+ * (a worktree, the file tree's "open here"); `local` is the harness's "on
+ * this Mac". Only the tab strip's terminal, `C-a T` and the terminal a split
+ * opens have none of the three, and those are the shells a pinned workspace
+ * means.
  */
 function pinnedShell(
   profileId: string,
@@ -1347,11 +1372,38 @@ function pinnedShell(
   if (options.local || options.command !== undefined || options.cwd !== undefined || (options.kind ?? "shell") !== "shell") {
     return undefined;
   }
+  const pin = pinOf(profileId, workspaceId);
+  return pin ? sessionShell(pin.machine, pin.workspaceName, pin.dir) : undefined;
+}
+
+/**
+ * A workspace's pin with its machine looked up, or undefined when it runs
+ * here. A pin to a machine since removed is no pin: the workspace comes home
+ * rather than opening tabs on a host nobody can see in the sidebar.
+ */
+/**
+ * The workspace's folder, for a LazyGit opened from its row: the main
+ * checkout, which is what the row's git verbs act on, else where its file tree
+ * starts — the repository the walk found, or outside one the directory the
+ * focused terminal is in. Undefined before the walk has been, and the tab then
+ * opens where any new tab would.
+ *
+ * Both are the walk's — directories the server found by going up from a
+ * terminal it holds — and neither comes from the client. The active profile's
+ * only, like the walk; a row's menu is always one of those.
+ */
+function workspaceRepo(workspaceId: string): string | undefined {
+  return (
+    state.branches.find((head) => head.workspaceId === workspaceId)?.git?.root ??
+    state.projects.find((project) => project.workspaceId === workspaceId)?.root
+  );
+}
+
+function pinOf(profileId: string, workspaceId: string): { machine: MachineEntry; dir: string; workspaceName: string } | undefined {
   const workspace = workspaces.workspaceIn(profileId, workspaceId);
   const pin = workspace?.machine;
   const machine = pin ? findMachine(pin.machineId) : undefined;
-  if (!workspace || !pin || !machine) return undefined;
-  return sessionShell(machine, workspace.name, pin.dir);
+  return workspace && pin && machine ? { machine, dir: pin.dir, workspaceName: workspace.name } : undefined;
 }
 
 /**
@@ -1366,16 +1418,46 @@ const claimedSessions = new Set<string>();
  * A shell on a machine in a tmux session of its own — see `sessionName` for
  * why the first slot no tab holds. Every machine's sessions count against
  * every other's, so two aliases for one box cannot hand out the same name.
+ * `avoid` is what the machine itself says it has, for a line that types
+ * something; see `commandOn`.
  */
-function sessionShell(machine: MachineEntry, workspaceName: string, dir: string, run?: string): string {
-  const taken = new Set([...sessionsEnding(), ...claimedSessions]);
+function sessionShell(
+  machine: MachineEntry,
+  workspaceName: string,
+  dir: string,
+  run?: string,
+  more: { agent?: AgentCli; avoid?: Iterable<string> } = {},
+): string {
+  const taken = new Set([...sessionsEnding(), ...claimedSessions, ...(more.avoid ?? [])]);
   for (const agent of host.agents) {
     const session = remoteShellOf(agent.command)?.session;
     if (session) taken.add(session);
   }
   const session = sessionName(workspaceName, taken);
   claimedSessions.add(session);
-  return remoteShellCommand({ host: machine.host, session, dir, run });
+  return remoteShellCommand({ host: machine.host, session, dir, run, agent: more.agent });
+}
+
+/**
+ * A line that types `run` into a new session on a machine — nvim, an agent,
+ * the harness's command — in a slot the machine says is free as well as the
+ * tabs. See `sessionsOn` for why a plain shell does not ask and this does.
+ * The listing is taken before the slot is chosen, and the choice and the
+ * claim happen together after it, so two of these in flight cannot pick one
+ * name.
+ */
+async function commandOn(machine: MachineEntry, workspaceName: string, dir: string, run: string, agent?: AgentCli): Promise<string> {
+  const avoid = (await sessionsOn(machine.host)) ?? [];
+  return sessionShell(machine, workspaceName, dir, run, { agent, avoid });
+}
+
+/**
+ * An agent on a machine: the launcher's line, with kururu's check that the
+ * CLI is there and signed in typed ahead of it. `command` is the launcher's
+ * line without the hook settings — see `remoteAgentRun`.
+ */
+function agentOn(machine: MachineEntry, workspaceName: string, dir: string, cli: AgentCli, command: string): Promise<string> {
+  return commandOn(machine, workspaceName, dir, remoteAgentRun(cli, command, machine.name), cli);
 }
 
 /** Spawn, and let go of the session name it was holding once the host lists it — or has refused it. */
@@ -1487,6 +1569,7 @@ async function runCardAt(
   cardId: string,
   launcherId: string,
   shown = false,
+  actor: Actor = "user",
 ): Promise<{ agentId: string }> {
   const onScreen = profileId === workspaces.active.id && workspaceId === workspaces.activeWorkspace.id;
   // `startDev` acts on the profile on screen, which a shown card's always is.
@@ -1505,14 +1588,27 @@ async function runCardAt(
   const target = workspaces.paneBesideBoardIn(profileId, workspaceId);
   if (!target) throw new Error("nowhere to put the agent");
   /*
+   * In a workspace pinned to a machine the agent runs there, in the pin's
+   * folder, the way the menu's agents do — unless the card has a worktree
+   * standing here from before the pin, which is where its work is. A
+   * worktree is git's on this disk (`worktree.ts`), so a card that asks for
+   * a new one in a pinned workspace is refused rather than run on the machine
+   * in the main checkout: the person ticked the box expecting isolation.
+   */
+  const standing = found.card.worktree !== null && worktreePresent(found.card.worktree.path);
+  const remote = standing ? undefined : pinOf(profileId, workspaceId);
+  if (remote && found.card.isolate) {
+    throw new Error(`${workspace.name} runs on ${remote.machine.name}, and a card's worktree is made on this Mac. Untick the card's worktree box to run it on ${remote.machine.name}.`);
+  }
+  /*
    * Where the agent would have started is where the repository is looked for;
    * where it *does* start is the card's worktree, when the card asked for one. A worktree that cannot be made is an error on the card rather
    * than an agent quietly started in the main checkout — the person pressed
    * the robot expecting isolation, and the one thing worse than no agent is
    * two agents in one tree that they believe are in two.
    */
-  const from = await cwdForPaneIn(profileId, workspaceId, target);
-  const checkout = await checkoutFor(found.card, from);
+  const from = remote ? undefined : await cwdForPaneIn(profileId, workspaceId, target);
+  const checkout = remote ? null : await checkoutFor(found.card, from);
   /*
    * A Claude run is told its session id rather than left to pick one, because
    * the id is the only road back to the conversation once the terminal has
@@ -1520,7 +1616,9 @@ async function runCardAt(
    */
   const sessionId = launcher.cli === "claude" ? randomUUID() : null;
   const cwd = checkout?.worktree.path ?? from;
-  let command = withPrompt(agentCommandFor(launcher, profileId) + (sessionId ? ` --session-id ${sessionId}` : ""), cardPrompt(found.card));
+  // No hook settings on a machine: they name files on this one. See `remoteAgentRun`.
+  const line = remote ? launcherCommand(launcher, launch) : agentCommandFor(launcher, profileId);
+  let command = withPrompt(line + (sessionId ? ` --session-id ${sessionId}` : ""), cardPrompt(found.card));
   /*
    * The dev server starts with the worktree, when the project has a dev line —
    * so that the card's work can be looked at without anybody having to ask.
@@ -1553,9 +1651,12 @@ async function runCardAt(
       console.error("kururu: could not start the card's dev server:", err instanceof Error ? err.message : err);
     });
   }
+  const options = remote
+    ? { command: await agentOn(remote.machine, remote.workspaceName, remote.dir, launcher.cli, command), kind: "agent" as const }
+    : { cwd, command, kind: "agent" as const };
   const agent = onScreen
-    ? await openTerminal(target, { cwd, command, kind: "agent" })
-    : await openTerminalAt(profileId, workspaceId, target, { cwd, command, kind: "agent" });
+    ? await openTerminal(target, options)
+    : await openTerminalAt(profileId, workspaceId, target, options);
   /*
    * Named after the card, as if somebody had typed it into rename-tab. Without
    * it the sidebar row says `starting…` and then whatever the agent titles its
@@ -1564,7 +1665,7 @@ async function runCardAt(
    * same as always.
    */
   host.rename(agent.id, found.card.title.slice(0, 80));
-  workspaces.editBoardIn(profileId, workspaceId, (board) =>
+  workspaces.as(actor, () => workspaces.editBoardIn(profileId, workspaceId, (board) =>
     startRun(setWorktree(board, cardId, checkout?.worktree ?? null), cardId, {
       agentId: agent.id,
       launcher: launcher.id,
@@ -1573,9 +1674,98 @@ async function runCardAt(
       sessionId,
       cwd: cwd ?? null,
     }),
-  );
+  ));
   if (onScreen && boardPane && workspaces.hasPane(boardPane)) workspaces.focusPane(boardPane);
   return { agentId: agent.id };
+}
+
+// ---------------------------------------------------------------------------
+// The database: search, history, the conversation
+// ---------------------------------------------------------------------------
+
+/** Hits for a profile, with this session's ids beside the keys so a window can go to the card. */
+function searchFor(profileId: string, query: string, scope: "all" | "cards" | "turns", limit: number): SearchHit[] {
+  const key = workspaces.keyOf(profileId);
+  if (!key) return [];
+  const profile = workspaces.profileByKey(key);
+  return store.search(query, scope, key, limit).map((hit) => {
+    if (hit.kind === "card") {
+      const workspaceId = hit.workspaceKey ? (profile?.workspaces.find((w) => w.key === hit.workspaceKey)?.id ?? null) : null;
+      return { ...hit, profileId, workspaceId };
+    }
+    return { ...hit, profileId };
+  });
+}
+
+function cardHistoryOf(cardId: string): { card: Card; workspaceName: string | null; deleted: boolean; events: import("../../shared/store").CardEvent[] } | null {
+  const found = store.findCard(cardId);
+  if (!found) return null;
+  const profile = workspaces.profileByKey(found.profileKey);
+  const workspaceName = found.workspaceKey ? (profile?.workspaces.find((w) => w.key === found.workspaceKey)?.name ?? null) : null;
+  return { card: found.card, workspaceName, deleted: found.deleted, events: store.cardHistory(cardId) };
+}
+
+/**
+ * What a hook report says about a conversation, written down. The harness's
+ * prompt on `UserPromptSubmit` is the one report that is `working` with a
+ * message; its reply on `Stop` is `done` with one. Any other agent's reply
+ * is kept too, as its own conversation named by its transcript, so the
+ * search finds what an agent said about a card.
+ */
+function recordTurn(agentId: string, report: { status?: string; message?: string }, body: Record<string, unknown>, utterance: string | null): void {
+  const profileId = workspaces.profileOf(agentId);
+  const profile = profileId ? workspaces.profile(profileId) : null;
+  if (!profile) return;
+  const reply = typeof body.reply === "string" ? body.reply.trim() : "";
+  const at = Date.now();
+  const cwd = host.find(agentId)?.cwd ?? null;
+  try {
+    if (harness.isHarness(agentId) && profile.harness) {
+      const base = { conversationId: profile.harness.sessionId, profileKey: profile.key, kind: "harness" as const, launcher: profile.harness.launcher, cwd, at };
+      if (report.status === "working" && report.message?.trim()) store.recordTurn({ ...base, role: "you", text: report.message.trim() });
+      // The reply names the utterance it was said as, so the drawer can put
+      // its fate — being said, unheard, heard — beside the words.
+      if (report.status === "done" && reply) store.recordTurn({ ...base, role: "kuru", text: reply, voiceId: utterance });
+      kuru.changed();
+      return;
+    }
+    if (report.status !== "done" || !reply) return;
+    const sessionId = sessionOfTranscript(typeof body.transcript === "string" ? body.transcript : null);
+    if (!sessionId) return;
+    store.recordTurn({ conversationId: sessionId, profileKey: profile.key, kind: "agent", launcher: null, cwd, role: "agent", text: reply, at });
+  } catch (err) {
+    console.error(`kururu: a turn could not be written down: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * A line Kuru says aloud mid-turn through its `say` tool: spoken, and written
+ * down as a turn of its own — `via: "kururu"`, which the drawer draws smaller —
+ * named for the utterance it was said as, so a line that was cut off shows as
+ * unheard beside the reply it preceded and can be played again from there.
+ */
+function sayAside(profileId: string, text: string): void {
+  const profile = workspaces.profile(profileId);
+  const key = profile?.key ?? "";
+  const utterance = voice.speak(key, text);
+  if (!profile?.harness) return;
+  try {
+    store.recordTurn({
+      conversationId: profile.harness.sessionId,
+      profileKey: profile.key,
+      kind: "harness",
+      launcher: profile.harness.launcher,
+      cwd: null,
+      role: "kuru",
+      via: "kururu",
+      text,
+      voiceId: utterance,
+      at: Date.now(),
+    });
+    kuru.changed();
+  } catch (err) {
+    console.error(`kururu: a said line could not be written down: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /**
@@ -1590,6 +1780,12 @@ async function runCardAt(
  * one is Claude's call, and the terminal is where it says so. The card goes
  * back to In progress, the same as any run, because it is being worked on.
  * Any workspace of the profile on screen, for `runCard`'s reason.
+ *
+ * A run on a machine kept no directory here, so in a workspace pinned to one
+ * it is resumed there, in the pin's folder, which is where it started and
+ * where its CLI filed the conversation. One that did start here — a directory
+ * that is still on this disk, a worktree standing — is resumed here whatever
+ * the pin says now, because here is where its transcript is.
  */
 async function resumeCard(workspaceId: string, cardId: string): Promise<{ agentId: string }> {
   const profileId = workspaces.active.id;
@@ -1610,10 +1806,15 @@ async function resumeCard(workspaceId: string, cardId: string): Promise<{ agentI
   const target = workspaces.paneBesideBoardIn(profileId, workspaceId);
   if (!target) throw new Error("nowhere to put the agent");
   const there = run.cwd && isDirectory(run.cwd) ? run.cwd : null;
-  const cwd = there ?? found.card.worktree?.root ?? (await cwdForPaneIn(profileId, workspaceId, target));
-  const command = resumeCommand(launcher, launch, run.sessionId, there === null);
+  const standing = found.card.worktree !== null && worktreePresent(found.card.worktree.path);
+  const remote = there || standing ? undefined : pinOf(profileId, workspaceId);
+  const cwd = remote ? undefined : (there ?? found.card.worktree?.root ?? (await cwdForPaneIn(profileId, workspaceId, target)));
+  // On a machine the folder is the one it ran in, so Codex's picker is not widened to every directory.
+  const command = resumeCommand(launcher, launch, run.sessionId, !remote && there === null);
   if (!command) throw new Error("there is no conversation on this card to resume");
-  const options = { cwd, command: command + hooksFor(launcher, profileId), kind: "agent" as const };
+  const options = remote
+    ? { command: await agentOn(remote.machine, remote.workspaceName, remote.dir, launcher.cli, command), kind: "agent" as const }
+    : { cwd, command: command + hooksFor(launcher, profileId), kind: "agent" as const };
   const agent = onScreen
     ? await openTerminal(target, options)
     : await openTerminalAt(profileId, workspaceId, target, options);
@@ -2583,7 +2784,7 @@ async function pollBranches(): Promise<void> {
     broadcast({ type: "projects", projects });
   }
   /**
-   * The env files in the same roots, for the database button on the row. The
+   * The env files in the same roots, for the row menu's Databases. The
    * roots are this walk's, which is the whole of why the scan sits here rather
    * than on a timer of its own: it reads under directories the server found
    * by walking up from a terminal, and learns none from anywhere else.
@@ -2603,7 +2804,7 @@ async function pollBranches(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// The workspace's git button
+// The workspace's git, from its row's menu
 // ---------------------------------------------------------------------------
 
 /**
@@ -2679,7 +2880,7 @@ async function gitFor(root: string): Promise<RepoGit | null> {
 }
 
 /**
- * One of the git button's verbs, on the workspace's main checkout.
+ * One of the row menu's git verbs, on the workspace's main checkout.
  *
  * The checkout is found the way the row's branch is — walking up from where
  * the workspace's terminals are — and then taken to the main one, so a
@@ -3385,17 +3586,43 @@ function handleMessage(ws: WebSocket, raw: string): void {
     // --- terminals ---------------------------------------------------------
 
     case "new-tab": {
+      // From a workspace row's menu, which may not be the workspace on screen:
+      // there first, as `open-board` goes, so the tab opens where you can see it.
+      const fromRow = typeof msg.workspaceId === "string";
+      if (typeof msg.workspaceId === "string") workspaces.switchWorkspace(msg.workspaceId);
       const paneId = msg.paneId ?? workspaces.focusedPaneId;
-      void replyAsync(ws, msg.id, () => {
+      void replyAsync(ws, msg.id, async () => {
+        /*
+         * In a workspace pinned to a machine, everything the menu offers opens
+         * there: the terminal through `pinnedShell`, nvim and the agents here,
+         * typed into a session of their own in the pin's folder. A directory
+         * sent with it is a place on this disk and keeps the tab here, as
+         * `local` does.
+         */
+        const pin = msg.cwd === undefined && msg.local !== true ? pinOf(workspaces.active.id, workspaces.activeWorkspace.id) : undefined;
         if (msg.launcher !== undefined) {
           // Looked up, never built: the id is the only thing taken off the wire.
           // Switched-off rows are not refused — the setting trims a menu, and a
           // second client with a stale one is still asking for a real agent.
           const launcher = typeof msg.launcher === "string" ? findLauncher(msg.launcher) : undefined;
           if (!launcher) throw new Error(`no such agent: ${String(msg.launcher)}`);
+          if (pin) {
+            const command = await agentOn(pin.machine, pin.workspaceName, pin.dir, launcher.cli, launcherCommand(launcher, launch));
+            return openTerminal(paneId, { command, kind: "agent" });
+          }
           return openTerminal(paneId, { cwd: msg.cwd, command: agentCommand(launcher), kind: "agent" });
         }
-        if (msg.nvim) return openTerminal(paneId, { cwd: msg.cwd, command: nvimCommand(), kind: "shell" });
+        if (msg.nvim) {
+          // The editor there, not this one: no socket for the reader to follow
+          // it by, since the reader reads this disk.
+          if (pin) return openTerminal(paneId, { command: await commandOn(pin.machine, pin.workspaceName, pin.dir, "nvim"), kind: "shell" });
+          return openTerminal(paneId, { cwd: msg.cwd, command: nvimCommand(), kind: "shell" });
+        }
+        if (msg.lazygit) {
+          if (pin) return openTerminal(paneId, { command: await commandOn(pin.machine, pin.workspaceName, pin.dir, lazygitRun(pin.machine.name)), kind: "shell" });
+          const cwd = msg.cwd ?? (fromRow ? workspaceRepo(workspaces.activeWorkspace.id) : undefined);
+          return openTerminal(paneId, { cwd, command: lazygitCommand(), kind: "shell" });
+        }
         return openTerminal(paneId, { cwd: msg.cwd, command: msg.command, kind: msg.kind, local: msg.local === true });
       });
       return;
@@ -3868,6 +4095,40 @@ function handleMessage(ws: WebSocket, raw: string): void {
       broadcast({ type: "openrouter", openrouter: null });
       return;
 
+    // --- the database and the backups ----------------------------------------
+    case "set-backup":
+      void replyAsync(ws, msg.id, async () => backup.set({ url: msg.url, enabled: msg.enabled, intervalMin: msg.intervalMin }));
+      return;
+
+    case "backup-now":
+      void replyAsync(ws, msg.id, () => backup.run());
+      return;
+
+    case "restore-card":
+      void replyAsync(ws, msg.id, async () => {
+        if (typeof msg.cardId !== "string") throw new Error("Which card?");
+        const found = store.findCard(msg.cardId);
+        if (!found || found.profileKey !== workspaces.active.key) throw new Error("No such deleted card in this profile.");
+        const where = store.restoreCard(msg.cardId, "user");
+        if (!where) throw new Error("That card is not deleted.");
+        const board = store.loadBoard(where.profileKey, where.workspaceKey);
+        if (board) workspaces.replaceBoard(where.profileKey, where.workspaceKey, board);
+        return true;
+      });
+      return;
+
+    case "deleted-cards":
+      reply(ws, msg.id, () => {
+        const key = typeof msg.profileId === "string" ? workspaces.keyOf(msg.profileId) : null;
+        if (!key) return [];
+        const profile = workspaces.profileByKey(key);
+        return store.deletedCards(key).map((card) => ({
+          ...card,
+          workspaceId: card.workspaceKey ? (profile?.workspaces.find((w) => w.key === card.workspaceKey)?.id ?? null) : null,
+        }));
+      });
+      return;
+
     // --- the voice ----------------------------------------------------------
     case "set-voice":
       voice.set(msg.voice);
@@ -3899,12 +4160,37 @@ function handleMessage(ws: WebSocket, raw: string): void {
       return;
 
     case "play-missed":
-      if (typeof msg.profileId === "string") voice.replay(msg.profileId);
+      if (typeof msg.profileId === "string") voice.replay(workspaces.keyOf(msg.profileId) ?? "");
       return;
 
     case "clear-missed":
-      if (typeof msg.profileId === "string") voice.clear(msg.profileId);
+      if (typeof msg.profileId === "string") voice.clear(workspaces.keyOf(msg.profileId) ?? "");
       return;
+
+    // --- the Kuru drawer ---------------------------------------------------
+
+    case "kuru-seen": {
+      const key = typeof msg.profileId === "string" ? workspaces.keyOf(msg.profileId) : null;
+      if (!key || !Array.isArray(msg.utterances)) return;
+      const ids = msg.utterances.filter((id): id is string => typeof id === "string" && id.length <= 80).slice(0, 200);
+      if (ids.length) voice.seen(key, ids);
+      return;
+    }
+
+    case "kuru-replay": {
+      const key = typeof msg.profileId === "string" ? workspaces.keyOf(msg.profileId) : null;
+      if (key && typeof msg.utterance === "string") voice.replayOne(key, msg.utterance);
+      return;
+    }
+
+    case "kuru-say": {
+      const key = typeof msg.profileId === "string" ? workspaces.keyOf(msg.profileId) : null;
+      const text = typeof msg.text === "string" ? msg.text.trim().slice(0, KURU_SAY_MAX) : "";
+      if (!key || !isClipId(msg.id) || !text) return;
+      const at = typeof msg.at === "number" && Number.isFinite(msg.at) && msg.at > 0 ? msg.at : Date.now();
+      outbox.say(key, msg.id, at, text);
+      return;
+    }
 
     case "voice-resend":
       if (isClipId(msg.id)) outbox.resend(msg.id);
@@ -4053,9 +4339,13 @@ function handleMessage(ws: WebSocket, raw: string): void {
     // --- the board ---------------------------------------------------------
 
     case "open-board":
-      // From a workspace row, which may not be the workspace on screen: go
-      // there first, since a board is only ever opened where you can see it.
-      if (typeof msg.workspaceId === "string") workspaces.switchWorkspace(msg.workspaceId);
+      // From a workspace row, which may not be the workspace on screen: it
+      // goes there first, since a board is only ever opened where you can see
+      // it — see `openBoardFromRow` for where in it.
+      if (typeof msg.workspaceId === "string") {
+        workspaces.openBoardFromRow(msg.workspaceId);
+        return;
+      }
       workspaces.openBoard(msg.paneId ?? workspaces.focusedPaneId, msg.here === true);
       return;
 
@@ -4499,6 +4789,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       agents: host.agents.length,
       liveAgents: host.agents.filter(countsAsAgent).length,
       devServers: state.devServers.length,
+      // The conversation's two counts for the profile on screen, for the
+      // menu bar: what Kuru said that nobody heard, and what did not reach
+      // it. The frog is the one presence a Mac with no window open has.
+      kuru: { profileId: workspaces.active.id, ...kuru.counts(workspaces.active.key) },
       pid: process.pid,
       // When and why this process started, and whether anything would start
       // it again. Without the file: this is asked every few seconds.
@@ -4514,6 +4808,58 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    */
   if (url.pathname === "/api/lifecycle") {
     json(res, lifecycleReport());
+    return;
+  }
+
+  /**
+   * Where the data lives, for the About page: the database's file and how
+   * big it is. Asked rather than pushed, since nobody watches it grow.
+   */
+  if (url.pathname === "/api/data") {
+    json(res, { path: store.path, bytes: store.bytes() });
+    return;
+  }
+
+  /**
+   * Full text over the cards and the conversations — `shared/store.ts`. A
+   * GET with the words, answered with hits that carry this session's ids
+   * beside the keys, so the window can go to a card.
+   */
+  if (url.pathname === "/api/search") {
+    const q = url.searchParams.get("q") ?? "";
+    const scope = url.searchParams.get("scope");
+    const asked = url.searchParams.get("profile");
+    const limit = Number(url.searchParams.get("limit") ?? 20);
+    json(res, {
+      hits: searchFor(asked && workspaces.profile(asked) ? asked : workspaces.active.id, q, isSearchScope(scope) ? scope : "all", Number.isFinite(limit) ? limit : 20),
+    });
+    return;
+  }
+
+  /**
+   * The conversation with Kuru before a moment, for the drawer's "Show
+   * earlier": the socket carries the newest items and this pages back
+   * through the rest. A GET, since it changes nothing. And one verb for a
+   * caller with no socket — the menu bar — to play the unheard replies.
+   */
+  if (url.pathname === "/api/kuru") {
+    const asked = url.searchParams.get("profile");
+    const profileId = asked && workspaces.profile(asked) ? asked : workspaces.active.id;
+    const before = Number(url.searchParams.get("before"));
+    const limit = Number(url.searchParams.get("limit") ?? KURU_PAGE);
+    json(res, kuru.page(workspaces.keyOf(profileId) ?? "", Number.isFinite(before) && before > 0 ? before : null, Number.isFinite(limit) ? Math.max(1, Math.min(200, Math.floor(limit))) : KURU_PAGE));
+    return;
+  }
+  if (url.pathname === "/api/kuru/play" && req.method === "POST") {
+    const asked = url.searchParams.get("profile");
+    const profileId = asked && workspaces.profile(asked) ? asked : workspaces.active.id;
+    json(res, { ok: true, played: voice.replay(workspaces.keyOf(profileId) ?? "").length });
+    return;
+  }
+
+  /** Back up now, for `bun run backup` and anything else without a socket. */
+  if (url.pathname === "/api/backup/now" && req.method === "POST") {
+    json(res, await backup.run());
     return;
   }
 
@@ -4688,10 +5034,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       // And when the reporter is a profile's harness, what it last said is
       // read aloud — the one place Kuru's turn ending is heard about.
       const spoken = harness.isHarness(agentId);
-      if (spoken && parsed.report.status === "done") voice.spoke(spoken, (body as Record<string, unknown>).reply);
+      const spokenKey = spoken ? workspaces.keyOf(spoken) : null;
+      const utterance = spokenKey && parsed.report.status === "done" ? voice.spoke(spokenKey, (body as Record<string, unknown>).reply) : null;
       // A prompt Kuru took, which is how a message of yours is known to have
       // arrived and not merely to have been typed. See `Outbox.prompted`.
-      if (spoken && parsed.report.message) outbox.prompted(spoken, parsed.report.message);
+      if (spokenKey && parsed.report.message) outbox.prompted(spokenKey, parsed.report.message);
+      // And the conversation, written down: the prompt on its way in and
+      // the reply on its way out, for the search and the drawer. Before the
+      // cap below, which is the sidebar's and not the record's.
+      recordTurn(agentId, parsed.report, body as Record<string, unknown>, utterance);
       /**
        * The host is told the status and the context; the message stops here.
        * It is the one part of a report that says something about the work rather
@@ -4826,7 +5177,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return;
     }
     try {
-      const entry = outbox.take(profileId, id, at, wav);
+      const entry = outbox.take(workspaces.keyOf(profileId)!, id, at, wav);
       // A page from before the outbox holds the upload open for the words
       // and reads them in the old shape; it gets both, once they are made.
       if (isClipId(given)) json(res, { entry });
@@ -5415,8 +5766,9 @@ server.on("upgrade", (req, socket, head) => {
     send(ws, { type: "openrouter", openrouter: openRouterSnapshot() });
     send(ws, { type: "voice", voice: voice.status() });
     send(ws, voice.hush());
-    send(ws, voice.missedMessage());
+    send(ws, kuru.message());
     send(ws, outbox.message());
+    send(ws, backup.message());
     // The first client through the door is also what starts the usage poll: it
     // is skipped while nothing is connected, so without this a freshly started
     // server would draw no bar for a minute.
@@ -5502,6 +5854,36 @@ async function attach(port: Port): Promise<void> {
 
   workspaces = new Workspaces(profiles);
   if (activeProfileId) workspaces.switchProfile(activeProfileId);
+  /**
+   * The database, made on the first start: every board read out of it and
+   * every change written through it from here on, with the keys the blob or
+   * the file carried matched up. A card either of them holds that the
+   * database has never seen — a file a build from before the database
+   * wrote — is adopted, and the file is written again at once, keys and no
+   * boards, so it is read for cards once. A database that is there and will
+   * not open is a server that does not start: boards live nowhere else, and
+   * a server running on without it would draw boards that forget everything
+   * typed into them.
+   */
+  const made = !existsSync(dbPath());
+  try {
+    store = Store.open();
+    const attached = store.attach(workspaces.all(), live);
+    workspaces.attachStore(store, attached.profiles);
+    if (made) console.log(`kururu: no database at ${dbPath()}, so a new one was made`);
+    if (attached.adopted || attached.recovered) {
+      console.log(`kururu: database attached — ${attached.adopted} card(s) adopted from the layout, ${attached.recovered} key(s) matched by name`);
+    }
+    if (attached.adopted) writeSnapshot(workspaces.all(), workspaces.active.id);
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    const what = made ? "made" : "opened";
+    record("crash", `the database at ${dbPath()} could not be ${what}: ${why}`);
+    console.error(
+      `kururu: the database at ${dbPath()} could not be ${what}: ${why}\n  Boards live nowhere else, so the server will not start without it.${made ? "" : " Move the file aside only if you mean to start from the last backup."}`,
+    );
+    process.exit(1);
+  }
   // Everything the harness touches, lent as functions: `index.ts` exports
   // nothing and should not start to for one caller.
   harness = new Harness({
@@ -5516,31 +5898,80 @@ async function attach(port: Port): Promise<void> {
     agentCommand: agentCommandFor,
     openTerminal: openTerminalAt,
     machines: machinesSnapshot,
-    shellOn: sessionShell,
+    shellOn: (machine, workspaceName, dir, run) =>
+      run ? commandOn(machine, workspaceName, dir, run) : Promise.resolve(sessionShell(machine, workspaceName, dir)),
+    agentOn,
     stopTerminal: (agentId) => {
       endRemote(agentId);
       host.kill(agentId);
     },
     cwdFor: cwdForPaneIn,
-    runCard: runCardAt,
+    runCard: (profileId, workspaceId, cardId, launcherId) => runCardAt(profileId, workspaceId, cardId, launcherId, false, "harness"),
     stopDev,
     // Through the variable rather than the instance, because the voice is
-    // built on the next line and needs the harness to hand words to.
-    say: (profileId, text) => void voice.speak(profileId, text),
-    replayMissed: (profileId) => voice.replay(profileId),
+    // built on the next line and needs the harness to hand words to. The
+    // voice and the outbox name a profile by its key — see `store.ts` —
+    // and the harness by its id, so the two are mapped here, at the edge.
+    say: (profileId, text) => sayAside(profileId, text),
+    replayMissed: (profileId) => voice.replay(workspaces.keyOf(profileId) ?? ""),
+    search: searchFor,
+    cardHistory: cardHistoryOf,
   });
-  voice = new Voice({ broadcast });
-  outbox = new Outbox({
+  // The reports a remote agent's hooks cannot send, read off its screen.
+  screens = new OnScreen({
+    host,
+    grid: ownedGrid,
+    report: (agentId, report) => host.report(agentId, report),
+    said: (agentId, text) => {
+      if (text) activity.set(agentId, text.slice(0, MAX_ACTIVITY));
+      else activity.delete(agentId);
+      pushSnapshot();
+    },
+  });
+  screens.start();
+  voice = new Voice({
     broadcast,
+    index: { load: () => store.loadMissed(), save: (list) => store.saveMissed(list) },
+    profileIdOf: (key) => workspaces.profileIdOf(key),
+    // Through the variable: the conversation is assembled below, after the
+    // outbox it also reads, and nothing here moves the list before then.
+    changed: () => kuru.changed(),
+  });
+  outbox = new Outbox({
+    // Every move of a message is also a move of the conversation it is in.
+    broadcast: (msg) => {
+      broadcast(msg);
+      if (msg.type === "outbox") kuru.changed();
+    },
+    index: { load: () => store.loadOutbox(), save: (entries) => store.saveOutbox(entries), remove: (id) => store.removeVoice(id) },
+    profileIdOf: (key) => workspaces.profileIdOf(key),
     transcribe: (path, ms) => voice.transcribe(path, ms),
-    deliver: (profileId, text, events) => harness.hear(profileId, text, events),
-    harness: (profileId) => {
-      const agentId = workspaces.profile(profileId)?.harness?.agentId;
+    deliver: (profileKey, text, events) => {
+      const profileId = workspaces.profileIdOf(profileKey);
+      if (!profileId) return Promise.reject(new Error("that profile is gone"));
+      return harness.hear(profileId, text, events);
+    },
+    harness: (profileKey) => {
+      const agentId = workspaces.profileByKey(profileKey)?.harness?.agentId;
       const agent = agentId ? host.find(agentId) : undefined;
       if (!agentId || !agent || agent.exited) return null;
       return { agentId, status: agent.status, transcript: harness.transcriptOf(agentId) };
     },
     talk: (who, on) => voice.talk(who, on),
+  });
+  kuru = new Kuru({
+    store,
+    profiles: () => workspaces.all().map((profile) => ({ id: profile.id, key: profile.key })),
+    outbox: (key) => outbox.entriesOf(key),
+    missed: (key) => voice.missedFor(key),
+    broadcast,
+  });
+  backup = new Backup({
+    store,
+    broadcast,
+    configDir,
+    stateDir: () => dirname(snapshotPath()),
+    dataDir,
   });
   for (const agentId of workspaces.allAgents()) {
     if (!live.has(agentId)) workspaces.removeTab(agentId);
@@ -5651,8 +6082,10 @@ function listenOnce(onListening: () => void): void {
  * to it. A server that has just been restarted connects again and `hello` hands
  * it back the agents and the arrangement, which is exactly what a re-forked
  * utilityProcess got. Starting the host if it is not there is a convenience for
- * the common case of one machine and one person; it is spawned **detached**, so
- * it is not our child and does not go down with us. That is the whole point.
+ * the common case of one machine and one person; it is started **by launchd**,
+ * so it is not our child, does not go down with us, and is not in the
+ * coalition of the app that started us either — `hostlaunch.ts` has why that
+ * last part cost 27 agents in one day. That is the whole point.
  */
 const SOCKET = hostSocketPath();
 const HOST_LOG = join(dirname(SOCKET), "ptyhost.log");
@@ -5667,15 +6100,37 @@ const HOST_LOG = join(dirname(SOCKET), "ptyhost.log");
  * Starting one means the last one is gone, and how it went is in the bottom of
  * that same file, so it is read before the new host writes its first line
  * there and the two go into the record together.
+ *
+ * launchd first, and a detached child of ours only when launchd will not take
+ * it. The fallback is the arrangement every host had before, so it works; what
+ * it lacks is a coalition of its own, and the record says that in as many
+ * words, because a host that a Force Quit can reach is one somebody should know
+ * about.
  */
-async function startPtyHost(): Promise<void> {
+async function startPtyHost(): Promise<string | null> {
   const entry = process.env.KURURU_PTYHOSTD || fileURLToPath(new URL("./ptyhostd.mjs", import.meta.url));
   if (!existsSync(entry)) throw new Error(`no pty host to start at ${entry} — bun run build:server`);
 
   const before = hostEnding(readTail(HOST_LOG));
-  mkdirSync(dirname(SOCKET), { recursive: true });
+  const { how, ...detail } = before ?? { how: null };
+  const last = how ? `; the last one ${how}` : "";
+  const dir = dirname(SOCKET);
+  mkdirSync(dir, { recursive: true });
+  const runtime = hostRuntime(process.execPath, entry, dir);
+
+  let refused = "";
+  if (process.platform === "darwin") {
+    try {
+      const { pid, label } = await launchHost(runtime, { dir, log: HOST_LOG, cwd: process.cwd(), env: process.env });
+      record("host", `started a pty host (pid ${pid ?? "pending"}) through launchd, in a coalition of its own, ${runtime.note}, because none was answering${last}`, detail);
+      return label;
+    } catch (err) {
+      refused = err instanceof Error ? err.message : String(err);
+    }
+  }
+
   const log = openSync(HOST_LOG, "a");
-  const child = spawn(process.execPath, [entry], {
+  const child = spawn(runtime.exe, [runtime.entry], {
     detached: true,
     stdio: ["ignore", log, log],
     // Harmless under node, and the one thing that makes this work if the binary
@@ -5684,9 +6139,21 @@ async function startPtyHost(): Promise<void> {
   });
   child.unref();
   closeSync(log);
-  const { how, ...detail } = before ?? { how: null };
-  record("host", `started a pty host (pid ${child.pid}) because none was answering${how ? `; the last one ${how}` : ""}`, detail);
+  const shared = refused
+    ? ` as a child of this server, because launchd refused it (${refused}) — it shares the coalition of the app that started this server, and a Force Quit of that app ends every agent`
+    : "";
+  record("host", `started a pty host (pid ${child.pid})${shared}${runtime.note ? `, ${runtime.note}` : ""}, because none was answering${last}`, detail);
+  return null;
 }
+
+/** How long a host gets to listen before anybody asks why: plenty for one that is only starting. */
+const HOST_START_MS = 5_000;
+/**
+ * How long a host launchd says is still running gets, past that. One blocked
+ * on a privacy prompt is waiting for a person, and two minutes is long enough
+ * to read one and short enough that a hung host is still noticed.
+ */
+const HOST_PROMPT_MS = 120_000;
 
 /**
  * The link, however we have to get it.
@@ -5695,6 +6162,13 @@ async function startPtyHost(): Promise<void> {
  * not listening yet, and because two servers started together both find nothing
  * and both spawn one — the loser exits on `EADDRINUSE` and the winner is there a
  * moment later, so patience is also what resolves the race.
+ *
+ * Past five seconds, a host launchd started is waited for as long as launchd
+ * says it is running, up to two minutes, and the console says why. The case is
+ * a runtime macOS has not yet let into `~/Desktop`: the host's first `open()`
+ * there blocks on the prompt, and a server that gave up at five seconds would
+ * exit, leave its runner down, and have a host come up a minute later with
+ * nobody to talk to.
  */
 async function linkToHost(): Promise<SocketPort> {
   try {
@@ -5702,13 +6176,26 @@ async function linkToHost(): Promise<SocketPort> {
   } catch {
     // Nothing listening. Ours to start.
   }
-  await startPtyHost();
-  for (let attempt = 0; attempt < 50; attempt++) {
+  const job = await startPtyHost();
+  const started = Date.now();
+  let told = false;
+  for (let attempt = 0; ; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 100));
     try {
       return await connectToHost(SOCKET);
     } catch {
       // Still coming up.
+    }
+    const waited = Date.now() - started;
+    if (waited < HOST_START_MS) continue;
+    // launchctl once a second, not ten times.
+    if (attempt % 10 !== 0) continue;
+    if (!job || waited > HOST_PROMPT_MS || !hostJobRunning(job)) break;
+    if (!told) {
+      told = true;
+      console.error(
+        "kururu: the pty host is running but not listening yet — if macOS is asking whether Kururu may use a folder, it is waiting for that answer",
+      );
     }
   }
   throw new Error(`the pty host did not come up at ${SOCKET} — see ${HOST_LOG}`);
@@ -5832,6 +6319,8 @@ export function shutdown(): Promise<void> {
     if (saveTimer) clearTimeout(saveTimer);
     if (workspaces) writeSnapshot(workspaces.all(), workspaces.active.id);
     closeAllPreviews();
+    backup?.close();
+    store?.close();
     void closeDatabasePools();
     // The Kokoro process, so it goes now rather than when it notices.
     voice?.close();

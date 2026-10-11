@@ -28,6 +28,7 @@ import type { StyleLibrary } from "../../../shared/styles";
 import type { Appearance } from "../../../shared/theme";
 import type { WorkspaceProject } from "../../../shared/wire";
 import { AboutSettings } from "./SettingsAbout";
+import { BackupSettings } from "./SettingsBackups";
 import { AgentSettings } from "./SettingsAgents";
 import { AppearanceSettings } from "./SettingsAppearance";
 import { KeySettings } from "./SettingsKeys";
@@ -55,6 +56,7 @@ export type Tab =
   | "voice"
   | "machines"
   | "openrouter"
+  | "backups"
   | "keys"
   | "about";
 
@@ -149,6 +151,12 @@ const SECTIONS: ReadonlyArray<{
       ["openrouter", "OpenRouter"],
     ],
   },
+  /**
+   * Where the precious things go when this Mac does not. Its own tab rather
+   * than a Monitors page: nothing in the sidebar draws it, and it is set up
+   * once and then only looked at when something went wrong.
+   */
+  { id: "backups", label: "Backups", pages: [["backups", "Backups"]] },
   { id: "keys", label: "Keys", pages: [["keys", "Keys"]] },
   { id: "about", label: "About", pages: [["about", "About"]] },
 ];
@@ -335,6 +343,8 @@ export function Settings({
             <VoiceSettings onEditing={onEditing} />
           ) : tab === "openrouter" ? (
             <OpenRouterSettings onEditing={onEditing} />
+          ) : tab === "backups" ? (
+            <BackupSettings onEditing={onEditing} />
           ) : tab === "processes" ? (
             <ProcessSettings />
           ) : tab === "about" ? (

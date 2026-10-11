@@ -30,6 +30,30 @@ const path = hostSocketPath();
 const host = createPtyHost();
 
 /**
+ * What this process is called, and what it is holding.
+ *
+ * It ran under the name of whatever binary started it — "Kururu", "Electron",
+ * "node" — beside a window, a runner and a server that all had the same name,
+ * and the one process whose ending ends every agent was the one nobody could
+ * pick out. On macOS `process.title` is also what Activity Monitor shows,
+ * because libuv hands it to LaunchServices as the display name, and registers
+ * the process as a daemon while it does, so there is still no Dock tile to
+ * quit. ASCII on purpose: `ps` cuts the name to sixteen bytes for its `comm`
+ * column, and a `·` cut in half there prints as garbage. `ptyhost` stays in it
+ * because `kill-ptyhosts`, the runner and `lifecycle.ts` all check for that
+ * word before they believe a pid on the socket is a host.
+ */
+let titled = -1;
+function title(): void {
+  const live = host.liveCount();
+  if (live === titled) return;
+  titled = live;
+  process.title = `Kururu ptyhost - ${live === 0 ? "no agents" : live === 1 ? "1 agent" : `${live} agents`}`;
+}
+title();
+setInterval(title, 2_000).unref();
+
+/**
  * The server currently attached, if any.
  *
  * One at a time, deliberately. The host holds one blob of arrangement and pushes

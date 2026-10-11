@@ -148,7 +148,8 @@ export type IconName =
   | "panel"
   | "fold"
   | "unfold"
-  | "terminal";
+  | "terminal"
+  | "more";
 
 export type IconSet = Record<IconName, string>;
 
@@ -202,6 +203,8 @@ export const ICON_NAMES: readonly IconName[] = [
   "unfold",
   /** A shell on one of the user's machines, from its row in the sidebar. */
   "terminal",
+  /** A workspace row's options, which wait for the pointer to be on the row. */
+  "more",
 ];
 
 /**
@@ -761,6 +764,8 @@ export const BASE_ICONS: IconSet = {
   unfold: "⊞",
   /** A prompt: what every terminal icon is, and what the user sees once it opens. */
   terminal: "❯",
+  /** More, behind a button: three dots is what every menu of the rest is drawn as. */
+  more: "⋯",
 };
 
 /**

@@ -672,50 +672,14 @@ export function promptCarries(prompt: string, text: string): boolean {
 }
 
 /**
- * Messages from the disk, made whole: anything not shaped like one is
- * dropped, and what the server keeps beside the wire's fields — its place in
- * the order, the tries, where the transcript was — is read back as numbers
- * and strings or not at all.
+ * A message as the server keeps it: the wire's fields and its own, with the
+ * profile named by its key rather than its id. The id is a counter minted on
+ * every cold start, and a list keyed by it lost every entry on each — three
+ * host restarts in a morning once orphaned the whole outbox. The wire still
+ * carries `profileId`, resolved from the key at the moment of sending.
  */
-export function adoptOutbox(value: unknown): StoredOutboxEntry[] {
-  if (!Array.isArray(value)) return [];
-  const out: StoredOutboxEntry[] = [];
-  const seen = new Set<string>();
-  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
-  const str = (v: unknown, max: number) => (typeof v === "string" && v ? v.slice(0, max) : null);
-  for (const raw of value) {
-    if (!raw || typeof raw !== "object") continue;
-    const r = raw as Record<string, unknown>;
-    if (!isClipId(r.id) || seen.has(r.id)) continue;
-    const profileId = str(r.profileId, 80);
-    const at = num(r.at);
-    const n = num(r.n);
-    if (!profileId || at === null || n === null) continue;
-    const state: OutboxState = r.state === "queued" || r.state === "delivered" || r.state === "failed" ? r.state : "transcribing";
-    const text = str(r.text, 20_000);
-    seen.add(r.id);
-    out.push({
-      id: r.id,
-      profileId,
-      at,
-      ms: Math.max(0, num(r.ms) ?? 0),
-      // Words are what make a message queued or delivered; one that says so without them goes back to being heard.
-      state: (state === "queued" || state === "delivered") && !text ? "transcribing" : state,
-      text,
-      lang: r.lang === "es" ? "es" : r.lang === "en" ? "en" : null,
-      typedAt: num(r.typedAt),
-      note: str(r.note, 400),
-      n,
-      attempts: Math.max(0, Math.floor(num(r.attempts) ?? 0)),
-      typings: Math.max(0, Math.floor(num(r.typings) ?? 0)),
-      transcript: str(r.transcript, 4096),
-    });
-  }
-  return capOutbox(out);
-}
-
-/** A message as the server keeps it on disk: the wire's fields and its own. */
-export interface StoredOutboxEntry extends OutboxEntry {
+export interface StoredOutboxEntry extends Omit<OutboxEntry, "profileId"> {
+  profileKey: string;
   /** Its place in the order messages reached the server, which is the order they go to Kuru. */
   n: number;
   /** Transcriptions tried and failed since it was last sent. */
@@ -730,16 +694,16 @@ export interface StoredOutboxEntry extends OutboxEntry {
  * In the order they reached the server, every delivered message past the
  * newest `OUTBOX_KEEP` of its profile dropped and nothing else.
  */
-export function capOutbox<T extends OutboxEntry & { n: number }>(list: readonly T[]): T[] {
+export function capOutbox<T extends { state: OutboxState; profileKey: string; n: number }>(list: readonly T[]): T[] {
   const sorted = [...list].sort((a, b) => a.n - b.n);
   const count = new Map<string, number>();
   const kept: T[] = [];
   for (let i = sorted.length - 1; i >= 0; i--) {
     const entry = sorted[i]!;
     if (entry.state === "delivered") {
-      const seen = count.get(entry.profileId) ?? 0;
+      const seen = count.get(entry.profileKey) ?? 0;
       if (seen >= OUTBOX_KEEP) continue;
-      count.set(entry.profileId, seen + 1);
+      count.set(entry.profileKey, seen + 1);
     }
     kept.push(entry);
   }
@@ -775,49 +739,25 @@ export interface MissedReply {
   at: number;
 }
 
+/** A missed reply as the server keeps it: by the profile's key, on `StoredOutboxEntry`'s reasoning, and pending while it may yet be heard. */
+export interface StoredMissed extends Omit<MissedReply, "profileId"> {
+  profileKey: string;
+  pending: boolean;
+}
+
 /** The most missed replies kept per profile. A day away is a few dozen; older than that is the transcript's to hold. */
 export const MISSED_MAX = 30;
 
-/**
- * Missed replies from the disk, made whole: anything not shaped like one is
- * dropped rather than trusted, and each profile keeps its newest
- * `MISSED_MAX`. `pending` is kept as it was written, for the server to decide
- * what a reply in flight when the last one died has become.
- */
-export function adoptMissed(value: unknown): (MissedReply & { pending: boolean })[] {
-  if (!Array.isArray(value)) return [];
-  const out: (MissedReply & { pending: boolean })[] = [];
-  const seen = new Set<string>();
-  for (const raw of value) {
-    if (!raw || typeof raw !== "object") continue;
-    const r = raw as Record<string, unknown>;
-    if (typeof r.id !== "string" || !r.id || seen.has(r.id)) continue;
-    if (typeof r.profileId !== "string" || !r.profileId) continue;
-    if (typeof r.text !== "string" || !r.text.trim()) continue;
-    if (typeof r.at !== "number" || !Number.isFinite(r.at)) continue;
-    seen.add(r.id);
-    out.push({
-      id: r.id.slice(0, 80),
-      profileId: r.profileId.slice(0, 80),
-      text: r.text.slice(0, SPOKEN_MAX),
-      lang: r.lang === "es" ? "es" : "en",
-      at: r.at,
-      pending: r.pending === true,
-    });
-  }
-  return capMissed(out);
-}
-
 /** The newest `MISSED_MAX` of each profile, in the order they were said. */
-export function capMissed<T extends MissedReply>(list: readonly T[]): T[] {
+export function capMissed<T extends { profileKey: string; at: number }>(list: readonly T[]): T[] {
   const sorted = [...list].sort((a, b) => a.at - b.at);
   const count = new Map<string, number>();
   const kept: T[] = [];
   for (let i = sorted.length - 1; i >= 0; i--) {
     const entry = sorted[i]!;
-    const n = count.get(entry.profileId) ?? 0;
+    const n = count.get(entry.profileKey) ?? 0;
     if (n >= MISSED_MAX) continue;
-    count.set(entry.profileId, n + 1);
+    count.set(entry.profileKey, n + 1);
     kept.push(entry);
   }
   return kept.reverse();
