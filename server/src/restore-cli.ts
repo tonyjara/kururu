@@ -12,7 +12,7 @@
  * because that server holds the database and the files it would write.
  *
  * It ends by saying what it could not put back: the logins, the OpenRouter
- * key and the share token are not in the backup, on purpose.
+ * and Firecrawl keys and the share token are not in the backup, on purpose.
  */
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -74,6 +74,8 @@ async function main(): Promise<void> {
 Done. What the backup never carried, and so what is left to do by hand:
   - /login in each profile (Settings → Profiles says which are signed in)
   - the OpenRouter management key, in Settings → OpenRouter
+  - the Firecrawl API key, in Settings → Agents → Firecrawl, if you used it
+  - the Telegram bot token and your account, in Settings → Channels, if you used it
   - the share token is made afresh the first time sharing is turned on
   - Input Monitoring for the talk key, when the app asks`);
 }

@@ -71,6 +71,33 @@ function run(command, args) {
   }
 }
 
+/** The helper beside an app's main binary, or null when `exe` is not one. */
+function helperOf(exe) {
+  const found = /^(.+?\.app)\/Contents\/MacOS\/([^/]+)$/.exec(exe);
+  if (!found || found[1].includes(".app/Contents/")) return null;
+  const name = `${found[2]} Helper`;
+  return path.join(found[1], "Contents", "Frameworks", `${name}.app`, "Contents", "MacOS", name);
+}
+
+/**
+ * The binary everything here runs as node: this app's Electron helper rather
+ * than the app's own binary, wherever the helper is there to be had.
+ *
+ * Run as node, the two are the same Electron. What differs is the bundle
+ * around them, and that is what macOS goes by once a process sets its title —
+ * which the runner, the server and the voice all do, so that Activity Monitor
+ * can tell them apart. libuv checks the process in with LaunchServices as an
+ * app of whatever kind its bundle's Info.plist says. The app's own says
+ * foreground, and the runner and the server each had a Dock tile for it, with
+ * the blank executable icon, in ⌘-Tab and in Force Quit. The helper's
+ * `LSUIElement` keeps them out of all three. `server/src/proctitle.ts` has the
+ * rest, and the TypeScript copy of `helperOf`; this one keeps in step by hand.
+ */
+function nodeBinary() {
+  const helper = process.platform === "darwin" ? helperOf(process.execPath) : null;
+  return helper && existsSync(helper) ? helper : process.execPath;
+}
+
 /**
  * Kuru's two counts off `/api/health`, made whole: whole numbers or nothing.
  * Null from a server that does not send them, which the menu reads as
@@ -152,6 +179,8 @@ class Runner extends EventEmitter {
     this.port = port;
     this.local = `http://127.0.0.1:${port}`;
     this.loginPath = loginPath;
+    /** What the runner, the web build and vite run on. */
+    this.node = nodeBinary();
 
     this.source = "app";
     this.checkout = null;
@@ -180,6 +209,7 @@ class Runner extends EventEmitter {
      * and a vite started over would be a reload.
      */
     this.vite = new Vite({
+      node: this.node,
       port: vitePort,
       host: viteHost,
       env: () => this.childEnv(),
@@ -273,7 +303,7 @@ class Runner extends EventEmitter {
     }
     return {
       ...env,
-      // This binary is Electron; this is what makes it node instead, for the
+      // The helper is Electron; this is what makes it node instead, for the
       // runner and for everything the runner starts.
       ELECTRON_RUN_AS_NODE: "1",
       PATH: this.loginPath(),
@@ -300,7 +330,7 @@ class Runner extends EventEmitter {
     record("start", `the menu bar is building the web app in ${checkout}`);
     return new Promise((resolve) => {
       const log = this.openLog();
-      const child = spawn(process.execPath, [path.join(checkout, "node_modules/vite/bin/vite.js"), "build"], {
+      const child = spawn(this.node, [path.join(checkout, "node_modules/vite/bin/vite.js"), "build"], {
         cwd: path.join(checkout, "web"),
         stdio: ["ignore", log, log],
         env: this.childEnv(),
@@ -370,7 +400,7 @@ class Runner extends EventEmitter {
     }
 
     const log = this.openLog();
-    const child = spawn(process.execPath, args, { cwd, stdio: ["ignore", log, log], env });
+    const child = spawn(this.node, args, { cwd, stdio: ["ignore", log, log], env });
     closeSync(log);
     this.child = child;
     record("start", `${because}: the runner (pid ${child.pid}) from ${checkout ?? "the app"}`);

@@ -28,3 +28,18 @@ export function SpeakerIcon() {
     </svg>
   );
 }
+
+/**
+ * A paper plane, for a message that came from a channel — Telegram's own
+ * mark is a plane, and a plane says "sent from elsewhere" in any chrome
+ * without borrowing anybody's logo.
+ */
+export function PlaneIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21.5 3.5 2.5 10.8l6.8 2.6 2.6 7 3.4-4.6 4.7 3.6 1.5-15.9Z" />
+      <path d="m9.3 13.4 12.2-9.9" />
+    </svg>
+  );
+}

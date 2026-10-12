@@ -11,7 +11,9 @@ second brain**. Speech-to-speech models in front of a coding agent give you
 two personalities and a bill per minute for the one that only talks. Kuru is
 the Claude Code session `harness.md` describes, and what is added is a pair
 of ears and a mouth around it. Nothing in between generates a word, and
-nothing leaves the machine.
+nothing of the voice leaves the machine: audio is heard and made here. A
+channel, if you switch one on, is another matter — Telegram carries the
+conversation's *text*, never its audio; see [channels](channels.md).
 
 ## The pieces
 
@@ -23,8 +25,9 @@ nothing leaves the machine.
 | The outbox | `server/src/outbox.ts` | The clip on the server's disk the moment it arrives, its words beside it once they are made, handed to Kuru in order and kept until Kuru's own session says it took them. Survives restarts; retries a failed transcription and an unconfirmed delivery. |
 | The ears | `server/src/voice.ts` `transcribe` → `yap` | Apple's on-device recogniser, one model per locale, through a Homebrew command line, reading the outbox's file where it lies. The clip is transcribed once per language you speak, in parallel, and `pickTranscript` keeps the one with the language in it. |
 | The words in | `Harness.hear` | Prefixed `[voice]` so Kuru knows a name may be misheard, and typed into its terminal with `now`, as `send_agent` types: a harness mid-turn hears it between tool calls, one showing a prompt or with your hands in its terminal hears it after. Typed and not posted to its inbox, because Claude Code makes everything on the inbox another session's message — see [harness](harness.md#speaking-into-a-running-agent) — and these are your words. Not running, it is started, and the words wait for its first hook report. It tells the outbox when they are typed, or dropped with a harness that went first. |
-| The words out | `index.ts` `/api/report` → `Voice.spoke` | The harness's own Stop report carries `last_assistant_message`; when the reporter is a profile's harness, that reply is spoken. The role prompt tells Kuru its final message is heard, not read. The `say` tool speaks one line mid-turn. |
+| The words out | `index.ts` `/api/report` → `Voice.spoke` | The harness's own Stop report carries `last_assistant_message`; when the reporter is a profile's harness, that reply is spoken — unless the turn answered only a message from Telegram, whose reply is already on the phone (see [channels](channels.md#is-the-reply-spoken-on-the-mac)). The role prompt tells Kuru its final message is heard, not read. The `say` tool speaks one line mid-turn. |
 | The mouth | `server/src/voice.ts` → `kokoro.ts`, or `say` | Kokoro-82M on the CPU through `kokoro-js`, in a process of its own that the server forks on the first sentence and kills with it, a sentence at a time, each announced on the socket as a `speech` chunk the moment it is ready. The Mac's own `say` voices are the fallback that needs nothing. |
+| The lab | `server/src/voicelab.ts` → `server/voicelab.py` | Engines on trial against Kokoro — Supertonic 3, Pocket TTS, Chatterbox, Qwen3-TTS — in Python processes of their own, offered in Settings → Voice when their files are in `~/.cache/kururu/voicelab`. See [the voice lab](#the-voice-lab). |
 | The player | `web/src/voice.ts` | Fetches each chunk from `/api/speech` and plays them in order on the page's one `AudioContext` (`notify.ts`). The talk key cuts Kuru off, and so do the pill's ✕ and Escape. Tells the server what became of each reply: held, each sentence played to its end, or let go before it. |
 | The hush | `server/src/voice.ts` `talk` | Nothing plays while anybody talks, and what waited plays after — see [below](#never-over-you). |
 | The missed list | `server/src/voice.ts` `review`, `replay`, `seen` | Every reply nobody played to its end, kept as words in the database (see [data](data.md)) — see [what you missed](#what-you-missed). Not a message of its own: it is merged into the conversation below. |
@@ -319,6 +322,65 @@ Settings → Voice says what is found and what to type when something is
 not. The server looks on its PATH and in Homebrew's two directories, since
 a server started from the app has a PATH no shell set.
 
+## The voice lab
+
+The candidates [research/voices.md](research/voices.md) found are pickable as
+Kuru's voice, under "· trial" headings in Settings → Voice, so they can be
+heard as Kuru for a while rather than as samples once. Whichever lose are
+deleted. This is a trial and is built like one: the folder is made by hand,
+nothing in kururu installs or updates it, the app does not ship
+`voicelab.py` (only a checkout's server has the lab), and a model whose
+files are missing is simply not offered.
+
+| model | voices | speaks | on disk | weights' licence |
+|---|---|---|---|---|
+| Supertonic 3 (`supertonic`) | F1–F5, M1–M5 | en, es | 383 MB | OpenRAIL-M |
+| Pocket TTS (`pocket`) | 11 of its 27 — `lola` and `rafael` are the native Spanish ones | en, es | in `hf/`, 1.7 GB with the next | CC-BY-4.0 |
+| Pocket TTS, 24-layer Spanish (`pocket-hq`) | `lola`, `rafael` | es | (above) | CC-BY-4.0 |
+| Chatterbox Multilingual v3 (`chatterbox`) | Default; Heart, cloned from a Kokoro `af_heart` render | en, es | 2.5 GB | MIT |
+| Chatterbox es-MX/LatAm (`chatterbox-latam`) | Default; Heart | es | 2.5 GB | MIT |
+| Qwen3-TTS 1.7B CustomVoice, 4-bit (`qwen3`) | Serena, Vivian, Ryan, Aiden | en, es | 2.2 GB | Apache-2.0 |
+
+**The folder**, `~/.cache/kururu/voicelab` (`KURURU_VOICELAB` overrides),
+about 11 GB: `venv-mlx` (mlx-audio 0.5.8 and onnxruntime 1.31, which run
+everything but Pocket), `venv-pocket` (pocket-tts 3.3.0 on torch), both on
+Homebrew's Python 3.12; `models/`; `hf/`, the hub cache Pocket and
+Chatterbox's speech tokenizer read from; `refs/heart.wav`, the clip the
+cloned Chatterbox voice is made from; `bin/uv`, which built the
+environments. The processes run offline (`HF_HUB_OFFLINE`), with every
+cache the libraries keep pointed inside the folder.
+
+**Two things in it were made here, not downloaded.** Chatterbox v3's MLX
+build ships without the default voice's conditionals, so
+`conds.safetensors` is the one from `mlx-community/chatterbox-4bit` (the same
+default voice). And Resemble publishes the es-MX/LatAm fine-tune as PyTorch
+weights only: `chatterbox-latam` is its T3 and S3Gen put through mlx-audio's
+own `sanitize`, beside v3's voice encoder, in mlx-audio's layout — no torch,
+and every key and shape checked against the v3 build.
+
+**How it runs.** One process per environment, started by the first sentence
+that needs it and killed with the server, for `kokoro.ts`'s reasons. A model
+loads on its first sentence: Supertonic and Chatterbox in a second or two,
+Qwen3 in three, Pocket in two and a half — but the first load after the folder
+was made took Pocket 36 s and can take Chatterbox half a minute, so a pick
+may say nothing for that long. Settings' "Trial engines" row says what is
+loaded. At most two MLX models are held at once, and a process nobody has
+asked for anything in fifteen minutes is ended, since these hold gigabytes
+of the memory the agents are using. Qwen3 gets a token budget a little past
+what the sentence needs and one more take when the first is still far too
+long: its 0.6B ran on past the end of its sentence in 39 takes of 96 here.
+Pocket's leading silence is trimmed. Speed follows the slider for Supertonic,
+Qwen3 and nothing else.
+
+**Deleting it.** Pick a Kokoro or Mac voice for each language, then
+`rm -rf ~/.cache/kururu/voicelab` — or just a model's folder under `models/`,
+which takes its voices out of the picker. A voice still chosen whose model is
+gone speaks with the Mac's voice. The code is `server/voicelab.py`,
+`server/src/voicelab.ts`, the `lab` engine with `LAB_MODELS`, `labVoice` and
+`labOptions` in `shared/voice.ts`, and the lines that call them in
+`server/src/voice.ts`, `server/src/index.ts` (the preview's engine check),
+`settings/Voice.tsx` and `server/test/voice.test.ts`.
+
 ## The phone
 
 The server does the hearing and the speaking, so a phone only posts a WAV
@@ -409,7 +471,10 @@ or pulled. `pill.log` is how the next try is read.
   cleanup now sends what a recording holds and closes the microphone — the
   words after the reload are lost, not the ones before. The cleanup that
   runs is the *old* copy's, so the guard protects from the reload after the
-  one that delivered it.
+  one that delivered it. A real reload clears every old copy, and an agent
+  can ask for one (`bun run reload-window`) that waits until nobody is
+  talking and Kuru is not speaking — see
+  [architecture](architecture.md#reloading-the-window).
 - **`kokoro-js`'s `stream()` hangs on a string.** It never closes the
   splitter, so the last sentence is never yielded. `sentencesOf` splits and
   `generate` is called per sentence.

@@ -19,6 +19,7 @@
  * test can hold. `server/src/kuru.ts` gathers the inputs and broadcasts;
  * `web/src/components/KuruDrawer.tsx` draws the result.
  */
+import { channelOfMessage, isChannelKind, withoutChannelMark, type ChannelKind } from "./channels";
 import type { Turn } from "./store";
 import { VOICE_PREFIX } from "./store";
 import type { OutboxEntry, OutboxState } from "./voice";
@@ -33,10 +34,11 @@ export const KURU_SEEN_MS = 2000;
 export const KURU_SAY_MAX = 20_000;
 
 /**
- * One of your messages, from either door: a clip the voice heard, a line the
- * drawer's composer sent through the same outbox, or a prompt typed straight
- * into Kuru's terminal, which arrives already delivered since the only record
- * of it is Kuru's own hook saying it took it.
+ * One of your messages, from any door: a clip the voice heard, a line the
+ * drawer's composer sent through the same outbox, a message from a channel
+ * such as Telegram through that outbox too, or a prompt typed straight into
+ * Kuru's terminal, which arrives already delivered since the only record of
+ * it is Kuru's own hook saying it took it.
  */
 export interface YouItem {
   kind: "you";
@@ -45,7 +47,8 @@ export interface YouItem {
   at: number;
   /** The words, without the voice's prefix; null while a clip is still being heard. */
   text: string | null;
-  via: "voice" | "typed";
+  /** Spoken, typed here, or written in a channel — the drawer marks each, and so does what Kuru is typed. */
+  via: "voice" | "typed" | ChannelKind;
   /** The clip's length; zero for anything typed. */
   ms: number;
   state: OutboxState;
@@ -127,9 +130,22 @@ export function spokenMessage(entry: Pick<OutboxLike, "ms">): boolean {
   return entry.ms > 0;
 }
 
-/** The words of a turn as a person said them: the voice's prefix is the recogniser's, not theirs. */
+/** The words of a turn as a person said them: the voice's prefix is the recogniser's, not theirs, and a channel's mark is kururu's. */
 export function plainWords(text: string): string {
-  return text.startsWith(VOICE_PREFIX) ? text.slice(VOICE_PREFIX.length).trim() : text;
+  return text.startsWith(VOICE_PREFIX) ? text.slice(VOICE_PREFIX.length).trim() : withoutChannelMark(text);
+}
+
+/**
+ * Where a message of yours came from, from what the outbox and the turn
+ * each know: a turn knows by the mark its words carried, the outbox by the
+ * message's length (a clip) or its id (a channel's). Either is enough, since
+ * a turn the outbox did not deliver has only the first and a message still
+ * on its way has only the second.
+ */
+export function youVia(turnVia: Turn["via"] | null, entry: Pick<OutboxLike, "id" | "ms"> | undefined): YouItem["via"] {
+  if (turnVia === "voice" || (entry !== undefined && spokenMessage(entry))) return "voice";
+  if (turnVia !== null && isChannelKind(turnVia)) return turnVia;
+  return (entry && channelOfMessage(entry.id)) ?? "typed";
 }
 
 /**
@@ -179,7 +195,7 @@ export function mergeConversation(args: {
         id: `t${turn.id}`,
         at: turn.at,
         text: plainWords(turn.text),
-        via: turn.via === "voice" || (entry !== undefined && spokenMessage(entry)) ? "voice" : "typed",
+        via: youVia(turn.via, entry),
         ms: entry?.ms ?? 0,
         // A turn is Kuru's own word that it took the message, whatever the
         // outbox has got round to writing.
@@ -209,7 +225,7 @@ export function mergeConversation(args: {
       id: entry.id,
       at: entry.at,
       text: entry.text,
-      via: spokenMessage(entry) ? "voice" : "typed",
+      via: youVia(null, entry),
       ms: entry.ms,
       state: entry.state,
       typedAt: entry.typedAt,

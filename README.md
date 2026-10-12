@@ -98,6 +98,9 @@ the file watcher, and the checkout's vite beside it — what `bun run dev` and
 vite log. Save a file under `server/src` or `shared` and the server restarts on
 your change; save one under `web/` and the window and the floating pill show it
 at once, through vite's hot reload — ⌘R at most, which reloads the pill too.
+An agent that needs that ⌘R asks for it instead (`bun run reload-window`): the
+window reloads by itself once you are not talking, typing or in a dialog, and
+says afterwards who asked and why.
 The menu says whether vite is serving; if it is not, the window shows the
 checkout's last build instead.
 
@@ -393,7 +396,7 @@ front, and the clip is dropped. If macOS has not allowed the helper yet the
 window's own key keeps working, and **⌥Space** can toggle the microphone from
 anywhere without a permission, off by default.
 
-Everything runs on your Mac and nothing leaves it. Hearing is Apple's
+The voice runs on your Mac and none of it leaves. Hearing is Apple's
 on-device recogniser, through `yap`; speaking is Kokoro, a small model on the
 CPU, with the Mac's own voices until it is downloaded. English and Spanish,
 mixed if you like. Settings → Voice picks the key, the languages, the
@@ -405,6 +408,24 @@ brew install espeak-ng  # Spanish through Kokoro
 ```
 
 On a phone the microphone needs https; see `docs/voice.md`.
+
+### From Telegram
+
+Settings → **Channels** lets you talk to Kuru from Telegram, which is the easy
+way to reach it from a phone without setting anything up on your network. You
+make a bot with @BotFather, paste its token, pair your own account by sending
+the bot a code the page shows, and switch it on. From then on a message to the
+bot reaches Kuru exactly as if you had typed it in the drawer, and every reply
+of Kuru's comes back to the chat — with a quiet copy of what you said or typed
+at the Mac, so the chat reads like the drawer. A reply to something sent only
+from Telegram is not read aloud on the Mac; there is a switch for that.
+
+Only the accounts you pair can talk to it: a stranger who finds the bot gets
+no answer and reaches nothing, and the page tells you they tried. The token
+is kept readable only by you and never backed up. Nothing listens on a port —
+kururu asks Telegram for new messages, and nothing at all while it is off. But
+with it on, the conversation's text goes through Telegram's servers, which do
+not encrypt bot chats end to end. See `docs/channels.md`.
 
 ## Settings
 
@@ -418,6 +439,8 @@ change reaches a second window and the phone without being told.
 | **Profiles** | the sessions, and the workspaces in each of them |
 | **Mascot** | what the badge does while an agent is working |
 | **Keys** | what each key does after the prefix |
+| **Channels** | talking to Kuru from Telegram: a walkthrough from making the bot to the switch |
+| **Agents → Firecrawl** | lets every agent kururu starts read pages a plain fetch cannot (JavaScript-drawn, bot-blocked, PDFs) through your Firecrawl key, which stays in kururu: a walkthrough, a switch, a page limit and a daily credit budget. The addresses agents fetch go to Firecrawl's servers. See `docs/web.md` |
 | **Backups** | a private git repository the boards, conversations, settings and memory go to, every few minutes when something changed — never the secrets |
 
 ### Appearance

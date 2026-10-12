@@ -19,7 +19,9 @@ and every check applied to a manifest a stranger wrote — no network, no disk),
 `layout` (asserting *through* `JSON.stringify`), `days` (that a day no calendar
 has is refused rather than rolled into the next month, and that a change of
 clocks is not a day), `board` (the run automation, and a card's dates and the
-timeline's window), `store` (the database against a temp directory: boards written through and read back, the history, deleted cards kept and restored, the file never taking a card off the database, keys matched back by name, and the mirror written and read back as the same database), `markdown` (the reader's whole
+timeline's window), `sleep` (what idle is, the question in a reply, the
+draft in a prompt, and the CLIs' conversation files — a Codex rollout found
+by its card's words, a last reply read off a tail — against a temp directory), `store` (the database against a temp directory: boards written through and read back, the history, deleted cards kept and restored, the file never taking a card off the database, keys matched back by name, and the mirror written and read back as the same database), `reload` (when a page may reload for an agent, what the agent is told, and the server's bookkeeping on a hand-turned clock, plus the harness's tool), `channels` (every way a Telegram message can fail to be the user's, in `judge`'s order; pairing codes; splitting a reply; when a reply is spoken; and the bot module itself against a stand-in Bot API in memory — the token's file mode, the offset kept across a restart, the queue's order through a 429, a 403, a revoked token, and the token never in an error), `markdown` (the reader's whole
 security story: that raw HTML cannot be emitted and that no `href` or `src`
 carries a scheme the browser would run — the one test that drives a real
 dependency, since Shiki's wasm has to load), and the pane tree in `web/test`,
@@ -76,6 +78,21 @@ Registry testing serves the sibling checkout with
 scratch copy under `/tmp` is where `build-index.mjs` is run — never in the
 checkout.
 
+**Run it from a copy outside `~/Desktop`, with `node-pty` copied rather than
+linked.** The isolated server starts its host as the real one does, a launchd
+job on a clone of Kururu.app, and macOS's privacy settings treat that clone as
+a new face: anything it opens under `~/Desktop` waits on a folder-access
+prompt, the host blocks in `open()`, and the server says it is "running but not
+listening". A checkout on the Desktop is that, and so is a scratch copy whose
+`node_modules` is a symlink back into one, since `node-pty` is the module the
+host loads. Copy the tree into the scratchpad, make `node_modules` a directory
+of symlinks with `node-pty` itself copied (`cp -cR`, a clone on APFS), build
+there, and keep the socket's path short — macOS caps one near 104 bytes. It
+also keeps the two esbuilds out of each other's `desktop/dist`. A client for
+it can be hidden Electron windows on the real preload, driven through
+`executeJavaScript`, with `app.dock.hide()` and a hard exit: an Electron tile
+left in the Dock is how a force quit reached a coalition on 2026-10-10.
+
 **The one trap in the isolated instance:** it sets `XDG_CONFIG_HOME`, and **nvim
 reads its config from there too**. So nvim comes up with no colourscheme and no
 per-mode cursor colours at all, which reads exactly like the cursor feature not
@@ -86,6 +103,32 @@ kururu stays isolated and nvim does not.
 
 Kept short on purpose; the detail is in git history.
 
+- **Firecrawl for agents** (2026-10-12), in an isolated instance on :7817 from
+  a scratch copy, with a stand-in Firecrawl (`KURURU_FIRECRAWL_API`) in the
+  documented v2 shapes. Settings: a wrong key refused with Firecrawl's
+  reason, a padded one saved 0600, the test page, a NaN limit ignored, and
+  none of 31 messages to the window carrying the key. The tools over
+  `/mcp/web`: a scrape wrapped and its `</web_page>` defused, a three-page
+  PDF charged three, `localhost` refused before anything was sent, map and
+  search, a crawl capped at the page limit and lowered to the budget's last
+  four credits (Firecrawl was sent `limit: 4`) and followed through `next`,
+  the next call refused as over budget, a crawl that never finished
+  cancelled at four minutes with its pages returned and a foreign `next`
+  link never requested, an `Origin` or `X-Forwarded-For` refused. Launches
+  through the isolated host, stand-in CLIs recording argv: the menu's
+  Claude and Codex, a card's robot (its prompt intact after
+  `--mcp-config=`) and the harness (two `--mcp-config` values) all got the
+  flags, and no agent's environment held the key. The real CLIs against
+  stand-in model APIs, no tokens spent: Claude Code 2.1.296 listed the four
+  tools, expanded `${KURURU_AGENT_ID}` into the header, called
+  `scrape_page` and handed the model the wrapped page — and in a stuck
+  tool loop made 1,104 calls in twenty seconds, which the budget stopped at
+  exactly its 500 credits; Codex 0.146 took the `-c` overrides, sent the
+  header and called `scrape_page` in its `mcp__kururu_web` namespace (on a
+  model name it did not know, since for its own models it defers MCP tools
+  behind `tool_search`). Not pressed: the real Firecrawl, which refused this
+  network's keyless tier, and a key, which the user pastes; the page in a
+  real window.
 - **The three-process split**, against a real pty: the server spawns a detached
   host when none is listening; input and output round-trip with escape sequences
   intact; the server is killed and restarted and the agent comes back with **the
@@ -127,6 +170,58 @@ Kept short on purpose; the detail is in git history.
   manifest, a registry install over a local skin of the same id was refused, and a
   non-PNG, a path and an upload to a registry skin were each refused with a
   sentence.
+- **Idle card agents** (2026-10-11), in an isolated instance with a stand-in
+  `claude` on the `PATH` and a scratch `HOME`: at one minute, the plain card's
+  agent was ended and its card read `asleep` with its session id; the card
+  whose reply asked a question and the one with half a message typed into it
+  stayed awake and `/api/sleep` said why; an agent from the menu idle as long
+  was never looked at; running the asleep card started `claude --resume` with
+  the same id; switched off, nothing was ended. Against the real CLIs, on the
+  cheapest models in a scratch folder: `claude --session-id` then `claude
+  --model … --dangerously-skip-permissions --resume <id>` recalled a word from
+  the first turn in the same transcript; Codex's TUI started as a card starts
+  it was found by its rollout (and another card's words and another folder
+  were not), and `codex resume … <id>` recalled its word in the same rollout.
+  The machine path ran on this Mac through a stand-in `ssh`: the tab's own
+  line — ssh loop, tmux session, the install check, `claude --resume` in the
+  pin's folder — brought the conversation back, the transcript was read "over
+  ssh", and `endSession` took the session and the process down. No real
+  machine was reachable with a CLI on it.
+- **Telegram** (2026-10-12), in an isolated instance on :7817 run from a
+  scratch copy with `KURURU_TELEGRAM_API` pointed at a stand-in Bot API on
+  loopback and a stand-in `claude` as the harness — a Python script that
+  reads a prompt off its terminal and reports it, then a reply, through
+  `/api/report` as the hooks do (hard-wired to :7817), with `HOME`, `SHELL`
+  and `PATH` set so the real CLI could not run. Thirty-four checks: a
+  malformed token refused without a request, a good one asked `getMe` and
+  kept 0600, the status carrying the last four and never the rest; no poll
+  while off and not pairing; on refused with nobody allowed; pairing offered
+  the account that sent `/start <code>` and not the stranger who wrote first,
+  who was counted and never answered; the test message; on. A stranger's
+  "stop every agent" reached nothing. A message from the paired account went
+  into the outbox as `telegram-<chat>-<id>`, was typed into the stand-in as
+  `[telegram] …`, delivered, and its reply came back to the fake chat; the
+  drawer's item said `telegram` and the reply had no utterance. A line typed
+  in the drawer reached the chat as a silent "⌨️ You typed" ahead of its
+  reply, which was spoken. Off: no poll and nothing sent, even for a drawer
+  line's reply, and a Telegram message went nowhere; on again, it was
+  dropped with one line saying so. The token was in no window message, no
+  server output, no `lifecycle.log` and not the state file. Not tried: the
+  real Telegram, a phone, the page in a real window.
+- **An agent reloading the window** (2026-10-11), in an isolated instance on
+  :7817 run from a scratch copy, with two hidden Electron pages on the real
+  preload — a window and the pill — and the real `bun run reload-window`. Both
+  idle reloaded at once and came back, and the window named who asked. A
+  keystroke a second held the window until five seconds after the last while
+  the pill went at once. A `.scrim` held the window to the timeout, which let
+  it go, and it did not reload when the scrim went. A third client's
+  `talking` held both. The pill speaking, as the bridge told the window, held
+  the window, and so did a focused field with words in it. An agent's id put
+  its name on the notice, and the harness's tool through `/mcp` said Kuru.
+  With no page the answer was "nothing was reloaded". A server killed
+  mid-wait came back to a command that asked again and a window that
+  reconnected without reloading. Not pressed: a real microphone, the
+  installed app's own pill, a phone.
 - **Notifications:** a `blocked` report with nobody watching raised a card on both
   clients; a second transition inside the throttle was dropped; with one client
   watching and one not, **the watching one was not interrupted and the other
@@ -203,8 +298,10 @@ Kept short on purpose; the detail is in git history.
   first: each got a resource and a jetsam coalition of its own, named after its
   label (`launchctl print`, and `proc_pidinfo(PROC_PIDCOALITIONINFO)` through
   Python's ctypes), with `spawn type = interactive`; no Background Task
-  Management item and no Dock tile, though `process.title` registers it with
-  LaunchServices under that name; open-file limits, process limits and umask
+  Management item; *no Dock tile, though `process.title` registers it with
+  LaunchServices under that name* — wrong, read off `visibleProcessList`,
+  which does not list a windowless app: a titled job on the main binary is
+  `type="Foreground"` and has a tile (corrected 2026-10-12, below); open-file limits, process limits and umask
   the same as an agent's today; a pty spawned through node-pty under the job,
   on a clone of the release build, listed `~/Desktop/Nyto` with no prompt; and
   an Electron launched from the job, which quit itself after three seconds,
@@ -221,6 +318,21 @@ Kept short on purpose; the detail is in git history.
   that had not been allowed there, which is why `linkToHost` waits for a
   running job. Not tried: a Dock force quit of a *live* app an agent launched,
   under the new arrangement, and the real host restarted into it.
+- **No Dock tiles for the runner, the server or the host** (`proctitle.ts`,
+  2026-10-12). Probes first, each a titled `sleep` on a clone of the release
+  build, read off `lsappinfo list`: main binary `Foreground` from a shell and
+  as a launchd job; the helper `UIElement`, ad-hoc and Developer ID alike;
+  plain node `BackgroundOnly`; no title, not registered at all. A helper under
+  a Kururu process read `~/Desktop/Nyto/kururu` with no prompt. Then the
+  isolated instance on 7817, from a scratch copy, in the dev shell with
+  `KURURU_AUTOSTART`: the window `Foreground`; the runner and the server on
+  `Electron Helper`, named and `UIElement`; vite on the helper and
+  unregistered; the host a launchd job on a clone's main binary, unnamed and
+  unregistered. The new `run.mjs` on the release build's main binary, as an
+  older app starts it: the runner unnamed and unregistered, its server on
+  `Kururu Helper` and `UIElement`. `hostRuntime` for a server on the helper
+  cloned the server's own Kururu.app. Not seen: the Dock itself, which only
+  the user's eyes report, and a packaged build with the new `runner.js`.
 
 **Not yet proven in place:** a card raised by the *heuristic* `done` rather than
 by a report, and a click on a real OS notification — neither can be driven from a

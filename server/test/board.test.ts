@@ -331,13 +331,22 @@ describe("resuming a card", () => {
   });
 
   it("hands Claude its id and Codex its picker", () => {
-    const settings = { offClis: [], offLaunchers: [], bypassClis: ["claude" as const], loginsPerProfile: false };
+    const settings = { offClis: [], offLaunchers: [], bypassClis: ["claude" as const], loginsPerProfile: false, sleepIdle: true, sleepMinutes: 10 };
     expect(resumeCommand(findLauncher("claude:claude-opus-5-5")!, settings, id, false)).toBe(
       `claude --model claude-opus-5-5 --dangerously-skip-permissions --resume ${id}`,
     );
     expect(resumeCommand(findLauncher("claude")!, settings, "not-a-uuid", false)).toBeNull();
     expect(resumeCommand(findLauncher("codex")!, settings, null, false)).toBe("codex resume");
     expect(resumeCommand(findLauncher("codex:gpt-5.5")!, settings, null, true)).toBe("codex resume --all --model gpt-5.5");
+  });
+
+  it("hands Codex its id too, once kururu has found it, and never a picker over every directory", () => {
+    const settings = { offClis: [], offLaunchers: [], bypassClis: ["codex" as const], loginsPerProfile: false, sleepIdle: true, sleepMinutes: 10 };
+    const codexId = "019faf87-0908-7651-848d-3b993fa540d3";
+    expect(resumeCommand(findLauncher("codex:gpt-5.5")!, settings, codexId, true)).toBe(
+      `codex resume --model gpt-5.5 --dangerously-bypass-approvals-and-sandbox ${codexId}`,
+    );
+    expect(resumeCommand(findLauncher("codex")!, settings, "x; rm -rf ~", false)).toBe("codex resume --dangerously-bypass-approvals-and-sandbox");
   });
 });
 

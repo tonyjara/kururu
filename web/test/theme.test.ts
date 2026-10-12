@@ -132,6 +132,14 @@ const NOT_THEME = new Set([
   // size or a solo pane's "2/3". A length read off the DOM, like `--sidebar-w`
   // and `--depth`, and nobody's to theme or skin.
   "--actions-w",
+  // Settings' four spacings — a card's side padding, a row's vertical padding,
+  // the gap between controls, the stack between groups — set once on the
+  // dialog (`.st-dialog`) so every row in there moves together. Not a skin's:
+  // padding and gap never were, on the reasoning in `docs/styles.md`.
+  "--st-x",
+  "--st-y",
+  "--st-gap",
+  "--st-stack",
 ]);
 
 /**

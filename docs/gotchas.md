@@ -80,6 +80,18 @@ Things that fail with an error naming something other than the cause.
   fact: `the pty host went away … stopped by SIGTERM` in `lifecycle.log` with no
   `the app is quitting` line before it, and a `Calling force quit` from the
   Dock in the same second. `lsappinfo list` shows a process's `coalition:`.
+- **A process that sets `process.title` on Kururu.app's own binary gets a Dock
+  tile.** libuv's title on macOS checks the process in with LaunchServices
+  under its binary's bundle, and Kururu.app's Info.plist is a foreground
+  app's. The runner and the server had a tile each on 2026-10-12 — the blank
+  executable icon, in ⌘-Tab and in Force Quit, and a click only brought the
+  window forward. The next launchd host would have had one too. The tell is
+  `type="Foreground"` and `!cgsConnection` in `lsappinfo list`, under a title
+  instead of "Kururu". `lsappinfo visibleProcessList` does *not* list these
+  tiles, which is how a probe recorded "no Dock tile" for a titled host on
+  2026-10-11. On Electron's helper the same title is a `UIElement`, and plain
+  node is `BackgroundOnly`. `server/src/proctitle.ts` has the rule: run as node
+  on the helper, and go unnamed on a main binary.
 - **`pkill -f ptyhostd` is not reliable here.** macOS `pgrep -f` was observed
   matching two scratch hosts while consistently skipping the real one, with
   `ps -ww` showing an identical command line for all three. A `pkill` that

@@ -43,6 +43,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } f
 import { keysByAction, type Action } from "../../../shared/keys";
 import {
   activeAgent,
+  activeTerminal,
   BOARD_TAB,
   isBoardTab,
   dividers,
@@ -186,6 +187,9 @@ export function Panes({
   const launchers = visibleLaunchers(launch);
   const boxes = rects(node);
   const all = panes(node);
+  /** The terminal in the focused pane, whose card a board here lights — see `BoardView`. */
+  const focusedPane = all.find((pane) => pane.id === focusedPaneId);
+  const focusedAgentId = focusedPane ? activeTerminal(focusedPane) : null;
 
   /**
    * Solo: the one pane a phone draws, and the others left out of the document.
@@ -255,6 +259,7 @@ export function Panes({
               workspaceName={workspaceName}
               board={board}
               launchers={launchers}
+              focusedAgentId={focusedAgentId}
               onEditing={onEditing}
             />
           </div>
@@ -584,6 +589,7 @@ function Pane({
   workspaceName,
   board,
   launchers,
+  focusedAgentId,
   onEditing,
 }: {
   pane: PaneState;
@@ -600,6 +606,8 @@ function Pane({
   /** The workspace's board, for a board pane to draw. */
   board: Board | null;
   launchers: Launcher[];
+  /** For a board pane: the terminal in the focused pane, which may be another one. */
+  focusedAgentId: string | null;
   onEditing: (on: boolean) => void;
 }) {
   const showing = activeAgent(pane);
@@ -882,6 +890,7 @@ function Pane({
             agents={agents}
             mascot={mascot}
             launchers={launchers}
+            focusedAgentId={focusedAgentId}
           />
         ) : showingDoc(pane) || (!showing && pane.reader) ? (
           /* A document tab, or a reader with no tabs yet — which is its picker.

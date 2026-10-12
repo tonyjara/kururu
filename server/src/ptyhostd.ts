@@ -24,6 +24,7 @@
 import { unlinkSync } from "node:fs";
 import type { Server } from "node:net";
 import { connectToHost, hostSocketPath, serveHostSocket, type SocketPort } from "./hostsock";
+import { nameProcess } from "./proctitle";
 import { createPtyHost } from "./ptyhost";
 
 const path = hostSocketPath();
@@ -36,19 +37,26 @@ const host = createPtyHost();
  * "node" — beside a window, a runner and a server that all had the same name,
  * and the one process whose ending ends every agent was the one nobody could
  * pick out. On macOS `process.title` is also what Activity Monitor shows,
- * because libuv hands it to LaunchServices as the display name, and registers
- * the process as a daemon while it does, so there is still no Dock tile to
- * quit. ASCII on purpose: `ps` cuts the name to sixteen bytes for its `comm`
- * column, and a `·` cut in half there prints as garbage. `ptyhost` stays in it
- * because `kill-ptyhosts`, the runner and `lifecycle.ts` all check for that
- * word before they believe a pid on the socket is a host.
+ * because libuv hands it to LaunchServices as the display name. It registers
+ * the process as an application while it does, of whatever kind the bundle
+ * around its binary says, and the clone's main binary that a launchd host runs
+ * on says foreground: a Dock tile, on the one process a force quit must never
+ * reach. So that host goes unnamed and keeps to `ps`, where its command line
+ * says `ptyhostd.mjs`; a host on node, or on a helper, is still named
+ * (`proctitle.ts`).
+ *
+ * ASCII on purpose: `ps` cuts the name to sixteen bytes for its `comm` column,
+ * and a `·` cut in half there prints as garbage. `ptyhost` stays in it because
+ * `kill-ptyhosts`, the runner and `lifecycle.ts` all check for that word before
+ * they believe a pid on the socket is a host — and an unnamed host's command
+ * line has it too.
  */
 let titled = -1;
 function title(): void {
   const live = host.liveCount();
   if (live === titled) return;
   titled = live;
-  process.title = `Kururu ptyhost - ${live === 0 ? "no agents" : live === 1 ? "1 agent" : `${live} agents`}`;
+  nameProcess(`Kururu ptyhost - ${live === 0 ? "no agents" : live === 1 ? "1 agent" : `${live} agents`}`);
 }
 title();
 setInterval(title, 2_000).unref();

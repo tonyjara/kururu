@@ -24,6 +24,7 @@
     "host": "bun run build:server && node desktop/dist/ptyhostd.mjs",
     "status": "node server/status.mjs",
     "kill-ptyhosts": "node server/kill-hosts.mjs",
+    "reload-window": "node server/reload-window.mjs",
     "backup": "bun server/src/backup-cli.ts",
     "restore": "bun server/src/restore-cli.ts",
     "dist": "bun run build && electron-builder --projectDir desktop --mac",

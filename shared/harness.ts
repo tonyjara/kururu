@@ -223,8 +223,17 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   },
   {
     name: "run_card",
-    description: "Hand an existing card on a workspace's board to an agent, the same as the robot button. Returns the agent's id. A card whose agent is still running is refused.",
-    inputSchema: obj({ workspace: WORKSPACE, card: str("The card id."), launcher: str("A launcher id. Default: Claude on its default model.") }, ["workspace", "card"]),
+    description:
+      "Hand an existing card on a workspace's board to an agent, the same as the robot button. Returns the agent's id. A card whose agent is still running is refused. A card whose agent was put to sleep for sitting idle (its run says asleep) is resumed — the same conversation, with its context — on the launcher it ran on unless you name another of the same CLI; fresh=true starts a new conversation instead.",
+    inputSchema: obj(
+      {
+        workspace: WORKSPACE,
+        card: str("The card id."),
+        launcher: str("A launcher id. Default: Claude on its default model, or the launcher an asleep card ran on."),
+        fresh: bool("Start a new conversation even on a card whose agent was put to sleep. Default false."),
+      },
+      ["workspace", "card"],
+    ),
   },
   {
     name: "send_card_to_workspace",
@@ -260,6 +269,18 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
     description:
       "Say one short line aloud to the user right now, mid-turn — for example that you are starting three agents and it will take a minute. Your final message of every turn is read aloud anyway, so use this only for something worth hearing before the turn ends. Plain words, one or two sentences, in the user's language.",
     inputSchema: obj({ text: str("What to say. At most 300 characters.") }, ["text"]),
+  },
+  {
+    name: "reload_window",
+    description:
+      "Reload the user's Kururu window on this Mac, and the floating pill, the way ⌘R does: for a change under web/ that did not hot-apply, or to clear the old copies a hot update leaves behind. Use it when an agent asks the user to press ⌘R, rather than passing the request on. Each page waits for a safe moment — never while the user is talking to Kuru or Kuru is speaking, within a few seconds of their typing or clicking, or with a dialog or menu open — and the call waits with it. Returns whether each page reloaded and came back, or what was still holding it when the time ran out. The window then shows \"Reloaded for Kuru: <why>\". The phone is never reloaded. Agents can do this themselves with `bun run reload-window --why \"…\"` from the kururu checkout.",
+    inputSchema: obj(
+      {
+        why: str("Why, in a few words — the notice the user sees afterwards shows it."),
+        seconds: int("How long to wait for a safe moment before giving up. Default 90, at most 600."),
+      },
+      ["why"],
+    ),
   },
   {
     name: "play_missed",
@@ -816,6 +837,9 @@ kururu messages you, unasked, when an agent in this profile finishes a turn or b
 
 ## Your voice
 The user may talk to you by holding a key, and your last message of every turn is read aloud to them by a speech synthesiser whether they typed or spoke. So write that message to be heard: a few plain sentences, no headings, lists, tables or code. Anything that needs to be read — a diff, a file list, a plan — goes on a card, and the message says that it did. Answer in the language the user used. A message that starts with "[voice]" was transcribed from speech, and a name or an id in it may be misheard: match it loosely against kururu_status, and ask when two things could be meant. The say tool speaks one line at once, mid-turn, for something worth hearing before you are done. When the user asks what they missed, call play_missed, which plays your replies they did not hear.
+
+## Telegram
+The user may also write to you from Telegram, on their phone and usually away from the Mac. Such a message starts with "[telegram]". Your reply to it goes back to their Telegram chat as text and is not read aloud, so the rules for being heard bend: a short list is fine there, but keep it phone-sized, and anything long still goes on a card. While the user has the Telegram channel switched on in kururu, every reply of yours — to them, to a [kururu] message — also arrives in that chat, so say what a reply is about rather than leaning on what is on the Mac's screen.
 
 ## Rules
 - The agents are the user's. A permission prompt an agent is showing is the user's to answer: read its screen, tell the user what is asked, and press keys only as they say. Ask before stop_agent, and before moving a card to done.

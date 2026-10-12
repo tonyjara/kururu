@@ -120,11 +120,13 @@ export function launcherCommand(launcher: Launcher, settings?: LaunchSettings): 
  *
  * Claude Code is handed the id kururu gave the session at launch (`--session-id`,
  * see `CardRun.sessionId`), so it goes straight back to the right one. Codex
- * keeps its own ids and never says them, so it gets its picker instead —
- * filtered to the directory, which on a card's worktree is nearly always the
- * one conversation, and `--all` when that directory has gone and the filter
- * would show nothing. The id is only ever one `SESSION_ID` has passed, and is
- * checked again here because this is a line for `sh -c`.
+ * keeps its own ids and never says them; once kururu has found one on disk
+ * (`server/src/sessions.ts`) Codex is handed it the same way, and until then
+ * it gets its picker — filtered to the directory, which on a card's worktree
+ * is nearly always the one conversation, and `--all` when that directory has
+ * gone and the filter would show nothing. The id is only ever one `SESSION_ID`
+ * has passed, and is checked again here because this is a line for `sh -c`.
+ * Codex's goes last, after the flags, where its positional argument belongs.
  */
 export function resumeCommand(
   launcher: Launcher,
@@ -137,6 +139,7 @@ export function resumeCommand(
     if (!sessionId || !SESSION_ID.test(sessionId)) return null;
     return ["claude", ...flags, "--resume", sessionId].join(" ");
   }
+  if (sessionId && SESSION_ID.test(sessionId)) return ["codex", "resume", ...flags, sessionId].join(" ");
   return ["codex", "resume", ...(anyDirectory ? ["--all"] : []), ...flags].join(" ");
 }
 
@@ -188,13 +191,32 @@ export interface LaunchSettings {
    * is nothing per profile to configure — which is the point of it.
    */
   loginsPerProfile: boolean;
+  /**
+   * End a card's agent once it has sat idle for `sleepMinutes` — its turn
+   * over, nothing on its screen asking, nothing waiting to be typed into it,
+   * nobody typing — and let running the card again pick the same conversation
+   * back up. Agents are what drain a laptop's battery, and an agent whose
+   * card is waiting in Review is one nobody is using. On by default, because
+   * nothing is lost: the work is on disk and the conversation is on the card.
+   * Only a card's agent, never one opened in a tab, never the harness — see
+   * `server/src/sleep.ts`. Here rather than in a file of its own because it
+   * is a rule about how agents run, and it rides the same page.
+   */
+  sleepIdle: boolean;
+  sleepMinutes: number;
 }
+
+/** What `sleepMinutes` may be: a minute at the least, a day at the most. */
+export const SLEEP_MINUTES_MIN = 1;
+export const SLEEP_MINUTES_MAX = 1440;
 
 export const DEFAULT_LAUNCH: LaunchSettings = {
   offClis: [],
   offLaunchers: [],
   bypassClis: [],
   loginsPerProfile: false,
+  sleepIdle: true,
+  sleepMinutes: 10,
 };
 
 /**
@@ -216,7 +238,20 @@ export function adoptLaunch(raw: unknown): LaunchSettings {
     offLaunchers: strings(obj.offLaunchers).slice(0, 256),
     bypassClis: clis(obj.bypassClis),
     loginsPerProfile: obj.loginsPerProfile === true,
+    // Absent is on: a `launch.json` written before this existed gets the default.
+    sleepIdle: obj.sleepIdle !== false,
+    sleepMinutes: sleepMinutes(obj.sleepMinutes),
   };
+}
+
+/**
+ * A number somebody typed into a box, as whole minutes in range — or the
+ * default, for anything that is not a number at all. `Number.isFinite` before
+ * the clamp, because NaN loses every comparison it is in.
+ */
+function sleepMinutes(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_LAUNCH.sleepMinutes;
+  return Math.min(SLEEP_MINUTES_MAX, Math.max(SLEEP_MINUTES_MIN, Math.round(value)));
 }
 
 /** What the new-tab menu shows, in catalogue order. */

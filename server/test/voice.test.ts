@@ -7,6 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_VOICE,
+  LAB_MODELS,
   LEAD_INS,
   MISSED_MAX,
   adoptVoice,
@@ -16,6 +17,8 @@ import {
   downsample,
   encodeWav,
   keyCodeLabel,
+  labOptions,
+  labVoice,
   parseSayVoices,
   pickTranscript,
   sentencesOf,
@@ -196,6 +199,38 @@ describe("adoptVoice", () => {
 
   test("no languages at all is both", () => {
     expect(adoptVoice({ languages: [] }).languages).toEqual(["en", "es"]);
+  });
+});
+
+describe("the voice lab", () => {
+  test("a lab voice survives the settings file", () => {
+    const got = adoptVoice({ voices: { en: { engine: "lab", voice: "qwen3/serena" }, es: { engine: "lab", voice: "chatterbox-latam/default" } } });
+    expect(got.voices.en).toEqual({ engine: "lab", voice: "qwen3/serena" });
+    expect(got.voices.es).toEqual({ engine: "lab", voice: "chatterbox-latam/default" });
+  });
+
+  test("a voice is named model/voice, and nothing else is one", () => {
+    expect(labVoice("supertonic/F1")?.model.id).toBe("supertonic");
+    expect(labVoice("pocket-hq/lola")?.voice.id).toBe("lola");
+    expect(labVoice("supertonic")).toBeUndefined();
+    expect(labVoice("supertonic/F9")).toBeUndefined();
+    expect(labVoice("af_heart")).toBeUndefined();
+    expect(labVoice("/F1")).toBeUndefined();
+  });
+
+  test("each voice is offered in every language its model speaks, and only those", () => {
+    const options = labOptions(LAB_MODELS);
+    const of = (id: string) => options.filter((o) => o.id === id).map((o) => o.lang);
+    expect(of("supertonic/M3")).toEqual(["en", "es"]);
+    expect(of("chatterbox-latam/heart")).toEqual(["es"]);
+    expect(of("pocket-hq/rafael")).toEqual(["es"]);
+    expect(options.every((o) => o.engine === "lab" && !!o.group)).toBe(true);
+  });
+
+  test("model ids cannot be mistaken for one another", () => {
+    const ids = LAB_MODELS.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.every((id) => !id.includes("/"))).toBe(true);
   });
 });
 

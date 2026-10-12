@@ -3295,6 +3295,45 @@ a.button {
   display: none;
 }
 
+/* The tray: what needs you, left of Kuru's chip and drawn like it. A dim
+   tray while nothing does; the tray and a count in the blocked ink while
+   something does, since what it counts is mostly agents asking. It keeps
+   its place at zero, because chrome that comes and goes reads as a bar that
+   lost a button. See `NeedsDrawer.tsx`. */
+.sb-needs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-md);
+  color: var(--dimmer);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  flex: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.sb-needs:hover,
+.sb-needs-on {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+.sb-needs-some,
+.sb-needs-some:hover {
+  color: var(--blocked);
+}
+.sb-needs svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+:root[data-narrow] .sb-needs {
+  height: 28px;
+  padding: 0 8px;
+}
+
 /* The pill: a level meter and a line, floating over the panes above the
    status bar. See `VoicePill.tsx` for why it is a meter first and words
    second. The bars' scale is an inline transform the component sets thirty
@@ -3477,6 +3516,37 @@ html.pill-page #root {
   font-size: var(--fs-lg);
 }
 
+/* Who reloaded the window and why, for ten seconds after an agent did. The
+   voice pill's box, so the two read as the same kind of thing, but in the
+   corner: the pill may come up next, with a reply that waited for the reload. */
+.reload-notice {
+  position: fixed;
+  right: 14px;
+  bottom: calc(var(--bar-h) + 14px);
+  z-index: 40;
+  max-width: min(92vw, 460px);
+  padding: 8px 14px;
+  border-radius: var(--radius-xl);
+  border: var(--border) var(--border-style) var(--line);
+  background: var(--chrome);
+  color: var(--text);
+  box-shadow: var(--elev-menu);
+  font-size: var(--fs-md);
+  cursor: pointer;
+}
+.reload-notice-line {
+  margin: 0;
+}
+.reload-notice-line + .reload-notice-line {
+  margin-top: 4px;
+}
+.reload-notice-by {
+  font-weight: 600;
+}
+.reload-notice-why {
+  color: var(--dim);
+}
+
 .sb-help {
   font-family: var(--mono);
   font-size: var(--fs-sm);
@@ -3556,6 +3626,18 @@ html.pill-page #root {
 .dialog-actions .button {
   flex: none;
   padding: 6px 14px;
+}
+
+/* A blocked merge's two ways through, each with a sentence on what it does:
+   the button, then the outcome under it in the muted ink, so the two read as
+   a choice and not as two confirms stacked on each other. */
+.dialog-ask-choice {
+  margin: 0 0 8px;
+}
+.dialog-ask-outcome {
+  margin: 4px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--dim);
 }
 
 .dialog-list {
@@ -3844,6 +3926,30 @@ html.pill-page #root {
 .kuru-head-btn:disabled {
   opacity: 0.5;
 }
+/* The Telegram switch, on: the accent ink, as a choice that is on wears it
+   elsewhere. Failing while on: the working ink, which
+   says "look at this" without saying "broken" over a link that may only be
+   retrying. */
+.kuru-head-btn-on {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.kuru-head-btn-warn {
+  color: var(--working);
+  border-color: var(--working);
+}
+.kuru-head-btn svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+}
+/* Where a message of yours came from when it was a channel: the plane and the
+   channel's name, since a plane alone is a glyph somebody has to learn. */
+.kuru-via {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
 .kuru-close {
   margin-left: 0;
   width: 28px;
@@ -3949,6 +4055,33 @@ html.pill-page #root {
   flex: none;
   width: 13px;
   height: 13px;
+}
+/* The speaker doubles as Play and Stop, once a reply has an utterance to
+   replay: a button rather than the bare glyph, tinted the same ink the
+   "Speaking" word wears while it is audible — this reply's own replay, or
+   Kuru saying it for the first time. */
+.kuru-speaker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: var(--radius-round);
+  color: inherit;
+}
+.kuru-speaker:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+.kuru-speaker-playing,
+.kuru-speaker-playing:hover {
+  color: var(--working);
+}
+:root[data-narrow] .kuru-speaker {
+  width: 28px;
+  height: 28px;
 }
 /* What became of a line, in the status inks the agents' badges use: the same
    word means the same colour everywhere. */
@@ -4109,548 +4242,1121 @@ html.pill-page #root {
 }
 
 /* --------------------------------------------------------------------------
-   Settings
+   The things that need you
+
+   A drawer like Kuru's — the same box, the same header — with three bands in
+   its list: the workspaces waiting on you, each a block with its tag down
+   the side and a row per thing; the ones working; and the quiet rest, folded
+   to a line of names. See `NeedsDrawer.tsx`.
    -------------------------------------------------------------------------- */
-
-/* Wider than a prompt because the mascot page is three columns of picture: the
-   ones you have kept, the sheet at integer zoom, and the badge itself. The sheet
-   alone is 512px before anything else, and shrinking it to fit a prompt-sized
-   dialog would put the pixels at a fractional scale, which is exactly what the
-   picker exists to avoid.
-
-   A column rather than a scrolling block, so the tabs and the way out stay
-   where they are while the page under them moves — a Done button that scrolls
-   off is a dialog people close with the scrim and hope. */
-.dialog-wide {
-  width: min(880px, 96vw);
-  max-height: 78vh;
+.needs-drawer .kuru-head > svg {
+  flex: none;
+  color: var(--dim);
+}
+.needs-head-some {
+  color: var(--blocked);
+}
+.needs-next-caret {
+  transform: rotate(-90deg);
+}
+.needs-list {
+  gap: 12px;
+}
+.needs-none {
+  padding: 6px 2px;
+  color: var(--dim);
+  font-size: var(--fs-base);
+}
+/* A band's heading, in the session mark's small capitals; the quiet one is
+   the button that folds the band. */
+.needs-band {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 -6px;
+  padding: 0 2px;
+  font-size: var(--fs-xs);
+  color: var(--dimmer);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.needs-band .icon {
+  flex: none;
+}
+.needs-quiet-head {
+  width: 100%;
+  margin: 0;
+  padding: 4px 2px;
+  border-radius: var(--radius-md);
+  text-align: left;
+}
+.needs-quiet-head:hover {
+  color: var(--dim);
+  background: var(--chrome-high);
+}
+/* A workspace's block: the rail down its left in the workspace's colour, as
+   its row in the sidebar has, so the two lists are read the same way. */
+.needs-ws {
   display: flex;
   flex-direction: column;
+  gap: 2px;
+  padding-left: 8px;
+  border-left: var(--border-thick) var(--border-style) var(--tag, var(--line));
+}
+.needs-ws-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 4px;
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  text-align: left;
+}
+.needs-ws-head:hover {
+  background: var(--chrome-high);
+}
+.needs-ws-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* How many, as a pill: the accent on a waiting workspace, since that is the
+   number the tray carries; plain on the quiet band's count. */
+.needs-ws-n {
+  flex: none;
+  padding: 0 6px;
+  border-radius: var(--radius-md);
+  background: var(--chrome-high);
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+}
+.needs-ws:not(.needs-ws-working) > .needs-ws-head .needs-ws-n {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.needs-ws-also {
+  color: var(--dimmer);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  white-space: nowrap;
+}
+.needs-ws-working .needs-ws-head {
+  color: var(--dim);
+  font-weight: 500;
+}
+.needs-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.needs-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* The row is the door: the agent's own mark, what it is, and why it is here. */
+.needs-go {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--radius-md);
+  color: var(--text);
+  text-align: left;
+}
+.needs-go:hover {
+  background: var(--chrome-high);
+}
+.needs-go .status {
+  flex: none;
+}
+/* A card with no terminal: a hollow dot where the agent's mark would be, in
+   the done ink, since what it marks is a turn that ended and a process that
+   is no longer there — the sidebar's exited outline, for the same fact. */
+.needs-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+.needs-mark::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-round);
+  border: var(--border) var(--border-style) var(--done);
+}
+.needs-what {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.needs-title,
+.needs-why {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.needs-title {
+  font-size: var(--fs-base);
+}
+.needs-why {
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.needs-row-asking .needs-why {
+  color: var(--blocked);
+}
+.needs-row-working .needs-title {
+  color: var(--dim);
+}
+.needs-done {
+  color: var(--text);
+}
+/* The quiet workspaces as chips, each a door, each wearing its tag. */
+.needs-chips {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.needs-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 10px;
+  border-radius: var(--radius-md);
+  border: var(--border) var(--border-style) var(--line);
+  color: var(--dim);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+.needs-chip:hover {
+  color: var(--text);
+  border-color: var(--line-high);
+  background: var(--chrome-high);
+}
+.needs-chip-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-round);
+  background: var(--tag, transparent);
+  border: var(--border) var(--border-style) var(--tag, var(--line-high));
+}
+/* A thumb's height on a phone. */
+:root[data-narrow] .needs-go {
+  padding: 8px 6px;
+}
+:root[data-narrow] .needs-ws-head {
+  min-height: 36px;
+}
+:root[data-narrow] .needs-chip {
+  min-height: 36px;
+  font-size: var(--fs-md);
+}
+
+/* --------------------------------------------------------------------------
+   Settings
+
+   One language for seventeen pages, and every rule here is a word of it:
+   the dialog, its list of pages, a page's header, a group's card, a row, and
+   the few kinds of control a row may hold. The pages (`web/src/settings/`)
+   are forbidden to lay anything out for themselves, so this is the whole of
+   what Settings looks like, and a change here changes every page the same
+   way — which is the point, and what the old `set-*` rules never managed.
+
+   Three grounds, in the window's own order: the body is `--bg`, a card is
+   `--chrome`, a control is `--chrome-high` or, for a field, back on `--bg`
+   as a well. The dialog's chrome and the list down its side are the skin's
+   dialog paint, like every other dialog.
+
+   Spacing is four numbers set once on the dialog. They are not skin tokens —
+   `docs/styles.md` says why padding and gap never were — but they are set in
+   one place so that every row, card and gutter in here moves together, and
+   the test knows them by name.
+   -------------------------------------------------------------------------- */
+
+.st-dialog {
+  --st-x: 12px;
+  --st-y: 8px;
+  --st-gap: 8px;
+  --st-stack: 18px;
+  display: flex;
+  width: min(940px, 96vw);
+  height: min(700px, 86vh);
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--chrome);
+  box-shadow: var(--elev-dialog);
   overflow: hidden;
 }
 
-.set-body {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  padding-right: 2px;
-}
-
-/* Two jobs, one of which you are doing. Underlined rather than boxed: these sit
-   directly on the dialog and a boxed tab needs a surface to sit on that this
-   does not have.
-
-   The rule belongs to the bar and the tabs scroll along it, which is the phone's
-   doing. Seven tabs are wider than a dialog 390px across, and a flex row that
-   overflows one with `overflow: hidden` on it is not three tabs sitting off the
-   edge — it is three tabs that cannot be reached at all, on the one device with
-   no keyboard to tab onto them with instead. Nothing sits beside the strip: every
-   page in here opens with its own note under its own heading, which is where a
-   sentence about the page belongs. */
-.set-tabbar {
+/* The list of pages, down the left. */
+.st-side {
+  flex: 0 0 176px;
   display: flex;
-  align-items: baseline;
-  margin-bottom: 12px;
-  border-bottom: var(--border) var(--border-style) var(--line);
+  flex-direction: column;
+  min-height: 0;
+  border-right: var(--border) var(--border-style) var(--line);
 }
-
-.set-tabs {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-  overflow-x: auto;
-  /* The strip hangs a hairline below the bar's own content, so that the underline
-     of the tab you are on lands on the bar's rule and covers it. The tabs did
-     that for themselves until they were in a scroller, and cannot now: a scroll
-     container clips at its padding box, which is exactly where a margin like
-     that puts the line. */
-  margin-bottom: calc(-1 * var(--border));
-  /* Nothing here is worth a scrollbar. On a desktop there is no overflow to
-     report and the bar would be chrome for a thing that is not happening, and
-     the phone this exists for draws none of its own until a finger is moving. */
-  scrollbar-width: none;
-  /* A swipe that runs out of tabs stops, rather than becoming the browser's back
-     gesture with a dialog open on top of it. */
-  overscroll-behavior-x: contain;
-}
-.set-tabs::-webkit-scrollbar {
-  display: none;
-}
-
-.set-tab {
-  /* Never squeezed and never wrapped: a strip that can scroll has somewhere to
-     put a tab that does not fit, so "Notifications" over two lines is a shape
-     nothing needs any more. */
-  flex: none;
-  white-space: nowrap;
-  padding: 6px 10px;
-  background: none;
-  border: none;
-  border-bottom: var(--border-thick) var(--border-style) transparent;
-  color: var(--dim);
-  font-size: var(--fs-md);
-  font-weight: 600;
-}
-.set-tab:hover {
-  color: var(--text);
-}
-.set-tab-on {
-  color: var(--text);
-  border-bottom-color: var(--accent);
-}
-
-
-.set-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin: 0 0 8px;
-  font-size: var(--fs-md);
-  font-weight: 600;
-}
-
-.set-note {
-  font-size: var(--fs-base);
-  font-weight: 400;
-  color: var(--dim);
-}
-
-/* A row of controls that reads left to right, wrapping rather than overflowing
-   so the dialog survives a phone. */
-.set-row {
+.st-side-head {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 8px 0;
+  justify-content: space-between;
+  gap: var(--st-gap);
+  padding: 12px var(--st-x) 4px 14px;
 }
-
-.set-label {
-  font-size: var(--fs-base);
-  color: var(--dim);
-  min-width: 44px;
-}
-
-.set-reset {
-  margin-left: auto;
-}
-
-.set-select,
-.set-num {
-  background: var(--bg);
-  color: var(--text);
-  border: var(--border) var(--border-style) var(--line);
-  border-radius: var(--radius-lg);
-  padding: 5px 7px;
-  font: var(--fs-md) var(--mono);
-  outline: none;
-}
-.set-select:focus,
-.set-num:focus {
-  border-color: var(--line-high);
-}
-.set-num {
-  width: 68px;
-}
-
-.set-range {
-  flex: 1;
-  min-width: 140px;
-  accent-color: var(--accent);
-}
-
-/* The text box on the Appearance page — a font name, which is the only free
-   string anywhere in Settings. Sized like `.set-select` so a row holding both
-   does not look like two dialogs. */
-.set-text {
-  flex: 1;
-  min-width: 160px;
-  background: var(--bg);
-  color: var(--text);
-  border: var(--border) var(--border-style) var(--line);
-  border-radius: var(--radius-lg);
-  padding: 5px 7px;
-  font: var(--fs-md) var(--mono);
-  outline: none;
-}
-.set-text:focus {
-  border-color: var(--line-high);
-}
-.set-text::placeholder {
-  color: var(--dimmer);
-}
-
-/* The number beside a slider. Monospaced and fixed-width so dragging one does
-   not shuffle the row left and right as the digits change. */
-.set-value {
-  font: var(--fs-base) var(--mono);
-  color: var(--dim);
-  min-width: 38px;
-  text-align: right;
-}
-
-.set-check {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: var(--fs-base);
-  color: var(--dim);
-  cursor: var(--cursor-pointer);
-}
-.set-check input {
-  accent-color: var(--accent);
-}
-/* A checkbox that is a row of the form rather than a control tucked beside
-   another one. `.set-check` alone is the second kind — the `Blink` box sitting
-   next to the cursor select — so the spacing is here rather than on the base
-   class, which would push those two apart. */
-.set-check-row {
-  margin: 5px 0;
-}
-/* The explanation after a checkbox's label, on the same line while there is
-   room for it. `.set-note` is a block elsewhere; this is the one place it is a
-   fragment of a sentence somebody is already reading. */
-.set-note-inline {
-  display: inline;
-}
-
-/* A group of controls that turns off with the switch above it.
-   `<fieldset disabled>` is what actually disables them — this only undoes the
-   browser's default frame and says so visibly, because a form that dims without
-   explanation reads as broken rather than as switched off. */
-.set-fieldset {
-  border: 0;
+.st-title {
   margin: 0;
-  padding: 0;
-  min-width: 0;
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.set-fieldset:disabled {
-  opacity: 0.5;
+.st-nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 6px 12px;
 }
-
-/* A button sitting inside a paragraph of explanation, which is where the one
-   thing on the Notifications page that is not a setting lives: asking the
-   browser for permission is a gesture, not a value, and it belongs in the
-   sentence that says why it is needed. */
-.set-button-inline {
-  vertical-align: baseline;
-}
-
-/* A page inside the dialog body, and the sections it stacks. Only Appearance
-   has more than one subject on it; the other two tabs are one thing each and
-   use the body directly. */
-.set-page {
+.st-nav-group {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 1px;
+  margin-top: 10px;
 }
-.set-section {
-  display: flex;
-  flex-direction: column;
-}
-.set-h {
-  margin: 0 0 4px;
-  font-size: var(--fs-base);
+.st-nav-h {
+  padding: 0 8px 4px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--dimmer);
 }
-/* A note that explains the control above it rather than the section below, so
-   it sits tight under that control instead of leading the next one. */
-.set-note-under {
-  margin: 2px 0 0;
-}
-
-/* A note that is a failure. Red and otherwise a note: it is a sentence from the
-   server about the button above it, not a banner, and it goes away the moment
-   the next press works. */
-.set-note-bad {
-  color: var(--danger);
-}
-
-/* The installed packs, as a row of buttons that wraps. Buttons rather than a
-   radiogroup because wearing a pack is an *act* and not a saved choice —
-   nothing records which one you are in, and the moment you change the skin you
-   are no longer quite in any of them, which is the whole reason this control
-   exists. */
-.pack-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 8px 0 0;
-}
-
-/* --------------------------------------------------------------------------
-   About
-
-   The one page in Settings that edits nothing, so it is laid out as a thing to
-   read rather than as a form: a name, a number, a button, and whatever the
-   release had to say for itself. The notes are the server's markup and are
-   therefore styled by `.markdown` like any other document kururu renders —
-   which is the point of rendering them there and not here.
-   -------------------------------------------------------------------------- */
-.about-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-/* The version is the answer to the question this page exists for, so it is set
-   in the terminal's face: it is a value to be read exactly, the same class of
-   fragment as a pid or a path, and `--mono` is nobody's skin by design. */
-.about-version {
-  margin: 0;
-  font-family: var(--mono);
-  font-size: var(--fs-md);
-  color: var(--dim);
-}
-
-.about-check {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-/* `.button` is `flex: 1` because the dialogs it was written for are rows of
-   two or three buttons sharing a width. These rows are not that: each is one
-   action with a sentence beside it, and a button stretched across the dialog
-   reads as the page's purpose rather than as a thing you may press. */
-.about-check .button,
-.about-release-head .button,
-.reach-share-actions .button {
-  flex: 0 0 auto;
-}
-
-.about-release {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 14px;
-  border-top: var(--border) var(--border-style) var(--line);
-}
-
-.about-release-head {
+.st-nav-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.about-release-title {
-  margin: 0;
-  font-size: var(--fs-md);
-  font-weight: 600;
-}
-
-/* Bounded, because a release with a long changelog would otherwise push the
-   dialog's Done button off a laptop screen — and this is a thing you skim. */
-.about-notes {
-  max-height: 46vh;
-  overflow: auto;
-}
-
-/* What is drawn when the server could not render the markdown. It is a
-   changelog, so the source is perfectly readable; wrapped rather than scrolled
-   sideways, because the one thing worse than unrendered notes is unrendered
-   notes you have to drag to read. */
-.about-notes-raw {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: var(--mono);
-  font-size: var(--fs-sm);
-  color: var(--dim);
-}
-
-/* The slot that holds *Get it*, which is a button, a progress bar or a link
-   depending on what the runtime under the page can actually do — a packaged
-   window can replace itself, a browser and the phone can only send you to
-   GitHub. All three live in the same corner of the release header, so the row
-   has to take any of them without moving the title. */
-.about-get {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  min-width: 0;
-}
-
-/* A bare `<progress>` is painted by the UA in its own blue — the one colour on
-   this page that answers to no theme and would go on being blue through every
-   one of them. Reset and repainted in the accent, which is the fill the button
-   it replaced was wearing a moment earlier, so pressing it looks like the same
-   object carrying on rather than a different control arriving. */
-.about-progress {
-  appearance: none;
-  width: 110px;
-  height: 4px;
-  border: 0;
-  border-radius: var(--radius-round);
-  overflow: hidden;
-  background: var(--line);
-}
-.about-progress::-webkit-progress-bar {
-  background: var(--line);
-  border-radius: var(--radius-round);
-}
-.about-progress::-webkit-progress-value {
-  background: var(--accent);
-  border-radius: var(--radius-round);
-}
-
-/* The server's story: when it started, why, and the last lines of the record.
-   Read as a list rather than a table, newest first, with the time and the
-   writer in the terminal's face — they are values to be matched against a log,
-   the same class of fragment as the version above. Bounded for the release
-   notes' reason: a long record should not push Done off a laptop. */
-.about-life {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 14px;
-  border-top: var(--border) var(--border-style) var(--line);
-}
-
-.about-life-list {
-  display: flex;
-  flex-direction: column;
   gap: 6px;
-  max-height: 40vh;
-  margin: 0;
-  padding: 0;
-  overflow: auto;
-  list-style: none;
-  font-size: var(--fs-sm);
-}
-
-.about-life-row {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
-  gap: 2px 10px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
   color: var(--dim);
-}
-
-.about-life-at,
-.about-life-by {
-  font-family: var(--mono);
-  color: var(--dimmer);
-  white-space: nowrap;
-}
-
-.about-life-why {
-  overflow-wrap: anywhere;
-}
-
-/* The error's own line and the folded stack sit under the sentence they
-   belong to, not under the time. */
-.about-life-more {
-  grid-column: 3;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.about-life-more summary {
-  cursor: pointer;
-  color: var(--dimmer);
-}
-
-.about-life-bad .about-life-why {
-  color: var(--danger);
-}
-
-/* --------------------------------------------------------------------------
-   Themes
-
-   Each option is drawn in its own colours rather than named in the window's,
-   because the colours are the entire thing being chosen — a list of names makes
-   you pick one to find out what it is, and then pick again. The values come
-   inline from the Theme itself (see SettingsAppearance.tsx): a stylesheet can
-   hold one palette at a time and this list is five at once.
-   -------------------------------------------------------------------------- */
-
-.theme-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 8px;
-  margin-top: 4px;
-}
-
-.theme-opt {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 9px 10px;
-  border-radius: var(--radius-xl);
-  border: var(--border) var(--border-style);
   font-size: var(--fs-md);
   text-align: left;
 }
-/* The ring is the theme's own accent — `--ring` is set inline per card, so the
-   mark that says "this one" is itself a sample of what picking it does. Two
-   pixels of it, because a one-pixel ring on top of a one-pixel border of the
-   same colour is indistinguishable from no ring at all. */
-.theme-opt-on {
-  box-shadow: 0 0 0 var(--border-thick) var(--ring);
+.st-nav-item:hover {
+  color: var(--text);
+  background: var(--chrome-high);
 }
-.theme-opt-name {
+.st-nav-on {
+  color: var(--text-strong);
+  background: var(--chrome-high);
+}
+.st-nav-caret {
+  color: var(--dimmer);
+  transform: rotate(-90deg);
+}
+
+/* The page: its header, then the body it scrolls in. */
+.st-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.st-head {
+  display: flex;
+  align-items: center;
+  gap: var(--st-gap);
+  padding: 10px var(--st-x) 10px 18px;
+  border-bottom: var(--border) var(--border-style) var(--line);
+}
+.st-head-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.st-tagline {
+  font-size: var(--fs-base);
+  color: var(--dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.theme-opt-swatches {
-  display: flex;
+/* The word in the corner for a page that is a thing that can be on. */
+.st-pill {
   flex: none;
-  gap: 3px;
+  padding: 2px 8px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: calc(var(--radius-xl) * 3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--dim);
 }
-/* Chrome, accent, and the three states worth spotting. Not a row of neutrals:
-   every dark flavour has the same neutrals, and telling two of them apart is
-   the whole question somebody is asking here. */
-.theme-opt-swatch {
-  width: 7px;
-  height: 14px;
-  border-radius: var(--radius-xs);
+.st-pill-ok {
+  color: var(--done);
+  border-color: var(--done);
+}
+.st-pill-busy {
+  color: var(--working);
+  border-color: var(--working);
+}
+.st-pill-bad {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.st-close,
+.st-back {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--dim);
+  font-size: var(--fs-lg);
+}
+.st-close:hover,
+.st-back:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+.st-back .icon {
+  transform: rotate(90deg);
+}
+.st-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 18px 24px;
+  background: var(--bg);
+}
+.st-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--st-stack);
+  max-width: 780px;
 }
 
-/* The skin list. Wider cards than the themes get, and the reason is what is
-   being compared: five swatches answer "which palette" at a glance, but "which
-   shape" needs a border, a corner and a line of the actual typeface before it
-   means anything — and the typeface is the part that surprises people. Every
-   card draws itself from its own tokens, set inline in `SkinOption`; the rules
-   here only lay them out. Deliberately *no* geometry in this block that the card
-   sets for itself, or the two would fight and the stylesheet would win. */
-.skin-list {
+/* One line the server wants read first. At the top of the body, never anywhere else. */
+.st-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--st-gap);
+  padding: 8px var(--st-x);
+  border-left: var(--border-thick) var(--border-style) var(--blocked);
+  border-radius: var(--radius-lg);
+  background: var(--chrome);
+  color: var(--text);
+  font-size: var(--fs-base);
+  line-height: var(--ui-line-height);
+}
+.st-banner-bad {
+  border-left-color: var(--danger);
+}
+.st-banner-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* A group: heading, card, footnote. The card is the only container. */
+.st-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.st-group-h {
+  margin: 0 0 0 var(--st-x);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dimmer);
+}
+.st-card {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--chrome);
+}
+/* `<fieldset disabled>` is what stops the rows taking input; this only says so. */
+.st-card:disabled {
+  opacity: 0.5;
+}
+.st-card > * + *,
+.st-sub > * + *,
+.st-step + .st-step,
+.st-step-body > * + * {
+  border-top: var(--border) var(--border-style) var(--line);
+}
+.st-foot {
+  margin: 0 var(--st-x);
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  line-height: var(--ui-line-height);
+}
+/* The rows a switch gates, indented under it in the same card. */
+.st-sub {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  border: 0;
+}
+.st-sub:disabled {
+  opacity: 0.5;
+}
+.st-sub > .st-row {
+  padding-left: calc(var(--st-x) + 16px);
+}
+
+/* The row: label and hint on the left, one control on the right, on one grid
+   for every row of every page. `wide` drops the control under the label. */
+.st-row {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  gap: 8px;
-  margin-top: 4px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--st-gap);
+  row-gap: 6px;
+  padding: var(--st-y) var(--st-x);
+  min-height: 40px;
+}
+.st-row-wide {
+  grid-template-columns: minmax(0, 1fr);
+}
+label.st-row {
+  cursor: var(--cursor-pointer);
+}
+.st-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.st-label {
+  font-size: var(--fs-md);
+  color: var(--text);
+}
+.st-hint {
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  line-height: var(--ui-line-height);
+  overflow-wrap: anywhere;
+}
+.st-ctl {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--st-gap);
+  min-width: 0;
+}
+.st-row-wide .st-ctl {
+  justify-content: flex-start;
+}
+.st-row-wide .st-ctl > .st-input,
+.st-row-wide .st-ctl > .st-select {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: none;
+}
+/* What a thing did, in the hint's place. */
+.st-outcome {
+  color: var(--text);
+}
+.st-outcome-bad {
+  color: var(--danger);
 }
 
-.skin-opt {
+/* The switch. Sized in em so a skin's type ramp scales it; the track takes
+   its corner from the skin, so a pixel skin gets a square one. */
+.st-switch {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  margin: 0;
+  width: 2.4em;
+  height: 1.4em;
+  border: var(--border) var(--border-style) transparent;
+  border-radius: calc(var(--radius-xl) * 3);
+  background: var(--line);
+  font-size: var(--fs-md);
+  cursor: var(--cursor-pointer);
+  transition: background 120ms;
+}
+.st-switch::before {
+  content: "";
+  position: absolute;
+  top: 0.15em;
+  left: 0.15em;
+  width: 1em;
+  height: 1em;
+  border-radius: var(--radius-round);
+  background: var(--text);
+  transition: transform 120ms;
+}
+.st-switch:checked {
+  background: var(--accent);
+}
+.st-switch:checked::before {
+  background: var(--on-accent);
+  transform: translateX(1em);
+}
+.st-switch:disabled {
+  opacity: 0.4;
+  cursor: var(--cursor);
+}
+@media (prefers-reduced-motion: reduce) {
+  .st-switch,
+  .st-switch::before {
+    transition: none;
+  }
+}
+
+/* A small choice, every option visible. */
+.st-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+}
+.st-seg-btn {
+  padding: 3px 10px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--dim);
+  font-size: var(--fs-base);
+  white-space: nowrap;
+}
+.st-seg-btn:hover:not(:disabled) {
+  color: var(--text);
+}
+.st-seg-on,
+.st-seg-on:hover:not(:disabled) {
+  color: var(--text-strong);
+  background: var(--chrome-high);
+}
+.st-seg-btn:disabled {
+  opacity: 0.5;
+}
+
+/* Fields and selects: wells on the body's ground. */
+.st-select,
+.st-input {
+  min-width: 0;
+  max-width: 100%;
+  padding: 5px 8px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--ui);
+  font-size: var(--fs-md);
+  outline: none;
+}
+.st-select:focus,
+.st-input:focus {
+  border-color: var(--line-high);
+}
+.st-select {
+  max-width: 300px;
+}
+.st-select-mini {
+  padding: 2px 4px;
+  font-size: var(--fs-sm);
+}
+.st-input::placeholder {
+  color: var(--dimmer);
+}
+.st-input-mono {
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+}
+.st-input-short {
+  width: 6em;
+  text-align: right;
+}
+.st-input-mini {
+  width: 3.8em;
+  padding: 2px 4px;
+}
+/* A name in a list: a field that does not look like one until you are in it. */
+.st-input-bare {
+  margin-left: -6px;
+  padding: 2px 6px;
+  border-color: transparent;
+  background: transparent;
+  font-weight: 600;
+}
+.st-input-bare:hover,
+.st-input-bare:focus {
+  border-color: var(--line);
+  background: var(--bg);
+}
+.st-num {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.st-unit {
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.st-keybox {
+  display: flex;
+  align-items: center;
+  gap: var(--st-gap);
+  width: 100%;
+}
+.st-keybox .st-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* A slider and its figure, fixed-width so the row does not shuffle. */
+.st-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--st-gap);
+  width: min(100%, 260px);
+}
+.st-range {
+  flex: 1 1 auto;
+  min-width: 120px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.st-value {
+  min-width: 4.5ch;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+
+/* A readout, and the dot every status wears. */
+.st-readout {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fs-base);
+  color: var(--text);
+  text-align: right;
+}
+.st-readout-v {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.st-readout-bad {
+  color: var(--danger);
+}
+.st-dot {
+  flex: none;
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: var(--radius-round);
+  background: var(--idle);
+}
+.st-dot-ok {
+  background: var(--done);
+}
+.st-dot-busy {
+  background: var(--working);
+}
+.st-dot-warn {
+  background: var(--blocked);
+}
+.st-dot-bad {
+  background: var(--danger);
+}
+.st-dot-off {
+  background: var(--exited);
+}
+
+/* Buttons, in three weights: quiet, the page's one primary, and danger. */
+.st-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--chrome-high);
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.st-btn:hover:not(:disabled) {
+  border-color: var(--line-high);
+}
+.st-btn:disabled {
+  opacity: 0.4;
+  cursor: var(--cursor);
+}
+.st-btn-primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.st-btn-danger {
+  border-color: var(--danger);
+  background: transparent;
+  color: var(--danger);
+}
+/* The confirm, once the question is up: filled, because this press is the one that does it. */
+.st-btn-danger-sure {
+  border-color: transparent;
+  background: var(--danger-bg);
+  color: var(--on-danger);
+}
+.st-ask {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.st-ask-q {
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+.st-textbtn {
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: var(--dim);
+  font-size: var(--fs-sm);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.st-textbtn:hover {
+  color: var(--accent);
+}
+.st-link,
+.st-a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.st-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-base);
+}
+.st-link:hover,
+.st-a:hover {
+  text-decoration: underline;
+}
+.st-mono {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.st-iconbtn {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--dimmer);
+  font-size: var(--fs-md);
+  line-height: 1;
+}
+.st-iconbtn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+.st-iconbtn-danger:hover:not(:disabled) {
+  color: var(--danger);
+}
+.st-iconbtn-on {
+  color: var(--accent);
+}
+
+/* An item of a list: a lead, a name and a second line, and what can be done to it. */
+.st-item {
+  display: flex;
+  align-items: center;
+  gap: var(--st-gap);
+  padding: var(--st-y) var(--st-x);
+  min-height: 40px;
+}
+.st-item-lead {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+.st-item-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.st-item-pick {
+  cursor: var(--cursor-pointer);
+}
+.st-item-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fs-md);
+  color: var(--text);
+}
+.st-item-sub {
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.st-item-meta {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--dimmer);
+}
+/* The chosen or current one: the accent down its left edge, never a filled
+   ground, which reads as a selection you are about to lose. */
+.st-item-on,
+.st-item-moved {
+  box-shadow: inset var(--border-thick) 0 0 var(--accent);
+}
+.st-item-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.st-item-add .st-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* An add row inside a row's control slot, where the row already pads it. */
+.st-ctl > .st-item-add {
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+}
+.st-item-busy {
+  opacity: 0.8;
+}
+.st-busy {
+  font-size: var(--fs-sm);
+  color: var(--working);
+}
+.st-item-bad .st-item-sub,
+.st-item-bad .st-item-name {
+  color: var(--danger);
+}
+.st-item-exited .st-item-name {
+  color: var(--dimmer);
+  text-decoration: line-through;
+}
+.st-version {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--dimmer);
+}
+.st-badge {
+  padding: 0 5px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--dim);
+}
+.st-when {
+  min-width: 5ch;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--dimmer);
+}
+.st-empty {
+  margin: 0;
+  padding: var(--st-y) var(--st-x);
+  font-size: var(--fs-base);
+  color: var(--dim);
+}
+
+/* The bar over a long list: which shelf, and a filter. */
+.st-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--st-gap);
+  padding: var(--st-y) var(--st-x);
+}
+.st-toolbar .st-seg {
+  flex: 1 1 auto;
+}
+/* Larger than the chrome's own size, for the reason the document picker's
+   filter is: iOS zooms the page when it focuses a field under 16px. */
+.st-search {
+  flex: 1 1 160px;
+  min-width: 0;
+  padding: 5px 8px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--ui);
+  font-size: var(--fs-xl);
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.st-search:focus {
+  border-color: var(--line-high);
+}
+.st-search::placeholder {
+  color: var(--dimmer);
+}
+.st-jump {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+}
+
+/* Pictures to choose between. */
+.st-gallery {
+  display: grid;
+  gap: var(--st-gap);
+  padding: var(--st-x);
+}
+.st-gallery-sm {
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+}
+.st-gallery-md {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+.st-gallery-lg {
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+}
+.st-pic {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   padding: 9px 10px;
-  border-color: var(--line);
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-lg);
   background: var(--bg);
   color: var(--text);
   text-align: left;
   overflow: hidden;
 }
-.skin-opt-on {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 var(--border-thick) var(--accent);
+.st-pic:hover {
+  border-color: var(--line-high);
 }
-
-/* A pane, two centimetres across: the border, the corner and the frame inset,
-   which together are most of what a skin is. The little bar across the top is
-   the tab strip, and the glyph on it is the skin's own `run` icon — the one
-   place the icon set is visible before you have picked it. */
-.skin-opt-preview {
+/* The ring is `--ring` where the card sets one — a theme card wears its own
+   accent, so the mark that says "this one" is a sample of what picking it
+   does — and the window's accent otherwise. */
+.st-pic-on,
+.st-pic-on:hover {
+  border-color: var(--ring, var(--accent));
+  box-shadow: 0 0 0 var(--border-thick) var(--ring, var(--accent));
+}
+.st-pic-shot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.st-pic-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.st-pic-name {
+  font-size: var(--fs-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.st-pic-sub {
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+/* A theme card: the name, then its five swatches — chrome, accent, and the
+   three marks that say an agent wants you. Colours come inline from the
+   theme itself; a stylesheet holds one palette at a time and this is many. */
+.st-theme {
+  flex-direction: row-reverse;
+  justify-content: space-between;
+}
+.st-theme-swatches {
+  display: flex;
+  gap: 3px;
+}
+.st-theme-swatch {
+  width: 7px;
+  height: 14px;
+  border-radius: var(--radius-xs);
+}
+/* A skin card draws its own corner, line and face inline; this is only the
+   little pane inside it, wearing the frame recipe a label cannot tell you. */
+.st-skin-pane {
   flex: none;
   width: 46px;
   height: 34px;
@@ -4660,33 +5366,825 @@ html.pill-page #root {
   background: var(--bg);
   overflow: hidden;
 }
-.skin-opt-bar {
+.st-skin-bar {
   display: flex;
   align-items: center;
-  padding: 0 4px;
   height: 11px;
+  padding: 0 4px;
   background: var(--chrome-high);
   color: var(--dim);
   line-height: 1;
 }
 
-.skin-opt-text {
+/* A registry entry's preview, one box whatever it is a preview of, so the
+   rows line up. The colours and the shape come inline from the entry. */
+.st-shot {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 36px;
+  flex: none;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  color: var(--dim);
 }
-.skin-opt-name {
+.st-shot-theme {
+  position: relative;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-end;
+  border: var(--border) var(--border-style) var(--line);
+}
+.st-shot-chrome {
+  height: 10px;
+  flex: none;
+}
+.st-shot-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  flex: 1;
+}
+.st-shot-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-round);
+}
+.st-shot-skin {
+  border-color: var(--line-high);
+  background: var(--bg);
+}
+.st-shot-picture img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  image-rendering: auto;
+}
+/* `.mascot` is `position: absolute` and relies on a positioned, one-cell
+   parent to show one frame; without one its containing block is the viewport. */
+.st-shot-mascot {
+  --status-size: 30px;
+  border: var(--border) var(--border-style) var(--line);
+  background: var(--bg);
+}
+.st-shot-cell {
+  position: relative;
+  width: var(--status-size);
+  height: var(--status-size);
+  overflow: hidden;
+}
+/* The one preview that is a control: a sound has no picture. */
+.st-shot-sound {
+  border: var(--border) var(--border-style) var(--line);
+  background: var(--bg);
+  color: var(--dim);
+  cursor: var(--cursor-pointer);
+}
+.st-shot-sound:hover:not(:disabled),
+.st-shot-sound:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.st-shot-sound:disabled {
+  cursor: var(--cursor);
+  color: var(--dimmer);
+}
+.st-shot-pack {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 4px;
+  border: var(--border) var(--border-style) var(--line);
+  background: var(--bg);
+  font-size: var(--fs-xs);
+  line-height: 1.1;
+  color: var(--dimmer);
+}
+.st-shot-part {
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.skin-opt-desc {
+
+/* A walkthrough: numbered rows that turn into ticks. A done step folds. */
+.st-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.st-step-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 2px;
+  width: 100%;
+  min-height: 40px;
+  padding: var(--st-y) var(--st-x);
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: var(--cursor-pointer);
+}
+.st-step-n {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-round);
+  background: var(--chrome-high);
+  color: var(--dim);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.st-step-done .st-step-n {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.st-step-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+.st-step-done .st-step-title {
+  font-weight: 500;
   color: var(--dim);
 }
+.st-step-line {
+  grid-column: 2;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  line-height: var(--ui-line-height);
+}
+.st-step-body {
+  display: flex;
+  flex-direction: column;
+  padding-left: 32px;
+  border-top: var(--border) var(--border-style) var(--line);
+}
+:root[data-narrow] .st-step-body {
+  padding-left: 0;
+}
 
-/* Three buttons where a radio group would be, because the choice is small and
-   always visible, and a select would hide two thirds of it behind a click. */
+/* The only place a paragraph may live. */
+.st-details-sum {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: var(--st-y) var(--st-x);
+  list-style: none;
+  font-size: var(--fs-base);
+  color: var(--text);
+  cursor: var(--cursor-pointer);
+}
+.st-details-sum::-webkit-details-marker {
+  display: none;
+}
+.st-details-sum .icon {
+  flex: none;
+  color: var(--dimmer);
+  transform: rotate(-90deg);
+  transition: transform 120ms;
+}
+.st-details[open] > .st-details-sum .icon {
+  transform: none;
+}
+.st-details-body {
+  padding: 0 var(--st-x) var(--st-y) calc(var(--st-x) + 22px);
+}
+.st-p {
+  margin: 0 0 8px;
+  font-size: var(--fs-base);
+  color: var(--dim);
+  line-height: 1.5;
+}
+.st-p:last-child {
+  margin-bottom: 0;
+}
+.st-p b {
+  color: var(--text);
+  font-weight: 600;
+}
+.st-bullets {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--fs-base);
+  color: var(--dim);
+  line-height: 1.5;
+}
+.st-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+/* Release notes are the server's markup, styled by `.markdown`; bounded, because they are skimmed. */
+.st-notes {
+  max-height: 40vh;
+  overflow: auto;
+}
+
+/* A row of figures. */
+.st-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: var(--st-gap);
+  padding: var(--st-x);
+}
+.st-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+}
+.st-tile-v {
+  font-family: var(--mono);
+  font-size: var(--fs-xl);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-strong);
+}
+.st-tile-l {
+  font-size: var(--fs-base);
+  color: var(--dim);
+}
+.st-tile-u {
+  font-size: var(--fs-sm);
+  color: var(--dimmer);
+}
+
+/* Processes: a workspace's terminals under its name, the workspace's colour
+   down the edge, and a bar against the heaviest tab. */
+.st-proc-group {
+  display: flex;
+  flex-direction: column;
+}
+.st-proc-head,
+.st-proc-group .st-item {
+  border-left: var(--border-thick) var(--border-style) var(--tag, var(--line));
+}
+.st-proc-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--st-gap);
+  min-height: 36px;
+  padding: var(--st-y) var(--st-x);
+}
+.st-proc-name {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text);
+}
+.st-proc-head .st-mem {
+  margin-left: auto;
+}
+.st-proc-foot {
+  justify-content: flex-end;
+}
+.st-mem {
+  flex: none;
+  min-width: 6ch;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+.st-bar {
+  flex: none;
+  width: 70px;
+  height: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--chrome-high);
+  overflow: hidden;
+}
+.st-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.st-report {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--st-y) var(--st-x);
+  font-size: var(--fs-base);
+  color: var(--text);
+}
+.st-report-warn {
+  box-shadow: inset var(--border-thick) 0 0 var(--blocked);
+}
+.st-report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Keyboard: a key drawn as a key, and the `+` that captures the next one. */
+.st-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 22px;
+  padding: 2px 6px;
+  border: var(--border) var(--border-style) var(--line);
+  border-bottom-width: var(--border-thick);
+  border-radius: var(--radius-md);
+  background: var(--chrome-high);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+}
+.st-key:hover {
+  border-color: var(--working);
+  color: var(--working);
+}
+.st-key-x {
+  opacity: 0;
+  font-size: var(--fs-sm);
+}
+.st-key:hover .st-key-x {
+  opacity: 1;
+}
+.st-key-none {
+  font-size: var(--fs-base);
+  font-style: italic;
+  color: var(--dimmer);
+}
+.st-key-add {
+  padding: 2px 7px;
+  border: var(--border) dashed var(--line);
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--dim);
+  font-size: var(--fs-base);
+}
+.st-key-add:hover {
+  color: var(--text);
+  border-color: var(--dimmer);
+}
+.st-key-add-armed {
+  border-style: solid;
+  border-color: var(--accent);
+  color: var(--text);
+  animation: st-key-wait 1.2s ease-in-out infinite;
+}
+@keyframes st-key-wait {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* Mascot: the picker, the sheet at integer zoom, and the badge beside it. */
+.st-mascot-chip {
+  --status-size: 22px;
+}
+.st-stage {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: var(--st-y) var(--st-x);
+}
+.st-sheet-col {
+  flex: 1 1 0;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.st-empty-stage {
+  align-items: flex-start;
+  padding: 16px;
+  border: var(--border) dashed var(--line);
+  border-radius: var(--radius-lg);
+}
+.st-sheet-wrap {
+  max-height: 40vh;
+  padding: 8px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  overflow: auto;
+}
+/* The grid is two gradients over the sheet rather than a cell per div.
+   `--cell` is set per element by the page: the cell size is the thing chosen. */
+.st-sheet {
+  position: relative;
+  image-rendering: var(--image-rendering);
+  background-repeat: no-repeat;
+  touch-action: none;
+  cursor: crosshair;
+}
+.st-sheet::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(to right, color-mix(in srgb, var(--accent) 22%, transparent) 0 1px, transparent 1px var(--cell)),
+    repeating-linear-gradient(to bottom, color-mix(in srgb, var(--accent) 22%, transparent) 0 1px, transparent 1px var(--cell));
+  pointer-events: none;
+}
+/* Outlined rather than tinted: a wash over pixel art hides the frame you are reading. */
+.st-sheet-sel {
+  position: absolute;
+  border: var(--border) var(--border-style) var(--accent);
+  box-shadow: 0 0 0 1px var(--shadow);
+  pointer-events: none;
+}
+.st-sheet-sel-other {
+  border-style: dashed;
+  border-color: var(--dimmer);
+  box-shadow: none;
+}
+.st-preview {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+}
+.st-preview-big {
+  --status-size: 64px;
+}
+.st-preview-pair {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Studio: a card per part, the colours as swatches, the icon strip and glyphs. */
+.st-part {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+}
+.st-part-on {
+  border-color: var(--line-high);
+}
+.st-part-over {
+  border-color: var(--accent);
+  background: var(--chrome-high);
+}
+.st-part-shot {
+  flex: none;
+  width: 96px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: var(--border) dashed var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--chrome);
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  line-height: 1.2;
+  text-align: center;
+  overflow: hidden;
+}
+.st-part-shot:hover {
+  border-color: var(--line-high);
+}
+.st-part-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.st-part-name {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.st-part-covers {
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.st-part-hint {
+  font-size: var(--fs-xs);
+  color: var(--dimmer);
+  line-height: 1.3;
+}
+.st-part-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-top: 4px;
+}
+.st-part-num {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--fs-xs);
+  color: var(--dimmer);
+}
+.st-part-remove {
+  margin-left: auto;
+}
+.st-colors {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 4px 10px;
+  padding: var(--st-y) var(--st-x);
+}
+.st-color {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.st-color-on {
+  background: var(--chrome-high);
+  color: var(--text);
+}
+/* A swatch that is a colour input in disguise: the native picker is the one
+   control the browser draws better than this file could. */
+.st-swatch {
+  position: relative;
+  flex: none;
+  width: 22px;
+  height: 18px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+  cursor: var(--cursor-pointer);
+}
+.st-swatch input {
+  position: absolute;
+  inset: -8px;
+  width: 200%;
+  height: 200%;
+  opacity: 0;
+  cursor: var(--cursor-pointer);
+}
+.st-color-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.st-color-from {
+  font-size: var(--fs-xs);
+  color: var(--dimmer);
+}
+.st-strip-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--st-gap);
+  width: 100%;
+}
+.st-strip {
+  height: 28px;
+  min-width: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border: var(--border) dashed var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--dimmer);
+  font-size: var(--fs-xs);
+}
+.st-strip-on {
+  border-style: solid;
+}
+.st-strip-img {
+  height: 20px;
+  image-rendering: pixelated;
+}
+.st-glyphs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 4px 8px;
+  width: 100%;
+}
+.st-glyph {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+.st-glyph .icon {
+  width: 16px;
+  color: var(--text);
+}
+.st-glyph-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+}
+.st-glyph-input {
+  width: 36px;
+  padding: 3px 4px;
+  text-align: center;
+}
+
+/* Channels: the pairing panel, the QR beside the words on a desktop and above them on a phone. */
+.st-pair {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 14px;
+  width: 100%;
+}
+.st-pair .qr {
+  flex: none;
+  width: 150px;
+}
+.st-pair-words {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* Big and spaced, because it is read off one screen and typed into another. */
+.st-code {
+  font-family: var(--mono);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--text-strong);
+  user-select: all;
+}
+
+/* About: a download's progress, repainted in the accent the button it replaced was wearing. */
+.st-progress-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.st-progress {
+  appearance: none;
+  width: 110px;
+  height: 4px;
+  border: 0;
+  border-radius: var(--radius-round);
+  background: var(--line);
+  overflow: hidden;
+}
+.st-progress::-webkit-progress-bar {
+  background: var(--line);
+  border-radius: var(--radius-round);
+}
+.st-progress::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: var(--radius-round);
+}
+
+/* The platform's scrollbars are wrong inside a dark dialog: the default light
+   track reads as a hole punched in the chrome. */
+.st-body::-webkit-scrollbar,
+.st-nav::-webkit-scrollbar,
+.st-sheet-wrap::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.st-body::-webkit-scrollbar-track,
+.st-nav::-webkit-scrollbar-track,
+.st-sheet-wrap::-webkit-scrollbar-track,
+.st-body::-webkit-scrollbar-corner,
+.st-sheet-wrap::-webkit-scrollbar-corner {
+  background: transparent;
+}
+.st-body::-webkit-scrollbar-thumb,
+.st-nav::-webkit-scrollbar-thumb,
+.st-sheet-wrap::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: var(--radius-md);
+}
+.st-body::-webkit-scrollbar-thumb:hover,
+.st-nav::-webkit-scrollbar-thumb:hover,
+.st-sheet-wrap::-webkit-scrollbar-thumb:hover {
+  background: var(--dimmer);
+}
+
+/* A phone, or a window as narrow as one: the dialog is the screen, the list
+   is a screen of its own, every field drops under its label, and a gallery
+   is two across. Toggles keep their two columns, because a switch on its own
+   line under a label is a switch nobody can tell belongs to it. */
+:root[data-narrow] .st-scrim {
+  padding: 0;
+}
+.st-dialog-narrow {
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: 0;
+}
+.st-dialog-narrow .st-side {
+  flex: 1 1 auto;
+  border-right: none;
+}
+.st-dialog-narrow .st-nav-item {
+  padding: 10px 10px;
+  font-size: var(--fs-lg);
+}
+.st-dialog-narrow .st-nav-group {
+  margin-top: 14px;
+}
+.st-dialog-narrow .st-head {
+  padding-left: var(--st-x);
+}
+.st-dialog-narrow .st-body {
+  padding: 12px;
+}
+.st-dialog-narrow .st-page {
+  max-width: none;
+}
+.st-dialog-narrow .st-row:not(.st-row-toggle) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.st-dialog-narrow .st-row:not(.st-row-toggle) .st-ctl {
+  justify-content: flex-start;
+}
+.st-dialog-narrow .st-select {
+  max-width: 100%;
+}
+.st-dialog-narrow .st-gallery {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.st-dialog-narrow .st-bar {
+  display: none;
+}
+.st-dialog-narrow .st-slider {
+  width: 100%;
+}
+
+/* --------------------------------------------------------------------------
+   Controls the rest of the window borrowed from the old Settings
+
+   The search over the boards, the sidebar's workspace mascot picker and the
+   databases sheet took a text box, a select, a pill and a warning from the
+   old `set-*` vocabulary and still wear them. Kept here, by themselves, so
+   that nothing in Settings depends on them and nothing outside it has to
+   change today; the day those three move onto a vocabulary of their own,
+   this block goes with them.
+   -------------------------------------------------------------------------- */
+.set-note {
+  font-size: var(--fs-base);
+  font-weight: 400;
+  color: var(--dim);
+}
+.set-select,
+.set-text {
+  background: var(--bg);
+  color: var(--text);
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-lg);
+  padding: 5px 7px;
+  font: var(--fs-md) var(--mono);
+  outline: none;
+}
+.set-text {
+  flex: 1;
+  min-width: 160px;
+}
+.set-select:focus,
+.set-text:focus {
+  border-color: var(--line-high);
+}
+.set-text::placeholder {
+  color: var(--dimmer);
+}
 .set-choice {
   padding: 4px 10px;
   border-radius: var(--radius-lg);
@@ -4699,423 +6197,21 @@ html.pill-page #root {
   color: var(--text);
   border-color: var(--accent);
 }
-/* A row of those as tabs inside a page — the Workspaces page's one per
-   workspace. Wraps rather than scrolls, because a phone at 390px holds three
-   names across and a strip you scroll is a name you cannot see. */
-.set-subtabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-/* The same row one level up: the pages inside a Settings tab — Theme, Explore,
-   Skin studio and Mascot under Appearance. Outside the scrolling body, so the
-   page you are on stays named while you scroll through it. */
-.set-pagetabs {
-  margin: -4px 0 12px;
-}
-
-/* --------------------------------------------------------------------------
-   Processes
-
-   A tally across the top and then the tree it came from: profile, workspace,
-   tab. Each tab is one line — status, name, what is running in it, where, how
-   many processes, a bar against the heaviest tab, the figure, and the button.
-   The bar is relative to the biggest tab rather than to the machine, because
-   "which one" is the question and a row of slivers against 32 GB cannot answer it.
-   -------------------------------------------------------------------------- */
-
-.proc-title {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.proc-tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-  gap: 8px;
-}
-.proc-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
-  border: var(--border) var(--border-style) var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--chrome);
-}
-.proc-tile-value {
-  font-family: var(--mono);
-  font-size: var(--fs-xl);
-  font-variant-numeric: tabular-nums;
-  color: var(--text-strong);
-}
-.proc-tile-label {
-  font-size: var(--fs-base);
-  color: var(--dim);
-}
-.proc-tile-under {
-  font-size: var(--fs-sm);
-  color: var(--dimmer);
-}
-/* The nvim tile's "close all", under its figure: the count it acts on is the
-   one printed above it, so that is where the button goes. */
-.proc-tile-action {
-  align-self: flex-start;
-  margin-top: 6px;
-}
-/* What force-closing costs, said between the list of what refused and the
-   button that does it. Both classes, because `.set-retire-lead` zeroes the
-   margin further down and would otherwise win. */
-.set-retire-lead.proc-nvim-force {
-  margin-top: 8px;
-}
-.proc-profile {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-.proc-here {
-  margin-left: 6px;
-  font-weight: 400;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--accent);
-}
-.proc-group {
-  margin-top: 8px;
-  padding-left: 8px;
-  border-left: var(--border-thick) var(--border-style) var(--tag, var(--line));
-}
-.proc-group-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 26px;
-}
-.proc-group-name {
-  font-size: var(--fs-md);
-  color: var(--text);
-}
-.proc-group-head .proc-mem {
-  margin-left: auto;
-  color: var(--text);
-}
-.proc-list {
-  list-style: none;
-  margin: 2px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-.proc-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 28px;
-  padding: 2px 0;
-  border-top: var(--border) var(--border-style) var(--chrome-high);
-}
-.proc-row-exited .proc-label {
-  color: var(--dimmer);
-  text-decoration: line-through;
-}
-.proc-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius-round);
-  flex: none;
-}
-.proc-dot-idle {
-  background: var(--idle);
-}
-.proc-dot-working {
-  background: var(--working);
-}
-.proc-dot-blocked {
-  background: var(--blocked);
-}
-.proc-dot-done {
-  background: var(--done);
-}
-.proc-dot-exited {
-  background: var(--exited);
-}
-.proc-main {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  overflow: hidden;
-  white-space: nowrap;
-}
-.proc-label {
-  font-size: var(--fs-md);
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 0 1 auto;
-  min-width: 0;
-}
-.proc-badge {
-  flex: none;
-  padding: 0 5px;
-  border: var(--border) var(--border-style) var(--line);
-  border-radius: var(--radius-sm);
-  font-family: var(--mono);
-  font-size: var(--fs-xs);
-  color: var(--dim);
-}
-.proc-cwd {
-  font-size: var(--fs-sm);
-  color: var(--dimmer);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-.proc-count {
-  flex: none;
-  font-size: var(--fs-sm);
-  color: var(--dimmer);
-  font-variant-numeric: tabular-nums;
-}
-.proc-bar {
-  flex: none;
-  width: 80px;
-  height: 4px;
-  border-radius: var(--radius-sm);
-  background: var(--chrome-high);
-  overflow: hidden;
-}
-.proc-bar-fill {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-}
-.proc-mem {
-  flex: none;
-  min-width: 52px;
-  text-align: right;
-  font-family: var(--mono);
-  font-size: var(--fs-sm);
-  font-variant-numeric: tabular-nums;
-  color: var(--dim);
-}
-/* A phone holds the name, the figure and the button; the rest is the desktop's. */
-@media (max-width: 600px) {
-  .proc-bar,
-  .proc-count,
-  .proc-cwd {
-    display: none;
-  }
-}
-
-/* The worktree switch asking before it acts: a warning box holding the list of
-   what would be merged and the two answers. The list is the point of the box —
-   "three worktrees" is a number, and the branch names are what somebody
-   recognises their work by. */
-.set-retire-lead {
-  margin: 0;
-}
-.set-retire-list {
+.set-warn {
   margin: 6px 0 0;
-  padding-left: 18px;
-  font-size: var(--fs-sm);
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--chrome-high);
+  border-left: var(--border-thick) var(--border-style) var(--blocked);
   color: var(--dim);
-}
-.set-retire-list li + li {
-  margin-top: 2px;
-}
-.set-retire-done {
-  color: var(--text);
-}
-.set-retire-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-/* The second press of a two-step button. Warm rather than accent, because the
-   accent means "selected" everywhere else in here and this one destroys a file. */
-.set-choice-warn {
-  color: var(--working);
-  border-color: var(--working);
-}
-
-/* --------------------------------------------------------------------------
-   Profiles
-
-   A card per profile rather than a row, because a row is a thing you pick and
-   this is a thing you act on: the name is editable in place and the delete
-   button asks in its own label. The active one is marked with the accent down
-   its left edge rather than a filled background — a highlight behind a card
-   reads as a selection you are about to lose rather than as "you are here".
-   -------------------------------------------------------------------------- */
-
-.prof-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 4px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.prof {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border: var(--border) var(--border-style) var(--line);
-  border-left: var(--border-thick) var(--border-style) transparent;
-  border-radius: var(--radius-xl);
-  background: var(--chrome-high);
-}
-.prof-on {
-  border-left-color: var(--accent);
-}
-
-.prof-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-/* The name is an input that does not look like one until you are in it: a
-   profile is renamed about once, and a box drawn around it permanently would
-   make the card look like a form with a required field at the top of it. */
-.prof-name {
-  flex: 1 1 140px;
-  min-width: 100px;
-  border-color: transparent;
-  background: transparent;
-  font-weight: 600;
-}
-.prof-name:hover {
-  border-color: var(--line);
-}
-.prof-meta {
-  flex: none;
-  font-size: var(--fs-base);
-  color: var(--dimmer);
-  font-variant-numeric: tabular-nums;
-}
-/* Where the profile's logins live, when it keeps its own. A path, so mono and
-   dim, and cut with an ellipsis rather than wrapped: the tail is a key nobody
-   reads and the head is what says it is the same place as the row above. */
-.prof-dir {
-  margin: 0;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--mono);
   font-size: var(--fs-sm);
-  color: var(--dimmer);
 }
-/* Which login the profile uses: a word and a picker on one line, the picker
-   taking the width because an email and the profiles sharing it are long and
-   the word is not. */
-.prof-login {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.prof-login-label {
-  flex: none;
-  font-size: var(--fs-base);
-  color: var(--dimmer);
-}
-
-/* Not a button, and shaped so it cannot be mistaken for the one beside it: the
-   thing you press is "switch to", and the profile you are already in has
-   nothing to press. */
-.prof-here {
-  flex: none;
-  padding: 4px 10px;
-  font-size: var(--fs-base);
-  color: var(--accent);
-}
-
-.prof-new {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-}
-.prof-new .set-text {
-  flex: 1 1 auto;
-}
-
-/* The file input is never seen — the button beside it is what you click, because
-   a browser's own file control cannot be styled into this chrome and says
-   "No file chosen" forever afterwards. */
-.set-file {
-  display: none;
-}
-
-.set-hint {
-  margin: 6px 0;
-  font-size: var(--fs-base);
-  line-height: 1.5;
-  color: var(--dim);
-}
-.set-hint code,
-.set-note code {
-  font-family: var(--mono);
-  color: var(--text);
-}
-
-/* --- the mascot page ---------------------------------------------------- */
-
-/* The kept list down one side and the picker filling the rest, stacking rather
-   than shrinking once there is no room: on a phone you get the list above the
-   sheet, which is legible, instead of a 90px column of squeezed frogs. */
-.set-split {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  align-items: flex-start;
-}
-
-.mascot-list {
-  flex: 0 0 172px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.set-main {
-  flex: 1 1 340px;
-  min-width: 0;
-}
-
-.mascot-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 6px;
-  border-radius: var(--radius-lg);
-  border: var(--border) var(--border-style) transparent;
-  cursor: var(--cursor-pointer);
-}
-.mascot-row:hover {
-  background: var(--chrome-high);
-}
-.mascot-row-on {
-  background: var(--chrome-high);
-  border-color: var(--accent);
-}
-
-/* Bigger than a sidebar badge and still animating, because four numbers are not
-   a thing anybody recognises their own selection by and a frog mid-jump is. */
+/* The sidebar's mascot picker draws its rows with these: a chip bigger than
+   a badge, still animating, and the name beside it. */
 .mascot-chip {
   --status-size: 22px;
   flex: 0 0 auto;
 }
-
 .mascot-name {
   flex: 1;
   min-width: 0;
@@ -5123,188 +6219,6 @@ html.pill-page #root {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* Drawn on every row, not only the default one — the same argument the workspace
-   colour swatch makes: a control that appears once it has been used is one
-   nobody finds. Hollow until it is the one. */
-.mascot-star {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  border: none;
-  background: none;
-  color: var(--dimmer);
-  font-size: var(--fs-md);
-  line-height: 1;
-}
-.mascot-star:hover {
-  color: var(--accent);
-}
-.mascot-star-on {
-  color: var(--accent);
-}
-
-.mascot-drop {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  border: none;
-  border-radius: var(--radius-md);
-  background: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--dimmer);
-  font-size: var(--fs-sm);
-  line-height: 1;
-  opacity: 0;
-}
-.mascot-row:hover .mascot-drop,
-.mascot-drop:focus-visible {
-  opacity: 1;
-}
-.mascot-drop:hover {
-  color: var(--text);
-  background: var(--line);
-}
-
-.mascot-add {
-  margin-top: 6px;
-  padding: 5px 8px;
-  border: var(--border) dashed var(--line);
-  border-radius: var(--radius-lg);
-  background: none;
-  color: var(--dim);
-  font-size: var(--fs-base);
-  text-align: left;
-}
-.mascot-add:hover {
-  color: var(--text);
-  border-color: var(--dimmer);
-}
-
-.mascot-listhint {
-  margin-top: 2px;
-}
-
-/* The picker and the preview side by side, and stacked once there is no room:
-   a phone gets the sheet above the frog rather than half of each. */
-.set-stage {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  margin: 10px 0;
-}
-
-.set-preview {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 12px;
-  border: var(--border) var(--border-style) var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--bg);
-}
-
-/* The same component the rows draw, told only that it is bigger. Nothing else
-   about it changes, which is what stops a preview and a badge from ever
-   disagreeing about what you picked. */
-.preview-big {
-  --status-size: 64px;
-}
-
-/* Both animations at the size they will really be, side by side: the question
-   the pair answers is "can I tell these two apart at 16px", which is the only
-   question that matters and the one a 64px preview cannot answer. */
-.preview-pair {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-/* Idle with no animation: the page still has to say what it does instead, and
-   the place to say it is where the grid would have been. */
-.set-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 16px;
-  border: var(--border) dashed var(--line);
-  border-radius: var(--radius-xl);
-}
-
-/* The two animations, kept a little apart from the sheet controls above them. */
-.set-clips {
-  margin-top: 12px;
-}
-
-/* The sheet and the line describing what is selected, as one column. Named for
-   the sheet rather than "picker", which the sidebar's colour popup already owns
-   — and owns as `position: fixed`, so the collision took this column out of the
-   flow and painted it over the dialog it belongs in.
-
-   `flex: 1 1 0` with a floor rather than `flex: 1`, because the preview beside
-   it must not be pushed onto its own line by two pixels of overflow — which is
-   what a content-sized basis did. */
-.sheet-col {
-  flex: 1 1 0;
-  min-width: 200px;
-}
-
-/* The sheet scrolls inside its own box rather than stretching the dialog: it is
-   drawn at whatever size the image is, times an integer, and a user's own sheet
-   has no size limit at all. */
-.sheet-wrap {
-  overflow: auto;
-  border: var(--border) var(--border-style) var(--line);
-  border-radius: var(--radius-xl);
-  background: var(--bg);
-  padding: 8px;
-  max-height: 40vh;
-}
-
-/* The grid is two repeating-linear-gradients over the sheet rather than a cell
-   per div — a 16x16 sheet is 256 elements that exist only to be looked through.
-   `--cell` is set per element in SettingsMascot.tsx, because the cell size is
-   the thing being chosen. */
-.sheet {
-  position: relative;
-  image-rendering: var(--image-rendering);
-  background-repeat: no-repeat;
-  touch-action: none;
-  cursor: crosshair;
-}
-.sheet::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image:
-    repeating-linear-gradient(to right, color-mix(in srgb, var(--accent) 22%, transparent) 0 1px, transparent 1px var(--cell)),
-    repeating-linear-gradient(to bottom, color-mix(in srgb, var(--accent) 22%, transparent) 0 1px, transparent 1px var(--cell));
-  pointer-events: none;
-}
-
-/* Outlined rather than tinted: a wash over pixel art hides the frame you are
-   trying to read, and reading it is the entire point of the picker. */
-.sheet-sel {
-  position: absolute;
-  border: var(--border) var(--border-style) var(--accent);
-  box-shadow: 0 0 0 1px var(--shadow);
-  pointer-events: none;
-}
-
-/* Where the mascot's other animation is taken from. Dashed and dim: it is not
-   what you are editing, but picking the idle frames on top of the working ones
-   is a mistake you can only avoid if you can see where they already are. */
-.sheet-sel-other {
-  border-style: dashed;
-  border-color: var(--dimmer);
-  box-shadow: none;
 }
 
 /* --- the workspace's mascot ---------------------------------------------- */
@@ -5337,153 +6251,6 @@ html.pill-page #root {
 .mascot-option-on {
   background: var(--chrome-high);
   border-color: var(--accent);
-}
-
-/* --- the keyboard page --------------------------------------------------- */
-
-.key-group {
-  margin: 14px 0 4px;
-}
-
-/* The action on the left and its keys on the right, with the keys in a column
-   of their own so thirty rows of them line up — a list where every chip starts
-   at a different x is a list you cannot scan for the one you are looking for. */
-.key-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 3px 4px;
-  border-radius: var(--radius-lg);
-  border-left: var(--border-thick) var(--border-style) transparent;
-}
-.key-row:hover {
-  background: var(--chrome-high);
-}
-
-.key-what {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: var(--fs-md);
-  color: var(--text);
-}
-
-/* Marked rather than listed separately, so "what have I changed" is answerable
-   without leaving the page you would change it back on. */
-.key-row-moved {
-  border-left-color: var(--accent);
-}
-
-.key-keys {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 132px;
-  justify-content: flex-end;
-}
-
-/* Drawn as a key rather than as text: the whole row is about which physical
-   thing you press, and `%` in prose is punctuation. Clicking one unbinds it, so
-   the hover is the warm one the working badge uses rather than the accent —
-   an accent hover on a thing that removes something reads as "select". */
-.key-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  min-width: 22px;
-  padding: 2px 6px;
-  border: var(--border) var(--border-style) var(--line);
-  border-bottom-width: var(--border-thick);
-  border-radius: var(--radius-md);
-  background: var(--chrome-high);
-  color: var(--text);
-  font: var(--fs-base) var(--mono);
-}
-.key-chip:hover {
-  border-color: var(--working);
-  color: var(--working);
-}
-.key-x {
-  opacity: 0;
-  font-size: var(--fs-sm);
-}
-.key-chip:hover .key-x {
-  opacity: 1;
-}
-
-.key-none {
-  font-size: var(--fs-base);
-  color: var(--dimmer);
-  font-style: italic;
-}
-
-.key-add {
-  padding: 2px 7px;
-  border: var(--border) dashed var(--line);
-  border-radius: var(--radius-md);
-  background: none;
-  color: var(--dim);
-  font-size: var(--fs-base);
-}
-.key-add:hover {
-  color: var(--text);
-  border-color: var(--dimmer);
-}
-/* While it is waiting for a key it is the only thing on the page that can
-   happen, so it says so in words rather than staying a `+` with a highlight. */
-.key-add-armed {
-  border-style: solid;
-  border-color: var(--accent);
-  color: var(--text);
-  animation: key-wait 1.2s ease-in-out infinite;
-}
-@keyframes key-wait {
-  50% {
-    opacity: 0.55;
-  }
-}
-
-.key-note {
-  color: var(--text);
-}
-
-.key-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 16px;
-  padding-top: 10px;
-  border-top: var(--border) var(--border-style) var(--line);
-}
-.key-foot .button-quiet:disabled {
-  opacity: 0.4;
-}
-
-/* The platform's scrollbars are fine on a terminal, which draws its own, and
-   wrong inside a dark dialog — the default light track reads as a hole punched
-   in the chrome. Only the two surfaces that scroll get this. */
-.sheet-wrap::-webkit-scrollbar,
-.set-body::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-.sheet-wrap::-webkit-scrollbar-track,
-.set-body::-webkit-scrollbar-track {
-  background: transparent;
-}
-.sheet-wrap::-webkit-scrollbar-thumb,
-.set-body::-webkit-scrollbar-thumb {
-  background: var(--line);
-  border-radius: var(--radius-md);
-}
-.sheet-wrap::-webkit-scrollbar-thumb:hover,
-.set-body::-webkit-scrollbar-thumb:hover {
-  background: var(--dimmer);
-}
-.sheet-wrap::-webkit-scrollbar-corner,
-.set-body::-webkit-scrollbar-corner {
-  background: transparent;
 }
 
 /* --------------------------------------------------------------------------
@@ -6171,6 +6938,38 @@ html.pill-page #root {
 .board-card:hover {
   border-color: var(--line-high);
 }
+/* The card whose agent is in the focused pane: the board's half of the
+   sidebar's `.agent-item-on`, for a board in one pane and the agent it is
+   about in the next. The edge in the accent and the ground just warmed by it
+   — found from across the board, and calm enough to live with all day. Not
+   the hover's grey, for that rule's reason: the pointer being somewhere is a
+   question, focus is an answer. Colours only, never a width, so moving the
+   focus moves no card; and no transition, since a highlight that eased in
+   would repaint for the whole of its easing every time the focus moved. The
+   run's rule down the left is a box-shadow, and stays. */
+.board-card-on,
+.board-card-on:hover {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg));
+}
+/* A card just asked for by name — from Kuru's reply, a search hit, the
+   drawer of needs — scrolled into view and lit: a ring in the accent that
+   fades over the moment it is worn, so the eye finds it and then nothing on
+   the board says it was. A fade and not a move, so it is not motion anybody
+   asked the system to reduce. */
+.board-card-shown {
+  animation: board-shown 1.8s ease-out both;
+}
+@keyframes board-shown {
+  from {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  to {
+    border-color: var(--line);
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
 /* A finished run is the thing the board exists to tell you about, so the card
    carries it on its edge as well as in its words — visible from across a
    column without reading anything. */
@@ -6360,38 +7159,6 @@ html.pill-page #root {
   }
 }
 
-/* A merge asking for its second click, inside the card it is about — the
-   same in-place confirm the Settings pages use, because the consequence lands
-   right here and a dialog over the board would point away from it. */
-.board-card-ask {
-  margin-top: 4px;
-  padding: 6px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--chrome-high);
-  border-left: var(--border-thick) var(--border-style) var(--working);
-}
-.board-card-ask-text {
-  margin: 0 0 6px;
-  font-size: var(--fs-sm);
-}
-.board-card-ask-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 6px;
-}
-/* A way through with a sentence on what it does: the button, then the
-   outcome under it in the muted ink, so the two ways read as a choice and
-   not as two confirms. */
-.board-card-ask-choice {
-  margin: 0 0 8px;
-}
-.board-card-ask-outcome {
-  margin: 4px 0 0;
-  font-size: var(--fs-sm);
-  color: var(--dim);
-}
-
 .board-robot:disabled {
   opacity: 0.35;
   cursor: var(--cursor);
@@ -6516,6 +7283,12 @@ html.pill-page #root {
 .board-run-finished .board-run-mark {
   border-color: var(--done);
   background: var(--done);
+}
+/* Asleep is ended on purpose, and only for now: the exited outline, broken,
+   since the conversation behind it is whole and one press from running. */
+.board-run-asleep .board-run-mark {
+  border-style: dashed;
+  border-color: var(--dim);
 }
 /* The dev server's line sits under its branch, a hair apart from the run line
    so the two terminals a card can have read as two. */
@@ -6848,406 +7621,6 @@ html.pill-page #root {
 }
 
 /* --------------------------------------------------------------------------
-   The styles registry
-
-   Settings → Appearance → Explore, which is a list of things that are not installed yet.
-   Every card here is drawn *as itself* — a theme in its colours, a skin in its
-   shape, a mascot moving — for the reason the theme list next door already
-   gives: a row of names makes you install one to find out what it is.
-
-   Two of these cards are the only place in the stylesheet that deliberately
-   leaves a property unset. A skin card takes its radius, its border weight and
-   its face from inline values the entry supplies, because a card in the *current*
-   skin would describe the one you already have; a theme card takes its colours
-   the same way. So the rules below set everything except the thing being
-   previewed, which is the inverse of how the rest of this file works and is why
-   they are gathered here rather than grown onto `.set-*`.
-   -------------------------------------------------------------------------- */
-
-/* A note and a button on one line, where the note is prose rather than a label.
-   `.set-row` alone would stretch the button to half the width, because `.button`
-   is `flex: 1` for the dialog footer it was written for. */
-.set-row-split {
-  align-items: flex-start;
-  gap: 12px;
-}
-.set-note-flush {
-  margin: 0;
-  flex: 1;
-}
-.style-refresh,
-.set-row-split .button {
-  flex: none;
-  white-space: nowrap;
-}
-
-/* A path, a file name, a repository — a fragment of terminal sitting in prose.
-   `--mono` and not `--ui` on purpose: see the note beside the token. */
-.set-mono {
-  font-family: var(--mono);
-  font-size: var(--fs-xs);
-  color: var(--text);
-}
-
-/* Something did not work and the list is still usable. Not `--danger-bg`: this
-   is a sentence, not a destructive control, and a filled red bar over a list of
-   themes reads as far more broken than it is. */
-.set-warn {
-  margin: 6px 0 0;
-  padding: 6px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--chrome-high);
-  border-left: var(--border-thick) var(--border-style) var(--blocked);
-  color: var(--dim);
-  font-size: var(--fs-sm);
-}
-
-/* The font list, which holds names far longer than a cursor style does. */
-.set-select-wide {
-  flex: 1;
-  min-width: 0;
-}
-
-/* Which shelf of the registry is showing, and the filter over it.
-
-   Pills rather than the dialog's own underlined tabs, and the reason is that
-   the two strips sit six pixels apart: in the same clothes, the second one
-   reads as a second level of the first, and it is not — it is a segmented
-   control over one list. One line, wrapping to two on a phone, with the field
-   dropping under the pills rather than being squeezed beside them. */
-.style-bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.style-shelves {
-  display: flex;
-  flex: 1 1 auto;
-  gap: 4px;
-  /* Four pills fit a desktop and do not fit a 390px phone, so the strip scrolls
-     the way the dialog's own tab strip does — including the reasons it draws no
-     scrollbar and refuses to become the browser's back gesture. */
-  overflow-x: auto;
-  scrollbar-width: none;
-  overscroll-behavior-x: contain;
-}
-.style-shelves::-webkit-scrollbar {
-  display: none;
-}
-
-.style-shelf {
-  flex: none;
-  white-space: nowrap;
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-  padding: 4px 10px;
-  border: var(--border) var(--border-style) transparent;
-  border-radius: var(--radius-md);
-  background: none;
-  color: var(--dim);
-  font-family: var(--ui);
-  font-size: var(--fs-sm);
-  font-weight: 600;
-}
-.style-shelf:hover {
-  color: var(--text);
-  background: var(--chrome-high);
-}
-/* The one that is showing is *filled*, not underlined, for the same reason the
-   strip is pills: an underline here would be the tab bar's mark used for a
-   different job one line below where it means something else. */
-.style-shelf-on {
-  color: var(--text-strong);
-  background: var(--chrome-high);
-  border-color: var(--line-high);
-}
-
-/* How many are on the shelf under whatever is typed. Tabular so that the pills
-   stop moving as the count changes under a filter being typed into. */
-.style-shelf-n {
-  color: var(--dimmer);
-  font-size: var(--fs-xs);
-  font-weight: 400;
-  font-variant-numeric: tabular-nums;
-}
-
-.style-find {
-  flex: 1 1 140px;
-  min-width: 0;
-  padding: 5px 8px;
-  background: var(--chrome);
-  border: var(--border) var(--border-style) var(--line);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  font-family: var(--ui);
-  /* Deliberately larger than the chrome's own size, for the reason the document
-     picker's filter is: iOS zooms the page when it focuses a field under 16px,
-     and a dialog that zooms the window is a dialog that leaves you somewhere
-     else when it closes. */
-  font-size: var(--fs-xl);
-  /* Safari draws a search field its own way unless told not to, and a skin that
-     has decided what a corner looks like should not be overruled by the
-     platform's idea of what a search box is. */
-  appearance: none;
-  -webkit-appearance: none;
-}
-.style-find::placeholder {
-  color: var(--dimmer);
-}
-
-/* "It is under mascots" — the way out of an empty shelf, drawn as the link it
-   is rather than as another button, because the sentence it is in is the
-   control. */
-.style-jump {
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--accent);
-  font: inherit;
-  text-decoration: underline;
-}
-
-.style-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 6px;
-}
-.style-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px;
-  border-radius: var(--radius-lg);
-  border: var(--border) var(--border-style) var(--line);
-  background: var(--chrome);
-}
-/* Installed rows are the ones you are most likely to be looking for when you
-   come back, so they are lifted rather than dimmed. */
-.style-row-have {
-  border-color: var(--line-high);
-  background: var(--chrome-high);
-}
-.style-text {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  flex: 1;
-  min-width: 0;
-}
-.style-name {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: var(--fs-md);
-  font-weight: 600;
-  color: var(--text-strong);
-}
-.style-version {
-  font-family: var(--mono);
-  font-size: var(--fs-xs);
-  font-weight: 400;
-  color: var(--dimmer);
-}
-.style-desc {
-  font-size: var(--fs-sm);
-  color: var(--dim);
-}
-.style-meta {
-  font-size: var(--fs-xs);
-  color: var(--dimmer);
-}
-.style-link {
-  color: var(--dim);
-  text-decoration: none;
-}
-.style-link:hover {
-  color: var(--accent);
-}
-.style-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-}
-.style-button {
-  flex: none;
-  white-space: nowrap;
-}
-.style-state {
-  font-size: var(--fs-sm);
-  color: var(--dim);
-  white-space: nowrap;
-}
-.style-state-working {
-  color: var(--working);
-}
-/* A failure is allowed to wrap: it is a sentence from the server, and a
-   sentence clipped to one line is a sentence you cannot act on. */
-.style-state-bad {
-  color: var(--danger);
-  white-space: normal;
-  max-width: 24ch;
-  text-align: right;
-}
-.style-row-working {
-  opacity: 0.85;
-}
-.style-remove {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: var(--radius-md);
-  color: var(--dimmer);
-  flex: none;
-}
-.style-remove:hover {
-  color: var(--danger);
-  background: var(--bg);
-}
-
-/* Every preview sits in the same box, whatever it is a preview of, so that the
-   rows line up and the eye can run down the list rather than around it. */
-.style-shot {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 52px;
-  height: 36px;
-  flex: none;
-  overflow: hidden;
-  border-radius: var(--radius-md);
-  color: var(--dim);
-}
-
-/* The colours come inline from the entry. What is here is the arrangement: a
-   strip of chrome along the top and the four marks you actually look at all day
-   — the accent, and the three that say an agent wants you. */
-.style-shot-theme {
-  position: relative;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-end;
-  gap: 0;
-  border: var(--border) var(--border-style) var(--line);
-}
-.style-shot-chrome {
-  height: 10px;
-  flex: none;
-}
-.style-shot-dots {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  flex: 1;
-}
-.style-shot-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-round);
-}
-
-/* The shape comes inline. This is a little pane wearing the skin's own frame
-   recipe, which is the one thing a label genuinely cannot tell you. */
-.style-shot-skin {
-  border-color: var(--line-high);
-  background: var(--bg);
-  color: var(--dim);
-}
-
-/* A screenshot, for a skin whose look is its pictures. Cover rather than
-   contain: the card is a glimpse, and a letterboxed thumbnail of a whole
-   window is a grey rectangle with a line in it. */
-.style-shot-picture img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  image-rendering: auto;
-}
-
-/* Bigger than a sidebar badge, because the whole question here is what the
-   animation looks like and 16px answers it badly. `--status-size` is the one
-   number the mascot's geometry is expressed in, so setting it is the whole of
-   scaling it — see the arithmetic in Status.tsx. */
-.style-shot-mascot {
-  --status-size: 30px;
-  /* `.mascot` is `position: absolute`, and everywhere else in the window it sits
-     inside `.status`, which is relative and clips it. Here there was no
-     positioned ancestor at all, so its containing block became the *viewport*
-     and every preview in the list piled up in the top-left corner of the app,
-     unclipped, animating over the tab strip. `overflow: hidden` on this element
-     did nothing about it, because overflow does not clip a descendant whose
-     containing block is outside the element. */
-  background: var(--bg);
-  border: var(--border) var(--border-style) var(--line);
-}
-/* One cell of the strip, and the containing block for it. `.mascot` is
-   `position: absolute`, and everywhere else in the window it sits inside
-   `.status`, which is relative and clips it to exactly one frame. Without a
-   positioned ancestor here its containing block became the *viewport*, so every
-   preview in the list piled up in the top-left corner of the app, unclipped,
-   animating over the tab strip — and `overflow: hidden` on the box above did
-   nothing about it, because overflow does not clip a descendant whose
-   containing block is outside the element. */
-.style-shot-cell {
-  position: relative;
-  width: var(--status-size);
-  height: var(--status-size);
-  overflow: hidden;
-}
-
-/* The one card that is a button, because a sound has no picture and a name is
-   not one. It wears the skin card's frame rather than a shape of its own —
-   what distinguishes it is that it is pressable, and a preview that also
-   invented a look would be two claims in one box. `accent` on hover is the
-   only colour here, and it is the window's, not the entry's: the entry has no
-   colours, which is exactly why this card exists. */
-.style-shot-sound {
-  border: var(--border) var(--border-style) var(--line);
-  background: var(--bg);
-  color: var(--dim);
-  cursor: pointer;
-}
-.style-shot-sound:hover:not(:disabled),
-.style-shot-sound:focus-visible {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-.style-shot-sound:disabled {
-  cursor: default;
-  color: var(--dimmer);
-}
-
-/* A pack is a handful of names and no picture of its own, on purpose: it *is* a
-   reference to other rows, and inventing a composite thumbnail would be
-   drawing something that does not exist. */
-.style-shot-pack {
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 1px;
-  padding: 0 4px;
-  border: var(--border) var(--border-style) var(--line);
-  background: var(--bg);
-  font-size: var(--fs-xs);
-  line-height: 1.1;
-  color: var(--dimmer);
-}
-.style-shot-part {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
-}
-
-/* --------------------------------------------------------------------------
    Parts — the pictures a skin paints
 
    Everything above this line describes kururu's chrome in tokens: a radius, a
@@ -7414,7 +7787,7 @@ html.pill-page #root {
 .sb-panes,
 .agent-tool,
 .dev-stop,
-.style-remove,
+.st-iconbtn,
 .sidebar-close {
   /* At rest these draw no ground of their own, so the skin's layer sits over
      nothing; the hover rules above still win with the theme's colour, which is
@@ -7489,6 +7862,7 @@ html.pill-page #root {
 }
 
 .dialog,
+.st-dialog,
 .help,
 .menu,
 .picker {
@@ -7497,259 +7871,8 @@ html.pill-page #root {
   border-image: var(--p-dialog-frame);
   image-rendering: var(--image-rendering);
 }
-.set-body,
-.about-notes {
+.st-body {
   image-rendering: auto;
-}
-
-/* --------------------------------------------------------------------------
-   The skin studio
-
-   Settings → Skin studio, which is a form over a manifest. Every colour and
-   every size in here is a token like everywhere else — the studio is drawn in
-   the skin being edited, on purpose: a page for making a bezel that did not
-   itself wear the bezel would be lying about what the bezel does to a form.
-   -------------------------------------------------------------------------- */
-
-.studio-bar {
-  align-items: center;
-}
-.studio-inline {
-  flex: none;
-  white-space: nowrap;
-  padding: 5px 10px;
-  font-size: var(--fs-base);
-}
-.studio-make {
-  padding: 8px;
-  border-radius: var(--radius-lg);
-  background: var(--chrome-high);
-}
-.studio-make .set-text {
-  flex: 1;
-  min-width: 140px;
-}
-.studio-wide {
-  flex: 1;
-  min-width: 200px;
-}
-.studio-mini {
-  padding: 3px 5px;
-  font-size: var(--fs-sm);
-  width: auto;
-  min-width: 0;
-}
-.set-num.studio-mini {
-  width: 52px;
-}
-.studio-link {
-  color: var(--dim);
-  font-size: var(--fs-sm);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  padding: 2px 4px;
-}
-.studio-link:hover {
-  color: var(--accent);
-}
-
-/* One card per part. The picture on the left is compiled by the same function
-   the window uses, so a bezel at 3x in a 96px box is a fair sample of a bezel
-   at 3x on a pane; the text on the right is the part's name, what it covers,
-   and — once it is painted — the numbers. */
-.studio-parts {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 8px;
-  margin-top: 6px;
-}
-.studio-part {
-  display: flex;
-  gap: 10px;
-  padding: 8px;
-  border-radius: var(--radius-lg);
-  border: var(--border) var(--border-style) var(--line);
-  background: var(--chrome);
-  min-width: 0;
-}
-.studio-part-on {
-  border-color: var(--line-high);
-}
-.studio-part-over {
-  border-color: var(--accent);
-  background: var(--chrome-high);
-}
-.studio-shot {
-  flex: none;
-  width: 96px;
-  height: 60px;
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  border: var(--border) dashed var(--line);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  color: var(--dimmer);
-  font-size: var(--fs-xs);
-  text-align: center;
-  padding: 0;
-}
-.studio-shot:hover {
-  border-color: var(--line-high);
-}
-.studio-shot-empty {
-  padding: 4px;
-  line-height: 1.2;
-}
-.studio-part-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-}
-.studio-part-name {
-  font-size: var(--fs-md);
-  font-weight: 600;
-  color: var(--text-strong);
-}
-.studio-part-covers {
-  font-size: var(--fs-sm);
-  color: var(--dim);
-}
-.studio-part-hint {
-  font-size: var(--fs-xs);
-  color: var(--dimmer);
-  line-height: 1.3;
-}
-.studio-part-controls {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 6px;
-  margin-top: 4px;
-}
-.studio-num {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: var(--fs-xs);
-  color: var(--dimmer);
-}
-.studio-remove {
-  margin-left: auto;
-  text-decoration: none;
-  display: inline-flex;
-}
-
-/* The colours: a swatch that is a colour input in disguise, because a native
-   colour picker is the one control the browser draws better than this file
-   could, and the swatch is the only part of it worth looking at. */
-.studio-colors {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 4px 10px;
-  margin-top: 6px;
-}
-.studio-color {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 4px;
-  border-radius: var(--radius-sm);
-  font-size: var(--fs-sm);
-  color: var(--dim);
-}
-.studio-color-on {
-  background: var(--chrome-high);
-  color: var(--text);
-}
-.studio-swatch {
-  position: relative;
-  flex: none;
-  width: 22px;
-  height: 18px;
-  border-radius: var(--radius-xs);
-  border: var(--border) var(--border-style) var(--line);
-  overflow: hidden;
-  cursor: var(--cursor-pointer);
-}
-.studio-swatch input {
-  position: absolute;
-  inset: -8px;
-  width: 200%;
-  height: 200%;
-  opacity: 0;
-  cursor: var(--cursor-pointer);
-}
-.studio-color-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.studio-color-from {
-  font-size: var(--fs-xs);
-  color: var(--dimmer);
-}
-
-/* The icons: a strip you drop a picture on, and fourteen boxes for glyphs. */
-.studio-strip {
-  height: 28px;
-  min-width: 160px;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  border: var(--border) dashed var(--line);
-  background: var(--bg);
-  color: var(--dimmer);
-  font-size: var(--fs-xs);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.studio-strip-on {
-  border-style: solid;
-}
-.studio-strip-img {
-  height: 20px;
-  image-rendering: pixelated;
-}
-.studio-glyphs {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 4px 8px;
-  margin-top: 8px;
-}
-.studio-glyph {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-xs);
-  color: var(--dim);
-}
-.studio-glyph .icon {
-  color: var(--text);
-  width: 16px;
-}
-.studio-glyph-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--mono);
-}
-.studio-glyph-input {
-  /* `.set-text` is `flex: 1; min-width: 160px` for a name or a path, and a
-     box for one or two characters is neither: without the override fourteen
-     of them are fourteen 160px boxes in a 120px grid, and the whole dialog
-     grows a horizontal scrollbar for it. */
-  flex: none;
-  min-width: 0;
-  width: 36px;
-  text-align: center;
-  padding: 3px 4px;
 }
 
 /* The profile's board: a board's columns in a sheet over the window, since it
@@ -7789,83 +7912,6 @@ html.pill-page #root {
   white-space: nowrap;
   color: var(--dim);
   font-size: var(--fs-base);
-}
-/* Every board in the profile, the profile's own first — see `ProfileBoard.tsx`.
-   One row at every width, scrolled sideways once it outgrows the sheet. Not
-   `.set-tabs`' hidden scrollbar: there, overflow is a phone's problem and a
-   finger finds it, while this one overflows on a desktop as soon as there
-   are enough workspaces, and a thin rule is the only thing that says so. */
-.profile-board-bar {
-  flex: none;
-  display: flex;
-  gap: 4px;
-  padding: 2px 8px 6px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
-  /* A swipe that runs out of boards stops, rather than becoming the browser's
-     back gesture with a sheet open on top of it. */
-  overscroll-behavior-x: contain;
-}
-.profile-board-tab {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 240px;
-  padding: 4px 10px;
-  border: var(--border) var(--border-style) var(--line);
-  border-radius: var(--radius-md);
-  color: var(--dim);
-  font-size: var(--fs-base);
-  white-space: nowrap;
-  cursor: var(--cursor-pointer);
-}
-.profile-board-tab:hover {
-  color: var(--text);
-  background: var(--chrome-high);
-}
-/* The board on show, edged in its workspace's colour — the accent for the
-   profile's, which has none — so the bar says which one the columns are. */
-.profile-board-tab-on {
-  color: var(--text);
-  background: var(--chrome-high);
-  border-color: var(--tag, var(--accent));
-}
-.profile-board-tab .icon {
-  flex: none;
-}
-.profile-board-tab-dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius-round);
-  background: var(--tag, transparent);
-  border: var(--border) var(--border-style) var(--tag, var(--line-high));
-}
-.profile-board-tab-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-weight: 600;
-}
-/* Something in progress or in review on that board. Smaller than the tag dot
-   and in the accent, so the two dots on an entry are never read as one thing
-   said twice: the first is which workspace, this one is that it wants a look. */
-.profile-board-tab-pending {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-round);
-  background: var(--accent);
-}
-/* A workspace's board, drawn here by `BoardView`: in a pane its parent is a
-   row and stretches it, and in this column it has to be told it may be
-   shorter than its cards, or the sheet clips them instead of the columns
-   scrolling. */
-.profile-board > .board {
-  min-height: 0;
 }
 /* A row rather than the board's grid, because a folded column is a strip and
    a grid's implicit columns are all one width. The open ones share what the
@@ -8020,10 +8066,6 @@ html.pill-page #root {
   height: 100%;
   border-radius: 0;
   border: none;
-}
-:root[data-narrow] .profile-board-tab {
-  min-height: 36px;
-  font-size: var(--fs-md);
 }
 
 /* --------------------------------------------------------------------------
@@ -8899,19 +8941,4 @@ html.pill-page #root {
   padding: 6px 8px;
   font-size: var(--fs-base);
   color: var(--dim);
-}
-
-/* The two lists on the Backups page: a plain list in a note's voice, each item
-   a path and a reason. */
-.backup-list {
-  margin: 4px 0 8px;
-  padding-left: 18px;
-  line-height: 1.5;
-}
-.backup-list li + li {
-  margin-top: 2px;
-}
-.set-text-short {
-  width: 72px;
-  flex: none;
 }

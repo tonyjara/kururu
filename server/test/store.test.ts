@@ -392,6 +392,7 @@ describe("the mirror", () => {
     mkdirSync(join(config, "profiles", "0123456789ab", "claude", "projects", "-Users-me-proj", "memory"), { recursive: true });
     writeFileSync(join(config, "appearance.json"), '{"theme":"x"}\n');
     writeFileSync(join(config, "openrouter.json"), '{"key":"SECRET"}\n');
+    writeFileSync(join(config, "telegram.json"), '{"token":"SECRET"}\n');
     writeFileSync(join(config, "access.json"), '{"token":"SECRET"}\n');
     writeFileSync(join(config, "profiles", "0123456789ab", "claude", "projects", "-Users-me-proj", "memory", "note.md"), "# remember\n");
     writeFileSync(join(config, "profiles", "0123456789ab", "claude", "settings.json"), '{"hooks":{},"env":{"ANTHROPIC_API_KEY":"SECRET"}}\n');
@@ -414,6 +415,7 @@ describe("the mirror", () => {
     const text = (rel: string) => readFileSync(join(mirror, rel), "utf8");
     expect(existsSync(join(mirror, "config", "appearance.json"))).toBe(true);
     expect(existsSync(join(mirror, "config", "openrouter.json"))).toBe(false);
+    expect(existsSync(join(mirror, "config", "telegram.json"))).toBe(false);
     expect(existsSync(join(mirror, "config", "access.json"))).toBe(false);
     expect(text("memory/0123456789ab/-Users-me-proj/note.md")).toBe("# remember\n");
     expect(text("profiles/0123456789ab/settings.json")).not.toContain("SECRET");

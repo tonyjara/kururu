@@ -155,6 +155,13 @@ interface Props {
   /** Opens the profile's own board — see `ProfileBoard`. */
   onBoard: () => void;
   /**
+   * The workspaces something is waiting in, by id — `shared/needs.ts`'s
+   * answer, worked out once by the app. A row in here wears the same dot an
+   * agent's row does when it needs you, so the list of workspaces says it
+   * without the list of agents being read.
+   */
+  needsYou: ReadonlySet<string>;
+  /**
    * Whether this is a column beside the panes or a screen in front of them.
    *
    * The second is what a narrow window gets, and it changes two things about how
@@ -187,6 +194,7 @@ export function Sidebar({
   onEditing,
   onPrompt,
   onBoard,
+  needsYou,
   onSettings,
   onReach,
   overlay,
@@ -1039,6 +1047,12 @@ export function Sidebar({
                     {mascotted && <WorkspaceMascot mascots={mascots} mascotId={workspace.mascotId} />}
                     <span className="ws-name">{workspace.name}</span>
                     {head?.git && <GitMarks git={head.git} />}
+                    {/* Something in here needs you — an agent asking, a card
+                        in Review, a turn that ended unseen. The dot the agent
+                        rows and a folded group's heading already wear, with
+                        the same meaning; the drawer behind the status bar's
+                        tray says what. */}
+                    {needsYou.has(workspace.id) && <span className="unread" aria-label="needs you" />}
                   </button>
 
                   {/* The row's options, at the end of the name's line, where its

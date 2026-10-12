@@ -11,6 +11,7 @@ import type { MascotConfig, Profile, Workspace } from "../../../shared/model";
 import { PREFIX_LABEL } from "../keys";
 import type { KuruLive } from "../kuru";
 import type { VoicePhase } from "../voice";
+import { InboxIcon } from "./NeedsDrawer";
 import { Mascot } from "./Status";
 import { MicIcon, SpeakerIcon } from "./VoiceIcons";
 
@@ -66,6 +67,12 @@ interface Props {
    */
   kuru: { live: KuruLive; unheard: number; undelivered: number; open: boolean; mascot: MascotConfig };
   onKuru: () => void;
+  /**
+   * What needs you across the workspaces, in two numbers, and whether its
+   * drawer is up — the chip left of Kuru's. See `NeedsDrawer.tsx`.
+   */
+  needs: { count: number; workspaces: number; open: boolean };
+  onNeeds: () => void;
 }
 
 export function StatusBar({
@@ -88,6 +95,8 @@ export function StatusBar({
   onTalkUp,
   kuru,
   onKuru,
+  needs,
+  onNeeds,
 }: Props) {
   const index = profile.workspaces.findIndex((w) => w.id === workspace.id);
   return (
@@ -163,6 +172,24 @@ export function StatusBar({
           <KeysIcon />
         </button>
       )}
+      {/* What needs you: a tray and a count in the blocked ink while anything
+          does, a dim tray and no number while nothing does. It stays at zero
+          rather than vanishing, because chrome that comes and goes reads as
+          a bar that lost a button. Left of Kuru's chip and drawn like it —
+          one subject, its own drawer — and `mousedown` is prevented for the
+          same reason: opening the list must not take the focus off a
+          terminal. See `NeedsDrawer.tsx`. */}
+      <button
+        className={`sb-needs ${needs.count > 0 ? "sb-needs-some" : ""} ${needs.open ? "sb-needs-on" : ""}`}
+        onClick={onNeeds}
+        onMouseDown={(event) => event.preventDefault()}
+        title={needsTitle(needs)}
+        aria-label={needsTitle(needs)}
+        aria-expanded={needs.open}
+      >
+        <InboxIcon />
+        {needs.count > 0 && <span className="sb-needs-n">{needs.count}</span>}
+      </button>
       {/* Kuru's chip: the one door onto its drawer, beside the mic because the
           two are the halves of one conversation. Each control has one subject
           — the mic is you, the chip is Kuru — which is the rule that replaced
@@ -249,6 +276,15 @@ export function StatusBar({
       </button>
     </footer>
   );
+}
+
+/** What the tray says when hovered: how many, where, and which way the click goes. */
+function needsTitle(needs: Props["needs"]): string {
+  const what =
+    needs.count === 0
+      ? "Nothing needs you"
+      : `${needs.count} ${needs.count === 1 ? "thing needs" : "things need"} you in ${needs.workspaces} ${needs.workspaces === 1 ? "workspace" : "workspaces"}`;
+  return `${what} — ${needs.open ? "close" : "open"} the list (C-a i)`;
 }
 
 /** What the chip says when hovered: the state, then whatever is news. */

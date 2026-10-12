@@ -69,13 +69,15 @@ async function serverAt(base) {
 class Vite extends EventEmitter {
   /**
    * @param {object} options
+   * @param {string} options.node  the binary to run vite on as node — the runner's, for the runner's reason
    * @param {number} options.port  `KURURU_VITE_PORT`, or vite's own 5173 — where `dev:desktop` looks
    * @param {string|null} options.host  the address to bind, or null for `web/vite.config.ts`'s
    * @param {() => object} options.env  the environment the runner gives its children
    * @param {() => number} options.openLog  a file descriptor to write vite's output into
    */
-  constructor({ port, host, env, openLog }) {
+  constructor({ node, port, host, env, openLog }) {
     super();
+    this.node = node;
     this.port = port;
     /**
      * An address and never `localhost`, because `localhost` is two addresses
@@ -172,7 +174,7 @@ class Vite extends EventEmitter {
     const args = [bin];
     if (this.host) args.push("--host", this.host);
     const log = this.openLog();
-    const child = spawn(process.execPath, args, {
+    const child = spawn(this.node, args, {
       cwd: path.join(checkout, "web"),
       stdio: ["ignore", log, log],
       env: { ...this.env(), KURURU_SERVER: target, KURURU_VITE_PORT: String(this.port) },

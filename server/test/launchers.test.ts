@@ -51,8 +51,9 @@ describe("LAUNCHERS", () => {
 
 describe("adoptLaunch", () => {
   it("makes defaults out of nothing", () => {
-    expect(adoptLaunch(undefined)).toEqual({ offClis: [], offLaunchers: [], bypassClis: [], loginsPerProfile: false });
-    expect(adoptLaunch("nonsense")).toEqual({ offClis: [], offLaunchers: [], bypassClis: [], loginsPerProfile: false });
+    const none = { offClis: [], offLaunchers: [], bypassClis: [], loginsPerProfile: false, sleepIdle: true, sleepMinutes: 10 };
+    expect(adoptLaunch(undefined)).toEqual(none);
+    expect(adoptLaunch("nonsense")).toEqual(none);
   });
 
   it("drops CLIs it has never heard of and anything that is not a string", () => {
@@ -63,6 +64,8 @@ describe("adoptLaunch", () => {
       offLaunchers: ["x"],
       bypassClis: ["claude"],
       loginsPerProfile: false,
+      sleepIdle: true,
+      sleepMinutes: 10,
     });
   });
 
@@ -96,5 +99,30 @@ describe("loginsPerProfile", () => {
   it("survives another page saving its own fields around it", () => {
     const on = adoptLaunch({ loginsPerProfile: true });
     expect(adoptLaunch({ ...on, bypassClis: ["claude"] }).loginsPerProfile).toBe(true);
+  });
+});
+
+describe("sleeping idle card agents", () => {
+  it("is on at ten minutes unless the file says otherwise", () => {
+    expect(adoptLaunch(null)).toMatchObject({ sleepIdle: true, sleepMinutes: 10 });
+    expect(adoptLaunch({ sleepIdle: false }).sleepIdle).toBe(false);
+    // Only an explicit false turns it off, so a hand-edited "no" leaves it on.
+    expect(adoptLaunch({ sleepIdle: "no" }).sleepIdle).toBe(true);
+  });
+
+  it("holds the minutes to whole numbers in range, and refuses what is not a number", () => {
+    expect(adoptLaunch({ sleepMinutes: 25 }).sleepMinutes).toBe(25);
+    expect(adoptLaunch({ sleepMinutes: 2.6 }).sleepMinutes).toBe(3);
+    expect(adoptLaunch({ sleepMinutes: 0 }).sleepMinutes).toBe(1);
+    expect(adoptLaunch({ sleepMinutes: -40 }).sleepMinutes).toBe(1);
+    expect(adoptLaunch({ sleepMinutes: 99999 }).sleepMinutes).toBe(1440);
+    expect(adoptLaunch({ sleepMinutes: Number.NaN }).sleepMinutes).toBe(10);
+    expect(adoptLaunch({ sleepMinutes: Number.POSITIVE_INFINITY }).sleepMinutes).toBe(10);
+    expect(adoptLaunch({ sleepMinutes: "30" }).sleepMinutes).toBe(10);
+  });
+
+  it("keeps the minutes while it is switched off, so switching back gives them back", () => {
+    const off = adoptLaunch({ sleepIdle: false, sleepMinutes: 45 });
+    expect(adoptLaunch({ ...off, sleepIdle: true })).toMatchObject({ sleepIdle: true, sleepMinutes: 45 });
   });
 });

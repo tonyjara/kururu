@@ -23,6 +23,7 @@ import { DEFAULT_VOICE } from "../../../shared/voice";
 import { desktop } from "../desktop";
 import { useKururu } from "../session";
 import { applyTalkGesture, installSpeech, setSpeechVolume, setVoiceProfile, useVoiceUi } from "../voice";
+import { installReload } from "../reload";
 import { VoicePill } from "./VoicePill";
 
 /**
@@ -48,6 +49,10 @@ export function Pill() {
     setVoiceProfile(() => profileRef.current);
     setSpeechVolume(() => voiceRef.current?.settings.volume ?? DEFAULT_VOICE.volume);
     const stopSpeech = installSpeech();
+    // Reloaded with the window when an agent asks, only while it is idle and
+    // so hidden: this page is where the voice module runs, and an old copy of
+    // it left behind by a hot update is the one that kept the microphone.
+    const stopReload = installReload("pill");
     const stopKeys = desktop()?.voice?.onKey(applyTalkGesture) ?? (() => {});
     let hereTimer: ReturnType<typeof setTimeout> | undefined;
     const stopLocate =
@@ -60,6 +65,7 @@ export function Pill() {
     console.log(`up${desktop()?.voice ? "" : ", with no bridge"}`);
     return () => {
       stopSpeech();
+      stopReload();
       stopKeys();
       stopLocate();
       clearTimeout(hereTimer);

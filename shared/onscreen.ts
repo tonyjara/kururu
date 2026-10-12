@@ -32,8 +32,11 @@
 import type { AgentStatus } from "./model";
 
 /**
- * What a screen shows. `missing` is kururu's own check saying the CLI is not
- * installed or not signed in on the machine — see `AGENT_CHECK`.
+ * What a screen shows. `missing` is kururu's own words rather than the CLI's
+ * — the check saying it is not installed or not signed in (`AGENT_CHECK`), or
+ * `LOOP_SCRIPT` saying it gave up reconnecting — read the same way because
+ * both mean the same thing to whoever is deciding whether to sleep the card:
+ * nothing is happening here until a person does something.
  */
 export type ScreenPhase = "working" | "asking" | "quiet" | "missing";
 
@@ -75,6 +78,8 @@ const CHOICE = /^\s*[❯›]\s*\d+\.\s+\S/;
 const SELECT_HINT = /\bEnter to select\b/i;
 /** What `AGENT_CHECK` prints, expanded — the typed line above it holds the same words with `$n` in them, and must not match. */
 const MISSING = /^kururu: ((?:Claude Code|Codex) is not (?:installed|logged in) on .+?)\.(?:\s|$)/;
+/** What `LOOP_SCRIPT` prints once ssh has failed three times running, waiting on Enter rather than retrying. */
+const UNREACHABLE = /^kururu: (.+? has not answered in \d+ tries running)\.(?:\s|$)/;
 /** Box edges a question may be drawn inside, taken off its ends. */
 const FRAME = /^[\s│┃|╭╮╰╯─]+|[\s│┃|╭╮╰╯─]+$/g;
 
@@ -92,11 +97,13 @@ export function readScreen(text: string): ScreenRead {
   // above them that quotes "esc to interrupt" — an agent working on this file
   // would — is not a turn in progress.
   if (lines.slice(-FOOTER).some((line) => WORKING.test(line) || SPINNER.test(line))) return { phase: "working", detail: null };
-  // The check's words and then a shell prompt — and tmux's status line — so
-  // only the last few rows: an agent started by hand after the CLI was
-  // installed draws below them.
+  // The check's words, or the loop's giving-up line, then a shell prompt — and
+  // tmux's status line — so only the last few rows: an agent started by hand
+  // after the CLI was installed draws below them, and a reconnect that got
+  // back in types over the line that said it hadn't.
   for (const line of lines.slice(-5)) {
-    const missing = MISSING.exec(line.trim());
+    const trimmed = line.trim();
+    const missing = MISSING.exec(trimmed) ?? UNREACHABLE.exec(trimmed);
     if (missing) return { phase: "missing", detail: missing[1]! };
   }
   return { phase: "quiet", detail: null };

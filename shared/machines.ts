@@ -468,14 +468,23 @@ export const AGENT_CHECK = [
  * while a plain shell asks, because what it had is gone and a fresh login is
  * a different thing to be handed unasked.
  *
- * "Got in" is ten seconds connected; ssh has no other way to say it. The
- * keepalives make a dead link a dead tab in under a minute rather than the
- * TCP timeout's quarter of an hour. Ctrl-C at the wait ends it.
+ * "Got in" is twelve seconds connected, not ten: `ConnectTimeout=10` means a
+ * host that never answers also takes *about* ten seconds to fail, and a
+ * two-second margin is what keeps that failure from being misread as a
+ * connection that briefly succeeded — which is what turned a sleeping
+ * omarchy1 into a tab that reattached forever without ever asking anybody.
+ * `fails` counts attempts that did not get in, in a row, and resets on one
+ * that did; three of them and the loop stops offering to retry by itself —
+ * sleeping or Ctrl-C has already covered "stop looping right now", this is
+ * for a host that is staying down. Enter after that starts the count over,
+ * which is the only way back in short of closing the tab. The keepalives
+ * make a dead link a dead tab in under a minute rather than the TCP timeout's
+ * quarter of an hour.
  */
 export const LOOP_SCRIPT = [
-  `h=$1; m=$2; r=$3; up=0`,
+  `h=$1; m=$2; r=$3; fails=0`,
   `if [ -n "$r" ]; then set -- "$h" "$r"; else set -- "$h"; fi`,
-  `while :; do t=$(date +%s); ssh -t -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -- "$@"; s=$?; [ "$s" -eq 255 ] || exit "$s"; [ $(( $(date +%s) - t )) -lt 10 ] || up=1; echo; if [ -n "$m" ] && [ "$up" -eq 1 ]; then echo "kururu: lost the connection to $h. Reattaching $m in 3s; Ctrl-C stops."; sleep 3; else echo "kururu: ssh to $h did not get in. Enter tries again; Ctrl-D gives up."; read -r _ || exit "$s"; fi; done`,
+  `while :; do t=$(date +%s); ssh -t -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -- "$@"; s=$?; [ "$s" -eq 255 ] || exit "$s"; if [ $(( $(date +%s) - t )) -ge 12 ]; then got=1; fails=0; else got=0; fails=$((fails + 1)); fi; echo; if [ "$fails" -ge 3 ]; then echo "kururu: $h has not answered in 3 tries running. Enter tries again; Ctrl-D gives up."; fails=0; read -r _ || exit "$s"; elif [ -n "$m" ] && [ "$got" -eq 1 ]; then echo "kururu: lost the connection to $h. Reattaching $m in 3s; Ctrl-C stops."; sleep 3; else echo "kururu: ssh to $h did not get in. Enter tries again; Ctrl-D gives up."; read -r _ || exit "$s"; fi; done`,
 ].join("; ");
 
 /** What a remote tab's command line starts with, and what `remoteShellOf` looks for. */

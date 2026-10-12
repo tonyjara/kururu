@@ -19,13 +19,19 @@
  * sidebar can never disagree about the same terminal, and falls back to the
  * recorded state when the terminal has gone.
  *
- * It is drawn in two places: a workspace's own pane, and the profile's board,
- * which shows any workspace's board over the window without going there. The
- * second is the same component with one thing added, `onReveal`, because
- * everything a card does works on a workspace that is not on screen — only a
- * terminal it opens is somewhere the sheet is in front of.
+ * It is drawn in one place, a workspace's own pane, and a card on it can be
+ * asked for by name from elsewhere — a reply of Kuru's that cites it, a
+ * search hit, a row in the drawer of things that need you. `showCardNext`
+ * is that door: the asker names the workspace and the card, opens the
+ * workspace's board the ordinary way, and the board drawn there scrolls
+ * the card into view and lights it for a moment. Shown, not opened: the
+ * asker wanted to see the card, and the edit is a double-click away if
+ * they want that too. For a version the profile's sheet drew any workspace's
+ * board over the window instead, and the server's card verbs still take any
+ * workspace of the profile for it; the sheet's version went because what
+ * it listed was boards and what was wanted was needs.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   BOARD_COLUMNS,
   canResume,
@@ -41,13 +47,16 @@ import {
   type CardRun,
   type CardWorktree,
 } from "../../../shared/board";
+import { today, type Day } from "../../../shared/days";
 import type { Launcher } from "../../../shared/launchers";
 import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
 import type { MergeBlock, MergeResolution, WorktreeStatus } from "../../../shared/projects";
 import type { DevServer } from "../../../shared/wire";
 import { isLoopback, previewUrl, serverIn } from "../preview";
+import { sameJson } from "../same";
 import * as api from "../session";
 import { datesLabel, datesTense } from "../when";
+import { Dialog } from "./Dialog";
 import { Icon } from "./Icon";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
 import { Status } from "./Status";
@@ -61,6 +70,7 @@ const RUN_WORDS: Record<CardRun["state"], string> = {
   blocked: "needs you",
   finished: "finished",
   ended: "ended",
+  asleep: "asleep after sitting idle",
 };
 
 /**
@@ -86,6 +96,34 @@ export const dropDraft = (key: string) => void drafts.delete(key);
 const openComposers = new Map<string, { adding: BoardColumn | null; editing: string | null }>();
 const newDraft = (workspaceId: string, column: BoardColumn) => `${workspaceId}\0new\0${column}`;
 const editDraft = (workspaceId: string, cardId: string) => `${workspaceId}\0card\0${cardId}`;
+
+/**
+ * A card somebody asked to be shown, by workspace and id, for the board of
+ * that workspace to scroll to when it is next drawn — or at once, if it is
+ * on screen already. Module state for `drafts`' reason: the asker is not in
+ * this tree, and the board may not be mounted when it asks. Taken once, by
+ * the first board that is the right workspace's, and never written to disk.
+ */
+let wanted: { workspaceId: string; cardId: string } | null = null;
+const wantedListeners = new Set<() => void>();
+function setWanted(next: typeof wanted): void {
+  wanted = next;
+  for (const listener of wantedListeners) listener();
+}
+export function showCardNext(workspaceId: string, cardId: string): void {
+  setWanted({ workspaceId, cardId });
+}
+/** How long a card asked for stays lit, so the eye finds it and then nothing on the board says it was. */
+const SHOWN_MS = 1800;
+function useWanted(): typeof wanted {
+  return useSyncExternalStore(
+    (listener) => {
+      wantedListeners.add(listener);
+      return () => wantedListeners.delete(listener);
+    },
+    () => wanted,
+  );
+}
 
 /**
  * Hold a new card's composer in sight, for the list of the column it is open
@@ -114,8 +152,7 @@ export function BoardView({
   agents,
   mascot,
   launchers,
-  onReveal,
-  openCard,
+  focusedAgentId,
 }: {
   workspaceId: string;
   workspaceName: string;
@@ -124,21 +161,42 @@ export function BoardView({
   mascot: MascotConfig;
   launchers: Launcher[];
   /**
-   * Said after the board has taken somebody to a terminal, by a board drawn
-   * over the window — the profile's — so that it can get out of the way of
-   * what it just showed. A board in a pane has nothing in front of it.
+   * The terminal in the focused pane, the one the sidebar marks. The card it
+   * is the agent of wears the accent, so that with the board in one pane and
+   * an agent in the next the board says which card the keyboard is on.
+   * Only a run's agent: a card's dev server or a shell in its worktree is not
+   * the work the card is about. Null, as for a pane showing a board, a
+   * document or nothing, lights nothing.
    */
-  onReveal?: () => void;
-  /**
-   * A card to open on arrival — the one a reply of Kuru's named, clicked in
-   * its drawer. Its composer is opened, which is as close to "at that card"
-   * as a board of columns gets.
-   */
-  openCard?: string | null;
+  focusedAgentId: string | null;
 }) {
   /** The column a new card is being written in, or null. One composer at a time. */
   const [adding, setAddingState] = useState<BoardColumn | null>(() => openComposers.get(workspaceId)?.adding ?? null);
-  const [editing, setEditingState] = useState<string | null>(() => openCard ?? openComposers.get(workspaceId)?.editing ?? null);
+  const [editing, setEditingState] = useState<string | null>(() => openComposers.get(workspaceId)?.editing ?? null);
+  /**
+   * A card asked for by name — see `showCardNext` — scrolled to and lit.
+   * Taken on arrival and on every later ask, so a board already on screen
+   * answers too; taken through the store, so that the ask is gone from the
+   * next render and a board that re-renders does not scroll again. The time
+   * on `shown` is what lets the same card be asked for twice.
+   */
+  const asked = useWanted();
+  const root = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState<{ id: string; at: number } | null>(null);
+  useEffect(() => {
+    if (!asked || asked.workspaceId !== workspaceId) return;
+    setWanted(null);
+    if (!board.cards.some((c) => c.id === asked.cardId)) return;
+    root.current
+      ?.querySelector<HTMLElement>(`[data-card="${CSS.escape(asked.cardId)}"]`)
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    setShown({ id: asked.cardId, at: Date.now() });
+  }, [asked, workspaceId, board]);
+  useEffect(() => {
+    if (!shown) return;
+    const timer = setTimeout(() => setShown(null), SHOWN_MS);
+    return () => clearTimeout(timer);
+  }, [shown]);
   // A composer put away on purpose takes its draft with it; one the board was
   // unmounted from underneath keeps it, which is the whole point of `drafts`.
   const setAdding = (column: BoardColumn | null) => {
@@ -167,10 +225,10 @@ export function BoardView({
    */
   const [notes, setNotes] = useState<Record<string, string>>({});
   /**
-   * A merge waiting for its second click. On the card rather than in the menu,
-   * because the menu closes on the click that asks, and because the card is
-   * where the consequence — worktree gone, agent ended, column changed — is
-   * going to show.
+   * A merge, or a move to Done, waiting for its second click — as a centred
+   * dialog rather than the menu it may have opened from, because the menu
+   * closes on the click that asks and a question about ending an agent wants
+   * to be seen, not scrolled to at the foot of a card.
    */
   const [ask, setAsk] = useState<Ask | null>(null);
   /**
@@ -195,16 +253,13 @@ export function BoardView({
     setErrors((all) => ({ ...all, [cardId]: err instanceof Error ? err.message : String(err) }));
   };
   const { devServers } = api.useKururu();
-  const reveal = (agentId: string) => {
-    api.revealAgent(agentId);
-    onReveal?.();
-  };
+  const reveal = (agentId: string) => api.revealAgent(agentId);
   /** Where a dragged card would land: a column and a place among its cards. */
   const [dropAt, setDropAt] = useState<{ column: BoardColumn; index: number } | null>(null);
 
-  const run = (card: Card, launcher: Launcher) => {
+  const run = (card: Card, launcher: Launcher, fresh = false) => {
     setErrors(({ [card.id]: _, ...rest }) => rest);
-    api.runCard(workspaceId, card.id, launcher.id).catch((err: unknown) => {
+    api.runCard(workspaceId, card.id, launcher.id, fresh).catch((err: unknown) => {
       setErrors((all) => ({ ...all, [card.id]: err instanceof Error ? err.message : String(err) }));
     });
   };
@@ -234,35 +289,40 @@ export function BoardView({
     api.stopCardDev(workspaceId, card.id).catch(failed(card.id));
   };
 
+  const resume = (card: Card) => {
+    setErrors(({ [card.id]: _, ...rest }) => rest);
+    api.resumeCard(workspaceId, card.id).catch(failed(card.id));
+  };
+
   /**
    * The robot's menu: the launchers, and above them — when the card's last
    * agent has gone and its conversation can be found again — the way back
    * into it. A new launcher on a card that has run starts a fresh
    * conversation with the card as its prompt; resume is the one that
-   * remembers what was said.
+   * remembers what was said. On a card whose agent was put to sleep the
+   * server would resume on a launcher row too, as it promised the card, so
+   * those rows say "new conversation" and ask for one in so many words.
    */
   const robotMenu = (card: Card, at: MenuAt) => {
-    const resume: MenuItem[] = canResume(card.run, agentOpen(card))
+    const asleep = card.run?.state === "asleep";
+    const resumeRow: MenuItem[] = canResume(card.run, agentOpen(card))
       ? [
           {
             label: "Resume conversation",
-            hint: card.run?.sessionId ? card.run.label : `${card.run?.label ?? "Codex"} · pick a session`,
-            run: () => {
-              setErrors(({ [card.id]: _, ...rest }) => rest);
-              api.resumeCard(workspaceId, card.id).catch(failed(card.id));
-            },
+            hint: card.run?.sessionId ? `${card.run.label}${asleep ? " · asleep" : ""}` : `${card.run?.label ?? "Codex"} · pick a session`,
+            run: () => resume(card),
           },
         ]
       : [];
     setMenu({
       at,
       items: [
-        ...resume,
+        ...resumeRow,
         ...launchers.map((launcher, index) => ({
           label: launcher.label,
-          hint: launcher.model ? undefined : "default model",
-          sep: (index === 0 && resume.length > 0) || (index > 0 && launchers[index - 1]?.cli !== launcher.cli),
-          run: () => run(card, launcher),
+          hint: resumeRow.length > 0 && asleep ? "new conversation" : launcher.model ? undefined : "default model",
+          sep: (index === 0 && resumeRow.length > 0) || (index > 0 && launchers[index - 1]?.cli !== launcher.cli),
+          run: () => run(card, launcher, asleep),
         })),
       ],
     });
@@ -336,7 +396,8 @@ export function BoardView({
     }
     setAsk({
       cardId: card.id,
-      text: parts.join(" "),
+      title: "Merge blocked",
+      hint: parts.join(" "),
       choices: offer
         ? [
             {
@@ -389,9 +450,8 @@ export function BoardView({
       setErrors(({ [card.id]: _, ...rest }) => rest);
       setAsk({
         cardId: card.id,
-        text: `Its agent is still open. End it too?${
-          canResume(card.run, false) ? " The conversation can be picked up again from the robot." : ""
-        }`,
+        title: `End ${card.run?.label ?? "the agent"} too?`,
+        hint: canResume(card.run, false) ? "The conversation can be picked up again from the robot." : undefined,
         yes: "Move and end agent",
         run: () => {
           api.moveCard(workspaceId, card.id, column, index);
@@ -409,9 +469,10 @@ export function BoardView({
       setErrors(({ [card.id]: _, ...rest }) => rest);
       setAsk({
         cardId: card.id,
-        text:
-          `Done means merged: ${commits} into ${tree.base}.${dirty}${nothing} ` +
-          `The worktree is removed${running ? ", its agent is ended" : ""}${devOpen(card) ? ", its dev server stopped" : ""} and branch ${tree.branch} deleted.`,
+        title: running ? `Merge and end ${card.run?.label ?? "the agent"}?` : `Merge into ${tree.base}?`,
+        hint:
+          `${commits} into ${tree.base}.${dirty}${nothing} ` +
+          `The worktree is removed${devOpen(card) ? ", its dev server stopped" : ""} and branch ${tree.branch} deleted.`,
         yes: changes ? "Commit and merge" : "Merge",
         run: () => merge(card, tree, changes > 0),
         alt: { label: "Just move", run: () => api.moveCard(workspaceId, card.id, column, index) },
@@ -459,7 +520,8 @@ export function BoardView({
         run: () =>
           setAsk({
             cardId: card.id,
-            text: `Merge ${status?.ahead ?? 0} ${status?.ahead === 1 ? "commit" : "commits"} into ${tree.base}? The worktree is removed${running ? ", its agent is ended" : ""} and the card goes to Done.`,
+            title: running ? `Merge and end ${card.run?.label ?? "the agent"}?` : `Merge into ${tree.base}?`,
+            hint: `${status?.ahead ?? 0} ${status?.ahead === 1 ? "commit" : "commits"} into ${tree.base}. The worktree is removed and the card goes to Done.`,
             yes: "Merge",
             run: () => merge(card, tree, false),
           }),
@@ -468,14 +530,8 @@ export function BoardView({
         label: "Open a terminal in the worktree",
         hint: gone ? "worktree gone" : undefined,
         disabled: gone,
-        // In a pane the server focuses the new terminal itself. Over the
-        // window it may be in a workspace that is not on screen, and a
-        // terminal asked for and not shown is one that seems not to have come.
-        run: () =>
-          api
-            .openWorktree(workspaceId, card.id)
-            .then((agentId) => onReveal && reveal(agentId))
-            .catch(failed(card.id)),
+        // The server focuses the new terminal itself, in this pane's workspace.
+        run: () => api.openWorktree(workspaceId, card.id).then(() => undefined, failed(card.id)),
       },
       {
         label: devOpen(card) ? "Restart the dev server" : "Start the dev server",
@@ -538,8 +594,33 @@ export function BoardView({
 
   const addingList = useComposerInView(adding, adding ? columnCards(board, adding).length : 0);
 
+  // Rebuilt on every render and read through the ref, so that the cards are
+  // handed the same object every time — see `CardView`.
+  const cardVerbs: CardVerbs = {
+    robot: robotMenu,
+    menu: cardMenu,
+    edit: setEditing,
+    over: (event, column, index) => {
+      if (!event.dataTransfer.types.includes(CARD_MIME)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const box = event.currentTarget.getBoundingClientRect();
+      setDropAt({ column, index: event.clientY > box.top + box.height / 2 ? index + 1 : index });
+    },
+    reveal,
+    resume,
+    restartDev,
+    stopDev,
+    dismissNote: (cardId) => setNotes(({ [cardId]: _, ...rest }) => rest),
+  };
+  const verbs = useRef(cardVerbs);
+  verbs.current = cardVerbs;
+  // For the dates on a card, which say "today" and "tomorrow": `endedAgo`'s
+  // reason, once a day.
+  const day = today(new Date());
+
   return (
-    <div className="board">
+    <div className="board" ref={root}>
       {BOARD_COLUMNS.map((column) => {
         const cards = columnCards(board, column);
         return (
@@ -610,31 +691,20 @@ export function BoardView({
                     agent={card.run?.agentId ? agents.find((a) => a.id === card.run?.agentId) : undefined}
                     server={card.dev?.agentId ? agents.find((a) => a.id === card.dev?.agentId) : undefined}
                     devServers={devServers}
-                    onRestartDev={() => restartDev(card)}
-                    onStopDev={() => stopDev(card)}
-                    onReveal={reveal}
                     mascot={mascot}
                     error={errors[card.id]}
                     working={working[card.id]}
                     note={notes[card.id]}
-                    onNoteClick={() => setNotes(({ [card.id]: _, ...rest }) => rest)}
-                    ask={ask?.cardId === card.id ? ask : null}
-                    onAsk={(run) => {
-                      setAsk(null);
-                      run?.();
-                    }}
                     insertBefore={dropAt?.column === column && dropAt.index === index}
                     canRun={launchers.length > 0}
-                    onRobot={(at) => robotMenu(card, at)}
-                    onMenu={(at) => cardMenu(card, at)}
-                    onEdit={() => setEditing(card.id)}
-                    onOver={(event) => {
-                      if (!event.dataTransfer.types.includes(CARD_MIME)) return;
-                      event.preventDefault();
-                      event.stopPropagation();
-                      const box = event.currentTarget.getBoundingClientRect();
-                      setDropAt({ column, index: event.clientY > box.top + box.height / 2 ? index + 1 : index });
-                    }}
+                    resumable={canResume(card.run, agentOpen(card))}
+                    ended={endedAgo(card.run)}
+                    day={day}
+                    focused={focusedAgentId !== null && card.run?.agentId === focusedAgentId}
+                    shown={shown?.id === card.id}
+                    column={column}
+                    index={index}
+                    verbs={verbs}
                   />
                 ),
               )}
@@ -690,47 +760,108 @@ export function BoardView({
       })}
 
       {menu && <Menu at={menu.at} items={menu.items} onClose={() => setMenu(null)} />}
+      {ask && board.cards.some((c) => c.id === ask.cardId) && (
+        <Dialog
+          state={{
+            kind: "ask",
+            title: ask.title,
+            hint: ask.hint,
+            yes: ask.yes,
+            run: ask.run,
+            alt: ask.alt,
+            choices: ask.choices,
+          }}
+          onClose={() => setAsk(null)}
+        />
+      )}
     </div>
   );
 }
 
 /**
- * A question a card is asking in place: what it says, and what yes and the
- * other way out do. A question with `choices` instead of a `yes` is one
- * whose answers each need a sentence — they are drawn as rows, each with
- * what it does under its button, and Cancel is the only plain button left.
+ * A question raised about a card: a short line on what is about to happen —
+ * a move, a merge — and what yes and the other way out do. Drawn as a
+ * centred `Dialog` rather than on the card itself, so a move to Done that
+ * would end an agent is seen rather than scrolled to. A question with
+ * `choices` instead of a `yes` is one whose answers each need a sentence —
+ * they are drawn as rows, each with what it does under its button, and
+ * Cancel is the only plain button left.
  */
 interface Ask {
   cardId: string;
-  text: string;
+  title: string;
+  hint?: string;
   yes?: string;
   run?: () => void;
   alt?: { label: string; run: () => void };
   choices?: { label: string; outcome: string; run: () => void }[];
 }
 
-function CardView({
+/**
+ * What a card can ask of the board it is on. Its own type, and handed down as
+ * one ref rather than as a closure per card, for `CardView`'s reason: see there.
+ */
+interface CardVerbs {
+  robot: (card: Card, at: MenuAt) => void;
+  menu: (card: Card, at: MenuAt) => void;
+  edit: (cardId: string) => void;
+  /** A card dragged over this one, which sits at `index` in `column`. */
+  over: (event: React.DragEvent, column: BoardColumn, index: number) => void;
+  /** Take the person to a terminal: the run's agent, or the dev server's log. */
+  reveal: (agentId: string) => void;
+  resume: (card: Card) => void;
+  restartDev: (card: Card) => void;
+  stopDev: (card: Card) => void;
+  dismissNote: (cardId: string) => void;
+}
+
+/**
+ * When it ended, as the run line says it, for a run that has — or null.
+ *
+ * Out here and handed in rather than worked out in the line, because the card
+ * is memoised: "just now" computed inside it would stay "just now" until
+ * something else about the card changed, where handed in it is a prop that
+ * changes when the words do, on whatever render of the board is next.
+ */
+function endedAgo(run: CardRun | null): string | null {
+  return run?.endedAt && (run.state === "finished" || run.state === "ended" || run.state === "asleep")
+    ? ago(run.endedAt)
+    : null;
+}
+
+/**
+ * One card, drawn again only when something it shows has changed.
+ *
+ * That is the point of the `memo` and of `sameJson` beside it. The snapshot is
+ * replaced whole on every message, so without them each status tick anywhere
+ * in the profile — and each focus change, which is a snapshot too — redrew
+ * every card on every board on screen to move one dot or one highlight. What
+ * stops a card being redrawn is that its props say the same thing as last
+ * time, which is why nothing here takes a closure: the board's verbs come as
+ * one ref that never changes, read at the moment of a click, so a card that
+ * has skipped a dozen renders still acts with the board as it is now — its
+ * agents, its launchers, whichever composer is open.
+ */
+const CardView = memo(function CardView({
   card,
   code,
   agent,
   server,
   devServers,
-  onRestartDev,
-  onStopDev,
-  onReveal,
   mascot,
   error,
   working,
   note,
-  onNoteClick,
-  ask,
-  onAsk,
   insertBefore,
   canRun,
-  onRobot,
-  onMenu,
-  onEdit,
-  onOver,
+  resumable,
+  ended,
+  day,
+  focused,
+  shown,
+  column,
+  index,
+  verbs,
 }: {
   card: Card;
   code: string;
@@ -738,45 +869,55 @@ function CardView({
   /** The terminal the card's dev server runs in, while it has one. */
   server: AgentSnapshot | undefined;
   devServers: DevServer[];
-  onRestartDev: () => void;
-  onStopDev: () => void;
-  /** Take the person to a terminal: the run's agent, or the dev server's log. */
-  onReveal: (agentId: string) => void;
   mascot: MascotConfig;
   error: string | undefined;
   /** What a slow git action on this card is doing right now, if one is. */
   working: string | undefined;
   /** What the last git action came to, until clicked away. */
   note: string | undefined;
-  onNoteClick: () => void;
-  /** A merge waiting for its second click, or null. */
-  ask: Ask | null;
-  /** The answer's action, or null for the way out. */
-  onAsk: (run: (() => void) | null) => void;
   insertBefore: boolean;
   canRun: boolean;
-  onRobot: (at: MenuAt) => void;
-  onMenu: (at: MenuAt) => void;
-  onEdit: () => void;
-  onOver: (event: React.DragEvent) => void;
+  /** Whether the run's conversation can be picked back up from here. */
+  resumable: boolean;
+  /** See `endedAgo`. */
+  ended: string | null;
+  /** Today, which the card's dates are said relative to. */
+  day: Day;
+  /** Its agent is in the focused pane — see `BoardView`'s `focusedAgentId`. */
+  focused: boolean;
+  /** It was just asked for by name and is lit for a moment — see `showCardNext`. */
+  shown: boolean;
+  /** Where the card sits, for a drag over it to say which side it would land. */
+  column: BoardColumn;
+  index: number;
+  verbs: { readonly current: CardVerbs };
 }) {
   const running = runLive(card.run) && agent !== undefined && !agent.exited;
   const below = (event: React.MouseEvent<HTMLElement>): MenuAt => {
     const box = event.currentTarget.getBoundingClientRect();
     return { x: box.left, y: box.bottom + 4 };
   };
+  const reveal = (agentId: string) => verbs.current.reveal(agentId);
   return (
     <>
       {insertBefore && <span className="board-insert" aria-hidden="true" />}
       <article
-        className={`board-card ${card.run ? `board-card-${card.run.state}` : ""}`}
+        className={[
+          "board-card",
+          card.run ? `board-card-${card.run.state}` : "",
+          focused ? "board-card-on" : "",
+          shown ? "board-card-shown" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        data-card={card.id}
         draggable
         onDragStart={(event) => {
           event.dataTransfer.setData(CARD_MIME, card.id);
           event.dataTransfer.effectAllowed = "move";
         }}
-        onDragOver={onOver}
-        onDoubleClick={onEdit}
+        onDragOver={(event) => verbs.current.over(event, column, index)}
+        onDoubleClick={() => verbs.current.edit(card.id)}
       >
         <div className="board-card-top">
           <span className="board-card-code">{code}</span>
@@ -794,7 +935,7 @@ function CardView({
               }
               aria-label="Hand to an agent"
               aria-haspopup="menu"
-              onClick={(event) => onRobot(below(event))}
+              onClick={(event) => verbs.current.robot(card, below(event))}
             >
               <Icon name="bot" />
             </button>
@@ -803,14 +944,14 @@ function CardView({
               title="Move, edit or delete"
               aria-label="Card menu"
               aria-haspopup="menu"
-              onClick={(event) => onMenu(below(event))}
+              onClick={(event) => verbs.current.menu(card, below(event))}
             >
               <Icon name="caret" />
             </button>
           </span>
         </div>
         {card.body && <CardBody text={card.body} />}
-        {card.dates && <CardWhen dates={card.dates} />}
+        {card.dates && <CardWhen dates={card.dates} now={day} />}
         {card.worktree ? (
           <TreeLine worktree={card.worktree} />
         ) : (
@@ -827,12 +968,21 @@ function CardView({
             worktree={card.worktree}
             terminal={server}
             servers={devServers}
-            onRestart={onRestartDev}
-            onStop={onStopDev}
-            onReveal={onReveal}
+            onRestart={() => verbs.current.restartDev(card)}
+            onStop={() => verbs.current.stopDev(card)}
+            onReveal={reveal}
           />
         )}
-        {card.run && <RunLine run={card.run} agent={agent} mascot={mascot} onReveal={onReveal} />}
+        {card.run && (
+          <RunLine
+            run={card.run}
+            agent={agent}
+            mascot={mascot}
+            ended={ended}
+            onReveal={reveal}
+            onResume={resumable ? () => verbs.current.resume(card) : undefined}
+          />
+        )}
         {error && <p className="board-card-error">{error}</p>}
         {working && (
           <p className="board-card-busy" role="status">
@@ -841,42 +991,14 @@ function CardView({
           </p>
         )}
         {note && (
-          <p className="board-card-note" onClick={onNoteClick} title="Click to dismiss">
+          <p className="board-card-note" onClick={() => verbs.current.dismissNote(card.id)} title="Click to dismiss">
             {note}
           </p>
-        )}
-        {ask && (
-          <div className="board-card-ask" role="alertdialog" aria-label="Confirm">
-            <p className="board-card-ask-text">{ask.text}</p>
-            {ask.choices?.map((choice) => (
-              <div key={choice.label} className="board-card-ask-choice">
-                <button className="board-btn" onClick={() => onAsk(choice.run)}>
-                  {choice.label}
-                </button>
-                <p className="board-card-ask-outcome">{choice.outcome}</p>
-              </div>
-            ))}
-            <div className="board-card-ask-actions">
-              <button className="board-btn board-btn-quiet" onClick={() => onAsk(null)}>
-                Cancel
-              </button>
-              {ask.alt && (
-                <button className="board-btn board-btn-quiet" onClick={() => onAsk(ask.alt?.run ?? null)}>
-                  {ask.alt.label}
-                </button>
-              )}
-              {ask.yes && (
-                <button className="board-btn" onClick={() => onAsk(ask.run ?? null)}>
-                  {ask.yes}
-                </button>
-              )}
-            </div>
-          </div>
         )}
       </article>
     </>
   );
-}
+}, sameJson);
 
 /**
  * The line under a card that has been handed to an agent: whose it is, what it
@@ -886,29 +1008,52 @@ function CardView({
  * component as the sidebar's — and the words are the run's, because "finished"
  * is a fact about this card that the terminal's `done` only says for as long as
  * nobody has typed into it.
+ *
+ * A run kururu put to sleep says so, and carries its way back on the line
+ * itself: one press, the same conversation, rather than a menu to find it in.
  */
 function RunLine({
   run,
   agent,
   mascot,
+  ended,
   onReveal,
+  onResume,
 }: {
   run: CardRun;
   agent: AgentSnapshot | undefined;
   mascot: MascotConfig;
+  /** See `endedAgo`. */
+  ended: string | null;
   onReveal: (agentId: string) => void;
+  onResume: (() => void) | undefined;
 }) {
+  const asleep = run.state === "asleep";
   return (
     <div className={`board-run board-run-${run.state}`}>
       {agent ? <Status agent={agent} mascot={mascot} /> : <span className="board-run-mark" aria-hidden="true" />}
-      <span className="board-run-words">
+      <span
+        className="board-run-words"
+        title={
+          asleep
+            ? "kururu ended this agent after it sat idle, to save the battery. Its conversation is kept: resuming picks it back up where it was."
+            : undefined
+        }
+      >
         {run.label} · {RUN_WORDS[run.state]}
-        {run.endedAt && (run.state === "finished" || run.state === "ended") ? ` ${ago(run.endedAt)}` : ""}
+        {ended ? ` ${ended}` : ""}
       </span>
       {agent && (
         <span className="board-seg">
           <button className="board-seg-btn" onClick={() => onReveal(agent.id)} title="Go to this agent's terminal">
             open
+          </button>
+        </span>
+      )}
+      {!agent && asleep && onResume && (
+        <span className="board-seg">
+          <button className="board-seg-btn" onClick={onResume} title="Wake it: the same conversation, with its context">
+            resume
           </button>
         </span>
       )}
@@ -1004,7 +1149,8 @@ function DevLine({
   );
 }
 
-function ago(at: number): string {
+/** How long ago, in the words the run line uses; the drawer of needs says the same thing the same way. */
+export function ago(at: number): string {
   const minutes = Math.round((Date.now() - at) / 60_000);
   if (minutes < 1) return "just now";
   if (minutes < 60) return `${minutes}m ago`;
@@ -1023,8 +1169,8 @@ function ago(at: number): string {
  * dates fall on by its ink alone, so that a column can be scanned for what is
  * happening now without reading a date on it.
  */
-export function CardWhen({ dates }: { dates: CardDates }) {
-  return <span className={`board-card-when board-card-when-${datesTense(dates)}`}>{datesLabel(dates)}</span>;
+export function CardWhen({ dates, now }: { dates: CardDates; now?: Day }) {
+  return <span className={`board-card-when board-card-when-${datesTense(dates, now)}`}>{datesLabel(dates, now)}</span>;
 }
 
 /**

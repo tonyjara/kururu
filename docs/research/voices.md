@@ -9,6 +9,10 @@ beside it, so the timings carry some noise. **Reported** means somebody else's
 number, on the hardware they name. The licence readings are a developer's
 reading and not legal advice.
 
+**Since then:** every candidate below that speaks Spanish, plus the downloads
+this research skipped for its 2 GB budget, is pickable as Kuru's voice in
+Settings → Voice as a trial — see [the voice lab](../voice.md#the-voice-lab).
+
 The question was whether a voice exists that is free to download and run here —
 no subscription, no per-use API — and better than Kokoro-82M as Kururu runs it,
 in English and in Spanish, since a reply is read in whichever language it was
