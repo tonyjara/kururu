@@ -38,7 +38,10 @@ import type { Direction } from "./layout";
 import type { Action } from "./keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
 import type { LaunchSettings } from "./launchers";
+import type { ReloadAsk, ReloadHold, ReloadPage } from "./reload";
 import type { OpenRouterStatus } from "./openrouter";
+import type { FirecrawlStatus } from "./firecrawl";
+import type { ChannelKind, ChannelsStatus } from "./channels";
 import type { BackupStatus } from "./backup";
 import type { KuruConversation } from "./kuru";
 import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "./voice";
@@ -390,6 +393,13 @@ export type ServerMessage =
    */
   | { type: "openrouter"; openrouter: OpenRouterStatus | null }
   /**
+   * Firecrawl, as Settings draws it: whether a key is given (its `hint`),
+   * the switch and the limits, the account's credits, what kururu spent
+   * today and its last few requests. Sent on connect and whenever any of it
+   * moves. Never the key — see `shared/firecrawl.ts`.
+   */
+  | { type: "firecrawl"; firecrawl: FirecrawlStatus }
+  /**
    * Where the backups stand: the settings, the last commit and push, and
    * what went wrong. Sent on connect, after every run and whenever the
    * settings change. Never the repository's credentials — git holds those,
@@ -435,6 +445,13 @@ export type ServerMessage =
    * `outbox.ts`.
    */
   | { type: "outbox"; outbox: OutboxEntry[] }
+  /**
+   * The channels — Telegram today — as Settings and the drawer draw them:
+   * whether each is on, who may use it, how its link is. Sent on connect and
+   * whenever any of that moves. Never a token: `hint` is the last four of
+   * it. See `shared/channels.ts`.
+   */
+  | { type: "channels"; channels: ChannelsStatus }
   /** Raw pty output, exactly as it arrived, for a terminal this client is watching. */
   | { type: "output"; agentId: string; data: string }
   /**
@@ -500,6 +517,19 @@ export type ServerMessage =
    * the card, and applies no policy of its own.
    */
   | { type: "notify"; notification: Notification }
+  /**
+   * Reload this page once it is safe to: an agent asked — `bun run
+   * reload-window`, or the harness's `reload_window`. Sent only to a client
+   * that said it is a page on this Mac (`reloadable`), and the page is the one
+   * that decides when, since everything that makes a reload unsafe is known
+   * there and nowhere else (`reloadHolds` in `shared/reload.ts`). `until` is how
+   * long the ask lasts, in milliseconds from now: the server sends
+   * `reload-cancel` when it runs out, and a page whose server went away in the
+   * meantime lets the ask go by itself, since nobody is waiting on it.
+   */
+  | { type: "reload"; ask: ReloadAsk; until: number }
+  /** The ask ran out of time while this page was still held. */
+  | { type: "reload-cancel"; id: string }
   /** Answer to any client message carrying an `id`. */
   | { type: "reply"; id: number; ok: true; result: unknown }
   | { type: "reply"; id: number; ok: false; error: string };
@@ -1085,7 +1115,18 @@ export type ClientMessage =
    * Replied to with the new agent's id, because a spawn is the one thing here
    * that can fail in a way the next snapshot would not explain.
    */
-  | { type: "run-card"; id: number; workspaceId: string; cardId: string; launcher: string }
+  | {
+      type: "run-card";
+      id: number;
+      workspaceId: string;
+      cardId: string;
+      launcher: string;
+      /**
+       * A new conversation even on a card whose agent was put to sleep for
+       * sitting idle — which is otherwise resumed, as the card promised.
+       */
+      fresh?: boolean;
+    }
   /**
    * The card's last conversation, picked back up on the launcher it ran on —
    * `claude --resume` with the id the run was started under, or Codex's
@@ -1275,6 +1316,47 @@ export type ClientMessage =
   | { type: "set-openrouter-key"; id: number; key: string }
   | { type: "clear-openrouter-key" }
   /**
+   * A Firecrawl API key, on the OpenRouter key's terms: it travels inbound
+   * once, is tried against Firecrawl's credit figures (which costs nothing),
+   * saved owner-only and answered with the status, whose `hint` is all of it
+   * a client sees again. Replied to with why, when refused.
+   */
+  | { type: "set-firecrawl-key"; id: number; key: string }
+  /** Forget the Firecrawl key, and the switch and limits kept beside it. */
+  | { type: "clear-firecrawl-key" }
+  /** Firecrawl's switch and its two limits, any of them. Replied to with the status. */
+  | { type: "set-firecrawl"; id: number; enabled?: boolean; pageLimit?: number; dailyCredits?: number }
+  /** Fetch one test page through Firecrawl — a credit. Replied to with its title and length, or why not. */
+  | { type: "test-firecrawl"; id: number }
+  /**
+   * A channel's bot token, the second message that carries a secret, and on
+   * the OpenRouter key's terms: it travels inbound once, is tried against the
+   * channel, saved owner-only and answered with the status, whose `hint` is
+   * all of it a client sees again. Replied to with why, when refused.
+   */
+  | { type: "channel-token"; id: number; kind: ChannelKind; token: string }
+  /** Forget a channel: its token, its settings and its list of accounts. */
+  | { type: "channel-forget"; kind: ChannelKind }
+  /**
+   * A channel's switch, the profile it talks to (by id; null for whichever
+   * is active), and whether its replies are spoken here too. Any of them.
+   * Replied to with why, when switching on is refused — no token, nobody
+   * allowed.
+   */
+  | { type: "channel-set"; id: number; kind: ChannelKind; enabled?: boolean; profileId?: string | null; speakReplies?: boolean }
+  /** Start or stop listening for a pairing code. Replied to with the status, which carries the code. */
+  | { type: "channel-pair"; id: number; kind: ChannelKind; on: boolean }
+  /** Put an account on the list: the one that sent the pairing code, or an id typed by hand. Replied to with why, when refused. */
+  | { type: "channel-allow"; id: number; kind: ChannelKind; userId: string }
+  /** "Not me": the account that sent the code is not yours. Ends the pairing. */
+  | { type: "channel-refuse"; kind: ChannelKind }
+  /** Take an account off the list. */
+  | { type: "channel-disallow"; kind: ChannelKind; userId: string }
+  /** Send a test message to every account on the list. Replied to with a sentence either way. */
+  | { type: "channel-test"; id: number; kind: ChannelKind }
+  /** Forget the count of messages from accounts not on the list. */
+  | { type: "channel-clear-ignored"; kind: ChannelKind }
+  /**
    * The backup settings, all at once. A remote that cannot be reached is a
    * refusal with git's reason, and the settings are not changed: a switch
    * turned on against a repository nobody can push to would fail quietly
@@ -1311,6 +1393,19 @@ export type ClientMessage =
    */
   | { type: "talking"; talking: boolean }
   /**
+   * This client is a page on this Mac that an agent may ask to reload — the
+   * desktop window, the floating pill, or a browser on a loopback address —
+   * and so is sent `reload`. A phone never says it, and is never asked.
+   * Re-sent on a reconnect, on `looking`'s reasoning. `reloaded` is the asks
+   * the page that was here before this one reloaded for, sent once by the page
+   * that came back, which is how the agent hears that the window is back.
+   */
+  | { type: "reloadable"; page: ReloadPage; reloaded?: string[] }
+  /** What is holding those asks on this page now. Sent when it changes, never on a timer. */
+  | { type: "reload-held"; ids: string[]; holds: ReloadHold[] }
+  /** This page is reloading for those asks, now. */
+  | { type: "reloading"; ids: string[] }
+  /**
    * What became of a reply on this client, which is how the server knows
    * what was missed. `held`: its first sentence arrived and it will be
    * played here, now or once the hush lifts. Not `held`: it was let go
@@ -1331,8 +1426,13 @@ export type ClientMessage =
    * job is to bring you to the drawer; once you are there it has done it.
    */
   | { type: "kuru-seen"; profileId: string; utterances: string[] }
-  /** Say one reply again, from the drawer's Play on that reply. */
-  | { type: "kuru-replay"; profileId: string; utterance: string }
+  /**
+   * Say one reply again, from the drawer's speaker on that reply. `text` is
+   * the reply as the drawer already shows it, for a reply the missed list no
+   * longer remembers — one already heard — which has no other copy of its
+   * words left on the server to say again.
+   */
+  | { type: "kuru-replay"; profileId: string; utterance: string; text?: string }
   /**
    * A message typed in the drawer's composer, for Kuru: the voice's road
    * without the clip. Through the outbox, so it gets the same queued, sent,
@@ -1408,7 +1508,9 @@ export const GIT_SCAN_MS = 4000;
 export const GIT_STATUS_MS = 10_000;
 /**
  * How often each profile's allowance is asked for. Slowest of the lot by two
- * orders of magnitude, and the only poll in kururu that leaves the machine.
+ * orders of magnitude, and one of the few polls in kururu that leave the
+ * machine — OpenRouter's balance, and Telegram's long poll while that channel
+ * is on, are the others.
  *
  * A minute is not a compromise between freshness and politeness — it is the
  * resolution of the thing being measured. The session window is five hours and

@@ -13,14 +13,20 @@ in this folder.
 | `harness.ts` | The harness's vocabulary: the MCP tool catalogue, the role prompt, key and paste grammar, when a waiting message may be typed, the frames of a notice, transcript turns. Pure, tested |
 | `lifecycle.ts` | The line `lifecycle.log` is made of, and reading it back forgivingly. Three processes write it; two of them are plain JS and keep in step by hand |
 | `voice.ts` | The voice's vocabulary: settings, the voice catalogue, which language a text is in, which of two transcripts is real, what of a reply to say aloud, the WAV encoder. Pure, tested |
+| `reload.ts` | An agent reloading the window: what holds a reload, who asked in words, what the agent is told. Pure, tested |
 | `kuru.ts` | The conversation with Kuru as one list: turns, your messages' states and each reply's fate merged, the chip's two counts, the card codes in a reply. Pure, tested |
+| `needs.ts` | What needs you across a profile's workspaces — an agent asking, a card in Review, a turn ended unseen, a card whose agent went — and the walk to the next. Pure, tested |
+| `channels.ts` | Other doors into that conversation — Telegram. The kinds and their marks, the settings, `judge` (the allow-list decision for one message), pairing codes, splitting a reply, `replySpoken`, the status a window draws. Pure, tested. See [channels](channels.md) |
 | `board.ts` | A workspace's cards, and what an agent's status does to the one it was handed. Also the profile's board, a card's dates, and the timeline's layout |
 | `store.ts` | The database's pure half: the keys a profile and a workspace are known by, a board change as events (`diffBoards`), a typed query as one FTS5 takes, the export's rows. See [data](data.md) |
+| `firecrawl.ts` | The web for agents: the settings, the four tools as their CLIs are told them, what may be fetched, the day's budget, Firecrawl's answers read and wrapped as untrusted, the launch flags. Pure, tested. See [web](web.md) |
 | `backup.ts` | What leaves the machine and what never does: the allow-list, the settings, the commit subject. See [data](data.md#backups) |
 | `days.ts` | Calendar days as strings, and the arithmetic over them. Why a card's date is not a timestamp |
 | `projects.ts` | What a repository has been told about itself, and how a card's worktree is named |
 | `machines.ts` | A machine, one sample of it, a workspace's pin to one, and the command line of a shell or an agent on it — built and read back, with the install-and-login check typed ahead of an agent. See [machines](machines.md) |
 | `onscreen.ts` | What a remote agent is doing, read off its screen: working, asking, missing, quiet — and the edges a hook would have reported. See [machines](machines.md#status-read-off-the-screen) |
+| `sleep.ts` | When a card's agent is idle enough to end: the rule, whether a reply asked you something, how much is typed into a prompt and not sent. See [layout](layout.md#idle-card-agents) |
+| `sessions.ts` | The CLIs' conversation files read back: which Codex rollout is a card's, and an agent's last reply out of a transcript or a rollout. Pure |
 | `keys.ts` | Every action, ghosttown's defaults, and a user's overrides |
 | `labels.ts` | What to call a terminal and what to say it is doing — three places must agree |
 | `notify.ts` | When kururu may interrupt you, and the words. Ported policy |
@@ -46,6 +52,7 @@ in this folder.
 | `src/agents/report.ts` | Parses what an agent says about itself |
 | `src/hostlink.ts` | The protocol between the halves, and the local pair for tests |
 | `src/hostsock.ts` | That protocol over a unix socket. The framing, nothing else |
+| `src/proctitle.ts` | Naming a process without a Dock tile: on macOS a title registers it as an app of its bundle's kind, so node runs on Electron's `LSUIElement` helper and a main binary goes unnamed |
 | `src/hostlaunch.ts` | Starting the host as a launchd job, in a coalition of its own, on a clone of Kururu.app under `runtime/`. Why a Force Quit used to end every agent |
 
 **The restartable half:**
@@ -70,15 +77,21 @@ in this folder.
 | `src/record.ts` | Rolling raw-stream tape per agent, for bugs you can't reproduce |
 | `src/transcript.ts` | How full a Claude Code window is, off its transcript. Ported |
 | `src/usage.ts` | The plan allowance, off a Claude credential — the machine's or the profile's. Read, never written |
-| `src/machines.ts` | The sidebar's machines (a VPS, a PC on the tailnet): the user's own `ssh`, `BatchMode`, one fixed read-only script, `tmux ls` before a session that types something, and `tmux kill-session` when a session tab is closed. A client names a host and nothing else (`shared/machines.ts`, [machines](machines.md)) |
+| `src/machines.ts` | The sidebar's machines (a VPS, a PC on the tailnet): the user's own `ssh`, `BatchMode`, one fixed read-only script, `tmux ls` before a session that types something, `tmux kill-session` when a session tab is closed, and two fixed reads of an agent's conversation files for `sleep.ts`. A client names a host and nothing else (`shared/machines.ts`, [machines](machines.md)) |
 | `src/onscreen.ts` | Reads each remote agent's screen every two seconds and posts the status through `host.report`, as a hook would have ([machines](machines.md#status-read-off-the-screen)) |
+| `src/sleep.ts` | Ends a card's agent that has sat idle, once its conversation is made sure of, through the close button's own `endTerminal`; learns Codex runs' ids. `GET /api/sleep` says why each is still awake ([layout](layout.md#idle-card-agents)) |
+| `src/sessions.ts` | The CLIs' files on this disk, bounded reads only: a Codex run's rollout found, any conversation's tail by its id |
 | `src/openrouter.ts` | The sidebar's OpenRouter balance and spend, read with a management key kept owner-only in `~/.config/kururu/openrouter.json`. GETs only; the key comes in once and never goes back out (`shared/openrouter.ts`) |
+| `src/firecrawl.ts` | Firecrawl for every agent: the key owner-only in `~/.config/kururu/firecrawl.json`, read per request and never lent; the calls behind `POST /mcp/web`; the day's budget reserved before a call and settled after; the flags a launch is given. `KURURU_FIRECRAWL_API` points it at a stand-in on loopback ([web](web.md)) |
 | `src/databases.ts` | The database sheet: `DATABASE_URL` read out of the workspace's env files at the moment of connecting and never held, every query in a `READ ONLY` transaction unless the switch says otherwise, reads bounded through a cursor. Postgres only (`shared/databases.ts`) |
 | `src/report-cli.ts` | What a Claude Code hook runs. Not in `agents/` on purpose. Also carries the session's inbox socket, transcript path and last reply for the harness |
 | `src/harness.ts` | The harness's hands: kururu's verbs as MCP tools for one profile, a terminal read as text, the user's words typed into a pty when it may take them, the status feed into the harness's inbox. Explicit targets, never `active` (`shared/harness.ts`) |
-| `src/mcp.ts` | Five methods of MCP over JSON-RPC, written out rather than the SDK. Pure; served at `POST /mcp` |
+| `src/mcp.ts` | Five methods of MCP over JSON-RPC, written out rather than the SDK. Pure; served at `POST /mcp` for the harness and `POST /mcp/web` for every agent |
 | `src/voice.ts` | The harness's ears and mouth: a clip through `yap` once per language, the words into the harness; a reply through Kokoro (or `say`) a sentence at a time, Spanish phonemised by `espeak-ng`. `/api/voice/hear`, `/api/speech` (`shared/voice.ts`) |
 | `src/kuru.ts` | The conversation assembled for the drawer, from the store's turns, the outbox and the voice's missed list — the `kuru` message, `GET /api/kuru`, the counts on `/api/health` |
+| `src/channels.ts` | What each channel hears of Kuru's turns: told what Kuru took in and said, decides whether a reply is spoken here, echoes your words from here, says when a channel's message failed |
+| `src/telegram.ts` | The Telegram bot: its token owner-only in `~/.config/kururu/telegram.json`, read per request and never sent back; the long poll (no webhook, nothing listens); the queue out; pairing. `KURURU_TELEGRAM_API` points it at a stand-in |
+| `src/reload.ts` | Agents' reload asks: sent to every page on this Mac, timed, answered with what each page did. Reloads nothing itself |
 | `src/kokoro.ts` | Kokoro in a process of its own (`dist/kokoro.mjs`), forked by `voice.ts` and talked to over IPC. Never exits the ordinary way: its ONNX runtime aborts on exit, so it ends by SIGKILL |
 | `src/devservers.ts` | lsof + ps discovery of what is listening, and what started it — and stopping one: the named command's tree, never a terminal's (`stopTargets`). Never kururu itself (`isKururu`) |
 | `src/proxy.ts` | Per-dev-server reverse proxy (HTTP + WS) for phone access |
@@ -103,6 +116,7 @@ in this folder.
 | `src/logins.ts` | Where a profile's logins live, and the two env vars. Makes, never deletes |
 | `run.mjs` | Builds, spawns and re-spawns the server, one at a time, and writes down why. What `C-a B` reaches. Shipped in the app and run with `--no-build --entry`; `SIGUSR2` is "cycle now" |
 | `status.mjs` | The daemon has no face; this is it. Socket + `/api/agents`, then the end of `lifecycle.log` |
+| `reload-window.mjs` | An agent's ⌘R: asks the server, waits, prints what happened, and asks again across a server restart |
 | `kill-hosts.mjs` | Finds hosts by socket, asks, SIGTERMs |
 
 ## `web/` — React 19 + Vite. One build; the desktop is what it is shaped for
@@ -128,7 +142,9 @@ in this folder.
 | `src/drop.ts` | A file dropped on a terminal → the path to type. Pure |
 | `src/notify.ts` | Making the noise and drawing the card. No policy |
 | `src/voice.ts` | The talk key (hold or tap), the microphone as PCM off a worklet, and the player for what the harness says. Module state, like `session.ts` |
+| `src/reload.ts` | When this page may reload for an agent — the voice, the hands, what is open over it — and the notice carried across the reload |
 | `src/kuru.ts` | Whether the Kuru drawer is open and at which reply, for every door that opens it; what Kuru is doing in one word, for the chip and the drawer |
+| `src/needs.ts` | Whether the drawer of things that need you is open, for the tray and the key; one drawer at a time with Kuru's |
 | `src/mascot.ts` | Loads a sheet once per URL and reports its size |
 | `src/mermaid.ts` | The one thing the reader draws itself — a diagram needs a DOM |
 | `src/labels.ts` | How the window draws the answers `shared/labels.ts` decides |
@@ -150,14 +166,16 @@ for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` ·
 `aria-hidden` span) · `Dialog.tsx` (while one is up, no key reaches a pty) ·
 `Menu.tsx` · `Reader.tsx` (**the thing kururu was built for**; one draggable tab per document) ·
 `Board.tsx` (a workspace's cards; the robot hands one to an agent) ·
-`Search.tsx` (the search over every board and the conversations, and the deleted cards, in the profile board's sheet) ·
-`ProfileBoard.tsx` (the profile's own cards, in a sheet over the window) ·
+`Search.tsx` (the search over every board and the conversations, and the deleted cards, in the profile board's sheet; a card hit is a door to the card) ·
+`ProfileBoard.tsx` (the profile's own cards, in a sheet over the window; its own and no other's) ·
+`NeedsDrawer.tsx` (what needs you across the workspaces, in three bands, with the next one a press away; opened by the status bar's tray) ·
 `Timeline.tsx` (that board by when its cards are for; holds only which weeks it is showing) ·
 `FileTree.tsx` (markdown to the reader, the rest to nvim; holds the reader's zoom) · `DocPicker.tsx` (an empty reader only) ·
 `Keybar.tsx` · `Reach.tsx` · `Crash.tsx` · `HelpOverlay.tsx` (printed from the
 keymap, so it cannot document a dead key) · `VoicePill.tsx` (the microphone is
 open, and this is how loud the room is; dragged anywhere, ✕ or Esc to stop Kuru, a tap opens the drawer) ·
-`KuruDrawer.tsx` (the conversation with Kuru: every message's state, every reply's fate, a composer; opened by the status bar's chip) · `Settings*.tsx`.
+`ReloadNotice.tsx` (who reloaded the window and why, for ten seconds after an agent did) ·
+`KuruDrawer.tsx` (the conversation with Kuru: every message's state, every reply's fate, a composer, the Telegram switch; opened by the status bar's chip) · Settings is `web/src/settings/`, not a component: `ui.tsx` is the language every page is written in (a group is a card of rows; a row is a label and one control of a dozen kinds; the in-place danger question; lists, galleries, steps, details), `Settings.tsx` the shell and the list of pages, and one file per page (`Channels.tsx` is the Telegram walkthrough, `Firecrawl.tsx` the Firecrawl one).
 
 ## `desktop/` — Electron main + preload, and the esbuild step
 

@@ -105,7 +105,8 @@ The report route already sees the harness's prompt on every
 `UserPromptSubmit` — the one report that is `working` with a message — and
 its reply on every `Stop`, with the session id in the profile's harness
 record. Each becomes a turn (`recordTurn` in `index.ts`); a `[voice]`
-prefix makes `via` spoken, and `promptCarries` links the turn to the outbox
+prefix makes `via` spoken and a `[telegram]` one makes it `telegram` (see
+[channels](channels.md)), and `promptCarries` links the turn to the outbox
 message it delivered. Every other agent's reply is kept too, as an `agent`
 conversation named by its transcript, so the search finds what an agent
 said about a card. Those stay out of the mirror, since an agent's reply can
@@ -122,9 +123,11 @@ with ranked hits carrying this session's ids beside the keys, so the window
 can go to the card. Cards first, then turns, each ranked within its kind —
 the two scales are not comparable.
 
-Where it is: the **Search** button on the profile board's sheet, which is
-already where every board in the profile is seen from; a card hit shows
-that workspace's board, a turn hit opens its words in place. For the
+Where it is: the **Search** button on the profile board's sheet. A card hit
+goes to the card, scrolled to and lit — one of the profile's own in the
+sheet, a workspace's on that workspace's board in its pane, with the sheet
+closed — and a turn hit
+opens its words in place. For the
 harness, two tools: `search` with the same arguments, answering in lines
 like `card KUR-12 "…" (Kururu, Done, moved 2026-10-09 14:02; id c…) — …`,
 and `card_history` for a card's events ([harness](harness.md#the-tools)).
@@ -173,9 +176,10 @@ be on; a repository nobody can push to failing quietly every five minutes
 is the one way a backup is worse than none.
 
 **An allow-list, not a deny-list** (`shared/backup.ts`). The config
-directory holds a share token, an OpenRouter key, the leftovers of the
-removed accounts feature with ssh keys in them, and every profile's Claude
-login. The files that go are named by name, and anything not named stays:
+directory holds a share token, an OpenRouter key, a Telegram bot token, a
+Firecrawl key, the
+leftovers of the removed accounts feature with ssh keys in them, and every
+profile's Claude login. The files that go are named by name, and anything not named stays:
 
 | in the repository | from |
 |---|---|
@@ -187,7 +191,7 @@ login. The files that go are named by name, and anything not named stays:
 | `state/session.json` | the arrangement: keys, never boards |
 | `README.md` | what this is and how `bun run restore` uses it |
 
-Never: `access.json`, `openrouter.json`, `identities/`, `.claude.json`,
+Never: `access.json`, `openrouter.json`, `telegram.json`, `identities/`, `.claude.json`,
 `history.jsonl`, the transcripts, every cache, the database binary (git
 keeps a whole copy per change; the text rebuilds it), and agents' replies.
 Secrets are left out rather than encrypted: an encrypted blob on GitHub is a
@@ -213,7 +217,8 @@ through the same importer, and puts config, memory folders and the
 arrangement back — only where nothing is, unless `--replace`, which moves
 what is there to `.bak` first. It refuses to run while a server is up, and
 ends by printing what the backup never carried: a login per profile, the
-OpenRouter key, Input Monitoring.
+OpenRouter key, the Firecrawl key, the Telegram token and account, Input
+Monitoring.
 
 ## Git, in two files
 

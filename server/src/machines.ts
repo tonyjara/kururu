@@ -9,9 +9,11 @@
  * which `validHost` holds to a grammar with no room for an option, and the
  * command that runs on the far side is `SCRIPT` below and nothing else. It
  * only reads — `/proc` and `df` — because it runs as whoever the user's ssh
- * config logs in as, which on a fresh VPS is root. The two other lines this
- * file sends are `tmux kill-session` on a session name `sessionName` made,
- * and `tmux ls`, which only reads.
+ * config logs in as, which on a fresh VPS is root. The other lines this file
+ * sends are `tmux kill-session` on a session name `sessionName` made, `tmux
+ * ls`, and the two reads of an agent's conversation files that `sleep.ts`
+ * makes before ending an idle card's agent there — each a constant with a
+ * UUID or a whole number in it, and nothing else.
  *
  * **Nothing is ever asked for.** `BatchMode` means ssh fails rather than
  * prompting for a passphrase or a host key nobody is there to confirm: the
@@ -38,6 +40,9 @@ import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { SESSION_ID } from "../../shared/board";
+import type { AgentCli } from "../../shared/launchers";
+import { ROLLOUT_MARK } from "../../shared/sessions";
 import {
   adoptMachineList,
   machineName,
@@ -260,4 +265,62 @@ export function endSession(host: string, session: string): void {
     ending.delete(session);
     if (!result.ok) console.error(`kururu: could not end tmux session ${session} on ${host}: ${result.error}`);
   });
+}
+
+/**
+ * A POSIX script for `sh -c` on the far side, whatever the account's login
+ * shell is — `shared/machines.ts`'s rule for `REMOTE_SCRIPT`: no single quote
+ * and no backslash in it, which is what lets it ride inside single quotes
+ * through bash, zsh and fish alike.
+ */
+function posix(script: string): string {
+  if (/['\\]/.test(script)) throw new Error("a remote script may not hold a quote or a backslash");
+  return `sh -c '${script}'`;
+}
+
+/**
+ * The Codex rollouts a machine has touched in the last `minutes`, each as its
+ * first line and its first user message, cut short — the listing
+ * `parseRolloutListing` reads, for finding a card's conversation id there.
+ * Null when the machine could not be asked; empty when it has none.
+ *
+ * `-mmin` rather than GNU's `-newermt`, so a Mac on the other end answers
+ * too. The first line is twenty kilobytes of instructions and only its
+ * start is wanted; the user message is the card's prompt, kept to a few
+ * kilobytes, which is plenty to tell it from another. `type.:.user_message`
+ * is the event's key and value with the quotes matched by `.`, since the
+ * script may not hold one.
+ */
+export async function codexRolloutsOn(host: string, minutes: number): Promise<string | null> {
+  if (!validHost(host) || !Number.isInteger(minutes) || minutes < 1) return null;
+  const script = [
+    `d="\${CODEX_HOME:-$HOME/.codex}/sessions"`,
+    `[ -d "$d" ] || exit 0`,
+    `find "$d" -name "rollout-*.jsonl" -mmin -${Math.min(minutes, 60 * 24 * 31)} 2>/dev/null | head -n 40 | while IFS= read -r f; do`,
+    `echo "${ROLLOUT_MARK}"`,
+    `head -n 1 "$f" | cut -c 1-3000`,
+    `head -c 1000000 "$f" | grep -m 1 "type.:.user_message" | cut -c 1-6000`,
+    `done`,
+  ].join("\n");
+  const result = await run(host, posix(script));
+  return result.ok ? result.text : null;
+}
+
+/** The tail of a conversation read on a machine: past what a last turn takes, short of what ssh is asked to carry. */
+const REMOTE_TAIL = 300_000;
+
+/**
+ * The end of an agent's conversation file on a machine, found by its id —
+ * Claude's transcript under any project, Codex's rollout under any day. Null
+ * when the machine could not be asked; an empty string when it was, and the
+ * file is not there.
+ */
+export async function sessionTailOn(host: string, cli: AgentCli, id: string): Promise<string | null> {
+  if (!validHost(host) || !SESSION_ID.test(id)) return null;
+  const script =
+    cli === "claude"
+      ? `tail -c ${REMOTE_TAIL} "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*/${id}.jsonl 2>/dev/null; true`
+      : `f=$(find "\${CODEX_HOME:-$HOME/.codex}/sessions" -name "rollout-*-${id}.jsonl" 2>/dev/null | head -n 1); [ -n "$f" ] && tail -c ${REMOTE_TAIL} "$f"; true`;
+  const result = await run(host, posix(script));
+  return result.ok ? result.text : null;
 }

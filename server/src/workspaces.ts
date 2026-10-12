@@ -24,7 +24,7 @@
  * profile, it always has at least one workspace, that workspace always has at
  * least one pane, and the focused pane always exists.
  */
-import { adoptBoard, adoptProfileBoard, emptyBoard, emptyProfileBoard, noteRun, transferCard, type Board, type Card, type CardWorktree } from "../../shared/board";
+import { adoptBoard, adoptProfileBoard, emptyBoard, emptyProfileBoard, noteRun, setRunSession, sleepRun, transferCard, type Board, type Card, type CardRun, type CardWorktree } from "../../shared/board";
 import { adoptHarness } from "../../shared/harness";
 import { adoptPin, type MachinePin } from "../../shared/machines";
 import type { HarnessState, Profile, ProfileSummary, Workspace, WorkspaceColor } from "../../shared/model";
@@ -1440,6 +1440,67 @@ export class Workspaces {
         if (!board || !board.cards.some((card) => card.run?.agentId === agentId)) continue;
         const next = noteRun(board, agentId, status, exited, now);
         if (next !== board) this.as("automation", () => this.mutate(profile.id, workspace.id, (w) => ({ ...w, board: next })));
+      }
+    }
+  }
+
+  /**
+   * Every card, in every profile, whose run names a terminal — what
+   * `server/src/sleep.ts` looks over. A card's run and nothing else: an agent
+   * opened from the menu is no card's, and neither is the harness.
+   */
+  cardRuns(): { profileId: string; workspaceId: string; card: Card & { run: CardRun } }[] {
+    const out: { profileId: string; workspaceId: string; card: Card & { run: CardRun } }[] = [];
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) {
+        for (const card of workspace.board?.cards ?? []) {
+          if (card.run?.agentId) out.push({ profileId: profile.id, workspaceId: workspace.id, card: card as Card & { run: CardRun } });
+        }
+      }
+    }
+    return out;
+  }
+
+  /** Every conversation id on any card, so the same one is never learned for two. */
+  cardSessions(): Set<string> {
+    const ids = new Set<string>();
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) {
+        for (const card of workspace.board?.cards ?? []) if (card.run?.sessionId) ids.add(card.run.sessionId);
+      }
+    }
+    return ids;
+  }
+
+  /**
+   * The run in this terminal, put to sleep — see `sleepRun`. True only when
+   * the board took it: a change the database refuses is logged and not made,
+   * and the caller must not end an agent its card does not say is asleep.
+   */
+  sleepRunOf(agentId: string): boolean {
+    const now = Date.now();
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) {
+        const card = workspace.board?.cards.find((c) => c.run?.agentId === agentId);
+        if (!card) continue;
+        this.as("automation", () => this.mutate(profile.id, workspace.id, (w) => ({ ...w, board: sleepRun(w.board!, card.id, now) })));
+        const after = this.workspaceIn(profile.id, workspace.id)?.board?.cards.find((c) => c.id === card.id);
+        return after?.run?.state === "asleep";
+      }
+    }
+    return false;
+  }
+
+  /** A conversation id learned for the run in this terminal — Codex's, off its rollout. */
+  noteRunSession(agentId: string, sessionId: string): void {
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) {
+        const board = workspace.board;
+        const card = board?.cards.find((c) => c.run?.agentId === agentId);
+        if (!board || !card) continue;
+        const next = setRunSession(board, card.id, agentId, sessionId);
+        if (next !== board) this.as("automation", () => this.mutate(profile.id, workspace.id, (w) => ({ ...w, board: next })));
+        return;
       }
     }
   }

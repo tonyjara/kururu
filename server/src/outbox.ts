@@ -53,6 +53,7 @@ import { open, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { channelOfMessage, channelWords } from "../../shared/channels";
 import { spokenMessage } from "../../shared/kuru";
 import type { AgentStatus } from "../../shared/model";
 import { VOICE_PREFIX } from "../../shared/store";
@@ -118,6 +119,8 @@ export interface OutboxDeps {
   harness: (profileKey: string) => KuruNow | null;
   /** Hold every client's speech while `who` is talking — `Voice.talk`. */
   talk: (who: object, on: boolean) => void;
+  /** Kuru took a message — between turns or mid-way through one, where no prompt hook says so. For the channels, which need to know what a turn answered. */
+  delivered?: (entry: StoredOutboxEntry) => void;
 }
 
 /** Where the audio is kept: the state directory, since a clip is a thing kururu wants back and nobody chose. */
@@ -175,8 +178,9 @@ export class Outbox {
   }
 
   /**
-   * A message typed in the drawer's composer, from `kuru-say`: the voice's
-   * road without the clip. It joins the list as `queued` with its words
+   * A message typed in the drawer's composer, from `kuru-say`, or written in
+   * a channel such as Telegram (`server/src/telegram.ts`), whose id says
+   * which: the voice's road without the clip. It joins the list as `queued` with its words
    * already made, so it goes to Kuru in order with whatever was said before
    * it, is confirmed by Kuru's own hook the way a clip is, and is typed again
    * once or failed on the same rules. No audio, so nothing to hear and
@@ -417,8 +421,11 @@ export class Outbox {
     this.handed.add(entry.id);
     try {
       // The prefix tells Kuru a name may be misheard, which is true of a clip
-      // and not of a line typed in the drawer.
-      const { outcome } = await this.deps.deliver(entry.profileKey, spokenMessage(entry) ? `${VOICE_PREFIX} ${entry.text}` : entry.text, {
+      // and not of a line typed in the drawer; a channel's mark tells it the
+      // answer goes back to a phone as text.
+      const channel = channelOfMessage(entry.id);
+      const words = spokenMessage(entry) ? `${VOICE_PREFIX} ${entry.text}` : channel ? channelWords(channel, entry.text) : entry.text;
+      const { outcome } = await this.deps.deliver(entry.profileKey, words, {
         typed: () => this.typed(entry),
         dropped: () => {
           // Kuru exited holding it: it goes back to the next one, once.
@@ -460,6 +467,7 @@ export class Outbox {
     this.drops.delete(entry.id);
     this.busySince.delete(entry.id);
     this.removeAudio(entry.id);
+    this.deps.delivered?.(entry);
     this.changed();
   }
 

@@ -6,14 +6,16 @@
  * in the profile is already seen from, and "find the card about Y" is a
  * question about all of them. The answer comes from the server's database
  * (`/api/search`) — the window holds no index — and a card hit is a door:
- * clicking it shows that workspace's board in the sheet, where the card is.
- * A turn hit opens the words in place, since there is nowhere else they
- * are drawn yet.
+ * clicking it hands the card back to the sheet by workspace and id, and the
+ * sheet takes you to it — its own board for one of its cards, the
+ * workspace's board in its pane for the rest. A turn hit opens the words
+ * in place, since there is nowhere else they are drawn yet.
  *
  * The deleted list is the other half of "never lost": a card deleted by
  * hand is marked and kept, and this is where it comes back from.
  */
 import { useEffect, useRef, useState } from "react";
+import { CHANNEL_NAMES, isChannelKind } from "../../../shared/channels";
 import { COLUMN_LABELS } from "../../../shared/board";
 import type { SearchHit } from "../../../shared/store";
 import * as api from "../session";
@@ -22,10 +24,11 @@ const TYPING_MS = 200;
 
 export function BoardSearch({
   profileId,
-  onPickWorkspace,
+  onPickCard,
 }: {
   profileId: string;
-  onPickWorkspace: (workspaceId: string | null) => void;
+  /** A card hit, clicked: its workspace, or null for the profile's own board, and the card. */
+  onPickCard: (workspaceId: string | null, cardId: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[] | null>(null);
@@ -111,10 +114,10 @@ export function BoardSearch({
                 <button
                   className="search-hit-btn"
                   onClick={() => {
-                    onPickWorkspace(hit.workspaceId ?? null);
+                    onPickCard(hit.workspaceId ?? null, hit.id);
                     setQuery("");
                   }}
-                  title={hit.workspaceName ? `Show ${hit.workspaceName}'s board` : "Show this profile's board"}
+                  title={hit.workspaceName ? `Go to this card on ${hit.workspaceName}'s board` : "Open this card"}
                 >
                   <span className="search-hit-kind">card</span>
                   <span className="search-hit-title">
@@ -131,7 +134,7 @@ export function BoardSearch({
             ) : (
               <li key={`t${hit.id}`} className="search-hit">
                 <button className="search-hit-btn" onClick={() => setOpen(open === i ? null : i)} title="Show the whole turn">
-                  <span className="search-hit-kind">{hit.role === "you" ? (hit.via === "voice" ? "you, spoken" : "you") : hit.role === "kuru" ? "Kuru" : "an agent"}</span>
+                  <span className="search-hit-kind">{hit.role === "you" ? (hit.via === "voice" ? "you, spoken" : isChannelKind(hit.via) ? `you, on ${CHANNEL_NAMES[hit.via]}` : "you") : hit.role === "kuru" ? "Kuru" : "an agent"}</span>
                   <span className="search-hit-where">{when(hit.at)}</span>
                   <span className="search-hit-snip">{open === i ? hit.text : hit.snippet}</span>
                 </button>

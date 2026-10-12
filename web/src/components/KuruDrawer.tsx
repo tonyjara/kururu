@@ -16,9 +16,10 @@
  * length, and one word in the status inks for where they are — Saving,
  * Hearing, Waiting for Kuru, Sent, Delivered, Failed — with Resend and
  * Discard inline on a failed one. Kuru's replies carry the speaker glyph and
- * the full text; a heard one shows nothing else, an unheard one says so with a
- * Play of its own, the one being said says Speaking with Stop, and a line said
- * mid-turn through the `say` tool is drawn smaller. A live row at the foot
+ * the full text; the speaker is Play and Stop both, for any reply with words
+ * to say again, and shows which it is — an unheard one also says so beside
+ * it, the one audible right now says Speaking, and a line said mid-turn
+ * through the `say` tool is drawn smaller. A live row at the foot
  * says what Kuru is doing now, and a composer under it types to Kuru through
  * the same outbox a clip goes through — so the phone talks to Kuru today,
  * since playback works over plain http and only the microphone needs the
@@ -46,6 +47,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cardCode } from "../../../shared/board";
+import { CHANNEL_NAMES, channelReady, isChannelKind, type TelegramStatus } from "../../../shared/channels";
 import { KURU_SEEN_MS, clipLength, splitCardCodes, type KuruConversation, type KuruItem, type KuruReply, type YouItem } from "../../../shared/kuru";
 import type { AgentSnapshot, MascotConfig, Profile } from "../../../shared/model";
 import type { OutboxState } from "../../../shared/voice";
@@ -55,7 +57,7 @@ import { useKururu } from "../session";
 import { dismissVoice, talkDown, talkUp, useOutgoing, useVoiceUi, voiceIsRemote } from "../voice";
 import { Icon } from "./Icon";
 import { Mascot } from "./Status";
-import { MicIcon, SpeakerIcon } from "./VoiceIcons";
+import { MicIcon, PlaneIcon, SpeakerIcon } from "./VoiceIcons";
 
 /** How close to the foot the list has to be for a new item to keep it there. Reading something older must not be yanked away. */
 const STICK_PX = 48;
@@ -104,18 +106,75 @@ export function KuruDrawer({
   onClose: () => void;
   /** The composer has the keyboard, so the prefix and the panes must leave it alone. */
   onEditing: (editing: boolean) => void;
-  /** A card named in a reply was clicked: the profile board, at that card. */
+  /** A card named in a reply was clicked: take me to it — the profile's sheet for one of its own, the workspace's board for the rest. */
   onCard: (workspaceId: string | null, cardId: string) => void;
   /** Take me to Kuru's terminal — started, resumed or revealed. */
   onTerminal: () => void;
 }) {
-  const { kuru } = useKururu();
+  const { kuru, channels } = useKururu();
   const conversation = kuru.find((c) => c.profileId === profile.id) ?? null;
+  // The drawer is the active profile's, so Telegram is this conversation's
+  // when it talks to whichever profile is active, or was pointed at this one.
+  const telegram = channels?.telegram && channelReady(channels.telegram) && (channels.telegram.profileId ?? profile.id) === profile.id ? channels.telegram : null;
   const outgoing = useOutgoing();
   const ui = useVoiceUi();
   const live = kuruLive(profile, agents, conversation, ui.phase === "speaking");
   const list = useRef<HTMLOListElement>(null);
   const stuck = useRef(true);
+
+  /**
+   * The speaker icon's own replay: which row asked to hear its reply again.
+   * There is one player, so one id is enough. Set the moment it is asked
+   * for, so a click shows the stop state at once rather than waiting out the
+   * gap before the first sentence is ready; `started` keeps that optimism
+   * from reading as "done" the instant it is set, and is what tells a replay
+   * that reached the pill's phase from one that never did — the row clears
+   * only once the player has actually left `speaking`, not before it got
+   * there, whatever took it away: the reply ending, Escape, or another row's
+   * click stopping it first.
+   */
+  const [replayingId, setReplayingId] = useState<string | null>(null);
+  const replayStarted = useRef(false);
+  useEffect(() => {
+    if (!replayingId) return;
+    if (ui.phase === "speaking") {
+      replayStarted.current = true;
+      return;
+    }
+    if (replayStarted.current) {
+      replayStarted.current = false;
+      setReplayingId(null);
+    }
+  }, [ui.phase, replayingId]);
+
+  /**
+   * The speaker clicked, on any reply: stop whatever that row is doing if it
+   * is the one audible right now — this row's own replay, or Kuru genuinely
+   * saying it for the first time — through `dismissVoice`, the pill's ✕
+   * itself, so a reply cut off here lands unheard exactly as it would from
+   * there. Otherwise this reply was not playing, so anything else that was
+   * is stopped first — one player, one row at a time — and this one is asked
+   * for, with the words the drawer already has: a reply already heard has
+   * left the missed list and kept no other copy of them.
+   */
+  const onReplay = useCallback(
+    (item: KuruReply) => {
+      if (!item.utterance) return;
+      if (replayingId === item.id || item.fate === "speaking") {
+        dismissVoice();
+        if (replayingId === item.id) {
+          replayStarted.current = false;
+          setReplayingId(null);
+        }
+        return;
+      }
+      if (ui.phase === "speaking") dismissVoice();
+      replayStarted.current = false;
+      setReplayingId(item.id);
+      api.kuruReplay(profile.id, item.utterance, item.text);
+    },
+    [profile.id, replayingId, ui.phase],
+  );
 
   /**
    * Everything seen so far, by id, so items the socket's window has slid past
@@ -340,6 +399,7 @@ export function KuruDrawer({
             Mark all heard
           </button>
         )}
+        {telegram && <TelegramSwitch status={telegram} />}
         <button className="kuru-head-btn" onClick={onTerminal} title={live === "off" ? "Start Kuru's session, in a terminal beside the board" : "Go to Kuru's terminal (C-a a opens this drawer)"}>
           Terminal
         </button>
@@ -365,7 +425,7 @@ export function KuruDrawer({
           ) : item.kind === "you" ? (
             <You key={item.id} item={item} state={item.state} note={item.note} />
           ) : (
-            <Reply key={item.id} item={item} marked={marked === item.utterance} profileId={profile.id} cardOf={cardOf} onCard={onCard} />
+            <Reply key={item.id} item={item} marked={marked === item.utterance} replaying={replayingId === item.id} onReplay={onReplay} cardOf={cardOf} onCard={onCard} />
           ),
         )}
         {saving.map((clip) => (
@@ -421,13 +481,50 @@ export function KuruDrawer({
   );
 }
 
+/**
+ * The Telegram channel's switch, beside Terminal: the same switch as
+ * Settings → Channels, here because the drawer is where you notice you are
+ * leaving the Mac. Drawn only once the channel is set up — a token and an
+ * account — since a switch that can only refuse is not a switch. Its ink
+ * says on; a link that is failing says so in the warning ink and the title.
+ */
+function TelegramSwitch({ status }: { status: TelegramStatus }) {
+  const bot = status.bot ? `@${status.bot.username}` : "the bot";
+  const title = status.error
+    ? `Telegram: ${status.error}`
+    : status.enabled
+      ? `Kuru listens to Telegram: what you write to ${bot} comes here, and every reply also goes there. Click to turn it off.`
+      : `Telegram is off. Click to let ${bot} reach Kuru, and send Kuru's replies there.`;
+  return (
+    <button
+      className={`kuru-head-btn ${status.enabled ? (status.error ? "kuru-head-btn-warn" : "kuru-head-btn-on") : ""}`}
+      aria-pressed={status.enabled}
+      title={title}
+      onClick={() => void api.setChannel("telegram", { enabled: !status.enabled }).catch(() => {})}
+    >
+      <PlaneIcon />
+      <span>{status.enabled ? "Telegram on" : "Telegram off"}</span>
+    </button>
+  );
+}
+
 /** One of your messages. The state is passed beside the item so this page's `saving` can wear the row the server's states do. */
 function You({ item, state, note }: { item: YouItem; state: RowState; note: string | null }) {
   const word = state === "queued" ? (item.typedAt !== null ? "Sent" : STATE_WORD.queued) : STATE_WORD[state];
+  const channel = isChannelKind(item.via) ? item.via : null;
   return (
     <li className={`kuru-item kuru-you kuru-you-${state}`}>
       <span className="kuru-meta">
-        {item.via === "voice" ? <MicIcon /> : <KeysIcon />}
+        {item.via === "voice" ? (
+          <MicIcon />
+        ) : channel ? (
+          <span className="kuru-via" title={`From ${CHANNEL_NAMES[channel]}`}>
+            <PlaneIcon />
+            <span>{CHANNEL_NAMES[channel]}</span>
+          </span>
+        ) : (
+          <KeysIcon />
+        )}
         <time dateTime={new Date(item.at).toISOString()}>{saidAt(item.at)}</time>
         {item.via === "voice" && item.ms > 0 && <span className="kuru-length">{clipLength(item.ms)}</span>}
         {word && <span className={`kuru-state kuru-state-${state}`}>{word}</span>}
@@ -448,30 +545,54 @@ function You({ item, state, note }: { item: YouItem; state: RowState; note: stri
   );
 }
 
-/** One of Kuru's replies, with its fate beside it and a door onto every card it names. */
+/**
+ * One of Kuru's replies, with its fate beside it and a door onto every card
+ * it names. The speaker is the one control for Play and Stop both: it plays
+ * this reply again while idle, and stops whatever is audible — this replay,
+ * or Kuru saying it for the first time — while `active`.
+ */
 function Reply({
   item,
   marked,
-  profileId,
+  replaying,
+  onReplay,
   cardOf,
   onCard,
 }: {
   item: KuruReply;
   marked: boolean;
-  profileId: string;
+  replaying: boolean;
+  onReplay: (item: KuruReply) => void;
   cardOf: (code: string) => { workspaceId: string | null; cardId: string } | null;
   onCard: (workspaceId: string | null, cardId: string) => void;
 }) {
+  const active = replaying || item.fate === "speaking";
   return (
     <li
       className={`kuru-item kuru-reply ${item.aside ? "kuru-aside" : ""} ${item.fate ? `kuru-fate-${item.fate}` : ""} ${marked ? "kuru-marked" : ""}`}
       data-utterance={item.utterance ?? undefined}
     >
       <span className="kuru-meta">
-        <SpeakerIcon />
+        {item.utterance ? (
+          <button
+            type="button"
+            className={`kuru-speaker ${active ? "kuru-speaker-playing" : ""}`}
+            onClick={() => onReplay(item)}
+            title={active ? "Stop (Esc)" : "Play again"}
+            aria-label={active ? "Stop" : "Play this reply again"}
+            aria-pressed={active}
+          >
+            {active ? <Icon name="stop" /> : <SpeakerIcon />}
+          </button>
+        ) : (
+          <SpeakerIcon />
+        )}
         <time dateTime={new Date(item.at).toISOString()}>{saidAt(item.at)}</time>
-        {item.fate === "unheard" && <span className="kuru-state kuru-state-unheard">Unheard</span>}
-        {item.fate === "speaking" && <span className="kuru-state kuru-state-speaking">Speaking</span>}
+        {active ? (
+          <span className="kuru-state kuru-state-speaking">Speaking</span>
+        ) : item.fate === "unheard" ? (
+          <span className="kuru-state kuru-state-unheard">Unheard</span>
+        ) : null}
       </span>
       <p className="kuru-text">
         {splitCardCodes(item.text).map((part, i) => {
@@ -486,21 +607,6 @@ function Reply({
           );
         })}
       </p>
-      {item.fate === "unheard" && item.utterance && (
-        <span className="kuru-actions">
-          <button className="kuru-head-btn" onClick={() => api.kuruReplay(profileId, item.utterance!)} title="Say this reply again">
-            <Icon name="play" />
-            <span>Play</span>
-          </button>
-        </span>
-      )}
-      {item.fate === "speaking" && (
-        <span className="kuru-actions">
-          <button className="kuru-head-btn" onClick={dismissVoice} title="Stop Kuru">
-            Stop
-          </button>
-        </span>
-      )}
     </li>
   );
 }

@@ -66,6 +66,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { bundleOf } from "./proctitle";
 
 /** Every host job's label starts with this, and nothing else's does. */
 export const HOST_LABEL_PREFIX = "io.github.tonyjara.kururu.ptyhost.";
@@ -167,16 +168,6 @@ export function jobPid(print: string): number | null {
   return found ? Number(found[1]) : null;
 }
 
-/**
- * The `.app` an executable is the main binary of, or null. Innermost, so a
- * helper inside a bundle names the helper's bundle — though nothing here runs
- * on a helper.
- */
-export function bundleOf(exe: string): string | null {
-  const found = /^(.*?\.app)\/Contents\/MacOS\/[^/]+$/.exec(exe);
-  return found ? found[1]! : null;
-}
-
 /** `path` moved from under `from` to the same place under `to`, or unchanged when it is not under `from`. */
 export function remapInto(path: string, from: string, to: string): string {
   return path.startsWith(`${from}/`) ? `${to}${path.slice(from.length)}` : path;
@@ -201,8 +192,9 @@ function plistValue(plist: string, key: string): string | null {
 /**
  * The bundle this host may run a copy of.
  *
- * The one the server is on comes first, and not only because it is the build
- * being run: launchd makes the host its own *responsible process*, so what
+ * The one the server is on comes first — the app around the helper it runs
+ * on, since that is where the app starts it (`proctitle.ts`) — and not only
+ * because it is the build being run: launchd makes the host its own *responsible process*, so what
  * macOS's privacy settings allow every agent is what they allow this binary.
  * The server's own build is the one whose grants the agents had until now,
  * and a copy of it has them still. An installed Kururu.app comes next, for a
@@ -278,9 +270,13 @@ export interface Runtime {
  *
  * In a packaged app the entry is in `Resources/server` beside the node-pty its
  * spawns need, so it moves into the clone with the binary; from a checkout it
- * is the checkout's, as before. Any failure gives back what the host ran on
- * before this existed, with the reason, because a host on the old binary is
- * much better than no host.
+ * is the checkout's, as before. The binary is the clone's main one and never
+ * its helper, though the server itself runs on a helper: the host is its own
+ * responsible process, and the main binary is the one macOS's privacy settings
+ * know. It goes unnamed for that rather than take a Dock tile (`proctitle.ts`).
+ *
+ * Any failure gives back what the host ran on before this existed, with the
+ * reason, because a host on the old binary is much better than no host.
  */
 export function hostRuntime(execPath: string, entry: string, dir: string): Runtime {
   if (process.platform !== "darwin") return { exe: execPath, entry, note: "" };

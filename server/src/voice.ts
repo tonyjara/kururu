@@ -61,6 +61,11 @@
  * model's own tokeniser was trained against, and straight into the model —
  * the library's phonemiser is used for English and nothing else.
  *
+ * **The lab is a third engine, on trial.** Voices from `voicelab.ts` — Python
+ * processes beside the Kokoro one, out of a folder made by hand — are offered
+ * when their model is installed and fall back to the Mac's when it is not,
+ * as Kokoro's do before the download. See `LAB_MODELS` in `shared/voice.ts`.
+ *
  * On the restartable side. Editing it costs a reconnect, and the first
  * sentence after a restart costs the second or two the model takes to load,
  * because the Kokoro process goes down with the server that started it.
@@ -81,6 +86,7 @@ import {
   capMissed,
   detectLanguage,
   kokoroVoice,
+  labOptions,
   parseSayVoices,
   pickTranscript,
   sentencesOf,
@@ -102,6 +108,7 @@ import {
 import type { ServerMessage } from "../../shared/wire";
 import { readConfigFile, writeConfigFile } from "./config";
 import type { FromKokoro, ToKokoro } from "./kokoro";
+import { Lab } from "./voicelab";
 
 const run = promisify(execFile);
 
@@ -253,6 +260,8 @@ export class Voice {
   private lastProgressSent = -1;
   /** The clients talking, each with the timer that stops believing it. Keyed by whatever `index.ts` knows a client by. */
   private readonly talkers = new Map<object, ReturnType<typeof setTimeout>>();
+  /** The engines on trial, in processes of their own — see `voicelab.ts`. */
+  private readonly lab = new Lab(() => this.tell());
 
   constructor(private readonly deps: VoiceDeps) {
     this.settings = adoptVoice(readConfigFile(FILE));
@@ -280,7 +289,8 @@ export class Voice {
       ears: this.ears,
       spanish: this.spanish,
       model: this.model,
-      voices: [...kokoro, ...this.system],
+      voices: [...kokoro, ...labOptions(this.lab.installed()), ...this.system],
+      lab: this.lab.status(),
     };
   }
 
@@ -447,14 +457,27 @@ export class Voice {
     this.deps.changed();
   }
 
-  /** One missed reply said again, from the drawer's Play on that reply — `replay` for one. Whether there was one to say. */
-  replayOne(profileKey: string, utterance: string): boolean {
+  /**
+   * One reply said again, from the drawer's speaker on that reply. A reply
+   * still on the missed list says its own kept words, exactly as `replay`
+   * does for every one of them. A reply already heard has left the list and
+   * kept no words here, so `text` — the drawer's own copy — is said in its
+   * place; `replays` is still set, so the words that come of it settle
+   * nothing and never join the list themselves. Whether there was something
+   * to say.
+   */
+  replayOne(profileKey: string, utterance: string, text?: string): boolean {
     const entry = this.missed.find((e) => e.id === utterance && e.profileKey === profileKey);
-    if (!entry || entry.pending || entry.replaying) return false;
-    const id = this.speak(profileKey, entry.text, { lang: entry.lang, lead: "earlier", replays: entry.id, spoken: true });
-    if (!id) return false;
-    entry.replaying = id;
-    return true;
+    if (entry) {
+      if (entry.pending || entry.replaying) return false;
+      const id = this.speak(profileKey, entry.text, { lang: entry.lang, lead: "earlier", replays: entry.id, spoken: true });
+      if (!id) return false;
+      entry.replaying = id;
+      return true;
+    }
+    const fallback = text?.trim();
+    if (!fallback) return false;
+    return this.speak(profileKey, fallback, { lead: "earlier", replays: utterance }) !== null;
   }
 
   /** A missed reply as the wire carries it: the profile's id for this session, and none of the server's bookkeeping. */
@@ -700,6 +723,7 @@ export class Voice {
   private async resolve(lang: VoiceLang): Promise<VoiceChoice | null> {
     const chosen = this.settings.voices[lang];
     if (chosen.engine === "system") return chosen;
+    if (chosen.engine === "lab") return this.lab.can(chosen.voice, lang) ? chosen : systemFallback(lang, this.system);
     const voice = kokoroVoice(chosen.voice);
     const can = voice && this.model.state !== "missing" && this.model.state !== "error" && (voice.lang === "en" || findTool("espeak-ng"));
     if (can) return chosen;
@@ -708,11 +732,11 @@ export class Voice {
 
   private async synthesize(sentence: string, choice: VoiceChoice, lang: VoiceLang): Promise<Buffer> {
     if (choice.engine === "system") return this.say(sentence, choice.voice);
+    if (choice.engine === "lab") return this.lab.speak(choice.voice, lang, sentence, this.settings.speed);
     const voice = kokoroVoice(choice.voice);
     if (!voice) throw new Error(`no Kokoro voice ${choice.voice}`);
     const speaker = await this.load(false);
     const speed = this.settings.speed;
-    void lang;
     if (voice.lang === "en") return this.ask(speaker, { voice: voice.id, speed, text: sentence });
     return this.ask(speaker, { voice: voice.id, speed, phonemes: await phonemesEs(sentence) });
   }
@@ -875,6 +899,7 @@ export class Voice {
    */
   close(): void {
     this.child?.kill("SIGKILL");
+    this.lab.close();
   }
 
   /** The one file that is big is the model itself; the rest are kilobytes. Progress is its progress, told every few percent. */

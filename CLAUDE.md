@@ -46,7 +46,7 @@ agents.** Quitting the window does not. Restarting the server does not.
 
 | you edit | what it costs |
 |---|---|
-| `web/`, `desktop/` | a repaint — ⌘R, or `C-a R` (a `desktop/` change wants the window relaunched, which is free) |
+| `web/`, `desktop/` | a repaint — ⌘R, or `C-a R`, and an agent asks for it with `bun run reload-window --why "…"` rather than asking the user: the window reloads once it is safe and the command says whether it did (a `desktop/` change wants the window relaunched, which is free) |
 | `server/src/` *except* the row below | a reconnect — `C-a B`, or automatic under `bun run dev` |
 | `server/run.mjs` | nothing, until a runner is next started — the one running keeps the copy it loaded |
 | `server/src/agents/`, `ptyhostd.ts`, `ptyhost.ts`, `hostlink.ts`, `hostsock.ts` | **every agent the user is running** |
@@ -91,6 +91,7 @@ bun run dev            # the agents: builds, starts the host if needed, serves :
 bun run dev:desktop    # the window. Finds a server; starts vite for itself
 bun run status         # is the host up, is a server up, what are they holding
 bun run kill-ptyhosts  # THE destructive one: ends every agent. --list to dry-run
+bun run reload-window --why "…"  # an agent's ⌘R: waits for a safe moment, says what happened
 bun run backup         # a backup now, through the server when one is up; --check lists what goes
 bun run restore <repo> # a new Mac put back from the backup; refuses while a server is up
 bun run typecheck      # root tsconfig + web tsconfig
@@ -177,6 +178,15 @@ The load-bearing invariants, one line each, with the argument behind the link:
   `HOST_PROTOCOL` exists. A profile may be pointed at another's key, from a
   list the server reads off the disk and refuses anything outside of; no path
   ever comes from a client. → [layout](docs/layout.md#profiles)
+- **An idle card's agent is ended, nothing else's, and never before its
+  conversation is found.** `server/src/sleep.ts` looks only at cards' runs —
+  never a tab from the menu, the harness, a shell — and every doubt keeps one
+  awake: a prompt or question on screen, a message held for it, a draft in its
+  prompt, a command running under it, a last reply that asks. Then the
+  transcript or rollout `--resume` needs is opened (over ssh on a machine; a
+  Codex run's id is learned off its rollout first), the run is written
+  `asleep`, and the close button's `endTerminal` ends it. Running the card
+  again resumes; nothing on disk is touched. → [layout](docs/layout.md#idle-card-agents)
 - **A card's worktree is git's to refuse, never kururu's to force.**
   `server/src/worktree.ts` and `server/src/backup.ts` are the only files that
   run `git`, through `gitcmd.ts` — the first on the user's repositories, the
@@ -185,26 +195,45 @@ The load-bearing invariants, one line each, with the argument behind the link:
   `worktree remove` and `branch -d` with no `--force` and no capital — a dirty
   worktree or a conflicting rebase stays standing and says why. The card's
   "discard" is `git stash`, never a checkout over the work. Anything that
-  ends an agent or removes a checkout asks in place first. Project settings
+  ends an agent or removes a checkout asks first, in a centred dialog rather
+  than at the foot of the card. Project settings
   are keyed by repository root and the root is only ever one the server found
   itself. → [layout](docs/layout.md#worktrees)
 - **Backups leave the machine, and secrets never do.** What goes to the
   private repository is an allow-list in `shared/backup.ts` — named config
   files, the boards and the harness conversation as text, the memory folders —
-  and anything not named stays: the share token, the OpenRouter key,
-  `identities/`, every login. Never `--force`, never a rewrite; a push the
+  and anything not named stays: the share token, the OpenRouter key, the
+  Telegram bot token, the Firecrawl key, `identities/`, every login. Never `--force`, never a rewrite; a push the
   remote refuses stops and says so. → [data](docs/data.md#backups)
 - **The usage bar reads a Claude credential and never writes one** — the
   machine's, or the active profile's when profiles keep their own logins. It is
-  the only thing in kururu that leaves the machine on the user's behalf:
+  one of the few things in kururu that reach off the machine on the user's
+  behalf, beside OpenRouter's balance, a channel that is switched on and the
+  pages agents fetch through Firecrawl; it is
   read at the moment of the fetch, never held, never logged, never on the wire —
   and no token refresh, because writing that store could log out a running agent
   to draw a bar. `server/src/usage.ts` is the only file that has seen it.
-- **The OpenRouter key is the one credential kururu stores, and it only comes
-  in.** A management key, pasted once in Settings, kept 0600 in
+- **The OpenRouter key is one of three credentials kururu stores — a
+  channel's bot token and the Firecrawl key, below, are the others — and it
+  only comes in.** A management key, pasted once in Settings, kept 0600 in
   `~/.config/kururu/openrouter.json`, read per fetch and used for GETs only.
   A client is sent its `hint` and dollars, never the key. →
   `shared/openrouter.ts`
+- **Firecrawl is lent to agents, never its key.** Every agent kururu starts
+  on this Mac — the + menu, a card's robot, the harness and its
+  `start_agent`, a card picked back up — gets four MCP tools served at
+  `POST /mcp/web` (`scrape_page`, `crawl_site`, `map_site`, `search_web`)
+  through flags on its command line, `--mcp-config=` for Claude (spelt with
+  `=` so a card's prompt is not read as a second config) and `-c` overrides
+  for Codex, and kururu makes the request. The key is kept on the OpenRouter
+  key's terms: 0600 in `~/.config/kururu/firecrawl.json`, read per request,
+  sent only to `api.firecrawl.dev`, never logged, never in a pty's
+  environment, a client sent its `hint`, never backed up. Each call reserves
+  credits against a daily budget before it goes, a crawl is held to the page
+  limit, and what comes back is wrapped and introduced as untrusted data.
+  **The URL or search words of every call go to Firecrawl's servers.** An
+  agent on a machine does not get the tools; the endpoint answers only a
+  program on this Mac. → [web](docs/web.md)
 - **A database is whatever `DATABASE_URL` says, read when asked and never
   held.** The scan reads a workspace's `.env*` files under the roots the branch
   walk found, never a path a client sent, and a client is told host, port,
@@ -227,7 +256,9 @@ The load-bearing invariants, one line each, with the argument behind the link:
   "kururu" is the prefix of every session in this repo. It is told every
   agent's `done`/`blocked` edge in its profile — never a shell's, and
   `blocked` only when Claude is asking. A permission prompt is the user's to
-  answer, and the role says so. → [harness](docs/harness.md)
+  answer, and the role says so. A message from a channel comes in by the
+  drawer's road — the outbox, typed — marked `[telegram]`, and the role says
+  what that means. → [harness](docs/harness.md)
 - **A shell on another machine is a command line, never a host change.** A
   machine is an ssh host the user named (Settings → Machines, `vps.json`); its
   shell is `ssh -t` in an ordinary pty, built and read back by
@@ -254,21 +285,62 @@ The load-bearing invariants, one line each, with the argument behind the link:
   composer types to Kuru through the same outbox a clip takes. The chip is the
   only door, and the sidebar has no harness button. Both halves are local — Apple's
   recogniser through `yap`, Kokoro on the CPU with `say` as the fallback — and
-  nothing leaves the machine. Kokoro runs in a process of its own
+  no audio leaves the machine; a channel, below, is the one road off it for
+  the conversation, and carries only its text. Kokoro runs in a process of its own
   (`server/src/kokoro.ts`) and is never imported into the server, because its
   runtime turns the exit of whatever loaded it into a SIGABRT. The server hears and speaks for every client;
   a window only posts a WAV and plays one. `web/src/voice.ts` holds the
   microphone and installs the talk key once, through refs, never per render.
   → [voice](docs/voice.md)
+- **What needs you is one rule, in `shared/needs.ts`, and three drawings of
+  it.** An agent asking, a card in Review, a turn that ended unseen, a card
+  whose agent went without finishing; never a working agent, a To do, a
+  shell, or the harness. The status bar's tray counts it, `NeedsDrawer.tsx`
+  lists it by workspace in three bands with Next a press away (`C-a i`,
+  `C-a o`), and a workspace's sidebar row wears the dot. No component
+  decides it again, and nothing in it is dismissed by hand — a row leaves
+  when its state does. The profile board is the profile's own board and
+  draws no workspace's; a card asked for by name goes to its board in its
+  pane through `showCardNext`. → [layout](docs/layout.md#what-needs-you)
+- **A channel is another door into the one conversation, and only the
+  user's own accounts may use it.** Telegram, today (`shared/channels.ts`,
+  `server/src/telegram.ts`, `server/src/channels.ts`). A message from an
+  account on the allow-list — empty until the user pairs one in Settings →
+  Channels, by a code this Mac shows — goes into the same outbox as the
+  drawer's composer and is typed into Kuru as `[telegram] …`; anyone else,
+  any group, any bot is ignored without an answer, and counted, and `judge`
+  is that decision in the order that makes it safe. Every reply Kuru makes
+  goes back while it is on — its answers to `[kururu]` notices too, never the
+  notices, which quote agents' replies — with a silent copy of the user's
+  words from here; a turn that answered only Telegram is not
+  spoken on the Mac (`replySpoken`). The bot token is kept on the OpenRouter
+  key's terms: 0600 in `~/.config/kururu/telegram.json`, read per request,
+  put only in the request URL, never logged, a client sent its `hint`, never
+  backed up. Long polling and never a webhook: nothing listens, and off is
+  no request at all. **This is the one road off the machine for the
+  conversation itself** — its text goes through Telegram's servers, which do
+  not encrypt bot chats end to end — and the page says so above the switch.
+  → [channels](docs/channels.md)
 - **`server/run.mjs` is the one supervisor, and the app ships it.** The
   menu-bar frog (`desktop/tray.js`) starts it from the app's Resources with
-  `--no-build --entry`, or from a checkout with `--watch`, on the app's own
-  binary as node; a server already on the port is adopted and never stopped.
+  `--no-build --entry`, or from a checkout with `--watch`, on the app's
+  Electron helper as node, because a titled process on the main binary is a
+  Dock tile (`proctitle.ts`); a server already on the port is adopted and
+  never stopped.
   A host restart goes *through the server* (`POST /api/host/restart`: SIGTERM
   the socket's holder, exit 75 when the link drops) so either runner comes
   back to a fresh host; the tray's dialog names the agent count and defaults
   to no. Where the server runs from is `~/.config/kururu/desktop.json`.
   → [architecture](docs/architecture.md#the-runner-and-the-menu-bar)
+- **An agent's reload is asked for, and the page picks the moment.**
+  `bun run reload-window` and the harness's `reload_window` reach
+  `POST /api/reload-window`, which sends `reload` to every page that said it
+  is on this Mac — the window, the floating pill, a loopback tab, never the
+  phone. Each reloads itself only when nobody is talking and Kuru is not
+  speaking, its hands have been still five seconds, and no dialog, menu or
+  unsent field is open (`reloadHolds` in `shared/reload.ts`), then shows who
+  asked and why. It is `location.reload()` — what `C-a R` costs, and the pty
+  host never hears of it. → [architecture](docs/architecture.md#reloading-the-window)
 - **While the talk key is hooked system-wide, the floating pill is the only
   voice client on this Mac.** `desktop/talkkey/talkkey.swift` is a listen-only
   event tap (Input Monitoring, nothing else) whose events go to the panel's

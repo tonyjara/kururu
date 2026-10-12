@@ -68,10 +68,12 @@ in a pane of *that* workspace (`devPane(workspaceId)`), never the one on screen.
 | `open_shell` | a shell tab on this Mac or on a machine, with a command typed into it; in a pinned workspace it goes to the workspace's machine by default — see [machines](machines.md) |
 | `stop_agent` | kill (and a remote shell's tmux session); refuses itself |
 | `reveal_agent`, `rename_agent` | the user's screen and the sidebar; with Auto Swap on the screen follows without being asked — see below |
-| `cards`, `add_card`, `edit_card`, `move_card`, `run_card`, `send_card_to_workspace` | the boards, workspace and profile; `add_card` with `run` is the robot |
+| `cards`, `add_card`, `edit_card`, `move_card`, `run_card`, `send_card_to_workspace` | the boards, workspace and profile; `add_card` with `run` is the robot; `run_card` on a card whose agent was put to sleep resumes its conversation unless `fresh` — see [layout](layout.md#idle-card-agents) |
 | `new_workspace` | a project, without switching the user to it |
+| `reload_window` | the user's window and the floating pill reloaded the way ⌘R does, each once it is safe; waits, and says whether each came back or what held it — for an agent that would otherwise ask the user to press ⌘R. See [architecture](architecture.md#reloading-the-window) |
 | `say`, `play_missed` | one line aloud mid-turn; every reply of its own the user never heard to the end, said again — see [voice](voice.md#what-you-missed) |
 | `search`, `card_history` | full text over the profile's cards and its conversations, and a card's history of moves and runs with who made each — see [data](data.md#search) |
+| `mcp__kururu_web__*` | not kururu's verbs but the web: `scrape_page`, `crawl_site`, `map_site`, `search_web` through Firecrawl, on a second MCP server every agent kururu starts is given while Firecrawl is set up and on — the harness by the same launch flags, so its own `--allowedTools` does not cover them. See [web](web.md) |
 
 Reads are capped (`READ_MAX`) and default small, on purpose: the orchestrator's
 own context is the scarce thing, and the role prompt tells it so.
@@ -309,6 +311,11 @@ through the voice's outbox. The agents' own transcripts as chat (roadmap item
   around this same session: your speech becomes a `[voice]` turn typed into
   its terminal, its last message becomes speech. Anthropic has no voice API and a
   realtime model up front would have been a second brain.
+- **Not a second session on the phone.** A channel (`channels.md`) is another
+  door into this one: a Telegram message is a `[telegram]` turn through the
+  same outbox, typed as your words like the drawer's, and every reply goes
+  back to the chat while the channel is on — replies to `[kururu]` notices
+  included. The role tells Kuru what the mark means.
 
 ## Gotchas
 

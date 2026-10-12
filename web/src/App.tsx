@@ -24,6 +24,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  activeAgent,
   activeTerminal,
   terminalsOf,
   isBoardTab,
@@ -49,12 +50,19 @@ import { Menu, type MenuAt } from "./components/Menu";
 import { resetZoom, zoomBy } from "./zoom";
 import { Panes } from "./components/Panes";
 import { Reach } from "./components/Reach";
-import { Settings, TAB_NAMES as SETTINGS_TABS, type Tab as SettingsTab } from "./components/Settings";
+import { Settings, TAB_NAMES as SETTINGS_TABS, type Tab as SettingsTab } from "./settings/Settings";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { VoicePill } from "./components/VoicePill";
+import { ReloadNotice } from "./components/ReloadNotice";
+import { installReload } from "./reload";
+import { isLoopback } from "./preview";
 import { KuruDrawer } from "./components/KuruDrawer";
 import { closeKuru, kuruLive, openKuru, toggleKuru, useKuruDrawer } from "./kuru";
+import { closeNeeds, toggleNeeds, useNeedsDrawer } from "./needs";
+import { NeedsDrawer } from "./components/NeedsDrawer";
+import { needsOf, nextNeed, type Need } from "../../shared/needs";
+import { showCardNext } from "./components/Board";
 import type { VoiceGlobalState } from "./desktop";
 import { installSpeech, installTalkKey, setSpeechVolume, setVoiceProfile, setVoiceRemote, talkDown, talkUp, useVoiceUi } from "./voice";
 import { DEFAULT_VOICE, keyCodeLabel } from "../../shared/voice";
@@ -215,8 +223,14 @@ export function App() {
    * under this component.
    */
   const kuruDrawer = useKuruDrawer();
-  /** A card a reply of Kuru's named, clicked: the profile board opens at it. */
-  const [boardShow, setBoardShow] = useState<{ workspaceId: string | null; cardId: string } | null>(null);
+  /** The drawer of things that need you — `needs.ts`, module state for `kuru.ts`'s reason. */
+  const needsOpen = useNeedsDrawer();
+  /**
+   * A card of the profile's own board, clicked by name — in a reply of
+   * Kuru's — for the sheet to show, lit. A workspace's card goes to its board
+   * in its pane instead (`showCardNext`), and never through here.
+   */
+  const [boardShow, setBoardShow] = useState<string | null>(null);
 
   /**
    * Whether the window is narrow enough that the sidebar stops being a column
@@ -379,6 +393,48 @@ export function App() {
   );
   /** This profile's conversation, as the server last sent it. */
   const kuruHere = useMemo(() => kuru.find((c) => c.profileId === profile?.id) ?? null, [kuru, profile?.id]);
+  /**
+   * What needs you across this profile's workspaces — `shared/needs.ts`,
+   * once per snapshot, for the three places that draw it: the status bar's
+   * tray, the drawer behind it, and the dot on a workspace's row.
+   */
+  const needs = useMemo(() => (profile ? needsOf(profile, agents) : null), [profile, agents]);
+  const needyWorkspaces = useMemo(
+    () => new Set(needs?.workspaces.filter((w) => w.band === "needs").map((w) => w.workspace.id) ?? []),
+    [needs],
+  );
+  // One drawer over the panes at a time: Kuru's opening puts this one away.
+  // The other direction is `needs.ts`'s own, so the two modules import one way.
+  useEffect(() => {
+    if (kuruDrawer.open) closeNeeds();
+  }, [kuruDrawer.open]);
+  /**
+   * Take me to a need: its terminal, or — for a card whose agent has gone —
+   * the card on its board, in its workspace. On a phone the sheet is then in
+   * front of the thing it just pointed at, and goes.
+   */
+  const goToNeed = useCallback(
+    (need: Need) => {
+      if (need.agent) api.revealAgent(need.agent.id);
+      else if (need.card) {
+        showCardNext(need.workspaceId, need.card.id);
+        api.openBoard(undefined, false, need.workspaceId);
+      } else api.switchWorkspace(need.workspaceId);
+      if (narrow) closeNeeds();
+    },
+    [narrow],
+  );
+  /** The next thing that needs you, from where the keyboard is — `nextNeed`'s walk. */
+  const goNext = useCallback(() => {
+    if (!needs || !workspace) return;
+    const pane = panes(workspace.layout).find((p) => p.id === workspace.focusedPaneId);
+    const next = nextNeed(needs, {
+      focusedAgentId: focusedAgentOf(workspace),
+      workspaceId: workspace.id,
+      boardShowing: pane ? isBoardTab(activeAgent(pane)) : false,
+    });
+    if (next) goToNeed(next);
+  }, [needs, workspace, goToNeed]);
 
   /**
    * Wear whatever the server says. The chrome's tokens go onto the root element
@@ -630,6 +686,16 @@ export function App() {
   }, []);
 
   /**
+   * Agents may ask this page to reload, and it does once that is safe — see
+   * `reload.ts`. The desktop window and a browser on this Mac; never a page
+   * on another device, which is somebody's phone and reloads when they say.
+   */
+  useEffect(() => {
+    const page = desktop() ? "window" : isLoopback(location.hostname) ? "tab" : null;
+    return page ? installReload(page) : undefined;
+  }, []);
+
+  /**
    * And let go of the emulators of terminals that no longer exist.
    *
    * An emulator is pooled for the life of its terminal now rather than the life
@@ -746,6 +812,10 @@ export function App() {
         // header for the times the pty itself is wanted.
         case "open-harness":
           return toggleKuru();
+        case "open-needs":
+          return toggleNeeds();
+        case "next-need":
+          return goNext();
         case "toggle-sidebar":
           return setSidebarOpen((open) => !open);
         case "toggle-files":
@@ -754,7 +824,7 @@ export function App() {
           if (narrow) setSidebarOpen(false);
           return setFilesOpen((open) => !open);
         case "settings":
-          return setSettings("appearance");
+          return setSettings("theme");
         case "zen-mode":
           return setZen((on) => !on);
         case "resize-mode":
@@ -876,7 +946,7 @@ export function App() {
           return setHelp((on) => !on);
       }
     },
-    [workspace, profile, agents, promptNewProfile, confirmDeleteWorkspace, narrow],
+    [workspace, profile, agents, promptNewProfile, confirmDeleteWorkspace, narrow, goNext],
   );
 
   /**
@@ -1099,6 +1169,13 @@ export function App() {
         closeKuru();
         return;
       }
+      // The needs drawer is the same kind of thing — a list beside the panes,
+      // never over the keyboard — so Escape is the one key it takes.
+      if (needsOpen && keyName(event) === "escape") {
+        take();
+        closeNeeds();
+        return;
+      }
 
       /**
        * Resize mode is modal over the ptys but not over the prefix: hjkl push
@@ -1191,7 +1268,7 @@ export function App() {
 
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [prefixArmed, resizeMode, dialog, editing, help, settings, reach, profileMenu, profileBoard, databasesFor, kuruDrawer.open, workspace, keymap, run, arm, disarm]);
+  }, [prefixArmed, resizeMode, dialog, editing, help, settings, reach, profileMenu, profileBoard, databasesFor, kuruDrawer.open, needsOpen, workspace, keymap, run, arm, disarm]);
 
   /**
    * A file dropped anywhere that is not a terminal does nothing.
@@ -1283,11 +1360,12 @@ export function App() {
              because a list of six agents does not otherwise say which of them
              the next keystroke belongs to. */
           focusedAgentId={focusedAgentOf(workspace)}
+          needsYou={needyWorkspaces}
           onRun={run}
           onDeleteWorkspace={confirmDeleteWorkspace}
           onEditing={setEditing}
           onPrompt={setDialog}
-          onSettings={() => setSettings("appearance")}
+          onSettings={() => setSettings("theme")}
           onReach={() => setReach(true)}
           onBoard={() => {
             setProfileBoard(true);
@@ -1404,12 +1482,17 @@ export function App() {
             mascot,
           }}
           onKuru={toggleKuru}
+          needs={{ count: needs?.count ?? 0, workspaces: needs?.inWorkspaces ?? 0, open: needsOpen }}
+          onNeeds={toggleNeeds}
         />
       </div>
 
       {/* Over everything, zen included: a microphone that is open must say so
           wherever the status bar has gone. See `VoicePill.tsx`. */}
       <VoicePill />
+
+      {/* Who reloaded the window and why, when an agent did. See `ReloadNotice.tsx`. */}
+      <ReloadNotice />
 
       {/* The conversation with Kuru, over the panes on a desktop and the whole
           screen on a phone. Not dimmed behind, because you read Kuru's answer
@@ -1429,9 +1512,40 @@ export function App() {
             if (narrow) closeKuru();
           }}
           onCard={(workspaceId, cardId) => {
-            setBoardShow({ workspaceId, cardId });
-            setProfileBoard(true);
+            // A workspace's card is on its board, in its pane; the profile's
+            // own is in the sheet. Either way the card is scrolled to and lit.
+            if (workspaceId) {
+              showCardNext(workspaceId, cardId);
+              api.openBoard(undefined, false, workspaceId);
+            } else {
+              setBoardShow(cardId);
+              setProfileBoard(true);
+            }
             if (narrow) closeKuru();
+          }}
+        />
+      )}
+
+      {/* What needs you, across the workspaces: a drawer like Kuru's, and one
+          of the two at a time. Not dimmed behind, for Kuru's reason — you deal
+          with a thing in its pane with the list of what is left beside it.
+          See `NeedsDrawer.tsx`. */}
+      {needsOpen && needs && (
+        <NeedsDrawer
+          needs={needs}
+          mascots={snapshot.mascots}
+          sheet={narrow}
+          onClose={closeNeeds}
+          onGo={goToNeed}
+          onNext={goNext}
+          onWorkspace={(workspaceId) => {
+            api.switchWorkspace(workspaceId);
+            if (narrow) closeNeeds();
+          }}
+          onBoard={(workspaceId, cardId) => {
+            showCardNext(workspaceId, cardId);
+            api.openBoard(undefined, false, workspaceId);
+            if (narrow) closeNeeds();
           }}
         />
       )}
@@ -1491,6 +1605,7 @@ export function App() {
           projects={projects}
           projectSettings={snapshot.projectSettings}
           initialTab={settings}
+          narrow={narrow}
           onClose={() => setSettings(null)}
           onEditing={setEditing}
         />

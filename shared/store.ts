@@ -25,6 +25,7 @@
  * each verb, and the one that cannot miss a road added later. Pure, tested.
  */
 import type { Board, BoardLane, Card, CardDates, CardRun, CardWorktree } from "./board";
+import { channelOfPrompt, type ChannelKind } from "./channels";
 import type { VoiceLang } from "./voice";
 
 // ---------------------------------------------------------------------------
@@ -159,6 +160,8 @@ export function cardDiffers(before: Card, after: Card): boolean {
     before.run?.state !== after.run?.state ||
     before.run?.endedAt !== after.run?.endedAt ||
     before.run?.agentId !== after.run?.agentId ||
+    // A Codex run's id arrives after it started, read off its rollout.
+    before.run?.sessionId !== after.run?.sessionId ||
     before.dev?.agentId !== after.dev?.agentId ||
     before.dev?.port !== after.dev?.port
   );
@@ -268,7 +271,8 @@ export interface CardHit {
 }
 
 export type TurnRole = "you" | "kuru" | "agent";
-export type TurnVia = "typed" | "voice" | "kururu";
+/** Where a turn came from: typed here, spoken, a line Kuru said mid-turn, or a channel such as Telegram (`shared/channels.ts`). */
+export type TurnVia = "typed" | "voice" | "kururu" | ChannelKind;
 
 export interface TurnHit {
   kind: "turn";
@@ -322,7 +326,8 @@ export interface Conversation {
 export const VOICE_PREFIX = "[voice]";
 
 export function viaOf(text: string): TurnVia {
-  return text.startsWith(VOICE_PREFIX) ? "voice" : "typed";
+  if (text.startsWith(VOICE_PREFIX)) return "voice";
+  return channelOfPrompt(text) ?? "typed";
 }
 
 /**

@@ -290,6 +290,81 @@ describe("the line, run", () => {
 });
 
 /**
+ * `LOOP_SCRIPT`'s own retry count, run for real against a fake `ssh` that
+ * fails on cue and a fake `date` that makes "connected for twelve seconds"
+ * mean whatever a case needs without the test waiting twelve seconds — the
+ * fake `ssh` nudges the clock forward before it exits 255 exactly when a case
+ * wants that attempt read as "got in, then dropped". `sleep` is faked too, so
+ * the one real reattach pause in here does not cost the suite three seconds.
+ */
+describe("LOOP_SCRIPT, run", () => {
+  const dir = mkdtempSync(join(tmpdir(), "kururu-loop-"));
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  const calls = join(dir, "calls");
+  const clock = join(dir, "clock");
+  const ctrl = join(dir, "ctrl");
+  const fake = (name: string, body: string) => {
+    writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`);
+    chmodSync(join(bin, name), 0o755);
+  };
+  // Ticks the clock by one on every call, so two calls a script makes back to
+  // back read ten seconds apart; `ssh` jumps it further on a "slow" attempt.
+  fake("date", `v=$(cat "$CLOCK"); printf '%s\\n' "$v"; echo $((v + 1)) > "$CLOCK"`);
+  fake("sleep", `exit 0`);
+  // One line of CTRL per call it expects, in order: "fail" exits 255 at once,
+  // "slow" nudges the clock past the twelve-second line first, "end" exits 0.
+  fake(
+    "ssh",
+    `n=$(( $(cat "$CALLS") + 1 )); echo "$n" > "$CALLS"
+action=$(sed -n "\${n}p" "$CTRL")
+case "$action" in
+  slow) echo $(( $(cat "$CLOCK") + 20 )) > "$CLOCK"; exit 255;;
+  end) exit 0;;
+  *) exit 255;;
+esac`,
+  );
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const run = (actions: string[], input: string) => {
+    writeFileSync(calls, "0");
+    writeFileSync(clock, "1000");
+    writeFileSync(ctrl, actions.join("\n"));
+    return spawnSync("/bin/sh", ["-c", LOOP_SCRIPT, "loop", "box", "kururu-x-1", ""], {
+      env: { PATH: `${bin}:/usr/bin:/bin`, CALLS: calls, CLOCK: clock, CTRL: ctrl },
+      input,
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+  };
+
+  it("gives up after three tries that never got in, and Enter starts the count over", () => {
+    // Two manual retries get the "did not get in" prompt; the third is the
+    // third in a row and gives up instead, then EOF at that prompt ends it.
+    const result = run(["fail", "fail", "fail"], "\n\n");
+    const lines = result.stdout.split("\n").filter((l) => l.startsWith("kururu:"));
+    expect(lines).toEqual([
+      "kururu: ssh to box did not get in. Enter tries again; Ctrl-D gives up.",
+      "kururu: ssh to box did not get in. Enter tries again; Ctrl-D gives up.",
+      "kururu: box has not answered in 3 tries running. Enter tries again; Ctrl-D gives up.",
+    ]);
+    expect(result.status).toBe(255);
+  });
+
+  it("keeps reattaching a connection that got in and then dropped, and resets the count", () => {
+    // fail, slow (got in, so the count resets), fail again — never three in a
+    // row, so the giving-up line never shows, and the loop reaches "end".
+    const result = run(["fail", "slow", "fail", "end"], "\n\n");
+    const lines = result.stdout.split("\n").filter((l) => l.startsWith("kururu:"));
+    expect(lines).toEqual([
+      "kururu: ssh to box did not get in. Enter tries again; Ctrl-D gives up.",
+      "kururu: lost the connection to box. Reattaching kururu-x-1 in 3s; Ctrl-C stops.",
+      "kururu: ssh to box did not get in. Enter tries again; Ctrl-D gives up.",
+    ]);
+    expect(result.status).toBe(0);
+  });
+});
+
+/**
  * The check typed ahead of an agent on a machine, run for real under both
  * shells against a fake `claude` and `codex` that write down how they were
  * called. What matters most is the third case: a CLI too old to have the

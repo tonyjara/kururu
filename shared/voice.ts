@@ -14,7 +14,7 @@
  * recogniser through `yap`, and speech is Kokoro, an 82-million-parameter
  * model that runs on the CPU faster than it talks, with the machine's own
  * `say` voices as the fallback that needs nothing installed. No key, no
- * account, nothing leaves the machine — which is also the property that lets
+ * account, no audio leaves the machine — which is also the property that lets
  * the phone use it: the server does the hearing and the speaking, and a phone
  * only ever sends a WAV and plays one back.
  *
@@ -57,10 +57,10 @@ export const LOCALES: Record<VoiceLang, readonly { id: string; name: string }[]>
   ],
 };
 
-/** Which program says the words. */
-export type VoiceEngine = "kokoro" | "system";
+/** Which program says the words. `lab` is the engines on trial — see `LAB_MODELS`. */
+export type VoiceEngine = "kokoro" | "lab" | "system";
 
-/** One voice: the engine and its name for it — `af_heart`, or `Samantha (English (US))`. */
+/** One voice: the engine and its name for it — `af_heart`, `qwen3/serena`, or `Samantha (English (US))`. */
 export interface VoiceChoice {
   engine: VoiceEngine;
   voice: string;
@@ -155,7 +155,7 @@ export function kokoroVoice(id: string): KokoroVoice | undefined {
   return KOKORO_VOICES.find((voice) => voice.id === id);
 }
 
-/** A voice the picker can offer: either engine, one shape. */
+/** A voice the picker can offer: any engine, one shape. */
 export interface VoiceOption {
   engine: VoiceEngine;
   id: string;
@@ -163,6 +163,117 @@ export interface VoiceOption {
   lang: VoiceLang;
   /** The model card's grade for a Kokoro voice; the locale for a system one. */
   note: string;
+  /** The picker's heading for it, when its engine has several models: a lab voice's model. */
+  group?: string;
+}
+
+/**
+ * The voice lab: engines on trial against Kokoro, to be heard as Kuru rather
+ * than as samples, and deleted when they lose.
+ *
+ * `docs/research/voices.md` is the argument and could not finish it: whether
+ * a voice sounds like a person is for listening, over days, to replies that
+ * matter. These run in `server/voicelab.py`, a Python process of the server's
+ * (`server/src/voicelab.ts`), out of `~/.cache/kururu/voicelab` — made by hand
+ * and not by kururu, which is why a model whose files are not there is simply
+ * not offered. Two Python environments, because Pocket TTS needs torch and the
+ * rest MLX or onnxruntime, and the two do not share one.
+ *
+ * A lab voice is named `model/voice`. A model that speaks both languages
+ * offers each of its voices under both, which Kokoro cannot: one voice for
+ * English and Spanish is part of what is on trial.
+ */
+export interface LabModel {
+  id: string;
+  name: string;
+  /** Which of the lab's environments runs it: `venv-mlx` or `venv-pocket`. */
+  runtime: "mlx" | "pocket";
+  langs: readonly VoiceLang[];
+  /** A file under the lab's folder whose presence says the model is installed. */
+  marker: string;
+  voices: readonly { id: string; name: string; note: string }[];
+}
+
+const POCKET_VOICES = [
+  { id: "lola", name: "Lola", note: "female, native Spanish" },
+  { id: "rafael", name: "Rafael", note: "male, native Spanish" },
+  { id: "alba", name: "Alba", note: "female" },
+  { id: "fantine", name: "Fantine", note: "female" },
+  { id: "cosette", name: "Cosette", note: "female" },
+  { id: "eve", name: "Eve", note: "female" },
+  { id: "estelle", name: "Estelle", note: "female, French" },
+  { id: "marius", name: "Marius", note: "male" },
+  { id: "jean", name: "Jean", note: "male" },
+  { id: "michael", name: "Michael", note: "male" },
+  { id: "giovanni", name: "Giovanni", note: "male, Italian" },
+] as const;
+
+const CHATTERBOX_VOICES = [
+  { id: "default", name: "Default", note: "female" },
+  { id: "heart", name: "Heart", note: "cloned from Kokoro's af_heart" },
+] as const;
+
+export const LAB_MODELS: readonly LabModel[] = [
+  {
+    id: "supertonic",
+    name: "Supertonic 3",
+    runtime: "mlx",
+    langs: ["en", "es"],
+    marker: "models/supertonic-3/onnx/vocoder.onnx",
+    voices: [1, 2, 3, 4, 5].flatMap((n) => [
+      { id: `F${n}`, name: `F${n}`, note: "female" },
+      { id: `M${n}`, name: `M${n}`, note: "male" },
+    ]),
+  },
+  { id: "pocket", name: "Pocket TTS", runtime: "pocket", langs: ["en", "es"], marker: "venv-pocket/bin/python", voices: POCKET_VOICES },
+  {
+    id: "pocket-hq",
+    name: "Pocket TTS, 24-layer Spanish",
+    runtime: "pocket",
+    langs: ["es"],
+    marker: "venv-pocket/bin/python",
+    voices: POCKET_VOICES.slice(0, 2),
+  },
+  { id: "chatterbox", name: "Chatterbox Multilingual v3", runtime: "mlx", langs: ["en", "es"], marker: "models/chatterbox-v3/model.safetensors", voices: CHATTERBOX_VOICES },
+  {
+    id: "chatterbox-latam",
+    name: "Chatterbox, es-MX/LatAm",
+    runtime: "mlx",
+    langs: ["es"],
+    marker: "models/chatterbox-latam/model.safetensors",
+    voices: CHATTERBOX_VOICES,
+  },
+  {
+    id: "qwen3",
+    name: "Qwen3-TTS 1.7B",
+    runtime: "mlx",
+    langs: ["en", "es"],
+    marker: "models/qwen3-tts-1.7b/model.safetensors",
+    voices: [
+      { id: "serena", name: "Serena", note: "female" },
+      { id: "vivian", name: "Vivian", note: "female" },
+      { id: "ryan", name: "Ryan", note: "male" },
+      { id: "aiden", name: "Aiden", note: "male" },
+    ],
+  },
+];
+
+/** A lab voice by its `model/voice` name, with its model; undefined for anything else. */
+export function labVoice(id: string): { model: LabModel; voice: LabModel["voices"][number] } | undefined {
+  const slash = id.indexOf("/");
+  if (slash < 0) return undefined;
+  const model = LAB_MODELS.find((m) => m.id === id.slice(0, slash));
+  const voice = model?.voices.find((v) => v.id === id.slice(slash + 1));
+  return model && voice ? { model, voice } : undefined;
+}
+
+/** The picker's entries for the lab models that are installed: each voice once per language its model speaks. */
+export function labOptions(models: readonly LabModel[]): VoiceOption[] {
+  return models.flatMap((model) =>
+    model.langs.flatMap((lang) =>
+      model.voices.map((voice) => ({ engine: "lab" as const, id: `${model.id}/${voice.id}`, name: voice.name, lang, note: voice.note, group: `${model.name} · trial` })),
+    ),
+  );
 }
 
 /**
@@ -499,7 +610,7 @@ export function adoptVoice(value: unknown): VoiceSettings {
   const rawVoices = (raw.voices && typeof raw.voices === "object" ? raw.voices : {}) as Record<string, unknown>;
   for (const lang of VOICE_LANGS) {
     const choice = rawVoices[lang] as { engine?: unknown; voice?: unknown } | undefined;
-    if (choice && (choice.engine === "kokoro" || choice.engine === "system") && typeof choice.voice === "string" && choice.voice.trim()) {
+    if (choice && (choice.engine === "kokoro" || choice.engine === "lab" || choice.engine === "system") && typeof choice.voice === "string" && choice.voice.trim()) {
       voices[lang] = { engine: choice.engine, voice: choice.voice.trim().slice(0, 80) };
     }
   }
@@ -569,8 +680,18 @@ export interface VoiceStatus {
   spanish: ToolStatus;
   /** Kokoro. */
   model: ModelStatus;
-  /** Every voice the picker can offer, both engines. */
+  /** Every voice the picker can offer, every engine. */
   voices: VoiceOption[];
+  /** The lab models that are installed and what each is doing. Absent from a server without the lab. */
+  lab?: LabStatus[];
+}
+
+/** One lab model, for Settings: whether it is loaded, and why not when it could not be. */
+export interface LabStatus {
+  id: string;
+  name: string;
+  state: "idle" | "loading" | "ready" | "error";
+  detail: string;
 }
 
 /** One sentence of an utterance, ready to play. The bytes are fetched, not sent, so the socket carries only words. */

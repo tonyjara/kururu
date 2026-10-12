@@ -51,12 +51,18 @@ Anything that would make `ptyhost.ts` need editing belongs on the server side.
   host's binary may. A clone of the server's own build has that build's grants;
   an installed app nobody has allowed yet asks once, and the server waits for
   the answer rather than giving up at five seconds.
-- **Every process says what it is.** `process.title` is what `ps` and Activity
-  Monitor show: `Kururu ptyhost - 12 agents`, `Kururu server :7717`,
+- **Every process says what it is, where that costs no Dock tile.**
+  `process.title` is what `ps` and Activity Monitor show: `Kururu server :7717`,
   `Kururu runner (run.mjs --watch)`, `Kururu voice (Kokoro)`. ASCII, because
   `ps` cuts `comm` at sixteen bytes; and `ptyhost` and `run.mjs` stay in them
   because the guards in `kill-ptyhosts`, `lifecycle.ts` and the runner match
-  those words.
+  those words. On macOS a title also checks the process in with LaunchServices
+  as an app of whatever kind its bundle says, and on Kururu.app's own binary
+  that is a foreground app with a Dock tile. So the app runs everything as
+  node on Electron's `LSUIElement` helper, and a process that is on a main
+  binary anyway stays unnamed (`proctitle.ts`). That includes the launchd host,
+  which runs on the clone's main binary for its privacy grants: it is
+  `…/Kururu.app/Contents/MacOS/Kururu …/ptyhostd.mjs` in `ps`.
 - **The two halves find each other at a path, not through a parent.** It was an
   Electron `MessagePort` once, which quietly made Electron the only thing that
   could arrange the split at all — with no Electron, `index.ts` built a host
@@ -140,6 +146,71 @@ Anything that would make `ptyhost.ts` need editing belongs on the server side.
   `focusedPaneId` and `activeWorkspaceId`, which is a silent rewrite of
   somebody's live layout.
 
+## Reloading the window
+
+An agent that changed `web/` used to stop and ask for ⌘R — to clear the old
+copies a hot update leaves running (a hot-updated voice module held the
+microphone open for fifteen minutes on 2026-10-11), or to measure the window
+as a fresh load draws it. A reload is something only a page can do to itself,
+and nothing on the server could ask one to. Now the agent runs
+`bun run reload-window --why "…"` (the harness: `reload_window`), and the
+window reloads itself as soon as that is safe.
+
+- **The server delivers and counts; the page decides.** Every reason a reload
+  would hurt is in the page — its microphone and player, its keyboard and
+  pointer, what is open over it — so the page is what times it.
+  `POST /api/reload-window` sends `reload` to each client that said
+  `reloadable`, and waits. The page checks `reloadHolds` (`shared/reload.ts`)
+  four times a second while an ask is waiting, and not at all otherwise. It
+  sends `reload-held` when the holds change and `reloading` as it goes, then
+  calls `location.reload()`. The page that comes back sends `reloadable` with
+  the ids it reloaded for, and that is what "back" means in the answer.
+  `server/src/reload.ts` keeps the time and assembles the answer, and reloads
+  nothing.
+- **What holds a reload:**
+
+  | hold | when |
+  |---|---|
+  | `talking` | the microphone is open, the talk key is down, a clip is still on its way, or the server's `hush` says anybody anywhere is talking |
+  | `speaking` | Kuru is mid-reply — on this page, or on the pill while the pill is the voice client (`voiceNow`) |
+  | `showing` | the pill still shows what Kuru heard, or why it did not (4 s, 15 s for a failure) |
+  | `hands` | a key, a click or a wheel in this page in the last 5 s (`RELOAD_QUIET_MS`, twice Auto Swap's), or a button still down |
+  | `dialog` | a `.scrim`, a `.menu-backdrop`, an `alertdialog` or an `aria-modal` on the page — read off the DOM, so a new dialog is covered without being listed |
+  | `draft` | a text field outside the terminals has focus and words in it |
+
+- **Which pages: this Mac's.** The desktop window, the floating pill, and a
+  browser on a loopback address say `reloadable`. A phone never does, so it is
+  never asked. It is not on this Mac. Under vite it stops following saves
+  after its first sleep on purpose (`main.tsx`); on `web/dist` a reload brings
+  nothing new until a rebuild; and reloading a page in somebody's hand on
+  another device is the surprise this exists to avoid, paid for by fetching
+  every backlog again over the tailnet.
+- **The pill reloads too**, through the same gate. While the talk key is
+  hooked it is where `voice.ts` runs, so an old hot-updated copy of the voice
+  — the one that kept the microphone — lives there. ⌘R already reloads it
+  (`talk.reloadPanel()`), so the agent's reload does what ⌘R does and no
+  more. And it only ever reloads idle, which is hidden. It shows no notice;
+  the window does.
+- **The notice.** The page writes the asks to `sessionStorage` before it goes,
+  and the page that comes back shows "Reloaded for *who*: *why*" in the
+  corner for ten seconds (`ReloadNotice.tsx`). Who is the agent the command
+  ran in, found by the `KURURU_AGENT_ID` its pty was started with, named by
+  what it is called and where (`reloaderName`); the harness is Kuru.
+- **Times.** An ask waits 90 s unless told otherwise (2 s to 600 s). A page
+  that reloaded has 20 s to come back on the socket. One that closed while it
+  waited has 5 s to be named by its new page before it is called gone. The
+  asker hanging up ends the wait and lets the pages go. A server restart drops
+  every ask — pages forget theirs when the socket drops — and the command asks
+  the next server again, giving up after 15 s of silence.
+- **The answer** is one line that says yes or no, a line per page with what
+  it waited for, and what to do next when it was no. The command exits 0 only
+  when every page reloaded. "No window" is also the answer from a window loaded
+  before this existed, which never says `reloadable` and needs one ⌘R by hand.
+- **Access and cost.** It is a route behind the same gate as every other, so
+  loopback, the `Origin` check and the token apply unchanged. The reload is
+  `location.reload()`, the same as `C-a R`: no emulator is rebuilt past what
+  ⌘R rebuilds, and the pty host never hears of it.
+
 ## Discovery, and the window giving up
 
 - **An address is a decision, so it goes in config** (`servers.json`, beside the
@@ -212,7 +283,7 @@ no save coming to mend it.
 - **Where the server runs from is the app's setting**, in
   `~/.config/kururu/desktop.json` beside `servers.json`: this app or a checkout
   path. From a checkout the runner is `run.mjs --watch` in that directory on
-  the app's own binary as node, so nothing needs node, bun or a terminal; the
+  the app's Electron helper as node, so nothing needs node, bun or a terminal; the
   checkout must have been `bun install`ed, which the menu checks and says.
 - **From a checkout the app is `bun run dev` and `bun run dev:desktop`
   together.** Beside the runner it runs the checkout's vite (`desktop/vite.js`,

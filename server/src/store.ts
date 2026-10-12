@@ -613,7 +613,7 @@ export class Store {
       let run = this.latestRun(row.id);
       if (run && live && run.agentId !== null && !live.has(run.agentId)) {
         // The terminal is gone: `adoptRun`'s rule, written back so the row says it too.
-        const state: CardRun["state"] = run.state === "finished" ? "finished" : "ended";
+        const state: CardRun["state"] = run.state === "finished" || run.state === "asleep" ? run.state : "ended";
         this.stmt("update card_runs set agent_id = null, state = ?, ended_at = coalesce(ended_at, ?) where card_id = ? and started_at = ?").run(state, at, row.id, run.startedAt);
         run = { ...run, agentId: null, state, endedAt: run.endedAt ?? at };
       }

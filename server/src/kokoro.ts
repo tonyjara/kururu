@@ -24,6 +24,7 @@
  * rather than as a JSON array of numbers.
  */
 import { mkdirSync } from "node:fs";
+import { nameProcess } from "./proctitle";
 
 /** What the server asks. One `load` first, then any number of sentences. */
 export type ToKokoro =
@@ -59,8 +60,8 @@ if (!process.send) {
   console.error("kururu: kokoro.mjs is started by the server, not by hand");
   process.exit(1);
 }
-// Named for `ps` and Activity Monitor, beside the server and the host — see `ptyhostd.ts`.
-process.title = "Kururu voice (Kokoro)";
+// Named for `ps` and Activity Monitor, beside the server and the host, where that costs no Dock tile — see `proctitle.ts`.
+nameProcess("Kururu voice (Kokoro)");
 process.on("disconnect", end);
 // A failure in here would otherwise exit the ordinary way and abort on the way
 // out, leaving a crash report about the destructor instead of the error. The

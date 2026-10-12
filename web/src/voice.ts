@@ -140,6 +140,17 @@ export function voiceIsRemote(): boolean {
 }
 
 /**
+ * What the voice on this Mac is doing, as this page knows it: its own phase,
+ * or the pill's while the pill is the voice client — and whether the server
+ * says anybody, anywhere, is talking. For `reload.ts`, which holds a reload
+ * while any of it is busy: a window reloaded under a reply the pill is
+ * reading out is as much a surprise as the pill reloaded under it.
+ */
+export function voiceNow(): { phase: VoicePhase; hushed: boolean } {
+  return { phase: remote ? remotePhase : ui.phase, hushed: hushed() };
+}
+
+/**
  * A gesture from the hook, as the pill page receives it over the bridge.
  * The grammar — hold, tap, Escape — is the same three functions the key
  * handler calls, so nothing is decided twice. A chord is the one word the

@@ -1,16 +1,25 @@
 /**
- * The three questions kururu ever asks: name this, are you sure, and which one.
+ * The questions kururu ever asks: name this, are you sure, which one, and —
+ * `ask` — does this go ahead, maybe ending an agent on the way.
  *
- * One component rather than three because they are the same shape — a modal that
- * owns the keyboard until it is answered — and because the thing that actually
- * matters about them is shared: while a dialog is up, **no key reaches a pty**.
- * A rename prompt that let keystrokes through to the terminal underneath would
- * type your new tab name into an agent.
+ * One component rather than several because they are the same shape — a modal
+ * that owns the keyboard until it is answered — and because the thing that
+ * actually matters about them is shared: while a dialog is up, **no key
+ * reaches a pty**. A rename prompt that let keystrokes through to the
+ * terminal underneath would type your new tab name into an agent.
  *
  * The picker is a filter, not a fuzzy matcher. Substring matching over a list
  * that is rarely longer than a dozen rows is the whole of what a picker this
  * size needs, and a scoring function nobody can predict is worse than one
  * anybody can.
+ *
+ * `ask` is deliberately not `confirm`: a merge or a move to Done is a question
+ * the person already meant to say yes to when they dragged the card, so focus
+ * (and Enter) lands on Yes rather than on the safe answer `confirm` defaults
+ * to. It carries an `alt` way through and, for a blocked merge, `choices`
+ * instead of a plain yes — the board's own `Ask` shape, drawn centred instead
+ * of on the card, so it reads the same wherever it is asked and a phone sees
+ * it as a dialog rather than something to scroll a card into view for.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./Icon";
@@ -41,6 +50,18 @@ export type DialogState =
       onConfirm: () => void;
     }
   | {
+      kind: "ask";
+      title: string;
+      hint?: string;
+      /** The plain yes/cancel case. Absent when only `choices` is offered. */
+      yes?: string;
+      run?: () => void;
+      /** A second way through, next to Cancel — "Just move" beside "Merge". */
+      alt?: { label: string; run: () => void };
+      /** A blocked merge's two resolutions, each with a sentence on what it does. */
+      choices?: { label: string; outcome: string; run: () => void }[];
+    }
+  | {
       kind: "pick";
       title: string;
       hint?: string;
@@ -65,6 +86,7 @@ export function Dialog({ state, onClose }: { state: DialogState; onClose: () => 
         {state.hint && <p className="dialog-hint">{state.hint}</p>}
         {state.kind === "prompt" && <Prompt state={state} onClose={onClose} />}
         {state.kind === "confirm" && <Confirm state={state} onClose={onClose} />}
+        {state.kind === "ask" && <Ask state={state} onClose={onClose} />}
         {state.kind === "pick" && <Pick state={state} onClose={onClose} />}
       </div>
     </div>
@@ -140,6 +162,71 @@ function Confirm({ state, onClose }: { state: Extract<DialogState, { kind: "conf
       >
         {state.confirmLabel}
       </button>
+    </div>
+  );
+}
+
+function Ask({ state, onClose }: { state: Extract<DialogState, { kind: "ask" }>; onClose: () => void }) {
+  const yes = useRef<HTMLButtonElement>(null);
+  const cancel = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    // Focus lands on Yes, not Cancel: unlike `confirm`, which only ever fronts
+    // something destructive, this is the question behind dragging a card to
+    // Done or pressing Merge — the person already meant to say yes, so Enter
+    // should do that. A question with only `choices` has no Yes to default to,
+    // and gets `confirm`'s safe default instead.
+    (yes.current ?? cancel.current)?.focus();
+  }, []);
+
+  return (
+    <div
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === "Escape") onClose();
+      }}
+    >
+      {state.choices?.map((choice) => (
+        <div key={choice.label} className="dialog-ask-choice">
+          <button
+            className="button"
+            onClick={() => {
+              choice.run();
+              onClose();
+            }}
+          >
+            {choice.label}
+          </button>
+          <p className="dialog-ask-outcome">{choice.outcome}</p>
+        </div>
+      ))}
+      <div className="dialog-actions">
+        <button ref={cancel} className="button button-quiet" onClick={onClose}>
+          Cancel
+        </button>
+        {state.alt && (
+          <button
+            className="button button-quiet"
+            onClick={() => {
+              state.alt?.run();
+              onClose();
+            }}
+          >
+            {state.alt.label}
+          </button>
+        )}
+        {state.yes && (
+          <button
+            ref={yes}
+            className="button"
+            onClick={() => {
+              state.run?.();
+              onClose();
+            }}
+          >
+            {state.yes}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

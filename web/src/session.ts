@@ -43,12 +43,15 @@ import type { LaunchSettings } from "../../shared/launchers";
 import type { MergeReply, MergeResolution, ProjectSettings, WorktreeOutcome, WorktreeStatus } from "../../shared/projects";
 import type { NotifySettings } from "../../shared/notify";
 import type { OpenRouterStatus } from "../../shared/openrouter";
+import type { FirecrawlStatus } from "../../shared/firecrawl";
+import type { ChannelKind, ChannelsStatus, TelegramStatus } from "../../shared/channels";
 import type { BackupStatus } from "../../shared/backup";
 import type { SearchHit, SearchScope } from "../../shared/store";
 import type { KuruConversation, KuruPage } from "../../shared/kuru";
 import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "../../shared/voice";
 import type { MachineEntry, MachinePin, MachineStatus } from "../../shared/machines";
 import type { TerminalAppearance } from "../../shared/theme";
+import type { ReloadAsk, ReloadHold, ReloadPage } from "../../shared/reload";
 import type { Grid } from "./grid";
 import { claimAccess } from "./access";
 
@@ -82,6 +85,8 @@ export interface KururuState {
   machines: MachineStatus[];
   /** The OpenRouter account, or null when no key has been given. See `shared/openrouter.ts`. */
   openrouter: OpenRouterStatus | null;
+  /** Firecrawl for the agents, or null until the server has said. Never the key. See `shared/firecrawl.ts`. */
+  firecrawl: FirecrawlStatus | null;
   /** Where the backups stand, or null until the server has said. See `shared/backup.ts`. */
   backup: BackupStatus | null;
   /**
@@ -100,6 +105,8 @@ export interface KururuState {
   kuru: KuruConversation[];
   /** Your messages to Kuru, every profile's, in the order the server took them: the pill's line under Kuru's words. The drawer reads them merged into `kuru`. */
   outbox: OutboxEntry[];
+  /** The channels — Telegram — or null until the server has said. Never a token. See `shared/channels.ts`. */
+  channels: ChannelsStatus | null;
 }
 
 const RETRY_MS = [200, 500, 1000, 2000, 4000];
@@ -113,11 +120,13 @@ let state: KururuState = {
   usage: null,
   machines: [],
   openrouter: null,
+  firecrawl: null,
   backup: null,
   databases: [],
   voice: null,
   kuru: [],
   outbox: [],
+  channels: null,
 };
 
 const listeners = new Set<() => void>();
@@ -251,6 +260,7 @@ function connect(): void {
      */
     if (!atScreen) send({ type: "looking", looking: false });
     if (amTalking) send({ type: "talking", talking: true });
+    sayReloadable();
     if (connectListener) deliver(() => connectListener?.());
     if (watched.size > 0 || warmed.size > 0) sendWatch();
     for (const open of sinks.values()) {
@@ -287,6 +297,9 @@ function connect(): void {
       case "openrouter":
         set({ openrouter: msg.openrouter });
         break;
+      case "firecrawl":
+        set({ firecrawl: msg.firecrawl });
+        break;
       case "backup":
         set({ backup: msg.backup });
         break;
@@ -301,12 +314,21 @@ function connect(): void {
       case "hush":
         if (hushListener) deliver(() => hushListener?.(msg.hushed === true));
         break;
+      case "reload":
+        if (reloadListener) deliver(() => reloadListener?.({ type: "ask", ask: msg.ask, until: msg.until }));
+        break;
+      case "reload-cancel":
+        if (reloadListener) deliver(() => reloadListener?.({ type: "cancel", id: msg.id }));
+        break;
       case "kuru":
         set({ kuru: Array.isArray(msg.kuru) ? msg.kuru : [] });
         break;
       case "outbox":
         set({ outbox: Array.isArray(msg.outbox) ? msg.outbox : [] });
         if (outboxListener) deliver(() => outboxListener?.(state.outbox));
+        break;
+      case "channels":
+        set({ channels: msg.channels });
         break;
       case "databases":
         set({ databases: msg.databases });
@@ -362,6 +384,9 @@ function connect(): void {
     // says again on connect. A hush nobody is left to lift would keep Kuru
     // quiet on this page for good.
     if (hushListener) deliver(() => hushListener?.(false));
+    // The asks belong to the server that made them, and nobody is waiting on
+    // them any more: the command that asked asks the next server again.
+    if (reloadListener) deliver(() => reloadListener?.({ type: "lost" }));
     const delay = RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)]!;
     attempt++;
     setTimeout(connect, delay);
@@ -875,8 +900,8 @@ export function sendProfileCard(profileId: string, cardId: string, workspaceId: 
  * Hand a card to an agent on this launcher. Waits, for `newTab`'s reason: a
  * spawn that fails is not explained by the next snapshot.
  */
-export function runCard(workspaceId: string, cardId: string, launcher: string): Promise<string> {
-  return request((id) => ({ type: "run-card", id, workspaceId, cardId, launcher })).then(
+export function runCard(workspaceId: string, cardId: string, launcher: string, fresh = false): Promise<string> {
+  return request((id) => ({ type: "run-card", id, workspaceId, cardId, launcher, ...(fresh ? { fresh } : {}) })).then(
     (result) => (result as { agentId: string }).agentId,
   );
 }
@@ -1116,6 +1141,68 @@ export function clearOpenRouterKey(): void {
   send({ type: "clear-openrouter-key" });
 }
 
+/** Hand the server a Firecrawl key. Rejects with the reason, in a sentence, when Firecrawl does not know it. */
+export function setFirecrawlKey(key: string): Promise<FirecrawlStatus> {
+  return request((id) => ({ type: "set-firecrawl-key", id, key })) as Promise<FirecrawlStatus>;
+}
+
+export function clearFirecrawlKey(): void {
+  send({ type: "clear-firecrawl-key" });
+}
+
+/** Firecrawl's switch and limits, any of them. */
+export function setFirecrawl(change: { enabled?: boolean; pageLimit?: number; dailyCredits?: number }): Promise<FirecrawlStatus> {
+  return request((id) => ({ type: "set-firecrawl", id, ...change })) as Promise<FirecrawlStatus>;
+}
+
+/** One test page through Firecrawl, a credit. Rejects with why, when it fails. */
+export function testFirecrawl(): Promise<{ title: string | null; chars: number; credits: number }> {
+  return request((id) => ({ type: "test-firecrawl", id })) as Promise<{ title: string | null; chars: number; credits: number }>;
+}
+
+// ---------------------------------------------------------------------------
+// Channels
+// ---------------------------------------------------------------------------
+
+/** Hand the server a channel's bot token. Rejects with the reason, in a sentence, when the channel refuses it. */
+export function setChannelToken(kind: ChannelKind, token: string): Promise<TelegramStatus> {
+  return request((id) => ({ type: "channel-token", id, kind, token })) as Promise<TelegramStatus>;
+}
+
+export function forgetChannel(kind: ChannelKind): void {
+  send({ type: "channel-forget", kind });
+}
+
+/** The switch, the profile (null for whichever is active) and whether replies are spoken here too. Rejects with why, when switching on is refused. */
+export function setChannel(kind: ChannelKind, change: { enabled?: boolean; profileId?: string | null; speakReplies?: boolean }): Promise<TelegramStatus> {
+  return request((id) => ({ type: "channel-set", id, kind, ...change })) as Promise<TelegramStatus>;
+}
+
+export function pairChannel(kind: ChannelKind, on: boolean): Promise<TelegramStatus> {
+  return request((id) => ({ type: "channel-pair", id, kind, on })) as Promise<TelegramStatus>;
+}
+
+export function allowChannelUser(kind: ChannelKind, userId: string): Promise<TelegramStatus> {
+  return request((id) => ({ type: "channel-allow", id, kind, userId })) as Promise<TelegramStatus>;
+}
+
+export function refuseChannelUser(kind: ChannelKind): void {
+  send({ type: "channel-refuse", kind });
+}
+
+export function disallowChannelUser(kind: ChannelKind, userId: string): void {
+  send({ type: "channel-disallow", kind, userId });
+}
+
+/** Send a test message to every allowed account. Resolves with what happened, rejects with why not. */
+export function testChannel(kind: ChannelKind): Promise<string> {
+  return request((id) => ({ type: "channel-test", id, kind })) as Promise<string>;
+}
+
+export function clearChannelIgnored(kind: ChannelKind): void {
+  send({ type: "channel-clear-ignored", kind });
+}
+
 // ---------------------------------------------------------------------------
 // The database and the backups
 // ---------------------------------------------------------------------------
@@ -1234,6 +1321,69 @@ export function speechPlayed(utterance: string, seq: number): void {
   send({ type: "speech-played", utterance, seq });
 }
 
+// ---------------------------------------------------------------------------
+// An agent reloading the window
+// ---------------------------------------------------------------------------
+
+export type ReloadEvent =
+  | { type: "ask"; ask: ReloadAsk; until: number }
+  | { type: "cancel"; id: string }
+  /** The socket dropped, and every ask with it. */
+  | { type: "lost" };
+
+let reloadListener: ((event: ReloadEvent) => void) | null = null;
+
+/** Who decides when this page reloads: `reload.ts`. One listener, like `onHush`. */
+export function onReload(listener: (event: ReloadEvent) => void): () => void {
+  reloadListener = listener;
+  return () => {
+    if (reloadListener === listener) reloadListener = null;
+  };
+}
+
+/**
+ * This page can be asked to reload — see `shared/reload.ts`. Said on every
+ * connect, on `looking`'s reasoning: the server keeps no memory of a socket
+ * that went away. `reloaded`, the asks the page before this one reloaded
+ * for, rides along until a connect has carried it once.
+ */
+let reloadPage: ReloadPage | null = null;
+const reloadedFor = new Set<string>();
+
+export function reloadable(page: ReloadPage, reloaded: readonly string[]): void {
+  reloadPage = page;
+  for (const id of reloaded) reloadedFor.add(id);
+  if (socket?.readyState === WebSocket.OPEN) sayReloadable();
+}
+
+function sayReloadable(): void {
+  if (!reloadPage) return;
+  send({ type: "reloadable", page: reloadPage, ...(reloadedFor.size ? { reloaded: [...reloadedFor] } : {}) });
+  reloadedFor.clear();
+}
+
+/** What is holding those asks here now. */
+export function reloadHeld(ids: string[], holds: ReloadHold[]): void {
+  send({ type: "reload-held", ids, holds });
+}
+
+/**
+ * This page is reloading for those asks. Resolves once the word has left
+ * the page — the socket's buffer is empty — or after a moment if it will not
+ * empty, so the reload that follows does not take the word down with it.
+ */
+export function reloading(ids: string[]): Promise<void> {
+  send({ type: "reloading", ids });
+  const started = performance.now();
+  return new Promise((resolve) => {
+    const drained = () => {
+      if (!socket || socket.bufferedAmount === 0 || performance.now() - started > 300) setTimeout(resolve, 20);
+      else setTimeout(drained, 10);
+    };
+    drained();
+  });
+}
+
 /** Play a profile's missed replies again, oldest first. */
 export function playMissed(profileId: string): void {
   send({ type: "play-missed", profileId });
@@ -1249,9 +1399,13 @@ export function kuruSeen(profileId: string, utterances: string[]): void {
   send({ type: "kuru-seen", profileId, utterances });
 }
 
-/** Say one unheard reply again. */
-export function kuruReplay(profileId: string, utterance: string): void {
-  send({ type: "kuru-replay", profileId, utterance });
+/**
+ * Say one reply again, from the drawer's speaker. `text` is the reply as the
+ * drawer already shows it, for when the one being replayed is already heard
+ * and so the server has no copy of its words left to say again.
+ */
+export function kuruReplay(profileId: string, utterance: string, text?: string): void {
+  send({ type: "kuru-replay", profileId, utterance, text });
 }
 
 /**

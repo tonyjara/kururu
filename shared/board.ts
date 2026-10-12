@@ -155,8 +155,14 @@ export function mintLaneId(): string {
  * that closed, or a run that a cold start found with no process behind it —
  * `persist.ts` restores structure and never processes, so a run it brings back
  * is one that is not running.
+ *
+ * `asleep` is a run kururu ended itself, because it had sat idle past the
+ * setting for it (`server/src/sleep.ts`). It is `ended` as far as processes
+ * go, and a state of its own because it says something `ended` does not: that
+ * nobody closed it, that its conversation was made sure of first, and that
+ * running the card again picks it back up rather than starting over.
  */
-export type RunState = "starting" | "working" | "blocked" | "finished" | "ended";
+export type RunState = "starting" | "working" | "blocked" | "finished" | "ended" | "asleep";
 
 export interface CardRun {
   /**
@@ -177,8 +183,10 @@ export interface CardRun {
    * Code's `--session-id` — so that a card whose agent has gone can be handed
    * the same conversation back with `--resume`. Unlike `agentId` it goes to
    * disk: it names a transcript file, not a process, and the transcript is
-   * still there after a cold start. Null for Codex, which picks its own ids
-   * and says them to nobody, and for runs from before this was kept.
+   * still there after a cold start. Codex picks its own ids and says them to
+   * nobody, so a Codex run starts with none and is given it once its rollout
+   * has been found on disk (`setRunSession`, `server/src/sessions.ts`). Null
+   * until then, and for runs from before this was kept.
    */
   sessionId: string | null;
   /**
@@ -516,13 +524,45 @@ export function noteRun(board: Board, agentId: string, status: string, exited: b
     if (next === null || next === run.state) return card;
     // An exited agent's card keeps `finished` if it got there first: the turn
     // ended well and then somebody closed the terminal, which is not news.
-    if (next === "ended" && run.state === "finished") return card;
+    // Nor is the end of one kururu put to sleep, which it was told first.
+    if (next === "ended" && (run.state === "finished" || run.state === "asleep")) return card;
     changed = true;
     const ending = next === "finished" || next === "ended";
     let column = card.column;
     if (next === "finished" && column === "doing") column = "review";
     if ((next === "working" || next === "blocked") && column === "review") column = "doing";
     return { ...card, column, run: { ...run, state: next, endedAt: ending ? now : run.endedAt } };
+  });
+  return changed ? { ...board, cards } : board;
+}
+
+/**
+ * The card's run, put to sleep: its agent is about to be ended for sitting
+ * idle, and the card says so rather than `ended`. The agent id goes at the
+ * same moment, so the exit that follows finds no run to carry onto — and the
+ * card stays in its column, since ending a process moves no work.
+ */
+export function sleepRun(board: Board, cardId: string, now: number): Board {
+  return {
+    ...board,
+    cards: board.cards.map((card) =>
+      card.id === cardId && card.run ? { ...card, run: { ...card.run, agentId: null, state: "asleep" as const, endedAt: now } } : card,
+    ),
+  };
+}
+
+/**
+ * A conversation id learned after its run started — Codex's, read off its
+ * rollout. Only onto the run still running in that terminal, only when it has
+ * none, and only one `SESSION_ID` passes, since it ends up on a command line.
+ */
+export function setRunSession(board: Board, cardId: string, agentId: string, sessionId: string): Board {
+  if (!SESSION_ID.test(sessionId)) return board;
+  let changed = false;
+  const cards = board.cards.map((card) => {
+    if (card.id !== cardId || !card.run || card.run.agentId !== agentId || card.run.sessionId !== null) return card;
+    changed = true;
+    return { ...card, run: { ...card.run, sessionId } };
   });
   return changed ? { ...board, cards } : board;
 }
@@ -837,7 +877,7 @@ function adoptDev(value: unknown): CardDev | null {
   return { agentId: typeof agentId === "string" ? agentId : null, port: port as number };
 }
 
-const RUN_STATES: readonly RunState[] = ["starting", "working", "blocked", "finished", "ended"];
+const RUN_STATES: readonly RunState[] = ["starting", "working", "blocked", "finished", "ended", "asleep"];
 
 function adoptRun(value: unknown): CardRun | null {
   if (!value || typeof value !== "object") return null;
@@ -845,7 +885,7 @@ function adoptRun(value: unknown): CardRun | null {
   if (typeof run.launcher !== "string") return null;
   const agentId = typeof run.agentId === "string" ? run.agentId : null;
   let state: RunState = RUN_STATES.includes(run.state as RunState) ? (run.state as RunState) : "ended";
-  if (agentId === null && state !== "finished") state = "ended";
+  if (agentId === null && state !== "finished" && state !== "asleep") state = "ended";
   return {
     agentId,
     launcher: run.launcher,

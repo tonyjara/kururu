@@ -5,7 +5,7 @@
  * built against.
  */
 import { describe, expect, test } from "bun:test";
-import { HOST_LABEL_PREFIX, bundleOf, hostJobPlist, isHostJob, jobPid, remapInto, staleHostJobs } from "../src/hostlaunch";
+import { HOST_LABEL_PREFIX, hostJobPlist, isHostJob, jobPid, remapInto, staleHostJobs } from "../src/hostlaunch";
 
 const LIST = [
   "PID\tStatus\tLabel",
@@ -70,24 +70,6 @@ describe("jobPid", () => {
 
   test("is null for a job that is not running", () => {
     expect(jobPid("\tstate = not running\n\tlast exit code = 0\n")).toBeNull();
-  });
-});
-
-describe("bundleOf", () => {
-  test("is the app an executable is the main binary of", () => {
-    expect(bundleOf("/Applications/Kururu.app/Contents/MacOS/Kururu")).toBe("/Applications/Kururu.app");
-    expect(bundleOf("/x/release/mac-arm64/Kururu.app/Contents/MacOS/Kururu")).toBe("/x/release/mac-arm64/Kururu.app");
-  });
-
-  test("is the innermost bundle for a helper", () => {
-    expect(bundleOf("/A/Kururu.app/Contents/Frameworks/Kururu Helper.app/Contents/MacOS/Kururu Helper")).toBe(
-      "/A/Kururu.app/Contents/Frameworks/Kururu Helper.app",
-    );
-  });
-
-  test("is null for a bare binary", () => {
-    expect(bundleOf("/opt/homebrew/bin/node")).toBeNull();
-    expect(bundleOf("/Applications/Kururu.app/Contents/Resources/server/run.mjs")).toBeNull();
   });
 });
 

@@ -343,7 +343,7 @@ because a file in a skin of yours is referenced by that skin alone; the answer
 carries a `stamp` the page appends to the URL, since the asset endpoint caches for
 a year on the assumption a file cannot change under its name.
 
-`SettingsStudio.tsx` holds the manifest it is editing and nothing about how the
+`settings/Studio.tsx` holds the manifest it is editing and nothing about how the
 window looks; saves are debounced 150ms.
 
 ## Sounds

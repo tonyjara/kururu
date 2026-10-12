@@ -145,8 +145,9 @@ place text somebody typed reaches `sh -c`. The agent lands in a pane *beside*
 the board's (`paneBesideBoard`) rather than as a tab in it, since a new tab is
 shown and would take the board away from the person pressing the robot; it is
 renamed after the card, and the focus goes back to the board. Any workspace of
-the profile on screen, not only the one on screen — the profile's board draws
-every workspace's board — and so for resume, the worktree's terminal and the dev
+the profile, not only the one on screen — the harness runs a card from
+anywhere, and for a version the profile's board drew every workspace's board
+over the window — and so for resume, the worktree's terminal and the dev
 server's ↻ too: off screen the terminal goes into that workspace's layout
 (`openTerminalAt`), beside its board, and nothing is focused.
 
@@ -182,21 +183,21 @@ there, same id, and its To do if it sat in a column the workspace does not
 have), making the board if the workspace had none. It rides the blob
 through `adopt()` and goes to disk beside the workspaces, counter included.
 
-**It is also where every board in the profile is seen from.** A bar under the
-sheet's header lists the profile's board first, then each workspace whose
-`board` is not null — those with a card in In progress or Review first, then
-the rest, each in the sidebar's order. An entry is its tag colour and its name,
-and a dot when it has such a card; To do does not count, being reminders, and
-there are no numbers. Picking one draws that workspace's board in
-the sheet with `BoardView` itself, not a second rendering of it, and the screen
-behind does not move: every card verb takes a workspace id, and the four that
-open a terminal take any workspace of the profile on screen (above). The one
-thing `BoardView` grew for it is `onReveal`, which the sheet answers by closing
-when a card takes somebody to a terminal. The timeline and the column tools are
-the profile board's, and are offered only while it is picked. Which board was
-last picked is kept per device in `localStorage`, by profile id, for the
-sidebar disclosures' reason; a cold start mints new ids and it falls back to the
-profile's board.
+**It is the profile's own board and no other.** For a version a bar under the
+sheet's header listed every workspace's board and drew the picked one in the
+sheet with `BoardView` itself, as the place the whole profile was looked at
+from. It went, because what it listed was boards when the question was which
+workspaces were *waiting*: a workspace with a blocked agent and no board was
+not in it, one mid-work looked like one waiting on you, and the sheet is modal,
+so going round them was open, pick, close, deal, reopen. That question is
+answered by the drawer of things that need you, below. What the sheet kept of
+the profile-wide job is the search, and a card hit for a workspace's card
+leads to that card on the workspace's board in its own pane (`showCardNext`
+in `Board.tsx`: the asker names the workspace and the card, opens the board
+the ordinary way, and the board drawn there scrolls the card into view and
+lights it for a moment — shown, never opened, since the edit is a
+double-click away), with the sheet closed. The server's card verbs still take any workspace of the
+profile, since the harness runs cards from anywhere.
 
 **A card has dates, and they are days.** `Card.dates` is a start and an end as
 `2026-09-28` strings — one day is a range whose ends are the same — or null,
@@ -327,8 +328,8 @@ message, the person's own git identity), **Set changes aside** (`git stash
 push -u`, named after the card — the row somebody looks for as "discard", and
 deliberately not one: the stash is the repository's and is still in
 `git stash list` after the worktree is gone), **Merge into `<base>`** (the one
-card's worktree merged back and removed, the card put in Done, asked on the
-card itself before it goes because it ends the agent), and **Open a terminal in
+card's worktree merged back and removed, the card put in Done, asked in a
+centred dialog before it goes because it ends the agent), and **Open a terminal in
 the worktree** for everything else. The menu opens at once with the rows that
 need counts disabled, and `worktree-status` fills them in a moment later —
 changes, ahead, behind — asked on the click and never polled, because each is a
@@ -338,15 +339,19 @@ came to is a line on the card until clicked away. Every verb names the card and
 the server finds the worktree on it; no path crosses the wire.
 
 **Done means merged.** Moving a card with a worktree into Done — by drag or by
-the menu's "Move to Done" — does not move it; it asks on the card, saying how
-many commits go into the base, whether anything uncommitted will be committed
-first, and that the worktree, the branch and a running agent go with it. Yes is
+the menu's "Move to Done" — does not move it; it asks, in a dialog centred
+over the window rather than at the foot of the card, saying how many commits
+go into the base, whether anything uncommitted will be committed first, and
+that the worktree, the branch and a running agent go with it. Yes is
 `merge-card` (preceded by the commit row's commit when the tree is dirty), and
 the server puts the card in Done only once the merge has held. **Just move**
 moves it and leaves the worktree standing, for a merge that cannot happen yet;
 a refusal from git is the card's error and the card stays where it was.
-A card with no worktree but an agent still open asks too: **Move and end
-agent**, or **Just move**, which leaves the terminal.
+A card with no worktree but an agent still open asks too, the same way: **Move
+and end agent**, or **Just move**, which leaves the terminal. The dialog is
+the board's own — `Dialog.tsx`'s `ask` kind — focused on Yes rather than
+Cancel, because by the time either question is asked the person has already
+dragged the card to Done.
 
 **A card's conversation outlives its agent.** A Claude run is started with
 `--session-id` and a UUID the server minted, and the id and the directory it ran
@@ -355,9 +360,13 @@ transcript and not a process. Once the agent's terminal has gone the robot's
 menu leads with **Resume conversation**: `claude --resume <id>` in that
 directory, or in the main checkout when a merge took the worktree down (Claude
 files transcripts by directory, so from there finding it is Claude's call).
-Codex picks its own ids and never says them, so its row opens `codex resume`'s
-picker instead, with `--all` when the directory is gone. Runs from before this
-have no id and no row.
+Codex picks its own ids and never says them, so kururu reads them back: the
+rollout Codex wrote under `$CODEX_HOME/sessions/` since the run started, in its
+directory, opened with the card's own words (`shared/sessions.ts`), found within
+a look or two of the start and written onto the run. With it the row is
+`codex resume <id>`; without it — a run from before this, or one resumed through
+the picker — the row opens the picker, with `--all` when the directory is gone.
+Runs from before any of this have no id and no row.
 
 **Retiring the worktrees standing asks first.** **Merge and remove** in
 Settings → Workspaces is the one control on that page that does anything to
@@ -408,6 +417,92 @@ found for that workspace, and two workspaces in one repository show the same
 controls and say whose else they are. `set-project` refuses any root that is
 not one of those, on `files.ts`'s rule that a path never comes from a client.
 An entry at the defaults is not written.
+
+### Idle card agents
+
+**A card's agent that has sat idle is ended, and the card says so.** Agents
+are what drain a laptop's battery, and a card waiting in Review is an agent
+nobody is using. `server/src/sleep.ts` looks over every card in every profile
+whose run has a terminal, every thirty seconds, and ends the ones that have been
+idle for Settings → Agents → **Idle card agents** (ten minutes, on by default,
+`LaunchSettings.sleepIdle` / `sleepMinutes`). Only a card's run: an agent opened
+from the menu, the harness, a shell, nvim and a card's dev server are no card's
+run, and are never looked at.
+
+**Idle is "nobody is using it", and every doubt keeps it awake** —
+`shared/sleep.ts` is the rule, pure and tested. The run has finished a turn
+and the terminal says `done` (or `idle` after it), never `working` or
+`blocked`; kururu holds no message to type into it (`Harness.holding`); nothing
+is typed into its prompt and not sent (`draftAfter` over the `input` verb,
+cleared by Enter, ^C, ^U or a new turn); its screen, read the way a remote
+agent's status is (`readScreen`), shows no prompt, question or turn in
+progress — which is what catches Codex's approvals, since it has no hooks; no
+command it started is still running under it (a shell with `-c` anywhere in its
+process tree: Claude's Bash tool, Codex's exec, a background build); and its
+last reply does not end by asking something (`asksYou`: a question mark ending
+a sentence in the last paragraph, or the one over a list of choices, headings
+it answers itself excepted). The clock starts again on every status edge, every
+keystroke and every server start — a server cannot vouch for keystrokes that
+went to the one before it.
+
+**The conversation is made sure of before anything is ended.** A Claude run
+has its `--session-id`; a Codex run its learned id (above) — one without is
+left awake. Then the transcript or rollout is opened, on a machine over ssh
+(`sessionTailOn`), both to see that `--resume` will find it and to read the last
+reply; a conversation that cannot be found keeps its agent. Then the run is
+marked `asleep` — written through the store before anything is killed, so a
+board the database refuses ends nothing — and the terminal ends through
+`endTerminal`, the close button's own function, which on a machine also ends
+the tmux session. The card stays in its column; nothing on disk is touched.
+
+**Running an asleep card resumes it.** The run line says "asleep after sitting
+idle" with a **resume** button, and the robot's menu leads with **Resume
+conversation**. `run-card` on an asleep card resumes rather than starting over
+— on the launcher asked for when it is the same CLI — unless the message says
+`fresh`, which the robot's launcher rows send on such a card and label "new
+conversation". The harness's `run_card` does the same, on the run's own
+launcher when none is named. `GET /api/sleep` lists every card's agent with why
+it is still awake ("idle 4 min of 10", "waiting on you: its last reply asked
+something"), for whoever is wondering.
+
+### What needs you
+
+**One rule, one list, three places.** `shared/needs.ts` answers "where am I
+wanted" across a profile's workspaces, pure, from the snapshot: a thing needs
+you when it will not move without you. That is an agent asking (`blocked`,
+which only ever comes from the agent saying so, or from a remote screen read
+as one), a card in Review (the column's whole meaning), an agent that
+finished while nobody watched (the server's `unread`, which also catches the
+agents no card claims), and a card in In progress whose agent went away
+without finishing (its run `ended`; nothing will move it). Not: a working
+agent, which will come to you and is counted apart; a card in To do, which
+is a reminder, or Done; a shell that finished a command off screen; and
+never the harness — Kuru asking is the status bar's chip, one subject per
+control. A card and its agent are one need, filed under the card's workspace
+wherever its tab was dragged; an agent on a To do or Done card shows as
+itself. Within a workspace the asking come first, then cards in board order,
+then agents in the sidebar's order. Every workspace is in one of three bands:
+`needs`, `working`, or `quiet`.
+
+**Where it is drawn.** The status bar's tray, left of Kuru's chip, counts the
+needs in the blocked ink and stays, dim, at zero. Behind it `NeedsDrawer.tsx`
+is a drawer like Kuru's, on its terms exactly — over the panes, not dimmed,
+closed by a click outside that lands where it was aimed (the tray excepted,
+since it toggles the drawer itself), by Escape or its ✕, and never holding the
+keyboard, so the terminal a row reveals is the one the next keystroke goes
+to; a full-screen sheet on a phone, where a pick closes it. Its list is the three bands: a block per waiting
+workspace with its tag down the side and a row per need, the working
+workspaces with what is running in them, and the quiet rest folded to a line
+of names (per device, the sidebar disclosures' reason). A row goes to the
+terminal, or to the card on its board for one with no terminal; a card's row
+has the board as a button too, and **Done** only where the move is nothing but
+a move (`Need.plainDone`: in Review, no worktree, no terminal left open) —
+every other move to Done is a question the board asks in its own dialog. The
+sidebar's workspace rows wear the agent rows' dot when their workspace is in
+the `needs` band. Nothing is dismissed by hand: a row leaves when its state
+does. `C-a i` opens the drawer; `C-a o` goes to the next need from the one the
+keyboard is on, round to the first — stepping from where you are rather than
+always to the first is what lets a prompt be left for later.
 
 ## Dragging
 

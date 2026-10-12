@@ -7,7 +7,7 @@ yet is at the bottom.
 
 ## A machine is an ssh host
 
-Settings → Monitors → **Machines** adds one by naming an ssh destination — an
+Settings → Connections → **Machines** adds one by naming an ssh destination — an
 alias from `~/.ssh/config` or `user@host`, held to `validHost`'s grammar
 because it lands in an argv. The list is `~/.config/kururu/vps.json`, named for
 when every entry was a VPS; renaming the file would have bought a migration
@@ -47,9 +47,17 @@ forgets everything on a restart and the host never does. Three readers:
 The line is a loop in `/bin/sh` around `ssh -t`, so what it means does not
 depend on the user's login shell. It exits with ssh when ssh exits on purpose;
 on ssh's 255 it either reattaches by itself (a session tab that had been
-connected for ten seconds) or waits for Enter (everything else) — because the
-server reaps an ended terminal at once, and a tab that vanished would take
-"connection refused" with it.
+connected for twelve seconds — not ten, because `ConnectTimeout=10` means a
+host that never answers also takes about ten seconds to fail, and the margin
+is what stops that failure from being misread as a connection that briefly
+got in) or waits for Enter (everything else) — because the server reaps an
+ended terminal at once, and a tab that vanished would take "connection
+refused" with it. Either way, three failures in a row without a successful
+connection between them and the loop stops offering to retry: it says the
+machine hasn't answered and waits for Enter (or Ctrl-D, or the tab just being
+closed) rather than trying forever on a host that is staying down. A
+connection that does get in resets the count, even if it drops again right
+after.
 
 The sidebar's button is a plain `ssh -t <host>`. A pinned workspace's shells,
 and the harness's, carry a session.
@@ -111,7 +119,7 @@ the point of it.
 | the tab is closed, its pane or workspace deleted, the harness's `stop_agent` | ended |
 | `exit` at its prompt | ends itself; the tab goes |
 | a detach | stays; the tab goes. The next shell in that slot reattaches |
-| the connection drops | stays; the tab reattaches every 3 s until it is back or Ctrl-C |
+| the connection drops | stays; the tab reattaches every 3 s until it is back, three tries fail in a row, or Ctrl-C |
 | the pty host restarts | stays. Tabs are not restored, but the first shells opened in the workspace again take slots 1, 2… and find them |
 
 ## Copying out of one
@@ -166,6 +174,11 @@ name files on this Mac — and a profile's own login directory does not follow
 it: `CLAUDE_CONFIG_DIR` and `CODEX_HOME` are environment on this side of the
 ssh. An agent on a machine is signed in as whoever is signed in there.
 
+Nor does it get kururu's web tools (Firecrawl): they are served on this
+Mac's loopback, and nothing on the machine can reach that address. An agent
+there has no `kururu_web` tools rather than tools that fail — see
+[web](web.md#agents-on-a-machine) for what making it work would take.
+
 `REMOTE_SCRIPT` turns `set-titles` on for an agent's session, scoped with `-t
 "=$S:"` (the bare `=$S` that `has-session` takes is refused by `set-option`),
 so Claude's own window title — its summary of the task — reaches the tab the
@@ -186,7 +199,7 @@ unchanged:
 |---|---|
 | `esc to interrupt` (Claude's footer, Codex's Working line), or Claude's spinner with its clock | `working` |
 | `Do you want to …?` / `Would you like to …?` over a list with `❯ 1.` / `› 1.` marked, or Claude's question tool (`Enter to select`) | `blocked`, the question as activity |
-| the check's `kururu: … is not installed / not logged in on …` | `blocked`, that sentence as activity |
+| the check's `kururu: … is not installed / not logged in on …`, or the loop's `kururu: … has not answered in 3 tries running` | `blocked`, that sentence as activity |
 | none of these, twice running, after `working` | `done` |
 
 It counts rows with something on them, never rows of the screen: a fresh agent
@@ -220,6 +233,20 @@ checkout. A card's dev server only starts with a worktree, so it never starts
 for a remote run. The run keeps no directory (`cwd: null`), so its resume goes
 back to the machine through the pin; a run that started here resumes here.
 
+A card's agent on a machine is put to sleep when idle like any other
+([layout](layout.md#idle-card-agents)), with its facts gathered there: its
+screen is the tab's, its conversation is read on the machine by id over the
+same `BatchMode` ssh (`sessionTailOn`: `tail -c` of Claude's transcript under
+any project, or of Codex's rollout under any day), and a Codex run's id is
+found there too (`codexRolloutsOn`: each rollout touched since the run began,
+its first line and first message cut short). Both are constants with a UUID or
+a whole number in them, run under `sh -c` in single quotes so that the
+account's shell — fish included — does not read them, and so they hold no
+quote and no backslash. What a machine cannot show is the processes under the
+agent, so a command still running there does not keep it awake; and a machine
+that cannot be reached keeps its agents awake, since their conversations cannot
+be checked. Ending one is the close button's: `tmux kill-session`.
+
 ## The harness
 
 `open_shell` and `start_agent` take a workspace, optionally a machine (by
@@ -236,6 +263,8 @@ tool list until it is reopened.
 ## Not yet
 
 - **Hook reports from a machine** — see above.
+- **Firecrawl for an agent on a machine** — a reverse tunnel per link to a
+  listener that serves only the web tools; see [web](web.md#agents-on-a-machine).
 - **The file tree, reader, worktrees, database scan and dev-server discovery**
   on a machine — each reads a disk or a process table kururu does not have
   there. The pages say so rather than drawing nothing.

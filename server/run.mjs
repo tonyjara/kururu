@@ -49,10 +49,34 @@ const building = !process.argv.includes("--no-build");
 const entryFlag = process.argv.indexOf("--entry");
 const ENTRY = entryFlag !== -1 && process.argv[entryFlag + 1] ? process.argv[entryFlag + 1] : join(root, "desktop/dist/server.mjs");
 
-// Named for `ps` and Activity Monitor, beside the server and the host — see
-// `server/src/ptyhostd.ts`. `run.mjs` stays in it because that is how the
-// window's runner recognises a supervisor that is not its own.
-process.title = `Kururu runner (run.mjs${watching ? " --watch" : ""})`;
+/**
+ * The helper beside an app's main binary, or null when this is not running on
+ * one. `server/src/proctitle.ts` has the argument and the TypeScript copy; this
+ * file imports nothing and keeps in step by hand.
+ */
+function helperOf(exe) {
+  const found = /^(.+?\.app)\/Contents\/MacOS\/([^/]+)$/.exec(exe);
+  if (!found || found[1].includes(".app/Contents/")) return null;
+  const name = `${found[2]} Helper`;
+  return join(found[1], "Contents", "Frameworks", `${name}.app`, "Contents", "MacOS", name);
+}
+
+/**
+ * What the build and the server run on. On an app's own binary a process
+ * title is a Dock tile, so the server goes on Electron's helper, which is the
+ * same Electron in an `LSUIElement` bundle. The app starts this runner there
+ * already; one an older app started is on the main binary, and moves its
+ * children off it all the same.
+ */
+const helper = process.platform === "darwin" ? helperOf(process.execPath) : null;
+const NODE = helper && existsSync(helper) ? helper : process.execPath;
+
+// Named for `ps` and Activity Monitor, beside the server and the host — and
+// left unnamed on an app's main binary, where the name would come with a Dock
+// tile. `run.mjs` stays in it because that is how the window's runner
+// recognises a supervisor that is not its own, and an unnamed runner's command
+// line has it anyway.
+if (!helper) process.title = `Kururu runner (run.mjs${watching ? " --watch" : ""})`;
 
 /** Kept in step with `RESTART_EXIT_CODE` in `server/src/index.ts`, which is what sends it. */
 const RESTART_EXIT_CODE = 75;
@@ -115,7 +139,7 @@ function saved(files) {
  */
 function build() {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [BUILD], { stdio: ["ignore", "inherit", "pipe"] });
+    const child = spawn(NODE, [BUILD], { stdio: ["ignore", "inherit", "pipe"] });
     let said = "";
     child.stderr.on("data", (chunk) => {
       process.stderr.write(chunk);
@@ -145,7 +169,7 @@ let stopping = false;
 
 /** `because` finishes the sentence "listening on :7717, because …" in the server's own record. */
 function start(because) {
-  const child = spawn(process.execPath, [ENTRY], {
+  const child = spawn(NODE, [ENTRY], {
     stdio: "inherit",
     env: {
       ...process.env,

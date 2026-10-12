@@ -88,10 +88,14 @@ import { scanDevServers, stopDevServer } from "./devservers";
 import { readHead, repoAt } from "./git";
 import { pollUsage, usageSnapshot } from "./usage";
 import { clearOpenRouterKey, openRouterSnapshot, pollOpenRouter, setOpenRouterKey } from "./openrouter";
+import { Firecrawl, callerAgent, localCaller } from "./firecrawl";
 import { Voice } from "./voice";
 import { Outbox, legacyHeard } from "./outbox";
+import { nameProcess } from "./proctitle";
 import { Kuru } from "./kuru";
+import { Channels } from "./channels";
 import { KURU_PAGE, KURU_SAY_MAX } from "../../shared/kuru";
+import { isChannelKind, type ChannelKind } from "../../shared/channels";
 import { Backup } from "./backup";
 import { Store, dataDir, dbPath } from "./store";
 import { isSearchScope, sessionOfTranscript, type Actor, type SearchHit } from "../../shared/store";
@@ -111,6 +115,7 @@ import {
 import { remoteAgentRun, remoteShellCommand, remoteShellOf, sessionName, validRemoteDir, type MachineEntry } from "../../shared/machines";
 import { lazygitCommand, lazygitRun } from "../../shared/lazygit";
 import { OnScreen } from "./onscreen";
+import { Sleeper } from "./sleep";
 import { closeDatabasePools, dbCatalog, dbQuery, dbRows, scanDatabases, type DatabaseScanInput } from "./databases";
 import { allowedRoots, allowRoot, findDocs, listDir, listDirs, readBytes, readFile, resolveInRoot } from "./files";
 import { parseFileOp, runFileOp } from "./fileops";
@@ -196,7 +201,7 @@ import {
 import { hookSettingsFlag } from "./hooks";
 import { Harness } from "./harness";
 import { mcpAnswer } from "./mcp";
-import { claudeDirFor, loginDir, loginEnv, scanLogins } from "./logins";
+import { claudeDirFor, codexDirFor, loginDir, loginEnv, scanLogins } from "./logins";
 import {
   adoptLaunch,
   findLauncher,
@@ -276,6 +281,19 @@ import { closeAllPreviews, closePreview, openPreview, openPreviews } from "./pro
 import { reach } from "./reach";
 import { smallestGrid, type Grid } from "./sizing";
 import { checkForUpdate } from "./update";
+import { WindowReloads } from "./reload";
+import {
+  BY_MAX,
+  RELOAD_TIMEOUT_MAX_MS,
+  RELOAD_TIMEOUT_MIN_MS,
+  RELOAD_TIMEOUT_MS,
+  WHY_MAX,
+  isReloadHold,
+  isReloadPage,
+  oneLine,
+  outcomeText,
+  reloaderName,
+} from "../../shared/reload";
 import { VERSION } from "./version";
 import { orderAgents, Workspaces } from "./workspaces";
 
@@ -287,8 +305,9 @@ watchSupervisor();
 const PORT = Number(process.env.KURURU_PORT ?? 7717);
 
 // Named for `ps` and Activity Monitor, where the window, the runner, this and
-// the host were otherwise four of the same "Kururu". See `ptyhostd.ts`.
-process.title = `Kururu server :${PORT}`;
+// the host were otherwise four of the same "Kururu" — and only where naming it
+// cannot give it a Dock tile, which `proctitle.ts` explains.
+nameProcess(`Kururu server :${PORT}`);
 
 /**
  * The exit code that means "start me again", as opposed to the ones that mean
@@ -427,8 +446,12 @@ let voice!: Voice;
 let outbox!: Outbox;
 /** The conversation with Kuru as the drawer draws it, assembled from the store, the outbox and the voice. See `kuru.ts`. */
 let kuru!: Kuru;
+/** Other doors into that conversation — Telegram — fed what Kuru took in and said. See `channels.ts`. */
+let channels!: Channels;
 /** What an agent on a machine is doing, read off its screen since nothing there reports. See `onscreen.ts`. */
 let screens!: OnScreen;
+/** Ends a card's agent that has sat idle, once its conversation is made sure of. See `sleep.ts`. */
+let sleeper!: Sleeper;
 /** The database: boards, conversations and the voice's lists. Opened in `attach()`, before anything is served. See `store.ts`. */
 let store!: Store;
 let backup!: Backup;
@@ -458,6 +481,36 @@ function broadcast(msg: ServerMessage): void {
       // ditto
     }
   }
+}
+
+/**
+ * Agents asking for the window to be reloaded — `bun run reload-window` and
+ * the harness's `reload_window`. It talks to the clients and nothing else;
+ * see `reload.ts`.
+ */
+const reloads = new WindowReloads<WebSocket>({ send, connected: () => clients.size });
+
+/**
+ * Who asked for a reload, as the window's notice names them: the agent the
+ * command ran in, found by the id its pty was started with — the way the
+ * report hook knows which agent it is — or what a caller from outside kururu
+ * called itself.
+ */
+function reloaderOf(agentId: string | null, given: string | null): string {
+  const agent = agentId ? host.find(agentId) : undefined;
+  if (agent) {
+    const profileId = workspaces.profileOf(agent.id);
+    const workspace = profileId
+      ? (workspaces.profile(profileId)?.workspaces.find((w) => workspaces.agentsInWorkspace(profileId, w.id).includes(agent.id))?.name ?? null)
+      : null;
+    return reloaderName({
+      name: agent.titleOverride || null,
+      doing: agent.title || activity.get(agent.id) || null,
+      program: agent.agent ?? agent.lastAgent ?? (agent.kind === "shell" ? "a shell" : "an agent"),
+      workspace,
+    });
+  }
+  return given ? oneLine(given, BY_MAX) || "a terminal outside kururu" : "a terminal outside kururu";
 }
 
 /**
@@ -536,6 +589,13 @@ function claudeDirOf(profileId: string): string {
   const profile = workspaces.profile(profileId);
   if (loginsActive() && profile) return claudeDirFor(profile.loginKey);
   return process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+}
+
+/** The same for Codex, whose rollouts are where a card's Codex conversation is found (`sleep.ts`). */
+function codexHomeOf(profileId: string): string {
+  const profile = workspaces.profile(profileId);
+  if (loginsActive() && profile) return codexDirFor(profile.loginKey);
+  return process.env.CODEX_HOME || join(homedir(), ".codex");
 }
 
 /**
@@ -1120,6 +1180,8 @@ function noticeStatuses(): void {
     // Never seen before, or has not moved. See `lastStatus` for why those are
     // two cases and not one.
     if (before === undefined || before === agent.status) continue;
+    // Any edge is something happening, which an idle card's clock starts again on.
+    sleeper.status(agent.id, agent.status);
     if (agent.exited) continue;
     // The harness hears every edge a person would; `reapExited` tells it the exits.
     harness.noticed(agent, agent.status, false);
@@ -1517,7 +1579,9 @@ function fillPane(paneId: string, from?: string): void {
  * The line that starts an agent from the menu, flags and all.
  *
  * A profile's own login directory has none of the hooks the machine's does, so
- * a Claude started into one is handed kururu's. See `hooks.ts`.
+ * a Claude started into one is handed kururu's. See `hooks.ts`. And every
+ * agent is pointed at kururu's web tools while Firecrawl is set up and on —
+ * an address on this Mac, never the key. See `firecrawl.ts`.
  */
 function agentCommand(launcher: Launcher): string {
   return agentCommandFor(launcher, workspaces.active.id);
@@ -1525,7 +1589,7 @@ function agentCommand(launcher: Launcher): string {
 
 /** The same, for a profile that need not be on screen: its own hooks, if it has its own directory. */
 function agentCommandFor(launcher: Launcher, profileId: string): string {
-  return launcherCommand(launcher, launch) + hooksFor(launcher, profileId);
+  return launcherCommand(launcher, launch) + hooksFor(launcher, profileId) + firecrawl.launchFlags(launcher.cli);
 }
 
 function hooksFor(launcher: Launcher, profileId: string): string {
@@ -1548,8 +1612,8 @@ function hooksFor(launcher: Launcher, profileId: string): string {
  * afterwards: the point of handing work off is to carry on with the list, not
  * to be taken to it.
  */
-async function runCard(workspaceId: string, cardId: string, launcherId: string): Promise<{ agentId: string }> {
-  return runCardAt(workspaces.active.id, workspaceId, cardId, launcherId, true);
+async function runCard(workspaceId: string, cardId: string, launcherId: string, fresh = false): Promise<{ agentId: string }> {
+  return runCardAt(workspaces.active.id, workspaceId, cardId, launcherId, true, "user", fresh);
 }
 
 /**
@@ -1570,6 +1634,7 @@ async function runCardAt(
   launcherId: string,
   shown = false,
   actor: Actor = "user",
+  fresh = false,
 ): Promise<{ agentId: string }> {
   const onScreen = profileId === workspaces.active.id && workspaceId === workspaces.activeWorkspace.id;
   // `startDev` acts on the profile on screen, which a shown card's always is.
@@ -1583,6 +1648,18 @@ async function runCardAt(
   }
   const launcher = typeof launcherId === "string" ? findLauncher(launcherId) : undefined;
   if (!launcher) throw new Error(`no such agent: ${String(launcherId)}`);
+  /*
+   * A card whose agent kururu put to sleep for sitting idle is picked back
+   * up, not started over: that run was ended on the understanding that
+   * running the card again would bring its conversation back, and the card
+   * says so. On the launcher asked for when it is the same CLI — a model can
+   * change between turns of one conversation — and fresh only when asked
+   * for in so many words, or on the other CLI, which cannot read this one's.
+   */
+  const last = found.card.run;
+  if (!fresh && last?.state === "asleep" && canResume(last, false) && findLauncher(last.launcher)?.cli === launcher.cli) {
+    return resumeCardAt(profileId, workspaceId, cardId, launcher, actor);
+  }
 
   const boardPane = paneWithAgent(workspace.layout, BOARD_TAB)?.id;
   const target = workspaces.paneBesideBoardIn(profileId, workspaceId);
@@ -1747,7 +1824,10 @@ function recordTurn(agentId: string, report: { status?: string; message?: string
 function sayAside(profileId: string, text: string): void {
   const profile = workspaces.profile(profileId);
   const key = profile?.key ?? "";
-  const utterance = voice.speak(key, text);
+  // Not aloud in a turn that answers only a channel, for the reason its reply
+  // is not (`replySpoken`); in the chat either way, as it is in the drawer.
+  const utterance = !key || channels.speaks(key) ? voice.speak(key, text) : null;
+  if (key) channels.aside(key, text);
   if (!profile?.harness) return;
   try {
     store.recordTurn({
@@ -1788,18 +1868,31 @@ function sayAside(profileId: string, text: string): void {
  * the pin says now, because here is where its transcript is.
  */
 async function resumeCard(workspaceId: string, cardId: string): Promise<{ agentId: string }> {
-  const profileId = workspaces.active.id;
+  return resumeCardAt(workspaces.active.id, workspaceId, cardId);
+}
+
+/**
+ * The same, for any profile's card — the harness's `run_card` on a card put
+ * to sleep — and on another launcher of the same CLI when one is named.
+ */
+async function resumeCardAt(
+  profileId: string,
+  workspaceId: string,
+  cardId: string,
+  on?: Launcher,
+  actor: Actor = "user",
+): Promise<{ agentId: string }> {
   const workspace = workspaces.workspaceIn(profileId, workspaceId);
   if (!workspace) throw new Error("no such workspace");
-  const onScreen = workspaceId === workspaces.activeWorkspace.id;
-  const found = workspaces.findCard(workspaceId, cardId);
+  const onScreen = profileId === workspaces.active.id && workspaceId === workspaces.activeWorkspace.id;
+  const found = workspaces.findCardIn(profileId, workspaceId, cardId);
   if (!found) throw new Error("no such card");
   const run = found.card.run;
   const open = run?.agentId != null && host.agents.some((a) => a.id === run.agentId && !a.exited);
   if (!run || !canResume(run, open)) {
     throw new Error(open ? "its agent is still open" : "there is no conversation on this card to resume");
   }
-  const launcher = findLauncher(run.launcher);
+  const launcher = on ?? findLauncher(run.launcher);
   if (!launcher) throw new Error(`no such agent: ${run.launcher}`);
 
   const boardPane = paneWithAgent(workspace.layout, BOARD_TAB)?.id;
@@ -1814,20 +1907,22 @@ async function resumeCard(workspaceId: string, cardId: string): Promise<{ agentI
   if (!command) throw new Error("there is no conversation on this card to resume");
   const options = remote
     ? { command: await agentOn(remote.machine, remote.workspaceName, remote.dir, launcher.cli, command), kind: "agent" as const }
-    : { cwd, command: command + hooksFor(launcher, profileId), kind: "agent" as const };
+    : { cwd, command: command + hooksFor(launcher, profileId) + firecrawl.launchFlags(launcher.cli), kind: "agent" as const };
   const agent = onScreen
     ? await openTerminal(target, options)
     : await openTerminalAt(profileId, workspaceId, target, options);
   host.rename(agent.id, found.card.title.slice(0, 80));
-  workspaces.editBoard(workspaceId, (board) =>
-    startRun(board, cardId, {
-      agentId: agent.id,
-      launcher: launcher.id,
-      label: launcher.label,
-      startedAt: Date.now(),
-      sessionId: run.sessionId,
-      cwd: cwd ?? null,
-    }),
+  workspaces.as(actor, () =>
+    workspaces.editBoardIn(profileId, workspaceId, (board) =>
+      startRun(board, cardId, {
+        agentId: agent.id,
+        launcher: launcher.id,
+        label: launcher.label,
+        startedAt: Date.now(),
+        sessionId: run.sessionId,
+        cwd: cwd ?? null,
+      }),
+    ),
   );
   if (onScreen && boardPane && workspaces.hasPane(boardPane)) workspaces.focusPane(boardPane);
   return { agentId: agent.id };
@@ -2166,6 +2261,19 @@ function newestAgentHere(): string | undefined {
 }
 
 /**
+ * End one terminal the way its close button does: its tmux session on a
+ * machine, the process group here, its tab, and everything this side kept
+ * about it. `close-tab` and an idle card's sleep (`sleep.ts`) are the same
+ * gesture, so they are the same function.
+ */
+function endTerminal(agentId: string): void {
+  endRemote(agentId);
+  host.kill(agentId);
+  workspaces.reapTab(agentId);
+  forget(agentId);
+}
+
+/**
  * Reap a terminal the arrangement no longer has room for. Pane and workspace
  * deletion hand back what was inside them; this is what ends it.
  */
@@ -2193,6 +2301,7 @@ function forget(agentId: string): void {
   workspaces.noteRun(agentId, "", true);
   activity.delete(agentId);
   harness.forget(agentId);
+  sleeper.forget(agentId);
   lastAgent.delete(agentId);
   memory.delete(agentId);
   unread.delete(agentId);
@@ -2391,6 +2500,9 @@ function dropClient(ws: WebSocket): void {
   // everywhere else, and what it was going to play is not going to be heard
   // there.
   voice.leave(ws);
+  // A page that said it was reloading goes this way, and so does one that
+  // was closed while it waited.
+  reloads.leave(ws);
   // The viewer cannot be open with nobody connected, and a connection to
   // somebody's production database is not a thing to keep for the company.
   if (clients.size === 0) void closeDatabasePools();
@@ -3514,6 +3626,24 @@ async function pollOpenRouterAccount(): Promise<void> {
 }
 
 /**
+ * Firecrawl for the agents: the key, the day's budget, and the tools served at
+ * `/mcp/web`. It reads its own credit figures on its own timer, only while a
+ * window is open, and broadcasts whatever moves. See `firecrawl.ts`.
+ */
+const firecrawl = new Firecrawl({
+  broadcast: (message) => broadcast(message),
+  clients: () => clients.size,
+  port: () => PORT,
+  nameOf: (agentId) => {
+    const agent = host.find(agentId);
+    if (!agent) return null;
+    const where = `${agent.agent ?? "agent"} in ${agent.cwd.split("/").pop() || agent.cwd}`;
+    const what = agent.title?.replace(/\s+/g, " ").trim().slice(0, 60);
+    return what ? `${where}: ${what}` : where;
+  },
+});
+
+/**
  * The timers left in this process, and what they have in common: each one asks
  * the *machine* a question no pty can raise an event about. The status heuristic
  * and the agent scan went with the ptys, because those are questions about a
@@ -3555,6 +3685,13 @@ function reply(ws: WebSocket, id: number, run: () => unknown): void {
 }
 
 /** The same, for anything that has to cross the link and come back. */
+/** A channel by its kind off the wire. One kind today; the throw is the sentence a page shows for a kind this server does not know. */
+function channelFor(kind: unknown): Channels["telegram"] {
+  if (!isChannelKind(kind)) throw new Error("kururu does not know that channel.");
+  const byKind: Record<ChannelKind, Channels["telegram"]> = { telegram: channels.telegram };
+  return byKind[kind];
+}
+
 async function replyAsync(ws: WebSocket, id: number, run: () => Promise<unknown>): Promise<void> {
   try {
     send(ws, { type: "reply", id, ok: true, result: (await run()) ?? true });
@@ -3641,12 +3778,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
       } else if (agentId) {
         // Closing a pane's last terminal closes the pane (`reapTab`), the same as
         // when its pty ends; the last pane of a workspace stays, empty.
-        for (const id of terminalsOf([agentId])) {
-          endRemote(id);
-          host.kill(id);
-          workspaces.reapTab(id);
-          forget(id);
-        }
+        for (const id of terminalsOf([agentId])) endTerminal(id);
       }
       return;
     }
@@ -3698,6 +3830,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
       // No reply: this is what the user typed, and it is either delivered or the
       // terminal is visibly dead already.
       recordInput(msg.agentId, msg.data);
+      if (typeof msg.data === "string") sleeper.typed(msg.agentId, msg.data);
       host.write(msg.agentId, msg.data);
       return;
 
@@ -4095,6 +4228,77 @@ function handleMessage(ws: WebSocket, raw: string): void {
       broadcast({ type: "openrouter", openrouter: null });
       return;
 
+    // --- firecrawl -------------------------------------------------------------
+    // Each broadcasts the status itself; the replies are for the page that asked.
+    case "set-firecrawl-key":
+      void replyAsync(ws, msg.id, () => firecrawl.setKey(msg.key));
+      return;
+
+    case "clear-firecrawl-key":
+      firecrawl.clearKey();
+      return;
+
+    case "set-firecrawl":
+      reply(ws, msg.id, () => firecrawl.setSettings(msg));
+      return;
+
+    case "test-firecrawl":
+      void replyAsync(ws, msg.id, () => firecrawl.test());
+      return;
+
+    // --- channels --------------------------------------------------------------
+    // Each names its kind, and only Telegram is one; the rest is the
+    // channel's own to check, and each refusal is a sentence for the page.
+    case "channel-token":
+      void replyAsync(ws, msg.id, () => channelFor(msg.kind).setToken(msg.token));
+      return;
+
+    case "channel-forget":
+      if (isChannelKind(msg.kind)) channelFor(msg.kind).forget();
+      return;
+
+    case "channel-set":
+      void replyAsync(ws, msg.id, async () => {
+        const change: { enabled?: boolean; profileKey?: string | null; speakReplies?: boolean } = {};
+        if (typeof msg.enabled === "boolean") change.enabled = msg.enabled;
+        if (typeof msg.speakReplies === "boolean") change.speakReplies = msg.speakReplies;
+        if (msg.profileId === null) change.profileKey = null;
+        else if (typeof msg.profileId === "string") {
+          const key = workspaces.keyOf(msg.profileId);
+          if (!key) throw new Error("That profile is gone.");
+          change.profileKey = key;
+        }
+        return channelFor(msg.kind).set(change);
+      });
+      return;
+
+    case "channel-pair":
+      void replyAsync(ws, msg.id, async () => channelFor(msg.kind).pair(msg.on === true));
+      return;
+
+    case "channel-allow":
+      void replyAsync(ws, msg.id, async () => {
+        if (typeof msg.userId !== "string") throw new Error("A Telegram account id is a number, like 123456789.");
+        return channelFor(msg.kind).allow(msg.userId.trim());
+      });
+      return;
+
+    case "channel-refuse":
+      if (isChannelKind(msg.kind)) channelFor(msg.kind).refuse();
+      return;
+
+    case "channel-disallow":
+      if (isChannelKind(msg.kind) && typeof msg.userId === "string") channelFor(msg.kind).disallow(msg.userId);
+      return;
+
+    case "channel-test":
+      void replyAsync(ws, msg.id, () => channelFor(msg.kind).test());
+      return;
+
+    case "channel-clear-ignored":
+      if (isChannelKind(msg.kind)) channelFor(msg.kind).clearIgnored();
+      return;
+
     // --- the database and the backups ----------------------------------------
     case "set-backup":
       void replyAsync(ws, msg.id, async () => backup.set({ url: msg.url, enabled: msg.enabled, intervalMin: msg.intervalMin }));
@@ -4138,7 +4342,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
       void replyAsync(ws, msg.id, () => {
         const lang = msg.lang === "es" ? "es" : "en";
         const choice = msg.voice;
-        if (!choice || (choice.engine !== "kokoro" && choice.engine !== "system") || typeof choice.voice !== "string") throw new Error("not a voice");
+        if (!choice || (choice.engine !== "kokoro" && choice.engine !== "lab" && choice.engine !== "system") || typeof choice.voice !== "string") throw new Error("not a voice");
         return voice.preview({ engine: choice.engine, voice: choice.voice.slice(0, 80) }, lang);
       });
       return;
@@ -4149,6 +4353,25 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "talking":
       voice.talk(ws, msg.talking === true);
+      return;
+
+    // --- an agent reloading the window -------------------------------------
+
+    case "reloadable": {
+      if (!isReloadPage(msg.page)) return;
+      const reloaded = Array.isArray(msg.reloaded) ? msg.reloaded.filter((id): id is string => typeof id === "string").slice(0, 16) : [];
+      reloads.declare(ws, msg.page, reloaded);
+      return;
+    }
+
+    case "reload-held":
+      if (!Array.isArray(msg.ids) || !Array.isArray(msg.holds)) return;
+      reloads.held(ws, msg.ids.filter((id): id is string => typeof id === "string"), msg.holds.filter(isReloadHold));
+      return;
+
+    case "reloading":
+      if (!Array.isArray(msg.ids)) return;
+      reloads.reloading(ws, msg.ids.filter((id): id is string => typeof id === "string"));
       return;
 
     case "speech-held":
@@ -4179,7 +4402,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "kuru-replay": {
       const key = typeof msg.profileId === "string" ? workspaces.keyOf(msg.profileId) : null;
-      if (key && typeof msg.utterance === "string") voice.replayOne(key, msg.utterance);
+      if (key && typeof msg.utterance === "string") voice.replayOne(key, msg.utterance, typeof msg.text === "string" ? msg.text.slice(0, KURU_SAY_MAX) : undefined);
       return;
     }
 
@@ -4444,7 +4667,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
       return;
 
     case "run-card":
-      void replyAsync(ws, msg.id, () => runCard(msg.workspaceId, msg.cardId, msg.launcher));
+      void replyAsync(ws, msg.id, () => runCard(msg.workspaceId, msg.cardId, msg.launcher, msg.fresh === true));
       return;
 
     case "resume-card":
@@ -4812,6 +5035,16 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   }
 
   /**
+   * Every card's agent as the idle look last found it, and why each one is
+   * still awake — "waiting on you: its last reply asked something", "idle 4
+   * min of 10". Asked, not pushed: it is for whoever is wondering.
+   */
+  if (url.pathname === "/api/sleep") {
+    json(res, { on: launch.sleepIdle, minutes: launch.sleepMinutes, agents: sleeper.looked() });
+    return;
+  }
+
+  /**
    * Where the data lives, for the About page: the database's file and how
    * big it is. Asked rather than pushed, since nobody watches it grow.
    */
@@ -4885,6 +5118,48 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     const refused = requestHostRestart();
     if (refused) json(res, { ok: false, error: refused }, 409);
     else json(res, { ok: true });
+    return;
+  }
+
+  /**
+   * An agent asking for the window to be reloaded, for a caller with no
+   * socket: `bun run reload-window`, which sends the `KURURU_AGENT_ID` its pty
+   * was started with so the notice can say who asked. Held open until every
+   * page on this Mac has reloaded and come back, or the time is up, or the
+   * page went — the answer is what the agent acts on. Behind the gate like
+   * every route here, so loopback, the Origin check and, when shared, the
+   * token are what they are for everything else; and it reloads pages and
+   * nothing more, the same reload `C-a R` does, never the host.
+   *
+   * A caller that hangs up stops the wait, and the pages still holding let
+   * the ask go: a reload nobody is waiting to hear about is one that would
+   * arrive unexplained but for its notice.
+   */
+  if (url.pathname === "/api/reload-window" && req.method === "POST") {
+    let body: Record<string, unknown> = {};
+    try {
+      const raw = await readJsonBody(req, 16 * 1024);
+      if (raw && typeof raw === "object") body = raw as Record<string, unknown>;
+    } catch (err) {
+      json(res, { ok: false, error: err instanceof Error ? err.message : String(err) }, 400);
+      return;
+    }
+    const why = typeof body.why === "string" ? oneLine(body.why, WHY_MAX) : "";
+    if (!why) {
+      json(res, { ok: false, error: "Say why: the window shows it in the notice after the reload." }, 400);
+      return;
+    }
+    const seconds = Number(body.timeout);
+    const timeoutMs = Number.isFinite(seconds) && body.timeout !== null && body.timeout !== undefined
+      ? Math.max(RELOAD_TIMEOUT_MIN_MS, Math.min(RELOAD_TIMEOUT_MAX_MS, seconds * 1000))
+      : RELOAD_TIMEOUT_MS;
+    const by = reloaderOf(typeof body.agent === "string" ? body.agent : null, typeof body.by === "string" ? body.by : null);
+    const hangup = new AbortController();
+    res.on("close", () => {
+      if (!res.writableFinished) hangup.abort();
+    });
+    const outcome = await reloads.ask(why, by, timeoutMs, hangup.signal);
+    if (!hangup.signal.aborted) json(res, { ...outcome, by, text: outcomeText(outcome) });
     return;
   }
 
@@ -5031,14 +5306,23 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       // The rest of the report is the harness's: where the transcript and the
       // inbox are, and what was last said. See `harness.ts`.
       harness.report(agentId, body as Record<string, unknown>);
-      // And when the reporter is a profile's harness, what it last said is
-      // read aloud — the one place Kuru's turn ending is heard about.
       const spoken = harness.isHarness(agentId);
       const spokenKey = spoken ? workspaces.keyOf(spoken) : null;
-      const utterance = spokenKey && parsed.report.status === "done" ? voice.spoke(spokenKey, (body as Record<string, unknown>).reply) : null;
       // A prompt Kuru took, which is how a message of yours is known to have
       // arrived and not merely to have been typed. See `Outbox.prompted`.
+      // The channels note where it came from, and carry it to the chat when
+      // it was yours from here; only a `working` report's message is a
+      // prompt, as `recordTurn` below reads it.
       if (spokenKey && parsed.report.message) outbox.prompted(spokenKey, parsed.report.message);
+      if (spokenKey && parsed.report.status === "working" && parsed.report.message) channels.prompted(spokenKey, parsed.report.message);
+      // And when the reporter is a profile's harness, what it last said is
+      // read aloud — the one place Kuru's turn ending is heard about — unless
+      // the turn answered only a channel, whose reply is already in somebody's
+      // hand (`replySpoken`). Every channel that carries the profile gets it.
+      const reply = (body as Record<string, unknown>).reply;
+      const ended = spokenKey !== null && parsed.report.status === "done";
+      const utterance = ended && channels.speaks(spokenKey) ? voice.spoke(spokenKey, reply) : null;
+      if (ended) channels.replied(spokenKey, reply);
       // And the conversation, written down: the prompt on its way in and
       // the reply on its way out, for the search and the drawer. Before the
       // cap below, which is the sidebar's and not the record's.
@@ -5056,6 +5340,48 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       json(res, { ok: true });
     } catch (err) {
       json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+    return;
+  }
+
+  /**
+   * Firecrawl as an MCP server: the web tools every agent kururu starts is
+   * pointed at (`Firecrawl.launchFlags`), and the harness with them. Stricter
+   * than `/mcp` below, because what it spends is credits: a program on this
+   * Mac only — loopback, no `Origin`, nothing a proxy added — whether or not
+   * sharing is on. The agent names itself in a header so the Settings page
+   * can say who spent what; one that does not is still served. See
+   * `firecrawl.ts` and `shared/firecrawl.ts`.
+   */
+  if (url.pathname === "/mcp/web") {
+    if (req.method === "GET") {
+      text(res, "kururu speaks MCP over POST only\n", 405);
+      return;
+    }
+    if (req.method === "DELETE") {
+      res.writeHead(200).end();
+      return;
+    }
+    if (req.method !== "POST") {
+      text(res, "POST only", 405);
+      return;
+    }
+    if (!localCaller(req)) {
+      json(res, { jsonrpc: "2.0", id: null, error: { code: -32000, message: "kururu's web tools answer programs on this Mac only" } }, 403);
+      return;
+    }
+    const said = callerAgent(req);
+    const agentId = said && host.find(said) ? said : null;
+    try {
+      const body = await readJsonBody(req, 64 * 1024);
+      const answer = await mcpAnswer(body, firecrawl.tools(), (name, args) => firecrawl.call(name, args, agentId), {
+        name: "kururu_web",
+        version: VERSION,
+      });
+      if (answer.body === undefined) res.writeHead(answer.status).end();
+      else json(res, answer.body, answer.status);
+    } catch (err) {
+      json(res, { jsonrpc: "2.0", id: null, error: { code: -32700, message: err instanceof Error ? err.message : String(err) } }, 400);
     }
     return;
   }
@@ -5764,10 +6090,12 @@ server.on("upgrade", (req, socket, head) => {
     send(ws, { type: "usage", usage: usageSnapshot() });
     send(ws, { type: "machines", machines: machinesSnapshot() });
     send(ws, { type: "openrouter", openrouter: openRouterSnapshot() });
+    send(ws, firecrawl.message());
     send(ws, { type: "voice", voice: voice.status() });
     send(ws, voice.hush());
     send(ws, kuru.message());
     send(ws, outbox.message());
+    send(ws, channels.message());
     send(ws, backup.message());
     // The first client through the door is also what starts the usage poll: it
     // is skipped while nothing is connected, so without this a freshly started
@@ -5906,7 +6234,7 @@ async function attach(port: Port): Promise<void> {
       host.kill(agentId);
     },
     cwdFor: cwdForPaneIn,
-    runCard: (profileId, workspaceId, cardId, launcherId) => runCardAt(profileId, workspaceId, cardId, launcherId, false, "harness"),
+    runCard: (profileId, workspaceId, cardId, launcherId, fresh) => runCardAt(profileId, workspaceId, cardId, launcherId, false, "harness", fresh),
     stopDev,
     // Through the variable rather than the instance, because the voice is
     // built on the next line and needs the harness to hand words to. The
@@ -5916,6 +6244,7 @@ async function attach(port: Port): Promise<void> {
     replayMissed: (profileId) => voice.replay(workspaces.keyOf(profileId) ?? ""),
     search: searchFor,
     cardHistory: cardHistoryOf,
+    reloadWindow: (why, timeoutMs) => reloads.ask(why, "Kuru", timeoutMs),
   });
   // The reports a remote agent's hooks cannot send, read off its screen.
   screens = new OnScreen({
@@ -5929,6 +6258,26 @@ async function attach(port: Port): Promise<void> {
     },
   });
   screens.start();
+  sleeper = new Sleeper({
+    host,
+    settings: () => ({ on: launch.sleepIdle, minutes: launch.sleepMinutes }),
+    cards: () => workspaces.cardRuns().map((at) => ({ ...at, prompt: cardPrompt(at.card) })),
+    taken: () => workspaces.cardSessions(),
+    grid: ownedGrid,
+    isHarness: (agentId) => harness.isHarness(agentId) !== null,
+    holding: (agentId) => harness.holding(agentId),
+    transcript: (agentId) => harness.transcriptOf(agentId),
+    claudeDir: claudeDirOf,
+    codexHome: codexHomeOf,
+    learned: (agentId, sessionId) => workspaces.noteRunSession(agentId, sessionId),
+    sleep: (at, agent, idleMs) => {
+      // The card first, so that a board the database refuses ends nothing.
+      if (!workspaces.sleepRunOf(agent.id)) return;
+      console.log(`kururu: put "${at.card.title}" to sleep after ${Math.round(idleMs / 60_000)} min idle (${agent.id}); running the card resumes it`);
+      endTerminal(agent.id);
+    },
+  });
+  sleeper.start();
   voice = new Voice({
     broadcast,
     index: { load: () => store.loadMissed(), save: (list) => store.saveMissed(list) },
@@ -5938,10 +6287,14 @@ async function attach(port: Port): Promise<void> {
     changed: () => kuru.changed(),
   });
   outbox = new Outbox({
-    // Every move of a message is also a move of the conversation it is in.
+    // Every move of a message is also a move of the conversation it is in,
+    // and of a channel's, which says when one of its messages failed.
     broadcast: (msg) => {
       broadcast(msg);
-      if (msg.type === "outbox") kuru.changed();
+      if (msg.type === "outbox") {
+        kuru.changed();
+        channels.outboxMoved(msg.outbox, (id) => workspaces.keyOf(id));
+      }
     },
     index: { load: () => store.loadOutbox(), save: (entries) => store.saveOutbox(entries), remove: (id) => store.removeVoice(id) },
     profileIdOf: (key) => workspaces.profileIdOf(key),
@@ -5958,7 +6311,26 @@ async function attach(port: Port): Promise<void> {
       return { agentId, status: agent.status, transcript: harness.transcriptOf(agentId) };
     },
     talk: (who, on) => voice.talk(who, on),
+    delivered: (entry) => channels.delivered(entry.profileKey, entry),
   });
+  channels = new Channels({
+    broadcast,
+    // A channel's message takes the composer's road: the same outbox, so the
+    // same order, the same confirmation by Kuru's own hook, the same Resend.
+    say: (profileKey, id, at, text) => void outbox.say(profileKey, id, at, text),
+    profileKeyFor: (chosen) => (chosen && workspaces.profileByKey(chosen) ? chosen : workspaces.active.key),
+    profileIdOf: (key) => workspaces.profileIdOf(key),
+    kuruBusy: (profileKey) => {
+      const agentId = workspaces.profileByKey(profileKey)?.harness?.agentId;
+      const agent = agentId ? host.find(agentId) : undefined;
+      return Boolean(agent && !agent.exited && agent.status === "working");
+    },
+  });
+  {
+    // What is already failed is learned now, so only a failure from here on is told.
+    const first = outbox.message();
+    if (first.type === "outbox") channels.outboxMoved(first.outbox, (id) => workspaces.keyOf(id));
+  }
   kuru = new Kuru({
     store,
     profiles: () => workspaces.all().map((profile) => ({ id: profile.id, key: profile.key })),
@@ -5983,6 +6355,9 @@ async function attach(port: Port): Promise<void> {
   // outlived the last server looks like none, and handing over would start a
   // second one.
   outbox.resume();
+  // And only then may a channel read what was sent to it: its messages go
+  // through the outbox, which is now ready to hand them over.
+  channels.start();
   // An agent the host has but no layout mentions would be running with nothing
   // pointing at it — put it somewhere rather than leave it unreachable.
   const placed = new Set(workspaces.allAgents());
@@ -6325,6 +6700,7 @@ export function shutdown(): Promise<void> {
     // The Kokoro process, so it goes now rather than when it notices.
     voice?.close();
     outbox?.close();
+    channels?.close();
     for (const ws of clients.keys()) {
       try { ws.terminate(); } catch { /* already gone */ }
     }

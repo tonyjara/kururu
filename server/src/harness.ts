@@ -49,6 +49,7 @@ import { join } from "node:path";
 import { Terminal } from "@xterm/headless";
 
 import { addCard, boardLanes, cardCode, editCard, mintCardId, moveCard, runLive, type Board, type Card } from "../../shared/board";
+import { CHANNEL_NAMES, isChannelKind } from "../../shared/channels";
 import {
   HARNESS_NAME,
   HARNESS_SERVER,
@@ -85,6 +86,7 @@ import { remoteShellOf, validRemoteDir, type MachineEntry, type MachineStatus } 
 import type { AgentSnapshot, AgentStatus, HarnessState } from "../../shared/model";
 import { isNotifyEvent } from "../../shared/notify";
 import type { MissedReply } from "../../shared/voice";
+import { RELOAD_TIMEOUT_MAX_MS, RELOAD_TIMEOUT_MIN_MS, RELOAD_TIMEOUT_MS, WHY_MAX, oneLine, outcomeText, type ReloadOutcome } from "../../shared/reload";
 import { COLUMN_LABELS } from "../../shared/board";
 import type { CardEvent, SearchHit, SearchScope } from "../../shared/store";
 import type { McpResult } from "./mcp";
@@ -133,7 +135,7 @@ export interface HarnessDeps {
   /** Where a new tab in that pane would start. */
   cwdFor: (profileId: string, workspaceId: string, paneId: string) => Promise<string | undefined>;
   /** Hand a card to an agent, on a board that need not be on screen. */
-  runCard: (profileId: string, workspaceId: string, cardId: string, launcherId: string) => Promise<{ agentId: string }>;
+  runCard: (profileId: string, workspaceId: string, cardId: string, launcherId: string, fresh: boolean) => Promise<{ agentId: string }>;
   /** A card to Done takes its dev server with it, as the client's move does. */
   stopDev: (workspaceId: string, cardId: string) => void;
   /** Say a line aloud to the user, as this profile's harness. See `voice.ts`. */
@@ -143,6 +145,8 @@ export interface HarnessDeps {
   /** The database: full text over the profile's cards and conversations, and a card's history. See `store.ts`. */
   search: (profileId: string, query: string, scope: SearchScope, limit: number) => SearchHit[];
   cardHistory: (cardId: string) => { card: Card; workspaceName: string | null; deleted: boolean; events: CardEvent[] } | null;
+  /** Reload the user's pages on this Mac once each is safe, and say what happened. See `reload.ts`. */
+  reloadWindow: (why: string, timeoutMs: number) => Promise<ReloadOutcome>;
 }
 
 type WaitState = "done" | "blocked" | "exited";
@@ -294,6 +298,11 @@ export class Harness {
   /** Where an agent's session keeps its transcript, as its hooks last said — for the outbox, which looks there for what it typed. */
   transcriptOf(agentId: string): string | null {
     return this.transcripts.get(agentId) ?? null;
+  }
+
+  /** Whether kururu is holding a message to type into this terminal — which keeps a card's agent awake (`sleep.ts`). */
+  holding(agentId: string): boolean {
+    return (this.held.get(agentId)?.length ?? 0) > 0;
   }
 
   /** Which profile an agent is the harness of, or null — how `index.ts` knows a Stop report is Kuru's own and worth saying aloud. */
@@ -768,7 +777,7 @@ export class Harness {
         if (!ws.findCardIn(profileId, workspaceId, id)) return fail("The card was refused — an empty title, or a column that is not one.");
         if (args.run === true) {
           const launcher = this.launcher(str(args.launcher));
-          const { agentId } = await this.deps.runCard(profileId, workspaceId, id, launcher.id);
+          const { agentId } = await this.deps.runCard(profileId, workspaceId, id, launcher.id, false);
           follow(agentId);
           return ok(`Added card ${id} "${title}" and handed it to ${launcher.label}: ${this.nameOf(agentId)}.`);
         }
@@ -805,10 +814,16 @@ export class Harness {
         const workspaceId = workspaceArg(true)!;
         const cardId = str(args.card);
         if (!cardId) return fail("A card id is needed.");
-        const launcher = this.launcher(str(args.launcher));
-        const { agentId } = await this.deps.runCard(profileId, workspaceId, cardId, launcher.id);
+        const fresh = args.fresh === true;
+        // An asleep card goes back to the launcher it ran on, so that leaving
+        // the launcher out resumes it rather than starting Claude beside it.
+        const asleep = ws.findCardIn(profileId, workspaceId, cardId)?.card.run;
+        const named = str(args.launcher) || (!fresh && asleep?.state === "asleep" ? asleep.launcher : undefined);
+        const launcher = this.launcher(named);
+        const { agentId } = await this.deps.runCard(profileId, workspaceId, cardId, launcher.id, fresh);
         follow(agentId);
-        return ok(`Handed card ${cardId} to ${launcher.label}: ${this.nameOf(agentId)}.`);
+        const resumed = !fresh && asleep?.state === "asleep" && findLauncher(asleep.launcher)?.cli === launcher.cli;
+        return ok(`${resumed ? `Woke card ${cardId}'s conversation on` : `Handed card ${cardId} to`} ${launcher.label}: ${this.nameOf(agentId)}.`);
       }
 
       case "send_card_to_workspace": {
@@ -860,6 +875,16 @@ export class Harness {
         if (!queued.length) return ok("Nothing was missed: every reply you gave was heard to the end, or is playing now.");
         const lines = queued.map((entry) => `- ${new Date(entry.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}: ${entry.text}`);
         return ok(`Playing ${queued.length} missed ${queued.length === 1 ? "reply" : "replies"}, oldest first:\n${lines.join("\n")}`);
+      }
+
+      case "reload_window": {
+        // Waits for the answer, as `wait_agent` does: the harness is the one
+        // that tells the agent which asked whether its change is on screen.
+        const why = oneLine(str(args.why), WHY_MAX);
+        if (!why) return fail("Say why: the window shows it in the notice after the reload.");
+        const seconds = int(args.seconds);
+        const timeoutMs = seconds === undefined ? RELOAD_TIMEOUT_MS : Math.max(RELOAD_TIMEOUT_MIN_MS, Math.min(RELOAD_TIMEOUT_MAX_MS, seconds * 1000));
+        return ok(outcomeText(await this.deps.reloadWindow(why, timeoutMs)));
       }
 
       default:
@@ -1150,7 +1175,16 @@ export class Harness {
       const moved = hit.movedAt ? `, moved ${stamp(hit.movedAt)}` : "";
       return `card ${code} "${hit.title}" (${where}${moved}${hit.deleted ? ", deleted" : ""}; id ${hit.id}) — ${hit.snippet}`;
     }
-    const who = hit.role === "you" ? (hit.via === "voice" ? "you (spoken)" : "you") : hit.role === "kuru" ? "you (Kuru)" : "an agent";
+    const who =
+      hit.role === "you"
+        ? hit.via === "voice"
+          ? "you (spoken)"
+          : isChannelKind(hit.via)
+            ? `you (on ${CHANNEL_NAMES[hit.via]})`
+            : "you"
+        : hit.role === "kuru"
+          ? "you (Kuru)"
+          : "an agent";
     return `${who} ${stamp(hit.at)} — ${hit.snippet}`;
   }
 
@@ -1297,6 +1331,7 @@ function eventLine(event: CardEvent): string {
     case "run": {
       const state = typeof detail.state === "string" ? detail.state : "";
       const launcher = typeof detail.launcher === "string" ? ` (${detail.launcher})` : "";
+      if (state === "asleep") return `its agent put to sleep after sitting idle${launcher}; running the card resumes it`;
       return state === "started" ? `handed to an agent by ${by}${launcher}` : `run ${state}${launcher}`;
     }
     case "deleted":

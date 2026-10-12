@@ -2,7 +2,7 @@
  * The skins you make yourself: where they live, and the four things the studio
  * can do to one.
  *
- * Settings → Skin studio edits a skin *live* — every slider and every picture
+ * Settings → Studio edits a skin *live* — every slider and every picture
  * dropped on a part lands on the window while you look at it, and on the phone
  * looking at the same server. That is only possible because the skin being
  * edited is an ordinary installed skin: it sits in `~/.config/kururu/styles/skins/<id>/`

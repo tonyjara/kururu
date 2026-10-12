@@ -427,7 +427,7 @@ function Way({
  * Which is also why the white stays white in a window that is otherwise all
  * dark — the quiet zone has to be the light of the code, not of the dialog.
  */
-function QrCode({ text }: { text: string }) {
+export function QrCode({ text }: { text: string }) {
   const matrix = qrMatrix(text);
   const size = matrix.length;
   const quiet = 4;

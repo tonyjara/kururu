@@ -1,0 +1,1445 @@
+/**
+ * Kururu's wire protocol: what the browser and the kururu server say to each
+ * other over the WebSocket.
+ *
+ * The shape follows from one decision: the browser runs a real terminal
+ * emulator now, so this protocol carries *pty bytes*, not a picture of them.
+ * It used to push the current screen rendered down to plain text, because the
+ * client was a `<pre>` and a `<pre>` cannot parse an escape sequence. That cost
+ * everything a terminal is — colour, cursor, alt-screen, selection, scrollback —
+ * to save a dependency, and a terminal that cannot do those things is not one.
+ *
+ * So output is a byte stream, input is keystrokes rather than submitted turns,
+ * and the *size* of the grid is the server's to decide. Three consequences
+ * worth naming:
+ *
+ *  - `watch` takes two *sets*. Panes are tiled, so several terminals are visible
+ *    at once and all of them want their bytes — and the client keeps emulators
+ *    for terminals it is not showing, which want theirs too or they go stale.
+ *  - A pane does not resize a terminal, it *proposes* a size. A pty has one
+ *    shape and there can be several clients, so the server collects the
+ *    proposals, picks one, resizes the pty, and tells every client what the
+ *    shape now is. The client's emulator changes size when it is told and at no
+ *    other time, which is what makes the two grids unable to disagree — and
+ *    every borked screen kururu has had was that disagreement.
+ *  - `input` carries no id and gets no reply. It is a keystroke; a round trip
+ *    per keypress to learn what the snapshot already says is not worth having.
+ *
+ * The second half of the protocol is the arrangement, and it reads as verbs
+ * rather than state because the server owns it: the client says *split the
+ * focused pane*, not *here is my new tree*. That is what makes two clients agree
+ * and what lets a window reload cost a repaint. Almost all of them are
+ * fire-and-forget for the same reason `input` is — the snapshot that follows is
+ * the answer, and it is complete. Only `new-tab` can fail in a way nothing else
+ * would explain, so it alone carries an `id` and is answered with `reply`.
+ */
+import type { BoardColumn, CardDates } from "./board";
+import type { Direction } from "./layout";
+import type { Action } from "./keys";
+import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
+import type { LaunchSettings } from "./launchers";
+import type { OpenRouterStatus } from "./openrouter";
+import type { BackupStatus } from "./backup";
+import type { KuruConversation } from "./kuru";
+import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "./voice";
+import type { MachineStatus } from "./machines";
+import type { WorkspaceDatabase } from "./databases";
+import type { NotifyEvent, NotifySettings } from "./notify";
+import type { MergeResolution, ProjectSettings } from "./projects";
+import type { TerminalAppearance } from "./theme";
+
+/**
+ * How to reach this server from a device that is not this machine — the answer
+ * to `GET /api/reach`, and the only part of the protocol that is not about
+ * agents.
+ *
+ * It is a fetch rather than a field of the snapshot, and that is the one
+ * decision in it. The snapshot is pushed because everything in it changes while
+ * you are looking at it; this changes when somebody joins a different Wi-Fi or
+ * brings tailscale up, which is not something the server has any way to be told
+ * about — it would be a poll, running forever, to keep a value nothing displays
+ * except a dialog that is almost never open. So the dialog asks, and goes on
+ * asking while it is open. See `server/src/reach.ts`.
+ */
+export interface Reach {
+  /** The port the kururu server itself is listening on. */
+  port: number;
+  /** Private addresses on this machine's own networks, likeliest first. */
+  lan: string[];
+  /** The tailnet address, or null when tailscale is not up. */
+  tailscale: string | null;
+}
+
+/** How often the dialog re-asks, so tailscale coming up shows without a reload. */
+export const REACH_POLL_MS = 3000;
+
+/**
+ * Whether this server can be reached from anywhere but the machine it is on, and
+ * the secret that makes that safe — the rest of the answer to `GET /api/reach`.
+ *
+ * Kururu has no accounts and never will; what it has is one token, minted once
+ * and carried in the QR code, so the phone that scanned it is in and the laptop
+ * on the same café Wi-Fi is not. It rides in the `Reach` answer because it is
+ * the same question asked twice — "how do I get to this from my phone" and "is
+ * anybody allowed to" are one sentence to the person in front of the dialog, and
+ * splitting them across two fetches would let the dialog draw a QR code for a
+ * server that is not listening on that address at all.
+ *
+ * The token is deliberately *not* in the snapshot. A snapshot goes to every
+ * client on every change and is written to disk by nothing, but it is also the
+ * thing most likely to end up in a screenshot of a bug report; a secret should
+ * be somewhere it is fetched on purpose, by the one dialog that draws it.
+ */
+export interface Sharing {
+  /** What the socket is doing. False when bound to loopback, which is the default. */
+  shared: boolean;
+  /**
+   * What was *chosen*, which is the same thing except in the window between
+   * pressing the button and the server coming back — the bind address is fixed
+   * when the socket opens. The two differing is the whole of "a restart is
+   * owed", and is why this is a second field rather than a nullable first one.
+   */
+  wanted: boolean;
+  /** The token a client that is not on this machine has to present. */
+  token: string;
+  /**
+   * Whether flipping `shared` will actually take effect by itself. The bind
+   * address is fixed when the socket is opened, so changing it needs the server
+   * started again — which is free, and something a supervisor does, and
+   * therefore something that may not be available. The dialog says which.
+   */
+  restartable: boolean;
+}
+
+/**
+ * What `GET /api/update` answers: whether there is a newer kururu than the one
+ * you are looking at.
+ *
+ * Fetched rather than pushed, because this is the world's state and not
+ * kururu's: it changes when somebody publishes a release rather than when
+ * anything here happens, and answering costs a request to GitHub that should be
+ * made when somebody asks and not on a timer.
+ *
+ * `error` and `newer: false` are different answers and the dialog must not
+ * collapse them. "You are up to date" and "I could not find out" are the same
+ * picture and opposite facts, and only one of them means you can stop thinking
+ * about it.
+ */
+export interface UpdateCheck {
+  /** The running server's version, or `0.0.0-dev` for a checkout. */
+  current: string;
+  /** The newest published release, without its leading `v`. Null if unknown. */
+  latest: string | null;
+  newer: boolean;
+  /** The release body — the changelog section for that version, as markdown. */
+  notes: string | null;
+  /**
+   * The same notes as markup. Rendered by the server for the reason everything
+   * else is — `markdown.ts` is server-side so that a phone is handed markup
+   * rather than a parser, and release notes are not the place to make a second
+   * arrangement. Null when there are no notes or when rendering them failed,
+   * which the dialog draws as the raw text rather than as nothing.
+   */
+  notesHtml: string | null;
+  url: string | null;
+  checkedAt: number;
+  /** Why there is no answer, in a sentence a person can read. */
+  error: string | null;
+}
+
+/** A dev server kururu found listening on this machine. */
+export interface DevServer {
+  /** Listening port on localhost — the thing the preview points at. */
+  port: number;
+  pid: number;
+  /** argv as `ps` prints it, tidied: "vite --port 3001". */
+  command: string;
+  /** Program name alone, for a label: "vite", "next", "bun". */
+  program: string;
+  /** Working directory of the process, when it could be read. */
+  cwd?: string;
+  /**
+   * Port the kururu proxy is exposing this on, once one has been opened. The
+   * desktop window does not need it (localhost is the same machine); the phone
+   * cannot reach the dev server any other way.
+   */
+  proxyPort?: number;
+}
+
+/**
+ * The branch a workspace is on.
+ *
+ * Live and per-workspace: it is learnt by looking at the disk rather than
+ * decided by anything kururu owns, it changes without kururu being told, and
+ * nothing about it is worth remembering across a restart. Two workspaces open on one checkout get one entry each
+ * saying the same thing, which is correct — they are both on that branch.
+ *
+ * Absent rather than empty when a workspace is not in a repository, so the row
+ * draws nothing instead of drawing a blank where a branch goes.
+ */
+export interface WorkspaceBranch {
+  workspaceId: string;
+  /** The working tree's root — the directory holding `.git`. */
+  root: string;
+  /** The branch, or a short sha when `detached`. */
+  branch: string;
+  /** HEAD names a commit rather than a branch: a tag, a sha, or a rebase. */
+  detached: boolean;
+  /**
+   * The repository's *main* checkout, for the git rows of the row's ⋯ menu —
+   * which are about that checkout even when the workspace is looking at a
+   * card's worktree, because the worktrees are the board's to commit and merge
+   * and the ⋯ would otherwise change colour every time focus crossed into one.
+   * Null until the first `git status` has come back, and for a repository git
+   * itself will not read.
+   */
+  git: RepoGit | null;
+}
+
+/**
+ * What `git status` says about a main checkout. Polled more slowly than the
+ * branch, and apart from it, since this one is a subprocess — see
+ * `repoStatus` in `server/src/worktree.ts`.
+ */
+export interface RepoGit {
+  /** The main checkout's root, which is what every `workspace-git` acts on. */
+  root: string;
+  /** What that checkout has checked out, which may not be what `branch` above says. */
+  branch: string;
+  detached: boolean;
+  /** Files `git status` lists: modified, staged, or untracked. */
+  changes: number;
+  /** The branch it tracks, as `origin/main`, or null when it tracks nothing. */
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  /**
+   * The branch "merge" goes into: the remote's default, else a local `main` or
+   * `master`. Null when there is none, and when it is the branch already out —
+   * either way there is nothing to merge *into*, and the menu says so by not
+   * offering it.
+   */
+  base: string | null;
+}
+
+/**
+ * The git verbs in a workspace row's ⋯ menu. The three that commit take the
+ * message the person typed; `commit-merge` then fast-forwards `base` to the
+ * branch, and `commit-push` pushes it. Nothing here forces, and nothing
+ * merges that is not a fast-forward — git's refusal is the reply.
+ */
+export const GIT_ACTIONS = ["commit", "commit-merge", "commit-push", "pull", "push", "fetch"] as const;
+export type GitAction = (typeof GIT_ACTIONS)[number];
+
+/** A commit message somebody typed. Generous, and still not a document. */
+export const COMMIT_MESSAGE_MAX = 10_000;
+
+/**
+ * The directory a workspace's file tree is rooted at.
+ *
+ * The repository the workspace is in when it is in one, and otherwise the
+ * directory its focused terminal is standing in. A repository rather than a cwd
+ * because a terminal that has `cd`'d into `server/src` is still working on the
+ * whole project, and a tree that shrank to wherever you last stood would be a
+ * tree you kept climbing out of.
+ *
+ * Found by the server, from terminals it holds, and allowed as a root there —
+ * so it is also the answer to "may the tree read this": a client never names a
+ * root it was not first handed.
+ */
+export interface WorkspaceProject {
+  workspaceId: string;
+  /** The server's guess: the repository the focused tab is in. */
+  root: string;
+  /**
+   * Every root this workspace's terminals are in, deduplicated, `root` among
+   * them — what the tree's header offers when the guess is the wrong one. Each
+   * tab gives its repository's root and, when it is further down, the folder
+   * it is actually in. All of them allowed by the server, so a client picking
+   * one is choosing among roots, never naming one.
+   */
+  choices: string[];
+}
+
+/**
+ * An nvim the file tree could open a file in: which terminal it is running in,
+ * and the pane that terminal is a tab of.
+ */
+export interface EditorChoice {
+  agentId: string;
+  paneId: string;
+}
+
+/**
+ * One allowance, as the account itself reports it.
+ *
+ * Deliberately the shape the API states rather than three named fields, because
+ * the set of limits is the account's business and changes without asking us: a
+ * plan with a per-model weekly cap sends a third entry, one without sends two,
+ * and a version of this that read `session` and `weekly` out of named keys would
+ * silently stop drawing the cap that was actually about to bite. So the client
+ * draws the list it is handed, whatever is in it.
+ *
+ * `severity` is the account's judgement and not a threshold kururu picked. That
+ * matters more than it looks: "80% is amber" is a rule we would have invented,
+ * and it would disagree with the warning Claude Code itself prints at exactly
+ * the moment the two are on screen together.
+ */
+export interface UsageLimit {
+  /** `session`, `weekly_all`, `weekly_scoped` — and whatever is added next. */
+  kind: string;
+  /** Which clock it is on, so the client can group without parsing `kind`. */
+  group: string;
+  /** How much is spent, 0–100. The bar draws it as it stands. */
+  percent: number;
+  /** `normal` | `warning` | `critical`, straight from the account. */
+  severity: string;
+  /** ISO 8601, or null for a limit with no clock of its own. */
+  resetsAt: string | null;
+  /** The model a scoped limit is scoped to — "Opus", "Fable". Null when it is not. */
+  scope: string | null;
+}
+
+/**
+ * What the machine's Claude account has spent.
+ *
+ * One account and not one per profile. A profile is a drawer of workspaces and
+ * nothing else — it has no login of its own to be measured against — so there is
+ * exactly one allowance here. A machine can still hold several Claude logins, one
+ * per `CLAUDE_CONFIG_DIR`, and the one measured is whichever was signed into
+ * last; `email` is there so the bar can say whose it is, because two accounts'
+ * percentages look exactly alike.
+ *
+ * `stale` rather than dropping the reading on a failed poll. A bar that empties
+ * because the wifi dropped is worse than a bar that admits it is a minute old:
+ * the number it was showing is still the best thing known, and the one thing it
+ * must not do is look current when it is not.
+ */
+export interface AccountUsage {
+  limits: UsageLimit[];
+  /** When this reading was actually taken, not when it was sent. */
+  at: number;
+  /** The last fetch failed; these are the numbers from before it. */
+  stale: boolean;
+  /** No usable login on this machine — nothing to show and nothing wrong. */
+  signedOut: boolean;
+  /** Whose allowance this is, as Claude Code recorded it, or null if it did not. */
+  email: string | null;
+}
+
+/**
+ * One notification, composed by the server and ready to draw.
+ *
+ * The text is composed *there* and not here, and it is worth saying why, since
+ * the client has a snapshot and could do it itself. It could not: the snapshot
+ * holds the active profile's agents only, and the notifications worth having are
+ * mostly from the profile you are not looking at. `notifyText` in
+ * `shared/notify.ts` is what writes these two strings.
+ */
+export interface Notification {
+  /** Where clicking it goes. See `reveal-agent`. */
+  agentId: string;
+  /** Which transition raised it, so the client can tell two cards apart. */
+  event: NotifyEvent;
+  /** The headline: which terminal, and what changed. */
+  title: string;
+  /** What it wants, then where it is. Empty when there is nothing to add. */
+  body: string;
+}
+
+export type ServerMessage =
+  /** Sent on connect and whenever anything about any agent changes. Complete, never a delta. */
+  | { type: "snapshot"; snapshot: SessionSnapshot }
+  /** Sent on connect and whenever the set of listening dev servers changes. */
+  | { type: "dev-servers"; servers: DevServer[] }
+  /**
+   * Sent on connect and whenever any workspace's branch changes. A whole list
+   * rather than a delta for the snapshot's reason: there are never more than a
+   * handful, and a client that has just reconnected must not have to work out
+   * what it missed.
+   */
+  | { type: "branches"; branches: WorkspaceBranch[] }
+  /** Where each workspace's file tree starts. Sent whole, like `branches`. */
+  | { type: "projects"; projects: WorkspaceProject[] }
+  /**
+   * Sent on connect and whenever the allowance moves. Null while nothing has
+   * ever been read successfully — which is not the same as `signedOut`, and the
+   * sidebar draws neither.
+   */
+  | { type: "usage"; usage: AccountUsage | null }
+  /**
+   * Sent on connect, after every machine poll, and whenever the list changes:
+   * every machine the sidebar watches, with its last reading. Whole, like
+   * `branches` — there are a handful, and the list and the numbers travel
+   * together so the settings page and the sidebar can never disagree about
+   * which exist.
+   */
+  | { type: "machines"; machines: MachineStatus[] }
+  /**
+   * Sent on connect and whenever the scan finds the list changed: every
+   * database every workspace's env files name, with the password left out.
+   * Whole, like `branches`, and found by the same walk — a workspace's
+   * `.env` files are read from the roots that walk found, never from a path a
+   * client sent. See `shared/databases.ts`.
+   */
+  | { type: "databases"; databases: WorkspaceDatabase[] }
+  /**
+   * Sent on connect, after a poll that moved anything, and whenever the key is
+   * set or removed. Null when no key has been given, which the sidebar draws as
+   * nothing. Never carries the key — see `shared/openrouter.ts`.
+   */
+  | { type: "openrouter"; openrouter: OpenRouterStatus | null }
+  /**
+   * Where the backups stand: the settings, the last commit and push, and
+   * what went wrong. Sent on connect, after every run and whenever the
+   * settings change. Never the repository's credentials — git holds those,
+   * and kururu only ever runs it. See `shared/backup.ts`.
+   */
+  | { type: "backup"; backup: BackupStatus }
+  /**
+   * Sent on connect and whenever the voice's settings, its programs or its
+   * model change: everything Settings → Voice draws, and what the talk key
+   * needs to know. Never carries audio — see `shared/voice.ts`.
+   */
+  | { type: "voice"; voice: VoiceStatus }
+  /**
+   * One sentence of something the harness is saying, ready to be fetched
+   * from `/api/speech`. An event like `notify`, and broadcast rather than
+   * addressed: the voice is the profile's, and every window and phone on it
+   * hears what Kuru says, the same way all of them see its terminal. The
+   * bytes are fetched rather than sent so the socket stays words.
+   */
+  | { type: "speech"; speech: SpeechChunk }
+  /**
+   * Somebody is talking to Kuru, on this client or any other, or nobody is
+   * any more. While `hushed`, a client starts no sentence: what arrives
+   * waits, and plays once the hush lifts, and going quiet cuts off what was
+   * playing, the way the talk key does on the client it was pressed on.
+   * Sent on connect, so a client arriving mid-sentence is quiet too.
+   */
+  | { type: "hush"; hushed: boolean }
+  /**
+   * The conversation with Kuru, every profile's: what you said and what it
+   * answered as one list, with each message's state and each reply's fate,
+   * and the two counts the status bar's chip wears. Sent on connect and
+   * whenever a turn lands, a message moves or a reply is heard, missed or
+   * seen. The newest `KURU_RECENT` items of each; the rest is `/api/kuru`.
+   * See `shared/kuru.ts`.
+   */
+  | { type: "kuru"; kuru: KuruConversation[] }
+  /**
+   * Your messages to Kuru, every profile's, in the order they reached the
+   * server — the pill's word on whether the last one got through, under
+   * Kuru's own words. The drawer reads the same messages merged into the
+   * conversation above. Sent on connect and whenever one moves. See
+   * `outbox.ts`.
+   */
+  | { type: "outbox"; outbox: OutboxEntry[] }
+  /** Raw pty output, exactly as it arrived, for a terminal this client is watching. */
+  | { type: "output"; agentId: string; data: string }
+  /**
+   * The grid this terminal is being drawn at. The server decided it, the pty has
+   * already been told, and the client's emulator becomes this shape.
+   *
+   * It is an instruction rather than a notification, and that inversion is the
+   * whole of the sizing rework. A pane used to fit its emulator to its box and
+   * inform the pty afterwards, which made the size whichever client resized
+   * last — so a second client of another width made the first one ragged, the
+   * server's single screen had to be reshaped to each client's guess before it
+   * could be serialized, and the client and the pty could believe different
+   * things about where a row ends. They cannot now: there is one size, the
+   * server owns it, and this message is how anybody learns what it is.
+   *
+   * Sent to every client that is being streamed this terminal, warm ones
+   * included — a pooled emulator off screen is still being fed bytes an agent
+   * laid out for the pty's grid, so it has to be that grid.
+   */
+  | { type: "grid"; agentId: string; cols: number; rows: number }
+  /**
+   * Everything that terminal has said so far, as the escape sequences that
+   * rebuild it — and the grid it was serialized at, which is the point of
+   * sending it rather than leaving the client to assume.
+   *
+   * A serialized screen is laid out at a particular width. Written into a grid
+   * of a different one, every row longer than the target wraps, everything below
+   * shifts down, and the top of the screen scrolls away. What is left is a
+   * client whose buffer disagrees with the server's — and an agent redraws
+   * differentially, so it will never resend a row it believes is already right
+   * and the disagreement is permanent. `cols`/`rows` are therefore not advice:
+   * the client sizes its emulator to them before writing `data`, which is what
+   * makes the two grids identical by construction rather than by luck.
+   *
+   * They survive the server owning the size, and deliberately. The size is no
+   * longer in *question* — a `grid` saying the same thing has almost always
+   * already gone out — but a backlog is the one message whose correctness
+   * depends on the shape it is written into, and a screen that states its own
+   * shape cannot be desynchronised by anything. It also covers the one ordering
+   * a single authoritative size does not: a resize landing while this one was
+   * being serialized, where the answer names the shape the *host* used and a
+   * second `grid` follows it.
+   */
+  | { type: "backlog"; agentId: string; data: string; cols: number; rows: number }
+  /**
+   * Something wants a human, and this client is one of the ones that should be
+   * told.
+   *
+   * The only message here that is not about state. Everything else says what
+   * *is* — and a notification is an event: it happens once, it is stale a
+   * heartbeat later, and a client that reconnects and finds it has missed one
+   * has missed nothing worth resending. Which is exactly why it cannot be a
+   * field on the snapshot: the snapshot goes out several times a second and is
+   * complete, so an agent that finished would keep on having finished, and the
+   * card would be raised again on every tick for as long as the status held.
+   *
+   * Addressed rather than broadcast, and that is the other half. The gate in
+   * `shared/notify.ts` asks whether *this* client has the terminal on screen,
+   * which is a different answer for the desktop showing it and the phone in
+   * your pocket — the same reason `watch` carries what a client can see rather
+   * than the server assuming one answer for everybody. Everything has already
+   * been decided by the time this is sent: the client plays the sound and draws
+   * the card, and applies no policy of its own.
+   */
+  | { type: "notify"; notification: Notification }
+  /** Answer to any client message carrying an `id`. */
+  | { type: "reply"; id: number; ok: true; result: unknown }
+  | { type: "reply"; id: number; ok: false; error: string };
+
+export type ClientMessage =
+  // --- terminals -----------------------------------------------------------
+  /**
+   * Start a terminal and put it in a pane as a new tab. Every field defaults:
+   * the focused pane, that pane's project, an agent rather than a shell.
+   *
+   * `launcher` is an id from `shared/launchers.ts` — an agent on a model, picked
+   * from the new-tab menu — and the server turns it into the command. It wins
+   * over `command` and `kind` when both are sent, and over `nvim` too.
+   *
+   * `nvim` is the same menu's plain-editor row: a shell that starts nvim and
+   * drops back to the shell when it quits, built server-side for the reason
+   * `launcher` is an id rather than a command string — see `shared/launchers.ts`.
+   * `lazygit` is its sibling, which closes its tab on a clean quit instead —
+   * see `shared/lazygit.ts`.
+   *
+   * In a workspace pinned to a machine the plain shell, `nvim`, `lazygit` and
+   * every `launcher` open on the machine — see `Workspace.machine`. A `cwd`
+   * keeps the tab here, being a place on this disk, and so does `local`, which
+   * the menu no longer sends: a pinned workspace's menu is the machine's.
+   *
+   * `workspaceId` is a workspace row's menu, and switches there first, as
+   * `open-board`'s does; the tab goes into that workspace's focused pane. A
+   * `lazygit` sent with it starts in the workspace's repository — the main
+   * checkout the row's git verbs act on — rather than wherever that pane's
+   * terminal is standing, which is what the new-tab menu's row means.
+   */
+  | {
+      type: "new-tab";
+      id: number;
+      kind?: PtyKind;
+      cwd?: string;
+      command?: string;
+      launcher?: string;
+      nvim?: boolean;
+      lazygit?: boolean;
+      local?: boolean;
+      paneId?: string;
+      workspaceId?: string;
+    }
+  /**
+   * End a terminal and take its tab with it. Defaults to the focused tab.
+   *
+   * This is the one destructive verb in the layout half, and it is destructive
+   * on purpose: a tab is where a terminal lives, so closing it is not putting it
+   * away. The key bound to it is shifted for exactly that reason.
+   */
+  | { type: "close-tab"; agentId?: string }
+  | { type: "select-tab"; paneId: string; index: number }
+  | { type: "cycle-tab"; delta: number; paneId?: string }
+  /**
+   * Put a terminal in a pane, at a position in its strip. One message for every
+   * rearrangement a drag can be — along a strip, into the pane next door, out of
+   * the sidebar, in from another workspace — because they are one gesture.
+   */
+  | { type: "move-tab"; agentId: string; paneId: string; index?: number }
+  /** Dropped on a pane's edge: divide it and put the terminal in the new half. */
+  | { type: "split-with"; agentId: string; paneId: string; dir: "row" | "col"; before: boolean }
+  /** Dropped on a workspace in the sidebar: send it there, to whatever has focus. */
+  | { type: "move-tab-to-workspace"; agentId: string; workspaceId: string }
+  /**
+   * Dropped on another row of the sidebar's agent list: put this terminal above
+   * that one, or at the end when `beforeAgentId` is null.
+   *
+   * It rearranges the *list* and nothing else — the terminal stays in the pane
+   * and the workspace it was in, which the row it is drawn in goes on saying.
+   * The two verbs above are the ones that move it.
+   */
+  | { type: "reorder-agent"; agentId: string; beforeAgentId: string | null }
+  /**
+   * Put a terminal away in the sidebar's list, or bring it back.
+   *
+   * The state and not a toggle, because two clients are the normal case here:
+   * a phone and a desktop drawing the same list, and a toggle arriving from one
+   * while the other was mid-tap is a row that ends up in whichever state the
+   * race decided. The button knows which state it is asking for; asking for it
+   * is free and cannot disagree with itself.
+   *
+   * It hides a *row*. The pty is untouched, the tab is untouched, and
+   * `close-tab` above remains the only verb in here that ends anything.
+   */
+  | { type: "hide-agent"; agentId: string; hidden: boolean }
+  /** Name a tab. An empty name hands it back to what it would be called anyway. */
+  | { type: "rename-tab"; agentId: string; name: string }
+  /**
+   * Keystrokes, straight through to the pty. No id: this is what the user typed,
+   * and it is either delivered or the terminal is visibly dead already.
+   */
+  | { type: "input"; agentId: string; data: string }
+  /**
+   * The grid this client's pane *could* draw that terminal at. A proposal, not
+   * a resize: the server collects them and decides.
+   *
+   * It was a resize, and the pane applied it to its own emulator on the way
+   * past. That made the size last-writer-wins, which is fine with one window and
+   * is why a phone made the desktop ragged — and, worse, meant the client and
+   * the pty could hold different ideas of the shape at once, which is the
+   * disagreement underneath every screen kururu has ever drawn wrong. tmux
+   * settled this in the 1990s with `window-size`; the policy here is its
+   * `smallest`, over the clients that have the terminal *visible*, so a phone
+   * and a desktop watching one agent both see a correct screen rather than take
+   * turns making each other wrong.
+   *
+   * A proposal is withdrawn by a `watch` that no longer lists the terminal as
+   * visible — the same message that already says what a human can see, rather
+   * than a second one that could disagree with it. So a warm client, which is
+   * keeping an emulator current and showing nobody anything, never has a say in
+   * the size; and a terminal no client can see keeps the shape it had rather
+   * than being resized to nothing.
+   */
+  | { type: "propose-size"; agentId: string; cols: number; rows: number }
+  /**
+   * What this client has on screen, and what it is keeping an emulator for
+   * without showing it. Both are sets: panes are tiled, and emulators are
+   * pooled. Re-sent after a reconnect — the server keeps no memory of a socket
+   * that went away.
+   *
+   * Two fields rather than one because the server answers two questions with
+   * them and only one of the answers is their union. What to *stream* is the
+   * union: a pooled emulator that stops being fed goes stale, and a stale one
+   * has to be reconstructed, which is the thing pooling exists to stop happening
+   * during ordinary navigation. What counts as *unread* is `agentIds` alone —
+   * the mark means "output arrived where nobody was looking", and an emulator
+   * kept warm in a workspace you are not in is nobody looking.
+   *
+   * `warm` is optional so a client that has not been updated still watches
+   * exactly as it did; an absent warm set is an empty one.
+   */
+  | { type: "watch"; agentIds: string[]; warm?: string[] }
+  /**
+   * Whether anybody is in front of this client at all.
+   *
+   * `watch` says which terminals are on screen; this says whether the screen
+   * is. They are not the same question and the second has no answer in the
+   * first: a phone locked in a pocket has exactly the panes it had a moment
+   * ago and a human reading none of them, and it goes on saying so for as long
+   * as its socket lives — which is a long time, because a sleeping phone is
+   * deliberately never hung up on and nothing here pings.
+   *
+   * What that cost was the desktop. The size policy is a minimum over the
+   * clients that can see a terminal, so a phone that had been looking at one
+   * held every other client down to phone width until its socket eventually
+   * died — and walking back to the window did not undo it, because nothing
+   * there had moved and a pane only proposes when its box does.
+   *
+   * So it gates the vote and nothing else. The proposals are *kept* rather
+   * than withdrawn: a page that goes away and comes back has the same panes at
+   * the same sizes, and a client that had to be re-measured before it could
+   * speak again would spend the first frame of every return at somebody else's
+   * shape. Deliberately not folded into `watch`, which would be the
+   * one-message answer and is the wrong one — `watching` also decides the
+   * unread mark and suppresses a notification card, and a frozen page cannot
+   * draw a card, it queues them and raises the lot on unlock. Reaching a phone
+   * with its screen off is push's job, not this one's.
+   */
+  | { type: "looking"; looking: boolean }
+  /**
+   * Rebuild this terminal. The only thing that produces a `backlog`.
+   *
+   * It used to name a size, and to carry an `epoch` so that an answer could be
+   * matched to the emulator that asked. Both were consequences of the client
+   * owning the shape: two panes of two widths asked two different questions
+   * about one terminal, and each had to be answered without wrecking the other.
+   * There is one shape now and the server knows it, so there is one answer, and
+   * an answer that states the grid it used is correct for whoever receives it.
+   *
+   * What it still is not is `watch`. Watching says which terminals are on
+   * screen and starts their bytes flowing; this says *I have nothing in my
+   * emulator*, which only an emulator that has just been built can know. A
+   * first borrow, one that was evicted and came back, and a reconnect are the
+   * three ways that happens — a tab switch and a workspace change are not among
+   * them, which is the point of pooling emulators at all.
+   *
+   * It is sent immediately after a `propose-size` for the same terminal, and
+   * `web/src/session.ts` sends the two together so it cannot be otherwise: the
+   * shape has to be established before a screen is laid out in it.
+   */
+  | { type: "request-backlog"; agentId: string }
+
+  // --- panes ---------------------------------------------------------------
+  | { type: "split"; dir: "row" | "col"; paneId?: string }
+  /** Close a pane and everything in it. The last pane of a workspace empties instead. */
+  | { type: "close-pane"; paneId?: string }
+  | { type: "focus-pane"; paneId: string }
+  /** prefix+hjkl. Nothing that way is not an error; the client focuses the sidebar. */
+  | { type: "focus-dir"; dir: Direction }
+  | { type: "step-pane"; delta: number }
+  /**
+   * The other pane: back where focus came from, and the next one along when
+   * there is no back yet. A toggle rather than a walk, the way `last-workspace`
+   * is one level up — it is what a phone flips between two agents with, since a
+   * narrow window draws one pane at a time.
+   */
+  | { type: "last-pane" }
+  | { type: "set-ratio"; splitId: string; ratio: number }
+  /**
+   * A whole pane, dragged by its tab strip. Dropped on another pane's middle it
+   * swaps places with it; on an edge it moves to that side of it; on its tab
+   * strip it pours its tabs in and disappears.
+   */
+  | { type: "swap-panes"; paneId: string; withPaneId: string }
+  | { type: "move-pane"; paneId: string; toPaneId: string; dir: "row" | "col"; before: boolean }
+  | { type: "merge-panes"; paneId: string; intoPaneId: string }
+  /** Resize mode: push the divider the focused pane's edge sits against. */
+  | { type: "nudge"; dir: Direction; delta: number }
+
+  // --- workspaces ----------------------------------------------------------
+  | { type: "new-workspace"; name?: string }
+  | { type: "switch-workspace"; workspaceId: string }
+  /** The number the sidebar prints beside each one, zero-based on the wire. */
+  | { type: "workspace-index"; index: number }
+  | { type: "step-workspace"; delta: number }
+  /** Back to the one you came from — a toggle, not a walk through the list. */
+  | { type: "last-workspace" }
+  | { type: "rename-workspace"; workspaceId: string; name: string }
+  /**
+   * Tag a workspace with a colour, or `null` to clear it. A name from
+   * WORKSPACE_COLORS and nothing else — the server refuses anything it does not
+   * recognise rather than storing it, because this value ends up in a style
+   * attribute and the client it came from may be a phone on the tailnet.
+   */
+  | { type: "set-workspace-color"; workspaceId: string; color: string | null }
+  /**
+   * Give a workspace its own mascot, or `null` to hand it back to the default.
+   * An id rather than a config, so changing a mascot changes it everywhere it is
+   * used rather than in one copy of it — and an id naming nothing reads as the
+   * default, which is what makes deleting a mascot need no cleanup.
+   */
+  | { type: "set-workspace-mascot"; workspaceId: string; mascotId: string | null }
+  /**
+   * Pin a workspace's shells to a machine and a folder on it, or `machineId:
+   * null` to bring them home. The machine is an id the server looks up and
+   * the folder goes through `validRemoteDir`, both because they end up in a
+   * command line; a refusal is the reply's error, said on the settings page.
+   */
+  | { type: "pin-workspace"; id: number; workspaceId: string; machineId: string | null; dir: string }
+  /** Deletes it and ends everything in it. The last workspace cannot go. */
+  | { type: "delete-workspace"; workspaceId: string }
+  /**
+   * Dragged up or down the sidebar list. An absolute position, not a step —
+   * and it takes the group of whatever was at that position, so dropping a
+   * workspace among a group's rows files it there. See `Workspace.group`.
+   */
+  | { type: "move-workspace"; workspaceId: string; index: number }
+  /** File a workspace under a group, made by naming it, or take it out with null. */
+  | { type: "set-workspace-group"; workspaceId: string; group: string | null }
+  /**
+   * Rename a group, which is renaming it on every member. Onto a name already
+   * in use the two merge; onto null the group is disbanded and its workspaces
+   * go back to being loose. Nothing in a workspace is touched but the label.
+   */
+  | { type: "rename-workspace-group"; from: string; to: string | null }
+  /**
+   * A whole group, dragged by its heading onto a workspace's row or another
+   * group's heading: it takes that place, the way a workspace dropped on a row
+   * takes the row's. `onto` is a workspace id; a member stands for its group.
+   */
+  | { type: "move-workspace-group"; group: string; onto: string }
+
+  // --- profiles ------------------------------------------------------------
+  | { type: "new-profile"; name: string }
+  /** What you switch away from keeps running; one server owns every profile's ptys. */
+  | { type: "switch-profile"; profileId: string }
+  | { type: "rename-profile"; profileId: string; name: string }
+  | { type: "delete-profile"; profileId: string }
+  /**
+   * Point a profile at one of the logins kururu holds — a key out of
+   * `SessionSnapshot.logins`, which is the only place one may come from — or,
+   * with null, at a fresh directory of its own that nobody is signed into. Two
+   * profiles on one key share the directory and everything in it, and that is
+   * the feature: the same account, the same settings, the same memory.
+   *
+   * Only terminals opened afterwards are affected. A running pty was spawned
+   * with its directories in its environment and keeps them; nothing here can
+   * or should reach into it.
+   */
+  | { type: "set-profile-login"; profileId: string; loginKey: string | null }
+
+  /**
+   * The profile's harness, brought to the screen — started if it has never
+   * been, resumed into its last conversation if its terminal has gone, and
+   * merely revealed if it is running. One verb for the three because the user
+   * means one thing by the button: "take me to the harness". `fresh` starts a
+   * new conversation instead of resuming, and `launcher` picks the model for a
+   * start; both are ignored when it is already running. See `shared/harness.ts`.
+   */
+  | { type: "open-harness"; id?: number; fresh?: boolean; launcher?: string }
+  /**
+   * Auto Swap, on or off, for a profile: whether the screen follows the agent
+   * its harness acts on. A switch rather than a verb the harness could call,
+   * because it is the user's screen — see `Profile.autoSwap`.
+   */
+  | { type: "set-auto-swap"; profileId: string; on: boolean }
+
+  /**
+   * Put the server back on current source. It owns no ptys, so this costs a
+   * reconnect and a repaint — the agents are in the pty host next door and the
+   * arrangement is handed back by it. Ghosttown's prefix+B, minus the casualties.
+   */
+  | { type: "restart-server" }
+
+  /**
+   * Go to that terminal, wherever it is: switch profile, switch workspace, focus
+   * the pane, select the tab.
+   *
+   * Sent by a click on a notification, and it is one verb rather than the four
+   * the client could have sent instead. Four would have to be sent in order,
+   * against a layout the sender is by definition not looking at — the whole
+   * point of the card is that the agent is somewhere else — and any of them
+   * arriving after the tree has moved would land somewhere nobody asked for. The
+   * server is holding the arrangement and can do all four against one state,
+   * which is the same argument every other verb in here makes.
+   *
+   * It is deliberately not restricted to the profile this client is in. That is
+   * the feature: an agent blocked in the profile you left is exactly the one you
+   * cannot see and most need taking to.
+   */
+  | { type: "reveal-agent"; agentId: string }
+
+  /*
+   * There was an `open-preview` here, carrying a port, and it is worth saying
+   * why there is not one now rather than leaving the gap to be refilled.
+   *
+   * It was how a client asked for a proxy, back when one was opened on demand.
+   * `pollDevServers` opens one for every dev server it finds instead — a link
+   * needs a real `href` before anybody taps it, which is the whole argument
+   * written out beside that loop — so by the time any client could have asked,
+   * the answer was already in the snapshot as `proxyPort`. The verb went on
+   * existing with nothing calling it.
+   *
+   * That is not free. A port on a `ClientMessage` is a port kururu was told,
+   * not one it found, and `openPreview` binds `0.0.0.0` — so the dead verb was
+   * a way for one unauthenticated message to put a listener on every interface
+   * this machine has, forwarding to any loopback port it named. Loopback-only
+   * services are loopback-only precisely because they are unauthenticated, and
+   * this reached past the tailnet onto whatever network the laptop was on.
+   *
+   * `devservers.ts` states the rule it broke: ports come from the kernel, never
+   * from a command line — or, here, from a client. If the preview *pane* ever
+   * needs a verb, it should name a dev server kururu has already discovered,
+   * never a number.
+   */
+
+  /**
+   * Stop one of the dev servers in the sidebar's list.
+   *
+   * It names a server the scan found, by the two numbers the row was drawn
+   * from, and is refused for any pair the last scan did not report — so it can
+   * end only a process kururu already found serving a dev command, never one a
+   * client chose. Then both are checked again against the machine, because the
+   * row can be a scan old. Which processes end is `stopTargets`' to decide.
+   * Replied to once the server has gone, or with why it was not stopped.
+   */
+  | { type: "stop-dev-server"; id: number; port: number; pid: number }
+
+  // --- the reader ----------------------------------------------------------
+  /**
+   * Split a reader off the pane a terminal is in, and point it at that
+   * terminal's editor.
+   *
+   * It splits rather than replacing, because the pane you asked from is the one
+   * with the editor in it and taking that away to show the file would be a
+   * strange reading of "show me this". `paneId` is the pane to split; `agentId`
+   * is whose nvim to follow, and with neither the focused pane and its showing
+   * terminal are used, which is what the keybinding sends.
+   *
+   * A pane already showing a document is re-pointed rather than split again:
+   * the second press of a key that made a pane should not make another one.
+   *
+   * `focus` moves the focus onto the reader instead of leaving it where it was,
+   * and it is the client's to decide because it is a fact about the window
+   * rather than about the layout. On a desktop the reader lands *beside* the
+   * editor and taking the keyboard away from what you were typing into would be
+   * wrong; on a phone only the focused pane is drawn at all, so a reader you
+   * asked for and cannot see is a reader that did not open.
+   */
+  | { type: "open-reader"; paneId?: string; agentId?: string; focus?: boolean }
+
+  /**
+   * Open a file somebody chose in a pane — any pane, as a tab after the one
+   * showing — and stop that pane following an editor.
+   *
+   * The unfollowing is not a separate decision the caller gets to make: a file
+   * you picked by hand that the next `:w` on another machine could replace is a
+   * document that walks away mid-sentence. Picking *is* pinning, which is what
+   * `pin-reader` already means — this is the other half of it, the half that
+   * says which file to pin to.
+   *
+   * `root` is one of the roots the server already holds. A client naming a root
+   * of its own is the one thing `files.ts` exists to refuse, so this is checked
+   * there like every other path that arrives from outside.
+   *
+   * `at` is a file dropped on a strip, and lands where it was dropped; without
+   * it the tab goes after the one showing. `focus` moves the focus there, which
+   * a drop wants and a pick in the pane you are already in does not need.
+   */
+  | { type: "open-doc"; paneId: string; root: string; path: string; at?: number; focus?: boolean }
+
+  /**
+   * Stop following an editor and sit on the file it is showing now.
+   *
+   * The reader is mostly worth having *because* it follows, so this is not the
+   * common case — it is for the moment you want to read one file while the
+   * editor goes somewhere else, and it is reversible by asking again.
+   */
+  | { type: "pin-reader"; paneId: string; follow: boolean }
+
+  /**
+   * Show, or close, a document's tab, by its place in the pane's strip — the
+   * whole strip, terminals and board included, since a document is a tab like
+   * they are. A place that is not a document is refused.
+   *
+   * An index rather than a path, for the reason tabs of terminals go by id: the
+   * client is naming a thing it can see, and the server already holds the list
+   * it is an index into — a path would be a second way to name a file that has
+   * to be checked all over again for a click that opens nothing new. Closing
+   * a pane's last tab closes the pane.
+   */
+  | { type: "select-doc"; paneId: string; index: number }
+  | { type: "close-doc"; paneId: string; index: number }
+
+  /**
+   * A document's tab, dragged: onto any pane's strip or middle, at a place in
+   * it — its own strip is a reorder — or onto a pane's edge, where it gets a
+   * pane of its own. `move-tab` and `split-with` for documents, kept apart from
+   * them because a terminal is named by an id the whole server knows and a
+   * document, which may be open in two panes, by its place in one pane's list.
+   */
+  | { type: "move-doc"; fromPaneId: string; index: number; toPaneId: string; at?: number }
+  | { type: "split-with-doc"; fromPaneId: string; index: number; paneId: string; dir: "row" | "col"; before: boolean }
+
+  /**
+   * A markdown file dragged out of the tree onto a pane: `open-doc` with an
+   * `at` for its strip or middle, and this for an edge, where it gets a pane of
+   * its own. A path rather than a place, since it had no tab to be taken from —
+   * and checked like every other path a client sends.
+   */
+  | { type: "split-with-file"; root: string; path: string; paneId: string; dir: "row" | "col"; before: boolean }
+
+  /**
+   * Show a markdown file, from the file tree, as a tab of the focused pane.
+   *
+   * The server picks the pane rather than the client, because which pane is
+   * focused is the server's to know — a client that named one could be naming
+   * the pane it last drew rather than the one focus has since moved to.
+   * `focus` is `open-reader`'s — a phone wants to be taken to the document, a
+   * desktop wants its keyboard left where it was.
+   */
+  | { type: "show-doc"; root: string; path: string; focus?: boolean }
+
+  /**
+   * Every nvim in the workspace on screen, nearest first — the focused pane's,
+   * then the pane focus came from, then the rest. Replied to with
+   * `EditorChoice[]`, which may be empty.
+   */
+  | { type: "find-editors"; id: number }
+
+  /**
+   * Open a file from the tree in nvim.
+   *
+   * `agentId` names the terminal whose nvim to use, from a `find-editors`
+   * answer; null asks for a new one, in a tab of the focused pane. Either way
+   * the pane it lands in is focused, because a file opened somewhere you are not
+   * looking has not been opened as far as you can tell. Replied to with the
+   * agent id it went to.
+   */
+  | { type: "open-in-editor"; id: number; root: string; path: string; agentId: string | null }
+  /**
+   * Ask nvims to `:qa` — Settings → Processes' buttons, for any nvim on the
+   * machine, in kururu or not.
+   *
+   * `ids` are `FootprintNvim.id`s, pid and start time, from what the page
+   * showed when the person said yes, and the server ends nothing else: each is
+   * looked up again and must still be that process, and an nvim. Gentle and
+   * only gentle — an editor that refuses is reported and never signalled. A tab
+   * kururu opened as nvim closes after its nvim; a shell somebody typed nvim
+   * into stays. Replied to with `NvimCloseReport`.
+   */
+  | { type: "close-nvims"; id: number; ids: string[] }
+  /**
+   * End nvims that refused `close-nvims`: SIGTERM to each one's own process
+   * tree, then SIGKILL for what is still there. Always a second yes, asked for
+   * on its own button; the same checks on `ids`, and never a process group.
+   * Replied to with `NvimCloseReport`.
+   */
+  | { type: "kill-nvims"; id: number; ids: string[] }
+
+  // --- the board -----------------------------------------------------------
+  /**
+   * Show the workspace's board, making it if this workspace has never had one.
+   * The only verb that creates a board — see `shared/board.ts`.
+   *
+   * The board is a tab (`BOARD_TAB` in `shared/layout.ts`). Without `here` this
+   * shows the one you have, or puts a new one beside `paneId`; with it — the
+   * new-tab menu — the tab goes *into* `paneId`, moved from wherever it was.
+   * `workspaceId` is a workspace row's menu, and switches there first; then it
+   * shows the board where it is, or makes it a new tab in the pane you were
+   * last in there. `paneId` and `here` are not read with it.
+   */
+  | { type: "open-board"; paneId?: string; here?: boolean; workspaceId?: string }
+
+  /**
+   * The cards, as verbs like everything else. Each names its workspace rather
+   * than meaning "the one on screen", because a phone and a desktop can be
+   * looking at the same board through a switch the other has not drawn yet.
+   * The text is checked and capped on the server (`shared/board.ts`), and a
+   * move's index is a place among the destination column's cards.
+   */
+  | { type: "add-card"; workspaceId: string; title: string; body?: string; column?: BoardColumn; isolate?: boolean }
+  /**
+   * A card written and handed to an agent in one go — the composer's robot.
+   * Add and run are one verb because the card's id is minted by the server:
+   * two messages would leave the client with nothing to name the card by.
+   * Replied to like `run-card`; a run that fails leaves the card on the board.
+   */
+  | {
+      type: "add-run-card";
+      id: number;
+      workspaceId: string;
+      title: string;
+      body?: string;
+      column?: BoardColumn;
+      isolate?: boolean;
+      launcher: string;
+    }
+  /**
+   * `dates` is absent to leave the card's alone and null to take them off —
+   * see `editCard`. Only an edit carries them here: a workspace's card has
+   * dates because it was sent with them, and its board can move or remove
+   * them but is not where a calendar is kept.
+   */
+  | {
+      type: "edit-card";
+      workspaceId: string;
+      cardId: string;
+      title?: string;
+      body?: string;
+      isolate?: boolean;
+      dates?: CardDates | null;
+    }
+  | { type: "move-card"; workspaceId: string; cardId: string; column: BoardColumn; index?: number }
+  | { type: "delete-card"; workspaceId: string; cardId: string }
+
+  /**
+   * The profile's board — see `Profile.board`. The same four verbs, naming a
+   * profile where those name a workspace and for the same reason, and one
+   * more: `send-profile-card` takes the card off the profile's board and puts
+   * it on `workspaceId`'s, making that board if the workspace never had one.
+   * Sending is the only road between the two, and it runs one way.
+   *
+   * These are also the timeline's verbs. Dragging a bar is `edit-profile-card`
+   * with `dates` and nothing else, so there is no second road onto a card for
+   * a day to arrive by.
+   */
+  | { type: "add-profile-card"; profileId: string; title: string; body?: string; column?: string; dates?: CardDates | null }
+  | { type: "edit-profile-card"; profileId: string; cardId: string; title?: string; body?: string; dates?: CardDates | null }
+  | { type: "move-profile-card"; profileId: string; cardId: string; column: string; index?: number }
+  | { type: "delete-profile-card"; profileId: string; cardId: string }
+  | { type: "send-profile-card"; profileId: string; cardId: string; workspaceId: string }
+
+  /**
+   * The profile's board's columns, which a person makes — see `BoardLane`. The
+   * server mints the id; a move's index is a place among the other columns;
+   * deleting one moves its cards to its neighbour rather than losing them.
+   */
+  | { type: "add-profile-column"; profileId: string; name: string }
+  | { type: "rename-profile-column"; profileId: string; columnId: string; name: string }
+  /** `color` is one of WORKSPACE_COLORS or null for none, and refused otherwise — see `colorLane`. */
+  | { type: "set-profile-column-color"; profileId: string; columnId: string; color: string | null }
+  /** Fold a column down to its name, or open it — see `collapseLane`. */
+  | { type: "set-profile-column-collapsed"; profileId: string; columnId: string; collapsed: boolean }
+  | { type: "move-profile-column"; profileId: string; columnId: string; index: number }
+  | { type: "delete-profile-column"; profileId: string; columnId: string }
+
+  /**
+   * Hand a card to an agent: start one on `launcher` — an id from
+   * `shared/launchers.ts`, looked up and never built, for `new-tab`'s reason —
+   * with the card as its prompt, in a terminal pane of the card's workspace.
+   * Replied to with the new agent's id, because a spawn is the one thing here
+   * that can fail in a way the next snapshot would not explain.
+   */
+  | {
+      type: "run-card";
+      id: number;
+      workspaceId: string;
+      cardId: string;
+      launcher: string;
+      /**
+       * A new conversation even on a card whose agent was put to sleep for
+       * sitting idle — which is otherwise resumed, as the card promised.
+       */
+      fresh?: boolean;
+    }
+  /**
+   * The card's last conversation, picked back up on the launcher it ran on —
+   * `claude --resume` with the id the run was started under, or Codex's
+   * picker. Refused while the old agent's terminal is still open.
+   */
+  | { type: "resume-card"; id: number; workspaceId: string; cardId: string }
+
+  /**
+   * The git a card's worktree needs, from the card's menu, so that nobody has
+   * to open a terminal in each worktree to get its work back to the branch.
+   * All five name the card and let the server find the worktree on it — a path
+   * never comes from a client — and all five are replied to, because each is a
+   * subprocess that can say no and the snapshot would not say why.
+   *
+   * `worktree-status` is what the menu opens with: changes, ahead, behind.
+   * `commit-card` commits everything in the worktree with the card as the
+   * message. `stash-card` sets the uncommitted work aside with `git stash`,
+   * which is how a worktree is cleared without kururu ever throwing anything
+   * away — the stash is in the repository and outlives the worktree.
+   * `merge-card` is the one card's worktree merged back, removed, and the card
+   * put in Done; it is `retire-worktrees` for one card and asks the same
+   * things of git. Its reply is a `MergeReply`: a merge that the base's own
+   * checkout would have refused — uncommitted work there in files the branch
+   * changes — comes back as a `MergeBlock` with nothing ended, and the card
+   * sends the message again with a `MergeResolution` once the person has
+   * picked one. `open-worktree` opens a shell there, beside the board.
+   */
+  | { type: "worktree-status"; id: number; workspaceId: string; cardId: string }
+  | { type: "commit-card"; id: number; workspaceId: string; cardId: string }
+  | { type: "stash-card"; id: number; workspaceId: string; cardId: string }
+  | { type: "merge-card"; id: number; workspaceId: string; cardId: string; resolve?: MergeResolution }
+  | { type: "open-worktree"; id: number; workspaceId: string; cardId: string }
+  /**
+   * The card's dev server, started on its own when the card's worktree is and
+   * ended when the card goes to Done — these are the two buttons between.
+   * `restart-card-dev` ends the terminal it is in and opens another in the
+   * same pane, or opens the first; `stop-card-dev` ends it and closes the tab.
+   * The command is the project's dev line and the port the kernel's; neither
+   * comes from here.
+   */
+  | { type: "restart-card-dev"; id: number; workspaceId: string; cardId: string }
+  | { type: "stop-card-dev"; id: number; workspaceId: string; cardId: string }
+  /**
+   * A git verb from a workspace row's ⋯. Names the workspace, and the server
+   * finds the main checkout by walking up from where its terminals are — the
+   * path is never the client's. `root` is the checkout the menu was showing, sent
+   * back only to be compared: the walk follows focus, and a verb that landed
+   * on another repository because a pane was clicked in between is refused
+   * rather than run. Replied to with what git said, or why it said no.
+   */
+  | { type: "workspace-git"; id: number; workspaceId: string; root: string; action: GitAction; message?: string }
+
+  // --- the mascot ----------------------------------------------------------
+  /**
+   * Change one saved mascot. A verb like everything else here: Settings does not
+   * hold a config and post it back, it says *this is the selection now* and reads
+   * the snapshot that follows. Which is what lets a second window — or a phone —
+   * see the change without being told separately, and what makes the file on
+   * disk worth writing.
+   *
+   * It names the one it is editing rather than meaning "the current one",
+   * because two windows can be open and the other one may have switched between
+   * you picking a cell and the message arriving.
+   */
+  | { type: "set-mascot"; id: string; mascot: MascotConfig }
+  /** Keep another. A copy of `from` when there is one, so a variation starts from the thing it varies. */
+  | { type: "add-mascot"; from?: string }
+  /** Forget one. The last one cannot go: a working row must always have something in it. */
+  | { type: "remove-mascot"; id: string }
+  | { type: "rename-mascot"; id: string; name: string }
+  /**
+   * Which one a workspace gets when it has not picked. The frog is what kururu
+   * ships with, not what you are stuck with.
+   */
+  | { type: "set-default-mascot"; id: string }
+
+  // --- the keyboard --------------------------------------------------------
+  /**
+   * Rebind one key, or unbind it with `null`. One key rather than a whole map,
+   * for the same reason a split is a verb: the gesture is "this key does that
+   * now", and a client that posted an entire keymap would be holding one.
+   *
+   * What gets stored is the difference from the defaults, which is what stops a
+   * saved keyboard from freezing kururu's keys at the version you first opened
+   * Settings in. See `shared/keys.ts`.
+   */
+  | { type: "bind-key"; key: string; action: Action | null }
+  /** Back to ghosttown's table, exactly. Deletes the overrides rather than writing them out. */
+  | { type: "reset-keys" }
+
+  // --- how it looks --------------------------------------------------------
+  /**
+   * Wear a different theme. An id from `shared/theme.ts` and nothing else — the
+   * server refuses anything it does not recognise, which is `set-workspace-color`'s
+   * rule and is here for a stronger version of the same reason: a palette is not
+   * eight values in a style attribute, it is forty, and kururu is reachable from
+   * the tailnet.
+   *
+   * An id rather than the tokens, so that a theme improved in a later version
+   * improves for everybody who picked it instead of leaving them on a copy taken
+   * the day they chose.
+   */
+  | { type: "set-theme"; themeId: string }
+  /**
+   * Which shape the window is, which is a separate decision from which colours
+   * — see `shared/skin.ts`. An id for `set-theme`'s reason, and doubly so here:
+   * a skin's tokens include a `font-family` and a `box-shadow`, so a message
+   * carrying them would be a client on the tailnet writing CSS values into the
+   * root element of every other client looking at this server.
+   *
+   * Changing it **does** re-measure every terminal, which is the one way this
+   * differs from `set-theme`: a skin moves the line weight and the type, and
+   * both move the box a pty is sized to. That resize goes through the same
+   * settle a dragged divider does, for the same reason.
+   */
+  | { type: "set-skin"; skinId: string }
+  /**
+   * The type a terminal is set in, and the shape of its cursor. A whole
+   * `TerminalAppearance` rather than one field at a time, which is the one place
+   * this protocol departs from "a message is a verb" — and deliberately: these
+   * four are edited together on one page, they have no meaning apart, and a
+   * per-field verb would make a Settings panel send four messages to describe
+   * one decision.
+   *
+   * It is adopted rather than trusted on arrival. `fontSize` especially: it
+   * decides the cell, the cell decides the grid a pane proposes, and the grid is
+   * what every pty watching gets resized to — so a number typed too large is a
+   * SIGWINCH into a shape no box has, and `adoptAppearance` clamps it.
+   */
+  | { type: "set-terminal-appearance"; terminal: TerminalAppearance }
+
+  /**
+   * When kururu may interrupt you, and what it sounds like — all five fields at
+   * once, on `set-terminal-appearance`'s reasoning: they are one decision and
+   * they are edited on one page.
+   *
+   * A verb like the rest, so the choice reaches the phone as well as the window
+   * that made it. The *sound* is the interesting one to think about here: what
+   * travels is an id, and the id is resolved against `/System/Library/Sounds` on
+   * the machine running the server. A phone has never heard of that directory
+   * and gets the sound anyway, because it fetches the bytes from `/api/sound`
+   * like it fetches everything else.
+   */
+  | { type: "set-notify"; notify: NotifySettings }
+  /**
+   * Which agents and models the new-tab menu offers. Server-owned like the rest
+   * of Settings, so the phone's menu is the desktop's menu.
+   */
+  | { type: "set-launch"; launch: LaunchSettings }
+  /**
+   * What a repository has been told about itself — see `shared/projects.ts`.
+   * `root` must be one the server already knows: a repository it found by
+   * walking up from a terminal it holds, or one already in the file. Any other
+   * path is refused, on `files.ts`'s rule that a root never comes from a client.
+   */
+  | { type: "set-project"; root: string; settings: ProjectSettings }
+  /**
+   * Merge every card's worktree in this repository back into the branch it was
+   * cut from and take it down — the sweep Settings → Workspaces offers, once
+   * the person has read the list and said so. Replied to with a
+   * `WorktreeOutcome` per card, because it is a sweep whose parts can fail
+   * separately and the next snapshot only shows which worktrees are gone, not
+   * why the others are not. `root` is checked as `set-project`'s is.
+   */
+  | { type: "retire-worktrees"; id: number; root: string }
+  /**
+   * Watch a machine from the sidebar. `host` is an ssh destination and is the
+   * only thing here that reaches a command line — `shared/machines.ts` holds
+   * it to a grammar with no room for an option, and the command run on the far
+   * side is the server's own. Replied to with the new entry, or with why it
+   * was refused.
+   */
+  | { type: "add-machine"; id: number; name: string; host: string; panel: string }
+  /** Stop watching it. Every workspace pinned to it comes home. */
+  | { type: "remove-machine"; machineId: string }
+  /**
+   * The machine row's shell button: a tab in the focused pane running
+   * `ssh -t <host>`. By id, so the host it runs is the one the server has.
+   */
+  | { type: "open-machine-shell"; id: number; machineId: string; paneId?: string }
+  /**
+   * Give the server an OpenRouter management key. The one message in the
+   * protocol that carries a secret, and it only ever travels this way: it is
+   * tried, saved owner-only, and answered with the status, whose `hint` is all
+   * of the key a client ever sees again. Replied to with why, when refused.
+   */
+  | { type: "set-openrouter-key"; id: number; key: string }
+  | { type: "clear-openrouter-key" }
+  /**
+   * The backup settings, all at once. A remote that cannot be reached is a
+   * refusal with git's reason, and the settings are not changed: a switch
+   * turned on against a repository nobody can push to would fail quietly
+   * every five minutes.
+   */
+  | { type: "set-backup"; id: number; url: string | null; enabled: boolean; intervalMin: number }
+  /** Back up now, whether or not anything changed. Replied to with the status once the run is over. */
+  | { type: "backup-now"; id: number }
+  /**
+   * Put a deleted card back on its board, in the column it was deleted
+   * from. Only a card of the profile on screen; the reply says if it is not
+   * one. Deleting never removed its row — see `shared/store.ts`.
+   */
+  | { type: "restore-card"; id: number; cardId: string }
+  /** The deleted cards of a profile, newest first, for the list that offers to restore them. */
+  | { type: "deleted-cards"; id: number; profileId: string }
+  /**
+   * The voice's settings, all at once, on `set-notify`'s reasoning. The
+   * words themselves never travel this way: a clip goes to `/api/voice/hear`
+   * as a WAV, and a sentence comes back from `/api/speech` as one.
+   */
+  | { type: "set-voice"; voice: VoiceSettings }
+  /** Audition a voice in a language. Replied to with the utterance to fetch, once it has been made. */
+  | { type: "voice-preview"; id: number; voice: VoiceChoice; lang: VoiceLang }
+  /** Fetch the speech model. Progress comes back as `voice` messages. */
+  | { type: "download-voice-model" }
+  /**
+   * This client is talking: from the talk key's press until the server has
+   * its clip on the disk, or the clip was thrown away. The server holds
+   * every client's speech for as long as any one says so (`hush`) — and for
+   * as long as a clip's words are on their way to Kuru, on the outbox's say —
+   * and forgets a client's say when its socket goes. Re-sent on a reconnect,
+   * on `looking`'s reasoning.
+   */
+  | { type: "talking"; talking: boolean }
+  /**
+   * What became of a reply on this client, which is how the server knows
+   * what was missed. `held`: its first sentence arrived and it will be
+   * played here, now or once the hush lifts. Not `held`: it was let go
+   * before its end — the ✕, the talk key, a sentence that would not load.
+   * A client that never says either is no say in it, so an old page or one
+   * with no speaker leaves a reply nobody holds, and that is missed.
+   */
+  | { type: "speech-held"; utterance: string; held: boolean }
+  /** One sentence of a reply played to its end here. The last one is the reply heard. */
+  | { type: "speech-played"; utterance: string; seq: number }
+  /** Play a profile's unheard replies again, oldest first — the drawer's header button. */
+  | { type: "play-missed"; profileId: string }
+  /** Take a profile's unheard replies off the list without hearing them: read is heard enough. */
+  | { type: "clear-missed"; profileId: string }
+  /**
+   * These replies were in view in the open drawer for long enough to have
+   * been read (`KURU_SEEN_MS`), so they stop counting as unheard. The count's
+   * job is to bring you to the drawer; once you are there it has done it.
+   */
+  | { type: "kuru-seen"; profileId: string; utterances: string[] }
+  /** Say one reply again, from the drawer's Play on that reply. */
+  | { type: "kuru-replay"; profileId: string; utterance: string }
+  /**
+   * A message typed in the drawer's composer, for Kuru: the voice's road
+   * without the clip. Through the outbox, so it gets the same queued, sent,
+   * delivered and failed states and the same retries a spoken one does, and
+   * typed into Kuru's terminal as the user's words. The id is the client's,
+   * as a clip's is, so a retried send is one message.
+   */
+  | { type: "kuru-say"; profileId: string; id: string; text: string; at: number }
+  /** Send a failed message of yours again: heard again if it has no words, handed to Kuru again if it has. */
+  | { type: "voice-resend"; id: string }
+  /** Take a failed message of yours off the list, and its audio off the disk. */
+  | { type: "voice-discard"; id: string }
+  /**
+   * The database viewer's three questions. Each names a database by the id
+   * the server minted for it, never by a URL or a path, and the server reads
+   * the env file again to answer. `database` picks another database on the
+   * same server, from the list the catalogue gave; absent is the URL's own.
+   * Everything runs in a read-only transaction unless `writes` says
+   * otherwise, and only `db-query` can say so. Replied to with the answer, or
+   * with what Postgres said, in its own words.
+   */
+  | { type: "db-catalog"; id: number; dbId: string; database?: string }
+  | {
+      type: "db-rows";
+      id: number;
+      dbId: string;
+      database?: string;
+      schema: string;
+      table: string;
+      offset: number;
+      limit: number;
+    }
+  | { type: "db-query"; id: number; dbId: string; database?: string; sql: string; writes: boolean };
+
+/**
+ * How often the status heuristic is asked to notice that work has stopped.
+ * Output arrives as events, but *silence* does not, so end-of-work needs a tick.
+ */
+export const STATUS_TICK_MS = 500;
+/**
+ * Output is coalesced and flushed at most this often — one frame at 60Hz. A pty
+ * mid-build emits thousands of writes a second, and a WebSocket message each
+ * would spend more time framing than the terminal spends drawing. Low enough
+ * that typing still feels direct.
+ */
+export const OUTPUT_FLUSH_MS = 16;
+/**
+ * How long the arrangement sits still before it is written to disk. Dragging a
+ * divider changes it sixty times a second; only the last one is worth a write.
+ */
+export const SAVE_DEBOUNCE_MS = 1000;
+/** How often the process table is re-read to see which agent is running where. */
+export const AGENT_SCAN_MS = 2000;
+/** How often it re-scans for listening dev servers. Slowest: it shells out twice. */
+export const DEV_SCAN_MS = 3000;
+/**
+ * How often each workspace's `.git/HEAD` is re-read.
+ *
+ * Faster than the other two because it is by far the cheapest — one small file
+ * read per workspace, no subprocess and no socket — and because it is the one
+ * of the three that a person changes *deliberately* and then immediately looks
+ * at. A branch that took five seconds to catch up would be caught out every
+ * time somebody checked out and glanced at the sidebar to confirm it.
+ */
+export const GIT_SCAN_MS = 4000;
+/**
+ * How often a main checkout's `git status` is asked for, for the colour of the
+ * workspace row's ⋯. Slower than the branch because it is a subprocess
+ * and a walk of the working tree, where the branch is one small read; and the
+ * colour is redrawn at once after any of the menu's own verbs, so the only change
+ * this is late for is one an agent or a terminal made.
+ */
+export const GIT_STATUS_MS = 10_000;
+/**
+ * How often each profile's allowance is asked for. Slowest of the lot by two
+ * orders of magnitude, and the only poll in kururu that leaves the machine.
+ *
+ * A minute is not a compromise between freshness and politeness — it is the
+ * resolution of the thing being measured. The session window is five hours and
+ * the weekly one is seven days, so a percentage that is sixty seconds old is
+ * indistinguishable from a current one at every width this bar is ever drawn.
+ * Polling faster would buy a number nobody could see change, against somebody
+ * else's API.
+ */
+export const USAGE_POLL_MS = 60_000;
+
+/**
+ * How often each machine is sampled. Fifteen seconds because this one *is* read
+ * for movement — a RAM bar climbing while a migration runs — and because each
+ * poll is a channel on a connection ssh already holds open, not a handshake.
+ */
+export const MACHINE_POLL_MS = 15_000;
+
+/**
+ * How often the OpenRouter balance is asked for. The usage bar's minute, for
+ * the same reason inverted: a balance moves by cents a call, and what anybody
+ * reads off it is days, so a figure a minute old is a current one.
+ */
+export const OPENROUTER_POLL_MS = 60_000;
