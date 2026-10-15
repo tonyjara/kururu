@@ -174,7 +174,7 @@ name files on this Mac — and a profile's own login directory does not follow
 it: `CLAUDE_CONFIG_DIR` and `CODEX_HOME` are environment on this side of the
 ssh. An agent on a machine is signed in as whoever is signed in there.
 
-Nor does it get kururu's web tools (Firecrawl): they are served on this
+Nor does it get kururu's web tools (`kururu_web`): they are served on this
 Mac's loopback, and nothing on the machine can reach that address. An agent
 there has no `kururu_web` tools rather than tools that fail — see
 [web](web.md#agents-on-a-machine) for what making it work would take.
@@ -263,7 +263,7 @@ tool list until it is reopened.
 ## Not yet
 
 - **Hook reports from a machine** — see above.
-- **Firecrawl for an agent on a machine** — a reverse tunnel per link to a
+- **The web tools for an agent on a machine** — a reverse tunnel per link to a
   listener that serves only the web tools; see [web](web.md#agents-on-a-machine).
 - **The file tree, reader, worktrees, database scan and dev-server discovery**
   on a machine — each reads a disk or a process table kururu does not have

@@ -103,6 +103,23 @@ kururu stays isolated and nvim does not.
 
 Kept short on purpose; the detail is in git history.
 
+- **The web chain and the self-hosted Firecrawl** (2026-10-15). The chain
+  and the real providers run from a scratch copy against our Firecrawl on
+  Omarchy over the tailnet, with a throwaway config directory: health and
+  the Test through the gate, a static page, a JavaScript-drawn page, an
+  Instagram profile, a SearXNG search and a three-page crawl served by it;
+  a Cloudflare challenge and G2 failed as `blocked` and handed back, naming
+  what was tried; a map of a site with no sitemap failed as `empty`. The
+  gate refuses no key and a wrong key; 3002 does not answer from the LAN
+  or from the internet over IPv6. Then the real server, from the checkout:
+  it restarted once into the chain and wrote `web.json` (the old switch and
+  page limit carried over); `/mcp/web` published the order in its
+  `instructions` and each description, served the same pages, handed the
+  Cloudflare page back with the opt-in named, and refused a tailnet address
+  before sending anything; the window reloaded onto Settings → Web, and the
+  page was rendered headlessly from the real chain's status. Not pressed:
+  the cloud past the hand-back with a real key (credits), and the page by a
+  hand in the window.
 - **Firecrawl for agents** (2026-10-12), in an isolated instance on :7817 from
   a scratch copy, with a stand-in Firecrawl (`KURURU_FIRECRAWL_API`) in the
   documented v2 shapes. Settings: a wrong key refused with Firecrawl's

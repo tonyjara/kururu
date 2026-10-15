@@ -21,7 +21,8 @@ in this folder.
 | `channels.ts` | Other doors into that conversation — Telegram. The kinds and their marks, the settings, `judge` (the allow-list decision for one message), pairing codes, splitting a reply, `replySpoken`, the status a window draws. Pure, tested. See [channels](channels.md) |
 | `board.ts` | A workspace's cards, and what an agent's status does to the one it was handed. Also the profile's board, a card's dates, and the timeline's layout |
 | `store.ts` | The database's pure half: the keys a profile and a workspace are known by, a board change as events (`diffBoards`), a typed query as one FTS5 takes, the export's rows. See [data](data.md) |
-| `firecrawl.ts` | The web for agents: the settings, the four tools as their CLIs are told them, what may be fetched, the day's budget, Firecrawl's answers read and wrapped as untrusted, the launch flags. Pure, tested. See [web](web.md) |
+| `web.ts` | The web for agents, whatever provider answers: the chain's settings, what may be fetched, the calls checked, the one result shape, what counts as a failure (`resultVerdict`), pages wrapped as untrusted, the four tools' descriptions written from the chain's order, the launch flags, what a window is told. Pure, tested. See [web](web.md) |
+| `firecrawl.ts` | Firecrawl's API as two providers speak it: the key, the cloud's daily budget, request bodies, its answers read, a self-hosted address, `crawlNext`. Pure, tested |
 | `backup.ts` | What leaves the machine and what never does: the allow-list, the settings, the commit subject. See [data](data.md#backups) |
 | `days.ts` | Calendar days as strings, and the arithmetic over them. Why a card's date is not a timestamp |
 | `projects.ts` | What a repository has been told about itself, and how a card's worktree is named |
@@ -85,7 +86,10 @@ in this folder.
 | `src/made.ts` | A reply's paths found on this disk under allowed roots, and each agent's links kept in `made.json` beside `session.json` — by id *and* spawn time, since a restart must not lose them and a reused id must not inherit them |
 | `src/sessions.ts` | The CLIs' files on this disk, bounded reads only: a Codex run's rollout found, any conversation's tail by its id |
 | `src/openrouter.ts` | The sidebar's OpenRouter balance and spend, read with a management key kept owner-only in `~/.config/kururu/openrouter.json`. GETs only; the key comes in once and never goes back out (`shared/openrouter.ts`) |
-| `src/firecrawl.ts` | Firecrawl for every agent: the key owner-only in `~/.config/kururu/firecrawl.json`, read per request and never lent; the calls behind `POST /mcp/web`; the day's budget reserved before a call and settled after; the flags a launch is given. `KURURU_FIRECRAWL_API` points it at a stand-in on loopback ([web](web.md)) |
+| `src/web/chain.ts` | The web chain behind `POST /mcp/web`: providers tried in Settings' order, each step skipped, served, failed, passed or stopped, answers judged, the record of recent calls, health on a timer, the launch flags ([web](web.md)) |
+| `src/web/provider.ts` | What a web provider is, and the registry each provider file puts itself on |
+| `src/web/firecrawlapi.ts` | Firecrawl's v2 API for both Firecrawl providers: one request under one base, failures as the chain reads them, crawls waited for and cancelled |
+| `src/web/providers/` | One file per provider, each registering itself: `firecrawl-self.ts` (ours, on Omarchy), `handback.ts` (the agent's own tools), `firecrawl-cloud.ts` (firecrawl.dev: key, budget, account; `KURURU_FIRECRAWL_API` points it at a stand-in). The build imports the directory |
 | `src/databases.ts` | The database sheet: `DATABASE_URL` read out of the workspace's env files at the moment of connecting and never held, every query in a `READ ONLY` transaction unless the switch says otherwise, reads bounded through a cursor. Postgres only (`shared/databases.ts`) |
 | `src/report-cli.ts` | What a Claude Code hook runs. Not in `agents/` on purpose. Also carries the session's inbox socket, transcript path and last reply for the harness |
 | `src/harness.ts` | The harness's hands: kururu's verbs as MCP tools for one profile, a terminal read as text, the user's words typed into a pty when it may take them, the status feed into the harness's inbox. Explicit targets, never `active` (`shared/harness.ts`) |
