@@ -40,6 +40,7 @@ const { Runner, hostSocket } = require("./runner");
 const { candidates, forget, normalize, remember } = require("./servers");
 const { TalkKey } = require("./talkkey");
 const { createTray } = require("./tray");
+const { editMenuTemplate } = require("./editmenu");
 
 const DEV = process.env.KURURU_DEV === "1";
 /**
@@ -587,6 +588,19 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: "deny" };
+  });
+
+  // Cut, Copy and Paste on a right-click in a text field, and Copy on selected
+  // text; what each right-click gets is decided in `editmenu.js`.
+  win.webContents.on("context-menu", (_event, params) => {
+    const template = editMenuTemplate(params);
+    if (!template) return;
+    const contents = win.webContents;
+    for (const item of template) {
+      if (item.id === "replace") item.click = () => contents.replaceMisspelling(item.word);
+      if (item.id === "learn") item.click = () => contents.session.addWordToSpellCheckerDictionary(item.word);
+    }
+    Menu.buildFromTemplate(template).popup({ window: win });
   });
 
   /**

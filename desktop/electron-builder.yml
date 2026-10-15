@@ -41,6 +41,7 @@ files:
   - runner.js
   - vite.js
   - menu.js
+  - editmenu.js
   - tray.js
   - talkkey.js
   - icon/icon-1024.png

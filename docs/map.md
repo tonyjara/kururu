@@ -191,6 +191,7 @@ open, and this is how loud the room is; dragged anywhere, ✕ or Esc to stop Kur
 | `runner.js` | Starts `server/run.mjs` from the app or from a checkout, probes health, reads `lifecycle.log`, adopts a server already on the port, asks the server to restart itself or the host |
 | `vite.js` | The checkout's vite, which the window and the pill load when the app runs from a checkout (and always in `dev:desktop`); adopts a kururu vite already on the port, refuses anything else there |
 | `tray.js` · `menu.js` | The frog in the menu bar and its clicks; the menu as data, with no Electron in it, so its sentences are tested |
+| `editmenu.js` | The right-click menu of a text field — Cut, Copy, Paste, spelling — as data; `main.js` pops it, the preload keeps it off terminals |
 | `talkkey.js` · `talkkey/talkkey.swift` | The talk key in every app: the native listen-only event tap, its router, and the floating pill's panel window |
 | `desktop.js` | `desktop.json`: where the server runs from, whether the hook is on, where the pill was left |
 | `connect.html` | The one page kururu draws itself — the address picker |
