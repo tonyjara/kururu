@@ -301,8 +301,8 @@ restarts the API container — about ten seconds, by itself.
 | a page drawn by JavaScript (quotes.toscrape.com/js) | served, 1.9 s |
 | a Cloudflare challenge (scrapingcourse.com's test page), G2 behind Cloudflare | **failed** — Playwright gets the 403, and the stealth proxy Firecrawl would retry with is a cloud feature; the chain reads `blocked` and hands back |
 | an Instagram profile (`/natgeo/`) | served, with the recent posts' captions |
-| a search (through SearXNG) | served, 4 s; Google answers, DuckDuckGo and Brave throttle a home IP |
-| a crawl of three pages | served, 12 s |
+| a search (through SearXNG) | served, 1.5 s (4 s before the engines were cut to the ones that answer) |
+| a crawl of three or four pages | served, 12–23 s; only pages under the starting path unless `entireDomain` |
 | a map | served from a sitemap; a site without one comes back with nothing, which fails over |
 
 ## Adding a provider
