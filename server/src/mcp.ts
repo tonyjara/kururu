@@ -49,7 +49,7 @@ export async function mcpAnswer(
   body: unknown,
   tools: readonly McpTool[],
   call: McpCall,
-  server: { name: string; version: string },
+  server: { name: string; version: string; instructions?: string },
 ): Promise<{ status: number; body?: unknown }> {
   if (Array.isArray(body)) {
     const replies = (await Promise.all(body.map((one) => answerOne(one, tools, call, server)))).filter((r) => r !== null);
@@ -63,7 +63,7 @@ async function answerOne(
   raw: unknown,
   tools: readonly McpTool[],
   call: McpCall,
-  server: { name: string; version: string },
+  server: { name: string; version: string; instructions?: string },
 ): Promise<Record<string, unknown> | null> {
   if (!raw || typeof raw !== "object") return failure(null, -32700, "Parse error");
   const req = raw as Request;
@@ -76,10 +76,15 @@ async function answerOne(
   switch (req.method) {
     case "initialize": {
       const asked = typeof params.protocolVersion === "string" ? params.protocolVersion : PROTOCOL;
+      // `instructions` is the protocol's place for what a client should tell
+      // its model about the server as a whole; Claude Code puts it in the
+      // system prompt beside the tools.
+      const { instructions, ...info } = server;
       return success(id, {
         protocolVersion: KNOWN.has(asked) ? asked : PROTOCOL,
         capabilities: { tools: {} },
-        serverInfo: server,
+        serverInfo: info,
+        ...(instructions ? { instructions } : {}),
       });
     }
     case "ping":

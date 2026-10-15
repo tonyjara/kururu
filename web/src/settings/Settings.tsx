@@ -36,7 +36,6 @@ import { AgentsPage } from "./Agents";
 import { BackupsPage } from "./Backups";
 import { ChannelsPage } from "./Channels";
 import { ExplorePage } from "./Explore";
-import { FirecrawlPage } from "./Firecrawl";
 import { KeyboardPage } from "./Keyboard";
 import { MachinesPage } from "./Machines";
 import { MascotPage } from "./Mascot";
@@ -48,6 +47,7 @@ import { StudioPage } from "./Studio";
 import { ThemePage } from "./Theme";
 import { EditingScope, type Tone } from "./ui";
 import { VoicePage } from "./Voice";
+import { WebPage } from "./Web";
 import { WorkspacesPage } from "./Workspaces";
 
 export type Tab =
@@ -62,7 +62,7 @@ export type Tab =
   | "voice"
   | "channels"
   | "machines"
-  | "firecrawl"
+  | "web"
   | "openrouter"
   | "backups"
   | "notify"
@@ -105,7 +105,7 @@ const GROUPS: ReadonlyArray<{ label: string; pages: ReadonlyArray<readonly [Tab,
     label: "Connections",
     pages: [
       ["machines", "Machines", "Your other computers, watched over ssh."],
-      ["firecrawl", "Firecrawl", "The web, when an agent's own fetch fails."],
+      ["web", "Web", "Search and page reading for agents: who is asked, in what order."],
       ["openrouter", "OpenRouter", "Your balance in the sidebar."],
       ["backups", "Backups", "The precious things, in a private repository."],
     ],
@@ -316,8 +316,8 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
       return <ChannelsPage profiles={p.profiles} />;
     case "machines":
       return <MachinesPage />;
-    case "firecrawl":
-      return <FirecrawlPage />;
+    case "web":
+      return <WebPage />;
     case "openrouter":
       return <OpenRouterPage />;
     case "backups":
@@ -337,7 +337,7 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
  * glance at whether Telegram is listening, and this is.
  */
 function usePill(tab: Tab): { text: string; tone: Tone } | null {
-  const { channels, firecrawl, openrouter, backup } = useKururu();
+  const { channels, web, openrouter, backup } = useKururu();
   switch (tab) {
     case "channels": {
       const t = channels?.telegram;
@@ -346,10 +346,13 @@ function usePill(tab: Tab): { text: string; tone: Tone } | null {
       if (t.enabled) return t.link === "listening" ? { text: "On", tone: "ok" } : { text: "Connecting", tone: "busy" };
       return { text: channelReady(t) ? "Off" : "Not set up", tone: "off" };
     }
-    case "firecrawl":
-      if (!firecrawl?.hint) return null;
-      if (firecrawl.error) return { text: "Error", tone: "bad" };
-      return firecrawl.settings.enabled ? { text: "On", tone: "ok" } : { text: "Off", tone: "off" };
+    case "web": {
+      if (!web) return null;
+      if (!web.active) return { text: "Off", tone: "off" };
+      // The first provider that will be tried is the one whose health is the page's.
+      const first = web.providers.find((p) => p.enabled && p.ready && p.kind === "service");
+      return first?.health.state === "bad" ? { text: `${first.label} down`, tone: "warn" } : { text: "On", tone: "ok" };
+    }
     case "openrouter":
       if (!openrouter) return null;
       if (openrouter.error) return { text: "Error", tone: "bad" };

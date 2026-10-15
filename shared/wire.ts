@@ -41,7 +41,7 @@ import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
 import type { LaunchSettings } from "./launchers";
 import type { ReloadAsk, ReloadHold, ReloadPage } from "./reload";
 import type { OpenRouterStatus } from "./openrouter";
-import type { FirecrawlStatus } from "./firecrawl";
+import type { WebStatus } from "./web";
 import type { ChannelKind, ChannelsStatus } from "./channels";
 import type { BackupStatus } from "./backup";
 import type { KuruConversation } from "./kuru";
@@ -394,12 +394,13 @@ export type ServerMessage =
    */
   | { type: "openrouter"; openrouter: OpenRouterStatus | null }
   /**
-   * Firecrawl, as Settings draws it: whether a key is given (its `hint`),
-   * the switch and the limits, the account's credits, what kururu spent
-   * today and its last few requests. Sent on connect and whenever any of it
-   * moves. Never the key — see `shared/firecrawl.ts`.
+   * The web for agents, as Settings → Web draws it: the providers in their
+   * order, each with its switch, its fields (a secret only as its hint), its
+   * health and its figures; the page limit; the last few calls and who
+   * served them. Sent on connect and whenever any of it moves. Never a key —
+   * see `shared/web.ts`.
    */
-  | { type: "firecrawl"; firecrawl: FirecrawlStatus }
+  | { type: "web"; web: WebStatus }
   /**
    * Where the backups stand: the settings, the last commit and push, and
    * what went wrong. Sent on connect, after every run and whenever the
@@ -1329,19 +1330,19 @@ export type ClientMessage =
    */
   | { type: "set-openrouter-key"; id: number; key: string }
   | { type: "clear-openrouter-key" }
+  /** The chain's order (provider ids, first first) and its page limit, either. Replied to with the status. */
+  | { type: "set-web"; id: number; order?: string[]; pageLimit?: number }
   /**
-   * A Firecrawl API key, on the OpenRouter key's terms: it travels inbound
-   * once, is tried against Firecrawl's credit figures (which costs nothing),
-   * saved owner-only and answered with the status, whose `hint` is all of it
-   * a client sees again. Replied to with why, when refused.
+   * One provider's switch, or one of its fields. A secret travels inbound
+   * once, on the OpenRouter key's terms: the provider tries it where it can
+   * (a free request) and keeps it owner-only, and the status carries only its
+   * hint. Replied to with the status, or why not.
    */
-  | { type: "set-firecrawl-key"; id: number; key: string }
-  /** Forget the Firecrawl key, and the switch and limits kept beside it. */
-  | { type: "clear-firecrawl-key" }
-  /** Firecrawl's switch and its two limits, any of them. Replied to with the status. */
-  | { type: "set-firecrawl"; id: number; enabled?: boolean; pageLimit?: number; dailyCredits?: number }
-  /** Fetch one test page through Firecrawl — a credit. Replied to with its title and length, or why not. */
-  | { type: "test-firecrawl"; id: number }
+  | { type: "set-web-provider"; id: number; provider: string; enabled?: boolean; field?: string; value?: unknown }
+  /** Forget one of a provider's fields — a key, an address. Replied to with the status. */
+  | { type: "clear-web-provider-field"; id: number; provider: string; field: string }
+  /** A provider's own test: a page fetched through it, which for a paid one is a credit. Replied to with what came back, or why not. */
+  | { type: "test-web-provider"; id: number; provider: string }
   /**
    * A channel's bot token, the second message that carries a secret, and on
    * the OpenRouter key's terms: it travels inbound once, is tried against the

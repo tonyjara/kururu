@@ -88,7 +88,9 @@ import { scanDevServers, stopDevServer } from "./devservers";
 import { readHead, repoAt } from "./git";
 import { pollUsage, usageSnapshot } from "./usage";
 import { clearOpenRouterKey, openRouterSnapshot, pollOpenRouter, setOpenRouterKey } from "./openrouter";
-import { Firecrawl, callerAgent, localCaller } from "./firecrawl";
+// Every provider in web/providers/, each registering itself; the build makes this module from the directory.
+import "kururu:web-providers";
+import { WebChain, callerAgent, fileStore, localCaller } from "./web/chain";
 import { Voice } from "./voice";
 import { Outbox, legacyHeard } from "./outbox";
 import { nameProcess } from "./proctitle";
@@ -1617,8 +1619,8 @@ function fillPane(paneId: string, from?: string): void {
  *
  * A profile's own login directory has none of the hooks the machine's does, so
  * a Claude started into one is handed kururu's. See `hooks.ts`. And every
- * agent is pointed at kururu's web tools while Firecrawl is set up and on —
- * an address on this Mac, never the key. See `firecrawl.ts`.
+ * agent is pointed at kururu's web tools while a web provider is on — an
+ * address on this Mac, never a key. See `web/chain.ts`.
  */
 function agentCommand(launcher: Launcher): string {
   return agentCommandFor(launcher, workspaces.active.id);
@@ -1626,7 +1628,7 @@ function agentCommand(launcher: Launcher): string {
 
 /** The same, for a profile that need not be on screen: its own hooks, if it has its own directory. */
 function agentCommandFor(launcher: Launcher, profileId: string): string {
-  return launcherCommand(launcher, launch) + hooksFor(launcher, profileId) + firecrawl.launchFlags(launcher.cli);
+  return launcherCommand(launcher, launch) + hooksFor(launcher, profileId) + web.launchFlags(launcher.cli);
 }
 
 function hooksFor(launcher: Launcher, profileId: string): string {
@@ -2168,7 +2170,7 @@ async function resumeCardAt(
   if (!command) throw new Error("there is no conversation on this card to resume");
   const options = remote
     ? { command: await agentOn(remote.machine, remote.workspaceName, remote.dir, launcher.cli, command), kind: "agent" as const }
-    : { cwd, command: command + hooksFor(launcher, profileId) + firecrawl.launchFlags(launcher.cli), kind: "agent" as const };
+    : { cwd, command: command + hooksFor(launcher, profileId) + web.launchFlags(launcher.cli), kind: "agent" as const };
   const target = workspaces.agentPaneIn(profileId, workspaceId);
   if (!target) throw new Error("nowhere to put the agent");
   const agent = onScreen
@@ -3906,22 +3908,27 @@ async function pollOpenRouterAccount(): Promise<void> {
 }
 
 /**
- * Firecrawl for the agents: the key, the day's budget, and the tools served at
- * `/mcp/web`. It reads its own credit figures on its own timer, only while a
- * window is open, and broadcasts whatever moves. See `firecrawl.ts`.
+ * The web for the agents: an ordered chain of providers set in Settings →
+ * Web, served at `/mcp/web`. It checks its providers' health and reads their
+ * figures on its own timer, only while a window is open, and broadcasts
+ * whatever moves. See `web/chain.ts`.
  */
-const firecrawl = new Firecrawl({
-  broadcast: (message) => broadcast(message),
+const web = WebChain.fromRegistry({
+  store: fileStore,
+  changed: () => broadcast({ type: "web", web: web.status() }),
   clients: () => clients.size,
   port: () => PORT,
-  nameOf: (agentId) => {
-    const agent = host.find(agentId);
-    if (!agent) return null;
-    const where = `${agent.agent ?? "agent"} in ${agent.cwd.split("/").pop() || agent.cwd}`;
-    const what = agent.title?.replace(/\s+/g, " ").trim().slice(0, 60);
-    return what ? `${where}: ${what}` : where;
-  },
 });
+web.start();
+
+/** An agent's name, for the list of recent web calls, or null if it is not one of ours. */
+function webAgentName(agentId: string): string | null {
+  const agent = host.find(agentId);
+  if (!agent) return null;
+  const where = `${agent.agent ?? "agent"} in ${agent.cwd.split("/").pop() || agent.cwd}`;
+  const what = agent.title?.replace(/\s+/g, " ").trim().slice(0, 60);
+  return what ? `${where}: ${what}` : where;
+}
 
 /**
  * The timers left in this process, and what they have in common: each one asks
@@ -4514,22 +4521,28 @@ function handleMessage(ws: WebSocket, raw: string): void {
       broadcast({ type: "openrouter", openrouter: null });
       return;
 
-    // --- firecrawl -------------------------------------------------------------
+    // --- web -------------------------------------------------------------------
     // Each broadcasts the status itself; the replies are for the page that asked.
-    case "set-firecrawl-key":
-      void replyAsync(ws, msg.id, () => firecrawl.setKey(msg.key));
+    case "set-web":
+      reply(ws, msg.id, () => {
+        if (msg.order !== undefined) web.setOrder(msg.order);
+        return msg.pageLimit !== undefined ? web.setPageLimit(msg.pageLimit) : web.status();
+      });
       return;
 
-    case "clear-firecrawl-key":
-      firecrawl.clearKey();
+    case "set-web-provider":
+      void replyAsync(ws, msg.id, async () => {
+        if (msg.enabled !== undefined) web.setEnabled(msg.provider, msg.enabled);
+        return msg.field !== undefined ? web.setField(msg.provider, msg.field, msg.value) : web.status();
+      });
       return;
 
-    case "set-firecrawl":
-      reply(ws, msg.id, () => firecrawl.setSettings(msg));
+    case "clear-web-provider-field":
+      reply(ws, msg.id, () => web.clearField(msg.provider, msg.field));
       return;
 
-    case "test-firecrawl":
-      void replyAsync(ws, msg.id, () => firecrawl.test());
+    case "test-web-provider":
+      void replyAsync(ws, msg.id, () => web.test(msg.provider));
       return;
 
     // --- channels --------------------------------------------------------------
@@ -5644,13 +5657,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   }
 
   /**
-   * Firecrawl as an MCP server: the web tools every agent kururu starts is
-   * pointed at (`Firecrawl.launchFlags`), and the harness with them. Stricter
-   * than `/mcp` below, because what it spends is credits: a program on this
-   * Mac only — loopback, no `Origin`, nothing a proxy added — whether or not
-   * sharing is on. The agent names itself in a header so the Settings page
-   * can say who spent what; one that does not is still served. See
-   * `firecrawl.ts` and `shared/firecrawl.ts`.
+   * kururu's web as an MCP server: the tools every agent kururu starts is
+   * pointed at (`WebChain.launchFlags`), and the harness with them. Stricter
+   * than `/mcp` below, because a provider behind it may spend credits: a
+   * program on this Mac only — loopback, no `Origin`, nothing a proxy added —
+   * whether or not sharing is on. The agent names itself in a header so the
+   * Settings page can say who asked for what; one that does not is still
+   * served. See `web/chain.ts`.
    */
   if (url.pathname === "/mcp/web") {
     if (req.method === "GET") {
@@ -5673,9 +5686,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     const agentId = said && host.find(said) ? said : null;
     try {
       const body = await readJsonBody(req, 64 * 1024);
-      const answer = await mcpAnswer(body, firecrawl.tools(), (name, args) => firecrawl.call(name, args, agentId), {
+      const agent = agentId ? webAgentName(agentId) : null;
+      const answer = await mcpAnswer(body, web.tools(), (name, args) => web.call(name, args, agent), {
         name: "kururu_web",
         version: VERSION,
+        instructions: web.instructions(),
       });
       if (answer.body === undefined) res.writeHead(answer.status).end();
       else json(res, answer.body, answer.status);
@@ -6389,7 +6404,7 @@ server.on("upgrade", (req, socket, head) => {
     send(ws, { type: "usage", usage: usageSnapshot() });
     send(ws, { type: "machines", machines: machinesSnapshot() });
     send(ws, { type: "openrouter", openrouter: openRouterSnapshot() });
-    send(ws, firecrawl.message());
+    send(ws, { type: "web", web: web.status() });
     send(ws, { type: "voice", voice: voice.status() });
     send(ws, voice.hush());
     send(ws, kuru.message());
