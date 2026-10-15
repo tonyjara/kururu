@@ -253,11 +253,57 @@ Dokploy (raw), from Firecrawl's own `docker-compose.yaml` at the commit image
 
 | Dokploy service | app name | what |
 |---|---|---|
-| `searxng` | `web-searxng-b5bzos` | `searxng/searxng:2026.10.13-22c64b8d3`, JSON format on, limiter off. Published nowhere; on the `web-search` network it creates |
+| `searxng` | `web-searxng-b5bzos` | `searxng/searxng:2026.10.13-22c64b8d3`, JSON format on, limiter off, and only the engines that answer from Omarchy's IP: google cse, bing, yahoo, wikipedia. Published nowhere; on the `web-search` network it creates |
 | `firecrawl` | `web-firecrawl-616leg` | `ghcr.io/firecrawl/firecrawl:2.11.522` (API and its workers, one container), `playwright-service` and `nuq-postgres` pinned by digest, `redis:8.2-alpine`, `rabbitmq:3.13-management-alpine`, and `gate` (`nginx:1.30.6-alpine`) |
 
 Deploy SearXNG before Firecrawl: it creates the `web-search` network Firecrawl
 joins (`SEARXNG_ENDPOINT=http://searxng:8080`).
+
+**Changes from Firecrawl's own compose, each for something its logs showed**
+(2026-10-15):
+
+- **SearXNG's engines are cut to the ones that work from a home IP**
+  (`use_default_settings.engines.keep_only`). With the defaults, DuckDuckGo
+  answered every query with a CAPTCHA, Brave with 429 and a three-minute
+  suspension, Google and Qwant with access denied, and Wikidata timed out —
+  holding every search for the full four-second timeout — so google cse was
+  the only engine with results. Now google cse, bing and yahoo answer, in about
+  a second. Startpage and mojeek do not load here at all. Re-check with a query
+  per engine (`&engines=bing`) and look at `unresponsive_engines` before adding
+  one back.
+- **Redis keeps no snapshots** (`--save "" --appendonly no`). Its data is a
+  throwaway cache, as in Firecrawl's compose, and without
+  `vm.overcommit_memory=1` on the host — a host-wide setting left alone because
+  Platypost shares the box — a failed background save would make Redis refuse
+  every write. Redis still prints the overcommit warning at start; with nothing
+  to fork for, it is only that.
+- **pg_cron is quiet** (`-c cron.log_run=off -c cron.log_statement=off`). It
+  runs about forty queue jobs, several every few seconds, and logged each
+  statement — eleven thousand lines in two hours, burying everything else in
+  Dokploy's log view — and kept a row per run in `cron.job_run_details`, which
+  nothing trims. Postgres's data sits in an anonymous volume that survives a
+  redeploy.
+- **Playwright runs `node dist/api.js`**, which is all `pnpm start` does, so a
+  new container no longer fetches pnpm from npm through Corepack first.
+
+**A changed inline config needs a new name.** Compose does not recreate a
+container when only the `content:` of a config changes, so Dokploy writes the
+new file and the old settings stay in force. SearXNG's config is versioned in
+its name (`settings-v3`); bump it with any edit. The gate's config would need
+the same.
+
+**What the logs still say, and why it is fine:** `AUTUMN_SECRET_KEY is not set`
+and `You're bypassing authentication` (cloud billing and auth; the gate is the
+auth here); `Credits billed unknown` (no billing); `All scraping engines failed`
+for a page behind a bot check (the chain's `blocked`); `SCRAPE_SITEMAP_ERROR`
+404 when a crawled site has no sitemap (the crawl follows links instead);
+Playwright's `No proxy server provided`; SearXNG's missing `limiter.toml` and
+its one `X-Forwarded-For` message (the limiter is off); RabbitMQ's first-boot
+and deprecation notices; and `initdb`'s own config message and pg_cron shutdown
+on the first start. The gate's restart count of 9 is its first deploy, two
+configs before the one that works. When Postgres or Redis is recreated, a
+worker loses its connection and Firecrawl's supervisor restarts the whole API
+container — about ten seconds, by itself.
 
 **The gate.** A self-hosted Firecrawl has no authentication
 (`USE_DB_AUTHENTICATION=false`; turning it on needs Supabase), so nothing
@@ -301,8 +347,8 @@ box.
 | a page drawn by JavaScript (quotes.toscrape.com/js) | served, 1.9 s |
 | a Cloudflare challenge (scrapingcourse.com's test page), G2 behind Cloudflare | **failed** — Playwright gets the 403, and the stealth proxy Firecrawl would retry with is a cloud feature; the chain reads `blocked` and hands back |
 | an Instagram profile (`/natgeo/`) | served, with the recent posts' captions |
-| a search (through SearXNG) | served, 4 s; Google answers, DuckDuckGo and Brave throttle a home IP |
-| a crawl of three pages | served, 12 s |
+| a search (through SearXNG) | served, 1.5 s (4 s before the engines were cut to the ones that answer) |
+| a crawl of three or four pages | served, 12–23 s; only pages under the starting path unless `entireDomain` |
 | a map | served from a sitemap; a site without one comes back with nothing, which fails over |
 
 ## Adding a provider
