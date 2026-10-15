@@ -26,7 +26,7 @@
  * to spawn.
  */
 import { build } from "esbuild";
-import { chmodSync, existsSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -44,6 +44,33 @@ const root = join(here, "..");
  * you shipped.
  */
 const VERSION = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+
+/**
+ * `kururu:web-providers`: an import of every file in `server/src/web/providers/`.
+ * Each of those registers itself with the web chain when it is loaded, and
+ * this is what loads them — made from the directory at build time, so adding
+ * a provider is adding a file and nothing else (`server/src/web/provider.ts`).
+ * The directory is watched with it, so a new file is a rebuild under
+ * `--watch` like an edited one.
+ */
+const providersDir = join(root, "server/src/web/providers");
+const webProviders = {
+  name: "web-providers",
+  setup(b) {
+    b.onResolve({ filter: /^kururu:web-providers$/ }, () => ({ path: "web-providers", namespace: "kururu" }));
+    b.onLoad({ filter: /.*/, namespace: "kururu" }, () => {
+      const files = readdirSync(providersDir)
+        .filter((f) => f.endsWith(".ts") && !f.endsWith(".d.ts") && !f.endsWith(".test.ts"))
+        .sort();
+      return {
+        contents: files.map((f) => `import ${JSON.stringify(`./${f}`)};`).join("\n"),
+        resolveDir: providersDir,
+        loader: "js",
+        watchDirs: [providersDir],
+      };
+    });
+  },
+};
 
 /** Both halves are built the same way; only the entry and the name differ. */
 async function bundle(entry, outfile) {
@@ -74,6 +101,7 @@ async function bundle(entry, outfile) {
      * output because the header above says why the output is ESM.
      */
     banner: { js: 'import { createRequire as __kururuRequire } from "node:module"; const require = __kururuRequire(import.meta.url);' },
+    plugins: [webProviders],
     logLevel: "info",
   });
 }
