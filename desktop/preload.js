@@ -40,6 +40,21 @@ if (isPicker) {
     },
   });
 } else {
+  /**
+   * A terminal's right-click stays the terminal's, which in this window has
+   * always been nothing at all.
+   *
+   * The emulator leaves the event unclaimed unless the program asked for the
+   * mouse, and moves its input textarea under the pointer as it goes — so
+   * unclaimed, it reaches `editmenu.js` as a right-click in an editable field
+   * and would open Paste over a pty, where a paste is typing into an agent.
+   * Claimed here, after the page's own handlers have had it, rather than in
+   * `terminals.ts`, because a browser tab and the phone keep the browser's
+   * menu on a terminal and only this window has a second one to suppress.
+   */
+  window.addEventListener("contextmenu", (event) => {
+    if (event.target instanceof Element && event.target.closest(".term")) event.preventDefault();
+  });
   /** An open-the-drawer ask that landed before the page subscribed: `undefined` is none. */
   let pendingKuru;
   ipcRenderer.on("kururu:open-kuru", (_event, focus, toggle) => {
