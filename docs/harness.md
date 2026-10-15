@@ -74,7 +74,7 @@ in a pane of *that* workspace (`devPane(workspaceId)`), never the one on screen.
 | `reload_window` | the user's window and the floating pill reloaded the way ⌘R does, each once it is safe; waits, and says whether each came back or what held it — for an agent that would otherwise ask the user to press ⌘R. See [architecture](architecture.md#reloading-the-window) |
 | `say`, `play_missed` | one line aloud mid-turn; every reply of its own the user never heard to the end, said again — see [voice](voice.md#what-you-missed) |
 | `search`, `card_history` | full text over the profile's cards and its conversations, and a card's history of moves and runs with who made each — see [data](data.md#search) |
-| `mcp__kururu_web__*` | not kururu's verbs but the web: `scrape_page`, `crawl_site`, `map_site`, `search_web` through Firecrawl — a fallback for when its own search and fetch fail, as their descriptions say — on a second MCP server every agent kururu starts is given while Firecrawl is set up and on — the harness by the same launch flags, so its own `--allowedTools` does not cover them. See [web](web.md) |
+| `mcp__kururu_web__*` | not kururu's verbs but the web: `scrape_page`, `crawl_site`, `map_site`, `search_web` through the chain in Settings → Web — our self-hosted Firecrawl first, then a hand-back to its own search and fetch, then cloud Firecrawl only with `ownToolsFailed` — on a second MCP server every agent kururu starts is given while a web provider is on; the harness by the same launch flags, so its own `--allowedTools` does not cover them, and its role says the order. See [web](web.md) |
 
 Reads are capped (`READ_MAX`) and default small, on purpose: the orchestrator's
 own context is the scarce thing, and the role prompt tells it so.

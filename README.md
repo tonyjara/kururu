@@ -439,7 +439,7 @@ change reaches a second window and the phone without being told.
 | **Mascot** | what the badge does while an agent is working |
 | **Keys** | what each key does after the prefix |
 | **Channels** | talking to Kuru from Telegram: a walkthrough from making the bot to the switch |
-| **Agents → Firecrawl** | lets every agent kururu starts fall back on Firecrawl for what its own web search and fetch cannot reach (JavaScript-drawn pages, bot-blocked sites, PDFs) through your Firecrawl key, which stays in kururu: a walkthrough, a switch, a page limit and a daily credit budget. The addresses agents fetch go to Firecrawl's servers. See `docs/web.md` |
+| **Web** | the web for every agent kururu starts, as an ordered list of providers: a Firecrawl you host yourself (free, first), the agent's own web search and fetch, and cloud Firecrawl on your credits, reached only when an agent says its own tools failed. Each with a switch, its address and key, its health and a test; a page limit, a daily credit budget for the cloud, and the recent calls with who served each. Keys stay in kururu. See `docs/web.md` |
 | **Backups** | a private git repository the boards, conversations, settings and memory go to, every few minutes when something changed — never the secrets |
 
 ### Appearance

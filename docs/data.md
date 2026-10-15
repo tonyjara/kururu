@@ -176,8 +176,8 @@ be on; a repository nobody can push to failing quietly every five minutes
 is the one way a backup is worse than none.
 
 **An allow-list, not a deny-list** (`shared/backup.ts`). The config
-directory holds a share token, an OpenRouter key, a Telegram bot token, a
-Firecrawl key, the
+directory holds a share token, an OpenRouter key, a Telegram bot token, the
+web providers' keys, the
 leftovers of the removed accounts feature with ssh keys in them, and every
 profile's Claude login. The files that go are named by name, and anything not named stays:
 
@@ -217,7 +217,7 @@ through the same importer, and puts config, memory folders and the
 arrangement back — only where nothing is, unless `--replace`, which moves
 what is there to `.bak` first. It refuses to run while a server is up, and
 ends by printing what the backup never carried: a login per profile, the
-OpenRouter key, the Firecrawl key, the Telegram token and account, Input
+OpenRouter key, the web providers' keys, the Telegram token and account, Input
 Monitoring.
 
 ## Git, in two files

@@ -210,39 +210,46 @@ The load-bearing invariants, one line each, with the argument behind the link:
   private repository is an allow-list in `shared/backup.ts` — named config
   files, the boards and the harness conversation as text, the memory folders —
   and anything not named stays: the share token, the OpenRouter key, the
-  Telegram bot token, the Firecrawl key, `identities/`, every login. Never `--force`, never a rewrite; a push the
+  Telegram bot token, the web providers' keys, `identities/`, every login. Never `--force`, never a rewrite; a push the
   remote refuses stops and says so. → [data](docs/data.md#backups)
 - **The usage bar reads a Claude credential and never writes one** — the
   machine's, or the active profile's when profiles keep their own logins. It is
   one of the few things in kururu that reach off the machine on the user's
   behalf, beside OpenRouter's balance, a channel that is switched on and the
-  pages agents fetch through Firecrawl; it is
+  pages agents fetch through a web provider; it is
   read at the moment of the fetch, never held, never logged, never on the wire —
   and no token refresh, because writing that store could log out a running agent
   to draw a bar. `server/src/usage.ts` is the only file that has seen it.
-- **The OpenRouter key is one of three credentials kururu stores — a
-  channel's bot token and the Firecrawl key, below, are the others — and it
-  only comes in.** A management key, pasted once in Settings, kept 0600 in
+- **The OpenRouter key is one of the credentials kururu stores — a
+  channel's bot token and the web providers' keys, below, are the others —
+  and it only comes in.** A management key, pasted once in Settings, kept 0600 in
   `~/.config/kururu/openrouter.json`, read per fetch and used for GETs only.
   A client is sent its `hint` and dollars, never the key. →
   `shared/openrouter.ts`
-- **Firecrawl is lent to agents, never its key.** Every agent kururu starts
-  on this Mac — the + menu, a card's robot, the harness and its
-  `start_agent`, a card picked back up — gets four MCP tools served at
+- **The web is lent to agents through a chain, never a key.** Every agent
+  kururu starts on this Mac — the + menu, a card's robot, the harness and
+  its `start_agent`, a card picked back up — gets four MCP tools served at
   `POST /mcp/web` (`scrape_page`, `crawl_site`, `map_site`, `search_web`)
-  — a fallback for when its own web search and fetch fail, which every
-  description opens by saying — through flags on its command line,
-  `--mcp-config=` for Claude (spelt with `=` so a card's prompt is not read
-  as a second config) and `-c` overrides for Codex, and kururu makes the
-  request. The key is kept on the OpenRouter
-  key's terms: 0600 in `~/.config/kururu/firecrawl.json`, read per request,
-  sent only to `api.firecrawl.dev`, never logged, never in a pty's
-  environment, a client sent its `hint`, never backed up. Each call reserves
-  credits against a daily budget before it goes, a crawl is held to the page
-  limit, and what comes back is wrapped and introduced as untrusted data.
-  **The URL or search words of every call go to Firecrawl's servers.** An
-  agent on a machine does not get the tools; the endpoint answers only a
-  program on this Mac. → [web](docs/web.md)
+  through flags on its command line, `--mcp-config=` for Claude (spelt with
+  `=` so a card's prompt is not read as a second config) and `-c` overrides
+  for Codex, and kururu makes the request. Behind them is an ordered chain
+  of providers set in Settings → Web (`server/src/web/chain.ts`): our
+  self-hosted Firecrawl on a box on the tailnet first, then the **hand-back** — a
+  provider like the others that tells the agent to use its own WebSearch /
+  WebFetch — then cloud Firecrawl, reached only when the agent calls again
+  with `ownToolsFailed`. A challenge page, a wall or nothing is a failure
+  like an error or a timeout, and every answer says who served it. A
+  provider is one file in `server/src/web/providers/` that registers itself;
+  the build imports the directory and the page draws its fields, so nothing
+  else is touched. Each keeps its key on the OpenRouter key's terms — 0600
+  (`firecrawl.json`, `web-<id>.json`), read per request, sent only to its own
+  address, never logged, never in a pty's environment, a client sent its
+  hint, never backed up. The cloud reserves credits against a daily budget,
+  a crawl is held to the page limit, and what comes back is wrapped and
+  introduced as untrusted data. **The URL or search words of every call go
+  to our Firecrawl over the tailnet, and to Firecrawl's servers when the
+  chain reaches the cloud.** An agent on a machine does not get the tools;
+  the endpoint answers only a program on this Mac. → [web](docs/web.md)
 - **A database is whatever `DATABASE_URL` says, read when asked and never
   held.** The scan reads a workspace's `.env*` files under the roots the branch
   walk found, never a path a client sent, and a client is told host, port,
