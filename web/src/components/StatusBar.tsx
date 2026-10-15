@@ -1,22 +1,41 @@
 /**
- * One line along the bottom: where you are, and whether the mux is listening.
+ * One line along the bottom: where you are, whether the mux is listening, and
+ * what is waiting for you.
  *
  * The PREFIX badge is the load-bearing part. A prefix is a mode, and an unlabelled
  * mode is the thing that makes people distrust modal interfaces — you press the
  * chord, something else takes your attention, and three seconds later you cannot
  * tell whether the next key will split a pane or go into your shell. So the bar
  * says, and it stops saying when the prefix times out.
+ *
+ * Everything else on it earns its place by one of two tests, and the bar has
+ * two halves because there are two tests. The left half is *where you are and
+ * the two columns beside you*: the sidebar's toggle at the edge the sidebar
+ * opens on, the workspace's name, and the mode badges. The right half is *what
+ * is coming to you*: the two drawers' chips — what needs you, and Kuru — and
+ * then the file tree's toggle at the edge the tree opens on, mirroring the
+ * bars. A phone gets two more between the halves, the jump to the other pane
+ * and the key bar's toggle, because on a phone those are the thumb's only
+ * doors onto things a keyboard does for free.
+ *
+ * What is *not* here is as deliberate. The profile's name was, and went on
+ * 2026-10-12: it is the sidebar's header, and a name shown twice is a name
+ * you check twice. Settings and the phone's QR code were in the sidebar's
+ * foot, which sat on this bar's left end as three icon buttons from two
+ * components — they are in that header now, beside the name they belong to.
+ * The `C-a ?` hint went too: the keys are a page in Settings and a key away,
+ * and a hint for a chord that is barely used was the bar's loudest text. The
+ * talk key's button is in the Kuru drawer's composer, which is the one place
+ * a message to Kuru is already being written; a microphone on the bar beside
+ * Kuru's chip was two controls for one conversation.
  */
-import type { MascotConfig, Profile, Workspace } from "../../../shared/model";
-import { PREFIX_LABEL } from "../keys";
+import type { MascotConfig, Workspace } from "../../../shared/model";
 import type { KuruLive } from "../kuru";
-import type { VoicePhase } from "../voice";
 import { InboxIcon } from "./NeedsDrawer";
 import { Mascot } from "./Status";
 import { MicIcon, SpeakerIcon } from "./VoiceIcons";
 
 interface Props {
-  profile: Profile;
   workspace: Workspace;
   connected: boolean;
   prefixArmed: boolean;
@@ -50,33 +69,24 @@ interface Props {
    */
   panes: number | null;
   onLastPane: () => void;
-  onHelp: () => void;
   /**
-   * The talk key, for a thumb: what the microphone is doing, and the key's
-   * name for the tooltip. Pressed and released like the key, so a phone —
-   * which has no right Control — holds the button instead.
+   * Kuru, as the second of the two chips: what it is doing, the one count that
+   * is news, and whether its drawer is up. The mascot is the one that hops
+   * while it thinks. The count of replies nobody heard was here too, and went
+   * on 2026-10-12 — the drawer marks each unheard reply where it sits, and
+   * asking Kuru what you missed plays them, which is all the count ever led to.
    */
-  talk: { phase: VoicePhase; key: string };
-  onTalkDown: () => void;
-  onTalkUp: () => void;
-  /**
-   * Kuru, beside the mic, because the two are the halves of one conversation
-   * and the status bar is the one strip on every device a thumb can reach.
-   * What Kuru is doing, the two counts that are news, and whether its drawer
-   * is up. The mascot is the one that hops while it thinks.
-   */
-  kuru: { live: KuruLive; unheard: number; undelivered: number; open: boolean; mascot: MascotConfig };
+  kuru: { live: KuruLive; undelivered: number; open: boolean; mascot: MascotConfig };
   onKuru: () => void;
   /**
    * What needs you across the workspaces, in two numbers, and whether its
-   * drawer is up — the chip left of Kuru's. See `NeedsDrawer.tsx`.
+   * drawer is up — the first of the two chips. See `NeedsDrawer.tsx`.
    */
   needs: { count: number; workspaces: number; open: boolean };
   onNeeds: () => void;
 }
 
 export function StatusBar({
-  profile,
   workspace,
   connected,
   prefixArmed,
@@ -89,16 +99,11 @@ export function StatusBar({
   onToggleKeybar,
   panes,
   onLastPane,
-  onHelp,
-  talk,
-  onTalkDown,
-  onTalkUp,
   kuru,
   onKuru,
   needs,
   onNeeds,
 }: Props) {
-  const index = profile.workspaces.findIndex((w) => w.id === workspace.id);
   return (
     <footer className="statusbar">
       {/* The pointer's door onto `toggle-sidebar`, which until now had only a
@@ -121,12 +126,13 @@ export function StatusBar({
       >
         <BarsIcon />
       </button>
-      <span className="sb-profile">{profile.name}</span>
-      <span className="sb-sep">/</span>
-      <span className="sb-workspace">
-        {index >= 0 && index < 9 ? `${index + 1} ` : ""}
-        {workspace.name}
-      </span>
+      {/* The workspace, and only the workspace. With the sidebar up its row is
+          lit and this is a second copy; with the sidebar away — which is how a
+          phone spends most of its time — it is the one thing on screen that
+          says which of the workspaces the panes belong to, and that is the
+          state the bar is laid out for. The `1 ` that used to lead it was the
+          `C-a 1` hint, and is gone with the rest of the key hints. */}
+      <span className="sb-workspace">{workspace.name}</span>
 
       {prefixArmed && <span className="sb-badge sb-prefix">PREFIX</span>}
       {resizeMode && <span className="sb-badge sb-resize">RESIZE hjkl · esc</span>}
@@ -172,13 +178,21 @@ export function StatusBar({
           <KeysIcon />
         </button>
       )}
-      {/* What needs you: a tray and a count in the blocked ink while anything
-          does, a dim tray and no number while nothing does. It stays at zero
-          rather than vanishing, because chrome that comes and goes reads as
-          a bar that lost a button. Left of Kuru's chip and drawn like it —
-          one subject, its own drawer — and `mousedown` is prevented for the
-          same reason: opening the list must not take the focus off a
-          terminal. See `NeedsDrawer.tsx`. */}
+      {/* The two drawers' chips: a mark, then whatever is news, and Kuru's
+          name between them on a desktop. What needs you said its words too
+          from 2026-10-12, on the argument that a tray with no word is an
+          inbox and the inbox is the other drawer; on 2026-10-13 they went on
+          every device, as they already had on a phone. The tray and its count
+          are what the eye comes for, and the words were the widest thing on
+          the right of the bar — the title and the label still say what it is,
+          to a pointer and to a screen reader.
+
+          What needs you: the tray, dim while nothing does; the blocked ink and
+          a count while something does, since what it counts is mostly agents
+          asking. It stays at zero rather than vanishing, because chrome that
+          comes and goes reads as a bar that lost a button. `mousedown` is
+          prevented on both chips for one reason: opening a drawer must not
+          take the focus off a terminal. See `NeedsDrawer.tsx`. */}
       <button
         className={`sb-needs ${needs.count > 0 ? "sb-needs-some" : ""} ${needs.open ? "sb-needs-on" : ""}`}
         onClick={onNeeds}
@@ -190,18 +204,12 @@ export function StatusBar({
         <InboxIcon />
         {needs.count > 0 && <span className="sb-needs-n">{needs.count}</span>}
       </button>
-      {/* Kuru's chip: the one door onto its drawer, beside the mic because the
-          two are the halves of one conversation. Each control has one subject
-          — the mic is you, the chip is Kuru — which is the rule that replaced
-          the badges on the old button's corners. Quiet, it is a dim dot and
+      {/* Kuru's chip: the one door onto its drawer. Quiet, it is a dim dot and
           the word; thinking, the mascot hops; speaking, the speaker glyph in
           the working ink; asking, the blocked ink and the word; off, dim and
-          the word. News is text inside the chip and never a corner: an accent
-          count with the speaker for unheard replies, a red one with the mic
-          for messages that did not get through. In flight and all delivered
-          are not news and get no mark. On a narrow bar the word Kuru is
-          dropped and the marks stay. `mousedown` is prevented for the mic's
-          reason: opening the drawer must not take the focus off a terminal. */}
+          the word. News is text inside the chip and never a corner: a red
+          count with the mic for messages that did not get through. In flight
+          and all delivered are not news and get no mark. */}
       <button
         className={`sb-kuru sb-kuru-${kuru.live} ${kuru.open ? "sb-kuru-on" : ""}`}
         onClick={onKuru}
@@ -223,12 +231,6 @@ export function StatusBar({
         </span>
         <span className="sb-kuru-name">Kuru</span>
         {(kuru.live === "asking" || kuru.live === "off") && <span className="sb-kuru-word">{kuru.live}</span>}
-        {kuru.unheard > 0 && (
-          <span className="sb-kuru-news sb-kuru-unheard">
-            <SpeakerIcon />
-            {kuru.unheard}
-          </span>
-        )}
         {kuru.undelivered > 0 && (
           <span className="sb-kuru-news sb-kuru-failed">
             <MicIcon />
@@ -236,32 +238,9 @@ export function StatusBar({
           </span>
         )}
       </button>
-      {/* The talk key as a button. Held, it records; tapped, it toggles — the
-          same two gestures the key has, through `voice.ts`'s one state
-          machine, so a phone that has no right Control key talks the same
-          way. `mousedown` is prevented so a press never takes focus off the
-          terminal that was being typed into. The colour is the mode: red
-          while the microphone is open, the working colour while Kuru speaks. */}
-      <button
-        className={`sb-mic ${talk.phase === "listening" ? "sb-mic-listening" : talk.phase === "speaking" ? "sb-mic-speaking" : talk.phase === "sending" ? "sb-mic-sending" : ""}`}
-        onPointerDown={(event) => {
-          event.preventDefault();
-          onTalkDown();
-        }}
-        onPointerUp={onTalkUp}
-        onPointerCancel={onTalkUp}
-        onMouseDown={(event) => event.preventDefault()}
-        onContextMenu={(event) => event.preventDefault()}
-        title={`Hold to talk to Kuru, tap to toggle (${talk.key})`}
-        aria-label="Talk to the harness"
-        aria-pressed={talk.phase === "listening"}
-      >
-        <MicIcon />
-      </button>
       {/* The tree's door, on the side the tree opens on — the bars at the far
           left open the column on the left, and this is the same gesture
-          mirrored. Before the key hint rather than after it, so the hint stays
-          the last thing on the bar on every device. */}
+          mirrored, the last thing on the bar on every device. */}
       <button
         className={`sb-files ${filesOpen ? "sb-files-on" : ""}`}
         onClick={onToggleFiles}
@@ -271,14 +250,11 @@ export function StatusBar({
       >
         <FilesIcon />
       </button>
-      <button className="sb-help" onClick={onHelp} title="Keys">
-        {PREFIX_LABEL} ?
-      </button>
     </footer>
   );
 }
 
-/** What the tray says when hovered: how many, where, and which way the click goes. */
+/** What the chip says when hovered: how many, where, and which way the click goes. */
 function needsTitle(needs: Props["needs"]): string {
   const what =
     needs.count === 0
@@ -299,11 +275,9 @@ function kuruTitle(kuru: Props["kuru"]): string {
           : kuru.live === "speaking"
             ? "Kuru is speaking"
             : "Kuru";
-  const news = [
-    kuru.unheard > 0 ? `${kuru.unheard} ${kuru.unheard === 1 ? "reply" : "replies"} you did not hear` : null,
-    kuru.undelivered > 0 ? `${kuru.undelivered} ${kuru.undelivered === 1 ? "message" : "messages"} did not get through` : null,
-  ].filter(Boolean);
-  return `${state}${news.length ? ` · ${news.join(", ")}` : ""} — ${kuru.open ? "close" : "open"} the conversation (C-a a)`;
+  const news =
+    kuru.undelivered > 0 ? ` · ${kuru.undelivered} ${kuru.undelivered === 1 ? "message" : "messages"} did not get through` : "";
+  return `${state}${news} — ${kuru.open ? "close" : "open"} the conversation (C-a a)`;
 }
 
 /**

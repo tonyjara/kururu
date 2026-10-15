@@ -32,10 +32,10 @@ conversation's *text*, never its audio; see [channels](channels.md).
 | The hush | `server/src/voice.ts` `talk` | Nothing plays while anybody talks, and what waited plays after — see [below](#never-over-you). |
 | The missed list | `server/src/voice.ts` `review`, `replay`, `seen` | Every reply nobody played to its end, kept as words in the database (see [data](data.md)) — see [what you missed](#what-you-missed). Not a message of its own: it is merged into the conversation below. |
 | The conversation | `shared/kuru.ts`, `server/src/kuru.ts` | The harness's turns out of the database, your messages out of the outbox and each reply's fate off the missed list, as one list per profile with two counts — the `kuru` message, sent on connect and on every change, and paged back through `GET /api/kuru`. See [the drawer](#the-drawer). |
-| The drawer | `KuruDrawer.tsx` | The conversation, over the panes on a desktop and the whole screen on a phone: every message of yours with its state, every reply with its fate, a live row for what Kuru is doing, and a composer that types to Kuru through the outbox. Opened by the chip, the harness key, a tap on the pill, the floating pill and the menu bar. |
-| The chip | `StatusBar.tsx` `sb-kuru` | The one door onto the drawer, beside the mic. Its mark is what Kuru is doing — a dim dot, the mascot hopping while it thinks, the speaker glyph while it speaks, the blocked ink and "asking" on a prompt, "off" when not running — and its news is text inside it: an accent count with the speaker for unheard replies, a red one with the mic for messages that did not get through. In flight and all delivered are not news and get no mark. |
+| The drawer | `KuruDrawer.tsx` | The conversation, beside the panes on a desktop (narrowing them, like the sidebar) and the whole screen on a phone: every message of yours with its state, every reply with its fate, a live row for what Kuru is doing, and a composer that types to Kuru through the outbox. Opened by the chip, the harness key, a tap on the pill, the floating pill and the menu bar. |
+| The chip | `StatusBar.tsx` `sb-kuru` | The one door onto the drawer, the second of the status bar's two drawer chips (the first is what needs you). Its mark is what Kuru is doing — a dim dot, the mascot hopping while it thinks, the speaker glyph while it speaks, the blocked ink and "asking" on a prompt, "off" when not running — and its news is text inside it: a red count with the mic for messages that did not get through. In flight and all delivered are not news and get no mark. It carried a count of unheard replies until 2026-10-12; the drawer marks each where it sits, which is all the count led to. |
 | The pill | `VoicePill.tsx` | A level meter and a line, over the panes, zen included. Says which gesture ends the recording, what was heard and where it went, what Kuru is saying. Dragged anywhere in the window by mouse or finger and drawn where this device left it (`web/src/place.ts`); a double click puts it back. Its ✕ is `dismissVoice`: Kuru stops mid-word and the rest of the reply, and what was queued behind it, is marked unheard; a clip being recorded is thrown away; words lingering go. Escape is the same ✕ while Kuru speaks. A plain click — one that travelled less than the drag's own slop, and landed outside the ✕ — toggles the drawer at the reply the pill is showing: open it unless it is already open, in which case this closes it, so a pill that only ever shows its last line is one tap from the whole conversation and one tap back. The pill is the live indicator; the drawer is the record. |
-| The button | `StatusBar.tsx` `sb-mic` | The key for a thumb: held, it records; tapped, it toggles. How a phone talks. |
+| The button | `KuruDrawer.tsx` `kuru-mic` | The key for a thumb, in the drawer's composer: held, it records; tapped, it toggles. How a phone talks. It was on the status bar beside the chip until 2026-10-12 — two controls for one conversation, one of them on every device's one strip. |
 
 ## Never over you
 
@@ -210,13 +210,15 @@ written to it, pending, the moment it is said, so a server that dies with a
 reply in flight leaves that reply missed rather than forgotten. Each profile
 keeps its newest thirty (`MISSED_MAX`).
 
-**Getting them back.** The chip in the status bar carries the count; the
-drawer behind it marks each unheard reply where it sits in the conversation,
-with a **Play** of its own, and its header has **Play unheard** for all of
-them, oldest first, each starting "Earlier." Saying (or typing) "what did I
-miss?" to Kuru does the same as Play: the role tells it to call
-`play_missed`, which queues them and hands their words back to it so it ends
-its turn with a line rather than a retelling. A replay heard to its end takes
+**Getting them back.** The drawer marks each unheard reply where it sits
+in the conversation, with a **Play** of its own; the status bar's chip
+carried the count until 2026-10-12 and no longer does. Saying (or typing) "what did I miss?" to Kuru
+plays all of them, oldest first, each starting "Earlier.": the role tells it
+to call `play_missed`, which queues them and hands their words back to it so
+it ends its turn with a line rather than a retelling. The menu bar's **Play**
+is the same `Voice.replay`, through `POST /api/kuru/play`. The drawer's
+header had **Play unheard** and **Mark all heard** buttons too, and they went
+on 2026-10-12: nobody could say what they were for. A replay heard to its end takes
 its reply off the list; one cut off leaves it there, and a replay is never
 put on the list itself.
 
@@ -226,8 +228,7 @@ it has been in view in the open drawer for about two seconds
 bring you to the drawer, and once you are there it has done it; a count that
 survived reading would teach you to ignore it. Opening the drawer is not
 seeing: a glance at a long list is not reading the reply at the top of it,
-so the drawer watches which replies are actually on screen. **Mark all
-heard** stays for when you will not scroll.
+so the drawer watches which replies are actually on screen.
 
 A running harness keeps the tools and role it was started with (see
 [harness](harness.md#gotchas)); `play_missed` is there from its next start.
@@ -235,15 +236,24 @@ The chip and the drawer work without it.
 
 ## The drawer
 
-One place, one timeline: `KuruDrawer.tsx`, over the panes, anchored to the
-right edge, about 420px wide and the height of the window above the status
-bar. It does not dim the terminals, because you read Kuru's answer while
-watching the agent it talks about; a click outside closes it and lands where
-you clicked, and `Esc` closes it from anywhere but its composer. On a narrow
+One place, one timeline: `KuruDrawer.tsx`, beside the panes, a flex sibling
+of `.stage` about 420px wide that narrows it the way the sidebar does, rather
+than a panel floated over it. It does not dim the terminals, because you read
+Kuru's answer while watching the agent it talks about, and a click into them
+is just a click into the layout — on a desktop only its own close button,
+the chip, or `Esc` (from anywhere but its composer) closes it. On a narrow
 window it is a full-screen sheet with the usual close button, one sheet at a
-time, like the board and the databases. The harness key (`C-a a`) opens and
+time, like the board and the databases, and there a click outside does close
+it. The harness key (`C-a a`) opens and
 shuts it; **Terminal** in its header is the old `open-harness` — started,
-resumed or revealed.
+resumed or revealed. The speaker in its header is Settings → Voice's **Speak
+replies**, the same setting written through the same `set-voice`, so the two
+always agree: a speaker while replies are read aloud, struck through while
+they are only on screen. Muting also stops a reply already audible, through
+the pill's ✕, so it lands unheard. A reply's own **Play** and `play_missed`
+still speak while it is off — muting is about replies arriving, not about
+replies you ask for — and so, as the setting stands, does a line Kuru says
+mid-turn through `say` (`sayAside` does not read it).
 
 What is in it is the server's `kuru` message, merged once on the server
 (`shared/kuru.ts` `mergeConversation`, tested) from three things it already
@@ -255,7 +265,25 @@ until it arrives. A reply named for its utterance is `heard`, `unheard` or
 `speaking` by the missed list's word, and one that was never spoken has no
 fate to show. A line said mid-turn through `say` is a turn of its own
 (`via: "kururu"`), drawn smaller. A fresh session is a mark on the timeline,
-not a different list. The socket carries the newest `KURU_RECENT` of each
+not a different list.
+
+**Who spoke is a colour.** Yours are on raised chrome at the right, Kuru's in
+a wash of the accent at the left, and nothing else wears either. kururu's
+`[kururu]` notices, a background task's `<task-notification>` and another
+session's message all reach Kuru's session as user turns, so the prompt hook
+records them as yours. `readPrompt` (`shared/kuru.ts`) reads every prompt on
+the way *out* of the database, so the hundreds already stored are covered
+without a migration. It takes off what is never anybody's words (a paste
+envelope, even one with its end cut off, `<system-reminder>`, a local command's
+record) and makes a notice of the cross-session envelope, with Claude Code's
+line before it and advice after it, or of a task report. A notice is drawn as
+one quiet line, such as `kururu · "Nightly export…" in Tracker finished its turn`,
+with "is blocked" in the blocked ink. A tap shows the whole message, and its
+card codes are links. The Telegram echo uses the same reading, so a task report
+is never sent to the chat as something you typed. Until 2026-10-13 notices were
+drawn as your bubbles. Every reply never spoken also wore the scrolled-to
+highlight for good, because the check was `null === null`. Together those made
+the colours alternate. The socket carries the newest `KURU_RECENT` of each
 profile and everything on the two lists with something to do about it;
 **Show earlier** pages back through `GET /api/kuru`.
 
@@ -384,7 +412,7 @@ gone speaks with the Mac's voice. The code is `server/voicelab.py`,
 ## The phone
 
 The server does the hearing and the speaking, so a phone only posts a WAV
-and plays one; the microphone button is in the status bar. One thing stands
+and plays one; the microphone button is in the Kuru drawer's composer. One thing stands
 in the way: a browser opens the microphone only in a secure context, and a
 tailnet IP over plain http is not one. The Electron window loads
 `127.0.0.1`, which is. For the phone, `tailscale serve` can put the server

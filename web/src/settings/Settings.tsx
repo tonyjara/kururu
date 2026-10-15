@@ -21,6 +21,7 @@
 import { useState, type ReactNode } from "react";
 import type { KeyOverrides } from "../../../shared/keys";
 import type { LaunchSettings } from "../../../shared/launchers";
+import type { AgentPlacement } from "../../../shared/agentpane";
 import type { HostInfo, LoginSummary, MascotSet, ProfileSummary, Workspace } from "../../../shared/model";
 import type { NotifySettings as NotifyConfig } from "../../../shared/notify";
 import type { ProjectSettingsMap } from "../../../shared/projects";
@@ -88,8 +89,8 @@ const GROUPS: ReadonlyArray<{ label: string; pages: ReadonlyArray<readonly [Tab,
     label: "General",
     pages: [
       ["profiles", "Profiles", "The drawers your workspaces live in."],
-      ["workspaces", "Workspaces", "Where each one's shells run, and what a card's worktree gets."],
-      ["agents", "Agents", "What the + menu starts, and when an idle card's agent sleeps."],
+      ["workspaces", "Workspaces", "Where each one's shells run and agents open, and what a card's worktree gets."],
+      ["agents", "Agents", "What the + menu starts, where kururu's own agents open, and when an idle card's agent sleeps."],
       ["keyboard", "Keyboard", "Every action and the keys that reach it."],
     ],
   },
@@ -104,7 +105,7 @@ const GROUPS: ReadonlyArray<{ label: string; pages: ReadonlyArray<readonly [Tab,
     label: "Connections",
     pages: [
       ["machines", "Machines", "Your other computers, watched over ssh."],
-      ["firecrawl", "Firecrawl", "The web, for every agent kururu starts."],
+      ["firecrawl", "Firecrawl", "The web, when an agent's own fetch fails."],
       ["openrouter", "OpenRouter", "Your balance in the sidebar."],
       ["backups", "Backups", "The precious things, in a private repository."],
     ],
@@ -142,6 +143,7 @@ export function Settings({
   logins,
   activeProfileId,
   autoSwap,
+  agentPlacement,
   workspaces,
   activeWorkspaceId,
   projects,
@@ -166,6 +168,7 @@ export function Settings({
   logins: LoginSummary[];
   activeProfileId: string;
   autoSwap: boolean;
+  agentPlacement: AgentPlacement;
   /** Which page this opening is about. Only the opening: where you go afterwards is this window's business. */
   initialTab: Tab;
   /** A phone, or a window as narrow as one: the list is a screen of its own and a page opens over it. */
@@ -233,7 +236,7 @@ export function Settings({
                 <div className="st-page">
                   <Page
                     tab={tab}
-                    props={{ appearance, styles, mascots, notify, launch, host, keys, profiles, logins, activeProfileId, autoSwap, workspaces, activeWorkspaceId, projects, projectSettings }}
+                    props={{ appearance, styles, mascots, notify, launch, host, keys, profiles, logins, activeProfileId, autoSwap, agentPlacement, workspaces, activeWorkspaceId, projects, projectSettings }}
                   />
                 </div>
               </EditingScope>
@@ -265,6 +268,7 @@ type PageProps = {
   logins: LoginSummary[];
   activeProfileId: string;
   autoSwap: boolean;
+  agentPlacement: AgentPlacement;
   workspaces: Workspace[];
   activeWorkspaceId: string;
   projects: WorkspaceProject[];
@@ -284,9 +288,26 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
     case "profiles":
       return <ProfilesPage profiles={p.profiles} logins={p.logins} activeProfileId={p.activeProfileId} launch={p.launch} host={p.host} />;
     case "workspaces":
-      return <WorkspacesPage workspaces={p.workspaces} activeWorkspaceId={p.activeWorkspaceId} projects={p.projects} settings={p.projectSettings} />;
+      return (
+        <WorkspacesPage
+          profileId={p.activeProfileId}
+          agentPlacement={p.agentPlacement}
+          workspaces={p.workspaces}
+          activeWorkspaceId={p.activeWorkspaceId}
+          projects={p.projects}
+          settings={p.projectSettings}
+        />
+      );
     case "agents":
-      return <AgentsPage launch={p.launch} profileId={p.activeProfileId} profileName={p.profiles.find((x) => x.id === p.activeProfileId)?.name ?? "this profile"} autoSwap={p.autoSwap} />;
+      return (
+        <AgentsPage
+          launch={p.launch}
+          profileId={p.activeProfileId}
+          profileName={p.profiles.find((x) => x.id === p.activeProfileId)?.name ?? "this profile"}
+          autoSwap={p.autoSwap}
+          agentPlacement={p.agentPlacement}
+        />
+      );
     case "keyboard":
       return <KeyboardPage keys={p.keys} />;
     case "voice":

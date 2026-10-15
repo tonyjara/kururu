@@ -41,7 +41,7 @@ screen", because a client is looking at them. The harness is not looking at
 anything: it acts on a profile it names, from a pane the user may have left,
 on workspaces that are not shown. So `workspaces.ts` grew a section of
 spellings that take the profile and workspace by id — `findCardIn`,
-`editBoardIn`, `paneBesideBoardIn`, `addTabIn`, `splitIn`, `newWorkspaceIn`,
+`editBoardIn`, `paneBesideBoardIn`, `agentPaneIn`, `addTabIn`, `splitIn`, `newWorkspaceIn`,
 `setHarness` — and the on-screen spellings call them with the active ids.
 `index.ts` got the same for its three functions that open things:
 `openTerminalAt`, `cwdForPaneIn`, `runCardAt`. The arrangement is still the
@@ -68,12 +68,13 @@ in a pane of *that* workspace (`devPane(workspaceId)`), never the one on screen.
 | `open_shell` | a shell tab on this Mac or on a machine, with a command typed into it; in a pinned workspace it goes to the workspace's machine by default — see [machines](machines.md) |
 | `stop_agent` | kill (and a remote shell's tmux session); refuses itself |
 | `reveal_agent`, `rename_agent` | the user's screen and the sidebar; with Auto Swap on the screen follows without being asked — see below |
+| `show_file` | a file pinned first among the links under an agent's row and on its card, found from the agent's directory; `open` also opens it, Markdown in the reader and code in nvim. kururu adds links itself from a reply that presents a file — see [layout](layout.md#what-an-agent-made) |
 | `cards`, `add_card`, `edit_card`, `move_card`, `run_card`, `send_card_to_workspace` | the boards, workspace and profile; `add_card` with `run` is the robot; `run_card` on a card whose agent was put to sleep resumes its conversation unless `fresh` — see [layout](layout.md#idle-card-agents) |
 | `new_workspace` | a project, without switching the user to it |
 | `reload_window` | the user's window and the floating pill reloaded the way ⌘R does, each once it is safe; waits, and says whether each came back or what held it — for an agent that would otherwise ask the user to press ⌘R. See [architecture](architecture.md#reloading-the-window) |
 | `say`, `play_missed` | one line aloud mid-turn; every reply of its own the user never heard to the end, said again — see [voice](voice.md#what-you-missed) |
 | `search`, `card_history` | full text over the profile's cards and its conversations, and a card's history of moves and runs with who made each — see [data](data.md#search) |
-| `mcp__kururu_web__*` | not kururu's verbs but the web: `scrape_page`, `crawl_site`, `map_site`, `search_web` through Firecrawl, on a second MCP server every agent kururu starts is given while Firecrawl is set up and on — the harness by the same launch flags, so its own `--allowedTools` does not cover them. See [web](web.md) |
+| `mcp__kururu_web__*` | not kururu's verbs but the web: `scrape_page`, `crawl_site`, `map_site`, `search_web` through Firecrawl — a fallback for when its own search and fetch fail, as their descriptions say — on a second MCP server every agent kururu starts is given while Firecrawl is set up and on — the harness by the same launch flags, so its own `--allowedTools` does not cover them. See [web](web.md) |
 
 Reads are capped (`READ_MAX`) and default small, on purpose: the orchestrator's
 own context is the scarce thing, and the role prompt tells it so.
@@ -228,7 +229,11 @@ the inbox of the profile's harness, if one runs and is not the agent itself:
 `[kururu] "<name>" (<program> in <workspace>, card …; id <id>) finished its turn. It said: …`.
 Throttled per agent like the notification gate. So the orchestrator reacts to
 the afternoon instead of polling it; `wait_agent` is for when it has nothing
-else to do.
+else to do. The prompt hook records each notice as a user turn. The drawer
+reads it back into its parts (`readPrompt` in `shared/kuru.ts`, held to this
+format by a round-trip test) and draws it as kururu's own line, never as a
+message from you. So **a change to this line's shape is a change to that
+reader**. See [voice](voice.md#the-drawer).
 
 **Signed so nothing answers it.** Claude Code tells the receiver of a peer
 message to reply over SendMessage, and resolves a SendMessage address of
@@ -280,14 +285,70 @@ in the status bar open the drawer rather than the terminal: the drawer is
 where the conversation is — every prompt you gave and every reply, out of the
 database — and the terminal is for the tool calls and the prompts. See
 [voice](voice.md#the-drawer).
-The command line is the profile's Claude launcher plus `--name harness`,
+The command line is the plain Claude launcher (bypass flag and hooks as the
+profile has them, never a launcher's `--model`) plus `--name harness`,
 `--session-id` or `--resume`, `--mcp-config` naming `/mcp?profile=…&session=…`
 with a per-server timeout above Claude Code's one-minute default,
-`--allowedTools mcp__kururu`, and `--append-system-prompt` with the role. It
-starts in the profile's active workspace, in the pane beside the board, and
-always in the same place, because `--resume` looks for the transcript under
-the directory the session ran in; a transcript that is not there any more is
-a fresh start rather than a tab that opens and closes.
+`--allowedTools mcp__kururu`, `--append-system-prompt` with the role, and
+last, so they win, `harnessRunFlags`: `--model claude-opus-5-5 --effort high
+--autocompact 233k`. Its tab goes into the profile's active workspace, in the
+pane beside the board; its directory is its own, below.
+
+### Its own folder
+
+`~/.local/share/kururu/harness/<profile key>/` (`server/src/harnesshome.ts`),
+in every workspace. It used to start in the active workspace's directory and,
+through `--resume`, stay there: one profile's harness ran in a client project, loaded
+that project's 13.6k-token AGENTS.md on every wake, and filed its memory
+beside its agents'. Claude Code takes instructions and memory from the
+directory it runs in and nowhere else, so a directory of its own is the
+whole fix. Under the data directory because `~/.config` is often a dotfiles
+repository, and a session inside a repository gets its git status in the
+system prompt.
+
+- **Two files, written once, then the user's.** AGENTS.md says where the
+  harness is and that it is no project; CLAUDE.md is `@AGENTS.md`. The role
+  stays appended to the system prompt rather than moving into the file: it
+  describes the tools and changes with them, and a file is written once.
+- **Memory follows the folder.** The first start there copies the memories
+  the harness wrote where it ran before — the folder holding its last
+  session's transcript, the files whose `originSessionId` names a session
+  titled `harness` — with an index of just those. Copied, never moved; the
+  project's agents' memories stay where they are and do not come along.
+- **Trust is answered on screen.** Claude Code asks once whether to trust a
+  new folder, and records the answer in `.claude.json`, which every running
+  session writes and which holds the login. So kururu does not write it:
+  `Harness.trustHome` watches the new harness's screen for twenty seconds
+  and says yes to that dialog only (`trustAnswer`, by where the pointer is).
+- **The folder is not the workspace's.** `openTerminalAt`'s `apart` keeps the
+  pane from remembering it and the tree from being given it, and `followCwd`
+  never follows the harness — a tab opened beside it, or an agent it starts
+  from that pane, lands in the project, not here.
+
+`--resume` looks for the transcript under the folder the session ran in, so
+a session from before the folder existed is not found and the next start is
+fresh; the board, the drawer's turns and the carried memories are what it
+keeps.
+
+### Model, effort, compaction
+
+A profile's terminals run on a login directory of their own (`logins.ts`),
+which never reads `~/.claude` — so a setting made there does not reach the
+harness — and whose `settings.json` holds whatever the last `/model` or
+`/config` in that profile saved. MV's says `autoCompactWindow: "auto"` for
+Opus 5.5, which is a 1M window: the harness never compacted and sat at 373k
+tokens, 322k of them conversation, re-sent on every notice. Nothing in
+kururu turned compaction off; nothing turned it to a size either.
+
+The flags settle it per launch, over any settings file: `HARNESS_MODEL`,
+`HARNESS_EFFORT` and `HARNESS_COMPACT_AT` in `shared/harness.ts`. Claude
+Code's `--autocompact` takes a *window* and compacts a fixed buffer short of
+it (33k on 2.1.300, read off `/context`), so 200k is passed as `233k`.
+Compaction is Claude Code's own and happens inside whatever turn crosses the
+line, a `[kururu]` notice's included; kururu types nothing for it. A
+compaction of kururu's own was built on 2026-10-07 and taken out the same
+day, because Claude Code compacts by itself; this adds none back, and only
+tells Claude Code's where.
 
 `Profile.harness` keeps the session id, the launcher and the current agent id.
 The id survives to disk (`persist.ts`), the agent id does not, on the same

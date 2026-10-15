@@ -28,7 +28,9 @@
 import type { KeyOverrides } from "./keys";
 import type { LayoutNode } from "./layout";
 import type { Board } from "./board";
+import type { AgentPlacement } from "./agentpane";
 import type { LaunchSettings } from "./launchers";
+import type { MadeFile } from "./made";
 import type { MachinePin } from "./machines";
 import type { NotifySettings } from "./notify";
 import type { ProjectSettingsMap } from "./projects";
@@ -157,6 +159,15 @@ export interface AgentSnapshot {
    * treating this as the truth about a machine.
    */
   rss?: number | null;
+  /**
+   * The file or two its last turn ended in — the plan, the research, the
+   * script it was asked for — drawn as links under its row. Read off the
+   * reply and checked against the disk; see `shared/made.ts` for which files
+   * earn one and `server/src/made.ts` for why it survives a server restart
+   * when the other server-side fields here do not. Absent when there are
+   * none, which is most of the time.
+   */
+  made?: MadeFile[];
   /**
    * A name the user typed (rename-tab). Wins over everything else a tab could
    * be called, and unlike the detected program it is never overwritten.
@@ -304,7 +315,7 @@ export const DEFAULT_MASCOT: MascotConfig = {
   idle: DEFAULT_IDLE,
 };
 
-/** A sheet name is a name, never a path — same rule as a workspace colour. */
+/** A sheet name is a name, never a path — same rule as a column's colour. */
 export function isSheetName(value: unknown): value is string {
   return typeof value === "string" && /^[a-z0-9][a-z0-9-]{0,63}$/.test(value);
 }
@@ -417,8 +428,8 @@ export interface Mascot extends MascotConfig {
  * is not: a sheet holds six animations across eight facings, so what people do
  * with the picker is find three they like — and a picker with no way to keep
  * anything makes you re-find a selection you already made. So the config is a
- * list, choosing is switching rather than re-picking, and a workspace can point
- * at one the way it points at a colour.
+ * list, choosing is switching rather than re-picking, and a workspace points at
+ * one by id.
  *
  * Never empty. An empty list would mean a working agent with no badge, and the
  * one thing this whole feature exists to guarantee is that a row which is doing
@@ -519,7 +530,14 @@ function clamp(value: unknown, low: number, high: number, fallback: number): num
 }
 
 /**
- * The colours a workspace can be tagged with.
+ * The colours a board column can wear.
+ *
+ * Named for the workspaces that wore them first. A workspace has no colour now —
+ * its mascot already tells it from the others, and a tag beside the mascot said
+ * the same thing less clearly — but the name stays, because the theme's
+ * `workspace` block and its `--ws-*` tokens are the styles registry's
+ * vocabulary, and renaming a slot there would cost every installed theme its
+ * palette to fix a word.
  *
  * Names rather than CSS values, and the server only ever accepts one of these.
  * Two reasons, and the second is the one that matters: a name can be restyled
@@ -581,32 +599,11 @@ export interface Workspace {
    */
   lastPaneId: string | null;
   /**
-   * A tag, not a theme: it rules a line down the left of the workspace's row and
-   * down the left of every agent living in it, so "which of these is the one I
-   * have the browser open for" is answered by glancing rather than by reading.
-   *
-   * It used to be null by default, on the argument that a palette where
-   * everything is coloured says nothing and the point of the mark is that you
-   * chose it. That argument was wrong about which thing is scarce. Nobody
-   * chooses: a workspace is made in the middle of doing something else, and the
-   * colour picker is two gestures away from a list that is already legible at
-   * three rows — so the tags got set on the day somebody had six workspaces and
-   * needed them, which is the day *after* the one where they would have helped.
-   * `blankWorkspace` assigns one now, spreading across the palette rather than
-   * picking blind, and choosing stays exactly as available as it was.
-   *
-   * Null survives, and is still what the picker's "No colour" writes. It also
-   * remains what every workspace restored from a session written before this
-   * reads as — retagging those on load would be a version change rearranging a
-   * palette somebody had already arranged by hand.
-   */
-  color: WorkspaceColor | null;
-  /**
    * Which mascot this workspace's agents animate, or null for the default.
    *
-   * Null rather than a copy of the default, for the same reason `color` is
-   * nullable: "I have not chosen" and "I chose the thing that is currently the
-   * default" are different, and only the first follows when the default changes.
+   * Null rather than a copy of the default, because "I have not chosen" and "I
+   * chose the thing that is currently the default" are different, and only the
+   * first follows when the default changes.
    * An id naming a mascot that has since been deleted reads as null, which is
    * why nothing has to be cleaned up when one goes.
    */
@@ -643,6 +640,12 @@ export interface Workspace {
    * pages that would otherwise draw an empty tree for it say so instead.
    */
   machine: MachinePin | null;
+  /**
+   * Where the agents kururu starts here go, when this workspace says
+   * otherwise than its profile — see `Profile.agentPlacement`. Null is "as
+   * the profile says", which is every workspace until somebody picks.
+   */
+  agentPlacement: AgentPlacement | null;
 }
 
 /** Long enough for a client's name and a word; a group heading is one line of a narrow column. */
@@ -806,6 +809,18 @@ export interface Profile {
    * across a cold start, since it is a preference and not a process.
    */
   autoSwap: boolean;
+  /**
+   * Where the agents kururu starts on its own go — a card's robot, a card
+   * run or resumed, Kuru's `start_agent`: a tab in the workspace's bottom
+   * pane, made if there is none, or the top one, or `off` for beside the
+   * board as before. Which pane counts is `shared/agentpane.ts`. An agent
+   * from a pane's + menu goes where it was asked for, whatever this says.
+   *
+   * Per profile, set in Settings → Agents, with a workspace able to say
+   * otherwise (`Workspace.agentPlacement`); a preference, so it survives a
+   * cold start.
+   */
+  agentPlacement: AgentPlacement;
 }
 
 /** A profile's harness session: the conversation, the launcher it was started on, and the terminal it is in. */

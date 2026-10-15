@@ -297,6 +297,14 @@ describe("what the model is given", () => {
     expect(webTools(S).map((t) => t.name)).toEqual(["scrape_page", "crawl_site", "map_site", "search_web"]);
     expect(webTools({ ...S, pageLimit: 40 })[1]!.description).toContain("40 pages");
   });
+
+  it("opens every tool's description by calling it the fallback to the agent's own search and fetch", () => {
+    for (const tool of webTools(S)) {
+      expect(tool.description).toMatch(/^A fallback/);
+      expect(tool.description).toMatch(/your own web (search|fetch)/);
+    }
+    expect(webTools(S).find((t) => t.name === "search_web")!.description).toMatch(/^A fallback, never your first search/);
+  });
 });
 
 describe("pointing an agent at the tools", () => {

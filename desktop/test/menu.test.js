@@ -146,18 +146,13 @@ describe("the tray menu", () => {
     expect(byId(failed, "vite").enabled).toBe(false);
   });
 
-  it("puts the live count in the tray title and nothing when there are none", () => {
-    expect(trayTitle(base)).toBe("3");
+  it("returns no title to show only the frog", () => {
+    expect(trayTitle(base)).toBe("");
     expect(trayTitle({ server: { up: true, liveAgents: 0 } })).toBe("");
     expect(trayTitle({ server: { up: false } })).toBe("");
-  });
-
-  it("adds the unheard count after the agents, and never the failed one", () => {
     const news = { ...base, server: { ...base.server, kuru: { unheard: 2, undelivered: 1, profileId: "p1" } } };
-    expect(trayTitle(news)).toBe("3 · 2 unheard");
-    expect(trayTitle({ server: { up: true, liveAgents: 0, kuru: { unheard: 1, undelivered: 0 } } })).toBe("1 unheard");
-    expect(trayTitle({ server: { up: true, liveAgents: 2, kuru: { unheard: 0, undelivered: 3 } } })).toBe("2");
-    expect(trayTitle({ server: { up: false, kuru: { unheard: 2, undelivered: 0 } } })).toBe("");
+    expect(trayTitle(news)).toBe("");
+    expect(trayTitle({ server: { up: true, liveAgents: 2, kuru: { unheard: 0, undelivered: 3 } } })).toBe("");
   });
 
   it("offers Kuru's lines only when there is news, with Play for the unheard and Open for both", () => {

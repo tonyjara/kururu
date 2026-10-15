@@ -128,19 +128,18 @@ export interface TerminalTokens {
 }
 
 /**
- * The fourteen workspace tags, which are in the theme for the reason
- * `web/src/colors.ts` gives for existing at all: these sit on `--chrome`, so
- * they are chosen *against the chrome* rather than against each other — and a
- * palette chosen against one chrome is wrong on another. `green` and `blue` are
- * `accent` and `done` exactly in every theme, so a tagged workspace never
- * introduces a colour the window did not already have.
+ * The fourteen tag colours, which board columns wear and which are named for
+ * the workspaces that wore them first (see `WORKSPACE_COLORS`). They are in the
+ * theme for the reason `web/src/colors.ts` gives for existing at all: they are
+ * chosen *against the chrome* rather than against each other — and a palette
+ * chosen against one chrome is wrong on another. `green` and `blue` are
+ * `accent` and `done` exactly in every theme, so a tag never introduces a
+ * colour the window did not already have.
  *
- * There were eight, and eight was the number a workspace tag could be chosen
- * from when choosing was a deliberate act. It is not one any more — every new
- * workspace is born with a colour (see `blankWorkspace` in `workspaces.ts`) —
- * and a palette that has to *allocate* wants more room than a palette that only
- * has to offer: eight colours across a dozen workspaces is a list where half the
- * tags are somebody else's too, which is the one thing a tag must not be.
+ * There were eight, and eight was enough while a tag was only ever chosen. A
+ * palette that has to *allocate* — every new column is born with a colour, see
+ * `freeColor` in `shared/board.ts` — wants more room than one that only has to
+ * offer.
  *
  * Fourteen rather than sixteen because that is what the flavour has. Catppuccin
  * publishes exactly fourteen accents and each name below takes one of them,
@@ -432,15 +431,15 @@ function catppuccin(id: string, name: string, p: Catppuccin, appearance: "dark" 
       // takes the published accent nearest to it and nothing is invented beside
       // them. That one-to-one is worth more than any individual match: a tag
       // that is a mix of two accents is a colour the flavour never shipped, and
-      // a window that is Catppuccin everywhere except down the left edge of the
-      // sidebar is not the thing on the tin.
+      // a window that is Catppuccin everywhere except on the board's columns is
+      // not the thing on the tin.
       //
       // `lime` is the name that bends furthest, and it is the reason to say this
       // out loud rather than leave it to be noticed: Catppuccin publishes no
       // yellow-green, so lime holds `teal` here and sits beside `cyan` in the
       // order above because that is where the colour it actually draws belongs.
       // It is kept under the wrong name because the name is on disk in
-      // everybody's session, and a rename would cost them the tag to fix a word.
+      // everybody's boards, and a rename would cost them the colour to fix a word.
       green: p.green,
       amber: p.yellow,
       sand: p.rosewater,

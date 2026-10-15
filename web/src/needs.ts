@@ -7,9 +7,10 @@
  * subscribes to the answer. View state and nothing else — a phone must not
  * be shown the drawer because the desktop opened it.
  *
- * One drawer at a time: opening this one closes Kuru's, since both sit
- * over the same edge of the window. The other direction is `App`'s to
- * keep, so that this module and `kuru.ts` import one way.
+ * One drawer at a time, both directions: opening this one closes Kuru's,
+ * and `kuru.ts`'s `openKuru` closes this one back, since both now push the
+ * stage aside and a second one left open behind the first would double the
+ * squeeze rather than just losing a click to it.
  */
 import { useSyncExternalStore } from "react";
 import { closeKuru } from "./kuru";

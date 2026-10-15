@@ -93,6 +93,9 @@ const NOT_THEME = new Set([
   // The file tree's width, on exactly the same terms, for the column on the
   // other side.
   "--files-w",
+  // The Kuru and needs drawers' width, shared between them on the same
+  // terms again — see `App.tsx`'s `DRAWER_WIDTH_KEY`.
+  "--drawer-w",
   // How deep a row of the file tree is, set per row by `FileTree.tsx`. A count,
   // not a length: the stylesheet decides how far one level indents.
   "--depth",
@@ -140,6 +143,15 @@ const NOT_THEME = new Set([
   "--st-y",
   "--st-gap",
   "--st-stack",
+  // A board column's width: the one every column starts at and the floor and
+  // ceiling a drag is held to, constants the stylesheet declares for itself
+  // on `--bar-h`'s reasoning, and `--col-w` itself, set per column by
+  // `ColumnResizeHandle` and `Board.tsx`/`ProfileBoard.tsx` — a length, like
+  // `--tag` and `--cell`, that a theme has no business holding an opinion on.
+  "--board-col-w",
+  "--board-col-min",
+  "--board-col-max",
+  "--col-w",
 ]);
 
 /**

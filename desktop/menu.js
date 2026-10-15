@@ -244,18 +244,10 @@ function shortPath(full, home) {
 }
 
 /**
- * The tray's title beside the icon: the live agent count, then the unheard
- * count after it when there is one — `3 · 2 unheard` — or nothing. The
- * failed count stays in the menu: a message that did not get through is a
- * thing to act on in the drawer, not a number to watch.
+ * The tray's title beside the icon. Empty to show only the frog.
  */
 function trayTitle(view) {
-  const count = view.server.up ? view.server.liveAgents : 0;
-  const missed = view.server.up ? view.server.kuru?.unheard ?? 0 : 0;
-  const parts = [];
-  if (count > 0) parts.push(String(count));
-  if (missed > 0) parts.push(`${missed} unheard`);
-  return parts.join(" · ");
+  return "";
 }
 
 module.exports = { menuTemplate, trayTitle, unheard, undelivered, uptimeWords, when };

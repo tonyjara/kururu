@@ -50,6 +50,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Profile, Workspace } from "../../shared/model";
 import { adoptBoard, adoptProfileBoard, emptyBoard, type Board, type BoardLane, type Card, type CardRun } from "../../shared/board";
+import { adoptMade } from "../../shared/made";
 import { promptCarries, type StoredMissed, type StoredOutboxEntry, type VoiceLang } from "../../shared/voice";
 import {
   diffBoards,
@@ -97,7 +98,7 @@ export function dbPath(): string {
 // ---------------------------------------------------------------------------
 
 /** Stepped by `MIGRATIONS`; `pragma user_version` holds it. */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 4;
 
 const SCHEMA = `
 create table if not exists profiles (
@@ -185,8 +186,35 @@ create trigger if not exists turns_ad after delete on turns begin
 end;
 `;
 
+/**
+ * The links to what a card's agent made (`Card.made`), as JSON: one or two
+ * `{root, path, line}`, read back through `adoptMade`. A column rather than a
+ * table because nothing ever asks for them except with their card, and never
+ * in the export, for the reason the dev server is not: they point at files on
+ * this disk, which a restored Mac does not have.
+ *
+ * Added only if it is not there, so the step can run twice: a database put
+ * back a version by hand (`pragma user_version = 2`, for a build from before
+ * it) and then opened by this one again still opens.
+ */
+function MADE_COLUMN(db: DatabaseSync): void {
+  const columns = db.prepare("pragma table_info(cards)").all() as { name: string }[];
+  if (!columns.some((column) => column.name === "made")) db.exec("alter table cards add column made text");
+}
+
+/**
+ * How wide a board's columns were dragged to (`Board.widths`), as JSON. A
+ * column on `boards` rather than a row on `lanes`, because it is true of a
+ * board that has no lanes at all — a workspace's — and `lanes` has no row
+ * for one of those. Added the way `MADE_COLUMN` is, so the step can run twice.
+ */
+function WIDTHS_COLUMN(db: DatabaseSync): void {
+  const columns = db.prepare("pragma table_info(boards)").all() as { name: string }[];
+  if (!columns.some((column) => column.name === "widths")) db.exec("alter table boards add column widths text");
+}
+
 /** Each entry takes the database from its index's version to the next. The first makes it. */
-const MIGRATIONS: readonly (string | ((db: DatabaseSync) => void))[] = [SCHEMA, unwrapPastedTurns];
+const MIGRATIONS: readonly (string | ((db: DatabaseSync) => void))[] = [SCHEMA, unwrapPastedTurns, MADE_COLUMN, WIDTHS_COLUMN];
 
 /**
  * Every turn of yours already on disk, reporting what Claude Code's own
@@ -235,6 +263,7 @@ interface CardRow {
   wt_base: string | null;
   dev_port: number | null;
   dev_agent_id: string | null;
+  made: string | null;
   created_at: number;
   updated_at: number;
   deleted_at: number | null;
@@ -266,7 +295,38 @@ function cardOf(row: CardRow, run: CardRun | null): Card {
     worktree: row.wt_root && row.wt_path && row.wt_branch && row.wt_base ? { root: row.wt_root, path: row.wt_path, branch: row.wt_branch, base: row.wt_base } : null,
     dev: row.dev_port ? { agentId: row.dev_agent_id, port: row.dev_port } : null,
     dates: row.date_start && row.date_end ? { start: row.date_start, end: row.date_end } : null,
+    ...madeOf(row.made),
   };
+}
+
+/** The column back as `Card.made`: absent rather than empty, so a card nothing was made from reads as it always did. */
+function madeOf(json: string | null): Pick<Card, "made"> {
+  if (!json) return {};
+  try {
+    const made = adoptMade(JSON.parse(json));
+    return made.length ? { made } : {};
+  } catch {
+    return {};
+  }
+}
+
+function madeColumn(card: Card): string | null {
+  return card.made?.length ? JSON.stringify(card.made) : null;
+}
+
+/** `boards.widths` back as `Board.widths`: absent rather than empty, like `made`. */
+function widthsOf(json: string | null): Pick<Board, "widths"> {
+  if (!json) return {};
+  try {
+    const widths = JSON.parse(json) as unknown;
+    return widths && typeof widths === "object" ? { widths: widths as Record<string, number> } : {};
+  } catch {
+    return {};
+  }
+}
+
+function widthsColumn(board: Board): string | null {
+  return board.widths && Object.keys(board.widths).length ? JSON.stringify(board.widths) : null;
 }
 
 function runOf(row: RunRow): CardRun {
@@ -577,7 +637,14 @@ export class Store {
     const existing = this.boardId(profileKey, workspaceKey);
     if (existing) return existing;
     const id = mintBoardId();
-    this.stmt("insert into boards(id, profile_key, workspace_key, next, created_at) values (?, ?, ?, ?, ?)").run(id, profileKey, workspaceKey, board.next, at);
+    this.stmt("insert into boards(id, profile_key, workspace_key, next, created_at, widths) values (?, ?, ?, ?, ?, ?)").run(
+      id,
+      profileKey,
+      workspaceKey,
+      board.next,
+      at,
+      widthsColumn(board),
+    );
     this.writeLanes(id, board.columns ?? null);
     return id;
   }
@@ -595,7 +662,7 @@ export class Store {
   }
 
   private loadBoardWithin(profileKey: string, workspaceKey: string | null, live: ReadonlySet<string> | null, at: number): Board | null {
-    const boardRow = this.stmt("select id, next from boards where profile_key = ? and workspace_key is ?").get(profileKey, workspaceKey) as Row | undefined;
+    const boardRow = this.stmt("select id, next, widths from boards where profile_key = ? and workspace_key is ?").get(profileKey, workspaceKey) as Row | undefined;
     if (!boardRow) return null;
     const boardId = boardRow.id as string;
     const laneRows = this.stmt("select id, name, color, collapsed from lanes where board_id = ? order by position").all(boardId) as Row[];
@@ -624,7 +691,7 @@ export class Store {
       }
       cards.push(card);
     }
-    const raw: Board = { cards, next: Number(boardRow.next) || 1, ...(columns ? { columns } : {}) };
+    const raw: Board = { cards, next: Number(boardRow.next) || 1, ...(columns ? { columns } : {}), ...widthsOf(boardRow.widths as string | null) };
     return workspaceKey === null ? adoptProfileBoard(raw) : (adoptBoard(raw) ?? emptyBoard());
   }
 
@@ -689,6 +756,7 @@ export class Store {
       for (const { change, boardId, diff } of diffs) {
         this.stmt("update boards set next = ? where id = ?").run(change.after.next, boardId);
         if (change.after.columns !== change.before?.columns) this.writeLanes(boardId, change.after.columns ?? null);
+        if (change.after.widths !== change.before?.widths) this.stmt("update boards set widths = ? where id = ?").run(widthsColumn(change.after), boardId);
         const positions = new Map(change.after.cards.map((card, i) => [card.id, i] as const));
         for (const card of diff.added) {
           const transfer = sent.get(card.id);
@@ -728,12 +796,13 @@ export class Store {
   private insertCard(boardId: string, card: Card, position: number, createdAt: number, at: number): void {
     this.stmt(
       `insert into cards(id, board_id, number, title, body, column_id, position, isolate, date_start, date_end,
-         wt_root, wt_path, wt_branch, wt_base, dev_port, dev_agent_id, created_at, updated_at, deleted_at)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null)
+         wt_root, wt_path, wt_branch, wt_base, dev_port, dev_agent_id, made, created_at, updated_at, deleted_at)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null)
        on conflict(id) do update set board_id = excluded.board_id, number = excluded.number, title = excluded.title, body = excluded.body,
          column_id = excluded.column_id, position = excluded.position, isolate = excluded.isolate, date_start = excluded.date_start,
          date_end = excluded.date_end, wt_root = excluded.wt_root, wt_path = excluded.wt_path, wt_branch = excluded.wt_branch,
-         wt_base = excluded.wt_base, dev_port = excluded.dev_port, dev_agent_id = excluded.dev_agent_id, updated_at = excluded.updated_at, deleted_at = null`,
+         wt_base = excluded.wt_base, dev_port = excluded.dev_port, dev_agent_id = excluded.dev_agent_id, made = excluded.made,
+         updated_at = excluded.updated_at, deleted_at = null`,
     ).run(
       card.id,
       boardId,
@@ -751,6 +820,7 @@ export class Store {
       card.worktree?.base ?? null,
       card.dev?.port ?? null,
       card.dev?.agentId ?? null,
+      madeColumn(card),
       createdAt,
       at,
     );
@@ -760,7 +830,7 @@ export class Store {
   private updateCard(boardId: string, card: Card, position: number, at: number): void {
     this.stmt(
       `update cards set number = ?, title = ?, body = ?, column_id = ?, position = ?, isolate = ?, date_start = ?, date_end = ?,
-         wt_root = ?, wt_path = ?, wt_branch = ?, wt_base = ?, dev_port = ?, dev_agent_id = ?, updated_at = ?
+         wt_root = ?, wt_path = ?, wt_branch = ?, wt_base = ?, dev_port = ?, dev_agent_id = ?, made = ?, updated_at = ?
        where id = ? and board_id = ?`,
     ).run(
       card.number,
@@ -777,6 +847,7 @@ export class Store {
       card.worktree?.base ?? null,
       card.dev?.port ?? null,
       card.dev?.agentId ?? null,
+      madeColumn(card),
       at,
       card.id,
       boardId,

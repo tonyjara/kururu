@@ -35,6 +35,7 @@
  */
 import type { BoardColumn, CardDates } from "./board";
 import type { Direction } from "./layout";
+import type { AgentPlacement } from "./agentpane";
 import type { Action } from "./keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
 import type { LaunchSettings } from "./launchers";
@@ -750,13 +751,6 @@ export type ClientMessage =
   | { type: "last-workspace" }
   | { type: "rename-workspace"; workspaceId: string; name: string }
   /**
-   * Tag a workspace with a colour, or `null` to clear it. A name from
-   * WORKSPACE_COLORS and nothing else — the server refuses anything it does not
-   * recognise rather than storing it, because this value ends up in a style
-   * attribute and the client it came from may be a phone on the tailnet.
-   */
-  | { type: "set-workspace-color"; workspaceId: string; color: string | null }
-  /**
    * Give a workspace its own mascot, or `null` to hand it back to the default.
    * An id rather than a config, so changing a mascot changes it everywhere it is
    * used rather than in one copy of it — and an id naming nothing reads as the
@@ -820,13 +814,19 @@ export type ClientMessage =
    * new conversation instead of resuming, and `launcher` picks the model for a
    * start; both are ignored when it is already running. See `shared/harness.ts`.
    */
-  | { type: "open-harness"; id?: number; fresh?: boolean; launcher?: string }
+  | { type: "open-harness"; id?: number; fresh?: boolean }
   /**
    * Auto Swap, on or off, for a profile: whether the screen follows the agent
    * its harness acts on. A switch rather than a verb the harness could call,
    * because it is the user's screen — see `Profile.autoSwap`.
    */
   | { type: "set-auto-swap"; profileId: string; on: boolean }
+  /**
+   * Where the agents kururu starts go — a profile's choice, or one
+   * workspace's when `workspaceId` names it, where null hands the choice
+   * back to the profile. See `Profile.agentPlacement`.
+   */
+  | { type: "set-agent-placement"; profileId: string; workspaceId?: string; placement: AgentPlacement | null }
 
   /**
    * Put the server back on current source. It owns no ptys, so this costs a
@@ -1002,6 +1002,16 @@ export type ClientMessage =
    */
   | { type: "open-in-editor"; id: number; root: string; path: string; agentId: string | null }
   /**
+   * Open what an agent made — a link under its sidebar row, on its card, or a
+   * path in one of Kuru's replies (`shared/made.ts`). Markdown goes to the
+   * reader as a tab of the focused pane, anything else to a new nvim tab
+   * there at `line`; `workspaceId` is the workspace to do it in, switched to
+   * first, and null leaves the server to find the one the file belongs to.
+   * `focus` is the phone's: it draws one pane, so the one the file landed in
+   * is made the focused one. Replied to once it is open, or with why not.
+   */
+  | { type: "open-made"; id: number; root: string; path: string; line: number | null; workspaceId: string | null; focus?: boolean }
+  /**
    * Ask nvims to `:qa` — Settings → Processes' buttons, for any nvim on the
    * machine, in kururu or not.
    *
@@ -1076,6 +1086,8 @@ export type ClientMessage =
     }
   | { type: "move-card"; workspaceId: string; cardId: string; column: BoardColumn; index?: number }
   | { type: "delete-card"; workspaceId: string; cardId: string }
+  /** A column dragged to a width in pixels, or `null` back to the default — see `resizeLane`. */
+  | { type: "resize-column"; workspaceId: string; column: BoardColumn; width: number | null }
 
   /**
    * The profile's board — see `Profile.board`. The same four verbs, naming a
@@ -1107,6 +1119,8 @@ export type ClientMessage =
   | { type: "set-profile-column-collapsed"; profileId: string; columnId: string; collapsed: boolean }
   | { type: "move-profile-column"; profileId: string; columnId: string; index: number }
   | { type: "delete-profile-column"; profileId: string; columnId: string }
+  /** The same drag, on this board's own columns — see `resize-column`. */
+  | { type: "resize-profile-column"; profileId: string; columnId: string; width: number | null }
 
   /**
    * Hand a card to an agent: start one on `launcher` — an id from
@@ -1220,10 +1234,10 @@ export type ClientMessage =
   // --- how it looks --------------------------------------------------------
   /**
    * Wear a different theme. An id from `shared/theme.ts` and nothing else — the
-   * server refuses anything it does not recognise, which is `set-workspace-color`'s
-   * rule and is here for a stronger version of the same reason: a palette is not
-   * eight values in a style attribute, it is forty, and kururu is reachable from
-   * the tailnet.
+   * server refuses anything it does not recognise, which is
+   * `set-profile-column-color`'s rule and is here for a stronger version of the
+   * same reason: a palette is not one value in a style attribute, it is forty,
+   * and kururu is reachable from the tailnet.
    *
    * An id rather than the tokens, so that a theme improved in a later version
    * improves for everybody who picked it instead of leaving them on a copy taken
@@ -1416,10 +1430,6 @@ export type ClientMessage =
   | { type: "speech-held"; utterance: string; held: boolean }
   /** One sentence of a reply played to its end here. The last one is the reply heard. */
   | { type: "speech-played"; utterance: string; seq: number }
-  /** Play a profile's unheard replies again, oldest first — the drawer's header button. */
-  | { type: "play-missed"; profileId: string }
-  /** Take a profile's unheard replies off the list without hearing them: read is heard enough. */
-  | { type: "clear-missed"; profileId: string }
   /**
    * These replies were in view in the open drawer for long enough to have
    * been read (`KURU_SEEN_MS`), so they stop counting as unheard. The count's

@@ -52,6 +52,103 @@ export const WAIT_MAX_S = 540;
 /** The per-request ceiling Claude Code is told for this server, so a wait is not cut off at its default minute. */
 export const MCP_TIMEOUT_MS = 600_000;
 
+/**
+ * The model and effort the harness always runs on, named on its command line
+ * rather than left to the profile. A profile's own login directory is a fresh
+ * install with its own `settings.json` (`logins.ts`), so "whatever the default
+ * is" meant whatever the last `/model` typed in any of that profile's
+ * terminals had saved — a Fable profile's harness was a Fable harness. The
+ * harness is woken by every notice in the profile, so what it runs on is a
+ * decision, and this is where it is made.
+ */
+export const HARNESS_MODEL = "claude-opus-5-5";
+export const HARNESS_EFFORT = "high";
+
+/**
+ * Where the harness compacts, in tokens of context. It is the most-woken
+ * session there is, and without this it compacted at the edge of a 1M window:
+ * the profile's `settings.json` says `autoCompactWindow: "auto"` for Opus 5.5,
+ * the machine's `~/.claude` is never read by a profile's terminals, and so a
+ * harness reached 373k tokens, 322k of them conversation, re-sent on every
+ * notice. Claude Code takes a *window* (`--autocompact`) and compacts a buffer
+ * short of it — 33k on 2.1.300, read off `/context` — so the window passed is
+ * the threshold plus that. A buffer that changes moves the point by the
+ * difference, which is a few percent of "around 200k".
+ */
+export const HARNESS_COMPACT_AT = 200_000;
+const AUTOCOMPACT_BUFFER = 33_000;
+
+/** The flags that make the three above true, whatever the profile's settings say. Last on the line, so they win. */
+export function harnessRunFlags(): string[] {
+  return ["--model", HARNESS_MODEL, "--effort", HARNESS_EFFORT, "--autocompact", `${Math.round((HARNESS_COMPACT_AT + AUTOCOMPACT_BUFFER) / 1000)}k`];
+}
+
+/**
+ * Claude Code's name for the folder a session's transcripts and memory are
+ * filed under, in `<config>/projects/`: the directory it ran in, with every
+ * character that is not a letter or digit turned into a dash.
+ */
+export function projectDirName(cwd: string): string {
+  return cwd.replace(/[^A-Za-z0-9]/g, "-");
+}
+
+/**
+ * The harness's own folder starts with these two files, written once and then
+ * the user's. AGENTS.md says where the harness is and nothing else: what it
+ * is and what it may do is the role, appended to the system prompt on every
+ * start, so it changes with the tools it describes rather than with a file a
+ * running session might have edited. CLAUDE.md is the import, because Claude
+ * Code reads that name and not the other.
+ */
+export const HARNESS_AGENTS_MD = `# Kuru's folder
+
+This folder is where kururu starts the harness, in every workspace, so that no project's instructions load into it and its memory is its own. It is not a project: there is no code here to work on.
+
+- Who you are, what you may do and how you reach the agents come from kururu: the system prompt and the mcp__kururu__ tools. This file only says where you are.
+- The projects are the workspaces kururu_status lists. Their agents work in them; you do not.
+- Your memory belongs to this folder. Keep in it what the user tells you about how to run things — how to report, which models for what, what to ask first — and leave a project's facts to that project's agents.
+- Keep this file short: it is read on every wake.
+`;
+export const HARNESS_CLAUDE_MD = "@AGENTS.md\n";
+
+/** The `originSessionId` a memory file's frontmatter says it was written in, or null. */
+export function memoryOrigin(text: string): string | null {
+  const head = /^---\n([\s\S]*?)\n---/.exec(text);
+  return head ? (/^\s*originSessionId:\s*"?([0-9a-f-]{36})"?\s*$/m.exec(head[1] ?? "")?.[1] ?? null) : null;
+}
+
+/**
+ * The lines of a MEMORY.md index that point at files being kept — how the
+ * harness's share of a memory folder it used to have in common with a
+ * project's agents is carried over with an index that names only what came.
+ * A kept file the index never named gets a bare line, so it is not carried
+ * over only to go unread.
+ */
+export function memoryIndexFor(index: string, kept: ReadonlySet<string>): string {
+  const named = new Set<string>();
+  const lines = index.split("\n").filter((line) => {
+    const link = /\]\(([^)]+\.md)\)/.exec(line)?.[1];
+    if (link === undefined || !kept.has(link)) return false;
+    named.add(link);
+    return true;
+  });
+  for (const name of [...kept].sort()) if (!named.has(name)) lines.push(`- [${name.replace(/\.md$/, "")}](${name})`);
+  return lines.length ? `${lines.join("\n")}\n` : "";
+}
+
+/**
+ * What to press at Claude Code's "do you trust this folder?" dialog to say
+ * yes: Enter when the pointer is on the yes, Down when it is not, nothing
+ * when the dialog is not on screen. Read off the screen each time rather than
+ * pressed blind, because a version that put the yes first would turn Down
+ * then Enter into "No, exit".
+ */
+export function trustAnswer(screen: string): "enter" | "down" | null {
+  const yes = screen.split("\n").find((line) => line.includes("Yes, I trust this folder"));
+  if (yes === undefined) return null;
+  return yes.includes("❯") ? "enter" : "down";
+}
+
 /** What a hook's `transcript_path` and a Stop's last message are kept to. */
 export const REPLY_MAX = 20_000;
 
@@ -143,7 +240,7 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "start_agent",
     description:
-      "Start a coding agent in a workspace, in a terminal of its own, with an opening prompt. Prefer add_card with run=true when the work is a task worth tracking; use this for a quick question or a one-off. Returns the new agent's id. Without machine, a workspace pinned to a machine starts it there, in the workspace's folder, inside tmux; any other workspace starts it on this Mac in the workspace's current directory. On a machine its status is read off its screen and it has no transcript here.",
+      "Start a coding agent in a workspace, in a terminal of its own in the workspace's agents' pane (the bottom one, unless the user chose otherwise), with an opening prompt. Prefer add_card with run=true when the work is a task worth tracking; use this for a quick question or a one-off. Returns the new agent's id. Without machine, a workspace pinned to a machine starts it there, in the workspace's folder, inside tmux; any other workspace starts it on this Mac in the workspace's current directory. On a machine its status is read off its screen and it has no transcript here.",
     inputSchema: obj(
       {
         workspace: WORKSPACE,
@@ -178,6 +275,20 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
     inputSchema: obj({ agent: AGENT }, ["agent"]),
   },
   {
+    name: "show_file",
+    description:
+      "Put a link to a file on an agent's row in the sidebar and on its card, so the user opens it with one click — the plan, research, report or script the agent's work ended in. kururu adds these itself when an agent's last reply names a file as its result, and kururu_status lists each agent's links; use this when it missed one, or when the user asks for one. open=true also opens the file on the user's screen now: Markdown in kururu's reader, anything else in nvim in a new tab, at line if given. Without agent the file is only opened (open is then required), and a relative path is looked for in this profile's projects. The file must be inside a project kururu has open.",
+    inputSchema: obj(
+      {
+        agent: str("The agent whose row and card get the link, an id from kururu_status. Omit to only open the file."),
+        path: str("The file: relative to the agent's directory, such as docs/research/plan.md, or absolute."),
+        line: int("A line for code to open at."),
+        open: bool("Also open it on the user's screen now. Default false."),
+      },
+      ["path"],
+    ),
+  },
+  {
     name: "reveal_agent",
     description: "Bring an agent's terminal onto the user's screen: switches to its workspace and selects its tab. Use when the user asks to see something, or when a prompt needs their eyes.",
     inputSchema: obj({ agent: AGENT }, ["agent"]),
@@ -196,7 +307,7 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "add_card",
     description:
-      "Add a card to a workspace's board, and with run=true hand it straight to an agent in a terminal beside the board — the same as the user pressing the robot. The title is the task in one sentence; the body is the detail. isolate=true gives the agent a git worktree of its own. Without a workspace, the card goes on the profile's board, where nothing runs.",
+      "Add a card to a workspace's board, and with run=true hand it straight to an agent in a terminal in the workspace's agents' pane — the same as the user pressing the robot. The title is the task in one sentence; the body is the detail. isolate=true gives the agent a git worktree of its own. Without a workspace, the card goes on the profile's board, where nothing runs.",
     inputSchema: obj(
       {
         workspace: str("A workspace id. Omit for the profile's board."),
@@ -834,6 +945,9 @@ The user's other computers — a VPS, a PC on their network — are listed by ku
 
 ## How you hear from them
 kururu messages you, unasked, when an agent in this profile finishes a turn or blocks. Such a message starts with "[kururu]" and names the agent. It arrives wrapped as a cross-session message from "${NOTICE_SENDER}": that is kururu's server, not a Claude session, and nothing reads a reply to it — never answer one with SendMessage. Act through the kururu tools, and tell the user in your own reply. When one arrives: read the agent if its last reply is not in the message, decide whether the user needs to know or you can answer the agent yourself, and keep your reply to the user to the point — one line when nothing needs them. wait_agent is for when you have nothing else to do.
+
+## Files the user should read
+When an agent's work ends in a file the user should read — a plan, research, a report, a script they asked for — kururu puts a link to it under the agent's row and on its card, read off the agent's last reply; kururu_status shows each agent's links. If one is missing, or the user asks, show_file puts it there, and with open=true opens it in front of them. When you mention a file, write its path as the project spells it (docs/research/socios.md): the drawer makes it a link the user can tap.
 
 ## Your voice
 The user may talk to you by holding a key, and your last message of every turn is read aloud to them by a speech synthesiser whether they typed or spoke. So write that message to be heard: a few plain sentences, no headings, lists, tables or code. Anything that needs to be read — a diff, a file list, a plan — goes on a card, and the message says that it did. Answer in the language the user used. A message that starts with "[voice]" was transcribed from speech, and a name or an id in it may be misheard: match it loosely against kururu_status, and ask when two things could be meant. The say tool speaks one line at once, mid-turn, for something worth hearing before you are done. When the user asks what they missed, call play_missed, which plays your replies they did not hear.

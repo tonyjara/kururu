@@ -9,8 +9,8 @@
  */
 import { describe, expect, it } from "bun:test";
 import { BOARD_TAB, docTab, docsOf, findPane, panes, showingDoc } from "../../shared/layout";
-import { Workspaces, nextColor, nextId, orderAgents } from "../src/workspaces";
-import { LOGIN_KEY, WORKSPACE_COLORS, gatherGroups, groupName, type Profile } from "../../shared/model";
+import { Workspaces, nextId, orderAgents } from "../src/workspaces";
+import { LOGIN_KEY, gatherGroups, groupName, type Profile } from "../../shared/model";
 import { addCard, moveCard } from "../../shared/board";
 
 describe("split", () => {
@@ -44,47 +44,6 @@ describe("hasPane", () => {
     const here = workspaces.focusedPaneId;
     workspaces.newWorkspace("elsewhere");
     expect(workspaces.hasPane(here)).toBe(false);
-  });
-});
-
-/**
- * The colour tag is the one field a client sets to a value that ends up inside a
- * style attribute, and kururu is reachable from the tailnet. So what it refuses
- * matters more than what it accepts, and refusing has to mean *leaving it alone*
- * rather than clearing it — a rejected write that silently untagged a workspace
- * would look like the feature not working rather than like a rejected write.
- */
-describe("setWorkspaceColor", () => {
-  it("tags a workspace, and unsets it with null", () => {
-    const workspaces = new Workspaces();
-    const id = workspaces.activeWorkspace.id;
-
-    workspaces.setWorkspaceColor(id, "violet");
-    expect(workspaces.activeWorkspace.color).toBe("violet");
-
-    workspaces.setWorkspaceColor(id, null);
-    expect(workspaces.activeWorkspace.color).toBeNull();
-  });
-
-  it("refuses anything that is not in the palette, and keeps what was there", () => {
-    const workspaces = new Workspaces();
-    const id = workspaces.activeWorkspace.id;
-    workspaces.setWorkspaceColor(id, "violet");
-
-    // `crimson` rather than `red`, which this list used to carry and which is a
-    // real tag now. The point of the case is a CSS colour word the palette does
-    // not name, and the palette grew into the old example.
-    for (const junk of ["crimson", "#ff0000", "url(javascript:0)", "", 7, {}, undefined]) {
-      workspaces.setWorkspaceColor(id, junk);
-      expect(workspaces.activeWorkspace.color).toBe("violet");
-    }
-  });
-
-  it("does nothing at all for a workspace that is not there", () => {
-    const workspaces = new Workspaces();
-    const had = workspaces.activeWorkspace.color;
-    workspaces.setWorkspaceColor("w-nope", "cyan");
-    expect(workspaces.activeWorkspace.color).toBe(had);
   });
 });
 
@@ -190,51 +149,6 @@ describe("workspace groups", () => {
     for (const w of blob.workspaces) delete (w as { group?: unknown }).group;
     const restored = new Workspaces([blob]);
     expect(restored.active.workspaces.every((w) => w.group === null)).toBe(true);
-  });
-});
-
-/**
- * The colour a new workspace is born with.
- *
- * The interesting property is not which colour comes out — it is random on
- * purpose — but that it does not repeat while there is anything left to repeat
- * with. That is the whole reason this is a function rather than one line inside
- * `blankWorkspace`, and it is the one part of it a test can hold.
- */
-describe("nextColor", () => {
-  it("gives a new workspace a colour rather than leaving it blank", () => {
-    const workspaces = new Workspaces();
-    const id = workspaces.newWorkspace("second");
-    const color = workspaces.active.workspaces.find((w) => w.id === id)?.color;
-    expect(WORKSPACE_COLORS).toContain(color!);
-  });
-
-  it("never repeats while the palette has anything left", () => {
-    const workspaces = new Workspaces();
-    for (let i = 0; i < WORKSPACE_COLORS.length - 1; i++) workspaces.newWorkspace(`ws${i}`);
-    const worn = workspaces.active.workspaces.map((w) => w.color);
-    expect(worn.length).toBe(WORKSPACE_COLORS.length);
-    expect(new Set(worn).size).toBe(WORKSPACE_COLORS.length);
-  });
-
-  it("takes the one colour left when every other is taken", () => {
-    const taken = WORKSPACE_COLORS.filter((c) => c !== "blush");
-    expect(nextColor(taken)).toBe("blush");
-  });
-
-  /**
-   * Past the end of the palette it starts again rather than giving up, and it
-   * starts with the colours used once rather than with the ones used twice.
-   */
-  it("spreads the second time round too", () => {
-    const twice = [...WORKSPACE_COLORS, ...WORKSPACE_COLORS.filter((c) => c !== "cyan")];
-    expect(nextColor(twice)).toBe("cyan");
-  });
-
-  /** An untagged workspace is not a colour and does not push the next one. */
-  it("ignores the ones nobody tagged", () => {
-    const taken = [...WORKSPACE_COLORS.filter((c) => c !== "sand"), null, null, null];
-    expect(nextColor(taken)).toBe("sand");
   });
 });
 
@@ -349,16 +263,19 @@ describe("the id counter across a restart", () => {
 });
 
 describe("adopting a restored profile", () => {
-  it("fills in a colour a previous version of the server never wrote", () => {
-    // The host's blob, as an older server left it: no `color` anywhere.
+  it("drops the colour an older server left on its workspaces", () => {
+    // The host's blob, as a server from when workspaces wore a colour left
+    // it: one tagged, one cleared, and one with a name no palette ever had.
     const before = new Workspaces();
-    const stale = JSON.parse(JSON.stringify(before.all()), (key, value) =>
-      key === "color" ? undefined : value,
-    );
-    expect(stale[0].workspaces[0]).not.toHaveProperty("color");
+    before.newWorkspace("second");
+    before.newWorkspace("third");
+    const stale = JSON.parse(JSON.stringify(before.all()));
+    const tags = ["violet", null, "url(javascript:0)"];
+    stale[0].workspaces.forEach((w: Record<string, unknown>, i: number) => (w.color = tags[i]));
 
     const after = new Workspaces(stale);
-    expect(after.activeWorkspace.color).toBeNull();
+    expect(after.active.workspaces.map((w) => w.name)).toEqual(["main", "second", "third"]);
+    for (const w of after.active.workspaces) expect(w).not.toHaveProperty("color");
   });
 });
 

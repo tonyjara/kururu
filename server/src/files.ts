@@ -96,6 +96,32 @@ export function resolveInRoot(root: string, rel: string): string | null {
   return full;
 }
 
+/**
+ * The root a file on disk is under, and its path there — `resolveInRoot`
+ * asked from the other end, for a path that arrived whole: one an agent
+ * named in a reply. The longest allowed root that holds it, as `rootFor`
+ * picks one for an editor; realpath'd first, so a symlink out of the project
+ * is where it points and not where it claims to be; and handed back through
+ * `resolveInRoot`, so there is one door and this is not a second.
+ */
+export function locate(absolute: string): { root: string; path: string; full: string } | null {
+  let real: string;
+  try {
+    real = realpathSync(resolve(absolute));
+  } catch {
+    return null;
+  }
+  let best: string | null = null;
+  for (const root of roots) {
+    if (real === root || !inside(root, real)) continue;
+    if (!best || root.length > best.length) best = root;
+  }
+  if (!best) return null;
+  const path = real.slice(best.length + 1).split(sep).join("/");
+  const full = resolveInRoot(best, path);
+  return full ? { root: best, path, full } : null;
+}
+
 export function listDir(root: string, rel: string): DirEntry[] {
   const full = resolveInRoot(root, rel);
   if (!full) throw new Error("path is outside the project");

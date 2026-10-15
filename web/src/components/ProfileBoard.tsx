@@ -51,9 +51,10 @@ import type { Profile } from "../../../shared/model";
 import { colorValue } from "../colors";
 import * as api from "../session";
 import { CardBody, CardWhen, Composer, dropDraft, showCardNext, useComposerInView } from "./Board";
+import { ColorPicker } from "./ColorPicker";
+import { ColumnResizeHandle } from "./ColumnResize";
 import { Icon } from "./Icon";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
-import { ColorPicker } from "./Sidebar";
 import { PROFILE_CARD_MIME as CARD_MIME, Timeline } from "./Timeline";
 import { BoardSearch } from "./Search";
 
@@ -370,9 +371,15 @@ export function ProfileBoard({
               ].join(" ");
               // The same drop target folded or open, so that a folded column
               // takes a card and a column exactly as it would standing up.
+              const width = board.widths?.[column];
               const target = {
                 className: laneClass,
-                style: lane.color ? ({ "--tag": colorValue(lane.color) } as React.CSSProperties) : undefined,
+                style: (lane.color || width !== undefined
+                  ? {
+                      ...(lane.color ? { "--tag": colorValue(lane.color) } : {}),
+                      ...(width !== undefined ? { "--col-w": `${width}px` } : {}),
+                    }
+                  : undefined) as React.CSSProperties | undefined,
                 onDragOver: (event: React.DragEvent<HTMLElement>) => {
                   overLane(laneIndex)(event);
                   over(column, cards.length, shut)(event);
@@ -542,6 +549,10 @@ export function ProfileBoard({
                       </button>
                     )}
                   </div>
+                  <ColumnResizeHandle
+                    onResize={(w) => api.resizeProfileColumn(profile.id, column, w)}
+                    onReset={() => api.resizeProfileColumn(profile.id, column, null)}
+                  />
                 </section>
               );
             })}

@@ -25,11 +25,12 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Profile, Workspace } from "../../shared/model";
-import { groupName, isLoginKey, isWorkspaceColor, mintLoginKey } from "../../shared/model";
+import { groupName, isLoginKey, mintLoginKey } from "../../shared/model";
 import { BOARD_TAB, docTab, isDocTab, parseDocTab, type LayoutNode, type ReaderDoc } from "../../shared/layout";
 import { adoptBoard, adoptProfileBoard, type Board } from "../../shared/board";
 import { adoptHarness } from "../../shared/harness";
 import { adoptPin, type MachinePin } from "../../shared/machines";
+import { DEFAULT_AGENT_PLACEMENT, isAgentPlacement, type AgentPlacement } from "../../shared/agentpane";
 import type { HarnessState } from "../../shared/model";
 import { isStoreKey, mintProfileKey, mintWorkspaceKey } from "../../shared/store";
 import { nextId } from "./workspaces";
@@ -57,6 +58,13 @@ interface StoredPane {
    */
   reader?: { root: string; path: string; docs?: { root: string; path: string }[] };
   board?: true;
+  /**
+   * The agents' pane's mark — see `PaneState.forAgents`. Kept, though what
+   * was in the pane is not: a cold start brings the pane back empty, and the
+   * mark is what has the next agent find it again rather than the rule
+   * picking afresh.
+   */
+  forAgents?: true;
 }
 type StoredNode =
   | { type: "pane"; pane: StoredPane }
@@ -73,18 +81,18 @@ interface StoredWorkspace {
    */
   key?: string;
   layout: StoredNode;
-  /** Optional because sessions written before colours existed do not have one. */
-  color?: string | null;
-  /** Likewise: a session written before a workspace could pick a mascot. */
+  /** Optional because sessions written before a workspace could pick a mascot do not have one. */
   mascotId?: string | null;
   /** Likewise: a session written before workspaces could be grouped. */
   group?: string | null;
   /**
    * Which machine its shells open on, and where. A preference, like the
-   * colour, and not a process: the sessions on the machine are tmux's to keep,
+   * mascot, and not a process: the sessions on the machine are tmux's to keep,
    * and the first shell opened after a cold start finds them again by name.
    */
   machine?: MachinePin;
+  /** Where its agents go when it says otherwise than its profile — see `Workspace.agentPlacement`. */
+  agentPlacement?: AgentPlacement;
   /**
    * The workspace's cards, from a file written before boards lived in the
    * database — or by a build from before it, run against this one. Only
@@ -119,6 +127,8 @@ interface StoredProfile {
   harness?: HarnessState;
   /** Auto Swap, written only when on. See `Profile.autoSwap`. */
   autoSwap?: boolean;
+  /** Where its agents go — see `Profile.agentPlacement`. Absent in a file from before it, which reads as the default. */
+  agentPlacement?: AgentPlacement;
   workspaces: StoredWorkspace[];
   /** Index rather than id: ids are regenerated on the way back in. */
   activeWorkspace: number;
@@ -146,7 +156,7 @@ export function snapshotPath(): string {
 
 function strip(node: LayoutNode): StoredNode {
   if (node.type === "pane") {
-    const { cwd, agentIds, activeIdx } = node.pane;
+    const { cwd, agentIds, activeIdx, forAgents } = node.pane;
     const kept = agentIds.flatMap((id, at): { at: number; tab: "board" | ReaderDoc }[] => {
       if (id === BOARD_TAB) return [{ at, tab: "board" }];
       const doc = parseDocTab(id);
@@ -159,6 +169,7 @@ function strip(node: LayoutNode): StoredNode {
         ...(cwd ? { cwd } : {}),
         ...(kept.length > 0 ? { tabs: kept.map(({ tab }) => tab) } : {}),
         ...(showing > 0 ? { showing } : {}),
+        ...(forAgents ? { forAgents } : {}),
       },
     };
   }
@@ -188,6 +199,9 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
       // A preference rather than a process, so it survives the cold start
       // the rest of this file is careful about.
       ...(profile.autoSwap ? { autoSwap: true } : {}),
+      // Written always, the default included, so that a default changed in
+      // some later version moves nobody who had chosen.
+      agentPlacement: profile.agentPlacement,
       activeWorkspace: Math.max(
         0,
         profile.workspaces.findIndex((w) => w.id === profile.activeWorkspaceId),
@@ -195,10 +209,10 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
       workspaces: profile.workspaces.map((workspace) => ({
         name: workspace.name,
         key: workspace.key,
-        color: workspace.color,
         mascotId: workspace.mascotId,
         group: workspace.group,
         ...(workspace.machine ? { machine: workspace.machine } : {}),
+        ...(workspace.agentPlacement ? { agentPlacement: workspace.agentPlacement } : {}),
         layout: strip(workspace.layout),
       })),
     })),
@@ -226,7 +240,8 @@ function revive(node: StoredNode): LayoutNode {
   if (node.type === "pane") {
     const cwd = typeof node.pane?.cwd === "string" ? node.pane.cwd : undefined;
     const { agentIds, activeIdx } = storedTabs(node.pane ?? {});
-    return { type: "pane", pane: { id: nextId("n"), agentIds, activeIdx, cwd } };
+    const forAgents = node.pane?.forAgents === true ? { forAgents: true as const } : {};
+    return { type: "pane", pane: { id: nextId("n"), agentIds, activeIdx, cwd, ...forAgents } };
   }
   const ratio = typeof node.ratio === "number" && node.ratio > 0 && node.ratio < 1 ? node.ratio : 0.5;
   return {
@@ -346,9 +361,10 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
       if (!w || typeof w.name !== "string" || !looksLikeNode(w.layout)) continue;
       const layout = revive(w.layout);
       const first = layout.type === "pane" ? layout.pane.id : firstPaneId(layout);
-      // Read as defensively as everything else here: a colour the palette has
-      // since dropped comes back as untagged rather than as a dead style.
-      const color = isWorkspaceColor(w.color) ? w.color : null;
+      // A `color` left by a version whose workspaces wore one is not read: the
+      // workspace is built field by field below, so it stays in the old file
+      // and goes from it at the next save.
+      //
       // The mascot is a plain id and is not checked against anything here: one
       // that names nothing draws the default, so a file naming a mascot since
       // deleted needs no repair.
@@ -366,13 +382,13 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
         // way in, so a remembered second one would be a memory of a move nobody
         // in this session made.
         lastPaneId: null,
-        color,
         mascotId,
         group: groupName(w.group),
         // Only from an old file, and only for `Store.attach` to adopt; what
         // the database holds replaces it before anything is drawn.
         board: adoptBoard(w.board),
         machine: adoptPin(w.machine),
+        agentPlacement: isAgentPlacement(w.agentPlacement) ? w.agentPlacement : null,
       };
       workspaces.push(workspace);
     }
@@ -397,6 +413,7 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
       hiddenAgents: [],
       harness: adoptHarness(stored.harness),
       autoSwap: stored.autoSwap === true,
+      agentPlacement: isAgentPlacement(stored.agentPlacement) ? stored.agentPlacement : DEFAULT_AGENT_PLACEMENT,
     });
   }
   if (profiles.length === 0) return null;

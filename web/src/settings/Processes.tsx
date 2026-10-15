@@ -13,9 +13,8 @@
  * one asks it to `:qa` — an editor that refuses stays open and is listed with
  * its reason, and ending it anyway is a second button that asks again.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { agentKinds, nvimWhere, tally, type Footprint, type FootprintNvim, type FootprintTally, type FootprintTerminal, type NvimCloseReport } from "../../../shared/footprint";
-import { colorValue } from "../colors";
 import { shortenPath } from "../labels";
 import * as api from "../session";
 import { Action, Banner, Btn, DangerButton, Dot, Empty, errorText, Group, Item, plural, Tile, Tiles, type Tone } from "./ui";
@@ -120,11 +119,11 @@ export function ProcessesPage() {
 
   const terminalsOf = (ids: string[]) => ids.flatMap((id) => byId.get(id) ?? []).sort((a, b) => (b.rss ?? -1) - (a.rss ?? -1));
 
-  const group = (key: string, title: string, ids: string[], tag: string | null) => {
+  const group = (key: string, title: string, ids: string[]) => {
     const rows = terminalsOf(ids);
     const sum = tally(rows);
     return (
-      <div key={key} className="st-proc-group" style={tag ? ({ "--tag": tag } as CSSProperties) : undefined}>
+      <div key={key} className="st-proc-group">
         <div className="st-proc-head">
           <span className="st-proc-name">{title}</span>
           <span className="st-hint">{countsLine(sum)}</span>
@@ -210,7 +209,7 @@ export function ProcessesPage() {
             title={many ? `${profile.name}${profile.active ? " · this profile" : ""}` : "Terminals"}
             foot={`${countsLine(sum)} · ${formatBytes(sum.rss)}${idle > 0 && busyWorkspaces.length > 0 ? ` · ${plural(idle, "other workspace")} with nothing running` : ""}`}
           >
-            {busyWorkspaces.map((w) => group(`ws:${w.id}`, w.name, w.terminals, colorValue(w.color)))}
+            {busyWorkspaces.map((w) => group(`ws:${w.id}`, w.name, w.terminals))}
             {busyWorkspaces.length === 0 && <Empty>No terminals open.</Empty>}
           </Group>
         );
@@ -218,7 +217,7 @@ export function ProcessesPage() {
 
       {reading.unplaced.length > 0 && (
         <Group title="Not in any tab" foot="Terminals the pty host is holding that no tab in any profile points at. Closing them is safe unless you meant to bring one back.">
-          {group("unplaced", "Unplaced", reading.unplaced, null)}
+          {group("unplaced", "Unplaced", reading.unplaced)}
         </Group>
       )}
     </>

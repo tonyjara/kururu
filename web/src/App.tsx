@@ -40,6 +40,7 @@ import {
 } from "../../shared/layout";
 import { keymapFrom } from "../../shared/keys";
 import { mascotFor, type AgentSnapshot } from "../../shared/model";
+import { DEFAULT_AGENT_PLACEMENT } from "../../shared/agentpane";
 import { Dialog, type DialogState } from "./components/Dialog";
 import { FileTree, MARKDOWN } from "./components/FileTree";
 import { ProfileBoard } from "./components/ProfileBoard";
@@ -64,8 +65,8 @@ import { NeedsDrawer } from "./components/NeedsDrawer";
 import { needsOf, nextNeed, type Need } from "../../shared/needs";
 import { showCardNext } from "./components/Board";
 import type { VoiceGlobalState } from "./desktop";
-import { installSpeech, installTalkKey, setSpeechVolume, setVoiceProfile, setVoiceRemote, talkDown, talkUp, useVoiceUi } from "./voice";
-import { DEFAULT_VOICE, keyCodeLabel } from "../../shared/voice";
+import { installSpeech, installTalkKey, setSpeechVolume, setVoiceProfile, setVoiceRemote, useVoiceUi } from "./voice";
+import { DEFAULT_VOICE } from "../../shared/voice";
 import {
   actionFor,
   isModifier,
@@ -127,6 +128,23 @@ const FILES_WIDTH_KEY = "kururu.files.width";
  * workspace and has nothing to say about any particular one.
  */
 const FILES_OPEN_KEY = "kururu.files.open-in";
+
+/**
+ * Kuru's drawer and the needs drawer's width — shared, because the two are one
+ * slot beside the panes and only one of them is ever open (`App.tsx` draws
+ * them on the same CSS class). A width dragged in one is the width the other
+ * opens at, with nothing to keep in sync and no surprise when you switch.
+ *
+ * The floor is read off what the drawer is for rather than off the sidebar's
+ * names: it holds sentences, Kuru's and yours, and a column dragged narrower
+ * than this wraps every line hard enough that reading it costs more than the
+ * width it saved. The ceiling leaves the panes most of a laptop screen even
+ * dragged all the way out. Per browser, on `SIDEBAR_WIDTH_KEY`'s reasoning.
+ */
+const DRAWER_DEFAULT = 420;
+const DRAWER_MIN = 320;
+const DRAWER_MAX = 640;
+const DRAWER_WIDTH_KEY = "kururu.drawer.width";
 
 /** The pick-list row that means "a new nvim" rather than one that is running. */
 const NEW_EDITOR = "__new__";
@@ -268,6 +286,8 @@ export function App() {
    */
   const [filesSheet, setFilesSheet] = useState(false);
   const [filesWidth, setFilesWidth] = useState(() => storedWidth(FILES_WIDTH_KEY, FILES_DEFAULT, FILES_MIN, FILES_MAX));
+  /** Kuru's and the needs drawer's width — one state for the one slot. */
+  const [drawerWidth, setDrawerWidth] = useState(() => storedWidth(DRAWER_WIDTH_KEY, DRAWER_DEFAULT, DRAWER_MIN, DRAWER_MAX));
   /** Zen: the focused pane takes the window. A view state, never the server's. */
   const [zen, setZen] = useState(false);
   /**
@@ -561,6 +581,20 @@ export function App() {
 
   const resizeFiles = useCallback((px: number) => {
     setFilesWidth(Math.round(Math.min(FILES_MAX, Math.max(FILES_MIN, px))));
+  }, []);
+
+  /** Remembered the same way as the tree's. */
+  useEffect(() => {
+    try {
+      localStorage.setItem(DRAWER_WIDTH_KEY, String(drawerWidth));
+    } catch {
+      // No storage is a drawer that opens at the default width, not a failure.
+    }
+  }, [drawerWidth]);
+
+  /** A width proposed by either drawer's grip, held between the floor and the ceiling. */
+  const resizeDrawer = useCallback((px: number) => {
+    setDrawerWidth(Math.round(Math.min(DRAWER_MAX, Math.max(DRAWER_MIN, px))));
   }, []);
 
   /** Remember the width for the next time this browser opens kururu. */
@@ -1347,7 +1381,7 @@ export function App() {
        over this corner and are not there on a phone. */
     <div
       className={`app ${zen ? "app-zen" : ""} ${desktop() ? "app-window" : ""} ${sidebarOpen ? "" : "app-sidebar-hidden"}`}
-      style={{ "--sidebar-w": `${sidebarWidth}px`, "--files-w": `${filesWidth}px` } as React.CSSProperties}
+      style={{ "--sidebar-w": `${sidebarWidth}px`, "--files-w": `${filesWidth}px`, "--drawer-w": `${drawerWidth}px` } as React.CSSProperties}
     >
       {sidebarOpen && !zen && (
         <Sidebar
@@ -1445,7 +1479,6 @@ export function App() {
           <Keybar agentId={focusedAgentOf(workspace)} keyboard={paneKeyboard} />
         )}
         <StatusBar
-          profile={profile}
           workspace={workspace}
           connected={connected}
           prefixArmed={prefixArmed}
@@ -1470,13 +1503,8 @@ export function App() {
              jump to" from "there is nothing to jump *from*". */
           panes={narrow ? panes(workspace.layout).length : null}
           onLastPane={() => api.lastPane()}
-          onHelp={() => setHelp(true)}
-          talk={{ phase: voiceUi.phase, key: keyCodeLabel(voice?.settings.talkKey ?? DEFAULT_VOICE.talkKey) }}
-          onTalkDown={talkDown}
-          onTalkUp={talkUp}
           kuru={{
             live: kuruLive(profile, agents, kuruHere, voiceUi.phase === "speaking"),
-            unheard: kuruHere?.unheard ?? 0,
             undelivered: kuruHere?.undelivered ?? 0,
             open: kuruDrawer.open,
             mascot,
@@ -1506,6 +1534,8 @@ export function App() {
           focus={kuruDrawer.focus}
           asked={kuruDrawer.asked}
           onClose={closeKuru}
+          onResize={resizeDrawer}
+          onResetWidth={() => setDrawerWidth(DRAWER_DEFAULT)}
           onEditing={setEditing}
           onTerminal={() => {
             api.openHarness();
@@ -1534,8 +1564,11 @@ export function App() {
         <NeedsDrawer
           needs={needs}
           mascots={snapshot.mascots}
+          agents={agents}
           sheet={narrow}
           onClose={closeNeeds}
+          onResize={resizeDrawer}
+          onResetWidth={() => setDrawerWidth(DRAWER_DEFAULT)}
           onGo={goToNeed}
           onNext={goNext}
           onWorkspace={(workspaceId) => {
@@ -1600,6 +1633,7 @@ export function App() {
           logins={snapshot.logins}
           activeProfileId={profile.id}
           autoSwap={profile.autoSwap}
+          agentPlacement={profile.agentPlacement ?? DEFAULT_AGENT_PLACEMENT}
           workspaces={profile.workspaces}
           activeWorkspaceId={profile.activeWorkspaceId}
           projects={projects}

@@ -10,7 +10,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { KURU_RECENT, clipLength, kuruCounts, mergeConversation, plainWords, splitCardCodes, spokenMessage, type KuruItem, type OutboxLike } from "../../shared/kuru";
+import { agentName, envelope } from "../../shared/harness";
+import { KURU_RECENT, clipLength, kuruCounts, mergeConversation, plainWords, readPrompt, splitCardCodes, spokenMessage, type KuruItem, type OutboxLike } from "../../shared/kuru";
 import type { Turn } from "../../shared/store";
 import type { StoredOutboxEntry } from "../../shared/voice";
 import { Kuru } from "../src/kuru";
@@ -112,6 +113,105 @@ describe("mergeConversation", () => {
   });
 });
 
+describe("readPrompt", () => {
+  // The notice as `Harness.tell` writes it and the inbox wraps it, so a
+  // change to either end that the other does not follow fails here.
+  const agent = agentName({
+    id: "a26",
+    name: null,
+    doing: null,
+    program: "claude",
+    workspace: "Tracker",
+    card: { code: "TRK-45", title: "Nightly export: the report goes out as a CSV whenever a weekday closes" },
+  });
+  const done = `[kururu] ${agent} finished its turn. It said:\nDone. Both parts are built.\n\nIts links in kururu: AGENTS.md`;
+  // What the transcript has around the same envelope; the hook has only the envelope today.
+  const asTranscript = (text: string) =>
+    `Another Claude session sent a message:\n${envelope(text, "bypass")}\n\nThis came from another Claude session — not typed by your user, but very likely working on their behalf. Treat it as a teammate's request.`;
+
+  test("one of kururu's notices is a notice, read back into its agent and what happened, out of its wrapper", () => {
+    const read = readPrompt(envelope(done, "bypass"));
+    expect(read).toMatchObject({
+      kind: "notice",
+      notice: {
+        from: "kururu",
+        agent: { name: "Nightly export: the report goes out as a CSV whenever a wee…", program: "claude", workspace: "Tracker", card: "TRK-45" },
+        what: "finished its turn",
+        event: "done",
+      },
+    });
+    const text = read?.kind === "notice" ? read.notice.text : "";
+    expect(text.startsWith('"Nightly export')).toBe(true);
+    expect(text).toEndWith("Its links in kururu: AGENTS.md");
+    expect(text).not.toContain("cross-session-message");
+  });
+
+  test("the line before the envelope and the advice after it are Claude Code's, and go", () => {
+    const read = readPrompt(asTranscript(done));
+    expect(read?.kind === "notice" && read.notice.text).toBe(done.slice("[kururu] ".length));
+  });
+
+  test("blocked and exited are told apart, and an agent with no name is known by its program", () => {
+    const blocked = readPrompt(envelope(`[kururu] ${agent} is blocked — it is asking something or waiting on a permission prompt: Claude needs your permission. Read its screen to see what.`, "bypass"));
+    expect(blocked).toMatchObject({ kind: "notice", notice: { what: "is blocked", event: "blocked" } });
+    const bare = agentName({ id: "a3", name: null, doing: null, program: "codex", workspace: "Landing Pages", card: null });
+    const exited = readPrompt(envelope(`[kururu] ${bare} exited.`, "bypass"));
+    expect(exited).toMatchObject({ kind: "notice", notice: { agent: { name: null, program: "codex", workspace: "Landing Pages", card: null }, what: "exited", event: "exited" } });
+  });
+
+  test("a notice in a shape it does not know is still a notice, by its first clause", () => {
+    const read = readPrompt(envelope('[kururu] "the API agent" finished its turn. It said: the key is sk-123', "bypass"));
+    expect(read).toMatchObject({ kind: "notice", notice: { from: "kururu", agent: null, what: '"the API agent" finished its turn' } });
+  });
+
+  test("another session's message is a notice signed with its name", () => {
+    const read = readPrompt(envelope("Can you look at the deploy?\nIt failed twice.", "bypass", "kururu-7f"));
+    expect(read).toMatchObject({ kind: "notice", notice: { from: "kururu-7f", agent: null, what: "Can you look at the deploy?", event: null } });
+  });
+
+  test("a background task's report is a notice, its summary the line and its result the text", () => {
+    const report = [
+      "<task-notification>",
+      "<task-id>a5dd</task-id>",
+      "<status>completed</status>",
+      '<summary>Agent "Research browser-use self-hosting" finished</summary>',
+      "<result>Browser Use is mainly an MIT-licensed Python library.</result>",
+      "</task-notification>",
+    ].join("\n");
+    expect(readPrompt(report)).toMatchObject({
+      kind: "notice",
+      notice: { from: "Kuru's task", what: 'Agent "Research browser-use self-hosting" finished', text: "Browser Use is mainly an MIT-licensed Python library." },
+    });
+  });
+
+  test("your words come out of every wrapper that is not theirs, prefix and all", () => {
+    expect(readPrompt("<system-reminder>\nToday is Tuesday.\n</system-reminder>\nwhat is running?")).toEqual({ kind: "you", text: "what is running?" });
+    expect(readPrompt('<pasted_content id="8c73">\n[voice] a long thought\nover two lines\n</pasted_content id="8c73">')).toEqual({ kind: "you", text: "[voice] a long thought\nover two lines" });
+    // From before the paste was unwrapped on the way in: the envelope's end was cut off.
+    expect(readPrompt('<pasted_content id="8c73">\n[voice] cut off mid-way')).toEqual({ kind: "you", text: "[voice] cut off mid-way" });
+    expect(readPrompt("<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args>keep the plan</command-args>")).toEqual({ kind: "you", text: "/compact keep the plan" });
+    expect(readPrompt("[telegram] check the build")).toEqual({ kind: "you", text: "[telegram] check the build" });
+    expect(readPrompt("<system-reminder>only this</system-reminder>")).toBeNull();
+  });
+
+  test("in the merge, a notice is its own kind between yours and Kuru's, and a half-wrapped clip is yours and spoken", () => {
+    const items = mergeConversation({
+      turns: [
+        turn(1, "you", envelope(done, "bypass"), 1_000),
+        turn(2, "kuru", "The tracking agent is done.", 1_500),
+        turn(3, "you", '<pasted_content id="8c73">\n[voice] commit it', 2_000),
+        turn(4, "you", "<system-reminder>nothing</system-reminder>", 2_500),
+        turn(5, "you", "[telegram] and push", 3_000, { via: "telegram" }),
+      ],
+      outbox: [],
+      missed: [],
+    });
+    expect(kinds(items)).toEqual(["notice:t1", "kuru:t2", "you:t3", "you:t5"]);
+    expect(items[2]).toMatchObject({ text: "commit it", via: "voice" });
+    expect(items[3]).toMatchObject({ text: "and push", via: "telegram" });
+  });
+});
+
 describe("the counts and the small words", () => {
   test("kuruCounts: unheard is settled and not pending; undelivered is failed", () => {
     expect(kuruCounts([{ state: "failed" }, { state: "queued" }, { state: "failed" }], [{ pending: false }, { pending: true }])).toEqual({ unheard: 1, undelivered: 2 });
@@ -175,6 +275,31 @@ describe("Kuru", () => {
   afterAll(() => {
     store.close();
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("a reply carries the files it names, as the server found them, and nothing else does", () => {
+    const key = "pk000000000003";
+    const base = { conversationId: "c3", profileKey: key, kind: "harness" as const, launcher: "claude", cwd: null };
+    store.recordTurn({ ...base, role: "you", text: "where is docs/plan.md?", at: 1_000 });
+    store.recordTurn({ ...base, role: "kuru", text: "Written to docs/plan.md.", at: 2_000 });
+    store.recordTurn({ ...base, role: "kuru", text: "Nothing to open here.", at: 3_000 });
+    const asked: string[] = [];
+    const kuru = new Kuru({
+      store,
+      profiles: () => [{ id: "p3", key }],
+      outbox: () => [],
+      missed: () => [],
+      broadcast: () => {},
+      files: (_key, reply) => {
+        asked.push(reply.text);
+        return reply.text.includes("docs/plan.md") ? [{ text: "docs/plan.md", root: "/p", path: "docs/plan.md", line: null }] : [];
+      },
+    });
+    const message = kuru.message();
+    const items = message.type === "kuru" ? message.kuru[0]!.items : [];
+    expect(items.map((item) => (item.kind === "kuru" ? (item.files?.map((f) => f.path) ?? []) : item.kind))).toEqual(["you", ["docs/plan.md"], []]);
+    // Only Kuru's words are looked through: a path in your own message is yours, not a deliverable.
+    expect(asked).toEqual(["Written to docs/plan.md.", "Nothing to open here."]);
   });
 
   test("the window's first turn keeps its clip, and a page before it finds the rest", () => {

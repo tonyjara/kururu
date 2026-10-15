@@ -17,6 +17,19 @@ a key, what the credits buy, the paste, a test page.
 itself with the key it read off the disk a moment before, and what crosses back
 to the agent is the page.
 
+**They are a fallback, and every description opens by saying so.** An agent
+searches with its own web search and reads with its own fetch — Claude Code's
+WebSearch and WebFetch, Codex's search — and calls a kururu tool only when that
+fails: the site blocks it, the page comes back empty, the content is drawn by
+JavaScript, or it is a PDF the fetch cannot read. `search_web` is for what its
+own search cannot find and never a first search; `map_site` and `crawl_site`
+are for a site a plain fetch has already failed on. Agents took the four for
+their way onto the web while only `scrape_page` said otherwise, and every call
+is the user's credits. It is said in each description, not once in the
+server's instructions (it has none), because a model that searched its way to
+one tool reads that tool's description and no other — and in words that name
+no CLI's tools, because Claude Code and Codex are given the same four.
+
 Not **the key in every agent's environment** with Firecrawl's own SDK or MCP
 server. That is the obvious way and the one this is built not to be: the key
 would be in every pty's env, inherited by everything the agent runs, in `ps e`,

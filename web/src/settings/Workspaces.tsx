@@ -1,6 +1,7 @@
 /**
- * Settings → General → Workspaces: where a workspace's shells run, and what a
- * card's worktree gets, for the repository each workspace is in.
+ * Settings → General → Workspaces: where a workspace's shells run, where the
+ * agents kururu starts in it open, and what a card's worktree gets, for the
+ * repository each workspace is in.
  *
  * Drawn per workspace and stored per repository: a person thinks in
  * workspaces, so that is the list, and under the one chosen is the repository
@@ -16,18 +17,25 @@
 import { useState } from "react";
 import type { Card } from "../../../shared/board";
 import type { Workspace } from "../../../shared/model";
+import type { AgentPlacement } from "../../../shared/agentpane";
 import { projectSettingsFor, worktreeDir, type ProjectSettings, type ProjectSettingsMap, type WorktreeOutcome } from "../../../shared/projects";
 import type { WorkspaceProject } from "../../../shared/wire";
 import * as api from "../session";
 import { useKururu } from "../session";
+import { PLACEMENT_OPTIONS } from "./Agents";
 import { Bullets, Choice, Danger, Details, Empty, Field, Group, Mono, Outcome, P, plural, Readout, Row, Segments } from "./ui";
 
 export function WorkspacesPage({
+  profileId,
+  agentPlacement,
   workspaces,
   activeWorkspaceId,
   projects,
   settings,
 }: {
+  profileId: string;
+  /** The profile's own, which a workspace with none of its own follows. */
+  agentPlacement: AgentPlacement;
   workspaces: Workspace[];
   activeWorkspaceId: string;
   projects: WorkspaceProject[];
@@ -51,6 +59,7 @@ export function WorkspacesPage({
       </Group>
 
       {shown && <RunsOn key={shown.id} workspace={shown} />}
+      {shown && <AgentsHere profileId={profileId} workspace={shown} profilePlacement={agentPlacement} />}
 
       {shown && !root && (
         <Group title="Repository">
@@ -101,6 +110,26 @@ function RunsOn({ workspace }: { workspace: Workspace }) {
         options={[["local", "This Mac"] as const, ...machines.map((m) => [m.id, m.name, `ssh ${m.host}`] as const)]}
       />
       {machine && pin && <Field label="Folder" hint={`On ${machine.name}.`} mono value={pin.dir} placeholder="~" onCommit={(dir) => pinTo(machine.id, dir)} ariaLabel={`Folder on ${machine.name}`} />}
+    </Group>
+  );
+}
+
+/**
+ * Where a card's or Kuru's agents open in this workspace, when it should
+ * differ from the profile: one more segment than the Agents page has, for
+ * "as the profile says", which is where every workspace starts.
+ */
+function AgentsHere({ profileId, workspace, profilePlacement }: { profileId: string; workspace: Workspace; profilePlacement: AgentPlacement }) {
+  const said = PLACEMENT_OPTIONS.find(([id]) => id === profilePlacement)?.[1] ?? profilePlacement;
+  return (
+    <Group title="Agents">
+      <Choice
+        label="A card's or Kuru's agent"
+        hint={`The profile says ${said.toLowerCase()}, under Agents.`}
+        value={workspace.agentPlacement ?? "profile"}
+        onChange={(value) => api.setAgentPlacement(profileId, value === "profile" ? null : value, workspace.id)}
+        options={[["profile", "Profile", `As the profile says: ${said}`] as const, ...PLACEMENT_OPTIONS]}
+      />
     </Group>
   );
 }

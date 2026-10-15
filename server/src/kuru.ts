@@ -22,7 +22,7 @@
  *
  * On the restartable side, like everything that reads the database.
  */
-import { KURU_PAGE, KURU_RECENT, kuruCounts, mergeConversation, type KuruConversation, type KuruPage } from "../../shared/kuru";
+import { KURU_PAGE, KURU_RECENT, kuruCounts, mergeConversation, type KuruConversation, type KuruFile, type KuruItem, type KuruPage } from "../../shared/kuru";
 import type { Turn } from "../../shared/store";
 import type { StoredMissed, StoredOutboxEntry } from "../../shared/voice";
 import type { ServerMessage } from "../../shared/wire";
@@ -40,6 +40,12 @@ export interface KuruDeps {
   /** A profile's missed replies, the pending ones included. */
   missed: (profileKey: string) => readonly StoredMissed[];
   broadcast: (msg: ServerMessage) => void;
+  /**
+   * The files a reply of Kuru's names, as links for the drawer. The disk is
+   * index.ts's to look at — which projects a relative path is tried in is a
+   * question about every terminal in the profile — so it is asked for here.
+   */
+  files?: (profileKey: string, reply: { id: string; text: string }) => KuruFile[];
 }
 
 export class Kuru {
@@ -87,7 +93,7 @@ export class Kuru {
       missed: this.deps.missed(profileKey).filter((entry) => inSpan(entry.at) || linked.has(entry.id)),
       launchers: this.launchers(profileKey),
     });
-    return { items, more };
+    return { items: this.linked(profileKey, items), more };
   }
 
   private conversation(profileId: string, profileKey: string): KuruConversation {
@@ -110,7 +116,18 @@ export class Kuru {
       missed: missed.filter((entry) => entry.at >= since || !entry.pending || linked.has(entry.id)),
       launchers: this.launchers(profileKey),
     });
-    return { profileId, items, more, ...kuruCounts(outbox, missed) };
+    return { profileId, items: this.linked(profileKey, items), more, ...kuruCounts(outbox, missed) };
+  }
+
+  /** Each reply with the files it names beside it, for the drawer to draw as links. */
+  private linked(profileKey: string, items: KuruItem[]): KuruItem[] {
+    const files = this.deps.files;
+    if (!files) return items;
+    return items.map((item) => {
+      if (item.kind !== "kuru") return item;
+      const found = files(profileKey, item);
+      return found.length ? { ...item, files: found } : item;
+    });
   }
 
   private launchers(profileKey: string): Map<string, string | null> {

@@ -10,7 +10,7 @@ It was two, kept in step by hand: the chrome in `styles.css`, the emulator's in 
 `THEME` constant in `terminals.ts`, because ghostty paints into a canvas CSS
 cannot reach. That was a fair price for one hand-sync and an unpayable one per
 theme. `shared/theme.ts` holds the chrome tokens, the sixteen ANSI slots and the
-eight workspace tags together; `web/src/theme.ts` writes the first onto `<html>`
+fourteen tag colours board columns wear together; `web/src/theme.ts` writes the first onto `<html>`
 as custom properties and hands the second to every pooled emulator.
 
 **Never write a hex into `styles.css` or a component.** A rule that names a
@@ -150,16 +150,18 @@ resolution happens at the moment of drawing, and the fallback lasts a frame
 rather than forever. It follows that removing a style touches nothing in
 `appearance.json`.
 
-**A workspace tag is `var(--ws-<name>)`, not a lookup.** `colors.ts` used to find
+**A tag colour is `var(--ws-<name>)`, not a lookup.** The names are the
+workspaces' still, from when workspaces wore them; board columns are what do
+now (see [layout](layout.md#workspace-colours-removed)). `colors.ts` used to find
 the theme again from `data-theme`. That broke the day a theme could be installed:
 the id then names something `shared/theme.ts` has never heard of, `themeFor`
-falls back, and the eight tags come out in plausible colours from the wrong
+falls back, and the tags come out in plausible colours from the wrong
 palette. `applyTheme` writes them onto the root instead.
 
-**A workspace colour is a name, never a CSS value.** `set-workspace-color` takes
-one of `WORKSPACE_COLORS` and the server refuses everything else, *leaving the
-old value alone* rather than clearing it — a rejected write that untagged the
-workspace would read as the feature being broken rather than as a refusal. The
+**A column's colour is a name, never a CSS value.** `set-profile-column-color`
+takes one of `WORKSPACE_COLORS` and the server refuses everything else, *leaving
+the old value alone* rather than clearing it — a rejected write that cleared the
+column would read as the feature being broken rather than as a refusal. The
 check is not decoration: the value ends up in a style attribute, and kururu is
 reachable from the tailnet.
 
@@ -487,7 +489,7 @@ The badge beside a working agent (`Status.tsx`).
   which is a status indicator that has stopped indicating. A 16px sprite is in the
   class of a spinner, not the sliding parallax that preference exists to stop, so
   it is offered in Settings instead of obeyed silently.
-- **A workspace wears a mascot the way it wears a colour.** `mascotId`, nullable,
+- **A workspace wears a mascot by id.** `mascotId`, nullable,
   where null means the set's `default` — so "I have not chosen" and "I chose the
   thing that is currently the default" stay different, and only the first follows
   when the default moves. Nothing validates the id: one naming a deleted mascot

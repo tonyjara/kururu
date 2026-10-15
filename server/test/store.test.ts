@@ -14,7 +14,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
-import { addCard, editCard, emptyBoard, emptyProfileBoard, moveCard, noteRun, removeCard, startRun, transferCard, type Board } from "../../shared/board";
+import { addCard, editCard, emptyBoard, emptyProfileBoard, moveCard, noteRun, pruneMade, removeCard, resizeLane, setMade, startRun, transferCard, type Board } from "../../shared/board";
 import type { Profile, Workspace } from "../../shared/model";
 import { diffBoards, exportName, ftsQuery, pairTransfers, sessionOfTranscript, stripPastedContent } from "../../shared/store";
 import { adoptBackupSettings, commitSubject, validRepoUrl } from "../../shared/backup";
@@ -46,7 +46,6 @@ function workspace(key: string, name: string, board: Board | null): Workspace {
     layout: { type: "pane", pane: { id: `n-${key}`, agentIds: [], activeIdx: 0 } },
     focusedPaneId: `n-${key}`,
     lastPaneId: null,
-    color: null,
     mascotId: null,
     group: null,
     board,
@@ -202,6 +201,21 @@ describe("the store", () => {
     store.close();
   });
 
+  it("keeps a column's width through a restart, on a workspace's board and the profile's", () => {
+    const store = Store.open();
+    const board = resizeLane(addCard(emptyBoard(), { title: "x" }, "c1", 1), "doing", 400);
+    const p0 = profile(PK, "Work", [workspace(WK, "Kururu", board)]);
+    store.syncProfile(null, p0, "user", 1);
+    const p1 = { ...p0, board: resizeLane(p0.board, "todo", 320) };
+    store.syncProfile(p0, p1, "user", 2);
+    store.close();
+
+    const again = Store.open();
+    expect(again.loadBoard(PK, WK)!.widths).toEqual({ doing: 400 });
+    expect(again.loadBoard(PK, null)!.widths).toEqual({ todo: 320 });
+    again.close();
+  });
+
   it("keeps a deleted card, lists it, and restores it into the column it left", () => {
     const store = Store.open();
     const board = addCard(addCard(emptyBoard(), { title: "keep me", column: "doing" }, "c1", 1), { title: "other" }, "c2", 2);
@@ -241,6 +255,26 @@ describe("the store", () => {
     // Attached with a2 gone: the run is ended, not left pointing at a terminal that is not there.
     const attached = store.attach([p], new Set(["a1"]), 400);
     expect(attached.profiles[0]!.workspaces[0]!.board!.cards[0]!.run).toMatchObject({ launcher: "codex", state: "ended", agentId: null });
+    store.close();
+  });
+
+  it("keeps the links to what a card's agent made, and writes no history for them", () => {
+    const store = Store.open();
+    let board = startRun(addCard(emptyBoard(), { title: "research tablet mounts" }, "c1", 1), "c1", { agentId: "a1", launcher: "claude", label: "Claude", startedAt: 10 });
+    let p = profile(PK, "Work", [workspace(WK, "Tracker", board)]);
+    store.syncProfile(null, p, "user", 1);
+    const made = [{ root: "/Users/me/tracker", path: "docs/research/tablet-stands.md", line: null }];
+    const next = setMade(board, "a1", made);
+    const q = { ...p, workspaces: [workspace(WK, "Tracker", next)] };
+    store.syncProfile(p, q, "automation", 20);
+    p = q;
+    board = next;
+    expect(store.loadBoard(PK, WK)!.cards[0]!.made).toEqual(made);
+    expect(store.cardHistory("c1").map((e) => e.kind)).toEqual(["created"]);
+    // Taken off again when the file goes: the card reads as one nothing was made from.
+    const pruned = pruneMade(board, () => false);
+    store.syncProfile(p, { ...p, workspaces: [workspace(WK, "Tracker", pruned)] }, "automation", 30);
+    expect(store.loadBoard(PK, WK)!.cards[0]!.made).toBeUndefined();
     store.close();
   });
 

@@ -18,9 +18,8 @@
  * this only routes. On the restartable side, like both of them.
  */
 import { channelOfMessage, echoLine, replySpoken, type ChannelsStatus } from "../../shared/channels";
-import { CROSS_SESSION_TAG } from "../../shared/harness";
-import { plainWords, youVia } from "../../shared/kuru";
-import { stripPastedContent, viaOf, type TurnVia } from "../../shared/store";
+import { plainWords, readPrompt, youVia } from "../../shared/kuru";
+import { viaOf, type TurnVia } from "../../shared/store";
 import type { OutboxEntry } from "../../shared/voice";
 import type { ServerMessage } from "../../shared/wire";
 import { TelegramChannel, type TelegramDeps } from "./telegram";
@@ -98,8 +97,12 @@ export class Channels {
    * the machine. Kuru's answer to it is Kuru's own words, and goes.
    */
   prompted(profileKey: string, prompt: string): void {
-    const text = stripPastedContent(prompt.trim());
-    if (!text || text.startsWith(`<${CROSS_SESSION_TAG}`)) return;
+    // A background task's report is not yours either, and the drawer's
+    // reading of a prompt is the one that decides, so a line it draws as a
+    // notice is never echoed here as something you typed.
+    const read = readPrompt(prompt);
+    if (read?.kind !== "you") return;
+    const text = read.text;
     const via = viaOf(text);
     this.turn(profileKey).add(via);
     if (via === "voice" || via === "typed") this.telegram.post(profileKey, echoLine(via, plainWords(text)), { silent: true });

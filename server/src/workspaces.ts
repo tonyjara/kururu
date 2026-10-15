@@ -24,11 +24,13 @@
  * profile, it always has at least one workspace, that workspace always has at
  * least one pane, and the focused pane always exists.
  */
-import { adoptBoard, adoptProfileBoard, emptyBoard, emptyProfileBoard, noteRun, setRunSession, sleepRun, transferCard, type Board, type Card, type CardRun, type CardWorktree } from "../../shared/board";
+import { adoptBoard, adoptProfileBoard, emptyBoard, emptyProfileBoard, noteRun, pruneMade, setMade, setRunSession, sleepRun, transferCard, type Board, type Card, type CardRun, type CardWorktree } from "../../shared/board";
+import type { MadeFile } from "../../shared/made";
 import { adoptHarness } from "../../shared/harness";
 import { adoptPin, type MachinePin } from "../../shared/machines";
-import type { HarnessState, Profile, ProfileSummary, Workspace, WorkspaceColor } from "../../shared/model";
-import { gatherGroups, groupName, workspaceUnits, isLoginKey, isWorkspaceColor, mintLoginKey, WORKSPACE_COLORS } from "../../shared/model";
+import { agentsPane, DEFAULT_AGENT_PLACEMENT, isAgentPlacement, placementOf, type AgentPlacement } from "../../shared/agentpane";
+import type { HarnessState, Profile, ProfileSummary, Workspace } from "../../shared/model";
+import { gatherGroups, groupName, workspaceUnits, isLoginKey, mintLoginKey } from "../../shared/model";
 import { isStoreKey, mintProfileKey, mintWorkspaceKey, type Actor } from "../../shared/store";
 import {
   activeTerminal,
@@ -41,6 +43,7 @@ import {
   cycleTab,
   findPane,
   makePane,
+  markAgentsPane,
   mergePanes,
   moveDocTo,
   movePaneTo,
@@ -65,6 +68,7 @@ import {
   swapPanes,
   updatePane,
   visibleAgents,
+  wrapLayout,
   type Direction,
   type LayoutNode,
   type PaneNode,
@@ -141,7 +145,7 @@ function adoptSeq(profiles: Profile[]): void {
  * host's blob is the arrangement as the *previous* server left it, and across a
  * rebuild that may be a previous version — which is the whole point of the blob
  * being opaque to the host, and the cost of it. A field added since is simply
- * absent, so `color` arrives as `undefined` where the type says `null`, and the
+ * absent, so `lastPaneId` arrives as `undefined` where the type says `null`, and the
  * difference is invisible right up until something compares against null and
  * gets a different answer than it would have a restart earlier.
  *
@@ -181,13 +185,16 @@ function adopt(profile: Profile): Profile {
     harness: adoptHarness(profile.harness),
     // Absent before Auto Swap existed, which is off.
     autoSwap: profile.autoSwap === true,
-    // `dev` is taken off rather than carried: a blob written while workspaces
-    // remembered a dev command still has one, and a field the type no longer
-    // names would ride along into every snapshot and back out to disk.
-    workspaces: gatherGroups(profile.workspaces.map(({ dev: _dev, ...workspace }: Workspace & { dev?: unknown }) => ({
+    // Absent before agents had a pane of their own, which is the default —
+    // the feature is on unless somebody turned it off.
+    agentPlacement: isAgentPlacement(profile.agentPlacement) ? profile.agentPlacement : DEFAULT_AGENT_PLACEMENT,
+    // `dev` and `color` are taken off rather than carried: a blob written
+    // while workspaces remembered a dev command, or wore a colour, still has
+    // one, and a field the type no longer names would ride along into every
+    // snapshot and back out to disk.
+    workspaces: gatherGroups(profile.workspaces.map(({ dev: _dev, color: _color, ...workspace }: Workspace & { dev?: unknown; color?: unknown }) => ({
       ...workspace,
       key: isStoreKey(workspace.key) ? workspace.key : mintWorkspaceKey(),
-      color: isWorkspaceColor(workspace.color) ? workspace.color : null,
       // A field this version has and the blob may not, like the three below.
       // It is deliberately not checked against the layout: a pane that has gone
       // reads as "nowhere to go back to" where it is used.
@@ -207,6 +214,8 @@ function adopt(profile: Profile): Profile {
       // Absent before workspaces could run on a machine, which is here. It
       // becomes a command line, so it is read as `adoptPin` reads a file.
       machine: adoptPin(workspace.machine),
+      // Absent before a workspace could say otherwise than its profile.
+      agentPlacement: isAgentPlacement(workspace.agentPlacement) ? workspace.agentPlacement : null,
     }))),
   };
 }
@@ -228,38 +237,6 @@ function adopt(profile: Profile): Profile {
  * different order than the one on screen would put the row somewhere nobody
  * pointed at.
  */
-/**
- * A colour for a workspace that is about to exist, given the ones its profile is
- * already wearing.
- *
- * Random, but not blind: it counts what is taken and draws from the colours that
- * are used least, so the first fourteen workspaces in a profile are fourteen
- * different colours and the fifteenth is the first repeat. Blind random is the
- * version that was obviously right and is obviously wrong the moment you look at
- * it — with fourteen colours and four workspaces it collides about a third of
- * the time, and two rows the same colour is worse than two rows with no colour
- * at all, because the second says nothing and the first says something false.
- *
- * Random *within* the least-used set rather than the next one along, because the
- * alternative is an order: make four workspaces and they are green, amber, sand,
- * coral in every profile on every machine, which reads as a sequence rather than
- * as a tag and invites somebody to look for a meaning in it.
- *
- * Untagged workspaces are counted as nothing at all rather than as a colour, so
- * a profile of workspaces somebody deliberately cleared does not push the next
- * one anywhere in particular.
- */
-export function nextColor(taken: Iterable<WorkspaceColor | null>): WorkspaceColor {
-  const used = new Map<WorkspaceColor, number>(WORKSPACE_COLORS.map((c) => [c, 0]));
-  for (const color of taken) {
-    if (color === null) continue;
-    used.set(color, (used.get(color) ?? 0) + 1);
-  }
-  const fewest = Math.min(...used.values());
-  const free = WORKSPACE_COLORS.filter((c) => used.get(c) === fewest);
-  return free[Math.floor(Math.random() * free.length)] ?? WORKSPACE_COLORS[0];
-}
-
 export function orderAgents(ids: string[], order: string[]): string[] {
   const present = new Set(ids);
   const placed = new Set<string>();
@@ -1401,11 +1378,63 @@ export class Workspaces {
     return this.splitIn(profileId, workspaceId, "row", board.id);
   }
 
+  /**
+   * The pane an agent kururu starts on its own goes to — a card's run or
+   * resume, Kuru's `start_agent` — in any workspace of the profile: the
+   * agents' pane on the edge the workspace or its profile asks for, made by
+   * dividing the whole layout when there is none, and marked so the next
+   * one joins it (`shared/agentpane.ts`). `off` is `paneBesideBoardIn`, the
+   * rule from before. Focus is left alone, as it is by `splitIn`: whether
+   * the screen moves is the caller's, and the callers' answer is that it
+   * does not.
+   */
+  agentPaneIn(profileId: string, workspaceId: string): string | null {
+    const profile = this.profile(profileId);
+    const workspace = this.workspaceIn(profileId, workspaceId);
+    if (!profile || !workspace) return null;
+    const placement = placementOf(profile.agentPlacement, workspace.agentPlacement);
+    if (placement === "off") return this.paneBesideBoardIn(profileId, workspaceId);
+    const choice = agentsPane(workspace.layout, placement);
+    const pane = "pane" in choice ? choice.pane : id("n");
+    this.mutate(profileId, workspaceId, (w) => {
+      // A fresh pane starts in the directory of the pane the person is in,
+      // as a split's half starts in its parent's: what it records is where
+      // its next tab would open, and that is the project they are working on.
+      const layout = "pane" in choice ? w.layout : wrapLayout(w.layout, id("s"), makePane(pane, findPane(w.layout, w.focusedPaneId)?.cwd), choice.wrap === "above");
+      return { ...w, layout: markAgentsPane(layout, pane) };
+    });
+    return pane;
+  }
+
+  /**
+   * The pane a new agent's directory is read off, which is not the pane it
+   * lands in: where `paneBesideBoardIn` would have put it — the pane focus
+   * came from, else any terminal's beside the board — without the split
+   * that rule makes when there is none, since a split's half only records
+   * the board pane's directory, and asking the board pane gives the same.
+   * Kept apart so that sending agents to their own pane changes where the
+   * tab goes and nothing about where the agent starts: following the
+   * agents' pane would start the next card in whatever checkout the last
+   * card's agent ran in, a worktree included.
+   */
+  cwdPaneIn(profileId: string, workspaceId: string): string | null {
+    const workspace = this.workspaceIn(profileId, workspaceId);
+    if (!workspace) return null;
+    const layout = workspace.layout;
+    const board = paneWithAgent(layout, BOARD_TAB);
+    if (!board) return workspace.focusedPaneId;
+    const takes = (pane: PaneState | null | undefined): pane is PaneState =>
+      Boolean(pane && pane.id !== board.id && !showsDoc(pane));
+    const last = workspace.lastPaneId ? findPane(layout, workspace.lastPaneId) : null;
+    if (takes(last)) return last.id;
+    return panes(layout).find(takes)?.id ?? board.id;
+  }
+
   /** `newWorkspace`, in a profile that need not be on screen, and without switching anybody to it. */
   newWorkspaceIn(profileId: string, name: string): string | null {
     const profile = this.profile(profileId);
     if (!profile) return null;
-    const workspace = this.blankWorkspace(name, profile.workspaces);
+    const workspace = this.blankWorkspace(name);
     this.replaceProfile(profileId, (p) => ({ ...p, workspaces: [...p.workspaces, workspace] }));
     return workspace.id;
   }
@@ -1414,6 +1443,20 @@ export class Workspaces {
   setHarness(profileId: string, harness: HarnessState | null): void {
     if (!this.profile(profileId)) return;
     this.replaceProfile(profileId, (p) => ({ ...p, harness }));
+  }
+
+  /** Where the agents kururu starts in this profile go — see `Profile.agentPlacement`. */
+  setAgentPlacement(profileId: string, placement: AgentPlacement): void {
+    const profile = this.profile(profileId);
+    if (!profile || profile.agentPlacement === placement) return;
+    this.replaceProfile(profileId, (p) => ({ ...p, agentPlacement: placement }));
+  }
+
+  /** The same, for one workspace; null hands the choice back to its profile. */
+  setWorkspaceAgentPlacement(profileId: string, workspaceId: string, placement: AgentPlacement | null): void {
+    const workspace = this.workspaceIn(profileId, workspaceId);
+    if (!workspace || workspace.agentPlacement === placement) return;
+    this.mutate(profileId, workspaceId, (w) => ({ ...w, agentPlacement: placement }));
   }
 
   /** Whether the screen follows what this profile's harness acts on — see `Profile.autoSwap`. */
@@ -1442,6 +1485,46 @@ export class Workspaces {
         if (next !== board) this.as("automation", () => this.mutate(profile.id, workspace.id, (w) => ({ ...w, board: next })));
       }
     }
+  }
+
+  /**
+   * The links to what an agent's turn made, onto the card it runs, in
+   * whichever profile that is. Written as `automation`, which records no
+   * event: a link is not a move or an edit (see `cardEvents`).
+   */
+  setMade(agentId: string, files: readonly MadeFile[]): void {
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) {
+        const board = workspace.board;
+        if (!board || !board.cards.some((card) => card.run?.agentId === agentId)) continue;
+        const next = setMade(board, agentId, files);
+        if (next !== board) this.as("automation", () => this.mutate(profile.id, workspace.id, (w) => ({ ...w, board: next })));
+      }
+    }
+  }
+
+  /** Take every card's link to a file that has gone off it, in every profile. */
+  pruneMade(there: (file: MadeFile) => boolean): void {
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) {
+        const board = workspace.board;
+        if (!board || !board.cards.some((card) => card.made?.length)) continue;
+        const next = pruneMade(board, there);
+        if (next !== board) this.as("automation", () => this.mutate(profile.id, workspace.id, (w) => ({ ...w, board: next })));
+      }
+    }
+  }
+
+  /** Whether a card in any profile carries this link — a root kururu itself found, for `open-made`. */
+  cardHasMade(root: string, path: string): boolean {
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) {
+        for (const card of workspace.board?.cards ?? []) {
+          if (card.made?.some((file) => file.root === root && file.path === path)) return true;
+        }
+      }
+    }
+    return false;
   }
 
   /**
@@ -1542,7 +1625,7 @@ export class Workspaces {
 
   newWorkspace(name?: string): string {
     const profile = this.active;
-    const workspace = this.blankWorkspace(name ?? `ws${profile.workspaces.length + 1}`, profile.workspaces);
+    const workspace = this.blankWorkspace(name ?? `ws${profile.workspaces.length + 1}`);
     this.replaceProfile(profile.id, (p) => ({
       ...p,
       workspaces: [...p.workspaces, workspace],
@@ -1587,17 +1670,6 @@ export class Workspaces {
     const trimmed = name.trim();
     if (!trimmed) return;
     this.mutate(this.activeId, workspaceId, (w) => ({ ...w, name: trimmed }));
-  }
-
-  /**
-   * Tag it, or untag it with null. Anything that is not a name from the palette
-   * is dropped rather than stored: the value is written into a style attribute
-   * at the other end, and the only thing standing between that and a client on
-   * the tailnet is this check.
-   */
-  setWorkspaceColor(workspaceId: string, color: unknown): void {
-    if (color !== null && !isWorkspaceColor(color)) return;
-    this.mutate(this.activeId, workspaceId, (w) => ({ ...w, color }));
   }
 
   /**
@@ -1791,14 +1863,7 @@ export class Workspaces {
   // Internals
   // -------------------------------------------------------------------------
 
-  /**
-   * `taken` is the profile the workspace is being made in, for the colour. It is
-   * a parameter rather than being read off `this.active` because the one caller
-   * that cannot use the active profile is `blankProfile`, which is making the
-   * profile that would be read — and a fresh profile has no workspaces, so the
-   * honest argument there is an empty list rather than somebody else's palette.
-   */
-  private blankWorkspace(name: string, taken: readonly Workspace[]): Workspace {
+  private blankWorkspace(name: string): Workspace {
     const pane = makePane(id("n"));
     return {
       id: id("w"),
@@ -1807,17 +1872,17 @@ export class Workspaces {
       layout: pane,
       focusedPaneId: pane.pane.id,
       lastPaneId: null,
-      color: nextColor(taken.map((w) => w.color)),
       mascotId: null,
       group: null,
       // Nobody has asked for one yet — see `Workspace.board`.
       board: null,
       machine: null,
+      agentPlacement: null,
     };
   }
 
   private blankProfile(name: string): Profile {
-    const workspace = this.blankWorkspace("main", []);
+    const workspace = this.blankWorkspace("main");
     return {
       id: id("p"),
       key: mintProfileKey(),
@@ -1833,6 +1898,7 @@ export class Workspaces {
       hiddenAgents: [],
       harness: null,
       autoSwap: false,
+      agentPlacement: DEFAULT_AGENT_PLACEMENT,
     };
   }
 

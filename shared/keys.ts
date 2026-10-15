@@ -5,7 +5,7 @@
  * handling, which was right while the map was a constant. It stopped being one:
  * a key you can rebind is a key the *server* has to store and validate, and
  * validating an action name means checking it against the list — the same rule
- * as a sheet name and a workspace colour, and for the same reason, since a
+ * as a sheet name and a column's colour, and for the same reason, since a
  * rebinding arrives from a client and kururu is reachable from the tailnet. So
  * the table moved here, where both halves can see it, and `web/src/keys.ts` kept
  * the half that needs a `KeyboardEvent`.
