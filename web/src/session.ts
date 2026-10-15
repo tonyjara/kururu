@@ -44,7 +44,7 @@ import type { LaunchSettings } from "../../shared/launchers";
 import type { MergeReply, MergeResolution, ProjectSettings, WorktreeOutcome, WorktreeStatus } from "../../shared/projects";
 import type { NotifySettings } from "../../shared/notify";
 import type { OpenRouterStatus } from "../../shared/openrouter";
-import type { FirecrawlStatus } from "../../shared/firecrawl";
+import type { WebStatus } from "../../shared/web";
 import type { ChannelKind, ChannelsStatus, TelegramStatus } from "../../shared/channels";
 import type { BackupStatus } from "../../shared/backup";
 import type { SearchHit, SearchScope } from "../../shared/store";
@@ -87,8 +87,8 @@ export interface KururuState {
   machines: MachineStatus[];
   /** The OpenRouter account, or null when no key has been given. See `shared/openrouter.ts`. */
   openrouter: OpenRouterStatus | null;
-  /** Firecrawl for the agents, or null until the server has said. Never the key. See `shared/firecrawl.ts`. */
-  firecrawl: FirecrawlStatus | null;
+  /** The web for the agents — its providers in order — or null until the server has said. Never a key. See `shared/web.ts`. */
+  web: WebStatus | null;
   /** Where the backups stand, or null until the server has said. See `shared/backup.ts`. */
   backup: BackupStatus | null;
   /**
@@ -122,7 +122,7 @@ let state: KururuState = {
   usage: null,
   machines: [],
   openrouter: null,
-  firecrawl: null,
+  web: null,
   backup: null,
   databases: [],
   voice: null,
@@ -299,8 +299,8 @@ function connect(): void {
       case "openrouter":
         set({ openrouter: msg.openrouter });
         break;
-      case "firecrawl":
-        set({ firecrawl: msg.firecrawl });
+      case "web":
+        set({ web: msg.web });
         break;
       case "backup":
         set({ backup: msg.backup });
@@ -1158,23 +1158,23 @@ export function clearOpenRouterKey(): void {
   send({ type: "clear-openrouter-key" });
 }
 
-/** Hand the server a Firecrawl key. Rejects with the reason, in a sentence, when Firecrawl does not know it. */
-export function setFirecrawlKey(key: string): Promise<FirecrawlStatus> {
-  return request((id) => ({ type: "set-firecrawl-key", id, key })) as Promise<FirecrawlStatus>;
+/** The chain's order, first first, or its page limit. */
+export function setWeb(change: { order?: string[]; pageLimit?: number }): Promise<WebStatus> {
+  return request((id) => ({ type: "set-web", id, ...change })) as Promise<WebStatus>;
 }
 
-export function clearFirecrawlKey(): void {
-  send({ type: "clear-firecrawl-key" });
+/** A provider's switch, or one of its fields. Rejects with the reason, in a sentence, when the provider will not take it — a key it does not know. */
+export function setWebProvider(provider: string, change: { enabled?: boolean; field?: string; value?: unknown }): Promise<WebStatus> {
+  return request((id) => ({ type: "set-web-provider", id, provider, ...change })) as Promise<WebStatus>;
 }
 
-/** Firecrawl's switch and limits, any of them. */
-export function setFirecrawl(change: { enabled?: boolean; pageLimit?: number; dailyCredits?: number }): Promise<FirecrawlStatus> {
-  return request((id) => ({ type: "set-firecrawl", id, ...change })) as Promise<FirecrawlStatus>;
+export function clearWebProviderField(provider: string, field: string): Promise<WebStatus> {
+  return request((id) => ({ type: "clear-web-provider-field", id, provider, field })) as Promise<WebStatus>;
 }
 
-/** One test page through Firecrawl, a credit. Rejects with why, when it fails. */
-export function testFirecrawl(): Promise<{ title: string | null; chars: number; credits: number }> {
-  return request((id) => ({ type: "test-firecrawl", id })) as Promise<{ title: string | null; chars: number; credits: number }>;
+/** A provider's own test. Resolves with what came back, rejects with why not. */
+export function testWebProvider(provider: string): Promise<string> {
+  return request((id) => ({ type: "test-web-provider", id, provider })) as Promise<string>;
 }
 
 // ---------------------------------------------------------------------------
