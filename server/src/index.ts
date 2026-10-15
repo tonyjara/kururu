@@ -94,7 +94,8 @@ import { Outbox, legacyHeard } from "./outbox";
 import { nameProcess } from "./proctitle";
 import { Kuru } from "./kuru";
 import { Channels } from "./channels";
-import { KURU_PAGE, KURU_SAY_MAX } from "../../shared/kuru";
+import { KURU_PAGE, KURU_SAY_MAX, type KuruFile } from "../../shared/kuru";
+import { mentionsIn, readsInReader, type MadeFile } from "../../shared/made";
 import { isChannelKind, type ChannelKind } from "../../shared/channels";
 import { Backup } from "./backup";
 import { Store, dataDir, dbPath } from "./store";
@@ -140,8 +141,10 @@ import {
   type NvimPlace,
 } from "../../shared/footprint";
 import { attach as attachEditor, endHard, findNvim, isNvimTab, nvimCommand, openFile, quit as quitNvim } from "./nvim";
+import { MadeFiles, locateMentions, stillThere as madeStillThere } from "./made";
 import { readProcTable } from "./agents/procs";
 import { activeAgent, BOARD_TAB, findPane, isBoardTab, isDocTab, panes, paneWithAgent, showsDoc, terminalsOf } from "../../shared/layout";
+import { isAgentPlacement } from "../../shared/agentpane";
 import {
   adoptLegacySheet,
   builtinSheets,
@@ -226,6 +229,7 @@ import {
   moveLane,
   removeLane,
   renameLane,
+  resizeLane,
   removeCard,
   runLive,
   setDev,
@@ -988,6 +992,24 @@ const activity = new Map<string, string>();
 const MAX_ACTIVITY = 200;
 
 /**
+ * What each agent's last turn ended in, as the links under its row. Beside
+ * `activity` because it is the same kind of thing — about the work, from the
+ * agent's own report, nothing the host needs — and unlike it kept on disk,
+ * for the reason `server/src/made.ts` gives: the next report that would fill
+ * it in again is the next turn, and a finished agent has none coming.
+ */
+const madeFiles = new MadeFiles(MadeFiles.defaultPath(snapshotPath()));
+madeFiles.load();
+
+/**
+ * When each agent's current turn began — its prompt hook's report — which is
+ * what "changed this turn" is measured from (`shared/made.ts`). A restart
+ * forgets it, and a turn whose start was not seen is measured from the end of
+ * the one before, which `madeFiles` does keep.
+ */
+const turnStart = new Map<string, number>();
+
+/**
  * Terminals that finished a turn, or asked a question, while nobody was looking.
  *
  * It used to mean "bytes arrived off screen", and that is what made it useless:
@@ -1092,12 +1114,14 @@ function overlay(agent: AgentSnapshot): AgentSnapshot {
   const was = lastAgent.get(agent.id);
   const fresh = unread.has(agent.id);
   const held = memory.get(agent.id);
-  if (!said && !was && !held && fresh === agent.unread) return agent;
+  const made = madeFiles.of(agent.id);
+  if (!said && !was && !held && made.length === 0 && fresh === agent.unread) return agent;
   return {
     ...agent,
     ...(said ? { activity: said } : {}),
     ...(was ? { lastAgent: was } : {}),
     ...(held ? { rss: held } : {}),
+    ...(made.length ? { made } : {}),
     // Replaced rather than ored, which is the one line that stops the host's
     // byte-derived flag from lighting every row again behind this one's back.
     // See `unread`: the two are not two halves of an answer any more, they are
@@ -1319,14 +1343,24 @@ async function cwdForNewTab(paneId: string): Promise<string | undefined> {
   return newest ? await followCwd(newest) : undefined;
 }
 
-/** Where that terminal is now, or failing that where it was opened. */
+/**
+ * Where that terminal is now, or failing that where it was opened — and
+ * nowhere for the harness, whose folder is its own and no project's: a tab
+ * opened beside it, a split off its pane or an agent it starts from there
+ * belongs in the workspace, not in kururu's data directory.
+ */
 async function followCwd(agentId: string): Promise<string | undefined> {
   const agent = host.find(agentId);
-  if (!agent) return undefined;
+  if (!agent || isApart(agentId)) return undefined;
   // An exited pty has no cwd to read, and asking about a recycled pid would be
   // worse than not asking: its spawn directory is the only honest answer left.
   const live = agent.exited || !agent.pid ? undefined : await processCwd(agent.pid);
   return live ?? agent.cwd;
+}
+
+/** A terminal whose directory says nothing about its workspace: a harness, in its own folder. */
+function isApart(agentId: string): boolean {
+  return harness?.isHarness(agentId) != null;
 }
 
 /**
@@ -1395,7 +1429,7 @@ async function openTerminalAt(
   profileId: string,
   workspaceId: string,
   paneId: string,
-  options: { cwd?: string; command?: string; kind?: PtyKind; local?: boolean } = {},
+  options: { cwd?: string; command?: string; kind?: PtyKind; local?: boolean; apart?: boolean } = {},
 ): Promise<AgentSnapshot> {
   const command = options.command ?? pinnedShell(profileId, workspaceId, options);
   const remote = remoteShellOf(command) !== null;
@@ -1406,8 +1440,11 @@ async function openTerminalAt(
   const workspace = workspaces.workspaceIn(profileId, workspaceId);
   if (!workspace) throw new Error("that workspace is gone");
   const target = workspaces.hasPaneIn(profileId, workspaceId, paneId) ? paneId : workspace.focusedPaneId;
-  workspaces.addTabIn(profileId, workspaceId, target, agent.id, remote ? undefined : agent.cwd);
-  if (!remote) allowRoot(agent.cwd);
+  // `apart` is the harness in its own folder: a directory that is not this
+  // workspace's, so the pane does not remember it and the tree is not given it.
+  const here = !remote && !options.apart;
+  workspaces.addTabIn(profileId, workspaceId, target, agent.id, here ? agent.cwd : undefined);
+  if (here) allowRoot(agent.cwd);
   return agent;
 }
 
@@ -1559,7 +1596,7 @@ async function cwdForPaneIn(profileId: string, workspaceId: string, paneId: stri
   const newest = workspaces
     .agentsInWorkspace(profileId, workspaceId)
     .map((id) => host.find(id))
-    .filter((a): a is AgentSnapshot => a !== undefined && !a.exited)
+    .filter((a): a is AgentSnapshot => a !== undefined && !a.exited && !isApart(a.id))
     .sort((a, b) => b.createdAt - a.createdAt)[0];
   return newest ? await followCwd(newest.id) : undefined;
 }
@@ -1599,18 +1636,19 @@ function hooksFor(launcher: Launcher, profileId: string): string {
 }
 
 /**
- * Hand a card to an agent: a terminal beside the board, running the chosen
- * launcher with the card as its first message.
+ * Hand a card to an agent: a terminal in the workspace's agents' pane
+ * (`agentPaneIn` — the bottom one, unless the profile says otherwise),
+ * running the chosen launcher with the card as its first message.
  *
  * Any workspace of the profile on screen, not only the workspace on screen,
  * because the profile's board draws every workspace's board over the window
  * and a robot pressed there is pressed on a card somebody is looking at. The
- * terminal goes into that workspace's layout, beside its board, and the screen
+ * terminal goes into that workspace's layout, in its agents' pane, and the screen
  * stays where it is: the card's run line is the way to it. It used to refuse
  * every workspace but the active one, when a workspace's board could only be
- * seen in its own pane. On screen, the focus is handed back to the board
- * afterwards: the point of handing work off is to carry on with the list, not
- * to be taken to it.
+ * seen in its own pane. On screen, the focus is handed back afterwards
+ * (`giveFocusBack`): the point of handing work off is to carry on with the
+ * list, not to be taken to it.
  */
 async function runCard(workspaceId: string, cardId: string, launcherId: string, fresh = false): Promise<{ agentId: string }> {
   return runCardAt(workspaces.active.id, workspaceId, cardId, launcherId, true, "user", fresh);
@@ -1662,8 +1700,11 @@ async function runCardAt(
   }
 
   const boardPane = paneWithAgent(workspace.layout, BOARD_TAB)?.id;
-  const target = workspaces.paneBesideBoardIn(profileId, workspaceId);
-  if (!target) throw new Error("nowhere to put the agent");
+  const focused = onScreen ? workspaces.focusedPaneId : null;
+  // Where it starts is read off the pane it always was; where its tab goes
+  // is the agents' pane, decided below — see `cwdPaneIn`.
+  const fromPane = workspaces.cwdPaneIn(profileId, workspaceId);
+  if (!fromPane) throw new Error("nowhere to put the agent");
   /*
    * In a workspace pinned to a machine the agent runs there, in the pin's
    * folder, the way the menu's agents do — unless the card has a worktree
@@ -1684,7 +1725,7 @@ async function runCardAt(
    * the robot expecting isolation, and the one thing worse than no agent is
    * two agents in one tree that they believe are in two.
    */
-  const from = remote ? undefined : await cwdForPaneIn(profileId, workspaceId, target);
+  const from = remote ? undefined : await cwdForPaneIn(profileId, workspaceId, fromPane);
   const checkout = remote ? null : await checkoutFor(found.card, from);
   /*
    * A Claude run is told its session id rather than left to pick one, because
@@ -1731,6 +1772,10 @@ async function runCardAt(
   const options = remote
     ? { command: await agentOn(remote.machine, remote.workspaceName, remote.dir, launcher.cli, command), kind: "agent" as const }
     : { cwd, command, kind: "agent" as const };
+  // Last, after everything that can refuse, so that a refusal leaves no
+  // empty agents' pane behind it.
+  const target = workspaces.agentPaneIn(profileId, workspaceId);
+  if (!target) throw new Error("nowhere to put the agent");
   const agent = onScreen
     ? await openTerminal(target, options)
     : await openTerminalAt(profileId, workspaceId, target, options);
@@ -1752,7 +1797,7 @@ async function runCardAt(
       cwd: cwd ?? null,
     }),
   ));
-  if (onScreen && boardPane && workspaces.hasPane(boardPane)) workspaces.focusPane(boardPane);
+  if (onScreen) giveFocusBack(boardPane ?? focused);
   return { agentId: agent.id };
 }
 
@@ -1849,6 +1894,221 @@ function sayAside(profileId: string, text: string): void {
 }
 
 /**
+ * A turn's start and end, as the links under an agent's row hear of them.
+ * The start is the prompt hook's report; the end is the Stop report's reply,
+ * read for what the turn made (`MadeFiles.turnEnded`) and written onto the
+ * card the agent runs, if it runs one. Kuru's own replies are the drawer's
+ * (`kuruFiles`), and an agent on a machine sends no reply here and has no
+ * disk here to find its files on.
+ */
+function noteMade(agentId: string, report: { status?: string; message?: string }, body: Record<string, unknown>): void {
+  if (report.status === "working" && report.message?.trim()) turnStart.set(agentId, Date.now());
+  const reply = typeof body.reply === "string" ? body.reply : "";
+  if (report.status !== "done" || !reply.trim() || harness.isHarness(agentId)) return;
+  const agent = host.find(agentId);
+  if (!agent || agent.exited || remoteShellOf(agent.command)) return;
+  const since = turnStart.get(agentId) ?? madeFiles.lastTurn(agentId) ?? agent.createdAt;
+  const moved = madeFiles.turnEnded({ id: agent.id, createdAt: agent.createdAt, cwd: agent.cwd }, reply, since);
+  workspaces.setMade(agentId, madeFiles.of(agentId));
+  if (moved) pushSnapshot();
+}
+
+/**
+ * The directories a path Kuru wrote may be relative to: the projects of the
+ * profile on screen, every terminal's directory in Kuru's profile, then every
+ * root the server allows. Kuru answers about every agent in its profile and
+ * writes a path as the agent's project spells it, so there is no one
+ * directory to read it from — `locateMentions` tries each, and the most
+ * recently written match wins.
+ */
+function projectDirsOf(profileId: string): string[] {
+  const dirs: string[] = [];
+  if (profileId === workspaces.active.id) for (const project of state.projects) dirs.push(project.root, ...project.choices);
+  for (const id of workspaces.agentsIn(profileId)) {
+    const agent = host.find(id);
+    if (agent && !remoteShellOf(agent.command)) dirs.push(agent.cwd);
+  }
+  dirs.push(...allowedRoots());
+  return [...new Set(dirs)];
+}
+
+/**
+ * The files each of Kuru's replies names, for the drawer to make links of.
+ *
+ * Resolved once per reply and kept, since a reply's words never change and
+ * the conversation is assembled again on every change to it — except a reply
+ * that named nothing findable, which is tried again after a while: right
+ * after a restart the projects' roots are still being relearnt. A link whose
+ * file goes is taken off by `sweepMade`.
+ */
+const kuruFound = new Map<string, { at: number; files: KuruFile[] }>();
+
+/** How long "this reply names no file" is believed before it is looked for again. */
+const KURU_RETRY_MS = 30_000;
+
+/** Replies remembered. The drawer shows sixty and pages back; this is a few pages. */
+const KURU_FOUND_MAX = 400;
+
+function kuruFiles(profileKey: string, reply: { id: string; text: string }): KuruFile[] {
+  const key = `${profileKey}\0${reply.id}`;
+  const now = Date.now();
+  const had = kuruFound.get(key);
+  if (had && (had.files.length > 0 || now - had.at < KURU_RETRY_MS)) return had.files;
+  const profileId = workspaces.profileIdOf(profileKey);
+  const mentions = mentionsIn(reply.text);
+  const found = profileId && mentions.length ? locateMentions(mentions, projectDirsOf(profileId), 0) : [];
+  const files: KuruFile[] = [];
+  const seen = new Set<string>();
+  for (const { mention, file } of found) {
+    if (seen.has(mention.text)) continue;
+    seen.add(mention.text);
+    files.push({ ...file, text: mention.text });
+  }
+  kuruFound.delete(key);
+  kuruFound.set(key, { at: now, files });
+  if (kuruFound.size > KURU_FOUND_MAX) kuruFound.delete(kuruFound.keys().next().value!);
+  return files;
+}
+
+/**
+ * How often the links are checked against the disk. A link to a file that was
+ * deleted or moved should be gone within a glance of it, and the check is a
+ * `stat` for each of a handful of files.
+ */
+const MADE_SWEEP_MS = 5000;
+
+/** Every link — on rows, on cards, in the drawer — that no longer goes anywhere, taken away. */
+function sweepMade(): void {
+  if (!host || !workspaces) return;
+  if (madeFiles.sweep(host.agents.map((agent) => ({ id: agent.id, createdAt: agent.createdAt })))) pushSnapshot();
+  workspaces.pruneMade(madeStillThere);
+  let gone = false;
+  for (const [key, entry] of kuruFound) {
+    const files = entry.files.filter(madeStillThere);
+    if (files.length === entry.files.length) continue;
+    kuruFound.set(key, { ...entry, files });
+    gone = true;
+  }
+  if (gone) kuru.changed();
+}
+
+/**
+ * Whether kururu itself is holding this link — on an agent's row, on a card,
+ * in a reply of Kuru's. What lets `openMade` allow a root that has not been
+ * relearnt since a restart: a card's link into a worktree no terminal is in
+ * any more is a root the server found, not one a client made up.
+ */
+function heldLink(root: string, path: string): boolean {
+  const is = (file: MadeFile) => file.root === root && file.path === path;
+  for (const agent of host.agents) if (madeFiles.of(agent.id).some(is)) return true;
+  if (workspaces.cardHasMade(root, path)) return true;
+  for (const entry of kuruFound.values()) if (entry.files.some(is)) return true;
+  return false;
+}
+
+/**
+ * Open what an agent made: Markdown in the reader, as a tab of the focused
+ * pane — the file tree's `show-doc` — and anything else in a new nvim tab
+ * there, at the line the link names. The focused pane because that is the
+ * one you were last in (KUR-44); a new nvim rather than one already running,
+ * unlike the tree, because a link is one click and the tree's question of
+ * which editor is the one you are typing in is a second.
+ *
+ * In the workspace the link was in — the agent's, the card's — switched to
+ * first, the way clicking the agent's row goes to it, so the file opens
+ * beside the work it came from. A link out of Kuru's drawer names no
+ * workspace and goes to the one whose project holds it, or stays put.
+ */
+async function openMade(
+  root: string,
+  path: string,
+  line: number | null,
+  workspaceId: string | null,
+  focus: boolean,
+): Promise<{ paneId: string }> {
+  let full = resolveInRoot(root, path);
+  if (!full && heldLink(root, path)) {
+    allowRoot(root);
+    full = resolveInRoot(root, path);
+  }
+  // Which of the two refusals it was is said only for a root kururu already
+  // allows: whether a file exists anywhere else is not a phone's to learn.
+  if (!full) throw new Error(rootAllowed(root) ? "that file is not there any more" : "that file is outside every project kururu has open");
+  try {
+    if (!statSync(full).isFile()) throw new Error("not a file");
+  } catch {
+    throw new Error("that file is not there any more");
+  }
+  const target = workspaceId ?? workspaceOfRoot(root);
+  if (target && target !== workspaces.activeWorkspace.id) {
+    if (!workspaces.active.workspaces.some((w) => w.id === target)) throw new Error("that workspace is not in this profile");
+    workspaces.switchWorkspace(target);
+  }
+  if (readsInReader(path)) {
+    const paneId = workspaces.showDoc(root, path);
+    if (!paneId) throw new Error("there is no pane to show it in");
+    if (focus) workspaces.focusPane(paneId);
+    return { paneId };
+  }
+  const paneId = workspaces.focusedPaneId;
+  await openTerminal(paneId, { cwd: root, command: nvimCommand(path, line), kind: "shell" });
+  return { paneId };
+}
+
+/**
+ * Kuru's `show_file`: the path found the way a reply's paths are — from the
+ * agent's directory, or with no agent from the profile's projects — put
+ * first on the agent's row and its card, and opened when asked. Opened only
+ * while Kuru's profile is the one on screen: a file opened in a profile
+ * nobody is looking at is a layout changed for no one.
+ */
+async function showFileFor(profileId: string, agentId: string | null, path: string, line: number | null, open: boolean): Promise<string> {
+  const agent = agentId ? host.find(agentId) : undefined;
+  if (agent && remoteShellOf(agent.command)) throw new Error("That agent runs on a machine, and kururu only opens files on this Mac.");
+  const written = mentionsIn(`\`${path}\``)[0] ?? { text: path, path, line: null, cue: true, at: 0 };
+  const [found] = locateMentions([{ ...written, line: line ?? written.line }], agent ? [agent.cwd] : projectDirsOf(profileId), 0);
+  if (!found) throw new Error(`${path} is not a file inside a project kururu has open${agent ? ` (looked from ${agent.cwd})` : ""}.`);
+  const said: string[] = [];
+  if (agent) {
+    madeFiles.pin(agent, found.file);
+    workspaces.setMade(agent.id, madeFiles.of(agent.id));
+    pushSnapshot();
+    said.push(`Linked ${found.file.path} under the agent's row, and on its card if it runs one.`);
+  }
+  if (open) {
+    if (profileId !== workspaces.active.id) {
+      said.push("Not opened: the user's window is showing another profile.");
+    } else {
+      const home = agent ? workspaces.active.workspaces.find((w) => paneWithAgent(w.layout, agent.id))?.id : undefined;
+      await openMade(found.file.root, found.file.path, found.file.line, home ?? null, false);
+      said.push(`Opened it on the user's screen, in ${readsInReader(found.file.path) ? "the reader" : "nvim"}.`);
+    }
+  }
+  return said.join(" ");
+}
+
+/** Whether a root, as a client spelt it, is one the server allows — realpath'd first, as `files.ts` stores them. */
+function rootAllowed(root: string): boolean {
+  try {
+    return allowedRoots().includes(realpathSync(root));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The workspace on screen if its project holds this root, else the first one
+ * in the profile whose project does, else null — the drawer's link, which
+ * names none. The projects are the branch walk's (`pollBranches`).
+ */
+function workspaceOfRoot(root: string): string | null {
+  const holds = (dir: string) => root === dir || root.startsWith(`${dir}/`);
+  const here = state.projects.find((p) => p.workspaceId === workspaces.activeWorkspace.id);
+  if (here && [here.root, ...here.choices].some(holds)) return here.workspaceId;
+  return state.projects.find((p) => [p.root, ...p.choices].some(holds))?.workspaceId ?? null;
+}
+
+/**
  * Pick a card's last conversation back up, in a terminal beside the board —
  * the robot's other row, for a card whose agent has gone.
  *
@@ -1896,18 +2156,21 @@ async function resumeCardAt(
   if (!launcher) throw new Error(`no such agent: ${run.launcher}`);
 
   const boardPane = paneWithAgent(workspace.layout, BOARD_TAB)?.id;
-  const target = workspaces.paneBesideBoardIn(profileId, workspaceId);
-  if (!target) throw new Error("nowhere to put the agent");
+  const focused = onScreen ? workspaces.focusedPaneId : null;
+  const fromPane = workspaces.cwdPaneIn(profileId, workspaceId);
+  if (!fromPane) throw new Error("nowhere to put the agent");
   const there = run.cwd && isDirectory(run.cwd) ? run.cwd : null;
   const standing = found.card.worktree !== null && worktreePresent(found.card.worktree.path);
   const remote = there || standing ? undefined : pinOf(profileId, workspaceId);
-  const cwd = remote ? undefined : (there ?? found.card.worktree?.root ?? (await cwdForPaneIn(profileId, workspaceId, target)));
+  const cwd = remote ? undefined : (there ?? found.card.worktree?.root ?? (await cwdForPaneIn(profileId, workspaceId, fromPane)));
   // On a machine the folder is the one it ran in, so Codex's picker is not widened to every directory.
   const command = resumeCommand(launcher, launch, run.sessionId, !remote && there === null);
   if (!command) throw new Error("there is no conversation on this card to resume");
   const options = remote
     ? { command: await agentOn(remote.machine, remote.workspaceName, remote.dir, launcher.cli, command), kind: "agent" as const }
     : { cwd, command: command + hooksFor(launcher, profileId) + firecrawl.launchFlags(launcher.cli), kind: "agent" as const };
+  const target = workspaces.agentPaneIn(profileId, workspaceId);
+  if (!target) throw new Error("nowhere to put the agent");
   const agent = onScreen
     ? await openTerminal(target, options)
     : await openTerminalAt(profileId, workspaceId, target, options);
@@ -1924,8 +2187,21 @@ async function resumeCardAt(
       }),
     ),
   );
-  if (onScreen && boardPane && workspaces.hasPane(boardPane)) workspaces.focusPane(boardPane);
+  if (onScreen) giveFocusBack(boardPane ?? focused);
   return { agentId: agent.id };
+}
+
+/**
+ * Where the keyboard goes after a card's agent has been put on screen: back
+ * to the board, the robot's own pane, when there is one, and otherwise to
+ * the pane that had it. `openTerminal` focuses the pane it fills, which was
+ * right while that was the pane you were in; the agents' pane is usually
+ * not, and the point of handing work off is to carry on with what you were
+ * doing rather than to be taken to it. Said in the same breath as the
+ * spawn's own focus, so the window sees one move, not two.
+ */
+function giveFocusBack(paneId: string | null | undefined): void {
+  if (paneId && workspaces.hasPane(paneId)) workspaces.focusPane(paneId);
 }
 
 function isDirectory(path: string): boolean {
@@ -2162,9 +2438,11 @@ function devOpen(card: Card): boolean {
  * servers line up as tabs of one pane instead of scattering — and, before
  * there has been one, the pane of the newest terminal in the workspace. Never
  * the board's own pane, since a new tab is shown and the board would be taken
- * away from somebody who pressed a robot on it; `paneBesideBoard` otherwise.
- * The card's own workspace, which the profile's board means need not be the
- * one on screen.
+ * away from somebody who pressed a robot on it; the agents' pane otherwise
+ * (`agentPaneIn`), where the agent it was started for is about to go — the
+ * server goes in first, so the agent is the tab left showing. The card's
+ * own workspace, which the profile's board means need not be the one on
+ * screen.
  */
 function devPane(workspaceId: string): string | null {
   const profileId = workspaces.active.id;
@@ -2179,7 +2457,7 @@ function devPane(workspaceId: string): string | null {
     const pane = agentId ? paneWithAgent(layout, agentId) : null;
     if (pane && pane.id !== board?.id && !showsDoc(pane)) return pane.id;
   }
-  return workspaces.paneBesideBoardIn(profileId, workspaceId);
+  return workspaces.agentPaneIn(profileId, workspaceId);
 }
 
 /**
@@ -2255,7 +2533,7 @@ async function restartDev(workspaceId: string, cardId: string): Promise<{ agentI
 function newestAgentHere(): string | undefined {
   const here = new Set(workspaces.agentsHere());
   // host.agents is oldest first, so the last of them is the most recent.
-  const mine = host.agents.filter((agent) => here.has(agent.id));
+  const mine = host.agents.filter((agent) => here.has(agent.id) && !isApart(agent.id));
   const live = mine.filter((agent) => !agent.exited);
   return (live.length ? live : mine).at(-1)?.id;
 }
@@ -2300,6 +2578,8 @@ function forget(agentId: string): void {
   // own was already told by `noticeStatuses`.
   workspaces.noteRun(agentId, "", true);
   activity.delete(agentId);
+  madeFiles.forget(agentId);
+  turnStart.delete(agentId);
   harness.forget(agentId);
   sleeper.forget(agentId);
   lastAgent.delete(agentId);
@@ -2730,7 +3010,7 @@ function tabCwd(agentId: string): string | undefined {
   // Somewhere kururu cannot read: the branch, the tree and the database scan
   // are all about this disk, and the `~` the tab's ssh runs in is not a
   // project. A pinned workspace whose tabs are all remote has no project here.
-  if (remoteShellOf(agent.command)) return undefined;
+  if (remoteShellOf(agent.command) || isApart(agentId)) return undefined;
   const seen = cwdSeen.get(agentId);
   if (!seen || Date.now() - seen.at > CWD_CACHE_MS) {
     // Stamped before the look so a slow `lsof` is not asked again by every
@@ -3374,7 +3654,7 @@ async function footprint(): Promise<Footprint> {
         .flatMap((pane) => terminalsOf(pane.agentIds))
         .filter((id) => known.has(id));
       for (const id of ids) placed.add(id);
-      return { id: workspace.id, name: workspace.name, color: workspace.color, terminals: ids };
+      return { id: workspace.id, name: workspace.name, terminals: ids };
     }),
   }));
   const hostPid = hostPidOf(roots, table);
@@ -3662,6 +3942,7 @@ const timers = [
   setInterval(() => void pollAccountUsage(), USAGE_POLL_MS),
   setInterval(() => void pollServers(), MACHINE_POLL_MS),
   setInterval(() => void pollOpenRouterAccount(), OPENROUTER_POLL_MS),
+  setInterval(sweepMade, MADE_SWEEP_MS),
 ];
 
 void pollDevServers();
@@ -4004,10 +4285,6 @@ function handleMessage(ws: WebSocket, raw: string): void {
       workspaces.renameWorkspace(msg.workspaceId, msg.name);
       return;
 
-    case "set-workspace-color":
-      workspaces.setWorkspaceColor(msg.workspaceId, msg.color);
-      return;
-
     case "set-workspace-mascot":
       workspaces.setWorkspaceMascot(msg.workspaceId, msg.mascotId);
       return;
@@ -4148,10 +4425,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
     // harness itself, once running, is not bound to what is on screen.
     case "open-harness": {
       const run = () =>
-        harness.open(workspaces.active.id, {
-          fresh: msg.fresh === true,
-          launcher: typeof msg.launcher === "string" ? msg.launcher : undefined,
-        });
+        harness.open(workspaces.active.id, { fresh: msg.fresh === true });
       if (typeof msg.id === "number") void replyAsync(ws, msg.id, run);
       else void run().catch((err: unknown) => console.error("kururu: could not open the harness:", err instanceof Error ? err.message : err));
       return;
@@ -4160,6 +4434,18 @@ function handleMessage(ws: WebSocket, raw: string): void {
     case "set-auto-swap":
       if (typeof msg.profileId !== "string") return;
       workspaces.setAutoSwap(msg.profileId, msg.on === true);
+      return;
+
+    case "set-agent-placement":
+      // Refused rather than defaulted, `set-profile-column-color`'s line: a word
+      // that is not one of the three is not a choice to round to the nearest.
+      if (typeof msg.profileId !== "string") return;
+      if (typeof msg.workspaceId === "string") {
+        if (msg.placement !== null && !isAgentPlacement(msg.placement)) return;
+        workspaces.setWorkspaceAgentPlacement(msg.profileId, msg.workspaceId, msg.placement);
+      } else if (isAgentPlacement(msg.placement)) {
+        workspaces.setAgentPlacement(msg.profileId, msg.placement);
+      }
       return;
 
     case "set-project":
@@ -4380,14 +4666,6 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "speech-played":
       if (typeof msg.utterance === "string" && typeof msg.seq === "number") voice.played(msg.utterance, msg.seq);
-      return;
-
-    case "play-missed":
-      if (typeof msg.profileId === "string") voice.replay(workspaces.keyOf(msg.profileId) ?? "");
-      return;
-
-    case "clear-missed":
-      if (typeof msg.profileId === "string") voice.clear(workspaces.keyOf(msg.profileId) ?? "");
       return;
 
     // --- the Kuru drawer ---------------------------------------------------
@@ -4613,6 +4891,10 @@ function handleMessage(ws: WebSocket, raw: string): void {
       workspaces.editBoard(msg.workspaceId, (board) => removeCard(board, msg.cardId));
       return;
 
+    case "resize-column":
+      workspaces.editBoard(msg.workspaceId, (board) => resizeLane(board, msg.column, msg.width));
+      return;
+
     // The profile's board. Nothing on it runs, so these are the pure functions
     // and nothing else — no agent to end on Done and no worktree to ask about.
     // The column is held to the ones the board has by the pure functions
@@ -4659,6 +4941,10 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "delete-profile-column":
       workspaces.editProfileBoard(msg.profileId, (board) => removeLane(board, msg.columnId));
+      return;
+
+    case "resize-profile-column":
+      workspaces.editProfileBoard(msg.profileId, (board) => resizeLane(board, msg.columnId, msg.width));
       return;
 
     case "send-profile-card":
@@ -4772,6 +5058,16 @@ function handleMessage(ws: WebSocket, raw: string): void {
       void replyAsync(ws, msg.id, () => openInEditor(msg.root, msg.path, msg.agentId));
       return;
 
+    case "open-made": {
+      if (typeof msg.root !== "string" || typeof msg.path !== "string") return;
+      // `Number.isFinite`'s rule, and a whole line or none: nvim's `+N` is
+      // the only place this number goes.
+      const line = Number.isInteger(msg.line) && (msg.line as number) > 0 ? (msg.line as number) : null;
+      const workspaceId = typeof msg.workspaceId === "string" ? msg.workspaceId : null;
+      void replyAsync(ws, msg.id, () => openMade(msg.root, msg.path, line, workspaceId, msg.focus === true));
+      return;
+    }
+
     case "close-nvims":
       void replyAsync(ws, msg.id, () => closeNvims(msg.ids));
       return;
@@ -4785,7 +5081,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
        * Checked where every path from a client is checked, and a pick that does
        * not resolve is simply not made: the pane keeps the document it had. A
        * refusal that blanked the reader would read as the feature being broken
-       * rather than as a refusal, which is the argument `set-workspace-color`
+       * rather than as a refusal, which is the argument `set-profile-column-color`
        * makes about a colour it will not take.
        */
       if (!resolveInRoot(msg.root, msg.path)) return;
@@ -5327,6 +5623,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       // the reply on its way out, for the search and the drawer. Before the
       // cap below, which is the sidebar's and not the record's.
       recordTurn(agentId, parsed.report, body as Record<string, unknown>, utterance);
+      // And what the turn ended in, for the links under the agent's row and
+      // on its card. See `noteMade`.
+      noteMade(agentId, parsed.report, body as Record<string, unknown>);
       /**
        * The host is told the status and the context; the message stops here.
        * It is the one part of a report that says something about the work rather
@@ -6245,6 +6544,8 @@ async function attach(port: Port): Promise<void> {
     search: searchFor,
     cardHistory: cardHistoryOf,
     reloadWindow: (why, timeoutMs) => reloads.ask(why, "Kuru", timeoutMs),
+    madeOf: (agentId) => madeFiles.of(agentId),
+    showFile: showFileFor,
   });
   // The reports a remote agent's hooks cannot send, read off its screen.
   screens = new OnScreen({
@@ -6337,6 +6638,7 @@ async function attach(port: Port): Promise<void> {
     outbox: (key) => outbox.entriesOf(key),
     missed: (key) => voice.missedFor(key),
     broadcast,
+    files: kuruFiles,
   });
   backup = new Backup({
     store,

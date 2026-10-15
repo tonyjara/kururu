@@ -43,7 +43,6 @@
 import { randomUUID } from "node:crypto";
 import { open, stat } from "node:fs/promises";
 import { connect } from "node:net";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { Terminal } from "@xterm/headless";
@@ -66,6 +65,7 @@ import {
   WAIT_MAX_S,
   WHENS,
   agentName,
+  harnessRunFlags,
   clip,
   due,
   inboxFrames,
@@ -74,6 +74,8 @@ import {
   mcpConfig,
   rolePrompt,
   tellsHarness,
+  projectDirName,
+  trustAnswer,
   turnsFrom,
   typingPieces,
   type Hands,
@@ -83,6 +85,7 @@ import {
 } from "../../shared/harness";
 import { findLauncher, launcherCommand, visibleLaunchers, withPrompt, type AgentCli, type LaunchSettings, type Launcher } from "../../shared/launchers";
 import { remoteShellOf, validRemoteDir, type MachineEntry, type MachineStatus } from "../../shared/machines";
+import type { MadeFile } from "../../shared/made";
 import type { AgentSnapshot, AgentStatus, HarnessState } from "../../shared/model";
 import { isNotifyEvent } from "../../shared/notify";
 import type { MissedReply } from "../../shared/voice";
@@ -90,6 +93,7 @@ import { RELOAD_TIMEOUT_MAX_MS, RELOAD_TIMEOUT_MIN_MS, RELOAD_TIMEOUT_MS, WHY_MA
 import { COLUMN_LABELS } from "../../shared/board";
 import type { CardEvent, SearchHit, SearchScope } from "../../shared/store";
 import type { McpResult } from "./mcp";
+import { harnessHome, prepareHarnessHome } from "./harnesshome";
 import type { HostLink } from "./hostlink";
 import type { Workspaces } from "./workspaces";
 
@@ -117,12 +121,15 @@ export interface HarnessDeps {
   /**
    * Open a terminal into a pane of a workspace that need not be on screen. A
    * plain shell in a pinned workspace opens on its machine unless `local`.
+   * `apart` is a terminal whose directory is not the workspace's — the
+   * harness's own folder — so the pane does not remember it and the file
+   * tree is not given it.
    */
   openTerminal: (
     profileId: string,
     workspaceId: string,
     paneId: string,
-    options: { cwd?: string; command?: string; kind?: "agent" | "shell"; local?: boolean },
+    options: { cwd?: string; command?: string; kind?: "agent" | "shell"; local?: boolean; apart?: boolean },
   ) => Promise<AgentSnapshot>;
   /** The user's machines, with whether the last look at each got in. See `shared/machines.ts`. */
   machines: () => readonly MachineStatus[];
@@ -147,6 +154,14 @@ export interface HarnessDeps {
   cardHistory: (cardId: string) => { card: Card; workspaceName: string | null; deleted: boolean; events: CardEvent[] } | null;
   /** Reload the user's pages on this Mac once each is safe, and say what happened. See `reload.ts`. */
   reloadWindow: (why: string, timeoutMs: number) => Promise<ReloadOutcome>;
+  /** The links under an agent's row: what its last turn made. See `shared/made.ts`. */
+  madeOf: (agentId: string) => readonly MadeFile[];
+  /**
+   * `show_file`: a file found from the agent's directory (or the profile's
+   * projects, with no agent), put on the agent's row and card, and opened on
+   * the user's screen when asked. Says what it did, or throws why not.
+   */
+  showFile: (profileId: string, agentId: string | null, path: string, line: number | null, open: boolean) => Promise<string>;
 }
 
 type WaitState = "done" | "blocked" | "exited";
@@ -194,6 +209,9 @@ const ENTER_DELAY_MS = 350;
 const TYPE_GAP_MS = 60;
 /** How long `open_shell` waits for a new local shell's first prompt before typing anyway. */
 const SHELL_DRAWN_MS = 5000;
+/** How long a harness just started is watched for the folder-trust dialog, and how often. */
+const TRUST_WATCH_MS = 20_000;
+const TRUST_POLL_MS = 300;
 /** How long after a `send` to watch for the agent to leave `done`, so a wait right after does not catch the stale state. */
 const SEND_SETTLE_MS = 2000;
 /** The same throttle `notify.ts` applies to a person: one posting per agent per little while. */
@@ -465,7 +483,7 @@ export class Harness {
     const lost = status === "exited" ? (this.held.get(agent.id)?.length ?? 0) : 0;
     const said =
       status === "done"
-        ? `finished its turn${this.replies.has(agent.id) ? `. It said:\n${this.replies.get(agent.id)!.slice(0, TELL_QUOTE)}` : "."}`
+        ? `finished its turn${this.replies.has(agent.id) ? `. It said:\n${this.replies.get(agent.id)!.slice(0, TELL_QUOTE)}` : "."}${madeLine(this.deps.madeOf(agent.id), "\n\nIts links in kururu:")}`
         : status === "blocked"
           ? `is blocked — it is asking something or waiting on a permission prompt${this.deps.activity.has(agent.id) ? `: ${this.deps.activity.get(agent.id)}` : ""}. Read its screen to see what.${this.held.has(agent.id) ? " What you sent it is waiting until the prompt is answered." : ""}`
           : `exited.${lost ? ` ${lost === 1 ? "A message you sent it was" : `${lost} messages you sent it were`} still waiting and never reached it.` : ""}`;
@@ -663,8 +681,16 @@ export class Harness {
         const prompt = str(args.prompt);
         if (!prompt) return fail("A prompt is needed.");
         const launcher = this.launcher(str(args.launcher));
-        const pane = ws.paneBesideBoardIn(profileId, workspaceId);
-        if (!pane) return fail("Nowhere to put a terminal in that workspace.");
+        // It starts where it always did, and its tab goes to the workspace's
+        // agents' pane — decided last, so that a refusal leaves no empty one
+        // behind. See `agentPaneIn` and `cwdPaneIn`.
+        const fromPane = ws.cwdPaneIn(profileId, workspaceId);
+        if (!fromPane) return fail("Nowhere to put a terminal in that workspace.");
+        const into = (): string => {
+          const pane = ws.agentPaneIn(profileId, workspaceId);
+          if (!pane) throw new Error("Nowhere to put a terminal in that workspace.");
+          return pane;
+        };
         const place = this.place(str(args.machine), workspace, str(args.cwd));
         if ("error" in place) return fail(place.error);
         let agent: AgentSnapshot;
@@ -674,14 +700,14 @@ export class Harness {
           // they name files on this Mac. See `remoteAgentRun`.
           const line = withPrompt(launcherCommand(launcher, this.deps.launch()), prompt);
           const command = await this.deps.agentOn(place.machine, workspace.name, place.folder, launcher.cli, line);
-          agent = await this.deps.openTerminal(profileId, workspaceId, pane, { command, kind: "agent" });
+          agent = await this.deps.openTerminal(profileId, workspaceId, into(), { command, kind: "agent" });
           where = `on ${place.machine.name}, in ${place.folder}`;
         } else {
           const asked = str(args.cwd);
           if (asked && !asked.startsWith("/")) return fail("On this Mac, cwd must be an absolute path.");
-          const cwd = asked || (await this.deps.cwdFor(profileId, workspaceId, pane));
+          const cwd = asked || (await this.deps.cwdFor(profileId, workspaceId, fromPane));
           const command = withPrompt(this.deps.agentCommand(launcher, profileId), prompt);
-          agent = await this.deps.openTerminal(profileId, workspaceId, pane, { cwd, command, kind: "agent" });
+          agent = await this.deps.openTerminal(profileId, workspaceId, into(), { cwd, command, kind: "agent" });
           where = `in ${agent.cwd}`;
         }
         const nameFor = str(args.name);
@@ -742,6 +768,16 @@ export class Harness {
         // waiting nor follows it with another before it has been seen.
         this.swaps.moved(Date.now());
         return ok(`Showing ${this.name(agent)} to the user.`);
+      }
+
+      case "show_file": {
+        const path = str(args.path);
+        if (!path) return fail("A path is needed.");
+        const open = args.open === true;
+        const agent = str(args.agent) ? agentArg() : null;
+        if (!agent && !open) return fail("Name the agent whose row the link goes on, or pass open=true to only open the file.");
+        const line = int(args.line);
+        return ok(await this.deps.showFile(profileId, agent?.id ?? null, path, line !== undefined && line > 0 ? line : null, open));
       }
 
       case "rename_agent": {
@@ -905,11 +941,17 @@ export class Harness {
    * there, and a pane closing is not a reason to lose it. `--resume` needs the
    * transcript to be where Claude Code filed it, which is under the config
    * directory, by the directory it ran in — so the harness is always started
-   * in the same place, the profile's active workspace, and a transcript that is
-   * not there any more means a fresh start rather than a tab that opens and
-   * closes with an error nobody saw.
+   * in the same place, its own folder (`harnesshome.ts`), and a transcript
+   * that is not there means a fresh start rather than a tab that opens and
+   * closes with an error nobody saw. A session that ran in a project's
+   * folder, as every harness did before the folder existed, is one of those.
+   *
+   * The tab still goes into the active workspace, beside the board; only the
+   * directory is its own. And always the plain Claude launcher, with the
+   * model, effort and compaction named after it (`harnessRunFlags`), so no
+   * launcher's `--model` and no profile's settings decide them.
    */
-  async open(profileId: string, options: { fresh?: boolean; launcher?: string } = {}): Promise<{ agentId: string }> {
+  async open(profileId: string, options: { fresh?: boolean } = {}): Promise<{ agentId: string }> {
     const ws = this.deps.workspaces;
     const profile = ws.profile(profileId);
     if (!profile) throw new Error("no such profile");
@@ -918,12 +960,14 @@ export class Harness {
       ws.reveal(running);
       return { agentId: running };
     }
-    const launcher = this.launcher(options.launcher ?? profile.harness?.launcher);
-    if (launcher.cli !== "claude") throw new Error("the harness is a Claude Code session");
+    const launcher = this.launcher("claude");
+    const key = ws.keyOf(profileId);
+    if (!key) throw new Error("that profile has no key yet");
     const workspaceId = profile.activeWorkspaceId;
     const pane = ws.paneBesideBoardIn(profileId, workspaceId);
     if (!pane) throw new Error("nowhere to put the harness");
-    const cwd = (await this.deps.cwdFor(profileId, workspaceId, pane)) ?? homedir();
+    const cwd = harnessHome(key);
+    await prepareHarnessHome(cwd, this.deps.claudeDir(profileId), profile.harness?.sessionId ?? null);
 
     let sessionId = profile.harness?.sessionId ?? null;
     const resume = !options.fresh && sessionId !== null && (await this.transcriptExists(profileId, cwd, sessionId));
@@ -945,17 +989,46 @@ export class Harness {
       `mcp__${HARNESS_SERVER}`,
       "--append-system-prompt",
       quote(role),
+      ...harnessRunFlags(),
     ];
     // The tool-call ceiling, as an environment variable on the line rather than
     // in the pty's env, which only a current host applies: `sh -c` takes it
     // either way, and a wait that was cut off at the default would be a wait
     // that lied.
     const command = `MCP_TOOL_TIMEOUT=${MCP_TIMEOUT_MS} ${this.deps.agentCommand(launcher, profileId)} ${flags.join(" ")}`;
-    const agent = await this.deps.openTerminal(profileId, workspaceId, pane, { cwd, command, kind: "agent" });
+    const agent = await this.deps.openTerminal(profileId, workspaceId, pane, { cwd, command, kind: "agent", apart: true });
     this.deps.host.rename(agent.id, HARNESS_NAME);
     ws.setHarness(profileId, { sessionId: sessionId!, launcher: launcher.id, agentId: agent.id, startedAt: Date.now() });
     ws.reveal(agent.id);
+    void this.trustHome(agent.id);
     return { agentId: agent.id };
+  }
+
+  /**
+   * Say yes to Claude Code's "do you trust this folder?" for the harness's
+   * own folder, which it asks the first time a profile's harness starts
+   * there. The folder is one kururu made and put nothing in but two files,
+   * and a harness stopped on a dialog is a voice message that waits thirty
+   * seconds and is then typed into the dialog. Watched for a while after the
+   * start and then left: a dialog still up after that is on screen for the
+   * user, as it would have been anyway.
+   */
+  private async trustHome(agentId: string): Promise<void> {
+    const until = Date.now() + TRUST_WATCH_MS;
+    let downs = 0;
+    while (Date.now() < until) {
+      await sleep(TRUST_POLL_MS);
+      const agent = this.deps.host.find(agentId);
+      if (!agent || agent.exited) return;
+      const { cols, rows } = this.deps.grid(agentId);
+      const answer = trustAnswer(await screenText(await this.deps.host.backlog(agentId), Math.max(cols, 120), rows, rows));
+      if (answer === "enter") {
+        this.deps.host.write(agentId, "\r");
+        return;
+      }
+      // One Down, then wait to see it land: two could carry the pointer past the yes.
+      if (answer === "down" && downs++ === 0) this.deps.host.write(agentId, "\x1b[B");
+    }
   }
 
   /** Which harness, if any, a session id names — the MCP endpoint's way of knowing who is calling. */
@@ -965,11 +1038,8 @@ export class Harness {
   }
 
   private async transcriptExists(profileId: string, cwd: string, sessionId: string): Promise<boolean> {
-    // Claude Code files a transcript under the directory it ran in, with every
-    // character that is not a letter or digit turned into a dash.
-    const dir = cwd.replace(/[^A-Za-z0-9]/g, "-");
     try {
-      await stat(join(this.deps.claudeDir(profileId), "projects", dir, `${sessionId}.jsonl`));
+      await stat(join(this.deps.claudeDir(profileId), "projects", projectDirName(cwd), `${sessionId}.jsonl`));
       return true;
     } catch {
       return false;
@@ -1123,7 +1193,8 @@ export class Harness {
           `  - ${id === selfId ? "you: " : ""}${this.name(agent)} · ${agent.exited ? "exited" : agent.status}${ctx}${remote}` +
             (doing ? ` · ${remote ? "on screen" : "last told"}: ${doing.slice(0, 120)}` : "") +
             (this.inboxes.has(id) ? "" : agent.agent === "claude" ? " · not heard from its hooks yet" : "") +
-            (this.held.has(id) ? ` · ${this.held.get(id)!.length} message${this.held.get(id)!.length === 1 ? "" : "s"} from you waiting to be typed` : ""),
+            (this.held.has(id) ? ` · ${this.held.get(id)!.length} message${this.held.get(id)!.length === 1 ? "" : "s"} from you waiting to be typed` : "") +
+            madeLine(this.deps.madeOf(id)),
         );
       }
     }
@@ -1147,7 +1218,7 @@ export class Harness {
     const code = workspaceName ? cardCode(workspaceName, card.number) : `#${card.number}`;
     const body = card.body ? ` — ${card.body.replace(/\s+/g, " ").slice(0, 200)}${card.body.length > 200 ? "…" : ""}` : "";
     const run = card.run ? ` [${card.run.label}: ${card.run.state}${runLive(card.run) ? `, agent ${card.run.agentId}` : ""}]` : "";
-    return `${code} ${card.id} "${card.title}"${run}${card.isolate ? " [worktree]" : ""}${body}`;
+    return `${code} ${card.id} "${card.title}"${run}${card.isolate ? " [worktree]" : ""}${madeLine(card.made ?? [])}${body}`;
   }
 
   private arrived(agentId: string, state: WaitState, name: string): string {
@@ -1344,3 +1415,13 @@ function eventLine(event: CardEvent): string {
 }
 
 export type { HarnessState };
+
+/**
+ * An agent's or a card's links, as a line Kuru reads: the paths, and the
+ * line a link opens at. Nothing at all when there are none, which is the
+ * ordinary case and not worth a word in every status line.
+ */
+function madeLine(files: readonly MadeFile[], lead = " · links:"): string {
+  if (!files.length) return "";
+  return `${lead} ${files.map((file) => `${file.path}${file.line ? `:${file.line}` : ""}`).join(", ")}`;
+}

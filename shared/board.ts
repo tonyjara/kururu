@@ -25,6 +25,7 @@
  * board of its own. The client sends verbs; the snapshot is the answer.
  */
 import { dayAt, dayNumber, type Day } from "./days";
+import { adoptMade, sameMade, type MadeFile } from "./made";
 import { isWorkspaceColor, WORKSPACE_COLORS, type WorkspaceColor } from "./model";
 
 /**
@@ -63,11 +64,11 @@ export function isBoardColumn(value: unknown): value is BoardColumn {
  *
  * `color` is what the column's cards wear wherever they are drawn away from
  * it — on the timeline a card is a bar among other columns' bars, and the
- * colour is the only thing left of which column it is in. One of a
- * workspace's tag colours by name, for the reasons `WORKSPACE_COLORS` gives,
- * and every column is made with one for the reason `Workspace.color` gives:
- * nobody chooses, and a colour that waits to be chosen arrives the day after
- * it would have helped. Null is "no colour", which a person can still pick.
+ * colour is the only thing left of which column it is in. One of
+ * `WORKSPACE_COLORS` by name, for the reasons it gives, and every column is
+ * made with one, because nobody chooses: a colour that waits to be chosen
+ * arrives the day after it would have helped. Null is "no colour", which a
+ * person can still pick.
  *
  * `collapsed` is the column folded down to its name on its side, the way Jira
  * does it: out of the way, and still a place to drop a card. On the board
@@ -95,8 +96,8 @@ const LANE_COLORS: Record<string, WorkspaceColor> = { todo: "blue", doing: "ambe
  * wearing. The order is not the picker's spectrum, whose neighbours are
  * alike, but one that steps across it — and it leaves the starting three's
  * colours until last, so a fourth column is never taken for In progress.
- * Chosen by rule rather than at random, unlike a workspace's, because this
- * file is pure and a board adopted twice has to come out the same.
+ * Chosen by rule rather than at random, because this file is pure and a board
+ * adopted twice has to come out the same.
  */
 const LANE_SPREAD: readonly WorkspaceColor[] = [
   "violet",
@@ -292,6 +293,15 @@ export interface Card {
    * since being handed to an agent does not move the day it was promised for.
    */
   dates: CardDates | null;
+  /**
+   * What its agents' last turn ended in — the same links the agent's row
+   * carries, written here as well so they outlive the agent: an idle card's
+   * agent is ended (`sleep.ts`), and the card is then the one place left to
+   * find the document it wrote. Replaced by the next turn's, and a link whose
+   * file has gone is taken off. Absent on a card no agent has pointed at a
+   * file from. See `shared/made.ts`.
+   */
+  made?: MadeFile[];
 }
 
 export interface Board {
@@ -309,6 +319,15 @@ export interface Board {
    * Absent on a workspace's, which draws the fixed four; see `BoardLane`.
    */
   columns?: BoardLane[];
+  /**
+   * How wide a column was dragged to, by its id — on *every* board, unlike
+   * `columns`: a workspace's board has no lanes of its own to hang this on,
+   * and a width is still true of it. Absent is the width every column starts
+   * at, which is the stylesheet's to say; a column no longer on the board is
+   * left here rather than hunted down, since a lane id is minted once and
+   * never given to another column. See `resizeLane`.
+   */
+  widths?: Record<string, number>;
 }
 
 /** Long enough for a real ticket, short enough that a bad paste is not a megabyte in every snapshot. */
@@ -420,7 +439,9 @@ export function removeCard(board: Board, cardId: string): Board {
 
 /**
  * Put a card in a column, at a place among the cards already there — or at the
- * foot when `index` is absent.
+ * foot when `index` is absent, except into Done, which goes to the head: a
+ * caller that doesn't name a position wants newest-first, and a drag that does
+ * (even one landing past the last card) always says so with a real index.
  *
  * The index counts the *destination column's* cards with the moved one taken
  * out, which is what the client can see: it is pointing between two cards in a
@@ -435,7 +456,8 @@ export function moveCard(board: Board, cardId: string, column: unknown, index?: 
   const rest = board.cards.filter((c) => c.id !== cardId);
   const moved = { ...card, column };
   const inColumn = rest.filter((c) => c.column === column);
-  const before = index === undefined ? undefined : inColumn[index as number];
+  const resolvedIndex = index === undefined && column === "done" ? 0 : index;
+  const before = resolvedIndex === undefined ? undefined : inColumn[resolvedIndex as number];
   if (!before) {
     // The foot of the column: after its last card, or at the end of everything.
     const last = inColumn.at(-1);
@@ -537,6 +559,36 @@ export function noteRun(board: Board, agentId: string, status: string, exited: b
 }
 
 /**
+ * The links an agent's turn ended in, onto the card it runs — the same list
+ * its sidebar row carries (`shared/made.ts`). Same board when nothing moved,
+ * for `noteRun`'s reason: every turn of every card's agent ends here.
+ */
+export function setMade(board: Board, agentId: string, files: readonly MadeFile[]): Board {
+  let changed = false;
+  const cards = board.cards.map((card) => {
+    if (card.run?.agentId !== agentId || sameMade(card.made, files)) return card;
+    changed = true;
+    const { made: _gone, ...rest } = card;
+    return files.length ? { ...rest, made: [...files] } : rest;
+  });
+  return changed ? { ...board, cards } : board;
+}
+
+/** Links whose file has gone, taken off every card. Same board when every one still goes somewhere. */
+export function pruneMade(board: Board, there: (file: MadeFile) => boolean): Board {
+  let changed = false;
+  const cards = board.cards.map((card) => {
+    if (!card.made?.length) return card;
+    const kept = card.made.filter(there);
+    if (kept.length === card.made.length) return card;
+    changed = true;
+    const { made: _gone, ...rest } = card;
+    return kept.length ? { ...rest, made: kept } : rest;
+  });
+  return changed ? { ...board, cards } : board;
+}
+
+/**
  * The card's run, put to sleep: its agent is about to be ended for sitting
  * idle, and the card says so rather than `ended`. The agent id goes at the
  * same moment, so the exit that follows finds no run to carry onto — and the
@@ -609,10 +661,18 @@ export function transferCard(from: Board, to: Board, cardId: string): { from: Bo
  * draw. A run that claims to be going but names no process is one a cold start
  * brought back, and it is `ended` — nothing is running it.
  */
+/** `Card.made` read back: absent rather than empty, as a card from before it existed is. */
+function madeOf(value: unknown): Pick<Card, "made"> {
+  const made = adoptMade(value);
+  return made.length ? { made } : {};
+}
+
 export function adoptBoard(value: unknown): Board | null {
   if (!value || typeof value !== "object") return null;
   const columns = adoptLanes((value as { columns?: unknown }).columns);
-  const shape: Board = columns ? { cards: [], next: 1, columns } : emptyBoard();
+  const withColumns: Board = columns ? { cards: [], next: 1, columns } : emptyBoard();
+  const widths = adoptWidths((value as { widths?: unknown }).widths, new Set(boardLanes(withColumns).map((lane) => lane.id)));
+  const shape: Board = widths ? { ...withColumns, widths } : withColumns;
   const raw = (value as { cards?: unknown }).cards;
   if (!Array.isArray(raw)) return shape;
   const cards: Card[] = [];
@@ -636,6 +696,7 @@ export function adoptBoard(value: unknown): Board | null {
       worktree: adoptWorktree(item.worktree),
       dev: adoptDev(item.dev),
       dates: adoptDates(item.dates),
+      ...madeOf(item.made),
     });
   }
   // A card from before cards were numbered, or one whose number is a second
@@ -658,6 +719,22 @@ export function adoptProfileBoard(value: unknown): Board {
   if (!board) return emptyProfileBoard();
   if (board.columns) return board;
   return adoptBoard({ ...board, columns: profileLanes() })!;
+}
+
+/**
+ * A board's widths off the wire or the disk: a column it still has, and a
+ * number in range — anything else is dropped rather than failing the whole
+ * board, since a width is cosmetic and a board is not. None left is null,
+ * for `adoptBoard`'s reason.
+ */
+function adoptWidths(value: unknown, laneIds: ReadonlySet<string>): Record<string, number> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const widths: Record<string, number> = {};
+  for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!laneIds.has(id) || typeof raw !== "number" || !Number.isFinite(raw)) continue;
+    widths[id] = clampLaneWidth(raw);
+  }
+  return Object.keys(widths).length ? widths : undefined;
 }
 
 /**
@@ -705,8 +782,8 @@ export function addLane(board: Board, name: unknown, id: string): Board {
 
 /**
  * Give a column a colour, or none. One of `WORKSPACE_COLORS` or the edit is
- * refused — `set-workspace-color`'s line, for its reason: the name ends up in
- * a style, and kururu is reachable from the tailnet.
+ * refused, leaving the old colour alone rather than clearing it: the name ends
+ * up in a style, and kururu is reachable from the tailnet.
  */
 export function colorLane(board: Board, laneId: string, color: unknown): Board {
   if (!board.columns || !hasLane(board, laneId)) return board;
@@ -729,6 +806,32 @@ export function collapseLane(board: Board, laneId: string, collapsed: unknown): 
       return collapsed ? { ...open, collapsed: true } : open;
     }),
   };
+}
+
+/** A column can't collapse to nothing or swallow the screen — see `Board.widths`. */
+export const LANE_WIDTH_MIN = 220;
+export const LANE_WIDTH_MAX = 640;
+
+export function clampLaneWidth(width: number): number {
+  return Math.min(LANE_WIDTH_MAX, Math.max(LANE_WIDTH_MIN, Math.round(width)));
+}
+
+/**
+ * Drag a column to a width, or take it back to the one every column starts
+ * at. On any board, unlike the rest of these — `hasLane` already draws the
+ * fixed four for a workspace's, and a width is a thing every one of them has
+ * too. `null` removes it; anything else is clamped the way a ratio off the
+ * wire is, because a width off the wire is a number nobody has checked yet.
+ */
+export function resizeLane(board: Board, laneId: string, width: unknown): Board {
+  if (!hasLane(board, laneId)) return board;
+  if (width === null) {
+    if (!board.widths || !(laneId in board.widths)) return board;
+    const { [laneId]: _, ...rest } = board.widths;
+    return { ...board, widths: Object.keys(rest).length ? rest : undefined };
+  }
+  if (typeof width !== "number" || !Number.isFinite(width)) return board;
+  return { ...board, widths: { ...board.widths, [laneId]: clampLaneWidth(width) } };
 }
 
 export function renameLane(board: Board, laneId: string, name: unknown): Board {

@@ -11,12 +11,20 @@ describe("nvimCommand", () => {
       `printf '\\033]2;nvim\\007'; nvim -- '/a/it'\\''s.md'; exec "\${SHELL:-/bin/sh}" -l`,
     );
   });
+
+  it("opens at a line when a link names one, and at the top when it names nonsense", () => {
+    expect(nvimCommand("src/a.ts", 120)).toBe(`printf '\\033]2;nvim\\007'; nvim +120 -- 'src/a.ts'; exec "\${SHELL:-/bin/sh}" -l`);
+    expect(nvimCommand("src/a.ts", 0)).toBe(nvimCommand("src/a.ts"));
+    expect(nvimCommand("src/a.ts", 1.5)).toBe(nvimCommand("src/a.ts"));
+    expect(nvimCommand(undefined, 9)).toBe(nvimCommand());
+  });
 });
 
 describe("isNvimTab", () => {
   it("knows a tab kururu started as nvim, with a file or without", () => {
     expect(isNvimTab(nvimCommand())).toBe(true);
     expect(isNvimTab(nvimCommand("/a/b.ts"))).toBe(true);
+    expect(isNvimTab(nvimCommand("/a/b.ts", 40))).toBe(true);
   });
 
   it("is not every command that mentions nvim", () => {

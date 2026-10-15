@@ -1,7 +1,7 @@
 /**
  * Settings → General → Agents: what the new-tab button offers besides a
- * terminal, when an idle card's agent is put to sleep, and what Kuru does to
- * the screen.
+ * terminal, where the agents kururu starts itself open, when an idle card's
+ * agent is put to sleep, and what Kuru does to the screen.
  *
  * A switch per CLI and a switch per model under it. The CLI's switch leaves
  * its models' switches as they were rather than turning them off, so switching
@@ -23,10 +23,30 @@ import {
   type AgentCli,
   type LaunchSettings,
 } from "../../../shared/launchers";
+import type { AgentPlacement } from "../../../shared/agentpane";
 import * as api from "../session";
-import { Details, Group, Mono, NumField, P, Toggle } from "./ui";
+import { Choice, Details, Group, Mono, NumField, P, Toggle } from "./ui";
 
-export function AgentsPage({ launch, profileId, profileName, autoSwap }: { launch: LaunchSettings; profileId: string; profileName: string; autoSwap: boolean }) {
+/** The three answers, as the segments say them; the third's tooltip is what off means. */
+export const PLACEMENT_OPTIONS = [
+  ["bottom", "Bottom", "A tab in the bottom pane"],
+  ["top", "Top", "A tab in the top pane"],
+  ["off", "Off", "Beside the board, in the pane you came from, as before"],
+] as const satisfies ReadonlyArray<readonly [AgentPlacement, string, string]>;
+
+export function AgentsPage({
+  launch,
+  profileId,
+  profileName,
+  autoSwap,
+  agentPlacement,
+}: {
+  launch: LaunchSettings;
+  profileId: string;
+  profileName: string;
+  autoSwap: boolean;
+  agentPlacement: AgentPlacement;
+}) {
   const toggleCli = (cli: AgentCli, on: boolean) => api.setLaunch({ ...launch, offClis: on ? launch.offClis.filter((c) => c !== cli) : [...launch.offClis, cli] });
   const toggleLauncher = (id: string, on: boolean) =>
     api.setLaunch({ ...launch, offLaunchers: on ? launch.offLaunchers.filter((l) => l !== id) : [...launch.offLaunchers, id] });
@@ -57,6 +77,24 @@ export function AgentsPage({ launch, profileId, profileName, autoSwap }: { launc
           </Group>
         );
       })}
+
+      <Group title="Where they open" foot={`For ${profileName}; a workspace can say otherwise under Workspaces. An agent from a pane's + menu opens where you asked.`}>
+        <Choice
+          label="A card's or Kuru's agent"
+          hint="Joins one pane on that edge as a tab, split off when there is none."
+          value={agentPlacement}
+          onChange={(placement) => api.setAgentPlacement(profileId, placement)}
+          options={PLACEMENT_OPTIONS}
+        />
+        <Details summary="Which pane is the bottom one">
+          <P>
+            The pane kururu put the last agent in, while it still runs along the bottom edge with something above it. Otherwise the widest pane along the bottom edge, then the
+            tallest, then the leftmost. A pane showing the board or a document is passed over. When nothing qualifies, the whole workspace is split: what is there keeps its
+            arrangement on top and the agents get the full width below. An empty workspace is split too, and keeps an empty top half. Top is the same, upside down.
+          </P>
+          <P>Where the agent starts is unchanged: the directory of the pane you came from. The keyboard stays where it was.</P>
+        </Details>
+      </Group>
 
       <Group title="Idle cards">
         <Toggle label="Sleep an idle card's agent" hint="The card keeps its conversation; running it again resumes." on={launch.sleepIdle} onChange={(sleepIdle) => api.setLaunch({ ...launch, sleepIdle })} />

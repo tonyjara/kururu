@@ -29,7 +29,7 @@
  * whatever follows being parsed as CSS. Today every glyph is one of ours and
  * that is theoretical; the moment skins arrive from the registry it is a
  * stranger's string landing in the root element of a window that is reachable
- * from the tailnet, which is the same sentence `set-workspace-color` and
+ * from the tailnet, which is the same sentence `set-profile-column-color` and
  * `files.ts` are both built around. `cssString` below is that check, written now
  * rather than when it is load-bearing.
  *

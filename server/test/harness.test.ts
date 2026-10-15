@@ -36,12 +36,17 @@ import {
   due,
   envelope,
   handsOf,
+  harnessRunFlags,
   inboxFrames,
   isCommand,
   keyBytes,
   mcpConfig,
+  memoryIndexFor,
+  memoryOrigin,
+  projectDirName,
   rolePrompt,
   tellsHarness,
+  trustAnswer,
   turnsFrom,
   typingPieces,
 } from "../../shared/harness";
@@ -461,6 +466,7 @@ describe("the feed", () => {
       host: { isLive: () => true, find: (id: string) => all.get(id) },
       activity: new Map<string, string>(),
       launch: () => ({ bypassClis: [] }),
+      madeOf: () => [],
     } as unknown as HarnessDeps;
     const harness = new Harness(deps);
     harness.report("h", { inbox: { socket, token: "tok" } });
@@ -531,6 +537,7 @@ describe("the user's words", () => {
       },
       activity: new Map<string, string>(),
       launch: () => ({ bypassClis: [] }),
+      madeOf: () => [],
     } as unknown as HarnessDeps;
     const harness = new Harness(deps);
     const send = async (agent: string, text: string, when?: string) => JSON.stringify(await harness.call("p", "h", "send_agent", { agent, text, when }));
@@ -601,5 +608,37 @@ describe("the user's words", () => {
     expect(typed.has("a1")).toBe(false);
     // Somebody typing elsewhere holds nothing here.
     expect(await send("a2", "hello")).toContain("Typed into");
+  });
+});
+
+describe("the harness's own run", () => {
+  it("names its model, effort and a window that compacts it near 200k, last on the line", () => {
+    expect(harnessRunFlags()).toEqual(["--model", "claude-opus-5-5", "--effort", "high", "--autocompact", "233k"]);
+  });
+
+  it("files a folder's transcripts where Claude Code does", () => {
+    expect(projectDirName("/Users/me/.local/share/kururu/harness/pk0123456789ab")).toBe("-Users-me--local-share-kururu-harness-pk0123456789ab");
+  });
+
+  it("reads which session a memory was written in", () => {
+    const memory = "---\nname: x\nmetadata:\n  type: feedback\n  originSessionId: 584040cf-b964-4819-a0fc-afefed5fcc79\n---\n\nbody originSessionId: nope";
+    expect(memoryOrigin(memory)).toBe("584040cf-b964-4819-a0fc-afefed5fcc79");
+    expect(memoryOrigin("no frontmatter\noriginSessionId: 584040cf-b964-4819-a0fc-afefed5fcc79")).toBeNull();
+    expect(memoryOrigin("---\nname: x\n---\n")).toBeNull();
+  });
+
+  it("keeps the index lines of what was carried, and names what the index forgot", () => {
+    const index = "- [Mine](mine.md) — kept\n- [Theirs](theirs.md) — the project's\nnot a link\n- [Also](also.md) — kept too\n";
+    expect(memoryIndexFor(index, new Set(["mine.md", "also.md", "lost.md"]))).toBe(
+      "- [Mine](mine.md) — kept\n- [Also](also.md) — kept too\n- [lost](lost.md)\n",
+    );
+    expect(memoryIndexFor(index, new Set())).toBe("");
+  });
+
+  it("says yes to the trust dialog by looking where the pointer is", () => {
+    const asked = (first: string, second: string) => `Quick safety check: Is this a project you created or one you trust?\n${first}\n${second}\nEnter to confirm`;
+    expect(trustAnswer(asked("❯ No, exit", "  Yes, I trust this folder"))).toBe("down");
+    expect(trustAnswer(asked("  No, exit", "❯ Yes, I trust this folder"))).toBe("enter");
+    expect(trustAnswer("❯ Try \"how does <filepath> work?\"")).toBeNull();
   });
 });

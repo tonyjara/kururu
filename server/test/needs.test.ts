@@ -38,7 +38,6 @@ function workspace(id: string, agentIds: string[], board: Board | null = null): 
     layout: { type: "pane", pane: { id: `p${id}`, agentIds, activeIdx: 0 } },
     focusedPaneId: `p${id}`,
     lastPaneId: null,
-    color: null,
     group: null,
     mascotId: null,
     board,

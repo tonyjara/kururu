@@ -395,8 +395,11 @@ const NVIM_TAB = `printf '\\033]2;nvim\\007'; nvim`;
  * shell on exit rather than ending the pty is the same choice `openInEditor`
  * makes: `:q` should close a buffer, not a tab.
  */
-export function nvimCommand(path?: string): string {
-  const arg = path ? ` -- ${shellQuote(path)}` : "";
+export function nvimCommand(path?: string, line?: number | null): string {
+  // `+N` before the `--`, where nvim still reads options: what a link to
+  // `index.ts:120` opens at. Only a whole positive number reaches the line.
+  const at = path && line && Number.isInteger(line) && line > 0 ? ` +${line}` : "";
+  const arg = path ? `${at} -- ${shellQuote(path)}` : "";
   return `${NVIM_TAB}${arg}; exec "\${SHELL:-/bin/sh}" -l`;
 }
 
@@ -407,5 +410,5 @@ export function nvimCommand(path?: string): string {
  * running in the tab now is a separate question, asked of the process table.
  */
 export function isNvimTab(command: string): boolean {
-  return command.startsWith(`${NVIM_TAB};`) || command.startsWith(`${NVIM_TAB} -- `);
+  return command.startsWith(`${NVIM_TAB};`) || command.startsWith(`${NVIM_TAB} -- `) || /^ \+\d+ -- /.test(command.slice(NVIM_TAB.length));
 }

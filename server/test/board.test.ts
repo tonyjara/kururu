@@ -12,8 +12,12 @@ import {
   addLane,
   adoptBoard,
   adoptDates,
+  clampLaneWidth,
   colorLane,
   collapseLane,
+  LANE_WIDTH_MAX,
+  LANE_WIDTH_MIN,
+  resizeLane,
   shiftDates,
   timeline,
   adoptProfileBoard,
@@ -69,6 +73,16 @@ describe("cards", () => {
     // Within a column, a reorder.
     b = moveCard(b, "c0", "doing", 0);
     expect(titles(b, "doing")).toEqual(["a", "b", "c"]);
+  });
+
+  it("puts a card moved to Done, with no index, at the top — newest first", () => {
+    let b = board("a", "b", "c");
+    b = moveCard(b, "c0", "done");
+    b = moveCard(b, "c1", "done");
+    expect(titles(b, "done")).toEqual(["b", "a"]);
+    // A drag names a real index, even to the foot, and that is honored as given.
+    b = moveCard(b, "c2", "done", 2);
+    expect(titles(b, "done")).toEqual(["b", "a", "c"]);
   });
 
   it("refuses an index that is not a place, through JSON", () => {
@@ -637,5 +651,41 @@ describe("a folded column", () => {
     const b = collapseLane(emptyProfileBoard(), "done", true);
     expect(folded(adoptProfileBoard(JSON.parse(JSON.stringify(b))))).toEqual([false, false, true]);
     expect(folded(adoptProfileBoard({ columns: [{ id: "k1", name: "Edited", collapsed: "yes" }], cards: [] }))).toEqual([false]);
+  });
+});
+
+describe("a column's width", () => {
+  it("takes a width on a workspace's board, unlike the rest of the lane verbs", () => {
+    const b = resizeLane(emptyBoard(), "doing", 400);
+    expect(b.widths).toEqual({ doing: 400 });
+    expect(b.columns).toBeUndefined();
+  });
+
+  it("clamps to the floor and the ceiling, and refuses a column it does not have", () => {
+    expect(resizeLane(emptyBoard(), "doing", 10).widths).toEqual({ doing: LANE_WIDTH_MIN });
+    expect(resizeLane(emptyBoard(), "doing", 9999).widths).toEqual({ doing: LANE_WIDTH_MAX });
+    expect(clampLaneWidth(10)).toBe(LANE_WIDTH_MIN);
+    expect(clampLaneWidth(9999)).toBe(LANE_WIDTH_MAX);
+    const b = emptyBoard();
+    expect(resizeLane(b, "nope", 400)).toBe(b);
+    expect(resizeLane(b, "doing", "400")).toBe(b);
+    expect(resizeLane(b, "doing", Number.NaN)).toBe(b);
+    expect(resizeLane(b, "doing", undefined)).toBe(b);
+  });
+
+  it("null takes a column back to no width at all, leaving the rest", () => {
+    let b = resizeLane(emptyProfileBoard(), "todo", 300);
+    b = resizeLane(b, "doing", 350);
+    b = resizeLane(b, "todo", null);
+    expect(b.widths).toEqual({ doing: 350 });
+    const e = emptyBoard();
+    expect(resizeLane(e, "todo", null)).toBe(e);
+  });
+
+  it("keeps a width to disk and back, and drops one for a column that board does not have", () => {
+    const b = resizeLane(emptyProfileBoard(), "todo", 300);
+    expect(adoptProfileBoard(JSON.parse(JSON.stringify(b))).widths).toEqual({ todo: 300 });
+    expect(adoptBoard({ cards: [], next: 1, widths: { nope: 300, todo: 350 } })!.widths).toEqual({ todo: 350 });
+    expect(adoptBoard({ cards: [], next: 1, widths: { todo: "350" } })!.widths).toBeUndefined();
   });
 });

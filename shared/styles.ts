@@ -52,7 +52,7 @@
  * up as custom properties on the root element of a window reachable from the
  * tailnet — and, for a mascot, as a PNG written into the user's config
  * directory. So this module is mostly checking, and the checks are the ones
- * `files.ts` and `set-workspace-color` already argue for: a name that becomes a
+ * `files.ts` and `set-profile-column-color` already argue for: a name that becomes a
  * path is checked against a list, a number is clamped to the nearest legal
  * value, and an enumeration falls back. The one rule with no give in it is that
  * **nothing may name a URL**: `cssValue` below refuses anything that would make

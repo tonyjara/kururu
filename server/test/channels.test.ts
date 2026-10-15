@@ -592,6 +592,8 @@ describe("Channels", () => {
     channels.replied("pk-main", "It finished.");
     channels.prompted("pk-main", notice);
     expect(channels.speaks("pk-main")).toBe(true);
+    // Nor is a background task's report, which arrives the same way.
+    channels.prompted("pk-main", '<task-notification>\n<summary>Agent "research" finished</summary>\n</task-notification>');
 
     await until(() => fake.sent().some((m) => m.text === "It finished."));
     const texts = fake.sent().map((m) => m.text);
@@ -599,7 +601,7 @@ describe("Channels", () => {
     expect(texts).toContain("🎙 You said: and the tests");
     expect(texts).toContain("They passed too.");
     expect(texts).not.toContain("⌨️ You typed: [telegram] check the build");
-    expect(texts.some((t) => t.includes("sk-123") || t.includes("cross-session"))).toBe(false);
+    expect(texts.some((t) => t.includes("sk-123") || t.includes("cross-session") || t.includes("task-notification"))).toBe(false);
     channels.close();
   });
 

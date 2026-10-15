@@ -50,14 +50,17 @@ import {
 import { today, type Day } from "../../../shared/days";
 import type { Launcher } from "../../../shared/launchers";
 import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
-import type { MergeBlock, MergeResolution, WorktreeStatus } from "../../../shared/projects";
+import type { WorktreeStatus } from "../../../shared/projects";
 import type { DevServer } from "../../../shared/wire";
+import { useCardDone } from "../cardDone";
 import { isLoopback, previewUrl, serverIn } from "../preview";
 import { sameJson } from "../same";
 import * as api from "../session";
 import { datesLabel, datesTense } from "../when";
+import { ColumnResizeHandle } from "./ColumnResize";
 import { Dialog } from "./Dialog";
 import { Icon } from "./Icon";
+import { MadeLinks } from "./MadeLinks";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
 import { Status } from "./Status";
 
@@ -225,25 +228,11 @@ export function BoardView({
    */
   const [notes, setNotes] = useState<Record<string, string>>({});
   /**
-   * A merge, or a move to Done, waiting for its second click — as a centred
-   * dialog rather than the menu it may have opened from, because the menu
-   * closes on the click that asks and a question about ending an agent wants
-   * to be seen, not scrolled to at the foot of a card.
-   */
-  const [ask, setAsk] = useState<Ask | null>(null);
-  /**
    * Cards with a slow git action in flight, and what it is doing. A merge is a
    * commit, a rebase, a worktree removal and an ended agent, and takes seconds
    * in which the card would otherwise sit there looking like nothing happened.
    */
   const [working, setWorking] = useState<Record<string, string>>({});
-  const whileWorking = <T,>(cardId: string, text: string, job: Promise<T>) => {
-    setWorking((all) => ({ ...all, [cardId]: text }));
-    const done = () => setWorking(({ [cardId]: _, ...rest }) => rest);
-    job.then(done, done);
-    return job;
-  };
-
   const said = (cardId: string, text: string) => {
     setErrors(({ [cardId]: _, ...rest }) => rest);
     setNotes((all) => ({ ...all, [cardId]: text }));
@@ -280,6 +269,19 @@ export function BoardView({
     const agentId = card.dev?.agentId;
     return agentId != null && agents.some((a) => a.id === agentId);
   };
+
+  /**
+   * Done's own question — end the agent too, or merge — asked the same way
+   * here and from the Needs drawer's "Move to Done": see `useCardDone`.
+   */
+  const { ask, setAsk, merge, moveToDone } = useCardDone(agentOpen, devOpen, {
+    working: (cardId, text) => setWorking((all) => ({ ...all, [cardId]: text })),
+    done: (cardId) => setWorking(({ [cardId]: _, ...rest }) => rest),
+    note: said,
+    error: (cardId, err) => failed(cardId)(err),
+    clearError: (cardId) => setErrors(({ [cardId]: _, ...rest }) => rest),
+  });
+
   const restartDev = (card: Card) => {
     setErrors(({ [card.id]: _, ...rest }) => rest);
     api.restartCardDev(workspaceId, card.id).catch(failed(card.id));
@@ -329,6 +331,21 @@ export function BoardView({
   };
 
   /**
+   * Every road into a column, the drag and the menu row alike. Done is asked
+   * about through `useCardDone`'s `moveToDone` rather than a second version
+   * of the same question here — the Needs drawer asks it too, from its own
+   * menu, and the two must never drift into two different dialogs for one
+   * move.
+   */
+  const move = (card: Card, column: BoardColumn, index?: number) => {
+    if (column === "done" && card.column !== "done") {
+      moveToDone(workspaceId, card, index);
+      return;
+    }
+    api.moveCard(workspaceId, card.id, column, index);
+  };
+
+  /**
    * The git a card's worktree needs, as menu rows: commit, set aside, merge,
    * a shell. Drawn twice — once as the menu opens, with the counts not yet
    * known and every row that needs them disabled, and again when the status
@@ -336,150 +353,6 @@ export function BoardView({
    * later. "Set aside" is `git stash`, and says so in its hint, because it is
    * the row somebody looks for as "discard" and it is deliberately not one.
    */
-  const merge = (card: Card, tree: CardWorktree, commitFirst: boolean, resolve?: MergeResolution) =>
-    whileWorking(
-      card.id,
-      commitFirst ? "Committing and merging…" : "Merging…",
-      (commitFirst ? api.commitCard(workspaceId, card.id) : Promise.resolve(null)).then(() =>
-        api.mergeCard(workspaceId, card.id, resolve),
-      ),
-    )
-      .then((reply) => {
-        if ("blocked" in reply) {
-          askAboutBlock(card, tree, reply.blocked);
-          return;
-        }
-        const merged = `Merged ${reply.commits} ${reply.commits === 1 ? "commit" : "commits"} into ${tree.base}; worktree removed`;
-        if (reply.note) failed(card.id)(new Error(`${merged} — but ${reply.note}`));
-        else said(card.id, merged);
-      })
-      .catch(failed(card.id));
-
-  /**
-   * The merge that stopped before it started, because the checkout `base` is
-   * on has uncommitted work in the files this branch changes. Git would have
-   * refused the fast-forward over it; the server saw that coming and ended
-   * nothing. The card says what is in the way and, when a dry run says the
-   * two sets of changes fit, offers the two ways through with what each one
-   * does — commit the work on the base first and rebase the card over it, or
-   * git's own autostash around the fast-forward. A dry run that conflicted
-   * gets neither, because both would land in the same conflict, one of them
-   * in a worse place: that one is the person's to resolve by hand. An
-   * untracked file the branch would create is the same kind of stop, since
-   * autostash leaves untracked files where they are and a commit would only
-   * turn the collision into an add/add conflict.
-   */
-  const askAboutBlock = (card: Card, tree: CardWorktree, block: MergeBlock) => {
-    const list = (paths: string[]) => paths.slice(0, 4).join(", ") + (paths.length > 4 ? ` and ${paths.length - 4} more` : "");
-    const parts: string[] = [];
-    if (block.files.length) {
-      parts.push(
-        `${block.base} has uncommitted changes in ${list(block.files)}, which this branch also changes, and git will not fast-forward over them.`,
-      );
-    }
-    if (block.untracked.length) {
-      parts.push(
-        `${block.base} has untracked ${list(block.untracked)}, which this branch creates. Move or remove ${
-          block.untracked.length === 1 ? "it" : "them"
-        } and merge again.`,
-      );
-    }
-    const offer = !block.untracked.length && block.clean !== false;
-    if (!block.untracked.length) {
-      parts.push(
-        block.clean === true
-          ? "In a dry run the two fit together, so either of these gets through:"
-          : block.clean === false
-            ? `In a dry run they conflict, so neither committing nor stashing them would get past this. Resolve it on ${block.base} by hand, then merge again.`
-            : "Whether the two fit together could not be checked; if they do not, the step that finds out stops and says so.",
-      );
-    }
-    setAsk({
-      cardId: card.id,
-      title: "Merge blocked",
-      hint: parts.join(" "),
-      choices: offer
-        ? [
-            {
-              label: `Commit ${block.base}, then merge`,
-              outcome:
-                `Everything uncommitted on ${block.base} is committed as “wip: before merging ${card.title}”, the card is rebased onto ` +
-                `that, and ${block.base} fast-forwards. A rebase that conflicts is aborted and the worktree stays.`,
-              run: () => merge(card, tree, false, "commit"),
-            },
-            {
-              label: "Stash, merge, restore",
-              outcome:
-                `git merge --autostash: the changes are set aside, ${block.base} fast-forwards, and they are put back uncommitted. ` +
-                "If they do not apply, they stay in git stash and the card says so.",
-              run: () => merge(card, tree, false, "stash"),
-            },
-          ]
-        : [],
-    });
-  };
-
-  /**
-   * Every road into a column, the drag and the menu row alike. Done is the one
-   * that is not just a move for a card with a worktree: on a board that runs
-   * cards in worktrees, done means merged — so the card asks, in place, with
-   * what the merge will cost, and a yes is `merge-card`, which rebases, fast-
-   * forwards the base, takes the worktree down, ends the agent and lands the
-   * card in Done itself. Uncommitted work is offered a commit first rather
-   * than a refusal, because the card is its message and the person dragging
-   * it to Done has already said the work is finished. "Just move" is there
-   * for the card whose merge cannot happen yet — a rebase that conflicts, a
-   * base that is somewhere else — and leaves the worktree standing.
-   */
-  const move = (card: Card, column: BoardColumn, index?: number) => {
-    const tree = card.worktree;
-    const running = agentOpen(card);
-    if (column !== "done" || card.column === "done" || (!tree && !running)) {
-      api.moveCard(workspaceId, card.id, column, index);
-      return;
-    }
-    /*
-     * No worktree, but an agent still open on the card: the work was merged
-     * however it was merged, and the terminal is what is left. Done asks
-     * whether that goes too rather than ending it — the agent may be the one
-     * that did the merge and still have something to say — and "Just move"
-     * leaves it, the way a merge that cannot happen yet leaves a worktree.
-     */
-    if (!tree) {
-      const agentId = card.run?.agentId;
-      setErrors(({ [card.id]: _, ...rest }) => rest);
-      setAsk({
-        cardId: card.id,
-        title: `End ${card.run?.label ?? "the agent"} too?`,
-        hint: canResume(card.run, false) ? "The conversation can be picked up again from the robot." : undefined,
-        yes: "Move and end agent",
-        run: () => {
-          api.moveCard(workspaceId, card.id, column, index);
-          if (agentId) api.closeTab(agentId);
-        },
-        alt: { label: "Just move", run: () => api.moveCard(workspaceId, card.id, column, index) },
-      });
-      return;
-    }
-    api.worktreeStatus(workspaceId, card.id).then((status) => {
-      const changes = status.changes.length;
-      const commits = `${status.ahead} ${status.ahead === 1 ? "commit" : "commits"}`;
-      const dirty = changes ? ` ${changes} uncommitted ${changes === 1 ? "file is" : "files are"} committed first as “${card.title}”.` : "";
-      const nothing = !changes && status.ahead === 0 ? " Nothing on the branch is new." : "";
-      setErrors(({ [card.id]: _, ...rest }) => rest);
-      setAsk({
-        cardId: card.id,
-        title: running ? `Merge and end ${card.run?.label ?? "the agent"}?` : `Merge into ${tree.base}?`,
-        hint:
-          `${commits} into ${tree.base}.${dirty}${nothing} ` +
-          `The worktree is removed${devOpen(card) ? ", its dev server stopped" : ""} and branch ${tree.branch} deleted.`,
-        yes: changes ? "Commit and merge" : "Merge",
-        run: () => merge(card, tree, changes > 0),
-        alt: { label: "Just move", run: () => api.moveCard(workspaceId, card.id, column, index) },
-      });
-    }, failed(card.id));
-  };
-
   const gitItems = (card: Card, tree: CardWorktree, status: WorktreeStatus | null): MenuItem[] => {
     const changes = status?.changes.length ?? 0;
     const files = status ? (changes ? `${changes} ${changes === 1 ? "file" : "files"}` : "nothing to commit") : "…";
@@ -523,7 +396,7 @@ export function BoardView({
             title: running ? `Merge and end ${card.run?.label ?? "the agent"}?` : `Merge into ${tree.base}?`,
             hint: `${status?.ahead ?? 0} ${status?.ahead === 1 ? "commit" : "commits"} into ${tree.base}. The worktree is removed and the card goes to Done.`,
             yes: "Merge",
-            run: () => merge(card, tree, false),
+            run: () => merge(workspaceId, card, tree, false),
           }),
       },
       {
@@ -627,6 +500,7 @@ export function BoardView({
           <section
             key={column}
             className={`board-col ${dropAt?.column === column ? "board-col-over" : ""}`}
+            style={board.widths?.[column] !== undefined ? ({ "--col-w": `${board.widths[column]}px` } as React.CSSProperties) : undefined}
             onDragOver={(event) => {
               if (!event.dataTransfer.types.includes(CARD_MIME)) return;
               event.preventDefault();
@@ -704,6 +578,7 @@ export function BoardView({
                     shown={shown?.id === card.id}
                     column={column}
                     index={index}
+                    workspaceId={workspaceId}
                     verbs={verbs}
                   />
                 ),
@@ -755,6 +630,7 @@ export function BoardView({
                 </button>
               )}
             </div>
+            <ColumnResizeHandle onResize={(width) => api.resizeColumn(workspaceId, column, width)} onReset={() => api.resizeColumn(workspaceId, column, null)} />
           </section>
         );
       })}
@@ -776,25 +652,6 @@ export function BoardView({
       )}
     </div>
   );
-}
-
-/**
- * A question raised about a card: a short line on what is about to happen —
- * a move, a merge — and what yes and the other way out do. Drawn as a
- * centred `Dialog` rather than on the card itself, so a move to Done that
- * would end an agent is seen rather than scrolled to. A question with
- * `choices` instead of a `yes` is one whose answers each need a sentence —
- * they are drawn as rows, each with what it does under its button, and
- * Cancel is the only plain button left.
- */
-interface Ask {
-  cardId: string;
-  title: string;
-  hint?: string;
-  yes?: string;
-  run?: () => void;
-  alt?: { label: string; run: () => void };
-  choices?: { label: string; outcome: string; run: () => void }[];
 }
 
 /**
@@ -861,6 +718,7 @@ const CardView = memo(function CardView({
   shown,
   column,
   index,
+  workspaceId,
   verbs,
 }: {
   card: Card;
@@ -890,6 +748,8 @@ const CardView = memo(function CardView({
   /** Where the card sits, for a drag over it to say which side it would land. */
   column: BoardColumn;
   index: number;
+  /** The board's workspace, which a link to what the card's agent made opens in. */
+  workspaceId: string;
   verbs: { readonly current: CardVerbs };
 }) {
   const running = runLive(card.run) && agent !== undefined && !agent.exited;
@@ -983,6 +843,9 @@ const CardView = memo(function CardView({
             onResume={resumable ? () => verbs.current.resume(card) : undefined}
           />
         )}
+        {/* The links its agent's row carries, kept here so they outlive the agent —
+            after an idle card's agent is ended, this is where the document still is. */}
+        {card.made?.length ? <MadeLinks className="board-made" files={card.made} workspaceId={workspaceId} /> : null}
         {error && <p className="board-card-error">{error}</p>}
         {working && (
           <p className="board-card-busy" role="status">

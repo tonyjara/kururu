@@ -103,6 +103,15 @@ export interface PaneState {
    * board's already did.
    */
   reader?: ReaderState;
+  /**
+   * The agents' pane: where kururu put the last agent it started on its own,
+   * and where the next one goes while it still sits on the edge the profile
+   * asked for — see `shared/agentpane.ts`. At most one per workspace
+   * (`markAgentsPane`), and only ever true: absent is the ordinary pane. It
+   * moves with the pane's contents, because a swap or a drag moves what the
+   * pane *is*, and a split leaves it on the half that kept the tabs.
+   */
+  forAgents?: true;
 }
 
 export type LayoutNode = PaneNode | SplitNode;
@@ -156,8 +165,8 @@ export function makePane(id: string, cwd?: string): PaneNode {
  * gesture in the window could undo — the divider you would drag to fix it is
  * computed from the ratio that is broken.
  *
- * Refused rather than repaired, and that is the same line `set-workspace-color`
- * draws. A ratio of `"x"` is not a drag that went too far, with a nearest legal
+ * Refused rather than repaired, and that is the same line
+ * `set-profile-column-color` draws. A ratio of `"x"` is not a drag that went too far, with a nearest legal
  * value to snap to; it is not a drag at all, and the tree it was aimed at is
  * already a perfectly good one. `propose-size` in `index.ts` has always taken
  * this shape — it is the same argument, arriving at the same answer, for the one
@@ -458,6 +467,32 @@ export function split(
   const a = split(node.a, paneId, dir, splitId, fresh, before);
   const b = split(node.b, paneId, dir, splitId, fresh, before);
   return a === node.a && b === node.b ? node : { ...node, a, b };
+}
+
+/**
+ * Divide the whole layout rather than one pane of it: everything there is
+ * keeps its arrangement on one side, and `fresh` gets the full width on the
+ * other — below by default, above with `before`. It is the agents' pane
+ * being made where there was none (`shared/agentpane.ts`), and the reason it
+ * is the root and not a pane is the picture asked for: a strip of agents
+ * under everything, not under whichever pane happened to be at the bottom.
+ */
+export function wrapLayout(node: LayoutNode, splitId: string, fresh: PaneNode, before = false): LayoutNode {
+  return { type: "split", id: splitId, dir: "col", ratio: 0.5, a: before ? fresh : node, b: before ? node : fresh };
+}
+
+/**
+ * Mark one pane as the agents' and take the mark off any other — it moves
+ * rather than multiplies, so "the pane the agents go to" always has one
+ * answer. The same tree back when that was already so.
+ */
+export function markAgentsPane(node: LayoutNode, paneId: string): LayoutNode {
+  return mapPanes(node, (pane) => {
+    if (pane.id === paneId) return pane.forAgents ? pane : { ...pane, forAgents: true };
+    if (!pane.forAgents) return pane;
+    const { forAgents: _gone, ...rest } = pane;
+    return rest;
+  });
 }
 
 /**

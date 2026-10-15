@@ -149,7 +149,9 @@ export type IconName =
   | "fold"
   | "unfold"
   | "terminal"
-  | "more";
+  | "more"
+  | "doc"
+  | "code";
 
 export type IconSet = Record<IconName, string>;
 
@@ -205,6 +207,10 @@ export const ICON_NAMES: readonly IconName[] = [
   "terminal",
   /** A workspace row's options, which wait for the pointer to be on the row. */
   "more",
+  /** A link to a document an agent made, which opens in the reader. */
+  "doc",
+  /** A link to code an agent made, which opens in nvim. */
+  "code",
 ];
 
 /**
@@ -766,6 +772,10 @@ export const BASE_ICONS: IconSet = {
   terminal: "❯",
   /** More, behind a button: three dots is what every menu of the rest is drawn as. */
   more: "⋯",
+  /** A document: the pilcrow, which is what "text to read" has been drawn as since before screens. */
+  doc: "¶",
+  /** Code: a pair of angle brackets is the one drawing of source every face has. */
+  code: "‹›",
 };
 
 /**

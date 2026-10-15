@@ -51,7 +51,7 @@ function Page({ status }: { status: FirecrawlStatus }) {
     <>
       {error && <Banner tone="bad">{error}</Banner>}
 
-      <Group title="Firecrawl" foot="Pages drawn by JavaScript, sites that block bots, PDFs: rendered on Firecrawl's servers, handed to the agent as text. The agent never sees the key.">
+      <Group title="Firecrawl" foot="For when an agent's own fetch fails — pages drawn by JavaScript, sites that block bots, PDFs: rendered on Firecrawl's servers, handed to the agent as text. The agent never sees the key.">
         <Toggle label="Agents get Firecrawl" hint={describe(status)} on={keyed && status.settings.enabled} disabled={!keyed} onChange={(enabled) => change({ enabled })} />
         {keyed && (
           <>
@@ -140,6 +140,11 @@ function Page({ status }: { status: FirecrawlStatus }) {
             content) and <Mono>search_web</Mono>, served by kururu on this Mac to agents from the + menu, a card's robot, Kuru, and a card picked back up. An agent already
             running gets them next time it starts. Not given them: agents on a machine, and a <Mono>claude</Mono> or <Mono>codex</Mono> you type into a shell yourself. Every
             result tells the agent that what came back is untrusted content from the web.
+          </P>
+          <P>
+            They are a fallback, and each one's description opens by saying so: an agent searches and reads with its own web search and fetch first, and calls one of these
+            only when that fails — a site that blocks it, a page that comes back empty, content drawn by JavaScript, a PDF its fetch cannot read. <Mono>search_web</Mono> is
+            for what its own search cannot find, never a first search; <Mono>map_site</Mono> and <Mono>crawl_site</Mono> for a site a plain fetch has already failed on.
           </P>
         </Details>
         <Details summary="What leaves this Mac: the address of every page an agent asks for, or its search words, with your key.">

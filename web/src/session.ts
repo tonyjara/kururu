@@ -23,8 +23,9 @@
  */
 import { useSyncExternalStore } from "react";
 import type { Direction } from "../../shared/layout";
+import type { AgentPlacement } from "../../shared/agentpane";
 import type { Action } from "../../shared/keys";
-import type { MascotConfig, PtyKind, SessionSnapshot, WorkspaceColor } from "../../shared/model";
+import type { MascotConfig, PtyKind, SessionSnapshot } from "../../shared/model";
 import type {
   AccountUsage,
   ClientMessage,
@@ -48,6 +49,7 @@ import type { ChannelKind, ChannelsStatus, TelegramStatus } from "../../shared/c
 import type { BackupStatus } from "../../shared/backup";
 import type { SearchHit, SearchScope } from "../../shared/store";
 import type { KuruConversation, KuruPage } from "../../shared/kuru";
+import type { MadeFile } from "../../shared/made";
 import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "../../shared/voice";
 import type { MachineEntry, MachinePin, MachineStatus } from "../../shared/machines";
 import type { TerminalAppearance } from "../../shared/theme";
@@ -729,11 +731,6 @@ export function renameWorkspace(workspaceId: string, name: string): void {
   send({ type: "rename-workspace", workspaceId, name });
 }
 
-/** Tag a workspace, or clear it with null. See WORKSPACE_COLORS. */
-export function setWorkspaceColor(workspaceId: string, color: WorkspaceColor | null): void {
-  send({ type: "set-workspace-color", workspaceId, color });
-}
-
 export function deleteWorkspace(workspaceId: string): void {
   send({ type: "delete-workspace", workspaceId });
 }
@@ -842,6 +839,11 @@ export function deleteCard(workspaceId: string, cardId: string): void {
   send({ type: "delete-card", workspaceId, cardId });
 }
 
+/** `width` in pixels, clamped on arrival; `null` takes the column back to the default. */
+export function resizeColumn(workspaceId: string, column: BoardColumn, width: number | null): void {
+  send({ type: "resize-column", workspaceId, column, width });
+}
+
 // The profile's board: the same verbs, by profile — see `send-profile-card`.
 
 export function addProfileCard(profileId: string, title: string, body: string, column?: string, dates?: CardDates | null): void {
@@ -889,6 +891,11 @@ export function moveProfileColumn(profileId: string, columnId: string, index: nu
 /** Its cards go to the column beside it — see `removeLane`. */
 export function deleteProfileColumn(profileId: string, columnId: string): void {
   send({ type: "delete-profile-column", profileId, columnId });
+}
+
+/** The same drag, on this board's own columns — see `resizeColumn`. */
+export function resizeProfileColumn(profileId: string, columnId: string, width: number | null): void {
+  send({ type: "resize-profile-column", profileId, columnId, width });
 }
 
 /** Off the profile's board and onto a workspace's, which is made if it has none. */
@@ -1021,6 +1028,16 @@ export function openInEditor(root: string, path: string, agentId: string | null)
   return request((id) => ({ type: "open-in-editor", id, root, path, agentId })).then(
     (result) => (result as { agentId: string }).agentId,
   );
+}
+
+/**
+ * Open what an agent made: Markdown in the reader, anything else in a new
+ * nvim tab, in `workspaceId` (switched to first) or wherever the server finds
+ * the file belongs. Waits, because "that file is not there any more" is a
+ * real answer and the link that was clicked is where it should be said.
+ */
+export function openMade(file: MadeFile, workspaceId: string | null, focus: boolean): Promise<void> {
+  return request((id) => ({ type: "open-made", id, root: file.root, path: file.path, line: file.line, workspaceId, focus })).then(() => undefined);
 }
 
 /**
@@ -1384,16 +1401,6 @@ export function reloading(ids: string[]): Promise<void> {
   });
 }
 
-/** Play a profile's missed replies again, oldest first. */
-export function playMissed(profileId: string): void {
-  send({ type: "play-missed", profileId });
-}
-
-/** Take a profile's unheard replies off the list, read rather than heard — the drawer's "Mark all heard". */
-export function clearMissed(profileId: string): void {
-  send({ type: "clear-missed", profileId });
-}
-
 /** These replies have been in view in the open drawer long enough to count as read. */
 export function kuruSeen(profileId: string, utterances: string[]): void {
   send({ type: "kuru-seen", profileId, utterances });
@@ -1561,13 +1568,18 @@ export function revealAgent(agentId: string): void {
  * the server knows which and the button does not. `fresh` throws the old
  * conversation away, which is a thing to ask for by name.
  */
-export function openHarness(options: { fresh?: boolean; launcher?: string } = {}): void {
+export function openHarness(options: { fresh?: boolean } = {}): void {
   send({ type: "open-harness", ...options });
 }
 
 /** Auto Swap for a profile — the screen following what its harness acts on. The server does the following; this is only the switch. */
 export function setAutoSwap(profileId: string, on: boolean): void {
   send({ type: "set-auto-swap", profileId, on });
+}
+
+/** Where a card's and Kuru's agents open, for a profile — or for one workspace of it, where null goes back to the profile's. */
+export function setAgentPlacement(profileId: string, placement: AgentPlacement | null, workspaceId?: string): void {
+  send({ type: "set-agent-placement", profileId, placement, ...(workspaceId ? { workspaceId } : {}) });
 }
 
 // ---------------------------------------------------------------------------

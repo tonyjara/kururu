@@ -61,6 +61,8 @@ const VECTORS: Record<IconName, string> = {
   unfold: /* chevrons-up-down */ `<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>`,
   terminal: /* terminal */ `<path d="M12 19h8"/><path d="m4 17 6-6-6-6"/>`,
   more: /* ellipsis */ `<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>`,
+  doc: /* file-text */ `<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>`,
+  code: /* file-code */ `<path d="M10 12.5 8 15l2 2.5"/><path d="m14 12.5 2 2.5-2 2.5"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/>`,
 };
 
 /**

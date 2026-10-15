@@ -26,6 +26,7 @@
  */
 import type { Board, BoardLane, Card, CardDates, CardRun, CardWorktree } from "./board";
 import { channelOfPrompt, type ChannelKind } from "./channels";
+import { sameMade } from "./made";
 import type { VoiceLang } from "./voice";
 
 // ---------------------------------------------------------------------------
@@ -100,9 +101,10 @@ export function sameRun(a: CardRun | null, b: CardRun | null): boolean {
 }
 
 /**
- * The events between two cards that are the same card. Order within a column
- * and the dev server are not events: one is a drag nobody wants a line for,
- * the other is a process.
+ * The events between two cards that are the same card. Order within a column,
+ * the dev server and the links to what its agent made are not events: a drag
+ * nobody wants a line for, a process, and a pointer at a file that every turn
+ * may move.
  */
 function cardEvents(before: Card, after: Card, at: number, actor: Actor): NewEvent[] {
   const out: NewEvent[] = [];
@@ -163,7 +165,8 @@ export function cardDiffers(before: Card, after: Card): boolean {
     // A Codex run's id arrives after it started, read off its rollout.
     before.run?.sessionId !== after.run?.sessionId ||
     before.dev?.agentId !== after.dev?.agentId ||
-    before.dev?.port !== after.dev?.port
+    before.dev?.port !== after.dev?.port ||
+    !sameMade(before.made, after.made)
   );
 }
 

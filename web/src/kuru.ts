@@ -13,10 +13,16 @@
  * View state and nothing else: which drawer is open is this window's, the way
  * the sidebar's width is, and a phone must not be shown a drawer because the
  * desktop opened one.
+ *
+ * One drawer at a time, both directions: opening this one closes the needs
+ * drawer the way opening that one closes this, since both now push the stage
+ * aside and a second one left open behind the first would double the squeeze
+ * rather than just losing a click to it.
  */
 import { useSyncExternalStore } from "react";
 import type { KuruConversation } from "../../shared/kuru";
 import type { AgentSnapshot, Profile } from "../../shared/model";
+import { closeNeeds } from "./needs";
 
 /**
  * What Kuru is doing now, in one word, for the chip and the drawer's live
@@ -74,6 +80,9 @@ export function useKuruDrawer(): KuruDrawerState {
 
 /** Open the drawer, at a reply when one is named, at the newest otherwise. */
 export function openKuru(focus: string | null = null): void {
+  // Both drawers push the stage now, so one left open behind the other
+  // would double the squeeze rather than just losing a click to it.
+  closeNeeds();
   set({ open: true, focus, asked: state.asked + 1 });
 }
 

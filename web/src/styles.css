@@ -138,6 +138,17 @@
      had to answer for to give the same answer is a token that rots. */
   --bar-h: 38px;
 
+  /* A board column's width: the one every column starts at, and the floor
+     and the ceiling a drag is held to (`shared/board.ts`'s `LANE_WIDTH_MIN`
+     and `LANE_WIDTH_MAX`, which this has to agree with by hand — one is the
+     clamp a width off the wire is checked against, the other is what stops
+     a column collapsing to nothing or swallowing the pane on screen). Not a
+     skin or a theme token, on `--bar-h`'s reasoning: a constant the
+     stylesheet declares for itself. */
+  --board-col-w: 280px;
+  --board-col-min: 220px;
+  --board-col-max: 640px;
+
   /* The tab strip's ground: one step between the well the panes sit on and the
      terminal inside them, so the strip is separable from both without a rule
      under it. Derived from two theme tokens rather than being a third, so it
@@ -175,13 +186,15 @@
   --icon-unfold: "⊞";
   --icon-terminal: "❯";
   --icon-more: "⋯";
+  --icon-doc: "¶";
+  --icon-code: "‹›";
 
   /* The icon strip a skin may bring instead of glyphs — every icon as one
      picture of `--icon-n` cells. `none` is the drawing. `--icon-n` is a
      constant the stylesheet needs for the arithmetic and is not a skin's to
      move: it is `ICON_NAMES.length`, and the test holds the two together. */
   --icon-sheet: none;
-  --icon-n: 27;
+  --icon-n: 29;
 
   /* ----------------------------------------------------------------------
      The parts: what a skin *paints*, three properties per region.
@@ -317,6 +330,8 @@
 .icon-unfold { --icon-svg: var(--icon-unfold-svg); --icon-glyph: var(--icon-unfold); --icon-i: 24; }
 .icon-terminal { --icon-svg: var(--icon-terminal-svg); --icon-glyph: var(--icon-terminal); --icon-i: 25; }
 .icon-more { --icon-svg: var(--icon-more-svg); --icon-glyph: var(--icon-more); --icon-i: 26; }
+.icon-doc { --icon-svg: var(--icon-doc-svg); --icon-glyph: var(--icon-doc); --icon-i: 27; }
+.icon-code { --icon-svg: var(--icon-code-svg); --icon-glyph: var(--icon-code); --icon-i: 28; }
 /* An icon strip, when a skin brought one: every icon is one cell of a single
    picture, `--icon-n` cells across, and `--icon-i` on each class says which.
    The strip is scaled so one cell is exactly the icon's box — which is what
@@ -361,7 +376,9 @@
 :root[data-glyphs~="fold"] .icon-fold::before,
 :root[data-glyphs~="unfold"] .icon-unfold::before,
 :root[data-glyphs~="terminal"] .icon-terminal::before,
-:root[data-glyphs~="more"] .icon-more::before {
+:root[data-glyphs~="more"] .icon-more::before,
+:root[data-glyphs~="doc"] .icon-doc::before,
+:root[data-glyphs~="code"] .icon-code::before {
   content: var(--icon-glyph);
   width: auto;
   height: auto;
@@ -859,12 +876,7 @@ kbd {
   background: var(--chrome-high);
 }
 
-/* One line, or two when there is a branch to show under the name. And it wears the workspace's colour as a rail down its left edge: the same
-   two pixels `.agent-item` wears, set from the same `--tag`, which is the whole
-   of how the sidebar says which agents belong to which workspace. It replaced a
-   10×3px mark tucked under the number, which was a tag you had to already know
-   was there; a rail the height of the row is the one thing on a list of a dozen
-   that can be read without reading.
+/* One line, or two when there is a branch to show under the name.
 
    Its two columns are its own. They were a `subgrid` slice of the list's, so
    the git and database buttons stood in one column down it whatever the names;
@@ -883,8 +895,6 @@ kbd {
   grid-column: 1 / -1;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  border-left: var(--border-thick) var(--border-style) var(--tag, transparent);
-  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
 }
 
 .ws-row {
@@ -1045,8 +1055,8 @@ kbd {
 
 /* A group of workspaces: a heading across the whole grid, in the agent
    groups' type so the two kinds of fold read as one, and its members stepped in
-   under it — the rail moves in with them, which is what says where a group ends
-   without a rule drawn under it. */
+   under it, which is what says where a group ends without a rule drawn under
+   it. */
 .ws-list .ws-group {
   grid-column: 1 / -1;
   display: block;
@@ -1078,17 +1088,10 @@ kbd {
   font-size: var(--fs-md);
 }
 
-/* Two pixels of the workspace's colour, always reserved. `--tag` is set per row
-   from the workspace it lives in; unset it falls back to transparent, so an
-   untagged agent lines up with a tagged one instead of sitting two pixels left
-   of it. */
-/* Qualified by the list, and not for tidiness: the shared `.agent-list li` rule
-   above is an element plus a class and would otherwise out-specify a bare
-   `.agent-item`, quietly keeping its own border-radius. */
+/* The positioned ancestor the selected row's frame is drawn against — see the
+   two selected rows under the skin's parts. */
 .agent-list .agent-item {
   position: relative;
-  border-left: var(--border-thick) var(--border-style) var(--tag, transparent);
-  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
 }
 
 /* Where the keyboard is. Deliberately not the same treatment as :hover — the
@@ -1180,10 +1183,6 @@ kbd {
    smaller, dimmer half of the pair. */
 .agent-name {
   margin-left: auto;
-  /* The room the corner takes, which is two buttons wide now. Padding rather
-     than a margin so the ellipsis lands before the icons rather than under
-     them. */
-  padding-right: 38px;
   font-size: var(--fs-sm);
   color: var(--dimmer);
   white-space: nowrap;
@@ -1205,41 +1204,71 @@ kbd {
   text-overflow: ellipsis;
 }
 
-/* Aligned with the top line rather than the row, because that is where the eye
-   is when it goes looking for a way to be rid of something. A box holding both
-   verbs rather than a corner each: what is to the left of the ✕ has changed
-   once already, and a second absolutely-placed button would have to be told the
-   first one's width — which is a skin's to decide and not this rule's. */
-.agent-tools {
-  position: absolute;
-  top: 3px;
-  right: 2px;
+/* What an agent's last turn made, on a line of its own under the row. The row
+   is a flex line with the button stretched across it, so it wraps, and the
+   links take the whole of the second line; the button gives up the bottom of
+   its padding so the two read as one row and not as a row and a stray. */
+.agent-list .agent-item-made {
+  flex-wrap: wrap;
+}
+.agent-item-made .agent-row {
+  padding-bottom: 2px;
+}
+.agent-made {
+  flex-basis: 100%;
+  padding: 0 8px 6px;
+}
+
+/* A link to a file an agent made: under its sidebar row and on its card
+   (`MadeLinks.tsx`). The card codes' chip in Kuru's replies, in the same
+   accent, because it is the same kind of thing — a door to somewhere else in
+   the window — and quiet beside the row's own words: one line, the file's
+   name, its folder a hover away. */
+.made {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 1px;
-  opacity: 0;
+  gap: 4px;
+  min-width: 0;
 }
-.agent-list .agent-item:hover .agent-tools,
-.agent-item-on .agent-tools {
-  opacity: 1;
-}
-.agent-tool {
+.made-link {
   display: inline-flex;
-  padding: 3px;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 1px 6px 1px 4px;
   border-radius: var(--radius-sm);
-  color: var(--dim);
-  font-size: var(--fs-base);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  cursor: var(--cursor-pointer);
 }
-/* Putting a row away is reversible and costs nothing, so it lights up the way
-   every other control does. The ✕ is the one that ends a process and says so in
-   the one colour the palette keeps for that. */
-.agent-tool:hover {
-  color: var(--text);
-  background: var(--chrome-high);
+.made-link:hover {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
-.agent-kill:hover {
+.made-link .icon {
+  flex: none;
+}
+.made-name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.made-line {
+  flex: none;
+  opacity: 0.75;
+}
+/* Why a link did not open, said beside it for a few seconds. */
+.made-error {
+  font-size: var(--fs-sm);
   color: var(--danger);
-  background: var(--chrome-high);
+}
+/* A thumb, not a pointer: the link is the whole of what a phone can press there. */
+:root[data-narrow] .made-link {
+  padding: 4px 8px 4px 6px;
 }
 
 /* A workspace's agents, under a heading that folds them away. The group is an
@@ -1259,17 +1288,15 @@ kbd {
   padding: 0;
 }
 
-/* The heading wears the workspace's rail, the same `--tag` its rows do, so a
-   folded group still says which colour it is. Not in capitals, unlike the
-   drawer's: this is a name somebody typed, and shouting it would change it. */
+/* Not in capitals, unlike the drawer's: this is a name somebody typed, and
+   shouting it would change it. */
 .agent-group-head {
   width: 100%;
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 3px 8px;
-  border-left: var(--border-thick) var(--border-style) var(--tag, transparent);
-  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  border-radius: var(--radius-lg);
   font-size: var(--fs-sm);
   color: var(--dim);
   text-align: left;
@@ -1291,12 +1318,6 @@ kbd {
   color: var(--dimmer);
 }
 
-/* A grouped row's top line leads with the program, since the heading above has
-   said where it is. It takes the workspace name's type and slack, and the line
-   keeps clear of the tools in its corner the way `.agent-name` used to for it. */
-.agent-top-grouped {
-  padding-right: 38px;
-}
 .agent-title {
   min-width: 0;
   font-family: var(--mono);
@@ -1902,33 +1923,34 @@ a.machine-name:hover {
   color: var(--danger);
 }
 
-.sidebar-foot {
-  /* Not somewhere to find room either — same argument as `.side-usage` above,
-     and here the thing squeezed out is the only door to Settings. `--bar-h` is
-     a floor for a bar with nothing in it and is shorter than a button a thumb
-     can hit, so on a phone the row was clipping its own cog by a pixel. */
-  flex: none;
-  padding: 6px 8px;
-  min-height: var(--bar-h);
-  display: flex;
-  align-items: center;
+/* What pushes the cog and the QR code to the header's far end. A spacer
+   rather than an auto margin on the first of them, so the profile's name —
+   which shrinks with an ellipsis — is what gives way, and so the close button
+   a phone adds after them needs no rule of its own. */
+.sidebar-head-spacer {
+  flex: 1;
+  min-width: 4px;
 }
 
-/* The one icon in the app, and deliberately quiet: settings is a place you go
-   once and then forget, so it sits at the dim end until you look for it. */
+/* The cog and the QR code, in the sidebar's header since 2026-10-12 — they
+   were its foot, and the foot sat on the status bar's left end. Deliberately
+   quiet: settings is a place you go once and then forget, so they sit at the
+   dim end, the board button's size and corner, until you look for them. */
 .cog {
+  -webkit-app-region: no-drag;
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-lg);
+  width: 26px;
+  height: 24px;
+  border-radius: var(--radius-md);
   color: var(--dimmer);
-  font-size: var(--fs-lg);
+  font-size: var(--fs-md);
 }
 :root[data-narrow] .cog {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   font-size: var(--fs-xl);
 }
 .cog:hover {
@@ -1991,24 +2013,6 @@ a.machine-name:hover {
   padding: 0;
 }
 
-/* The controls that wait for a hover have no hover to wait for.
-   The ✕ especially: it is drawn at zero opacity until the cursor is on the row,
-   which on a touch screen means an agent you cannot dismiss at all. It is worth
-   the accidental tap it costs — a kill is one confirmation away everywhere else
-   in the app, and a control nobody can reach is worth nothing at any price. */
-:root[data-narrow] .agent-tools {
-  opacity: 1;
-  top: 2px;
-}
-:root[data-narrow] .agent-tool {
-  padding: 8px;
-  font-size: var(--fs-lg);
-}
-/* And the name line clears both of them at that size. */
-:root[data-narrow] .agent-name,
-:root[data-narrow] .agent-top-grouped {
-  padding-right: 76px;
-}
 :root[data-narrow] .agent-group-head,
 :root[data-narrow] .ws-group-head {
   padding-top: 6px;
@@ -3131,11 +3135,15 @@ a.button {
   cursor: var(--cursor);
 }
 
-.sb-sep {
-  color: var(--dimmer);
-}
+/* The workspace's name, which gives way before any control does: on a phone
+   the bar once wrapped "profile / 1 workspace" onto two lines rather than
+   shorten it, and a bar two lines tall is a bar that moved the keyboard. */
 .sb-workspace {
   color: var(--text);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .sb-spacer {
   flex: 1;
@@ -3163,52 +3171,16 @@ a.button {
   font-weight: 500;
 }
 
-/* The talk key for a thumb. Quiet like the other buttons until it is doing
-   something, and then it is the one thing on the bar in a status colour: a
-   microphone that is open is the window's loudest fact. */
-.sb-mic {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 20px;
-  border-radius: var(--radius-md);
-  color: var(--dimmer);
-  flex: none;
-  touch-action: none;
-  -webkit-user-select: none;
-  user-select: none;
-}
-.sb-mic:hover {
-  color: var(--text);
-  background: var(--chrome-high);
-}
-.sb-mic-listening,
-.sb-mic-listening:hover {
-  color: var(--on-danger);
-  background: var(--danger-bg);
-}
-.sb-mic-sending {
-  color: var(--blocked);
-}
-.sb-mic-speaking {
-  color: var(--working);
-}
-:root[data-narrow] .sb-mic {
-  width: 32px;
-  height: 28px;
-  color: var(--dim);
-}
-
-/* Kuru's chip, beside the mic: the one door onto the drawer, and the one
-   place its news is. Each control has one subject — the mic is you, the chip
-   is Kuru — which is the rule that replaced the counts on the old bot
-   button's corners. Quiet, it is a dim dot and the word; thinking, the
-   mascot hops in it; speaking, the speaker glyph in the working ink; asking,
-   the blocked ink and the word; off, a hollow dot and the word. News is text
-   inside the chip and never a corner: an accent count with the speaker for
-   unheard replies, a red one with the mic for messages that did not get
-   through. In flight and all delivered are not news and get no mark. */
+/* Kuru's chip: the one door onto the drawer, and the one place its news is.
+   The second of the two drawer chips, drawn to the same height and corner as
+   the first (`.sb-needs` below): a mark, its name, then the news — the name
+   being the one thing the first does not carry. Quiet, it is a dim dot
+   and the word; thinking, the mascot hops in it; speaking, the speaker glyph
+   in the working ink; asking, the blocked ink and the word; off, a hollow
+   dot and the word. News is text inside the chip and never a corner: a red
+   count with the mic for messages that did not get through. In flight and
+   all delivered are not news and get no mark. The talk key's button stood
+   beside this chip until 2026-10-12 and is in the drawer's composer now. */
 .sb-kuru {
   display: inline-flex;
   align-items: center;
@@ -3277,10 +3249,6 @@ a.button {
   width: 11px;
   height: 11px;
 }
-.sb-kuru-unheard {
-  background: var(--accent);
-  color: var(--on-accent);
-}
 .sb-kuru-failed {
   background: var(--danger-bg);
   color: var(--on-danger);
@@ -3295,17 +3263,23 @@ a.button {
   display: none;
 }
 
-/* The tray: what needs you, left of Kuru's chip and drawn like it. A dim
-   tray while nothing does; the tray and a count in the blocked ink while
-   something does, since what it counts is mostly agents asking. It keeps
-   its place at zero, because chrome that comes and goes reads as a bar that
-   lost a button. See `NeedsDrawer.tsx`. */
+/* What needs you: the first of the two drawer chips, left of Kuru's and the
+   same height and corner — the tray, and the count when there is one. Dim
+   while nothing does; the blocked ink while something does, since what it
+   counts is mostly agents asking. It keeps its place at zero, because chrome
+   that comes and goes reads as a bar that lost a button. It said "Needs you"
+   from 2026-10-12 to 2026-10-13, and the title carries that now; at zero it
+   is the bars button's size, so the tray alone reads as one of the bar's
+   icon buttons rather than a chip with its words missing. See
+   `NeedsDrawer.tsx`. */
 .sb-needs {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  gap: 5px;
+  min-width: 22px;
   height: 20px;
-  padding: 0 6px;
+  padding: 0 4px;
   border-radius: var(--radius-md);
   color: var(--dimmer);
   font-size: var(--fs-sm);
@@ -3329,6 +3303,21 @@ a.button {
   height: 14px;
   flex: none;
 }
+/* The count, in the chip's own ink on the chip's own ground: a second colour
+   here would make three on one bar with Kuru's red, and the blocked ink on
+   the whole chip already says what kind of number it is. */
+.sb-needs-n {
+  padding: 0 5px;
+  height: 15px;
+  line-height: 15px;
+  border-radius: var(--radius-md);
+  background: var(--chrome-high);
+}
+.sb-needs-some .sb-needs-n {
+  background: var(--blocked);
+  color: var(--on-accent);
+}
+/* A thumb's height on a phone. */
 :root[data-narrow] .sb-needs {
   height: 28px;
   padding: 0 8px;
@@ -3545,15 +3534,6 @@ html.pill-page #root {
 }
 .reload-notice-why {
   color: var(--dim);
-}
-
-.sb-help {
-  font-family: var(--mono);
-  font-size: var(--fs-sm);
-  color: var(--dimmer);
-}
-.sb-help:hover {
-  color: var(--text);
 }
 
 /* --------------------------------------------------------------------------
@@ -3837,35 +3817,57 @@ html.pill-page #root {
    The Kuru drawer
    -------------------------------------------------------------------------- */
 
-/* The conversation with Kuru, over the panes: a panel on the right edge, the
-   height of the window above the status bar, and nothing dimmed behind it —
-   you read Kuru's answer while watching the agent it talks about. See
-   `KuruDrawer.tsx` for why a panel and not a column. Above the sidebar as an
-   overlay (40) and under the dialogs (50): a card opened from a reply draws
-   its sheet over this. */
+/* The conversation with Kuru, beside the panes: a flex sibling of `.stage`,
+   on exactly the terms the sidebar and the file tree already sit on it —
+   `flex: none` and a width, so opening it narrows `.stage` (`flex: 1;
+   min-width: 0`) instead of floating over it. That shrink is what resizes
+   every pty: it arrives through the ResizeObserver in `terminals.ts` with
+   the usual settle, the same path a dragged divider or a toggled sidebar
+   already takes, so this costs nothing new. Not dimmed, because you read
+   Kuru's answer while watching the agent it talks about. See
+   `KuruDrawer.tsx` for the rest of the argument. A full-screen sheet on a
+   phone instead, where there is no room to give anything up: `.kuru-sheet`
+   below, over the sidebar's own full-screen overlay (40) and under the
+   dialogs (50) — a card opened from a reply draws its sheet over this. */
 .kuru-drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: var(--bar-h);
-  width: min(420px, 100%);
+  position: relative;
+  flex: none;
+  width: min(var(--drawer-w, 420px), 33vw);
   display: flex;
   flex-direction: column;
   min-height: 0;
   background: var(--chrome);
   border-left: var(--border) var(--border-style) var(--line);
-  box-shadow: var(--elev-menu);
-  z-index: 45;
 }
-.app-zen .kuru-drawer {
-  bottom: 0;
-}
-/* On a phone it is the screen, like the board and the databases. */
 .kuru-sheet {
+  position: fixed;
   inset: 0;
   width: 100%;
+  z-index: 45;
   border-left: none;
-  box-shadow: none;
+}
+
+/* The sidebar's and the tree's grip, on the same reasoning: the left edge of
+   a column that grows leftwards, drawn over the border rather than beside it
+   so a handle never widens the drawer past the width it was told to be. */
+.kuru-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 9px;
+  z-index: 4;
+  cursor: col-resize;
+  touch-action: none;
+}
+.kuru-grip::after {
+  content: "";
+  position: absolute;
+  inset: 0 4px;
+  border-radius: var(--radius-xs);
+}
+.kuru-grip:hover::after {
+  background: var(--accent);
 }
 .kuru-head {
   -webkit-app-region: no-drag;
@@ -3942,6 +3944,18 @@ html.pill-page #root {
   flex: none;
   width: 13px;
   height: 13px;
+}
+/* The speaker switch: a header button with only its glyph, so it is padded
+   square rather than for a word, and the glyph is a size up — the height a
+   word's line gives its neighbours — so the cross of the muted speaker reads
+   at a glance beside them. */
+.kuru-head-icon {
+  justify-content: center;
+  padding: 3px 7px;
+}
+.kuru-head-icon svg {
+  width: 14px;
+  height: 14px;
 }
 /* Where a message of yours came from when it was a channel: the plane and the
    channel's name, since a plane alone is a glyph somebody has to learn. */
@@ -4021,27 +4035,101 @@ html.pill-page #root {
   padding: 6px 10px;
   border-radius: var(--radius-lg);
 }
-/* Yours sit to the right on a tinted ground; Kuru's to the left on none. The
-   glyph in the meta line says the same thing again, because which way the
-   words went is the one thing a line must not get wrong. */
+/* Who spoke is a ground, and there are two: yours to the right on raised
+   chrome, Kuru's to the left in a wash of the accent. The colour says who on
+   its own, and the side and the glyph in the meta line say it again, because
+   which way the words went is the one thing a line must not get wrong. The
+   wash used to be the highlight of the reply just scrolled to, worn by
+   mistake by every reply never spoken while spoken ones had no ground at
+   all, and kururu's notices were in yours — so the two colours came and
+   went by accident and said nothing. Now nothing that is neither of you
+   wears either: see `.kuru-notice`. */
 .kuru-you {
   align-self: flex-end;
   max-width: 92%;
   background: var(--chrome-high);
 }
 .kuru-reply {
-  align-self: stretch;
-  padding-left: 0;
+  align-self: flex-start;
+  max-width: 92%;
+  background: color-mix(in srgb, var(--accent) 14%, var(--chrome));
 }
-/* An unheard reply wears a rule in the accent, the colour the chip counts
-   it in; the one the pill was showing when it was tapped is lit for a
-   moment so the eye finds it. */
+/* An unheard reply wears a rule in the accent down its edge, the colour the
+   chip counts it in — a mark on Kuru's ground, not a ground of its own; the
+   one the pill was showing when it was tapped is lit for a moment, a deeper
+   wash of the same ink, so the eye finds it. */
 .kuru-fate-unheard {
   box-shadow: inset var(--border-thick) 0 0 var(--accent);
-  padding-left: 10px;
 }
 .kuru-marked {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: color-mix(in srgb, var(--accent) 32%, var(--chrome));
+}
+/* kururu's notices, and a background task reporting back: neither you nor
+   Kuru, so no ground and no side — one line in the meta line's size and ink,
+   across the list, between the two of you. The agent's name is the part
+   that gives way when the drawer is narrow; what happened, and when, never
+   do. A blocked agent's "is blocked" is in the blocked ink, the one notice
+   that may be waiting on you. The caret turns as the message opens. */
+.kuru-notice {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--dimmer);
+}
+.kuru-notice-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.kuru-notice-line:hover {
+  color: var(--dim);
+}
+.kuru-notice-line > * {
+  flex: none;
+}
+.kuru-notice-line .icon {
+  transform: rotate(-90deg);
+  transition: transform 120ms ease;
+}
+.kuru-notice-line[aria-expanded="true"] .icon {
+  transform: none;
+}
+.kuru-notice-from {
+  font-weight: 700;
+}
+.kuru-notice-line > .kuru-notice-cut {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kuru-notice-line time {
+  margin-left: auto;
+  padding-left: 6px;
+}
+.kuru-notice-blocked .kuru-notice-what {
+  color: var(--blocked);
+}
+:root[data-narrow] .kuru-notice-line {
+  min-height: 32px;
+}
+.kuru-notice-text {
+  margin: 2px 0 2px 9px;
+  padding: 2px 0 2px 10px;
+  border-left: var(--border) var(--border-style) var(--line);
+  font-size: var(--fs-base);
+  line-height: 1.45;
+  color: var(--dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .kuru-meta {
   display: flex;
@@ -4147,6 +4235,23 @@ html.pill-page #root {
 .kuru-card:hover {
   background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
+/* A path in a reply that is a file kururu can open: the card code's chip, for
+   the same reason, and allowed to break — a path is long and the drawer is
+   narrow. */
+.kuru-file {
+  display: inline;
+  padding: 0 3px;
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.kuru-file:hover {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
 /* What Kuru is doing now, at the foot of the list. */
 .kuru-live {
   display: flex;
@@ -4245,7 +4350,7 @@ html.pill-page #root {
    The things that need you
 
    A drawer like Kuru's — the same box, the same header — with three bands in
-   its list: the workspaces waiting on you, each a block with its tag down
+   its list: the workspaces waiting on you, each a block with a rule down
    the side and a row per thing; the ones working; and the quiet rest, folded
    to a line of names. See `NeedsDrawer.tsx`.
    -------------------------------------------------------------------------- */
@@ -4294,14 +4399,14 @@ html.pill-page #root {
   color: var(--dim);
   background: var(--chrome-high);
 }
-/* A workspace's block: the rail down its left in the workspace's colour, as
-   its row in the sidebar has, so the two lists are read the same way. */
+/* A workspace's block: a rule down its left, so where one workspace's needs
+   end and the next one's begin is drawn rather than left to the spacing. */
 .needs-ws {
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding-left: 8px;
-  border-left: var(--border-thick) var(--border-style) var(--tag, var(--line));
+  border-left: var(--border-thick) var(--border-style) var(--line);
 }
 .needs-ws-head {
   display: flex;
@@ -4428,7 +4533,16 @@ html.pill-page #root {
 .needs-done {
   color: var(--text);
 }
-/* The quiet workspaces as chips, each a door, each wearing its tag. */
+/* What the turn made, on a line of its own under the row, starting where the
+   title does: the row's padding, the 16px mark and the gap after it. */
+.needs-row-made {
+  flex-wrap: wrap;
+}
+.needs-made {
+  flex-basis: 100%;
+  padding: 0 6px 4px 30px;
+}
+/* The quiet workspaces as chips, each a door. */
 .needs-chips {
   margin: 8px 0 0;
   padding: 0;
@@ -4453,14 +4567,6 @@ html.pill-page #root {
   color: var(--text);
   border-color: var(--line-high);
   background: var(--chrome-high);
-}
-.needs-chip-dot {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius-round);
-  background: var(--tag, transparent);
-  border: var(--border) var(--border-style) var(--tag, var(--line-high));
 }
 /* A thumb's height on a phone. */
 :root[data-narrow] .needs-go {
@@ -5630,15 +5736,15 @@ label.st-row {
   color: var(--dimmer);
 }
 
-/* Processes: a workspace's terminals under its name, the workspace's colour
-   down the edge, and a bar against the heaviest tab. */
+/* Processes: a workspace's terminals under its name, a rule down the edge,
+   and a bar against the heaviest tab. */
 .st-proc-group {
   display: flex;
   flex-direction: column;
 }
 .st-proc-head,
 .st-proc-group .st-item {
-  border-left: var(--border-thick) var(--border-style) var(--tag, var(--line));
+  border-left: var(--border-thick) var(--border-style) var(--line);
 }
 .st-proc-head {
   display: flex;
@@ -6867,15 +6973,17 @@ label.st-row {
    The board
    -------------------------------------------------------------------------- */
 
-/* Four columns side by side, scrolled sideways once the pane is narrower than
-   four readable columns — which on a phone is always, and is why each column
-   snaps: one column to a screen is the phone's version of this layout. */
+/* Columns side by side, each the width it was last dragged to — a board's
+   own, kept on `shared/board.ts`'s `Board.widths` — or `--board-col-w` for
+   one that never was, scrolled sideways once they no longer fit. A phone
+   never drags one (`ColumnResizeHandle` is hidden there), and keeps the
+   layout every column had before there was a width to keep: an equal share
+   of the pane, which is why each still snaps — one column to a screen is the
+   phone's version of this. */
 .board {
   flex: 1;
   min-width: 0;
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(220px, 1fr);
+  display: flex;
   gap: 8px;
   padding: 8px;
   overflow-x: auto;
@@ -6886,10 +6994,26 @@ label.st-row {
   font-family: var(--ui);
 }
 
+.board-col,
+.board-col-add {
+  flex: 0 0 var(--col-w, var(--board-col-w));
+  min-width: var(--board-col-min);
+  max-width: var(--board-col-max);
+}
+/* Not a folded column: that one stays the strip `.board-col-shut` makes it,
+   narrow or not. */
+:root[data-narrow] .board-col:not(.board-col-shut),
+:root[data-narrow] .board-col-add {
+  flex: 1 1 0;
+  min-width: 220px;
+  max-width: none;
+}
+
 .board-col {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
   background: var(--chrome);
   border: var(--border) var(--border-style) var(--line);
   border-radius: var(--radius-lg);
@@ -7295,6 +7419,10 @@ label.st-row {
 .board-dev {
   padding-top: 1px;
 }
+/* What the card's agent made, under the run line it came from. */
+.board-made {
+  padding-top: 2px;
+}
 .board-dev-ended .board-run-words {
   color: var(--dimmer);
 }
@@ -7637,8 +7765,7 @@ label.st-row {
    instead would keep the layout and cover the first row of text. The two rows
    in the sidebar are the exception and draw theirs on `::after` — a row's
    width is the sidebar's, and a frame that took room there would make the
-   selected row a different height from its neighbours and shift the tag stripe
-   beside it.
+   selected row a different height from its neighbours.
 
    `image-rendering` is set on every painted element because a bezel is pixel
    art nine times out of ten, and reset on the pane's body because the property
@@ -7785,7 +7912,6 @@ label.st-row {
 .cog,
 .sb-bars,
 .sb-panes,
-.agent-tool,
 .dev-stop,
 .st-iconbtn,
 .sidebar-close {
@@ -7913,17 +8039,8 @@ label.st-row {
   color: var(--dim);
   font-size: var(--fs-base);
 }
-/* A row rather than the board's grid, because a folded column is a strip and
-   a grid's implicit columns are all one width. The open ones share what the
-   strips leave, which is the grid's `minmax(220px, 1fr)` said in flex. */
 .profile-board-cols {
   min-height: 0;
-  display: flex;
-}
-.profile-board-cols > .board-col,
-.profile-board-cols > .board-col-add {
-  flex: 1 1 0;
-  min-width: 220px;
 }
 .profile-board-cols > .board-col-shut {
   flex: none;
@@ -8024,6 +8141,38 @@ label.st-row {
 }
 .board-col-grip:active {
   cursor: grabbing;
+}
+/* The handle a column is resized by: the full height of it, in the gap to
+   its right, so the pointer does not have to land on a one-pixel border. Lit
+   only on hover or while it is held, like `.board-col-grip`, and gone on a
+   phone — which never drags one (`ColumnResizeHandle` is not offered a
+   `--col-w` to write there) and is not holding still for a sliver of it to
+   land on either. */
+.board-col-resize {
+  position: absolute;
+  top: 0;
+  right: -5px;
+  bottom: 0;
+  width: 10px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 1;
+}
+.board-col-resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  margin-left: -1px;
+  background: transparent;
+}
+.board-col-resize:hover::after {
+  background: var(--accent);
+}
+:root[data-narrow] .board-col-resize {
+  display: none;
 }
 /* The column in flight stays where it was, faded, so the gap it left is
    still visibly its own. */

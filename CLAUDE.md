@@ -142,6 +142,13 @@ The load-bearing invariants, one line each, with the argument behind the link:
   [terminals](docs/terminals.md#no-gpu-context-in-a-pane)
 - **`persist.ts` restores structure, never processes.** Four restored agent tabs
   must not launch four agents. → [layout](docs/layout.md#persistence)
+- **The agents kururu starts itself go to the agents' pane.** A card's run and
+  resume and Kuru's `start_agent` ask `agentPaneIn` — the bottom pane by
+  geometry (`shared/agentpane.ts`), marked `forAgents` so the next one joins
+  it, the whole layout split when there is none — and read their directory
+  off the old pane (`cwdPaneIn`); the keyboard stays where it was. The + menu's
+  agents go where they were asked for, and `off` is the old `paneBesideBoard`.
+  → [layout](docs/layout.md#the-agents-pane)
 - **Boards live in the database and nowhere else, and a file never moves or
   deletes a card that is there.** A first start makes `kururu.db`, and there
   is no other mode. Every change to a profile goes through `Store.syncProfile`
@@ -223,9 +230,11 @@ The load-bearing invariants, one line each, with the argument behind the link:
   on this Mac — the + menu, a card's robot, the harness and its
   `start_agent`, a card picked back up — gets four MCP tools served at
   `POST /mcp/web` (`scrape_page`, `crawl_site`, `map_site`, `search_web`)
-  through flags on its command line, `--mcp-config=` for Claude (spelt with
-  `=` so a card's prompt is not read as a second config) and `-c` overrides
-  for Codex, and kururu makes the request. The key is kept on the OpenRouter
+  — a fallback for when its own web search and fetch fail, which every
+  description opens by saying — through flags on its command line,
+  `--mcp-config=` for Claude (spelt with `=` so a card's prompt is not read
+  as a second config) and `-c` overrides for Codex, and kururu makes the
+  request. The key is kept on the OpenRouter
   key's terms: 0600 in `~/.config/kururu/firecrawl.json`, read per request,
   sent only to `api.firecrawl.dev`, never logged, never in a pty's
   environment, a client sent its `hint`, never backed up. Each call reserves
@@ -244,7 +253,10 @@ The load-bearing invariants, one line each, with the argument behind the link:
   [layout](docs/layout.md#the-databases-on-the-row)
 - **The harness is a session, not a loop.** One Claude Code session per
   profile, started by kururu with kururu's verbs as MCP tools (`POST /mcp`)
-  and a role; nothing in kururu generates text and no API key exists. Its
+  and a role; nothing in kururu generates text and no API key exists. It
+  runs in a folder of its own, never a project's (`harnesshome.ts`), and its
+  model, effort and compaction point are flags on its line
+  (`harnessRunFlags`), never the profile's settings. Its
   tools take a profile and workspace by id, never `active` — the `*In`
   spellings in `workspaces.ts`. What it says to an agent is **typed into the
   agent's pty as the user's words**, never posted to its inbox: Claude Code
@@ -275,9 +287,8 @@ The load-bearing invariants, one line each, with the argument behind the link:
   becomes speech, off the same Stop report. No client plays a word while any client
   is talking (`hush`); the replies that waited play after, ahead of the answer,
   each starting "While you were talking", and nothing is dropped — a reply nobody
-  played to its end is marked unheard in the Kuru drawer and counted on the
-  status bar's chip, which the clients' `speech-held`/`speech-played` reports
-  decide, and seeing it in the open drawer counts as hearing it. **The
+  played to its end is marked unheard in the Kuru drawer, which the clients'
+  `speech-held`/`speech-played` reports decide, and seeing it in the open drawer counts as hearing it. **The
   conversation has one home, the drawer** (`KuruDrawer.tsx`): every prompt and
   reply out of the database's turns, your messages' states off the outbox,
   each reply's fate off the missed list, merged once on the server
@@ -292,6 +303,16 @@ The load-bearing invariants, one line each, with the argument behind the link:
   a window only posts a WAV and plays one. `web/src/voice.ts` holds the
   microphone and installs the talk key once, through refs, never per render.
   → [voice](docs/voice.md)
+- **A link to what an agent made is read off its last reply, never off
+  everything it touched.** `shared/made.ts` finds the paths a reply names and
+  keeps the deliverable — a document presented as the result or changed in a
+  turn that changed no code, code only when presented and one of at most two —
+  two at most per agent; `server/src/made.ts` resolves them under roots
+  `files.ts` already allows and keeps them in `made.json` (by id *and* spawn
+  time), and a card's agent writes them onto `Card.made` so they outlive it.
+  A gone file's link goes within seconds. Kuru's `show_file` pins one; the
+  drawer makes Kuru's own paths links. Opening is `open-made`: Markdown to the
+  reader, code to a new nvim tab at the line. → [layout](docs/layout.md#what-an-agent-made)
 - **What needs you is one rule, in `shared/needs.ts`, and three drawings of
   it.** An agent asking, a card in Review, a turn that ended unseen, a card
   whose agent went without finishing; never a working agent, a To do, a

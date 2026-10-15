@@ -141,15 +141,16 @@ behind it as `ended`.
 **The robot is `new-tab` with a prompt on the end.** `run-card` looks the
 launcher up by id, exactly as the new-tab menu does, and `withPrompt` in
 `shared/launchers.ts` single-quotes the card onto the command line — the one
-place text somebody typed reaches `sh -c`. The agent lands in a pane *beside*
-the board's (`paneBesideBoard`) rather than as a tab in it, since a new tab is
-shown and would take the board away from the person pressing the robot; it is
-renamed after the card, and the focus goes back to the board. Any workspace of
-the profile, not only the one on screen — the harness runs a card from
-anywhere, and for a version the profile's board drew every workspace's board
-over the window — and so for resume, the worktree's terminal and the dev
+place text somebody typed reaches `sh -c`. The agent lands in the workspace's
+agents' pane ([below](#the-agents-pane)), never as a tab in the board's, since
+a new tab is shown and would take the board away from the person pressing the
+robot; it is renamed after the card, and the focus goes back to the board. Any
+workspace of the profile, not only the one on screen — the harness runs a card
+from anywhere, and for a version the profile's board drew every workspace's
+board over the window — and so for resume, the worktree's terminal and the dev
 server's ↻ too: off screen the terminal goes into that workspace's layout
-(`openTerminalAt`), beside its board, and nothing is focused.
+(`openTerminalAt`) and nothing is focused. The worktree's shell still goes
+beside the board (`paneBesideBoard`): it is a shell, opened to be typed in.
 
 **The automation moves a card on an edge, and only out of the column it put it
 in.** `noteRun` runs for every agent on every host snapshot and compares
@@ -228,9 +229,10 @@ that has passed is dimmer and never red — nothing on a board knows a card is
 finished except the name of a column a person made.
 
 **A column has a colour, and its cards wear it on the timeline.**
-`BoardLane.color` is one of a workspace's tag colours by name
-(`WORKSPACE_COLORS`) or null, and `set-profile-column-color` refuses anything
-else, for `set-workspace-color`'s reason: the name ends up in a style. It is
+`BoardLane.color` is one of the tag colours by name (`WORKSPACE_COLORS`, named
+for the workspaces that wore them first) or null, and `set-profile-column-color`
+refuses anything else, leaving the old one alone: the name ends up in a style,
+and kururu is reachable from the tailnet. It is
 what is left of the columns in a view that has given them up — a bar is its
 column's colour, so moving a card to In progress changes its bar, and the key
 above the days says which is which. Every column has one without being asked:
@@ -484,14 +486,19 @@ itself. Within a workspace the asking come first, then cards in board order,
 then agents in the sidebar's order. Every workspace is in one of three bands:
 `needs`, `working`, or `quiet`.
 
-**Where it is drawn.** The status bar's tray, left of Kuru's chip, counts the
-needs in the blocked ink and stays, dim, at zero. Behind it `NeedsDrawer.tsx`
-is a drawer like Kuru's, on its terms exactly — over the panes, not dimmed,
-closed by a click outside that lands where it was aimed (the tray excepted,
-since it toggles the drawer itself), by Escape or its ✕, and never holding the
-keyboard, so the terminal a row reveals is the one the next keystroke goes
-to; a full-screen sheet on a phone, where a pick closes it. Its list is the three bands: a block per waiting
-workspace with its tag down the side and a row per need, the working
+**Where it is drawn.** The status bar's **Needs you** chip, left of Kuru's
+— a tray and the count, with no words on any device; its title and label
+say what it is — counts the needs in the blocked ink and stays, dim and
+without a number, at zero. Behind it `NeedsDrawer.tsx`
+is a drawer like Kuru's, on its terms exactly — beside the panes, narrowing
+them rather than floating over them, not dimmed, and on a desktop closed
+only by its own ✕, the tray that opened it, or Escape: a click into the
+panes behind it is just a click into the layout and leaves it open. Never
+holding the keyboard, so the terminal a row reveals is the one the next
+keystroke goes to; a full-screen sheet on a phone instead, where a click
+outside or a pick does close it, since there is still a sheet to be outside
+of. Its list is the three bands: a block per waiting
+workspace with a rule down the side and a row per need, the working
 workspaces with what is running in them, and the quiet rest folded to a line
 of names (per device, the sidebar disclosures' reason). A row goes to the
 terminal, or to the card on its board for one with no terminal; a card's row
@@ -503,6 +510,102 @@ the `needs` band. Nothing is dismissed by hand: a row leaves when its state
 does. `C-a i` opens the drawer; `C-a o` goes to the next need from the one the
 keyboard is on, round to the first — stepping from where you are rather than
 always to the first is what lets a prompt be left for later.
+
+### What an agent made
+
+**A link to the file a turn ended in, under the agent's row, on its card, and
+on its row in the Needs you drawer** — where a card in Review or a turn that
+ended unseen is usually a document to read before it is anything else; the
+drawer takes the agent's list while it has a terminal and the card's after.
+A research doc, a plan, a script you asked for: one click opens it, Markdown
+in the reader as a tab of the focused pane, anything else in a new nvim tab
+there at the line the agent named (`nvim +N`), in the agent's workspace —
+switched to first, as clicking the row does. On a phone a tap opens the reader
+and puts the sheet away. Two links at most, and most rows have none.
+
+**Which files: the ones the last reply presents.** The Stop hook carries the
+turn's last message (`report-cli.ts`); `shared/made.ts` finds the paths in it —
+backticks, Markdown links, bare paths with an extension, `:120` and `#L120` on
+the end — and `server/src/made.ts` resolves each from the agent's directory,
+keeps only files inside a root `files.ts` already allows, and asks whether the
+turn changed it (modified since its prompt hook). Then the rule: a document
+(Markdown, text, CSV) earns a link when the reply presents it as the result —
+"written to", "saved in", "is in", "Plan:", "(new)", or the Spanish — or when
+the turn changed it and changed no code the reply names; code earns one only
+when presented *and* the reply names at most two code files. Presented first,
+then in the order named. A turn that picks nothing keeps the last links unless
+it changed a file it names, in which case it has moved on and the row goes
+bare. Rejected: every file the turn touched (that is the change, not the
+deliverable), and a tool every agent calls (its description in every turn of
+every session, and nothing at all from the agents that forget). Kuru has the
+tool instead: `show_file` pins a file to an agent's row and card, and with
+`open` puts it on the screen.
+
+**Kept where a restart cannot lose it.** The server restarts on every save in
+`server/src`, and a finished agent has no next turn to report the links again,
+so the rows' lists live in `made.json` beside `session.json`, keyed by the
+terminal's id *and* its spawn time. A card's agent writes the same list onto
+the card (`Card.made`, the `made` column, no history event, not exported — it
+points at this disk), which is how a link outlives an agent put to sleep.
+Every five seconds each link is checked against the disk, and one whose file
+went is taken off the row, the card and the drawer. Codex reports no reply, so
+its agents get links only from Kuru; an agent on a machine gets none.
+
+**Kuru's replies make their paths links too.** `server/src/kuru.ts` asks for
+the files each reply names, tried against the profile's projects, its
+terminals' directories and every allowed root (the most recently written match
+wins), and the drawer draws each path the server found as a link, opened the
+same way in the workspace whose project holds it.
+
+## The agents' pane
+
+**The agents kururu starts itself go to one pane, along one edge — the
+bottom, unless the profile says otherwise.** A card's robot, a card run or
+resumed (by hand or by Kuru) and Kuru's `start_agent` ask `agentPaneIn`. They
+used to ask `paneBesideBoard`, which put an agent in the pane focus came
+from, else any other beside the board, and with no board open in the focused
+pane itself. Each was a fair answer to "where is nobody reading", and together
+they scattered: five cards later a workspace was one pane of everything,
+agents tabbed in with the nvim somebody was using. The person who asked for
+this keeps the top half for what they read and the bottom half for agents,
+so that is the default. An agent from a pane's + menu is not one of these: it
+was put somewhere by hand, and goes there.
+
+**Which pane is the bottom one is geometry, not the tree**
+(`shared/agentpane.ts`), since one picture has many trees and the person
+sees the picture. A pane is on the bottom when it touches the bottom edge and
+has something above it; a pane that runs the full height is the bottom of
+nothing. Among those: the one marked `forAgents` — kururu marks the pane it
+put the last agent in, one per workspace (`markAgentsPane`), and the mark
+moves with the pane's contents through a swap or a drag and survives a cold
+start — else the widest, since a strip along the bottom is the bottom pane
+and a corner is not, then the tallest, then reading order. A pane showing the
+board or a document is passed over, for the old reason: a new tab is shown.
+With nothing left, the whole layout is wrapped in a split (`wrapLayout`):
+everything there keeps its arrangement on top and the agents get the full
+width below. An empty workspace is wrapped too and keeps an empty top half,
+rather than taking the only pane. A mark on a pane dragged off the edge is
+passed over rather than followed — the setting says where agents go, and the
+mark only says which of the panes there.
+
+**Where the agent starts did not move with its tab, and nor did the
+keyboard.** `cwdPaneIn` is the old rule's pane without its split, and the
+directory is read off that: following the agents' pane would start the next
+card in whatever checkout the last card's agent ran in, a worktree included.
+On screen `giveFocusBack` hands focus to the board when the robot's board is
+open, else back to the pane that had it; off screen nothing is focused, as
+before. A card's dev server lines up where it always did and falls back to
+the agents' pane rather than to a split off the board, so the server and its
+agent end up as two tabs of one pane, the agent showing.
+
+**A choice per profile, which a workspace may override.**
+`Profile.agentPlacement` is `bottom`, `top` or `off` — off being
+`paneBesideBoard`, unchanged — in Settings → Agents; `Workspace.agentPlacement`
+says otherwise for one workspace (null is "as the profile"), in Settings →
+Workspaces. Both are preferences and go to disk; `set-agent-placement` refuses
+a word that is not one of the three. A workspace pinned to a machine needs
+nothing of its own: where a tab goes is this Mac's layout, whatever its
+command line runs.
 
 ## Dragging
 
@@ -669,35 +772,26 @@ Anything that prints a key reads the merged map — the help overlay inverts it
 rather than keeping a list beside it, because a list beside it starts lying the
 first time somebody moves a key.
 
-## Workspace colours
+## Workspace colours, removed
 
-**Every new workspace is born with one, and the palette is fourteen.** It was
-eight, and null by default, on the argument that a tag means something only if
-somebody chose it. That is true and it is not the binding constraint: nobody
-chooses, because a workspace is made in the middle of doing something else. So
-`blankWorkspace` allocates — `nextColor` in `workspaces.ts` counts what the
-profile is already wearing and draws at random from the colours used least, which
-means the first fourteen workspaces are fourteen different colours. Random
-*within* the least-used set rather than the next one along, because an order
-would make the first four workspaces the same four colours in every profile on
-every machine, which reads as a sequence rather than as a tag.
+**A workspace has no colour.** It had one from the start — a tag picked from
+the row's menu, then one allocated to every new workspace, drawn as a rail down
+the left of its sidebar row, its agents' rows, their group heading, its block in
+Needs you and its terminals in Settings → Processes. It went on 2026-10-12: the
+mascot already tells two workspaces apart, and a colour beside it said the same
+thing less clearly. There is no picker, no `set-workspace-color` and no
+`Workspace.color`.
 
-Fourteen because that is how many accents Catppuccin publishes, and each name in
-`WORKSPACE_COLORS` takes one of them exactly once — a tag is never a colour the
-flavour did not ship. The names are wire slots and the order is the picker's,
-which is why `lime` holds Catppuccin's *teal*: the flavour has no yellow-green,
-and renaming the slot would cost everybody the tag on a workspace they had
-already coloured, to fix a word. Kururu's own theme has a real lime.
+A colour already saved is let go of rather than read. `readSnapshot` builds a
+workspace field by field and never looks at the old `color`, so it leaves the
+layout file at the next save; `adopt` in `workspaces.ts` takes it off a host
+blob an older server wrote, beside `dev`, so it does not ride along into every
+snapshot. Neither checks what it was — a name, a null or junk all load the same.
 
-Restored sessions are left alone. A workspace that comes back from disk with no
-colour stays that way, because retagging on load would be a version change
-rearranging a palette somebody had arranged by hand.
-
-**Where you see it is the rail**: a two-pixel edge down the left of the
-workspace's row, in the same `--tag` every agent living in that workspace wears.
-It is changed from the row's menu, **Colour…**. A round chip at the end of the
-name's line did that job until the git button took its place, and that is the
-⋯ now.
+The palette itself stayed, because a board column wears one: `WORKSPACE_COLORS`,
+the theme's `workspace` block and its `--ws-*` tokens keep their name, which is
+the styles registry's vocabulary, and the picker is `ColorPicker.tsx`, the
+profile board's now.
 
 ## The workspace row
 

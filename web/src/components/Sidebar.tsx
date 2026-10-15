@@ -46,7 +46,7 @@
  * look at the sidebar and pressed a few times a day are the trade the row made
  * once already, with the dev servers.
  */
-import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { panes } from "../../../shared/layout";
 import type {
   AgentSnapshot,
@@ -54,9 +54,8 @@ import type {
   MascotSet,
   Profile,
   Workspace,
-  WorkspaceColor,
 } from "../../../shared/model";
-import { defaultMascot, mascotFor, WORKSPACE_COLORS, workspaceUnits } from "../../../shared/model";
+import { defaultMascot, mascotFor, workspaceUnits } from "../../../shared/model";
 import type { AccountUsage, DevServer, GitAction, RepoGit } from "../../../shared/wire";
 import { formatBytes as formatSize, machineSeverity, type MachineStatus, type MachineUsed } from "../../../shared/machines";
 import {
@@ -67,7 +66,6 @@ import {
   runway,
   type OpenRouterReading,
 } from "../../../shared/openrouter";
-import { colorValue, colorValues } from "../colors";
 import { AGENT_MIME, GROUP_MIME, WORKSPACE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
 import type { Action } from "../keys";
 import { agentLabel, agentSummary, remoteHost, remoteNote, shortenPath } from "../labels";
@@ -75,9 +73,11 @@ import { previewLabel, previewUrl } from "../preview";
 import * as api from "../session";
 import { useKururu } from "../session";
 import { limitLabel, limitMarks, limitTitle, resetIn, staleTitle } from "../usage";
+import { showCardNext } from "./Board";
 import { Menu, Popover, type MenuItem } from "./Menu";
 import type { DialogState } from "./Dialog";
 import { Icon } from "./Icon";
+import { MadeLinks } from "./MadeLinks";
 import { Mascot, Status } from "./Status";
 
 /**
@@ -99,6 +99,9 @@ import { Mascot, Status } from "./Status";
  * next row — which is the only gesture on the other side of it.
  */
 const CLICK_SLOP = 12;
+
+/** How long a touch has to hold still on an agent row to open its menu — see `longPress`. */
+const LONG_PRESS_MS = 500;
 
 interface Props {
   profile: Profile;
@@ -269,6 +272,8 @@ export function Sidebar({
   const [renaming, setRenaming] = useState<string | null>(null);
   /** Where a context menu is open, and which row it belongs to. */
   const [menu, setMenu] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
+  /** Where an agent row's context menu is open, and which agent it belongs to. */
+  const [agentMenu, setAgentMenu] = useState<{ agentId: string; x: number; y: number } | null>(null);
   /**
    * Where a row's ⋯ menu is open, and whose. Apart from the right-click menu,
    * which is about the row as a thing in a list; this one is about the work in
@@ -290,10 +295,7 @@ export function Sidebar({
     const timer = setTimeout(() => setGitSaid(null), 8000);
     return () => clearTimeout(timer);
   }, [gitSaid]);
-  /** Where the colour picker is open, and whose colour it is setting. */
-  const [picker, setPicker] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
-  /** The same, for the mascot. Two states rather than one with a mode in it,
-      because only one of them can be open and neither cares about the other. */
+  /** Where the mascot picker is open, and whose mascot it is setting. */
   const [mascotPicker, setMascotPicker] = useState<{ workspaceId: string; x: number; y: number } | null>(
     null,
   );
@@ -308,6 +310,47 @@ export function Sidebar({
    * click the platform turned into a drag. See `CLICK_SLOP`.
    */
   const dragFrom = useRef<{ x: number; y: number } | null>(null);
+  /**
+   * The right-click a finger does not have. iOS never fires `contextmenu` on
+   * a long press, so an agent row times one itself — the same trick
+   * `FileTree.tsx` plays for its own rows. Held still for half a second opens
+   * the row's menu, and the click the lift would otherwise deliver is
+   * swallowed so `show()` does not also fire underneath it.
+   */
+  const press = useRef<{ timer: number; x: number; y: number } | null>(null);
+  const pressed = useRef(false);
+  const cancelPress = () => {
+    if (press.current) window.clearTimeout(press.current.timer);
+    press.current = null;
+  };
+  const longPress = (agentId: string) => ({
+    onPointerDown: (event: React.PointerEvent) => {
+      if (event.pointerType !== "touch") return;
+      event.stopPropagation();
+      cancelPress();
+      const { clientX: x, clientY: y } = event;
+      press.current = {
+        x,
+        y,
+        timer: window.setTimeout(() => {
+          press.current = null;
+          pressed.current = true;
+          setAgentMenu({ agentId, x, y });
+        }, LONG_PRESS_MS),
+      };
+    },
+    onPointerMove: (event: React.PointerEvent) => {
+      const at = press.current;
+      if (at && Math.hypot(event.clientX - at.x, event.clientY - at.y) > 10) cancelPress();
+    },
+    onPointerUp: cancelPress,
+    onPointerCancel: cancelPress,
+  });
+  const swallowed = () => {
+    if (!pressed.current) return false;
+    pressed.current = false;
+    return true;
+  };
 
   useEffect(() => {
     onEditing(renaming !== null || renamingGroup !== null);
@@ -335,6 +378,19 @@ export function Sidebar({
           mascotId: workspace.mascotId,
         });
       });
+    }
+  }
+
+  /**
+   * The card an agent is running under, if any — so its row's menu can offer
+   * "Go to card". Only a workspace's own board ever runs an agent; the
+   * profile's board is an inbox nothing has been started from yet, so it is
+   * not searched here — see `shared/board.ts`.
+   */
+  const cardFor = new Map<string, { workspaceId: string; cardId: string }>();
+  for (const workspace of profile.workspaces) {
+    for (const card of workspace.board?.cards ?? []) {
+      if (card.run?.agentId) cardFor.set(card.run.agentId, { workspaceId: workspace.id, cardId: card.id });
     }
   }
 
@@ -397,12 +453,6 @@ export function Sidebar({
     })),
     { id: "", name: "Elsewhere", agents: shown.filter((agent) => !where.has(agent.id)) },
   ].filter((group) => group.agents.length > 0);
-
-  /**
-   * Which colour each workspace is wearing, so an agent row can rule a line in
-   * the colour of the workspace it lives in without walking the tree again.
-   */
-  const tint = new Map(profile.workspaces.map((w) => [w.id, colorValue(w.color)] as const));
 
   /**
    * Whether the Agents heading's fold-everything button opens rather than
@@ -643,6 +693,38 @@ export function Sidebar({
     return items;
   };
 
+  /** The agent an open row menu belongs to. */
+  const menuAgent = agentMenu ? agents.find((a) => a.id === agentMenu.agentId) ?? null : null;
+
+  /**
+   * An agent row's menu: the two things its corner used to carry as buttons,
+   * plus the one new way out of it, "Go to card" — reachable only by right-click
+   * or a long press now, which is what let the corner go back to just the row.
+   */
+  const agentItems = (agent: AgentSnapshot): MenuItem[] => {
+    const hiddenHere = away.has(agent.id);
+    const card = cardFor.get(agent.id);
+    return [
+      { label: hiddenHere ? "Show" : "Hide", run: () => api.hideAgent(agent.id, !hiddenHere) },
+      {
+        label: "Go to card",
+        disabled: !card,
+        run: () => {
+          if (!card) return;
+          showCardNext(card.workspaceId, card.cardId);
+          api.openBoard(undefined, false, card.workspaceId);
+          navigated();
+        },
+      },
+      {
+        label: agent.exited ? "Dismiss" : "Kill",
+        sep: true,
+        danger: true,
+        run: () => api.closeTab(agent.id),
+      },
+    ];
+  };
+
   /**
    * One row of the agent list, drawn the same whichever of the two lists it is
    * in: the list proper, and the drawer of the ones put away. One function
@@ -664,7 +746,6 @@ export function Sidebar({
     const hiddenHere = !reorderable;
     const at = where.get(agent.id);
     const focused = agent.id === focusedAgentId;
-    const bar = at ? tint.get(at.workspaceId) : null;
     /* Which row a drop here would put the dragged one above. The row below this one when
        the pointer is past the midpoint, and nothing at all at the bottom of the list —
        which is the end of it. The list is agents only, so "the next row" is the next one
@@ -679,15 +760,11 @@ export function Sidebar({
         className={[
           "agent-item",
           focused ? "agent-item-on" : "",
+          agent.made?.length ? "agent-item-made" : "",
           insert ? (insert.after ? "agent-under" : "agent-over") : "",
         ]
           .filter(Boolean)
           .join(" ")}
-        /* The rule down the left is the workspace's colour. It is a variable rather than
-           a border set here so the untagged case still reserves the two pixels: rows that
-           shift sideways when a colour is assigned would make the list jump under the
-           cursor. */
-        style={bar ? ({ "--tag": bar } as React.CSSProperties) : undefined}
         /* Only a terminal, and never the one in flight: a row dropped on itself is a drag
            somebody changed their mind about, and it should read as nothing happening
            rather than as a refusal. A pane or a workspace dropped here means nothing, so
@@ -730,10 +807,17 @@ export function Sidebar({
           const box = event.currentTarget.getBoundingClientRect();
           api.reorderAgent(dragged, insertBefore(event.clientY > box.top + box.height / 2));
         }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setAgentMenu({ agentId: agent.id, x: event.clientX, y: event.clientY });
+        }}
       >
         <button
           className={`agent-row ${agent.exited ? "agent-row-exited" : ""}`}
-          onClick={() => show(agent.id)}
+          onClick={() => {
+            if (swallowed()) return;
+            show(agent.id);
+          }}
           title={(remoteNote(agent) ? [agentLabel(agent), agentSummary(agent), remoteNote(agent)] : [agentLabel(agent), agentSummary(agent), agent.command, agent.cwd])
             .filter(Boolean)
             .join("\n")}
@@ -745,6 +829,7 @@ export function Sidebar({
             setOverAgent(null);
             endDrag();
           }}
+          {...longPress(agent.id)}
         >
           {/* Where it lives and what it is. The two things you need to find it again, and
               nothing that changes while you read.
@@ -756,7 +841,7 @@ export function Sidebar({
               goes where the workspace used to be, at the end of the line and dimmer, as
               the thing you read once you have found the row rather than the thing you
               find it by. */}
-          <span className={`agent-top ${hiddenHere ? "" : "agent-top-grouped"}`}>
+          <span className="agent-top">
             {/* The agent's own workspace, not the one you are looking at: this list spans
                 the whole profile, so two rows of it can legitimately be wearing different
                 mascots. */}
@@ -797,33 +882,13 @@ export function Sidebar({
             {agent.contextUsage && <ContextRing usage={agent.contextUsage} />}
           </span>
         </button>
-        {/* The two things you can do to a row without going and looking at it, in the
-            corner, in the order of what they cost. Putting one away is a decision about
-            this list; the ✕ beside it ends a process. They are one flex box rather than
-            two absolutely-placed corners, so that adding the first did not mean knowing
-            how wide the second is under every skin. */}
-        <span className="agent-tools">
-          <button
-            className="agent-tool agent-away"
-            onClick={() => api.hideAgent(agent.id, !hiddenHere)}
-            title={
-              hiddenHere
-                ? "Put back in the list"
-                : "Hide this row — the agent keeps running"
-            }
-            aria-label={hiddenHere ? "Show" : "Hide"}
-          >
-            <Icon name="hide" />
-          </button>
-          <button
-            className="agent-tool agent-kill"
-            onClick={() => api.closeTab(agent.id)}
-            title={agent.exited ? "Remove this tab" : "End this agent and close its tab"}
-            aria-label={agent.exited ? "Dismiss" : "Kill"}
-          >
-            <Icon name="close" />
-          </button>
-        </span>
+        {/* What its last turn ended in, when that was something to read: a line of its
+            own under the row rather than a third line inside it, because these are
+            buttons and the row is one, and because a row with nothing to read keeps
+            the height it always had. Into the agent's workspace, like the row. */}
+        {agent.made?.length ? (
+          <MadeLinks className="agent-made" files={agent.made} workspaceId={at?.workspaceId ?? null} onOpened={navigated} />
+        ) : null}
       </li>
     );
   };
@@ -882,8 +947,25 @@ export function Sidebar({
         </button>
         {/* Kuru is not here any more. It was a bot button beside the board with
             a count on each corner, and it is now a chip in the status bar and
-            a drawer behind it — see `StatusBar.tsx` and `KuruDrawer.tsx`. The
-            header is the profile's name and its board, which is what it was. */}
+            a drawer behind it — see `StatusBar.tsx` and `KuruDrawer.tsx`. */}
+        <span className="sidebar-head-spacer" />
+        {/* Settings and the phone, at the far end of the header. They were the
+            sidebar's foot until 2026-10-12, where they sat on the status bar's
+            left end as three icon buttons from two components, next to a
+            second copy of the profile's name. Up here they are beside the
+            name they belong to — a profile is edited in Settings, and the
+            profile menu's last item already goes there — and the bottom edge
+            is one bar with one grammar. The QR code is for getting kururu
+            *onto* a phone, so a sidebar that is a phone's whole screen does
+            not draw it; a narrow desktop window gets it back when widened. */}
+        {!overlay && (
+          <button className="cog" onClick={onReach} title="Open on your phone" aria-label="Open on your phone">
+            <Icon name="share" />
+          </button>
+        )}
+        <button className="cog" onClick={onSettings} title="Settings (C-a g)" aria-label="Settings">
+          <Icon name="settings" />
+        </button>
         {/* The way out of a full-screen sidebar. Drawn only when it is one: as a
             column, the panes next to it are already the way out, and a close
             button beside a thing with a keyboard shortcut and a status-bar
@@ -934,15 +1016,6 @@ export function Sidebar({
               className={`ws-item ${workspace.id === profile.activeWorkspaceId ? "ws-item-on" : ""} ${
                 overWorkspace === workspace.id ? "ws-over" : ""
               } ${group !== null ? "ws-item-grouped" : ""}`}
-              /* The rail down the left edge, in this workspace's colour — the
-                 same `--tag` every agent living in here wears, so the sidebar
-                 says which agents belong to which workspace by lining them up
-                 rather than by making anybody read two lists. */
-              style={
-                colorValue(workspace.color)
-                  ? ({ "--tag": colorValue(workspace.color)! } as CSSProperties)
-                  : undefined
-              }
               /* The whole row, both lines of it, and not the name's button.
                  The button was the target for as long as a row *was* the name;
                  splitting the second line out left a strip along the bottom of
@@ -1143,7 +1216,6 @@ export function Sidebar({
           )}
           {groups.map((group) => {
             const shut = folded.has(group.id);
-            const bar = tint.get(group.id);
             return (
               <li key={group.id || "elsewhere"} className="agent-group">
                 {/* The heading is the fold, and also a place to drop a terminal: the
@@ -1155,7 +1227,6 @@ export function Sidebar({
                     take you there. */}
                 <button
                   className={`agent-group-head ${overGroup === group.id ? "ws-over" : ""}`}
-                  style={bar ? ({ "--tag": bar } as CSSProperties) : undefined}
                   onClick={() => toggleFolded(group.id)}
                   aria-expanded={!shut}
                   title={shut ? `Show ${group.name}'s agents` : `Fold ${group.name}'s agents away`}
@@ -1238,27 +1309,9 @@ export function Sidebar({
       <Machines />
       <DevServers />
 
-      {/* A new terminal used to be a button down here and is not one any more:
-          the tab strip's `+` is in the place you are already looking when you
-          want another tab, and C-a T and ⌘T are how it actually gets opened.
-          What the corner is for instead is the thing with no other door. */}
-      <div className="sidebar-foot">
-        <button className="cog" onClick={onSettings} title="Settings" aria-label="Settings">
-          <Icon name="settings" />
-        </button>
-        {/* Beside the cog rather than in it: getting kururu onto a phone is a
-            thing you do at the start of a session, not a preference you set —
-            and it is the one gesture in the app with no keyboard door, because
-            the answer to it is a picture you have to be looking at. */}
-        <button
-          className="cog"
-          onClick={onReach}
-          title="Open on your phone"
-          aria-label="Open on your phone"
-        >
-          <Icon name="share" />
-        </button>
-      </div>
+      {/* No foot. A new terminal was a button down here once, and then the cog
+          and the QR code were; the first is the tab strip's `+`, and the two
+          are in the header now, beside the profile they belong to. */}
 
       {/* The edge you drag. Last in the tree and absolutely positioned, so it
           sits over the border rather than taking a column of its own — a handle
@@ -1276,10 +1329,6 @@ export function Sidebar({
                the same verb as the ⋯ menu's, which says what it does. */
             { label: "Open the board", run: () => openRowBoard(menuWorkspace.id) },
             { label: "Rename", sep: true, run: () => setRenaming(menuWorkspace.id) },
-            {
-              label: "Colour…",
-              run: () => setPicker({ workspaceId: menuWorkspace.id, x: menu.x, y: menu.y }),
-            },
             {
               label: "Mascot…",
               run: () => setMascotPicker({ workspaceId: menuWorkspace.id, x: menu.x, y: menu.y }),
@@ -1357,6 +1406,14 @@ export function Sidebar({
         />
       )}
 
+      {agentMenu && menuAgent && (
+        <Menu
+          at={agentMenu}
+          onClose={() => setAgentMenu(null)}
+          items={agentItems(menuAgent)}
+        />
+      )}
+
       {mascotPicker && (
         <MascotPicker
           at={mascotPicker}
@@ -1371,71 +1428,7 @@ export function Sidebar({
           onClose={() => setMascotPicker(null)}
         />
       )}
-
-      {picker && (
-        <ColorPicker
-          at={picker}
-          current={profile.workspaces.find((w) => w.id === picker.workspaceId)?.color ?? null}
-          onPick={(color) => {
-            api.setWorkspaceColor(picker.workspaceId, color);
-            setPicker(null);
-          }}
-          onClose={() => setPicker(null)}
-        />
-      )}
     </aside>
-  );
-}
-
-/**
- * Fourteen swatches and a way back out of them.
- *
- * A grid rather than a list of colour names, because nobody picks "coral" — they
- * pick the one that is not the one the workspace above is wearing, and that is a
- * comparison you make by looking. The colour currently set is ringed rather than
- * ticked for the same reason: a tick would have to sit on top of the colour it
- * is describing.
- *
- * "None" is a swatch too, not a separate control. Clearing a tag is the same
- * kind of decision as changing it, and burying the undo of a thing one row lower
- * than the thing is how people end up with a palette they cannot get out of.
- */
-export function ColorPicker({
-  at,
-  current,
-  onPick,
-  onClose,
-}: {
-  at: { x: number; y: number };
-  current: WorkspaceColor | null;
-  onPick: (color: WorkspaceColor | null) => void;
-  onClose: () => void;
-}) {
-  return (
-    <Popover at={at} onClose={onClose} className="picker" role="listbox">
-      <div className="picker-grid">
-        {WORKSPACE_COLORS.map((color) => (
-          <button
-            key={color}
-            role="option"
-            aria-selected={current === color}
-            className={`chip ${current === color ? "chip-on" : ""}`}
-            style={{ background: colorValues()[color] }}
-            title={color}
-            aria-label={color}
-            onClick={() => onPick(color)}
-          />
-        ))}
-      </div>
-      <button
-        role="option"
-        aria-selected={current === null}
-        className={`picker-none ${current === null ? "picker-none-on" : ""}`}
-        onClick={() => onPick(null)}
-      >
-        No colour
-      </button>
-    </Popover>
   );
 }
 

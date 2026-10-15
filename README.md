@@ -178,7 +178,7 @@ runs `tailscale` for you.
 
 ```
 ┌───────────┬─────────────────────────────────────────────┐
-│ ● main    │ [claude ●][zsh][+]            ⊟ ⊞ ✕        │
+│ ● main  ⚙ │ [claude ●][zsh][+]            ⊟ ⊞ ✕        │
 │           │ > running the tests…                        │
 │ WORKSPACES│                                             │
 │ 1 main   ●│                    │                        │
@@ -188,7 +188,7 @@ runs `tailscale` for you.
 │ ● claude  │ nothing to commit                           │
 │ ○ zsh     │                                             │
 │           ├─────────────────────────────────────────────┤
-│[Terminal] │ main / 1 main        PREFIX          C-a ?  │
+│           │ ≡ main      PREFIX      Needs you 2   Kuru  │
 └───────────┴─────────────────────────────────────────────┘
 ```
 
@@ -229,13 +229,12 @@ it. A new tab opens where the terminal you were just in *is*, read from the pty.
 
 ### The sidebar
 
-Double-click a workspace to rename it; right-click for colour, mascot, reorder,
+Double-click a workspace to rename it; right-click for mascot, reorder,
 groups, new, and delete. `C-a 1`…`9` still jump to the first nine, and the row's
 tooltip says which key is its. After the name, `±3` is files not committed and
 `↑2` `↓1` commits to push and pull. Hover a row for its **⋯** — the board,
 LazyGit in the workspace's repository, its databases, and commit, merge, pull
-and push; on a touch screen the ⋯ is always there. The colour tags a workspace and every
-terminal in it gets a rule down its left in that colour.
+and push; on a touch screen the ⋯ is always there.
 
 The list below is **agents**, not terminals — the test is "has an agent ever been
 seen in here", so a row does not flicker out while claude is between things, and
@@ -356,7 +355,7 @@ over its own copy, so nothing is reported twice.
 
 ## The harness
 
-The bot button beside the profile's board, or `C-a a`, opens the profile's
+The **Kuru** chip on the status bar, or `C-a a`, opens the profile's
 **harness**: one Claude Code session that oversees every agent in the profile.
 Talk to it as you would to any Claude, about all of them at once — "start an
 agent on the migration card", "what did the API worker say", "tell it to use
@@ -429,7 +428,7 @@ not encrypt bot chats end to end. See `docs/channels.md`.
 
 ## Settings
 
-The cog, or `C-a g`. Five tabs, all server-side, in `~/.config/kururu` — so a
+The cog at the top of the sidebar, or `C-a g`. Five tabs, all server-side, in `~/.config/kururu` — so a
 change reaches a second window and the phone without being told.
 
 | | |
@@ -440,7 +439,7 @@ change reaches a second window and the phone without being told.
 | **Mascot** | what the badge does while an agent is working |
 | **Keys** | what each key does after the prefix |
 | **Channels** | talking to Kuru from Telegram: a walkthrough from making the bot to the switch |
-| **Agents → Firecrawl** | lets every agent kururu starts read pages a plain fetch cannot (JavaScript-drawn, bot-blocked, PDFs) through your Firecrawl key, which stays in kururu: a walkthrough, a switch, a page limit and a daily credit budget. The addresses agents fetch go to Firecrawl's servers. See `docs/web.md` |
+| **Agents → Firecrawl** | lets every agent kururu starts fall back on Firecrawl for what its own web search and fetch cannot reach (JavaScript-drawn pages, bot-blocked sites, PDFs) through your Firecrawl key, which stays in kururu: a walkthrough, a switch, a page limit and a daily credit budget. The addresses agents fetch go to Firecrawl's servers. See `docs/web.md` |
 | **Backups** | a private git repository the boards, conversations, settings and memory go to, every few minutes when something changed — never the secrets |
 
 ### Appearance
@@ -550,7 +549,7 @@ to the dot if it is not a PNG.
 
 #### A mascot per workspace
 
-Right-click a workspace → **Mascot…**, where its colour lives; each option is drawn
+Right-click a workspace → **Mascot…**; each option is drawn
 animating. **Default** is an option in the list rather than a way of dismissing it:
 it means the ★ moving in Settings moves this workspace too. Deleting a mascot a
 workspace used needs no clean-up.

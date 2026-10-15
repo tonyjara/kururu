@@ -66,7 +66,7 @@ and the harness's, carry a session.
 
 `Workspace.machine` is `{ machineId, dir }` or null. Set in Settings → General
 → Workspaces, **Runs on**; persisted with the layout as a preference, like the
-colour; read by `adoptPin`; removed from every workspace when its machine is.
+mascot; read by `adoptPin`; removed from every workspace when its machine is.
 
 What goes to the machine is **every terminal the workspace opens for itself**:
 

@@ -30,6 +30,21 @@ export function SpeakerIcon() {
 }
 
 /**
+ * The speaker struck through, for replies that are not read aloud: the same
+ * cone as `SpeakerIcon` with a cross where the waves were, so the two read as
+ * one switch in its two positions rather than two different things.
+ */
+export function SpeakerOffIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M11 5 6 9H2v6h4l5 4V5Z" />
+      <path d="m16 9 6 6M22 9l-6 6" />
+    </svg>
+  );
+}
+
+/**
  * A paper plane, for a message that came from a channel — Telegram's own
  * mark is a plane, and a plane says "sent from elsewhere" in any chrome
  * without borrowing anybody's logo.

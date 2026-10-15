@@ -82,7 +82,69 @@ describe("Auto Swap on disk", () => {
 });
 
 /**
- * Where a workspace's shells run is a preference like its colour, so it comes
+ * Where agents open is a preference, so it survives a cold start; so does
+ * the agents' pane's mark, though not what was in the pane, because the
+ * mark is how the next agent finds the pane again.
+ */
+describe("where agents open, on disk", () => {
+  it("keeps the profile's choice, a workspace's own, and the mark", () => {
+    const workspaces = new Workspaces();
+    workspaces.newProfile("work");
+    const [first, second] = workspaces.all();
+    workspaces.setAgentPlacement(second!.id, "top");
+    workspaces.setWorkspaceAgentPlacement(first!.id, first!.workspaces[0]!.id, "off");
+    workspaces.setWorkspaceAgentPlacement(second!.id, second!.workspaces[0]!.id, "off");
+    workspaces.setWorkspaceAgentPlacement(second!.id, second!.workspaces[0]!.id, null);
+    workspaces.agentPaneIn(second!.id, second!.workspaces[0]!.id);
+    writeSnapshot(workspaces.all(), workspaces.active.id);
+    const after = readSnapshot()!.profiles;
+    expect(after.map((p) => p.agentPlacement)).toEqual(["bottom", "top"]);
+    expect(after.map((p) => p.workspaces[0]!.agentPlacement)).toEqual(["off", null]);
+    expect(panes(after[1]!.workspaces[0]!.layout).map((p) => p.forAgents === true)).toEqual([true, false]);
+  });
+
+  it("reads a file from before it as the default, and junk as no choice", () => {
+    const workspaces = new Workspaces();
+    writeSnapshot(workspaces.all(), workspaces.active.id);
+    const session = JSON.parse(readFileSync(snapshotPath(), "utf8"));
+    delete session.profiles[0].agentPlacement;
+    session.profiles[0].workspaces[0].agentPlacement = "sideways";
+    session.profiles[0].workspaces[0].layout.pane.forAgents = "yes";
+    writeFileSync(snapshotPath(), JSON.stringify(session));
+    const read = readSnapshot()!.profiles[0]!;
+    expect(read.agentPlacement).toBe("bottom");
+    expect(read.workspaces[0]!.agentPlacement).toBeNull();
+    expect(panes(read.workspaces[0]!.layout)[0]!.forAgents).toBeUndefined();
+  });
+});
+
+/**
+ * Workspaces wore a colour until 2026-10-12, and every session file written
+ * before then still says which. It must load as it did, minus the colour, and
+ * the colour must be gone from the file after the next save rather than ride
+ * along in it for ever.
+ */
+describe("a workspace colour on disk", () => {
+  it("is read past, and not written back", () => {
+    const workspaces = new Workspaces();
+    workspaces.newWorkspace("second");
+    writeSnapshot(workspaces.all(), workspaces.active.id);
+    const session = JSON.parse(readFileSync(snapshotPath(), "utf8"));
+    session.profiles[0].workspaces[0].color = "violet";
+    session.profiles[0].workspaces[1].color = "url(javascript:0)";
+    writeFileSync(snapshotPath(), JSON.stringify(session));
+
+    const read = readSnapshot()!;
+    expect(read.profiles[0]!.workspaces.map((w) => w.name)).toEqual(["main", "second"]);
+    for (const w of read.profiles[0]!.workspaces) expect(w).not.toHaveProperty("color");
+
+    writeSnapshot(read.profiles, read.activeProfileId);
+    expect(readFileSync(snapshotPath(), "utf8")).not.toContain("color");
+  });
+});
+
+/**
+ * Where a workspace's shells run is a preference like its mascot, so it comes
  * back as it was — and is read as a command line's ingredients are, since that
  * is what it becomes. Removing the machine brings every workspace on it home.
  */

@@ -14,7 +14,7 @@
  * Settings is open, so the page asks while it is open and nothing runs once it
  * is closed. See `server/src/footprint.ts` for how a tree is read.
  */
-import type { AgentStatus, PtyKind, WorkspaceColor } from "./model";
+import type { AgentStatus, PtyKind } from "./model";
 
 /** One terminal, and what is running under it. */
 export interface FootprintTerminal {
@@ -44,7 +44,6 @@ export interface FootprintTerminal {
 export interface FootprintWorkspace {
   id: string;
   name: string;
-  color: WorkspaceColor | null;
   /** Terminal ids, in the order the panes hold them. */
   terminals: string[];
 }

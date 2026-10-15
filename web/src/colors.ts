@@ -1,5 +1,6 @@
 /**
- * What a workspace colour looks like.
+ * What a board column's colour looks like — the palette workspaces wore until
+ * they stopped, and which is still named after them (see `WORKSPACE_COLORS`).
  *
  * The server stores a name and the web decides what it means, which is the same
  * split `labels.ts` makes for the same reason: the thing that has to be agreed
@@ -41,7 +42,7 @@ export function colorValues(): Record<WorkspaceColor, string> {
   return out;
 }
 
-/** The CSS value for a tag, or null for an untagged workspace. */
+/** The CSS value for a tag, or null for an untagged column. */
 export function colorValue(color: WorkspaceColor | null | undefined): string | null {
   return color ? `var(--ws-${color})` : null;
 }

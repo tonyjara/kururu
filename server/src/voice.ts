@@ -503,15 +503,6 @@ export class Voice {
     return queued;
   }
 
-  /** Take a profile's missed replies off the list unheard: the person has read them, or does not care to. */
-  clear(profileKey: string): void {
-    const before = this.missed.length;
-    this.missed = this.missed.filter((entry) => entry.profileKey !== profileKey || entry.pending);
-    if (this.missed.length === before) return;
-    this.saveMissed();
-    this.deps.changed();
-  }
-
   /**
    * Settle what can be settled: a reply heard leaves the list, one missed
    * joins it. Called on every report a client makes and every reply that

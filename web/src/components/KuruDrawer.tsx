@@ -25,39 +25,66 @@
  * since playback works over plain http and only the microphone needs the
  * secure context.
  *
- * **A panel over the panes, not a column.** A column would resize every pty
- * on open and close; a drawer costs nothing and the terminals stay readable,
- * which matters because you read Kuru's answer while watching the agent it
- * talks about. It does not dim them for the same reason. A click outside
- * closes it and lands where you clicked. On a narrow window it is a
- * full-screen sheet with the usual close button, one sheet at a time, like
- * the board and the databases.
+ * **Who spoke is a colour, and only two people speak.** Yours are on raised
+ * chrome at the right, Kuru's on the terminals' ground at the left, and
+ * nothing else wears either: kururu's notices that an agent finished or
+ * blocked, and a background task reporting back, arrive in Kuru's session as
+ * user turns, and were drawn as yours — most of "your" lines on a busy day,
+ * so the two colours alternated and said nothing. They are a third kind now
+ * (`readPrompt` in `shared/kuru.ts` decides, out of the database, wrappers
+ * and all), drawn as one quiet line — who, which agent, what happened —
+ * with the whole message behind a tap.
+ *
+ * **A column beside the panes, on the sidebar's terms.** It used to be a
+ * panel floated over them, on the argument that a column resizes every pty
+ * on open and close — which is true of a resize dragged frame by frame, and
+ * not of one settled in `terminals.ts`'s usual 60ms, the same debounce a
+ * sidebar toggle already rides. So it is a flex sibling of `.stage` now,
+ * narrowing it the way the sidebar and the file tree do, and the terminals
+ * resize once, at the end, instead of never. It does not dim them, because
+ * you read Kuru's answer while watching the agent it talks about, and a
+ * click into them — a terminal, a card — is just a click into the layout,
+ * not a reason to close; only the close button, the chip, or the keyboard
+ * does that. On a narrow window it is still a full-screen sheet over
+ * everything, the usual close button, one sheet at a time like the board
+ * and the databases — and there a click outside does close it, since
+ * "outside" is still something else drawn above the sheet.
  *
  * **Unheard means neither heard nor seen.** A reply stops counting when it is
  * played to its end, or when it has been in view in the open drawer for
  * `KURU_SEEN_MS`. The count's job is to bring you here; once you are here it
  * has done it, and a count that survived reading would teach you to ignore
- * it. "Mark all heard" stays for when you will not scroll, and Play says them
- * aloud as before.
+ * it. So nothing here clears the count by hand: a reply's own speaker says it
+ * again, and asking Kuru what you missed has it call `play_missed` for all of
+ * them. The header used to carry "Play unheard" and "Mark all heard" for
+ * those two jobs, and they were two buttons nobody could say the use of.
+ *
+ * **The speaker in the header is Settings → Voice's "Speak replies"** — the
+ * one setting, not a copy of it: read off the socket's `voice` and written
+ * back whole through `setVoice`, so the two places cannot disagree. Muting
+ * also stops a reply already audible here, because a mute that lets the
+ * sentence finish reads as a mute that did not work.
  *
  * What it draws is the server's `kuru` message (`shared/kuru.ts`), already
  * merged: nothing in here decides what a message's state is or whether a
  * reply was heard. What it adds is this page's own two states for a clip the
  * server does not have yet — recording, and saving — from the voice module.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cardCode } from "../../../shared/board";
 import { CHANNEL_NAMES, channelReady, isChannelKind, type TelegramStatus } from "../../../shared/channels";
-import { KURU_SEEN_MS, clipLength, splitCardCodes, type KuruConversation, type KuruItem, type KuruReply, type YouItem } from "../../../shared/kuru";
+import { KURU_SEEN_MS, clipLength, splitCardCodes, type KuruConversation, type KuruItem, type KuruReply, type NoticeItem, type YouItem } from "../../../shared/kuru";
+import { splitMentions } from "../../../shared/made";
 import type { AgentSnapshot, MascotConfig, Profile } from "../../../shared/model";
-import type { OutboxState } from "../../../shared/voice";
+import type { OutboxState, VoiceSettings } from "../../../shared/voice";
 import { kuruLive, type KuruLive } from "../kuru";
 import * as api from "../session";
 import { useKururu } from "../session";
-import { dismissVoice, talkDown, talkUp, useOutgoing, useVoiceUi, voiceIsRemote } from "../voice";
+import { dismissVoice, talkDown, talkUp, useOutgoing, useVoiceUi, voiceIsRemote, voiceNow } from "../voice";
 import { Icon } from "./Icon";
+import { MadeInline } from "./MadeLinks";
 import { Mascot } from "./Status";
-import { MicIcon, PlaneIcon, SpeakerIcon } from "./VoiceIcons";
+import { MicIcon, PlaneIcon, SpeakerIcon, SpeakerOffIcon } from "./VoiceIcons";
 
 /** How close to the foot the list has to be for a new item to keep it there. Reading something older must not be yanked away. */
 const STICK_PX = 48;
@@ -91,6 +118,8 @@ export function KuruDrawer({
   focus,
   asked,
   onClose,
+  onResize,
+  onResetWidth,
   onEditing,
   onCard,
   onTerminal,
@@ -104,6 +133,9 @@ export function KuruDrawer({
   focus: string | null;
   asked: number;
   onClose: () => void;
+  /** A width proposed by the drawer's own grip — desktop only, see `Grip` below. */
+  onResize: (px: number) => void;
+  onResetWidth: () => void;
   /** The composer has the keyboard, so the prefix and the panes must leave it alone. */
   onEditing: (editing: boolean) => void;
   /** A card named in a reply was clicked: take me to it — the profile's sheet for one of its own, the workspace's board for the rest. */
@@ -111,7 +143,7 @@ export function KuruDrawer({
   /** Take me to Kuru's terminal — started, resumed or revealed. */
   onTerminal: () => void;
 }) {
-  const { kuru, channels } = useKururu();
+  const { kuru, channels, voice } = useKururu();
   const conversation = kuru.find((c) => c.profileId === profile.id) ?? null;
   // The drawer is the active profile's, so Telegram is this conversation's
   // when it talks to whichever profile is active, or was pointed at this one.
@@ -329,15 +361,17 @@ export function KuruDrawer({
   }, [unheardKey, profile.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
-   * A click outside closes the drawer and lands where it was aimed — no
-   * scrim, since the terminals behind are the point. The chip is the one
-   * exception: it toggles the drawer itself, and closing here first would
-   * reopen it. Capture phase, so a terminal's own handler taking the press
-   * cannot keep the drawer up.
+   * On a phone the drawer is a sheet over the whole screen, so a click
+   * outside only reaches something drawn above it — the chip, a menu, a
+   * dialog — and still means "go there instead". On a desktop it narrows
+   * `.stage` rather than covering it, so a click outside is just a click
+   * into the layout (a terminal, a card) and must not close the drawer; only
+   * its own close button, the chip, or the keyboard does. Capture phase, so
+   * a terminal's own handler taking the press cannot keep the drawer up.
    */
   const root = useRef<HTMLElement>(null);
   useEffect(() => {
-    if (sheet) return;
+    if (!sheet) return;
     const away = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
@@ -364,10 +398,18 @@ export function KuruDrawer({
     [profile.workspaces],
   );
 
+  /**
+   * A path in a reply was opened. On a phone the drawer is a sheet over the
+   * pane the file just landed in, so it gets out of the way, as the file tree
+   * does; on the desktop it stays, beside what it opened.
+   */
+  const onFile = useCallback(() => {
+    if (sheet) onClose();
+  }, [sheet, onClose]);
+
   // This page's own clips, before the server has them, and the one being recorded.
   const saving = outgoing.filter((clip) => clip.profileId === profile.id && !known.has(clip.id));
   const recording = ui.phase === "listening" && !voiceIsRemote();
-  const count = conversation?.unheard ?? 0;
 
   return (
     <aside className={`kuru-drawer ${sheet ? "kuru-sheet" : ""}`} ref={root} role="dialog" aria-label="Kuru">
@@ -388,17 +430,7 @@ export function KuruDrawer({
           {liveWord(live)}
         </span>
         <span className="kuru-head-spacer" />
-        {count > 0 && (
-          <button className="kuru-head-btn" onClick={() => api.playMissed(profile.id)} title="Say every unheard reply again, oldest first">
-            <Icon name="play" />
-            <span>Play unheard ({count})</span>
-          </button>
-        )}
-        {count > 0 && (
-          <button className="kuru-head-btn" onClick={() => api.clearMissed(profile.id)} title="Take every unheard reply off the count without hearing it">
-            Mark all heard
-          </button>
-        )}
+        {voice && <SpeakSwitch settings={voice.settings} />}
         {telegram && <TelegramSwitch status={telegram} />}
         <button className="kuru-head-btn" onClick={onTerminal} title={live === "off" ? "Start Kuru's session, in a terminal beside the board" : "Go to Kuru's terminal (C-a a opens this drawer)"}>
           Terminal
@@ -424,8 +456,22 @@ export function KuruDrawer({
             </li>
           ) : item.kind === "you" ? (
             <You key={item.id} item={item} state={item.state} note={item.note} />
+          ) : item.kind === "notice" ? (
+            <Notice key={item.id} item={item} cardOf={cardOf} onCard={onCard} />
           ) : (
-            <Reply key={item.id} item={item} marked={marked === item.utterance} replaying={replayingId === item.id} onReplay={onReplay} cardOf={cardOf} onCard={onCard} />
+            <Reply
+              key={item.id}
+              item={item}
+              // Not `marked === item.utterance` alone: with nothing marked that
+              // is null === null for every reply never spoken, and each of them
+              // wore the accent of the one just scrolled to, for good.
+              marked={marked !== null && marked === item.utterance}
+              replaying={replayingId === item.id}
+              onReplay={onReplay}
+              cardOf={cardOf}
+              onCard={onCard}
+              onFile={onFile}
+            />
           ),
         )}
         {saving.map((clip) => (
@@ -477,7 +523,83 @@ export function KuruDrawer({
       </ol>
 
       <Composer profileId={profile.id} onEditing={onEditing} talking={ui.phase === "listening"} />
+
+      {/* The edge you drag, on the sidebar's and the tree's terms: last in the
+          tree and absolutely positioned, so it sits over the border rather
+          than taking a column of its own. Only where there is a column to
+          resize — a phone's sheet has no edge beside the panes to grab. */}
+      {!sheet && <Grip onResize={onResize} onReset={onResetWidth} />}
     </aside>
+  );
+}
+
+/**
+ * The drawer's left edge, as something to take hold of — `FileTree.tsx`'s
+ * `Grip` mirrored, because this column grows leftwards too, so its width is
+ * measured from the right edge of the box rather than from the left. Shared
+ * in spirit with `NeedsDrawer.tsx`'s copy of the same handle: the two drawers
+ * never hold the slot at once, and `App.tsx` resizes both from one width.
+ */
+function Grip({ onResize, onReset }: { onResize: (px: number) => void; onReset: () => void }) {
+  const onPointerDown = (event: React.PointerEvent) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const onPointerMove = (event: React.PointerEvent) => {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    const box = event.currentTarget.parentElement?.getBoundingClientRect();
+    if (!box) return;
+    onResize(box.right - event.clientX);
+  };
+  const release = (event: React.PointerEvent) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+  return (
+    <div
+      className="kuru-grip"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize the drawer"
+      title="Drag to resize · double-click to reset"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={release}
+      onPointerCancel={release}
+      onDoubleClick={onReset}
+    />
+  );
+}
+
+/**
+ * Settings → Voice's "Speak replies", in the header of the conversation it
+ * governs. The glyph is the state — the speaker while replies are read aloud,
+ * the speaker struck through while they are only on screen — so the button
+ * does not also wear the accent ink the Telegram switch wears when on: on is
+ * this switch's ordinary position, and a colour worn all the time says
+ * nothing. Its name stays the same both ways and `aria-pressed` says which,
+ * as a toggle's should. Muting asks the voice client what it is doing at the
+ * moment of the click — this page, or the pill when the pill is the mouth —
+ * and stops a reply mid-sentence through `dismissVoice`, the ✕ itself, so it
+ * lands unheard exactly as it would from there.
+ */
+function SpeakSwitch({ settings }: { settings: VoiceSettings }) {
+  const on = settings.speak;
+  return (
+    <button
+      type="button"
+      className="kuru-head-btn kuru-head-icon"
+      aria-pressed={on}
+      aria-label="Speak the replies"
+      title={on ? "Replies are read aloud. Click to mute them (Settings → Voice → Speak replies)" : "Replies are muted. Click to read them aloud (Settings → Voice → Speak replies)"}
+      onClick={() => {
+        if (on && voiceNow().phase === "speaking") dismissVoice();
+        api.setVoice({ ...settings, speak: !on });
+      }}
+    >
+      {on ? <SpeakerIcon /> : <SpeakerOffIcon />}
+    </button>
   );
 }
 
@@ -558,13 +680,16 @@ function Reply({
   onReplay,
   cardOf,
   onCard,
+  onFile,
 }: {
   item: KuruReply;
   marked: boolean;
   replaying: boolean;
   onReplay: (item: KuruReply) => void;
-  cardOf: (code: string) => { workspaceId: string | null; cardId: string } | null;
+  cardOf: CardOf;
   onCard: (workspaceId: string | null, cardId: string) => void;
+  /** A path in the reply was opened. */
+  onFile: () => void;
 }) {
   const active = replaying || item.fate === "speaking";
   return (
@@ -595,18 +720,71 @@ function Reply({
         ) : null}
       </span>
       <p className="kuru-text">
-        {splitCardCodes(item.text).map((part, i) => {
-          if ("text" in part) return part.text;
-          const card = cardOf(part.code);
-          return card ? (
-            <button key={i} className="kuru-card" onClick={() => onCard(card.workspaceId, card.cardId)} title="Open the board at this card">
-              {part.code}
-            </button>
-          ) : (
-            part.code
-          );
+        {/* Paths first, each a link when the server found its file, then card codes in
+            the words between: a path such as docs/KUR-12.md is a file, not a card. */}
+        {(item.files?.length ? splitMentions(item.text) : [{ text: item.text }]).map((part, i) => {
+          if ("mention" in part) {
+            const file = item.files?.find((f) => f.text === part.mention.text);
+            if (file) return <MadeInline key={i} file={file} label={part.mention.text} onOpened={onFile} />;
+          }
+          return <CardWords key={i} text={"mention" in part ? part.mention.text : part.text} cardOf={cardOf} onCard={onCard} />;
         })}
       </p>
+    </li>
+  );
+}
+
+type CardOf = (code: string) => { workspaceId: string | null; cardId: string } | null;
+
+/** Words with every card code in them a door onto the board — one that is not a card stays a word. */
+function CardWords({ text, cardOf, onCard }: { text: string; cardOf: CardOf; onCard: (workspaceId: string | null, cardId: string) => void }) {
+  return (
+    <>
+      {splitCardCodes(text).map((bit, j) => {
+        if ("text" in bit) return <Fragment key={j}>{bit.text}</Fragment>;
+        const card = cardOf(bit.code);
+        return card ? (
+          <button key={j} className="kuru-card" onClick={() => onCard(card.workspaceId, card.cardId)} title="Open the board at this card">
+            {bit.code}
+          </button>
+        ) : (
+          <Fragment key={j}>{bit.code}</Fragment>
+        );
+      })}
+    </>
+  );
+}
+
+/**
+ * Something Kuru was told that neither of you said — kururu's notice that an
+ * agent finished or blocked, a background task reporting back — as one quiet
+ * line rather than a bubble, since a bubble is a side of the conversation and
+ * this is neither. The agent's name is what a narrow drawer cuts short, never
+ * what happened to it; a blocked one says so in the blocked ink, because that
+ * one may be waiting on you. A tap opens the whole message under the line —
+ * the agent's reply, its card a door as it is in a reply — and closes it
+ * again; nothing about it is unread or needs clearing, so it keeps no state
+ * past this row's.
+ */
+function Notice({ item, cardOf, onCard }: { item: NoticeItem; cardOf: CardOf; onCard: (workspaceId: string | null, cardId: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const agent = item.agent;
+  return (
+    <li className={`kuru-notice ${item.event === "blocked" ? "kuru-notice-blocked" : ""}`}>
+      <button type="button" className="kuru-notice-line" aria-expanded={open} onClick={() => setOpen((was) => !was)} title={open ? "Hide the message" : "Show the whole message"}>
+        <Icon name="caret" />
+        <span className="kuru-notice-from">{item.from}</span>
+        <span aria-hidden="true">·</span>
+        {agent && <span className="kuru-notice-cut">{agent.name ? `"${agent.name}"` : agent.program}</span>}
+        {agent?.workspace && <span className="kuru-notice-where">in {agent.workspace}</span>}
+        <span className={`kuru-notice-what ${agent ? "" : "kuru-notice-cut"}`}>{item.what}</span>
+        <time dateTime={new Date(item.at).toISOString()}>{saidAt(item.at)}</time>
+      </button>
+      {open && (
+        <p className="kuru-notice-text">
+          <CardWords text={item.text} cardOf={cardOf} onCard={onCard} />
+        </p>
+      )}
     </li>
   );
 }
