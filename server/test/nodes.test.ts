@@ -214,14 +214,14 @@ describe("addresses", () => {
   it("parses what the user types into the parent's form", () => {
     expect(parseNodeAddress("100.96.1.2", 7717)).toEqual({ address: "100.96.1.2", port: 7717 });
     expect(parseNodeAddress("100.96.1.2:7817", 7717)).toEqual({ address: "100.96.1.2", port: 7817 });
-    expect(parseNodeAddress("http://devbox:7717/?k=secret", 7717)).toEqual({ address: "devbox", port: 7717 });
-    expect(parseNodeAddress("devbox.tail1234.ts.net", 7717)).toEqual({ address: "devbox.tail1234.ts.net", port: 7717 });
+    expect(parseNodeAddress("http://box1:7717/?k=secret", 7717)).toEqual({ address: "box1", port: 7717 });
+    expect(parseNodeAddress("box.example-tailnet.ts.net", 7717)).toEqual({ address: "box.example-tailnet.ts.net", port: 7717 });
   });
   it("refuses anything that is not a host", () => {
     for (const bad of ["", "https://x", "a b", "user:pw@host", "999.1.1.1", "x:99999", 42]) expect(parseNodeAddress(bad, 7717)).toBeNull();
   });
   it("lets a node's routes answer the tailnet and loopback only", () => {
-    expect(nodeRemoteAllowed("100.101.102.103")).toBe(true);
+    expect(nodeRemoteAllowed("100.96.20.30")).toBe(true);
     expect(nodeRemoteAllowed("::ffff:100.64.0.1")).toBe(true);
     expect(nodeRemoteAllowed("127.0.0.1")).toBe(true);
     expect(nodeRemoteAllowed("192.168.1.20")).toBe(false);
@@ -243,7 +243,7 @@ describe("names", () => {
   });
   it("defaults to mac on a Mac and the hostname's first label elsewhere", () => {
     expect(defaultNodeName("Somebodys-MacBook-Pro.local", "darwin")).toBe("mac");
-    expect(defaultNodeName("devbox.lan", "linux")).toBe("devbox");
+    expect(defaultNodeName("box1.lan", "linux")).toBe("box1");
     expect(defaultNodeName("", "linux")).toBe("node");
   });
   it("finds a free one", () => {
