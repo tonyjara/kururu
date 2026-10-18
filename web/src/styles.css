@@ -856,6 +856,7 @@ kbd {
    links — so when the window is short they are the wrong place to find room;
    the list of agents is. */
 .side-openrouter,
+.side-nodes,
 .side-dev {
   flex: none;
 }
@@ -1809,6 +1810,86 @@ kbd {
 /* Last reading kept across a failed poll, as `.machine-stale` keeps one. */
 .or-stale {
   opacity: 0.55;
+}
+
+/* The other nodes — see `Nodes` in Sidebar.tsx. Capped and scrolled, since
+   a node with a dozen workspaces must not push the agents away. A workspace is a name and its agents' marks on one line, the
+   workspace list's face with the agent list's marks. */
+.node-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 6px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  max-height: 35vh;
+}
+.node-item {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+/* Away: the last summary it pushed, still drawn and visibly not current. */
+.node-stale {
+  opacity: 0.55;
+}
+.node-head,
+.node-ws {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 6px;
+  border-radius: var(--radius-lg);
+  color: inherit;
+  text-decoration: none;
+}
+.node-head:hover,
+.node-ws:hover {
+  background: var(--chrome-high);
+}
+.node-name {
+  min-width: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.node-state {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--dimmer);
+  white-space: nowrap;
+}
+.node-workspaces {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.node-ws-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.node-marks {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.node-empty {
+  margin: 0;
+  padding: 2px 6px;
+  font-size: var(--fs-xs);
+  color: var(--dimmer);
 }
 
 /* A machine's name, in the bottom bar's machines popover — see `Machines.tsx`. */
@@ -4974,6 +5055,12 @@ html.pill-page #root {
 .needs-go:hover {
   background: var(--chrome-high);
 }
+/* Another node's rows are links to it rather than buttons here: the same
+   clothes, without a link's underline. */
+a.needs-ws-head,
+a.needs-go {
+  text-decoration: none;
+}
 .needs-go .status {
   flex: none;
 }
@@ -5786,6 +5873,45 @@ label.st-row {
   width: 100%;
   min-height: 0;
   padding: 0;
+}
+/* A row of the roster in Settings → Nodes, which is dragged to rank. The line
+   a drop would land on is the sidebar's agent line, for that line's reason: a
+   rank goes between two nodes, not into one. */
+.st-node {
+  position: relative;
+  cursor: grab;
+}
+.st-node-dragging {
+  opacity: 0.5;
+}
+.st-node-over::before,
+.st-node-under::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--border-thick);
+  background: var(--accent);
+  z-index: 1;
+}
+.st-node-over::before {
+  top: 0;
+}
+.st-node-under::after {
+  bottom: 0;
+}
+/* "Open", which is a link to another kururu dressed as the row's button. */
+a.st-btn {
+  text-decoration: none;
+}
+/* A pairing code: read off one screen and typed into another, so it is big,
+   spaced, and in the face where 2 and Z do not look alike. */
+.st-code {
+  font-family: var(--mono);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  color: var(--text);
 }
 .st-item-busy {
   opacity: 0.8;
@@ -7081,6 +7207,18 @@ label.st-row {
 .reach-alt-on {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* The other nodes' codes, which can be more than two and so wrap, two to a
+   row, rather than squeeze into one. */
+.reach-nodes-title {
+  margin-top: 12px;
+}
+.reach-nodes {
+  flex-wrap: wrap;
+}
+.reach-nodes .reach-way {
+  flex: 1 1 40%;
 }
 
 /* The two codes stack on a narrow window — which is the phone, where this

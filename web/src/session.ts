@@ -53,6 +53,7 @@ import type { KuruConversation, KuruPage } from "../../shared/kuru";
 import type { MadeFile } from "../../shared/made";
 import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "../../shared/voice";
 import type { MachineEntry, MachinePin, MachineStatus } from "../../shared/machines";
+import type { NodeStatus, NodesView } from "../../shared/nodes";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { ReloadAsk, ReloadHold, ReloadPage } from "../../shared/reload";
 import type { Grid } from "./grid";
@@ -88,6 +89,12 @@ export interface KururuState {
   codexUsage: CodexUsage | null;
   /** Every machine the sidebar watches, with its last reading. See `shared/machines.ts`. */
   machines: MachineStatus[];
+  /**
+   * This kururu among the others — its role, every other member with its
+   * last summary, who leads — or null until the server has said. See
+   * `shared/nodes.ts`.
+   */
+  nodes: NodesView | null;
   /** The OpenRouter account, or null when no key has been given. See `shared/openrouter.ts`. */
   openrouter: OpenRouterStatus | null;
   /** The web for the agents — its providers in order — or null until the server has said. Never a key. See `shared/web.ts`. */
@@ -125,6 +132,7 @@ let state: KururuState = {
   usage: null,
   codexUsage: null,
   machines: [],
+  nodes: null,
   openrouter: null,
   web: null,
   backup: null,
@@ -302,6 +310,9 @@ function connect(): void {
         break;
       case "machines":
         set({ machines: msg.machines });
+        break;
+      case "nodes":
+        set({ nodes: msg.nodes });
         break;
       case "openrouter":
         set({ openrouter: msg.openrouter });
@@ -1135,6 +1146,34 @@ export function setNotify(notify: NotifySettings): void {
 /** Watch a machine. Rejects with the server's sentence when the host is not one it will run. */
 export function addMachine(name: string, host: string, panel: string): Promise<MachineEntry> {
   return request((id) => ({ type: "add-machine", id, name, host, panel })) as Promise<MachineEntry>;
+}
+
+/**
+ * Pair the node at `address` that is showing `code`. The server makes the two
+ * posts and signs the roster; rejects with its sentence about why not.
+ */
+export function addNode(address: string, code: string, name: string): Promise<NodeStatus> {
+  return request((id) => ({ type: "node-add", id, address, code, ...(name.trim() ? { name: name.trim() } : {}) })) as Promise<NodeStatus>;
+}
+
+/** A new name for a member, this node included. The parent's alone. */
+export function renameNode(nodeId: string, name: string): Promise<unknown> {
+  return request((id) => ({ type: "node-rename", id, nodeId, name }));
+}
+
+/** The rank list as the drag left it: every member's id, first first. */
+export function rankNodes(order: string[]): Promise<unknown> {
+  return request((id) => ({ type: "node-rank", id, order }));
+}
+
+/** Out of the roster. Its links drop as the new roster reaches each node. */
+export function removeNode(nodeId: string): Promise<unknown> {
+  return request((id) => ({ type: "node-remove", id, nodeId }));
+}
+
+/** Show a pairing code for ten minutes, or stop. Resolves with the code, or null once stopped. */
+export function nodeCode(on: boolean): Promise<{ code: string; expiresAt: number } | null> {
+  return request((id) => ({ type: "node-code", id, on })) as Promise<{ code: string; expiresAt: number } | null>;
 }
 
 /** Stop watching it, which also brings home every workspace pinned to it. */

@@ -35,10 +35,12 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cardCode, type Card } from "../../../shared/board";
-import type { Need, ProfileNeeds, WorkspaceNeeds } from "../../../shared/needs";
+import type { Need, NeedKind, ProfileNeeds, WorkspaceNeeds } from "../../../shared/needs";
+import type { NodeStatus, SummaryAgent, SummaryNeed } from "../../../shared/nodes";
 import { mascotFor, type AgentSnapshot, type MascotSet } from "../../../shared/model";
 import { useCardDone } from "../cardDone";
 import { agentLabel, agentSummary } from "../labels";
+import { asAgent } from "../nodes";
 import * as api from "../session";
 import { ago } from "./Board";
 import { Dialog } from "./Dialog";
@@ -64,6 +66,7 @@ function readQuiet(): boolean {
 
 export function NeedsDrawer({
   needs,
+  nodes,
   mascots,
   agents,
   sheet,
@@ -77,6 +80,12 @@ export function NeedsDrawer({
   chips,
 }: {
   needs: ProfileNeeds;
+  /**
+   * The other nodes, each with the summary it last pushed. A linked one with
+   * something waiting gets a band of its own under this node's queue, each
+   * row a link to that node — going there is how anything there is done.
+   */
+  nodes: NodeStatus[];
   mascots: MascotSet;
   /** Every agent in the profile — the same check the board makes before Done asks its question, for the row's own menu. */
   agents: AgentSnapshot[];
@@ -156,6 +165,9 @@ export function NeedsDrawer({
   const waiting = needs.workspaces.filter((w) => w.band === "needs");
   const working = needs.workspaces.filter((w) => w.band === "working");
   const quiet = needs.workspaces.filter((w) => w.band === "quiet");
+  /* A node that is away is left out, not drawn stale: its last summary may
+     list a question already answered, and this is a queue to act on. */
+  const elsewhere = nodes.filter((node) => node.state === "up" && (node.summary?.needs.count ?? 0) > 0);
   const mascot = (w: WorkspaceNeeds) => mascotFor(mascots, w.workspace.mascotId);
 
   return (
@@ -183,7 +195,7 @@ export function NeedsDrawer({
       </header>
 
       <ol className="kuru-list needs-list">
-        {waiting.length === 0 && (
+        {waiting.length === 0 && elsewhere.length === 0 && (
           <li className="needs-none" role="status">
             Nothing is waiting on you.
           </li>
@@ -223,6 +235,10 @@ export function NeedsDrawer({
               ))}
             </ul>
           </li>
+        ))}
+
+        {elsewhere.map((node) => (
+          <NodeBand key={node.id} node={node} mascot={mascotFor(mascots, null)} />
         ))}
 
         {working.length > 0 && (
@@ -489,6 +505,63 @@ function why(need: Need): string {
       return `in progress, and its agent ended${at ? ` ${ago(at)}` : ""}`;
     }
   }
+}
+
+/**
+ * Another node's queue, under its name: its workspaces that need you, each a
+ * block like this node's own, and every row a link to the node. Nothing here
+ * can act — there is no Done and no board, since both are that node's — and
+ * the row says why it is there in the words `why` uses for the same kinds.
+ */
+function NodeBand({ node, mascot }: { node: NodeStatus; mascot: ReturnType<typeof mascotFor> }) {
+  const summary = node.summary!;
+  const go = `Open ${node.name}'s kururu`;
+  return (
+    <>
+      <li className="needs-band">{node.name}</li>
+      {summary.workspaces
+        .filter((w) => w.band === "needs")
+        .map((w) => {
+          const agents = new Map<string, SummaryAgent>(w.agents.map((agent) => [agent.id, agent]));
+          return (
+            <li key={w.key} className="needs-ws">
+              <a className="needs-ws-head" href={node.url} target="_blank" rel="noreferrer noopener" title={go}>
+                <span className="needs-ws-name">{w.name}</span>
+                <span className="needs-ws-n">{w.needs.length}</span>
+              </a>
+              <ul className="needs-rows">
+                {w.needs.map((need) => {
+                  const agent = need.agentId ? agents.get(need.agentId) : undefined;
+                  return (
+                    <li key={need.cardId ? `c${need.cardId}` : `a${need.agentId ?? need.title}`} className={`needs-row needs-row-${need.kind}`}>
+                      <a className="needs-go" href={node.url} target="_blank" rel="noreferrer noopener" title={go}>
+                        {agent ? <Status agent={asAgent(agent)} mascot={mascot} /> : <span className="needs-mark" aria-hidden="true" />}
+                        <span className="needs-what">
+                          <span className="needs-title">{need.title}</span>
+                          <span className="needs-why">{nodeWhy(need, agent)}</span>
+                        </span>
+                      </a>
+                    </li>
+                  );
+                })}
+              </ul>
+            </li>
+          );
+        })}
+    </>
+  );
+}
+
+/** `why`, for a need another node summarised: the kind, and the agent's own words when it has said any. */
+function nodeWhy(need: SummaryNeed, agent: SummaryAgent | undefined): string {
+  const summary = agent ? agentSummary(asAgent(agent)) : null;
+  const words: Record<NeedKind, string> = {
+    asking: summary ?? "asking something in its terminal",
+    review: "in Review",
+    unseen: summary ? `finished while you were away · ${summary}` : "finished while you were away",
+    stalled: "in progress, and its agent ended",
+  };
+  return words[need.kind];
 }
 
 /** An agent mid-turn, under its workspace in the Working band: its mark, its name, what it says it is doing. */

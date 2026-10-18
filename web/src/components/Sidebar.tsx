@@ -61,6 +61,7 @@ import type {
 import { defaultMascot, mascotFor, workspaceUnits } from "../../../shared/model";
 import type { DevServer, GitAction, RepoGit } from "../../../shared/wire";
 import type { MachineStatus } from "../../../shared/machines";
+import type { NodeStatus } from "../../../shared/nodes";
 import {
   balanceOf,
   balanceSeverity,
@@ -74,6 +75,7 @@ import { AGENT_MIME, GROUP_MIME, WORKSPACE_MIME, allowDrop, beginDrag, endDrag, 
 import type { Action } from "../keys";
 import { agentLabel, agentSummary, remoteHost, remoteNote, shortenPath } from "../labels";
 import { useLongPress } from "../longpress";
+import { asAgent, nodeState } from "../nodes";
 import { previewLabel, previewUrl } from "../preview";
 import * as api from "../session";
 import { useKururu } from "../session";
@@ -1326,6 +1328,10 @@ export function Sidebar({
         )}
       </section>
 
+      {/* The other kururus, under the agents: what is running on them is the
+          same kind of thing as the list above, where the bottom bar's
+          machines are gauges. */}
+      <Nodes mascots={mascots} />
       {/* OpenRouter's balance, in words. The Claude and Codex allowances and
           the machines were sections here too and are the bottom bar's since
           2026-10-18 (`Usage.tsx`, `Machines.tsx`). The balance stays: it is a
@@ -1754,6 +1760,85 @@ function pinnedTo(workspace: Workspace, machines: MachineStatus[]): ReactNode {
   );
 }
 
+/**
+ * The other kururus — a child on a box that stays on, or the Mac seen from
+ * a child — each under a heading of its name, drawn from the summary it last
+ * pushed over its link (`shared/nodes.ts`).
+ *
+ * Read-only, and every row a link: the agents here are another server's, so
+ * nothing on this side can type into them, and going to the node is how
+ * anything there is done. A node that is away keeps its last summary,
+ * greyed, with since when — which, on a child with the Mac's lid shut, is the
+ * answer to "is the Mac there".
+ *
+ * A workspace is a row with its agents' marks, and the dot when something in
+ * it needs you, which is the node's own `needsOf` band, not a rule redone
+ * here. An agent's mark is the default mascot's: which mascot a workspace
+ * wears there is that node's, and not worth a field on the wire.
+ */
+function Nodes({ mascots }: { mascots: MascotSet }) {
+  const { nodes } = useKururu();
+  const [open, toggle] = useDisclosure("kururu.sidebar.nodes", true);
+  if (!nodes || nodes.nodes.length === 0) return null;
+  const away = nodes.nodes.some((node) => node.state !== "up");
+  return (
+    <section className="side-section side-nodes">
+      <h2>
+        <SectionToggle open={open} onToggle={toggle} label="Nodes">
+          {away && (
+            <span className="usage-stale" title="A node is not linked. What it shows is the last it said.">
+              ·
+            </span>
+          )}
+        </SectionToggle>
+      </h2>
+      {open && (
+        <ul className="node-list">
+          {nodes.nodes.map((node) => (
+            <NodeBlock key={node.id} node={node} mascot={mascotFor(mascots, null)} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function NodeBlock({ node, mascot }: { node: NodeStatus; mascot: ReturnType<typeof mascotFor> }) {
+  const up = node.state === "up";
+  const summary = node.summary;
+  const go = `Open ${node.name}'s kururu`;
+  return (
+    <li className={`node-item ${up ? "" : "node-stale"}`}>
+      <a className="node-head" href={node.url} target="_blank" rel="noreferrer noopener" title={[go, node.error && !up ? node.error : null].filter(Boolean).join("\n")}>
+        <span className="node-name">{node.name}</span>
+        {!up && <span className="node-state">{nodeState(node)}</span>}
+        {up && summary && summary.needs.count > 0 && <span className="unread" aria-label="needs you" />}
+      </a>
+      {summary ? (
+        <ul className="node-workspaces">
+          {summary.workspaces.map((w) => (
+            <li key={w.key}>
+              <a className="node-ws" href={node.url} target="_blank" rel="noreferrer noopener" title={[w.name, w.folder].filter(Boolean).join("\n")}>
+                <span className="node-ws-name">{w.name}</span>
+                <span className="node-marks">
+                  {w.agents.map((agent) => (
+                    <span key={agent.id} className="node-mark" title={[agentLabel(asAgent(agent)), agentSummary(asAgent(agent))].filter(Boolean).join(" · ")}>
+                      <Status agent={asAgent(agent)} mascot={mascot} />
+                    </span>
+                  ))}
+                </span>
+                {w.band === "needs" && <span className="unread" aria-label="needs you" />}
+              </a>
+            </li>
+          ))}
+          {summary.workspaces.length === 0 && <li className="node-empty">No workspaces.</li>}
+        </ul>
+      ) : (
+        <p className="node-empty">{up ? "Waiting for what it is doing…" : "Not heard from since this server started."}</p>
+      )}
+    </li>
+  );
+}
 /** How long a dev server's stop button keeps asking before it lets the question go. */
 const STOP_ASK_MS = 4000;
 

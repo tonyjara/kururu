@@ -41,6 +41,9 @@ import { useEffect, useState } from "react";
 import type { Reach as ReachInfo, Sharing } from "../../../shared/wire";
 import { REACH_POLL_MS } from "../../../shared/wire";
 import { qrMatrix } from "../qr";
+import type { NodeStatus, NodesView } from "../../../shared/nodes";
+import { nodeState } from "../nodes";
+import { useKururu } from "../session";
 
 /**
  * The two questions this dialog asks are answered together, by one fetch, and
@@ -88,6 +91,7 @@ function readHidden(): WayName[] {
 }
 
 export function Reach({ onClose }: { onClose: () => void }) {
+  const { nodes } = useKururu();
   const [reach, setReach] = useState<ReachAnswer | null>(null);
   const [failed, setFailed] = useState(false);
   /**
@@ -242,6 +246,8 @@ export function Reach({ onClose }: { onClose: () => void }) {
             onToggle={() => toggle("tailscale")}
           />
         </div>
+
+        {nodes && nodes.nodes.length > 0 && <OtherNodes view={nodes} />}
 
         {failed && !reach && (
           <p className="reach-note">Asking the server… it may be restarting.</p>
@@ -408,6 +414,52 @@ function Way({
           <p>{missing}</p>
         </div>
       )}
+    </section>
+  );
+}
+
+/**
+ * Every other node, each with its own code — a child's, from the Mac, is how
+ * a phone gets onto the box that stays on while the lid is shut.
+ *
+ * On the parent each code carries that node's own share token, handed over
+ * at pairing, so the phone that scans it is let in there as it would be by
+ * the node's own dialog. On a child it is the bare address and says so: a
+ * child never holds another node's token, so a phone not yet let in there
+ * needs the code from that node, or from the parent.
+ */
+function OtherNodes({ view }: { view: NodesView }) {
+  return (
+    <>
+      <h3 className="reach-title reach-nodes-title">The other nodes</h3>
+      <p className="reach-note">
+        {view.role === "parent"
+          ? "Each code is that node's own, token and all: a phone that scans one is let in there, not here."
+          : "These are bare addresses: a child holds no other node's token. A phone not yet let in on one wants its code from that node, or from the parent's Share dialog."}
+      </p>
+      <div className="reach-pair reach-nodes">
+        {view.nodes.map((node) => (
+          <NodeCode key={node.id} node={node} />
+        ))}
+      </div>
+    </>
+  );
+}
+
+function NodeCode({ node }: { node: NodeStatus }) {
+  const label = `${node.address}:${node.port}`;
+  return (
+    <section className="reach-way">
+      <header className="reach-head">
+        <h3 className="reach-title">{node.name}</h3>
+      </header>
+      <QrCode text={node.url} />
+      {/* The address and not the URL, on the dialog's rule above: a token on
+          screen is a token in every screenshot of it. */}
+      <a className="reach-url" href={node.url} target="_blank" rel="noreferrer">
+        {label}
+      </a>
+      <p className="reach-note">{nodeState(node)}</p>
     </section>
   );
 }
