@@ -471,6 +471,38 @@ button {
 }
 
 /**
+ * No field a finger can focus is under 16px, because iOS Safari zooms the whole
+ * page in whenever one is, and does not zoom back out. Tapping Kuru's composer
+ * left the window magnified with the drawer half off the screen — and every
+ * field in the chrome was the same bug waiting for a tap, since the type ramp
+ * tops out at `--fs-xl`, 15px, one pixel short. The two filters that already
+ * reached for `--fs-xl` "to stop the zoom" never did.
+ *
+ * One rule for all of them rather than a size per field, because a per-field
+ * fix is a list somebody has to remember to extend, and the next rename box
+ * or search field would bring the zoom back on its own. `!important` because it
+ * has to win over every field's own rule whatever its specificity, and is the
+ * only one in this file: it is a floor the platform sets, not a size the design
+ * chose, which is also why it is a literal and not `--fs-xl` (see the comment
+ * on `.term textarea`, the case that found it). The viewport's
+ * `maximum-scale=1` in `index.html` is the other half, for a field this misses.
+ *
+ * Coarse pointers only: on a desktop nothing zooms, and the chrome's own sizes
+ * are the right ones there. `.term`, ghostty's host element, is
+ * `contenteditable` and is left alone, since its font is the terminal's — a
+ * cell's size, and so a grid, and so a SIGWINCH for every agent on the screen —
+ * and on a touch device it never holds the focus anyway (`terminals.ts`).
+ */
+@media (pointer: coarse) {
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], [type="button"], [type="submit"], [type="reset"], [type="image"]),
+  textarea,
+  select,
+  [contenteditable]:not([contenteditable="false"], .term) {
+    font-size: 16px !important;
+  }
+}
+
+/**
  * The window, minus whatever an on-screen keyboard has taken.
  *
  * `--keyboard` is written onto the root by `useKeyboardInset` in `App.tsx` and
