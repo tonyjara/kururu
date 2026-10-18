@@ -51,6 +51,7 @@ import { join } from "node:path";
 import type { Profile, Workspace } from "../../shared/model";
 import { adoptBoard, adoptProfileBoard, emptyBoard, type Board, type BoardLane, type Card, type CardRun } from "../../shared/board";
 import { adoptMade } from "../../shared/made";
+import type { MoveDone } from "../../shared/move";
 import { promptCarries, type StoredMissed, type StoredOutboxEntry, type VoiceLang } from "../../shared/voice";
 import {
   diffBoards,
@@ -1176,57 +1177,67 @@ export class Store {
   // Export and import
   // -------------------------------------------------------------------------
 
+  /** One board's rows as the export writes them, from its row joined to its profile's and workspace's names. */
+  private boardExport(row: Row): BoardExport {
+    const boardId = row.id as string;
+    const lanes = this.stmt("select id, name, color, collapsed from lanes where board_id = ? order by position").all(boardId) as Row[];
+    const cardRows = this.stmt("select * from cards where board_id = ? order by number").all(boardId) as unknown as CardRow[];
+    const cards: CardExport[] = cardRows.map((card) => ({
+      id: card.id,
+      number: card.number,
+      title: card.title,
+      body: card.body,
+      column: card.column_id,
+      position: card.position,
+      isolate: card.isolate === 1,
+      dates: card.date_start && card.date_end ? { start: card.date_start, end: card.date_end } : null,
+      worktree: card.wt_root && card.wt_path && card.wt_branch && card.wt_base ? { root: card.wt_root, path: card.wt_path, branch: card.wt_branch, base: card.wt_base } : null,
+      createdAt: card.created_at,
+      updatedAt: card.updated_at,
+      deletedAt: card.deleted_at,
+      runs: (this.stmt("select * from card_runs where card_id = ? order by started_at, id").all(card.id) as unknown as RunRow[]).map((run) => ({
+        launcher: run.launcher,
+        label: run.label,
+        state: run.state,
+        startedAt: run.started_at,
+        endedAt: run.ended_at,
+        sessionId: run.session_id,
+        cwd: run.cwd,
+      })),
+      events: this.cardHistory(card.id).map(({ at, actor, kind, fromColumn, toColumn, detail }) => ({ at, actor, kind, fromColumn, toColumn, detail })),
+    }));
+    return {
+      version: EXPORT_VERSION,
+      profile: { key: row.profile_key as string, name: row.profile_name as string, loginKey: (row.login_key as string | null) ?? null },
+      workspace: row.workspace_key ? { key: row.workspace_key as string, name: (row.workspace_name as string | null) ?? "" } : null,
+      board: {
+        id: boardId,
+        next: row.next as number,
+        columns: lanes.length ? lanes.map((lane) => ({ id: lane.id as string, name: lane.name as string, color: (lane.color as BoardLane["color"]) ?? null, ...(lane.collapsed === 1 ? { collapsed: true as const } : {}) })) : null,
+        createdAt: row.created_at as number,
+      },
+      cards,
+    };
+  }
+
+  /** One workspace's board as the export writes it, or null when it never had one. What a move carries. */
+  exportBoard(profileKey: string, workspaceKey: string): BoardExport | null {
+    const row = this.stmt(
+      "select b.*, p.name as profile_name, p.login_key, w.name as workspace_name from boards b join profiles p on p.key = b.profile_key left join workspaces w on w.key = b.workspace_key where b.profile_key = ? and b.workspace_key = ?",
+    ).get(profileKey, workspaceKey) as Row | undefined;
+    return row ? this.boardExport(row) : null;
+  }
+
   /**
    * Everything the database can be rebuilt from, as the mirror writes it.
    * Agents' conversations stay behind unless asked: an agent's reply can
    * quote a file that holds a secret, and the mirror leaves the machine.
    */
   exportAll(options: { agents?: boolean } = {}): DataExport {
-    const boards: BoardExport[] = [];
     const boardRows = this.stmt(
       "select b.*, p.name as profile_name, p.login_key, w.name as workspace_name from boards b join profiles p on p.key = b.profile_key left join workspaces w on w.key = b.workspace_key order by p.name, w.name",
     ).all() as Row[];
-    for (const row of boardRows) {
-      const boardId = row.id as string;
-      const lanes = this.stmt("select id, name, color, collapsed from lanes where board_id = ? order by position").all(boardId) as Row[];
-      const cardRows = this.stmt("select * from cards where board_id = ? order by number").all(boardId) as unknown as CardRow[];
-      const cards: CardExport[] = cardRows.map((card) => ({
-        id: card.id,
-        number: card.number,
-        title: card.title,
-        body: card.body,
-        column: card.column_id,
-        position: card.position,
-        isolate: card.isolate === 1,
-        dates: card.date_start && card.date_end ? { start: card.date_start, end: card.date_end } : null,
-        worktree: card.wt_root && card.wt_path && card.wt_branch && card.wt_base ? { root: card.wt_root, path: card.wt_path, branch: card.wt_branch, base: card.wt_base } : null,
-        createdAt: card.created_at,
-        updatedAt: card.updated_at,
-        deletedAt: card.deleted_at,
-        runs: (this.stmt("select * from card_runs where card_id = ? order by started_at, id").all(card.id) as unknown as RunRow[]).map((run) => ({
-          launcher: run.launcher,
-          label: run.label,
-          state: run.state,
-          startedAt: run.started_at,
-          endedAt: run.ended_at,
-          sessionId: run.session_id,
-          cwd: run.cwd,
-        })),
-        events: this.cardHistory(card.id).map(({ at, actor, kind, fromColumn, toColumn, detail }) => ({ at, actor, kind, fromColumn, toColumn, detail })),
-      }));
-      boards.push({
-        version: EXPORT_VERSION,
-        profile: { key: row.profile_key as string, name: row.profile_name as string, loginKey: (row.login_key as string | null) ?? null },
-        workspace: row.workspace_key ? { key: row.workspace_key as string, name: (row.workspace_name as string | null) ?? "" } : null,
-        board: {
-          id: boardId,
-          next: row.next as number,
-          columns: lanes.length ? lanes.map((lane) => ({ id: lane.id as string, name: lane.name as string, color: (lane.color as BoardLane["color"]) ?? null, ...(lane.collapsed === 1 ? { collapsed: true as const } : {}) })) : null,
-          createdAt: row.created_at as number,
-        },
-        cards,
-      });
-    }
+    const boards = boardRows.map((row) => this.boardExport(row));
     const conversations: DataExport["conversations"] = [];
     const convRows = this.stmt(
       "select v.*, p.name as profile_name from conversations v join profiles p on p.key = v.profile_key where (? = 1 or v.kind = 'harness') order by v.started_at",
@@ -1324,6 +1335,160 @@ export class Store {
       }
     });
     return counts;
+  }
+
+  // -------------------------------------------------------------------------
+  // A workspace moved between nodes (`server/src/move.ts`)
+  // -------------------------------------------------------------------------
+
+  /** How many deleted cards a workspace's board keeps, which a move takes along. */
+  deletedOn(profileKey: string, workspaceKey: string): number {
+    const row = this.stmt("select count(*) as n from cards c join boards b on b.id = c.board_id where b.profile_key = ? and b.workspace_key = ? and c.deleted_at is not null").get(profileKey, workspaceKey) as Row | undefined;
+    return Number(row?.n ?? 0);
+  }
+
+  /** The answer this node gave a move id, if it has given one. */
+  moveAnswered(move: string): MoveDone | null {
+    const row = this.stmt("select value from meta where key = ?").get(`move:${move}`) as Row | undefined;
+    if (typeof row?.value !== "string") return null;
+    try {
+      return JSON.parse(row.value) as MoveDone;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The store's one road in for a moved board: every card of `file` onto
+   * the board of the workspace just made here, with every run and event it
+   * had, its dates and number kept, and an `imported` event saying where it
+   * came from. The answer is written beside it in the same transaction,
+   * keyed by the move id, so a move whose acknowledgement was lost is
+   * answered the same way twice and never adopted twice.
+   *
+   * A card whose id this database already holds is the same card coming
+   * back — a workspace moved there and back again — and its row is taken
+   * up again rather than skipped, which is what the restore's importer
+   * does and is wrong here: the card would stay on the board it left, marked
+   * moved. Its runs and events are added where they are not already here,
+   * by when they began and what they say, so the history reads straight
+   * through both machines and a clock that differs between them loses
+   * nothing.
+   *
+   * No run is live here, and an `asleep` one is `ended`: its conversation
+   * is a transcript on the other machine, and "running the card resumes it"
+   * would be a promise this one cannot keep.
+   */
+  adoptMove(move: { id: string; from: string; to: string }, profileKey: string, workspaceKey: string, file: BoardExport | null, done: MoveDone, at = Date.now()): MoveDone {
+    return this.tx(() => {
+      const was = this.moveAnswered(move.id);
+      if (was) return { ...was, again: true };
+      let cards = 0;
+      if (file) {
+        let boardId = this.boardId(profileKey, workspaceKey);
+        if (!boardId) {
+          boardId = mintBoardId();
+          this.stmt("insert into boards(id, profile_key, workspace_key, next, created_at) values (?, ?, ?, ?, ?)").run(boardId, profileKey, workspaceKey, file.board.next, file.board.createdAt);
+        }
+        this.stmt("update boards set next = max(next, ?) where id = ?").run(file.board.next, boardId);
+        for (const card of file.cards) {
+          const fields = [
+            boardId,
+            card.number,
+            card.title,
+            card.body,
+            card.column,
+            card.position,
+            card.isolate ? 1 : 0,
+            card.dates?.start ?? null,
+            card.dates?.end ?? null,
+            card.worktree?.root ?? null,
+            card.worktree?.path ?? null,
+            card.worktree?.branch ?? null,
+            card.worktree?.base ?? null,
+          ] as const;
+          if (this.stmt("select 1 as x from cards where id = ?").get(card.id) !== undefined) {
+            this.stmt(
+              `update cards set board_id = ?, number = ?, title = ?, body = ?, column_id = ?, position = ?, isolate = ?, date_start = ?, date_end = ?,
+                 wt_root = ?, wt_path = ?, wt_branch = ?, wt_base = ?, dev_port = null, dev_agent_id = null, made = null, updated_at = ?, deleted_at = ? where id = ?`,
+            ).run(...fields, card.updatedAt, card.deletedAt, card.id);
+          } else {
+            this.stmt(
+              `insert into cards(id, board_id, number, title, body, column_id, position, isolate, date_start, date_end, wt_root, wt_path, wt_branch, wt_base, dev_port, dev_agent_id, created_at, updated_at, deleted_at)
+               values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, null, ?, ?, ?)`,
+            ).run(card.id, ...fields, card.createdAt, card.updatedAt, card.deletedAt);
+          }
+          for (const run of card.runs) {
+            const state = run.state === "finished" ? "finished" : "ended";
+            const ended = run.endedAt ?? (state === run.state ? null : at);
+            const here = this.stmt("select id from card_runs where card_id = ? and started_at = ? and launcher = ?").get(card.id, run.startedAt, run.launcher) as Row | undefined;
+            if (here) {
+              this.stmt("update card_runs set state = ?, ended_at = ?, session_id = coalesce(?, session_id), agent_id = null where id = ?").run(state, ended, run.sessionId, here.id as number);
+              continue;
+            }
+            this.stmt("insert into card_runs(card_id, launcher, label, state, started_at, ended_at, session_id, cwd, agent_id) values (?, ?, ?, ?, ?, ?, ?, ?, null)").run(
+              card.id,
+              run.launcher,
+              run.label,
+              state,
+              run.startedAt,
+              ended,
+              run.sessionId,
+              run.cwd,
+            );
+          }
+          const same = this.stmt("select 1 as x from card_events where card_id = ? and at = ? and kind = ? and actor = ? and from_column is ? and to_column is ? and detail is ?");
+          for (const event of card.events) {
+            const detail = event.detail ? JSON.stringify(event.detail) : null;
+            if (same.get(card.id, event.at, event.kind, event.actor, event.fromColumn, event.toColumn, detail) !== undefined) continue;
+            this.event(boardId, { ...event, cardId: card.id });
+          }
+          this.event(boardId, {
+            at,
+            cardId: card.id,
+            actor: "import",
+            kind: "imported",
+            fromColumn: null,
+            toColumn: card.column,
+            detail: { title: card.title, from: move.from, to: move.to, move: move.id, workspace: file.workspace?.key ?? null },
+          });
+          if (card.deletedAt === null) cards++;
+        }
+      }
+      const answer = { ...done, cards, again: false };
+      this.stmt("insert into meta(key, value) values (?, ?) on conflict(key) do update set value = excluded.value").run(`move:${move.id}`, JSON.stringify(answer));
+      return answer;
+    });
+  }
+
+  /**
+   * The moving node's half, once the other has answered: every card still
+   * on the workspace's board marked deleted, with a `moved` event naming
+   * the node and the workspace it is now there. The board and its rows
+   * stay, as removing a workspace keeps them, so Search → Deleted finds
+   * every card with the line that says where it went. A card made in the
+   * seconds the move was on the wire was not carried, and its event says so.
+   */
+  markMovedAway(profileKey: string, workspaceKey: string, move: { id: string; node: string; key: string; carried: ReadonlySet<string> }, actor: Actor, at = Date.now()): number {
+    return this.tx(() => {
+      const boardId = this.boardId(profileKey, workspaceKey);
+      if (!boardId) return 0;
+      const rows = this.stmt("select id, column_id, title from cards where board_id = ? and deleted_at is null").all(boardId) as Row[];
+      for (const row of rows) {
+        const id = row.id as string;
+        this.stmt("update cards set deleted_at = ?, updated_at = ? where id = ?").run(at, at, id);
+        this.event(boardId, {
+          at,
+          cardId: id,
+          actor,
+          kind: "moved",
+          fromColumn: row.column_id as string,
+          toColumn: null,
+          detail: { title: row.title as string, node: move.node, workspace: move.key, move: move.id, carried: move.carried.has(id) },
+        });
+      }
+      return rows.length;
+    });
   }
 
   // -------------------------------------------------------------------------

@@ -54,6 +54,7 @@ import type { MadeFile } from "../../shared/made";
 import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "../../shared/voice";
 import type { MachineEntry, MachinePin, MachineStatus } from "../../shared/machines";
 import type { NodeStatus, NodesView } from "../../shared/nodes";
+import type { MoveDone, MovePlan } from "../../shared/move";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { ReloadAsk, ReloadHold, ReloadPage } from "../../shared/reload";
 import type { Grid } from "./grid";
@@ -1174,6 +1175,16 @@ export function rankNodes(order: string[]): Promise<unknown> {
 /** Out of the roster. Its links drop as the new roster reaches each node. */
 export function removeNode(nodeId: string): Promise<unknown> {
   return request((id) => ({ type: "node-remove", id, nodeId }));
+}
+
+/** The row menu's Move to <node>…: what would go and stay, and the node's word on the folder — its guess when null. */
+export function moveWorkspacePlan(workspaceId: string, nodeId: string, folder: string | null): Promise<MovePlan> {
+  return request((id) => ({ type: "node-move-plan", id, workspaceId, nodeId, folder })) as Promise<MovePlan>;
+}
+
+/** Move it. Resolves once the node has it and it has left this list; rejects with why, and then nothing here changed. */
+export function moveWorkspaceTo(workspaceId: string, nodeId: string, folder: string): Promise<{ done: MoveDone; node: string; url: string }> {
+  return request((id) => ({ type: "node-move", id, workspaceId, nodeId, folder })) as Promise<{ done: MoveDone; node: string; url: string }>;
 }
 
 /** Stop watching it, which also brings home every workspace pinned to it. */

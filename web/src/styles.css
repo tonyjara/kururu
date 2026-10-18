@@ -4192,6 +4192,51 @@ html.pill-page #root {
   color: var(--dim);
 }
 
+/* Move to <node>…: wider than a question, because it is two lists of
+   sentences, and scrolled inside itself rather than off the screen — on a
+   phone the button must stay reachable under a long "stays" list. */
+.dialog.dialog-move {
+  width: min(560px, 92vw);
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.dialog-move-label {
+  display: block;
+  margin: 4px 0 4px;
+  font-size: var(--fs-base);
+  color: var(--dim);
+}
+.dialog-move-check {
+  margin: 4px 0 10px;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.dialog-move-check.dialog-move-bad,
+.dialog-move-refused {
+  color: var(--danger);
+}
+.dialog-move-refused {
+  margin: 0 0 10px;
+  font-size: var(--fs-base);
+}
+.dialog-move-head {
+  margin: 10px 0 4px;
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+.dialog-move-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--fs-base);
+}
+.dialog-move-list li + li {
+  margin-top: 3px;
+}
+.dialog-move-done {
+  margin: 4px 0 0;
+  font-size: var(--fs-base);
+}
+
 .dialog-list {
   list-style: none;
   margin: 10px 0 0;

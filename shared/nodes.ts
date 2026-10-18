@@ -29,6 +29,7 @@
 import type { AgentSnapshot, Profile } from "./model";
 import { needsOf, type Band, type NeedKind } from "./needs";
 import { panes, terminalsOf } from "./layout";
+import type { MoveCheck, MoveCheckAsk, MoveDone, MoveOffer } from "./move";
 
 /**
  * The link's own version, said in `hello`. Bumped when a message changes
@@ -729,9 +730,30 @@ export type LinkMessage =
   | { type: "ping"; at: number }
   | { type: "export-ask"; id: string }
   | { type: "export"; id: string; mark: string; files: Record<string, string> | null; error: string | null }
+  // Phase 6: a workspace moved to the peer (`shared/move.ts`). The check
+  // asks whether a folder will do; the move carries the board and is
+  // answered once per move id, however often it is sent.
+  | { type: "workspace-move-check"; id: string; ask: MoveCheckAsk }
+  | { type: "workspace-move-checked"; id: string; check: MoveCheck | null; error: string | null }
+  | { type: "workspace-move"; id: string; offer: MoveOffer }
+  | { type: "workspace-moved"; id: string; done: MoveDone | null; error: string | null }
   | { type: "bye"; reason: string };
 
-const LINK_TYPES = new Set<LinkMessage["type"]>(["hello", "prove", "refuse", "roster", "summary", "ping", "export-ask", "export", "bye"]);
+const LINK_TYPES = new Set<LinkMessage["type"]>([
+  "hello",
+  "prove",
+  "refuse",
+  "roster",
+  "summary",
+  "ping",
+  "export-ask",
+  "export",
+  "workspace-move-check",
+  "workspace-move-checked",
+  "workspace-move",
+  "workspace-moved",
+  "bye",
+]);
 
 /** A frame off the socket, as a message with a known type, or null. The fields are each handler's to check. */
 export function parseLinkMessage(raw: string): LinkMessage | null {

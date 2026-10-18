@@ -108,6 +108,7 @@ import { isChannelKind, type ChannelKind } from "../../shared/channels";
 import { Backup } from "./backup";
 import { mirrorFiles } from "./export";
 import { NodeHost, nodeRequestRefusal } from "./nodes";
+import { Mover } from "./move";
 import { summarize, type NodeSummary } from "../../shared/nodes";
 import { hostname } from "node:os";
 import { Store, dataDir, dbPath } from "./store";
@@ -486,6 +487,8 @@ let store!: Store;
 let backup!: Backup;
 /** This kururu among the others: pairing, the roster and the links. See `nodes.ts`. */
 let nodes!: NodeHost;
+/** A workspace moved to or from another node. See `move.ts`. */
+let mover!: Mover;
 const clients = new Map<WebSocket, ClientState>();
 
 const state = {
@@ -3174,6 +3177,11 @@ function tabCwd(agentId: string): string | undefined {
   return seen?.cwd ?? agent.cwd;
 }
 
+/** The databases a workspace's env files name, as the last scan found them. Outside `attach`, whose own `state` is the host's. */
+function databasesOfWorkspace(workspaceId: string): WorkspaceDatabase[] {
+  return state.databases.filter((db) => db.workspaceId === workspaceId);
+}
+
 /**
  * Every directory this workspace could be said to be *in*, best first.
  *
@@ -4643,6 +4651,12 @@ function handleMessage(ws: WebSocket, raw: string): void {
       return;
     case "node-remove":
       void replyAsync(ws, msg.id, () => nodes.remove(msg.nodeId));
+      return;
+    case "node-move-plan":
+      void replyAsync(ws, msg.id, () => mover.plan(workspaces.active.id, String(msg.workspaceId), String(msg.nodeId), typeof msg.folder === "string" ? msg.folder : null));
+      return;
+    case "node-move":
+      void replyAsync(ws, msg.id, () => mover.move(workspaces.active.id, String(msg.workspaceId), String(msg.nodeId), String(msg.folder ?? ""), "user"));
       return;
 
     case "remove-machine":
@@ -6853,6 +6867,8 @@ async function attach(port: Port): Promise<void> {
     reloadWindow: (why, timeoutMs) => reloads.ask(why, "Kuru", timeoutMs),
     madeOf: (agentId) => madeFiles.of(agentId),
     showFile: showFileFor,
+    movePlan: (profileId, workspaceId, nodeId, folder) => mover.plan(profileId, workspaceId, nodeId, folder),
+    moveWorkspace: (profileId, workspaceId, nodeId, folder) => mover.move(profileId, workspaceId, nodeId, folder, "harness"),
   });
   // The reports a remote agent's hooks cannot send, read off its screen.
   screens = new OnScreen({
@@ -6976,6 +6992,21 @@ async function attach(port: Port): Promise<void> {
       };
     },
     changed: pushNodes,
+    log: (line) => console.log(`kururu: ${line}`),
+    moves: { check: (peer, ask) => mover.check(peer, ask), adopt: (peer, offer) => mover.adopt(peer, offer) },
+  });
+  mover = new Mover({
+    workspaces,
+    store,
+    nodes,
+    agents: () => host.agents.map(overlay),
+    harnessOf: (profileId) => workspaces.profile(profileId)?.harness?.agentId ?? null,
+    dirsOf: workspaceDirs,
+    databasesOf: databasesOfWorkspace,
+    machineOf: (workspace) => (workspace.machine ? (findMachine(workspace.machine.machineId)?.name ?? null) : null),
+    standing: (worktree) => worktreePresent(worktree.path),
+    endTerminals: killAll,
+    home: homedir(),
     log: (line) => console.log(`kururu: ${line}`),
   });
   for (const agentId of workspaces.allAgents()) {
