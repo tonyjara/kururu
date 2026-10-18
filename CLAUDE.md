@@ -219,7 +219,8 @@ The load-bearing invariants, one line each, with the argument behind the link:
   private repository is an allow-list in `shared/backup.ts` — named config
   files, the boards and the harness conversation as text, the memory folders —
   and anything not named stays: the share token, the OpenRouter key, the
-  Telegram bot token, the web providers' keys, `identities/`, every login. Never `--force`, never a rewrite; a push the
+  Telegram bot token, the web providers' keys, `identities/`, every login,
+  a node's keys and the roster (`node.json`, `nodes.json`). Never `--force`, never a rewrite; a push the
   remote refuses stops and says so. → [data](docs/data.md#backups)
 - **The usage bar reads a Claude credential and never writes one** — the
   machine's, or the active profile's when profiles keep their own logins. It is
@@ -290,6 +291,17 @@ The load-bearing invariants, one line each, with the argument behind the link:
   answer, and the role says so. A message from a channel comes in by the
   drawer's road — the outbox, typed — marked `[telegram]`, and the role says
   what that means. → [harness](docs/harness.md)
+- **A node is let in by the roster, never by a token.** Every kururu is a
+  node; the parent (the Mac) signs a roster of members' public keys, and two
+  nodes link — one WebSocket per pair, `/link`, the lower rank dialling the
+  higher — by each signing the other's challenge with a key that roster
+  lists. Pairing is a code the child shows, posted to `/api/nodes/enrol`.
+  Those two routes are the only ones ahead of the token gate, and both
+  refuse an `Origin`, a proxy's header and anything off the tailnet and
+  loopback. What crosses a link is a summary a node pushes about itself,
+  never a copy of a board; a node is away after 25 s of silence, because a
+  sleeping Mac sends no FIN. The parent pulls each child's backup over its
+  link into `nodes/<name>/`. → [nodes](docs/nodes.md)
 - **A shell on another machine is a command line, never a host change.** A
   machine is an ssh host the user named (Settings → Machines, `vps.json`); its
   shell is `ssh -t` in an ordinary pty, built and read back by
