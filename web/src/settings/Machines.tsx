@@ -1,6 +1,6 @@
 /**
  * Settings → Connections → Machines: which of the user's other computers the
- * sidebar watches — a VPS, a PC on the same tailnet.
+ * bottom bar watches — a VPS, a PC on the same tailnet.
  *
  * This works through the user's own ssh, so what makes a machine work here is
  * what makes `ssh <host>` work in a terminal without a question, and the one
@@ -61,7 +61,7 @@ export function MachinesPage({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <Group title="Watching" foot="CPU, memory and disk in the sidebar, read over ssh every fifteen seconds while a window is open.">
+      <Group title="Watching" foot="CPU, memory and disk on the bottom bar — a chip in the colour of the worst load, each machine's rings on a hover — read over ssh every fifteen seconds while a window is open.">
         {machines.length === 0 && <p className="st-empty">No machines yet.</p>}
         {machines.map((machine) => (
           <Item

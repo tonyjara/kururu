@@ -20,6 +20,9 @@ import {
   validHost,
   validPanel,
   validRemoteDir,
+  usedShare,
+  worstLoad,
+  type MachineStatus,
 } from "../../shared/machines";
 import { agentLabel } from "../../shared/labels";
 import type { AgentSnapshot } from "../../shared/model";
@@ -453,5 +456,35 @@ esac`,
     expect(out.stdout).toContain("Run codex login here");
     const ok = run("/bin/zsh", remoteAgentRun("codex", "codex --model gpt-5.5", "box"));
     expect(ok.calls).toEqual(["codex login --help", "codex login status", "codex --model gpt-5.5"]);
+  });
+});
+
+/** A machine as the bottom bar sees it: a reading, or none with ssh's reason. */
+function machine(id: string, cpu: number | null, mem: [number, number] | null, disk: [number, number] | null, error: string | null = null): MachineStatus {
+  return {
+    id,
+    name: id,
+    host: id,
+    panel: null,
+    reading: cpu === null && !mem && !disk ? null : { at: 0, cpu, mem: mem && { used: mem[0], total: mem[1] }, disk: disk && { used: disk[0], total: disk[1] } },
+    stale: false,
+    error,
+  };
+}
+
+describe("worstLoad", () => {
+  it("names the fullest reading across every machine and every metric", () => {
+    const worst = worstLoad([machine("a", 10, [9, 10], null), machine("b", 50, null, [1, 4])]);
+    expect(worst).toEqual({ id: "a", name: "a", label: "RAM", percent: 90 });
+  });
+  it("is null while nothing has reported, and skips the machines that have not", () => {
+    expect(worstLoad([machine("down", null, null, null, "ssh: timed out")])).toBeNull();
+    expect(worstLoad([machine("down", null, null, null, "ssh: timed out"), machine("up", 3, null, null)])?.percent).toBe(3);
+  });
+  it("reads a share off used and total, and refuses a total of nothing", () => {
+    expect(usedShare({ used: 1, total: 4 })).toBe(25);
+    expect(usedShare({ used: 9, total: 4 })).toBe(100);
+    expect(usedShare({ used: 3, total: 0 })).toBeNull();
+    expect(usedShare(null)).toBeNull();
   });
 });

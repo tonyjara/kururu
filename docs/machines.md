@@ -1,7 +1,7 @@
 # Machines
 
 The user's other computers — a VPS, a PC on the same tailnet — as kururu sees
-them: three gauges in the sidebar, a **Shell** for each in Settings → Machines, and workspaces whose
+them: a chip on the bottom bar in the colour of the worst load, with each machine's three gauges and a **Shell** in its popover (`web/src/components/Machines.tsx`; the gauges were a sidebar section until 2026-10-18), and workspaces whose
 terminals — shells, nvim, agents — open on one. What is deliberately *not* here
 yet is at the bottom.
 
