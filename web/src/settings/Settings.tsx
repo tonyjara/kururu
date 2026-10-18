@@ -236,7 +236,7 @@ export function Settings({
                 <div className="st-page">
                   <Page
                     tab={tab}
-                    props={{ appearance, styles, mascots, notify, launch, host, keys, profiles, logins, activeProfileId, autoSwap, agentPlacement, workspaces, activeWorkspaceId, projects, projectSettings }}
+                    props={{ appearance, styles, mascots, notify, launch, host, keys, profiles, logins, activeProfileId, autoSwap, agentPlacement, workspaces, activeWorkspaceId, projects, projectSettings, onClose }}
                   />
                 </div>
               </EditingScope>
@@ -273,6 +273,8 @@ type PageProps = {
   activeWorkspaceId: string;
   projects: WorkspaceProject[];
   projectSettings: ProjectSettingsMap;
+  /** For a page whose action is somewhere else — the machines' Shell, which opens a tab. */
+  onClose: () => void;
 };
 
 function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
@@ -315,7 +317,7 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
     case "channels":
       return <ChannelsPage profiles={p.profiles} />;
     case "machines":
-      return <MachinesPage />;
+      return <MachinesPage onClose={p.onClose} />;
     case "web":
       return <WebPage />;
     case "openrouter":

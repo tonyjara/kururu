@@ -1806,7 +1806,7 @@ a.machine-name:hover {
   flex-wrap: wrap;
   justify-content: flex-end;
   align-items: center;
-  gap: 4px 8px;
+  gap: 4px 10px;
   flex: none;
   max-width: 100%;
 }
@@ -1830,7 +1830,21 @@ a.machine-name:hover {
   color: var(--danger-bg);
 }
 
+/* Every ring the same width, so the rings of the usage row and of each
+   machine stand in columns down the sidebar rather than wherever their
+   numbers happen to end: the mark is held to a letter's room and the figure
+   to "99%". A full "100%" runs one character past its box into the gap after
+   it rather than widening the ring, because holding every ring to that width
+   would take the room the name beside them needs, and a ring that grew would
+   push its row out of the columns. Right-aligned in their rows, so the last
+   ring of every row is one column, the one before it the next. */
+.gauge-ring-label {
+  min-width: 1em;
+  text-align: center;
+}
 .gauge-ring-pct {
+  width: 3ch;
+  white-space: nowrap;
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
 }

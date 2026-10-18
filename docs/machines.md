@@ -1,7 +1,7 @@
 # Machines
 
 The user's other computers — a VPS, a PC on the same tailnet — as kururu sees
-them: three gauges in the sidebar, a shell button on each, and workspaces whose
+them: three gauges in the sidebar, a **Shell** for each in Settings → Machines, and workspaces whose
 terminals — shells, nvim, agents — open on one. What is deliberately *not* here
 yet is at the bottom.
 
@@ -25,7 +25,7 @@ means something for a box with a dashboard.
 tailnet address before sshd does and authenticates by tailnet identity, so
 `authorized_keys` and `ssh-copy-id` do nothing on that address. In *check* mode
 it periodically wants a browser visit: the poll then fails with that in its
-error, and the row's shell button is where you do the visit. kururu never runs
+error, and the machine's **Shell** in Settings → Machines is where you do the visit (it was a button on the sidebar's row until 2026-10-18). kururu never runs
 `tailscale`.
 
 ## A shell on one is a command line

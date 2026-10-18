@@ -1309,9 +1309,12 @@ export function Sidebar({
         )}
       </section>
 
+      {/* The usage rings and the machines' first, because both are rows of
+          the same rings and read as one column of them; then OpenRouter's
+          balance, which is words. */}
       <Usage />
-      <OpenRouter />
       <Machines />
+      <OpenRouter />
       <DevServers />
 
       {/* The foot: Settings and the phone's QR code, at the bottom left. They
@@ -1919,7 +1922,7 @@ function OpenRouterBalance({ reading, stale, open }: { reading: OpenRouterReadin
 
 /**
  * The machines somebody asked to watch — a VPS, a PC on the tailnet — a bar
- * each for CPU, memory and disk, and a button that opens a shell on one.
+ * each for CPU, memory and disk.
  *
  * Under the usage bars and drawn with their parts, because it is the same kind
  * of glance — a thing you notice on the way past rather than go and read — and
@@ -1928,10 +1931,11 @@ function OpenRouterBalance({ reading, stale, open }: { reading: OpenRouterReadin
  * Shut, one line per machine with the three percentages, which is enough to see
  * that nothing is on fire. Open, the bars.
  *
- * The shell button is on every row, reachable or not, and most of all when
- * not: a row that says ssh could not get in is fixed by answering ssh once in
- * a terminal — a host key, a passphrase, Tailscale's browser check — and the
- * button is that terminal, already pointed at the host.
+ * A shell button stood at the end of every row until 2026-10-18. It pushed
+ * the rings out of the column the usage rings above them stand in, and it is
+ * a thing done once — answering ssh's question for a row that cannot get in —
+ * so it is a **Shell** on the machine's row in Settings → Machines now, beside
+ * the error that says why it is wanted.
  *
  * Draws nothing until one has been added in Settings, like the dev servers: an
  * empty section on every window for a feature most people never use is noise.
@@ -1988,26 +1992,12 @@ function MachineRow({ server, open }: { server: MachineStatus; open: boolean }) 
       {server.name}
     </span>
   );
-  const shell = (
-    <button
-      className="mini"
-      onClick={() => void api.openMachineShell(server.id)}
-      title={`Open a shell on ${server.name} in a new tab\nssh -t ${server.host}`}
-      aria-label={`Shell on ${server.name}`}
-    >
-      <Icon name="terminal" />
-    </button>
-  );
-
   if (!reading) {
     return (
       <li className="machine-item">
         <span className="usage-head">
           {name}
-          <span className="usage-used">
-            {server.error ? "unreachable" : "…"}
-            {shell}
-          </span>
+          <span className="usage-used">{server.error ? "unreachable" : "…"}</span>
         </span>
         {server.error && <span className="machine-error">{server.error}</span>}
       </li>
@@ -2030,7 +2020,6 @@ function MachineRow({ server, open }: { server: MachineStatus; open: boolean }) 
           {cpu !== null && <MachineRing label="CPU" percent={cpu} figure={`${Math.round(cpu)}%`} />}
           {mem !== null && <MachineRing label="RAM" percent={mem} figure={memFigure ?? ""} />}
           {disk !== null && <MachineRing label="Disk" percent={disk} figure={diskFigure ?? ""} />}
-          {shell}
         </span>
       </li>
     );
@@ -2038,10 +2027,7 @@ function MachineRow({ server, open }: { server: MachineStatus; open: boolean }) 
 
   return (
     <li className={`machine-item ${server.stale ? "machine-stale" : ""}`}>
-      <span className="usage-head">
-        {name}
-        {shell}
-      </span>
+      <span className="usage-head">{name}</span>
       {cpu !== null && <MachineMeter label="CPU" percent={cpu} figure={`${Math.round(cpu)}%`} />}
       {mem !== null && memFigure && <MachineMeter label="RAM" percent={mem} figure={memFigure} />}
       {disk !== null && diskFigure && <MachineMeter label="Disk" percent={disk} figure={diskFigure} />}
