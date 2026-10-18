@@ -367,9 +367,13 @@ export const STEPS = [
       );
       const web = staleBuild(mtime(join(ctx.root, "web", "dist", "index.html")), sourceTimes(ctx.root, ["web/src", "shared"]));
       const stale = [server.stale && "the server", web.stale && "the web app"].filter(Boolean);
+      const never = !existsSync(join(ctx.root, "desktop", "dist", "server.mjs")) && !existsSync(join(ctx.root, "web", "dist", "index.html"));
+      const newest = server.stale ? server.newest : web.newest;
       rows.push(
-        stale.length
-          ? { title: "built", state: "fail", detail: `${stale.join(" and ")} older than the sources${server.newest || web.newest ? ` (${short(server.newest ?? web.newest)})` : ""}`, fix: "bun run build" }
+        never
+          ? { title: "built", state: "fail", detail: "not built", fix: "bun run build" }
+          : stale.length
+          ? { title: "built", state: "fail", detail: `${stale.join(" and ")} ${stale.length > 1 ? "are" : "is"} older than ${newest ? short(newest) : "the sources"}`, fix: "bun run build" }
           : { title: "built", state: "ok", detail: "the server and the web app are current" },
       );
       return rows;
@@ -550,6 +554,8 @@ export const STEPS = [
       }
       return rows;
     },
+    /** Codex is a question even when Claude is fine: the step is not done until it is answered. */
+    pending: (ctx) => ctx.saved.codex === undefined,
     async repair(ctx, io, rows) {
       if (ctx.saved.codex === undefined) {
         const has = Boolean(which("codex", ctx.env));
@@ -761,6 +767,8 @@ export const STEPS = [
     id: "phone",
     title: "the phone",
     why: "The phone opens the child's tailnet address with the token in the link; the first visit trades it for a cookie. The link is a key to this box, so it is shown only in a terminal of yours, as a QR code: `kururu share`.",
+    /** The phone's row is never a failure, so the wizard asks itself whether to show the code. */
+    pending: (_ctx, rows) => rows[0]?.state !== "ok",
     async check(ctx) {
       const answer = await health(ctx);
       if (answer.status !== 200) return [{ title: "phone", state: "skip", detail: "no server to ask" }];
