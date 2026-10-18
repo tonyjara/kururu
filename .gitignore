@@ -7,3 +7,9 @@ out/
 /release/
 .vercel
 .env*
+
+# Notes about this machine and its network, kept out of a public repository.
+docs/private/
+docs/research/remote-*.md
+# Merge leftovers.
+*.orig

@@ -19,9 +19,9 @@ describe("classify", () => {
     expect(
       classify({
         lo0: [v4("127.0.0.1", true)],
-        en0: [v6("fe80::1"), v4("192.168.100.139")],
+        en0: [v6("fe80::1"), v4("192.168.1.139")],
       }),
-    ).toEqual({ lan: ["192.168.100.139"], tailscale: null });
+    ).toEqual({ lan: ["192.168.1.139"], tailscale: null });
   });
 
   it("finds the tailnet address when it is up", () => {
@@ -41,10 +41,10 @@ describe("classify", () => {
   it("does not mistake a VPN tunnel for the local network", () => {
     expect(
       classify({
-        en0: [v4("192.168.100.139")],
+        en0: [v4("192.168.1.139")],
         utun4: [v4("10.15.16.80")],
       }),
-    ).toEqual({ lan: ["192.168.100.139"], tailscale: null });
+    ).toEqual({ lan: ["192.168.1.139"], tailscale: null });
   });
 
   it("skips an interface that gave itself an address because nothing answered", () => {

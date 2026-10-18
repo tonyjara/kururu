@@ -83,6 +83,11 @@ async function bundle(entry, outfile) {
     // Electron 44 ships Node 24; there is no older runtime to be kind to.
     target: "node22",
     sourcemap: true,
+    // The maps ship inside the app, so they carry file and line for a stack
+    // trace and not the source itself: with the contents in, every comment in
+    // the repository went out in the DMG, and a comment is where a real
+    // project or machine name is most likely to have been written down.
+    sourcesContent: false,
     define: { KURURU_VERSION: JSON.stringify(VERSION) },
     // Native, and resolved at runtime. `ws` could be bundled but is left external
     // alongside it so the two are found the same way. The voice's stack is

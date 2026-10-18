@@ -59,7 +59,7 @@ export interface Address {
  * A VPN's tunnel hands out a perfectly ordinary-looking 10.x address that no
  * phone on the sofa can reach, so the name has to be checked as well as the
  * address — this machine has a `utun` on 10.15.16.80 while its actual LAN is
- * 192.168.100.139, and offering the first would send somebody debugging the
+ * 192.168.1.139, and offering the first would send somebody debugging the
  * wrong thing for an afternoon.
  *
  * `awdl`/`llw` are AirDrop's, `anpi` is the internal bus to the Mac's own
