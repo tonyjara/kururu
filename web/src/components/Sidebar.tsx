@@ -216,7 +216,7 @@ export function Sidebar({
    * the sidebar draws, and passing it through the app would mean two components
    * knowing about it so that one of them could forget.
    */
-  const { branches, databases, machines } = useKururu();
+  const { branches, databases, machines, nodes } = useKururu();
   const heads = new Map(branches.map((head) => [head.workspaceId, head] as const));
   const dbCount = new Map<string, number>();
   for (const db of databases) dbCount.set(db.workspaceId, (dbCount.get(db.workspaceId) ?? 0) + 1);
@@ -694,6 +694,17 @@ export function Sidebar({
         ? [{ label: "Remove from group", run: () => api.setWorkspaceGroup(workspace.id, null) }]
         : []),
       { label: "New workspace", sep: true, run: () => onRun("new-workspace") },
+      /* To another kururu, the parent included, so a move goes either way.
+         One that is not linked is listed and greyed with why, rather than
+         left out: a menu that loses a row whenever a lid closes reads as a
+         feature that went away. The dialog asks the rest. */
+      ...(nodes?.nodes ?? []).map((node, i) => ({
+        label: `Move to ${node.name}…`,
+        sep: i === 0,
+        hint: node.state === "up" ? undefined : node.state,
+        disabled: node.state !== "up" || profile.workspaces.length < 2,
+        run: () => onPrompt({ kind: "move", title: `Move “${workspace.name}” to ${node.name}`, workspaceId: workspace.id, nodeId: node.id }),
+      })),
       {
         label: "Delete",
         sep: true,

@@ -85,6 +85,7 @@ import {
 } from "../../shared/harness";
 import { findLauncher, launcherCommand, visibleLaunchers, withPrompt, type AgentCli, type LaunchSettings, type Launcher } from "../../shared/launchers";
 import { remoteShellOf, validRemoteDir, type MachineEntry, type MachineStatus } from "../../shared/machines";
+import { folderSentence, planText, type MoveDone, type MovePlan } from "../../shared/move";
 import { nodesText, type NodeStatus } from "../../shared/nodes";
 import type { MadeFile } from "../../shared/made";
 import type { AgentSnapshot, AgentStatus, HarnessState } from "../../shared/model";
@@ -174,6 +175,9 @@ export interface HarnessDeps {
    * the user's screen when asked. Says what it did, or throws why not.
    */
   showFile: (profileId: string, agentId: string | null, path: string, line: number | null, open: boolean) => Promise<string>;
+  /** `move_workspace`: what moving a workspace to a node would do, and doing it. See `move.ts`. */
+  movePlan?: (profileId: string, workspaceId: string, nodeId: string, folder: string | null) => Promise<MovePlan>;
+  moveWorkspace?: (profileId: string, workspaceId: string, nodeId: string, folder: string) => Promise<{ done: MoveDone; node: string }>;
 }
 
 type WaitState = "done" | "blocked" | "exited";
@@ -961,6 +965,23 @@ export class Harness {
         return id ? ok(`Made workspace ${id} "${nameFor}".`) : fail("Could not make it.");
       }
 
+      case "move_workspace": {
+        const workspaceId = workspaceArg(true)!;
+        const nodeName = str(args.node);
+        const node = this.deps.nodes?.().find((n) => n.name === nodeName);
+        if (!node) return fail(`No node ${nodeName || "(none)"}. kururu_status lists them under nodes.`);
+        if (!this.deps.movePlan || !this.deps.moveWorkspace) return fail("This kururu cannot move workspaces.");
+        const plan = await this.deps.movePlan(profileId, workspaceId, node.id, str(args.folder) || null);
+        if (args.confirm !== true) return ok(planText(plan));
+        if (plan.refusal) return fail(plan.refusal);
+        if (!plan.check) return fail(`Could not ask ${node.name} about the folder: ${plan.checkError ?? "no answer"}`);
+        if (plan.check.problem) return fail(folderSentence(plan.check.problem, node.name, plan.check.shown));
+        const moved = await this.deps.moveWorkspace(profileId, workspaceId, node.id, plan.check.folder);
+        return ok(
+          `Moved ${plan.workspace.name} to ${moved.node}${moved.done.again ? " (it had arrived already)" : ""}: workspace ${moved.done.name} in ${plan.check.shown}, ${moved.done.cards} cards, in ${moved.done.profile}. It is gone from this list, and its board here is in Search → Deleted. ${moved.node}'s own Kuru drives it from now on.`,
+        );
+      }
+
       case "search": {
         const query = str(args.query);
         if (!query) return fail("Words to look for are needed.");
@@ -1474,8 +1495,10 @@ function eventLine(event: CardEvent): string {
     case "created":
       return `made by ${by} in ${laneName(event.toColumn ?? "")}`;
     case "imported":
+      if (typeof detail.from === "string") return `arrived on ${typeof detail.to === "string" ? detail.to : "this node"} from ${detail.from} with its workspace, in ${laneName(event.toColumn ?? "")}`;
       return `imported from the layout file, in ${laneName(event.toColumn ?? "")}`;
     case "moved":
+      if (typeof detail.node === "string") return `went with its workspace to ${detail.node}, moved by ${by}${detail.carried === false ? " (made during the move, so not carried)" : ""}`;
       return `moved by ${by} from ${laneName(event.fromColumn ?? "")} to ${laneName(event.toColumn ?? "")}`;
     case "sent":
       return `sent by ${by} to another board, into ${laneName(event.toColumn ?? "")}`;

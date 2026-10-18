@@ -1374,6 +1374,14 @@ export type ClientMessage =
   /** Take a member out of the roster. Its links drop as the new roster reaches each node. The parent's alone. */
   | { type: "node-remove"; id: number; nodeId: string }
   /**
+   * The row menu's Move to <node>…: what would go and stay, whether it is
+   * refused here, and the node's word on the folder (its guess when null).
+   * Replied to with a `MovePlan`. Asked again as the folder is edited.
+   */
+  | { type: "node-move-plan"; id: number; workspaceId: string; nodeId: string; folder: string | null }
+  /** Move it: the board goes over the link, and the workspace leaves this list once the node has it. Replied to with what was made there. */
+  | { type: "node-move"; id: number; workspaceId: string; nodeId: string; folder: string }
+  /**
    * Give the server an OpenRouter management key. The one message in the
    * protocol that carries a secret, and it only ever travels this way: it is
    * tried, saved owner-only, and answered with the status, whose `hint` is all

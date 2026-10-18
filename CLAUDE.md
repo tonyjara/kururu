@@ -303,7 +303,10 @@ The load-bearing invariants, one line each, with the argument behind the link:
   loopback. What crosses a link is a summary a node pushes about itself,
   never a copy of a board; a node is away after 25 s of silence, because a
   sleeping Mac sends no FIN. The parent pulls each child's backup over its
-  link into `nodes/<name>/`. → [nodes](docs/nodes.md)
+  link into `nodes/<name>/`. A workspace moves by its board alone, never
+  its code, and only with no agent running and no worktree standing. The
+  source removes it only once the target has answered, and the move id
+  makes a retry the same move. → [nodes](docs/nodes.md)
 - **A shell on another machine is a command line, never a host change.** A
   machine is an ssh host the user named (Settings → Machines, `vps.json`); its
   shell is `ssh -t` in an ordinary pty, built and read back by

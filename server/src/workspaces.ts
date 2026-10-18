@@ -1430,11 +1430,15 @@ export class Workspaces {
     return panes(layout).find(takes)?.id ?? board.id;
   }
 
-  /** `newWorkspace`, in a profile that need not be on screen, and without switching anybody to it. */
-  newWorkspaceIn(profileId: string, name: string): string | null {
+  /**
+   * `newWorkspace`, in a profile that need not be on screen, and without
+   * switching anybody to it. `cwd` is where its one pane starts — a
+   * workspace moved here from another node, whose folder is already known.
+   */
+  newWorkspaceIn(profileId: string, name: string, cwd?: string): string | null {
     const profile = this.profile(profileId);
     if (!profile) return null;
-    const workspace = this.blankWorkspace(name);
+    const workspace = this.blankWorkspace(name, cwd);
     this.replaceProfile(profileId, (p) => ({ ...p, workspaces: [...p.workspaces, workspace] }));
     return workspace.id;
   }
@@ -1708,8 +1712,13 @@ export class Workspaces {
 
   /** Deletes it and says what was inside. The last workspace cannot be deleted. */
   deleteWorkspace(workspaceId: string): string[] {
-    const profile = this.active;
-    if (profile.workspaces.length < 2) return [];
+    return this.deleteWorkspaceIn(this.activeId, workspaceId);
+  }
+
+  /** `deleteWorkspace`, in a profile that need not be on screen: a workspace that moved to another node, or one a failed move made here. */
+  deleteWorkspaceIn(profileId: string, workspaceId: string): string[] {
+    const profile = this.profile(profileId);
+    if (!profile || profile.workspaces.length < 2) return [];
     const doomed = profile.workspaces.find((w) => w.id === workspaceId);
     if (!doomed) return [];
     const agents = panes(doomed.layout).flatMap((pane) => terminalsOf(pane.agentIds));
@@ -1863,8 +1872,8 @@ export class Workspaces {
   // Internals
   // -------------------------------------------------------------------------
 
-  private blankWorkspace(name: string): Workspace {
-    const pane = makePane(id("n"));
+  private blankWorkspace(name: string, cwd?: string): Workspace {
+    const pane = makePane(id("n"), cwd);
     return {
       id: id("w"),
       key: mintWorkspaceKey(),

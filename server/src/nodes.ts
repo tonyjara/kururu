@@ -80,6 +80,7 @@ import {
   type SignedRoster,
   validHostName,
 } from "../../shared/nodes";
+import type { MoveCheck, MoveDone } from "../../shared/move";
 import { readConfigFile, writeConfigFile } from "./config";
 import { safeMirrorPath } from "./export";
 import { becomeParent, challenge, identity, rosterSigner, signAsNode, signRoster, stopBeingParent, verifySigned, type Identity } from "./nodekeys";
@@ -126,6 +127,15 @@ export interface NodeHostDeps {
   /** Something a client draws changed. */
   changed: () => void;
   log: (line: string) => void;
+  /**
+   * A peer's workspace arriving here (`move.ts`): whether a folder will do,
+   * and the move itself. Absent in a test that does not move anything, and
+   * then a peer's ask is answered with why not.
+   */
+  moves?: {
+    check: (peer: string, ask: unknown) => MoveCheck;
+    adopt: (peer: string, offer: unknown) => Promise<MoveDone>;
+  };
 }
 
 interface PeerState {
@@ -170,6 +180,14 @@ interface Dialer {
   link: Link | null;
 }
 
+/** A question put to a peer that wants its answer back: a move's check, or the move. */
+interface Ask {
+  peer: string;
+  resolve: (message: LinkMessage) => void;
+  reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 interface Pull {
   peer: string;
   resolve: (value: { mark: string; files: Map<string, Buffer> }) => void;
@@ -206,6 +224,7 @@ export class NodeHost {
   private readonly pending = new Set<Link>();
   private readonly dialers = new Map<string, Dialer>();
   private readonly pulls = new Map<string, Pull>();
+  private readonly asks = new Map<string, Ask>();
   /** The data mark of each node's last backup pull. */
   private readonly pulled = new Map<string, string>();
   private lastSummaryKey = "";
@@ -265,6 +284,26 @@ export class NodeHost {
     const roster = this.roster;
     if (!roster || !memberOf(roster, this.me.id)) return "alone";
     return roster.parent === this.me.id && rosterSigner() === roster.signer ? "parent" : "child";
+  }
+
+  /** This node's id. */
+  selfId(): string {
+    return this.me.id;
+  }
+
+  /** This node's name in the roster, or the one it would take. */
+  name(): string {
+    return this.selfName();
+  }
+
+  /** A member's name, for a sentence. */
+  nameOf(nodeId: string): string | null {
+    return memberOf(this.roster, nodeId)?.name ?? null;
+  }
+
+  /** Whether the link to a member is up now. */
+  linked(nodeId: string): boolean {
+    return this.links.has(nodeId);
   }
 
   private selfName(): string {
@@ -777,6 +816,16 @@ export class NodeHost {
       case "export":
         this.onExport(message);
         return;
+      case "workspace-move-check":
+        this.answerMoveCheck(link, message);
+        return;
+      case "workspace-move":
+        void this.answerMove(link, message);
+        return;
+      case "workspace-move-checked":
+      case "workspace-moved":
+        this.onAnswer(link, message);
+        return;
       case "bye":
         this.noteError(link.peer, typeof message.reason === "string" ? message.reason : "it said goodbye");
         link.close("bye");
@@ -827,6 +876,12 @@ export class NodeHost {
       clearTimeout(pull.timer);
       this.pulls.delete(id);
       pull.reject(new Error("the link dropped"));
+    }
+    for (const [id, ask] of this.asks) {
+      if (ask.peer !== peerId) continue;
+      clearTimeout(ask.timer);
+      this.asks.delete(id);
+      ask.reject(new Error("the link dropped"));
     }
     this.deps.log(`nodes: ${memberOf(this.roster, peerId)?.name ?? peerId} went away`);
     this.queueSeen();
@@ -1013,6 +1068,65 @@ export class NodeHost {
       }
     }
     return { pulled, failed };
+  }
+
+  // ---------------------------------------------------------------------------
+  // A workspace moved (`move.ts` decides; this carries it)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Put a question to a linked peer and wait for its answer, by a fresh id.
+   * The answer's own type is the caller's to check; a peer one phase behind
+   * says nothing at all, which is the timeout and the sentence with it.
+   */
+  ask(nodeId: string, build: (id: string) => LinkMessage, timeoutMs: number, silent: string): Promise<LinkMessage> {
+    const link = this.links.get(nodeId);
+    if (!link) return Promise.reject(new Error(`${this.nameOf(nodeId) ?? "That node"} is not linked right now.`));
+    const id = randomBytes(8).toString("hex");
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.asks.delete(id);
+        reject(new Error(silent));
+      }, timeoutMs);
+      timer.unref();
+      this.asks.set(id, { peer: nodeId, resolve, reject, timer });
+      link.send(build(id));
+    });
+  }
+
+  private onAnswer(link: Link, message: Extract<LinkMessage, { type: "workspace-move-checked" | "workspace-moved" }>): void {
+    const ask = typeof message.id === "string" ? this.asks.get(message.id) : undefined;
+    // Only from the peer it was put to: an id is not a secret between members, and need not be.
+    if (!ask || ask.peer !== link.peer) return;
+    this.asks.delete(message.id);
+    clearTimeout(ask.timer);
+    ask.resolve(message);
+  }
+
+  private answerMoveCheck(link: Link, message: Extract<LinkMessage, { type: "workspace-move-check" }>): void {
+    if (typeof message.id !== "string" || message.id.length > 64) return;
+    const peer = this.nameOf(link.peer!) ?? link.peer!;
+    try {
+      if (!this.deps.moves) throw new Error("this node takes no workspaces");
+      link.send({ type: "workspace-move-checked", id: message.id, check: this.deps.moves.check(peer, message.ask), error: null });
+    } catch (err) {
+      link.send({ type: "workspace-move-checked", id: message.id, check: null, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private async answerMove(link: Link, message: Extract<LinkMessage, { type: "workspace-move" }>): Promise<void> {
+    if (typeof message.id !== "string" || message.id.length > 64) return;
+    const peer = this.nameOf(link.peer!) ?? link.peer!;
+    try {
+      if (!this.deps.moves) throw new Error("this node takes no workspaces");
+      const done = await this.deps.moves.adopt(peer, message.offer);
+      this.deps.log(`nodes: ${done.again ? "answered a repeated move of" : "took"} workspace ${done.name} from ${peer}, ${done.cards} cards`);
+      link.send({ type: "workspace-moved", id: message.id, done, error: null });
+    } catch (err) {
+      const said = err instanceof Error ? err.message : String(err);
+      this.deps.log(`nodes: refused a workspace from ${peer}: ${said}`);
+      link.send({ type: "workspace-moved", id: message.id, done: null, error: said });
+    }
   }
 
   // ---------------------------------------------------------------------------

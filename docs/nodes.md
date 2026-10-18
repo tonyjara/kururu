@@ -6,8 +6,9 @@ each draws the other: the Mac's sidebar and Needs drawer show the child's
 workspaces, agents and asks, the Mac's backup carries the child's boards, and
 the child's own page says when the Mac went away. This is phase 2 of
 [the plan](plans/kururu-parent-child.md#phase-2--nodes-the-roster-the-mesh-the-mirror).
-Kurus talking to each other, lent secrets, one Telegram and moving a
-workspace are phases 3–6, and this file grows with them.
+Kurus talking to each other, lent secrets and one Telegram are phases 3–5,
+and this file grows with them. Moving a workspace, phase 6, is
+[below](#moving-a-workspace).
 
 The code is `shared/nodes.ts` (the shapes and every rule, pure and tested),
 `server/src/nodekeys.ts` (the keys) and `server/src/nodes.ts` (`NodeHost`).
@@ -183,6 +184,76 @@ child's boards are therefore backed up as often as the Mac is awake.
 `bun run restore <repo> --node <name>` on a fresh child reads that subtree
 back. The child is then paired again, because its keys and the roster were
 never in the backup.
+
+## Moving a workspace
+
+Phase 6. A workspace row's ⋯ menu (and its right-click) has **Move to
+<node>…** for every other member, the parent included, so a move goes either
+way. A node that is not linked is listed, greyed, with its state. The same
+move is Kuru's `move_workspace`: without `confirm` it returns the plan as
+text, and with `confirm: true` it moves the workspace. The tool tells Kuru to
+ask the user before confirming.
+
+**The dialog** is centred, like everything else that ends work. It asks for
+the project's folder on the other node, and that node judges it as it is
+typed. The first guess is the folder name from here under the other node's
+projects folder: the folder most of its workspaces sit in, else `~/Projects`
+or one of the usual names, else home. Then come two lists, worded in
+`shared/move.ts`:
+
+- **Moves:** the name, and the board. Every card goes, deleted ones too,
+  each with its number, dates, runs and history. The runs come as history
+  only: their conversations stay here, so running such a card there starts
+  a new conversation. An asleep run arrives `ended`, so the card does not
+  promise a resume.
+- **Stays:** the code (the other node uses its own checkout, so push here
+  and pull there), the env files, any database the project points at, the
+  panes (it arrives with one pane in its folder), the open terminals (they
+  close), the cards' dev servers, a machine pin, the links to files agents
+  made, and this node's copy of the board, which goes to Search → Deleted.
+
+**Refused** while it is the profile's only workspace, while Kuru's own tab is
+in it, while an agent is running in it or on one of its cards (a shell
+running `claude` counts), or while a card has a worktree on the disk. A
+worktree the disk no longer has is dropped and does not block the move. The
+refusal is drawn above the lists. The folder is still checked under it, so
+both fixes show at once.
+
+**The folder is the other node's to judge.** `judgeFolder` in
+`server/src/move.ts` expands `~` and wants an absolute path inside home,
+both before and after links are followed (refuse, never clamp). The path
+must be a directory with a `.git` in it. Nothing runs `git`.
+
+**The exchange** is two questions on the link:
+
+| message | answer | what it carries |
+|---|---|---|
+| `workspace-move-check` | `workspace-move-checked` | the folder (or null for the guess); answered with the resolved folder, the problem if any, the profile it would land in and whether a workspace of that name is there |
+| `workspace-move` | `workspace-moved` | a move id, the workspace's key and name, the folder, and the board as `Store.exportBoard` writes it (the backup's `BoardExport`); answered with what was made |
+
+The receiving node checks the offer down to every event (`adoptOffer`) and
+judges the folder again. It makes the workspace in the profile on screen,
+with one pane in that folder. Then `Store.adoptMove` writes the cards, runs
+and events in one transaction, adds an `imported` event to each card naming
+both nodes, and stores its answer in `meta` under the move id. The board is
+read back into memory from those rows, as a restored card is.
+
+Only when the answer arrives does the moving node act. `Store.markMovedAway`
+marks every card on the board deleted, with a `moved` event naming the node
+and the new key. Then the workspace is removed, as deleting one would, and
+its terminals are ended. **The move id is
+the same every time** this workspace is sent to that node (a hash of the
+two node ids and the workspace's key). So a second press after a lost answer
+is the same move, and the other node replies from its record with
+`again: true` and makes nothing twice. A move interrupted before the answer
+leaves this node as it was.
+
+**A card that comes back** keeps its row. Moving a workspace there and back
+finds the cards' ids already in this database, on the board they left,
+marked moved. `adoptMove` takes those rows up again: new board, the export's
+fields, deletion as the export says. It adds only the runs and events that
+are not already there, matched by when and what, so the history reads
+straight through both machines.
 
 ## Files
 

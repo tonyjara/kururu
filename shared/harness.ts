@@ -357,6 +357,20 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
     inputSchema: obj({ name: str("The workspace's name.") }, ["name"]),
   },
   {
+    name: "move_workspace",
+    description:
+      "Move a workspace of this profile to another node (kururu_status lists them under nodes). Its name and its board go there, every card with its history, and it leaves this list. The code, env files, databases, panes and terminals do not move: the node works in its own checkout of the project, which must already be there. Refused while an agent runs in it or a card has a worktree standing. Without confirm it only says what would move and stay and whether the folder there will do: call it that way first and tell the user. Call it with confirm=true only after they have said yes, because it closes the workspace's terminals here.",
+    inputSchema: obj(
+      {
+        workspace: WORKSPACE,
+        node: str("The node's name, such as omarchy."),
+        folder: str("The project's folder on that node, ~/… or /…. Default: the node's guess, the same folder name under its projects folder."),
+        confirm: bool("true to move it. Absent or false only shows what would happen."),
+      },
+      ["workspace", "node"],
+    ),
+  },
+  {
     name: "search",
     description:
       "Full-text search over every card in this profile (titles and bodies, deleted ones included) and over the conversation history: what the user typed or said to you and what you answered, in every session, plus what each agent said when it finished a turn. Use it for \"when did we decide X\" and \"find the card about Y\" before asking the user. Accents are ignored; the last word matches as a prefix. Each hit says what it is, where, and the matching line.",

@@ -20,8 +20,16 @@
  * instead of a plain yes — the board's own `Ask` shape, drawn centred instead
  * of on the card, so it reads the same wherever it is asked and a phone sees
  * it as a dialog rather than something to scroll a card into view for.
+ *
+ * `move` is the one that talks to the server while it is up: moving a
+ * workspace to another node asks that node whether the folder will do, as
+ * the folder is typed, and says what goes and what stays before anything
+ * does — the worktree rule's reasoning, that anything ending work asks in
+ * the middle of the screen and not at the foot of a row.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { folderSentence, type MoveDone, type MovePlan } from "../../../shared/move";
+import * as api from "../session";
 import { Icon } from "./Icon";
 
 export interface PickItem {
@@ -76,18 +84,26 @@ export type DialogState =
        * of; `run` puts the next dialog up itself, so it does not close this one.
        */
       onCreate?: { label: string; run: () => void };
+    }
+  | {
+      kind: "move";
+      title: string;
+      hint?: string;
+      workspaceId: string;
+      nodeId: string;
     };
 
 export function Dialog({ state, onClose }: { state: DialogState; onClose: () => void }) {
   return (
     <div className="scrim" onPointerDown={onClose}>
-      <div className="dialog" onPointerDown={(event) => event.stopPropagation()} role="dialog" aria-modal>
+      <div className={state.kind === "move" ? "dialog dialog-move" : "dialog"} onPointerDown={(event) => event.stopPropagation()} role="dialog" aria-modal>
         <h2 className="dialog-title">{state.title}</h2>
         {state.hint && <p className="dialog-hint">{state.hint}</p>}
         {state.kind === "prompt" && <Prompt state={state} onClose={onClose} />}
         {state.kind === "confirm" && <Confirm state={state} onClose={onClose} />}
         {state.kind === "ask" && <Ask state={state} onClose={onClose} />}
         {state.kind === "pick" && <Pick state={state} onClose={onClose} />}
+        {state.kind === "move" && <Move state={state} onClose={onClose} />}
       </div>
     </div>
   );
@@ -322,6 +338,163 @@ function Pick({ state, onClose }: { state: Extract<DialogState, { kind: "pick" }
           </li>
         )}
       </ul>
+    </div>
+  );
+}
+
+/** How long the folder field sits still before the node is asked about it. */
+const CHECK_AFTER_MS = 500;
+
+/**
+ * Move to <node>…: the folder on that node, checked there as it is typed;
+ * what goes and what stays, from the server; and the button, which waits
+ * for both. A refusal is drawn above the lists so it is read first, and the
+ * folder is still checked under it, so both things to fix are seen at once.
+ */
+function Move({ state, onClose }: { state: Extract<DialogState, { kind: "move" }>; onClose: () => void }) {
+  const [plan, setPlan] = useState<MovePlan | null>(null);
+  const [folder, setFolder] = useState("");
+  /** The folder the plan's check is about, so a field edited since is not mistaken for one checked. */
+  const [checked, setChecked] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
+  const [moved, setMoved] = useState<{ done: MoveDone; node: string; url: string } | null>(null);
+  const asked = useRef(0);
+
+  const ask = (value: string | null) => {
+    const n = ++asked.current;
+    api.moveWorkspacePlan(state.workspaceId, state.nodeId, value).then(
+      (next) => {
+        if (n !== asked.current) return;
+        setPlan(next);
+        setError(null);
+        // The words asked about, not the node's spelling of them: "~/x" and
+        // "/home/me/x" are one folder, and a field compared against the other
+        // spelling would be checked again for ever.
+        const words = value ?? next.check?.shown ?? "";
+        setChecked(words);
+        if (value === null) setFolder(words);
+      },
+      (err: unknown) => {
+        if (n === asked.current) setError(err instanceof Error ? err.message : String(err));
+      },
+    );
+  };
+
+  useEffect(() => {
+    ask(null);
+    // Asked once on opening; the field's own effect below asks after that.
+  }, [state.workspaceId, state.nodeId]);
+
+  useEffect(() => {
+    if (checked === null || folder.trim() === checked) return;
+    const timer = setTimeout(() => ask(folder.trim()), CHECK_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [folder, checked]);
+
+  const node = plan?.node.name ?? "the node";
+  const check = plan?.check ?? null;
+  const fresh = checked !== null && folder.trim() === checked;
+  const ready = plan !== null && plan.refusal === null && check !== null && check.problem === null && fresh && !moving;
+
+  const go = () => {
+    if (!ready || !check) return;
+    setMoving(true);
+    setError(null);
+    api.moveWorkspaceTo(state.workspaceId, state.nodeId, check.folder).then(
+      (result) => {
+        setMoving(false);
+        setMoved(result);
+      },
+      (err: unknown) => {
+        setMoving(false);
+        setError(err instanceof Error ? err.message : String(err));
+      },
+    );
+  };
+
+  const keys = (event: KeyboardEvent) => {
+    event.stopPropagation();
+    if (event.key === "Escape" && !moving) onClose();
+  };
+
+  if (moved) {
+    return (
+      <div onKeyDown={keys}>
+        <p className="dialog-move-done">
+          {moved.done.name} is on {moved.node} now{moved.done.again ? " (it had already arrived)" : ""}: {moved.done.cards} card
+          {moved.done.cards === 1 ? "" : "s"}, in its profile {moved.done.profile}. Its board here is in Search → Deleted.
+        </p>
+        <div className="dialog-actions">
+          {moved.url && (
+            <a className="button button-quiet" href={moved.url} target="_blank" rel="noreferrer">
+              Open {moved.node}
+            </a>
+          )}
+          <button className="button" autoFocus onClick={onClose}>
+            Done
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div onKeyDown={keys}>
+      {!plan && !error && <p className="dialog-hint">Asking {node}…</p>}
+      {plan?.refusal && <p className="dialog-move-refused">{plan.refusal}</p>}
+      {plan && (
+        <>
+          <label className="dialog-move-label" htmlFor="move-folder">
+            The project's folder on {node}
+          </label>
+          <input
+            id="move-folder"
+            className="dialog-input"
+            value={folder}
+            autoFocus
+            disabled={moving}
+            onChange={(event) => setFolder(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                if (fresh) go();
+                else ask(folder.trim());
+              }
+            }}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <p className={check?.problem || plan.checkError ? "dialog-move-check dialog-move-bad" : "dialog-move-check"}>
+            {!fresh
+              ? "Checking…"
+              : check
+                ? `${folderSentence(check.problem, node, check.shown)} It arrives in ${node}'s profile ${check.profile}${check.clash ? `, which already has a workspace called ${plan.workspace.name}` : ""}.`
+                : (plan.checkError ?? "")}
+          </p>
+          <h3 className="dialog-move-head">Moves to {node}</h3>
+          <ul className="dialog-move-list">
+            {plan.moves.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          <h3 className="dialog-move-head">Stays here</h3>
+          <ul className="dialog-move-list">
+            {plan.stays.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </>
+      )}
+      {error && <p className="dialog-move-refused">{error}</p>}
+      <div className="dialog-actions">
+        <button className="button button-quiet" onClick={onClose} disabled={moving}>
+          Cancel
+        </button>
+        <button className="button" onClick={go} disabled={!ready}>
+          {moving ? "Moving…" : `Move to ${node}`}
+        </button>
+      </div>
     </div>
   );
 }
