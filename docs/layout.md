@@ -75,6 +75,18 @@ disk. Never move a layout decision back into React state.
   drawer is *open* is the client's, because a disclosure is a thing you do with
   your eyes and a phone opening one to find something must not undo the tidying
   on the desktop.
+- **A terminal's tab and its sidebar row open one menu** (`agentItems` in
+  `web/src/agentmenu.ts`), off a right-click or a long press
+  (`web/src/longpress.ts`), since 2026-10-18. Until then a tab's right-click
+  was not a menu but a rename field over the tab, and the row's menu had no
+  rename — one name, reachable from one of its two places, by a gesture
+  nothing else used. The list is Rename, Go to card, then Kill or Dismiss past
+  a line; the row adds Hide or Show, which is the list's and means nothing to
+  a tab. Rename puts the name in a field where it was (`NameField`), which
+  sends `rename-tab` — the same as `C-a ,` — and both places draw
+  `titleOverride`, so the name typed into either is the name on both. The
+  field starts on what that place showed, sends nothing when it is
+  unchanged, and claims the keyboard for as long as it exists.
 - **The sidebar lists agents; `lastAgent` is what makes that possible.**
   Filtering on `agent` alone would drop rows every time the process poll blinked,
   and would hide every *exited* agent — whose row carries the only dismiss gesture

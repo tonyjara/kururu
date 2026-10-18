@@ -1382,6 +1382,30 @@ kbd {
   color: var(--dimmer);
 }
 
+/* An agent's name as a field, from Rename in its row's menu: the row's top
+   line with the field where the title was, in the title's type and the tab
+   field's outline — it is the same name as the tab's, edited the same way. */
+.agent-renaming {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 6px;
+}
+.agent-edit {
+  flex: 1;
+  min-width: 0;
+  padding: 0 4px;
+  border: var(--border) var(--border-style) var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  outline: none;
+}
+
 /* The drawer of put-away agents, under the list and outside its scroll: it is
    the foot of the section rather than the last row of a list you may have
    scrolled away from, and a count you have to scroll to find is a count that
@@ -2271,10 +2295,11 @@ a.machine-name:hover {
 }
 /* A long press is the phone's right-click, and iOS answers one on a button with
    a callout and a text selection unless told not to. The sidebar's workspace
-   and agent rows open their menus the same way. */
+   and agent rows open their menus the same way, and so does a tab. */
 .tree-row,
 .ws-item,
-.agent-row {
+.agent-row,
+.tab {
   -webkit-touch-callout: none;
   user-select: none;
 }
