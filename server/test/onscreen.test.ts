@@ -34,6 +34,17 @@ const CLAUDE_DONE = [
   "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents",
 ].join("\n");
 
+/** A turn stopped with Escape — what the drawer's Stop waits to see before it calls Kuru idle (`Harness.interrupt`). */
+const CLAUDE_INTERRUPTED = [
+  "⏺ Reading the file now.",
+  "  ⎿  Interrupted · What should Claude do instead?",
+  "",
+  RULE,
+  "❯ ",
+  RULE,
+  "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents",
+].join("\n");
+
 const CLAUDE_PERMISSION = [
   "⏺ Bash(git push --force)",
   "",
@@ -100,6 +111,10 @@ describe("readScreen", () => {
 
   it("sees a finished turn as quiet: the clock has stopped and the footer lost its interrupt", () => {
     expect(readScreen(CLAUDE_DONE)).toEqual({ phase: "quiet", detail: null });
+  });
+
+  it("sees a turn stopped with Escape as quiet, which is when Stop lets the status go", () => {
+    expect(readScreen(CLAUDE_INTERRUPTED)).toEqual({ phase: "quiet", detail: null });
   });
 
   it("reads Claude's permission prompt and its question", () => {

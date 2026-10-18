@@ -4373,17 +4373,45 @@ html.pill-page #root {
 .kuru-file:hover {
   background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
-/* What Kuru is doing now, at the foot of the list. */
+/* What Kuru is doing now: a line of its own between the list and the
+   composer, so it stays in view however far up the list has been read, and
+   is over the box the next message goes into. Inset as the list is, so its
+   mascot sits in the column the bubbles start in. */
 .kuru-live {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 2px;
+  min-height: 34px;
+  padding: 4px 12px;
   font-size: var(--fs-base);
   color: var(--dim);
 }
 .kuru-live-asking {
   color: var(--blocked);
+}
+.kuru-live-word {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Stop: a header button in the working ink, the colour the thinking mascot
+   beside it wears, so the two read as one thing — this, and the way to end
+   it — rather than as a status and an unrelated warning. */
+.kuru-stop {
+  flex: none;
+  color: var(--working);
+  border-color: var(--working);
+}
+.kuru-stop:hover:not(:disabled) {
+  color: var(--working);
+  border-color: var(--working);
+}
+:root[data-narrow] .kuru-stop {
+  min-height: 32px;
+  padding: 4px 12px;
 }
 
 /* Typing to Kuru, and the mic beside it. Clear of the home indicator for the

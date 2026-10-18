@@ -32,7 +32,7 @@ conversation's *text*, never its audio; see [channels](channels.md).
 | The hush | `server/src/voice.ts` `talk` | Nothing plays while anybody talks, and what waited plays after — see [below](#never-over-you). |
 | The missed list | `server/src/voice.ts` `review`, `replay`, `seen` | Every reply nobody played to its end, kept as words in the database (see [data](data.md)) — see [what you missed](#what-you-missed). Not a message of its own: it is merged into the conversation below. |
 | The conversation | `shared/kuru.ts`, `server/src/kuru.ts` | The harness's turns out of the database, your messages out of the outbox and each reply's fate off the missed list, as one list per profile with two counts — the `kuru` message, sent on connect and on every change, and paged back through `GET /api/kuru`. See [the drawer](#the-drawer). |
-| The drawer | `KuruDrawer.tsx` | The conversation, beside the panes on a desktop (narrowing them, like the sidebar) and the whole screen on a phone: every message of yours with its state, every reply with its fate, a live row for what Kuru is doing, and a composer that types to Kuru through the outbox. Opened by the chip, the harness key, a tap on the pill, the floating pill and the menu bar. |
+| The drawer | `KuruDrawer.tsx` | The conversation, beside the panes on a desktop (narrowing them, like the sidebar) and the whole screen on a phone: every message of yours with its state, every reply with its fate, a live line over the composer for what Kuru is doing — with **Stop** while it works — and a composer that types to Kuru through the outbox. Opened by the chip, the harness key, a tap on the pill, the floating pill and the menu bar. |
 | The chip | `DrawerChips.tsx` `sb-kuru` | The one door onto the drawer, the second of the two drawer chips (the first is what needs you) — in the top-right pane's tab strip while the drawers are shut, in the open drawer's header, in the bottom bar on a phone. Its mark is what Kuru is doing — a dim dot, the mascot hopping while it thinks, the speaker glyph while it speaks, the blocked ink and "asking" on a prompt, "off" when not running — and its news is text inside it: a red count with the mic for messages that did not get through. In flight and all delivered are not news and get no mark. It carried a count of unheard replies until 2026-10-12; the drawer marks each where it sits, which is all the count led to. |
 | The pill | `VoicePill.tsx` | A level meter and a line, over the panes, zen included. Says which gesture ends the recording, what was heard and where it went, what Kuru is saying. Dragged anywhere in the window by mouse or finger and drawn where this device left it (`web/src/place.ts`); a double click puts it back. Its ✕ is `dismissVoice`: Kuru stops mid-word and the rest of the reply, and what was queued behind it, is marked unheard; a clip being recorded is thrown away; words lingering go. Escape is the same ✕ while Kuru speaks. A plain click — one that travelled less than the drag's own slop, and landed outside the ✕ — toggles the drawer at the reply the pill is showing: open it unless it is already open, in which case this closes it, so a pill that only ever shows its last line is one tap from the whole conversation and one tap back. The pill is the live indicator; the drawer is the record. |
 | The button | `KuruDrawer.tsx` `kuru-mic` | The key for a thumb, in the drawer's composer: held, it records; tapped, it toggles. How a phone talks. It was on the status bar beside the chip until 2026-10-12 — two controls for one conversation, one of them on every device's one strip. |
@@ -248,7 +248,7 @@ it. The harness key (`C-a a`) opens and
 shuts it. Its header leads with the two drawers' chips, Kuru's lit; the
 **Terminal** button that stood there went on 2026-10-18, and the old
 `open-harness` — started, resumed or revealed — is the **Start** or **Open
-terminal** at the foot of the list while Kuru is off or asking. The speaker in its header is Settings → Voice's **Speak
+terminal** on the live line over the composer while Kuru is off or asking. The speaker in its header is Settings → Voice's **Speak
 replies**, the same setting written through the same `set-voice`, so the two
 always agree: a speaker while replies are read aloud, struck through while
 they are only on screen. Muting also stops a reply already audible, through
@@ -289,11 +289,28 @@ the colours alternate. The socket carries the newest `KURU_RECENT` of each
 profile and everything on the two lists with something to do about it;
 **Show earlier** pages back through `GET /api/kuru`.
 
-The live row at the foot says what Kuru is doing now — the mascot hopping
-with "thinking", "asking something in its terminal" with **Open terminal**,
-"not running" with **Start** — and the chip says the same in a glyph, from
-the same function (`kuruLive` in `web/src/kuru.ts`), so the two cannot
-disagree. A card code in a reply (`KUR-67`) is a door onto the profile board
+The live line says what Kuru is doing now — the mascot hopping with
+"Thinking…" and **Stop**, "asking something in its terminal" with **Open
+terminal**, "not running" with **Start** — and the chip says the same in a
+glyph, from the same function (`kuruLive` in `web/src/kuru.ts`), so the two
+cannot disagree. It stands between the list and the composer rather than at
+the list's foot, where it scrolled away the moment you read up. "Thinking" is
+the harness's `working` status (`kuruWorking`), so a line said mid-turn
+through `say` does not take Stop away.
+
+**Stop** sends `kuru-stop`, and `Harness.interrupt` types the one Escape a
+press in Kuru's terminal would. Claude Code runs no Stop hook for a turn it
+was interrupted in, so the hooks' last word stays `working`; the server
+therefore reads Kuru's screen (`readScreen`, the remote agents' reader) until
+the footer's "esc to interrupt" and the spinner are gone, then reports
+`idle` — not `done`, which would ring — and types anything held for the
+turn's end. Only while `working`, since an Escape at a permission prompt
+answers it; and one Escape per stop, held for `STOP_REPEAT_MS`, since two
+together are Claude Code's rewind menu. A screen that still says working
+after `STOP_WATCH_MS` is left saying it, and Stop comes back after
+`STOPPING_MS`. The composer is never touched, so a draft survives a stop.
+An Escape pressed in the terminal itself still leaves the status at
+`working` until the next prompt; only the drawer's Stop puts it right. A card code in a reply (`KUR-67`) is a door onto the profile board
 at that card, resolved against the boards the profile actually has; a word
 shaped like one that is not a card is left as a word.
 

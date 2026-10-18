@@ -1427,6 +1427,11 @@ export function kuruSay(profileId: string, text: string): string {
   return id;
 }
 
+/** Stop Kuru's turn, as Escape in its terminal would. The status the drawer reads says when it has. */
+export function kuruStop(profileId: string): void {
+  send({ type: "kuru-stop", profileId });
+}
+
 /** The conversation before a moment, oldest first, and whether there is more before that. */
 export async function fetchKuru(profileId: string, before: number | null): Promise<KuruPage> {
   const params = new URLSearchParams({ profile: profileId });

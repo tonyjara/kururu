@@ -1452,6 +1452,13 @@ export type ClientMessage =
    * as a clip's is, so a retried send is one message.
    */
   | { type: "kuru-say"; profileId: string; id: string; text: string; at: number }
+  /**
+   * Stop Kuru's turn, from the drawer's Stop: the Escape a press in its
+   * terminal sends, and then its status put back to idle once its screen
+   * shows the turn is over, since Claude Code runs no Stop hook for an
+   * interrupted turn. Only while it is working. See `Harness.interrupt`.
+   */
+  | { type: "kuru-stop"; profileId: string }
   /** Send a failed message of yours again: heard again if it has no words, handed to Kuru again if it has. */
   | { type: "voice-resend"; id: string }
   /** Take a failed message of yours off the list, and its audio off the disk. */

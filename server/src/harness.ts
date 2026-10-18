@@ -88,6 +88,7 @@ import { remoteShellOf, validRemoteDir, type MachineEntry, type MachineStatus } 
 import type { MadeFile } from "../../shared/made";
 import type { AgentSnapshot, AgentStatus, HarnessState } from "../../shared/model";
 import { isNotifyEvent } from "../../shared/notify";
+import { readScreen } from "../../shared/onscreen";
 import type { MissedReply } from "../../shared/voice";
 import { RELOAD_TIMEOUT_MAX_MS, RELOAD_TIMEOUT_MIN_MS, RELOAD_TIMEOUT_MS, WHY_MAX, oneLine, outcomeText, type ReloadOutcome } from "../../shared/reload";
 import { COLUMN_LABELS } from "../../shared/board";
@@ -227,6 +228,11 @@ const WAKE_TIMEOUT_MS = 30_000;
  * line discipline's to lose.
  */
 const WAKE_SETTLE_MS = 1500;
+/** How long a Stop watches Kuru's screen for the turn to end, and how often it looks. */
+const STOP_WATCH_MS = 4000;
+const STOP_POLL_MS = 250;
+/** How long after a Stop another Escape is withheld: Claude Code reads two within about this as a double press. */
+const STOP_REPEAT_MS = 1200;
 
 export class Harness {
   private readonly inboxes = new Map<string, Inbox>();
@@ -248,6 +254,8 @@ export class Harness {
   private readonly retries = new Map<string, NodeJS.Timeout>();
   /** Harnesses just started and not yet reported in, whose words wait. See `hear`. */
   private readonly starting = new Map<string, NodeJS.Timeout>();
+  /** Harnesses an Escape was just sent to by `interrupt`, which does not send another until this lets go. */
+  private readonly stopping = new Set<string>();
   /** Auto Swap's clock, and the one timer that asks it again. See `follow`. */
   private readonly swaps = new SwapGate<{ profileId: string; agentId: string }>();
   private swapTimer: NodeJS.Timeout | null = null;
@@ -328,6 +336,55 @@ export class Harness {
     const profileId = this.deps.workspaces.profileOf(agentId);
     const profile = profileId ? this.deps.workspaces.profile(profileId) : null;
     return profile?.harness?.agentId === agentId ? profile.id : null;
+  }
+
+  /**
+   * Stop Kuru's turn, from the drawer's Stop: the Escape a press in its
+   * terminal would have sent, and then the status put right, which the press
+   * never does. Claude Code runs no Stop hook for a turn the user interrupted,
+   * so the last word its hooks said is `working` and stays that until the next
+   * prompt — and a drawer that keeps saying "thinking" after you stopped it
+   * says the stop did not work. Nothing else will say otherwise, so the screen
+   * is asked: once the footer's "esc to interrupt" and the spinner are gone
+   * (`readScreen`), the turn is over and the status is `idle`, the word for a
+   * turn nobody needs to be told about — not `done`, which would ring.
+   *
+   * Only while it is `working`: an Escape at a permission prompt answers it,
+   * which is the user's to do in the terminal (the drawer's line for that
+   * says so), and one at an idle prompt does nothing worth sending. And once
+   * per stop: a second Escape soon after the first is Claude Code's
+   * double-press, which opens its rewind menu over the prompt. A screen that
+   * still says working when the watch gives up is left saying it, since that
+   * is what is true, and Stop can be pressed again.
+   */
+  async interrupt(profileId: string): Promise<boolean> {
+    const agentId = this.deps.workspaces.profile(profileId)?.harness?.agentId;
+    const agent = agentId ? this.deps.host.find(agentId) : undefined;
+    if (!agentId || !agent || agent.exited || agent.status !== "working" || this.stopping.has(agentId)) return false;
+    this.stopping.add(agentId);
+    try {
+      this.deps.host.write(agentId, "\x1b");
+      const until = Date.now() + STOP_WATCH_MS;
+      while (Date.now() < until) {
+        await sleep(STOP_POLL_MS);
+        const now = this.deps.host.find(agentId);
+        // A hook got there first — the turn ended on its own, or went on to
+        // ask something — and its word is better than the screen's.
+        if (!now || now.exited || now.status !== "working") return true;
+        const { cols, rows } = this.deps.grid(agentId);
+        const screen = await screenText(await this.deps.host.backlog(agentId), cols, rows, rows);
+        if (readScreen(screen).phase === "working") continue;
+        this.deps.host.report(agentId, { status: "idle" });
+        // Anything held for the turn's end is due now, as it would be on a Stop.
+        void this.pump(agentId);
+        return true;
+      }
+      return false;
+    } finally {
+      // Held past the watch for as long as Claude Code counts two presses as
+      // one gesture, so a Stop pressed again at once is not the rewind menu.
+      setTimeout(() => this.stopping.delete(agentId), STOP_REPEAT_MS).unref();
+    }
   }
 
   // ---------------------------------------------------------------------------

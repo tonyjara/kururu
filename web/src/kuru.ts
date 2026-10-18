@@ -48,6 +48,18 @@ export function kuruLive(profile: Profile, agents: readonly AgentSnapshot[], con
   return "quiet";
 }
 
+/**
+ * Whether Kuru's turn is under way, whatever else is true — the drawer's
+ * Stop is for exactly this. Not `kuruLive(…) === "thinking"`, because a line
+ * Kuru says mid-turn through `say` makes that word `speaking`, and the turn
+ * it is said in can still want stopping.
+ */
+export function kuruWorking(profile: Profile, agents: readonly AgentSnapshot[]): boolean {
+  const id = profile.harness?.agentId;
+  const agent = id ? agents.find((a) => a.id === id) : undefined;
+  return agent !== undefined && !agent.exited && agent.status === "working";
+}
+
 export interface KuruDrawerState {
   open: boolean;
   /**

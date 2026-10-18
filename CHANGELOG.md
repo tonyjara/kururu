@@ -13,6 +13,14 @@ shows, so it is written once and read in three places — see
 
 ## [Unreleased]
 
+### Added
+
+- **Stop Kuru from its drawer.** While Kuru works on a turn, a "Thinking…" line sits
+  just above the chat box, in view however far up you have scrolled, with a
+  **Stop** button that interrupts the turn as Esc in its terminal would. The line
+  goes once the turn has really ended, and anything you were typing stays in the
+  box. Works on the phone too.
+
 ## [0.4.0] - 2026-10-17
 
 Picking this up needs the pty host restarted, which ends the agents running in

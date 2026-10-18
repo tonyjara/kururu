@@ -19,11 +19,21 @@
  * the full text; the speaker is Play and Stop both, for any reply with words
  * to say again, and shows which it is — an unheard one also says so beside
  * it, the one audible right now says Speaking, and a line said mid-turn
- * through the `say` tool is drawn smaller. A live row at the foot
- * says what Kuru is doing now, and a composer under it types to Kuru through
- * the same outbox a clip goes through — so the phone talks to Kuru today,
- * since playback works over plain http and only the microphone needs the
- * secure context.
+ * through the `say` tool is drawn smaller. A live line over the composer
+ * says what Kuru is doing now — thinking, with Stop beside it — and the
+ * composer under it types to Kuru through the same outbox a clip goes
+ * through — so the phone talks to Kuru today, since playback works over
+ * plain http and only the microphone needs the secure context.
+ *
+ * **The live line stands outside the list, over the composer,** where it
+ * was inside the list at its foot until 2026-10-18. At the foot it scrolled
+ * away with everything else the moment you read up, which is when "is it
+ * still going?" is asked; over the box it is always where the next message
+ * is typed. Stop is the Escape a press in Kuru's terminal sends, through the
+ * server (`Harness.interrupt`), which also puts the status right afterwards
+ * — Claude Code tells no hook about a turn it was stopped in — so the line
+ * goes when the turn has ended and not before. It leaves the composer alone:
+ * a half-written message stays half-written.
  *
  * **Who spoke is a colour, and only two people speak.** Yours are on raised
  * chrome at the right, Kuru's on the terminals' ground at the left, and
@@ -77,7 +87,7 @@ import { KURU_SEEN_MS, clipLength, splitCardCodes, type KuruConversation, type K
 import { splitMentions } from "../../../shared/made";
 import type { AgentSnapshot, MascotConfig, Profile } from "../../../shared/model";
 import type { OutboxState, VoiceSettings } from "../../../shared/voice";
-import { kuruLive, type KuruLive } from "../kuru";
+import { kuruLive, kuruWorking, type KuruLive } from "../kuru";
 import * as api from "../session";
 import { useKururu } from "../session";
 import { dismissVoice, talkDown, talkUp, useOutgoing, useVoiceUi, voiceIsRemote, voiceNow } from "../voice";
@@ -92,6 +102,13 @@ const STICK_PX = 48;
 const FOCUS_MS = 1800;
 /** Seen reports are gathered for a moment so a screenful read at once is one message. */
 const SEEN_BATCH_MS = 300;
+/**
+ * How long Stop stays "Stopping…" waiting for the turn to end. A little over
+ * the server's own watch (`STOP_WATCH_MS` in `harness.ts`), after which a
+ * turn still running is one the Escape did not reach, and Stop is offered
+ * again.
+ */
+const STOPPING_MS = 5000;
 
 /** One of your messages as the drawer draws it: the server's states, and this page's two for a clip the server has not taken yet. */
 type RowState = OutboxState | "saving" | "recording";
@@ -158,6 +175,7 @@ export function KuruDrawer({
   const outgoing = useOutgoing();
   const ui = useVoiceUi();
   const live = kuruLive(profile, agents, conversation, ui.phase === "speaking");
+  const working = kuruWorking(profile, agents);
   const list = useRef<HTMLOListElement>(null);
   const stuck = useRef(true);
 
@@ -303,7 +321,7 @@ export function KuruDrawer({
       return;
     }
     if (stuck.current) el.scrollTop = el.scrollHeight;
-  }, [items.length, live, outgoing.length, ui.phase]);
+  }, [items.length, live, working, outgoing.length, ui.phase]);
   const onScroll = () => {
     const el = list.current;
     if (el) stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
@@ -424,7 +442,7 @@ export function KuruDrawer({
           the title and its state word did — the mark, the name, and "asking"
           or "off" — and a header carrying both would say Kuru twice. The
           Terminal button went on 2026-10-18; the terminal is still a press
-          away from the line at the foot of the list while Kuru is asking or
+          away from the live line over the composer while Kuru is asking or
           off, which is when it was ever wanted. */}
       <header className="kuru-head">
         {chips}
@@ -486,37 +504,9 @@ export function KuruDrawer({
             </span>
           </li>
         )}
-        {live !== "quiet" && live !== "speaking" && (
-          <li className={`kuru-live kuru-live-${live}`} role="status">
-            {live === "thinking" && (
-              <>
-                <span className="status status-working">
-                  <Mascot config={mascot} clip={mascot.working} />
-                </span>
-                <span>thinking…</span>
-              </>
-            )}
-            {live === "asking" && (
-              <>
-                <span className="kuru-dot kuru-dot-asking" />
-                <span>asking something in its terminal</span>
-                <button className="kuru-head-btn" onClick={onTerminal}>
-                  Open terminal
-                </button>
-              </>
-            )}
-            {live === "off" && (
-              <>
-                <span className="kuru-dot kuru-dot-off" />
-                <span>not running</span>
-                <button className="kuru-head-btn" onClick={onTerminal}>
-                  Start
-                </button>
-              </>
-            )}
-          </li>
-        )}
       </ol>
+
+      <Live live={live} working={working} profileId={profile.id} mascot={mascot} onTerminal={onTerminal} />
 
       <Composer profileId={profile.id} onEditing={onEditing} talking={ui.phase === "listening"} />
 
@@ -527,6 +517,80 @@ export function KuruDrawer({
       {!sheet && <Grip onResize={onResize} onReset={onResetWidth} />}
     </aside>
   );
+}
+
+/**
+ * What Kuru is doing now, over the composer: thinking, with Stop; asking,
+ * with the way to its terminal; not running, with Start. Nothing between
+ * turns, since quiet is the ordinary state and a line saying so is noise, and
+ * nothing while a reply is only being said, which the reply's own row shows.
+ * Thinking is `working` rather than `live`'s word, so a line said mid-turn
+ * does not take Stop away for as long as it is being said.
+ *
+ * Stop is pressed once: "Stopping…" until the turn ends, or until
+ * `STOPPING_MS` says the Escape did not reach it — the server sends no
+ * second one meanwhile, since two Escapes together are Claude Code's rewind.
+ * It does not take the keyboard from the composer, so a message being
+ * written goes on being written.
+ */
+function Live({ live, working, profileId, mascot, onTerminal }: { live: KuruLive; working: boolean; profileId: string; mascot: MascotConfig; onTerminal: () => void }) {
+  const [stopping, setStopping] = useState(false);
+  useEffect(() => {
+    if (!working) setStopping(false);
+  }, [working]);
+  useEffect(() => {
+    if (!stopping) return;
+    const timer = setTimeout(() => setStopping(false), STOPPING_MS);
+    return () => clearTimeout(timer);
+  }, [stopping]);
+  if (working) {
+    return (
+      <div className="kuru-live kuru-live-thinking" role="status">
+        <span className="status status-working">
+          <Mascot config={mascot} clip={mascot.working} />
+        </span>
+        <span className="kuru-live-word">{stopping ? "Stopping…" : "Thinking…"}</span>
+        <button
+          type="button"
+          className="kuru-head-btn kuru-stop"
+          disabled={stopping}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            setStopping(true);
+            api.kuruStop(profileId);
+          }}
+          title="Stop Kuru's turn, as Esc in its terminal would"
+          aria-label="Stop Kuru"
+        >
+          <Icon name="stop" />
+          <span>Stop</span>
+        </button>
+      </div>
+    );
+  }
+  if (live === "asking") {
+    return (
+      <div className="kuru-live kuru-live-asking" role="status">
+        <span className="kuru-dot kuru-dot-asking" />
+        <span className="kuru-live-word">asking something in its terminal</span>
+        <button className="kuru-head-btn" onClick={onTerminal}>
+          Open terminal
+        </button>
+      </div>
+    );
+  }
+  if (live === "off") {
+    return (
+      <div className="kuru-live kuru-live-off" role="status">
+        <span className="kuru-dot kuru-dot-off" />
+        <span className="kuru-live-word">not running</span>
+        <button className="kuru-head-btn" onClick={onTerminal}>
+          Start
+        </button>
+      </div>
+    );
+  }
+  return null;
 }
 
 /**

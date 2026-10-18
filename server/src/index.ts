@@ -4706,6 +4706,10 @@ function handleMessage(ws: WebSocket, raw: string): void {
       return;
     }
 
+    case "kuru-stop":
+      if (typeof msg.profileId === "string" && workspaces.profile(msg.profileId)) void harness.interrupt(msg.profileId);
+      return;
+
     case "voice-resend":
       if (isClipId(msg.id)) outbox.resend(msg.id);
       return;
