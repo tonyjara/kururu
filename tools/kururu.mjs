@@ -38,7 +38,7 @@ import { networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
-import { lifecycleTail, Stop, STEPS, context } from "./kururu/checks.mjs";
+import { context, lifecycleTail, remember, Stop, STEPS } from "./kururu/checks.mjs";
 import { doctorExit, parseArgs, table, tailnetAddress } from "./kururu/pure.mjs";
 
 /** The checkout, found from this file and not the working directory, through the link in `~/.local/bin`. */
@@ -136,6 +136,14 @@ async function setup(flags) {
   console.log();
   console.log(bold(`kururu child setup${ctx.dryRun ? " — dry run: nothing will change" : ""}`));
   console.log(dim(`  ${ROOT} · port ${ctx.port} · unit ${ctx.unit}${ctx.runtime ? " (runtime, gone at reboot)" : ""}`));
+  // Where this child lives, kept from the first run, so every later command
+  // (`doctor`, `update`, the next `setup`) finds it without the flags.
+  const where = { port: ctx.port, unit: ctx.unit, runtime: ctx.runtime, bin: ctx.binDir };
+  const moved = Object.entries(where).filter(([key, value]) => ctx.saved[key] !== value);
+  if (moved.length && !ctx.dryRun) {
+    remember(ctx, where);
+    ctx.changed.push(`kept ${moved.map(([key, value]) => `${key} ${value}`).join(", ")} in ${ctx.configDir}/child.json`);
+  }
   for (const [index, step] of STEPS.entries()) {
     console.log();
     console.log(bold(`── ${index + 1}/${STEPS.length}  ${step.title}`));
@@ -181,7 +189,7 @@ function stopped(err, ctx) {
   for (const line of wrap(err.message)) console.log(`  ${err.code === 0 ? "" : paint("33", "→ ")}${line}`);
   if (err.code === 3 || err.code === 4) {
     console.log();
-    console.log(dim(`  Everything before this step is done and stays done; \`kururu child setup${ctx.port !== 7717 ? ` --port=${ctx.port}` : ""}\` picks up from here.`));
+    console.log(dim("  Everything before this step is done and stays done. Run the same command again, with the answer when it asked for one, and it picks up from here."));
   }
   return err.code;
 }
