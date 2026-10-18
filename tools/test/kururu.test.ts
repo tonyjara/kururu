@@ -9,7 +9,6 @@ import {
   atLeast,
   cgroupUnit,
   doctorExit,
-  formatCode,
   isHostUnit,
   keysInEnv,
   lanAddresses,
@@ -218,11 +217,6 @@ describe("pairing", () => {
   const health = (nodes: unknown) => ({ ok: true, nodes });
   const child = (state: string, since: number | null = null) =>
     health({ role: "child", name: "box", leader: null, nodes: [{ name: "mac", state, parent: true, since }, { name: "other", state: "up", parent: false, since: 1 }] });
-
-  it("shows a code as ABC-DEF, and anything else as it came", () => {
-    expect(formatCode("ABCDEF")).toBe("ABC-DEF");
-    expect(formatCode("ABC")).toBe("ABC");
-  });
 
   it("reads where the node stands off the health answer", () => {
     expect(pairingState({ ok: true })).toEqual({ state: "unknown" });

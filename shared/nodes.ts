@@ -48,15 +48,19 @@ export const PING_MS = 5_000;
  * within thirty seconds of the lid closing" is the promise.
  */
 export const AWAY_MS = 25_000;
-/** How long a pairing code is good for. */
+/** How long a join command's code is good for. */
 export const CODE_TTL_MS = 10 * 60_000;
 /** Wrong guesses a code survives before it is burnt and a new one is wanted. */
 export const CODE_ATTEMPTS = 5;
-export const CODE_LENGTH = 6;
 /**
- * No 0/O, 1/I/L: the code is read off one screen and typed into another,
- * and the letters a person confuses are the letters that cost a retry.
- * Thirty-one symbols to six places is about 887 million, against five tries.
+ * Eight, because the code travels inside a command that is copied, not
+ * typed, so length costs nobody anything: thirty-one symbols to eight places
+ * is about 852 billion, against five tries.
+ */
+export const CODE_LENGTH = 8;
+/**
+ * No 0/O, 1/I/L, for the day it is read aloud or typed off a phone after
+ * all: the letters a person confuses are the letters that cost a retry.
  */
 export const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 export const NODE_NAME_MAX = 24;
@@ -349,10 +353,10 @@ function isLoopback(ip: string): boolean {
 }
 
 /**
- * Whether a request to a node's own routes — enrolment and the link — came
+ * Whether a request to a node's own routes — joining and the link — came
  * from where a node could be: the tailnet, or this machine. Loopback is in
  * because two isolated instances on one machine are how this is tested,
- * and a process on the box gains nothing by it: enrolment still wants the
+ * and a process on the box gains nothing by it: joining still wants the
  * code and the link still wants a key the roster lists.
  */
 export function nodeRemoteAllowed(remote: string | undefined): boolean {
@@ -404,7 +408,18 @@ export function parseNodeAddress(raw: unknown, defaultPort: number): { address: 
 // Pairing
 // ---------------------------------------------------------------------------
 
-/** A code a child is showing, and what has happened to it. */
+/**
+ * Pairing starts on the Mac, which shows one command to run on the new PC:
+ * `kururu child join <the Mac's address> <a code>`. It was the other way
+ * round first — the PC showed a code, and the person typed it and the PC's
+ * address into the Mac — and nobody could tell from the page what the code
+ * was for, where to get it, or where to type it. Both directions trust the
+ * same thing: a short-lived, single-use code that only the person carried
+ * between the two screens, and after that only keys the roster lists. This
+ * one is a copy and a paste, and the person never has to know an address.
+ */
+
+/** The join code the Mac is showing, and what has happened to it. */
 export interface Pairing {
   code: string;
   expiresAt: number;
@@ -424,9 +439,31 @@ export function normalizeCode(raw: unknown): string {
   return typeof raw === "string" ? raw.toUpperCase().replace(/[^A-Z0-9]/g, "") : "";
 }
 
-/** `ABC-DEF`, which is how it is shown and how nobody has to type it. */
+/** `ABCD-EFGH`, which is how it is shown. */
 export function formatCode(code: string): string {
-  return code.length === CODE_LENGTH ? `${code.slice(0, 3)}-${code.slice(3)}` : code;
+  return code.length === CODE_LENGTH ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
+}
+
+/** The command the Mac shows, to run on the new PC. */
+export function joinCommand(address: string, port: number, code: string): string {
+  return `kururu child join ${address}:${port} ${formatCode(code)}`;
+}
+
+/**
+ * The Mac's address and the code, out of what was pasted: the whole command
+ * (`kururu child join 100.64.0.1:7717 ABCD-EFGH`, with `node tools/kururu.mjs`
+ * in front of it too), or just the two words. Null for anything else.
+ */
+export function parseJoin(text: unknown, defaultPort: number): { address: string; port: number; code: string } | null {
+  if (typeof text !== "string") return null;
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const at = words.lastIndexOf("join");
+  const rest = at === -1 ? words : words.slice(at + 1);
+  if (rest.length !== 2) return null;
+  const target = parseNodeAddress(rest[0], defaultPort);
+  const code = normalizeCode(rest[1]);
+  if (!target || code.length !== CODE_LENGTH) return null;
+  return { ...target, code };
 }
 
 export type CodeCheck = { ok: true } | { ok: false; why: "none" | "expired" | "wrong" | "burnt"; pairing: Pairing | null };
@@ -448,16 +485,17 @@ export function checkCode(pairing: Pairing | null, given: unknown, now: number):
   return { ok: false, why: "wrong", pairing: { ...pairing, misses } };
 }
 
+/** Why the Mac refused a join, said to the person at the new PC. */
 export function codeRefusal(why: "none" | "expired" | "wrong" | "burnt"): string {
   switch (why) {
     case "none":
-      return "That node is not showing a pairing code. Run `kururu child code` there, or press Pair in its Settings → Nodes.";
+      return "The Mac is not showing a join command right now. On the Mac, open Settings → Nodes, press Add a computer, and run the command it shows.";
     case "expired":
-      return "That pairing code has expired. Ask the node for a new one.";
+      return "That command has expired; they last ten minutes. Press Add a computer on the Mac again for a new one.";
     case "burnt":
-      return "Too many wrong codes: that one is burnt. Ask the node for a new one.";
+      return "Too many wrong codes, so that command no longer works. Press Add a computer on the Mac again for a new one.";
     case "wrong":
-      return "That is not the code the node is showing.";
+      return "That code is not the one the Mac is showing. Copy the command from the Mac again.";
   }
 }
 
@@ -647,8 +685,10 @@ export interface NodesView {
   leader: string | null;
   /** Every other member, by rank. */
   nodes: NodeStatus[];
-  /** On a child: the code it is showing, while it is. */
-  pairing: { code: string; expiresAt: number } | null;
+  /** On the parent, or a node about to be one: the join command it is showing, while it is. */
+  invite: { code: string; expiresAt: number; command: string } | null;
+  /** The last node that joined, and when, so the page that showed the command can say it worked. */
+  joined: { name: string; at: number } | null;
   /**
    * Whether another node could dial this one: an address on the tailnet
    * that the socket answers on. When not, the sentence that says why, which

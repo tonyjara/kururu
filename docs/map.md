@@ -70,7 +70,7 @@ in this folder.
 | `src/export.ts` | The mirror: the database and the allowed config as a tree git can diff, and the tree read back for `restore` |
 | `src/backup.ts` | Every few minutes when something changed: mirror, commit, push to the user's private repository. Never forced |
 | `src/gitcmd.ts` | Running `git`, for the two files allowed to |
-| `src/nodes.ts` | `NodeHost`: pairing (`/api/nodes/enrol`, ahead of the gate), the roster taken and relayed, a link per pair (`/link`, ahead of the gate, proved by keys), pings and away, summaries pushed on change, the backup pull. See [nodes](nodes.md) |
+| `src/nodes.ts` | `NodeHost`: joining (the Mac's `/api/nodes/join`, ahead of the gate, and the new computer's half), the roster taken and relayed, a link per pair (`/link`, ahead of the gate, proved by keys), pings and away, summaries pushed on change, the backup pull. See [nodes](nodes.md) |
 | `src/nodekeys.ts` | This node's Ed25519 and X25519 pairs and, on the parent, the roster's signing key, in `node.json` at `0600`. Never sent, never backed up |
 | `src/backup-cli.ts`, `src/restore-cli.ts` | `bun run backup` and `bun run restore` |
 | `src/share-cli.ts` | `bun run share`: the phone's link and the Share dialog's QR code, drawn in the terminal, for a server with no window to show them |

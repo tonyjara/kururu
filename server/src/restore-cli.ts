@@ -87,7 +87,7 @@ async function main(): Promise<void> {
   for (const path of files.written) console.log(`  wrote ${path}`);
   for (const path of files.skipped) console.log(`  left alone (exists; --replace to overwrite): ${path}`);
 
-  if (node) console.log(`\nThis box's boards are back. Pair it with the parent again (\`kururu child code\`): its keys and the roster were never in the backup.`);
+  if (node) console.log(`\nThis box's boards are back. Pair it with the parent again (the parent's Settings → Nodes → Add a computer shows the command): its keys and the roster were never in the backup.`);
   console.log(`
 Done. What the backup never carried, and so what is left to do by hand:
   - /login in each profile (Settings → Profiles says which are signed in)

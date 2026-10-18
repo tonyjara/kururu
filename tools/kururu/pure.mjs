@@ -291,18 +291,13 @@ export function parseArgs(argv, valued = []) {
   return { flags, words };
 }
 
-/** `ABC-DEF`, as `shared/nodes.ts` shows a pairing code: read off one screen, typed into another. */
-export function formatCode(code) {
-  const text = String(code ?? "");
-  return text.length === 6 ? `${text.slice(0, 3)}-${text.slice(3)}` : text;
-}
 
 /**
  * Where this node stands with the Mac, from `/api/health`'s `nodes`:
  * `unknown` for a server from before nodes, `alone` for one in no roster,
  * `parent` for one that pairs others, and for a child `linked` or `waiting`
  * — waiting being a parent that is away or not yet dialled, with its name
- * and since when. One reading, for the doctor's row and for `child code`'s
+ * and since when. One reading, for the doctor's row and for `child join`'s
  * wait, so the two cannot disagree about what "paired" is.
  */
 export function pairingState(health) {
@@ -333,7 +328,7 @@ export function pairingRow(health, now = Date.now()) {
     case "unknown":
       return { title: "pairing", state: "skip", detail: health ? "this server is from before pairing — kururu child update" : "no server to ask" };
     case "alone":
-      return { title: "pairing", state: "skip", detail: "not paired with a Mac (optional) — kururu child code" };
+      return { title: "pairing", state: "skip", detail: "not paired with a Mac (optional) — the Mac's Settings → Nodes → Add a computer shows the command to run here" };
     case "parent":
       return { title: "pairing", state: "skip", detail: `the parent of ${at.count} node${at.count === 1 ? "" : "s"}, not a child` };
     case "linked":

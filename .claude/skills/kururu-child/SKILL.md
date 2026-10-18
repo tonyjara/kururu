@@ -97,8 +97,9 @@ The questions, so you can explain them when asked:
 - `--yes` agrees to writing over a unit that differs from the one this
   checkout would write, and to restarting the server onto it. That costs any
   open phone a reconnect. No agent ends.
-- `--pair=yes|no` decides whether to pair this child with the Mac now. It is
-  optional: a child works alone. Yes shows a pairing code; see *Pairing* below.
+- `--join="<address> <code>"` pairs this child with the Mac, from the command
+  the Mac shows. It is optional: a child works alone, and without it the
+  wizard says how to pair and moves on. See *Pairing* below.
 - `--port=N`, only when 7717 is taken by something that is not kururu.
 
 The hand steps you will most likely relay:
@@ -110,24 +111,27 @@ The hand steps you will most likely relay:
 - **Linger:** `sudo loginctl enable-linger <user>`, only when the wizard's own
   attempt was refused.
 - **No tailnet address:** `sudo tailscale up`.
-- **The pairing code:** see *Pairing*.
+- **Pairing with the Mac:** see *Pairing*.
 
 ## Pairing
 
-When the user wants the box paired with the Mac, the wizard's pairing step (or
-`kururu child code` on its own) prints a code like `ABC-DEF`, this box's
-address, and its name. The code is not a secret worth hiding from the user: it
-is good for ten minutes and five wrong tries, and pairs nothing without the
-Mac. So relay all three to the user, word for word, and ask them to type the
-address and the code into the Mac's **Settings → Nodes → Add a node**. The Mac
-must be shared (its Share dialog) for this box to reach it.
+Pairing starts on the Mac, and the user carries one command from the Mac to
+you. When they want the box paired, tell them, in these words:
 
-Your tool has no terminal, so the wizard stops with exit 4 at this point and
-`kururu child code` returns at once. When the user says it is typed in, run
-`kururu child code --wait`, which waits on the same code for the link and says
-*"Paired with mac, and linked."*, or run the wizard again. Running either again
-shows the same code while it is good, never a new one. The doctor's pairing
-row is then ✓.
+> On the Mac, open Settings → Nodes and press **Add a computer**, then
+> **Show the command**. Copy the command it shows and paste it to me.
+
+The command looks like `kururu child join 100.64.0.1:7717 ABCD-EFGH`: the
+Mac's address and a code that works once, for ten minutes. It is not a secret
+worth hiding from the user, since it pairs only this box and only once. Run it
+as given. It says *"Joined mac as omarchy"* and then *"Linked."*, and the
+Mac's page says *"omarchy joined"* by itself. During setup you can instead
+pass it to the wizard: `kururu child setup --join="<address> <code>"`.
+
+If it says the Mac is not showing a command, or the command expired, ask for a
+new one: Add a computer again. If nothing answers at the address, the Mac is
+asleep, not shared (its Share dialog), or not on the same tailnet; say which
+the message names. The doctor's pairing row is ✓ once linked.
 
 ## Finishing
 
@@ -138,9 +142,8 @@ When setup exits 0, the child is running. Then:
    Ask them to scan it on the phone.
 2. Run `kururu child doctor`. Every row should be ✓. The phone row says ✓ once
    a device on the tailnet has connected, and – before that; the pairing row
-   is – for a child that is not paired. A – is not a failure. The doctor exits
-   1 on any ✗, with the fix under it. A paired child whose Mac is asleep shows
-   its pairing row ✗; that mends itself when the Mac wakes.
+   is – for a child that is not paired, and for one whose Mac is asleep. A –
+   is not a failure. The doctor exits 1 on any ✗, with the fix under it.
 3. Run `kururu child setup` once more. It should end with *"Nothing to change:
    this child was already set up."*
 4. Tell the user what to try from the phone: open a shell tab, start an agent,
@@ -153,7 +156,7 @@ After that, the commands on the box are:
 kururu child doctor        # the same checks, read-only
 kururu child status        # the service, the pty host and its unit, the agents
 kururu child update        # pull, install, build, restart the server, doctor
-kururu child code          # pair with the Mac: a code and the address to type there
+kururu child join <address> <code>   # join the Mac: the command its Settings → Nodes → Add a computer shows
 kururu share               # the phone's link and QR code (the user's terminal only)
 ```
 

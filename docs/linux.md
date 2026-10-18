@@ -50,10 +50,11 @@ That is because the first time it runs is before `bun install`.
 | `kururu child update` | `git pull --ff-only`, then `bun install`, `bun run build` and a restart of the server, but only when the pull brought something; then the doctor. It refuses a dirty tree |
 | `kururu child status` | The service's state, then `server/status.mjs`, which names the host's unit |
 | `kururu child restart-host` | A new pty host, through the server's `POST /api/host/restart`. It ends every terminal the host holds, says how many, and asks. Default no; `--yes` without a terminal |
-| `kururu child code` | Pairing with the Mac: a code and this box's address, to type into the Mac's Settings → Nodes. With a terminal it waits until the Mac has paired and the link is up. Without one it shows them and returns, and `--wait` (300 s, or `--wait=S`) waits on the same code |
+| `kururu child join <address> <code>` | Joins the Mac. The Mac shows this exact command, ready to copy, in Settings → Nodes → Add a computer. It pairs, waits up to half a minute for the link, and says how it went |
 | `kururu share` | The phone's link and QR code, which is `bun run share` for this instance. `--url`, `--rotate` |
 
-`doctor`, `update`, `status` and `code` answer without `child` too.
+`doctor`, `update`, `status` and `join` answer without `child` too. The old
+`kururu child code` only says where pairing starts now.
 
 ### The checks, in order
 
@@ -72,7 +73,7 @@ only reads it, so the two cannot disagree about what is right.
 | the tailnet | a 100.64/10 address on an interface; the port free or already kururu's | guides: `sudo tailscale up` is the user's, never the wizard's |
 | the service | the unit as this checkout would write it, enabled, active; `/api/health` on the tailnet address; the gate refusing loopback and the tailnet without the token, and every LAN address outright; the host in a `kururu-ptyhost-…` unit and current | writes the unit, `daemon-reload`, enables, starts or restarts, and waits for health |
 | the phone | a device on the tailnet has connected since the server started (`clients.remoteAt` in `/api/health`) | with a terminal: shows the QR and waits for the phone. Without one: tells the person to run `kururu share` in their own terminal |
-| pairing | `nodes` in `/api/health`: ✓ paired and the link to the Mac up; ✗ paired and the Mac away or not linked yet; – not paired, which is a child working as built | asks whether to pair now (`--pair`, kept once answered). Yes shows the code and the address and waits for the Mac; without a terminal it stops with exit 4 and the two to type |
+| pairing | `nodes` in `/api/health`: ✓ paired and the link to the Mac up; – not paired, which is a child working as built, or paired with the Mac away, as it is while the lid is shut; ✗ paired and the Mac never reached since this server started | with a terminal, asks for the Mac's join command (Enter skips, and the skip is kept); `--join="<address> <code>"` gives it. Without either it says how to pair and moves on, since pairing is optional |
 
 The secrets and leading rows arrive with phases 4 and 5.
 
@@ -82,11 +83,10 @@ With a terminal, the wizard asks and waits. Without one (an agent's tool, a
 pipe, `--no-input`) it never waits. It stops, and the exit status says why:
 
 - **3**: a question. The message names the flag that answers it:
-  `--account=this|dedicated`, `--codex=yes|no`, `--pair=yes|no`, `--yes`
+  `--account=this|dedicated`, `--codex=yes|no`, `--yes`
   (write over a differing unit and restart onto it), `--relink`.
 - **4**: a step only the person can do: sign in, `sudo`, `tailscale up`,
-  remove a key, type the pairing code into the Mac. The message is the exact
-  line to type.
+  remove a key. The message is the exact line to type.
 - **1**: a step still failed after its repair. **2**: a bad flag.
 
 Every run starts from the top and leaves alone what is done. Running it again
@@ -98,7 +98,7 @@ from the shell, an ssh session and a tmux pane would write different units,
 and every second run would rewrite one.
 
 The answers are kept in `~/.config/kururu/child.json`: the account, Codex,
-whether to pair, the port, the unit's name and the link's directory. Later commands find the child
+a skipped pairing, the port, the unit's name and the link's directory. Later commands find the child
 without flags.
 
 ### What it refuses
@@ -118,32 +118,30 @@ structural is copied either way. The design is
 [the plan's](plans/kururu-parent-child.md#nodes-ranks-and-the-roster); this is
 the box's half.
 
-```sh
-kururu child code
-```
+Pairing starts on the Mac, and on this box it is one command:
 
-prints three things:
+1. On the Mac, open Settings → Nodes and press **Add a computer**, then
+   **Show the command**.
+2. Copy the command it shows and run it here. It looks like
+   `kururu child join 100.64.0.1:7717 ABCD-EFGH`: the Mac's address, and a
+   code that works once, for ten minutes.
+3. The Mac's page says *"omarchy joined"* by itself, and the command here says
+   *"Linked."*
 
-```
-    code     ABC-DEF
-    address  100.64.0.2:7717
-    name     omarchy
-```
+If this box has no kururu yet, the same page says what to run first: the clone
+and `node tools/kururu.mjs child setup`, or ask an agent here to use the
+kururu skill. The wizard's last step asks for the join command, so it can be
+pasted there. The Mac must be shared (its Share dialog), since this box
+dials it; the page says so and keeps the button off until it is.
 
-On the Mac, Settings → Nodes → Add a node takes the address and the code. The
-name is what the Mac will call this box, and can be changed there. The code is
-good for ten minutes and five wrong tries, and a second `kururu child code`
-while one is showing shows the same one, so a run stopped halfway never burns
-the code somebody is typing. The Mac must be shared (its Share dialog), since
-this box dials it. Once the Mac has paired, the link comes up within seconds and
-`kururu child code` says *"Paired with mac, and linked."*
-
-Pairing is reached without the share token, because the code is what it is for:
-`POST /api/nodes/enrol` answers only the tailnet, with no proxy header and no
-page in between. It never prints or sends this box's token anywhere but to the
-Mac that presented the code, which keeps it for the QR code and the "Open"
-link. A child whose Mac is asleep says so in the doctor's pairing row (✗, with
-how long), and the link comes back by itself when the Mac does.
+The name the Mac gives this box is its hostname, and can be changed there.
+The address the Mac records is the one the join came from, so nobody types
+an address. `/api/nodes/join` on the Mac answers only the tailnet, with no
+proxy header and no page in between, and five wrong codes burn the one
+showing. This box sends the Mac its keys and its share token, which the Mac
+keeps for its QR code and "Open" link, and takes back the roster the Mac
+signed. A child whose Mac is asleep shows a – in the doctor's pairing row,
+with how long, and the link comes back by itself when the Mac does.
 
 ## The unit
 

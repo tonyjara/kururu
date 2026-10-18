@@ -50,6 +50,7 @@ import {
   FORWARDING_HEADERS,
   freeName,
   isNodeId,
+  joinCommand,
   leaderOf,
   LinkHandshake,
   makeCode,
@@ -57,9 +58,8 @@ import {
   nodeName,
   nodeRemoteAllowed,
   nodeUrl,
-  normalizeCode,
   parseLinkMessage,
-  parseNodeAddress,
+  parseJoin,
   PING_MS,
   reranked,
   rosterPayload,
@@ -78,6 +78,7 @@ import {
   type Pairing,
   type Roster,
   type SignedRoster,
+  validHostName,
 } from "../../shared/nodes";
 import { readConfigFile, writeConfigFile } from "./config";
 import { safeMirrorPath } from "./export";
@@ -90,8 +91,8 @@ const SEEN = "nodes-seen.json";
 const HANDSHAKE_MS = 10_000;
 /** Summaries at most this often: a turn ending flips three fields in one breath. */
 const SUMMARY_MIN_MS = 1_000;
-/** One enrolment post. A node on the tailnet answers in milliseconds or not at all. */
-const ENROL_MS = 10_000;
+/** The join post. A node on the tailnet answers in milliseconds or not at all. */
+const JOIN_MS = 10_000;
 /** A child's backup export, which is its boards and conversations as text. */
 const EXPORT_MS = 60_000;
 /** The largest frame a link takes: a child's whole mirror is one, and conversations are long. */
@@ -196,7 +197,9 @@ export function nodeRequestRefusal(req: IncomingMessage): string | null {
 export class NodeHost {
   private saved: Saved;
   private readonly me: Identity;
-  private pairing: Pairing | null = null;
+  /** The join code this node is showing, on the parent or a node about to be one. */
+  private invitation: Pairing | null = null;
+  private lastJoined: { name: string; at: number } | null = null;
   private readonly peers = new Map<string, PeerState>();
   /** Up links, by peer. */
   private readonly links = new Map<string, Link>();
@@ -312,7 +315,8 @@ export class NodeHost {
       rosterVersion: mine ? (roster?.version ?? null) : null,
       leader: this.leader(),
       nodes: this.statuses(),
-      pairing: this.pairing && this.pairing.expiresAt > now ? { code: this.pairing.code, expiresAt: this.pairing.expiresAt } : null,
+      invite: this.inviteView(),
+      joined: this.lastJoined,
       reachable: this.off ? `Nodes are off for this run: ${this.off}` : this.deps.unreachable(),
     };
   }
@@ -338,7 +342,7 @@ export class NodeHost {
 
   /**
    * Take a roster that is newer and signed by the parent — off a link, out
-   * of enrolment, or just signed here — and pass it on to every peer.
+   * of a join, or just signed here — and pass it on to every peer.
    * Learning from it that this node was removed ends the membership: the
    * links close and the node is alone again, ready to be paired anew.
    */
@@ -428,7 +432,7 @@ export class NodeHost {
 
   /**
    * Become a parent, for the first node added: the roster key, made once,
-   * and a roster of one. Refused on a node another parent enrolled, and on
+   * and a roster of one. Refused on a node in another parent's roster, and on
    * one no other node could dial — the Mac with sharing off.
    */
   private ensureParent(): Roster {
@@ -454,67 +458,80 @@ export class NodeHost {
     return this.roster!;
   }
 
-  private async enrolPost(target: { address: string; port: number }, body: unknown): Promise<Record<string, unknown>> {
-    const host = target.address.includes(":") ? `[${target.address}]` : target.address;
-    let res: Response;
-    try {
-      res = await fetch(`http://${host}:${target.port}/api/nodes/enrol`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(ENROL_MS),
-      });
-    } catch (err) {
-      const said = err instanceof Error ? (err.cause instanceof Error ? err.cause.message : err.message) : String(err);
-      throw new Error(`Nothing answered at ${target.address}:${target.port} (${said}). Is the child up, and on the tailnet?`);
+  /**
+   * Settings → Nodes → Add a computer: a single-use code for ten minutes,
+   * and the command to run on the new PC with this node's address in it.
+   * Refused where no other node could dial this one, since the command
+   * would send the PC to an address nothing answers on.
+   */
+  invite(on: boolean): NodesView["invite"] {
+    if (!on) {
+      this.invitation = null;
+      this.changed();
+      return null;
     }
-    let answer: Record<string, unknown> = {};
-    try {
-      answer = (await res.json()) as Record<string, unknown>;
-    } catch {
-      // A body that is not JSON is not a kururu that knows about nodes.
-    }
-    if (!res.ok) {
-      const error = typeof answer.error === "string" ? answer.error : res.status === 404 ? "That kururu does not know about nodes yet; update it." : `It answered ${res.status}.`;
-      throw new Error(error);
-    }
-    return answer;
+    if (this.off) throw new Error(`Nodes are off for this run: ${this.off}`);
+    if (this.role() === "child") throw new Error("This node is in another parent's roster, so computers are added from the parent.");
+    const why = this.deps.unreachable();
+    if (why) throw new Error(why);
+    this.invitation = { code: makeCode(randomBytes(CODE_LENGTH)), expiresAt: Date.now() + CODE_TTL_MS, misses: 0 };
+    this.changed();
+    return this.inviteView();
+  }
+
+  private inviteView(): NodesView["invite"] {
+    const invite = this.invitation;
+    const address = this.deps.address();
+    if (!invite || invite.expiresAt <= Date.now() || !address) return null;
+    return { code: invite.code, expiresAt: invite.expiresAt, command: joinCommand(address, this.deps.port, invite.code) };
   }
 
   /**
-   * Settings → Nodes: pair the node at `address` that is showing `code`.
-   *
-   * Two posts. The first carries the roster as it is, so the child can check
-   * the parent's signature and learn its key; it answers with its id, keys
-   * and share token. The parent signs a roster with the child in it, and the
-   * second post carries that, which the child takes and starts dialling. A
-   * second post lost on the way is mended by the child's first `hello`,
-   * which carries the roster the parent signed.
+   * `POST /api/nodes/join`, from a new PC running the command this node
+   * showed. The code is checked and burnt, the PC goes into a roster signed
+   * here — this node becoming a parent if it was not one — and the answer
+   * is that roster. The PC's address is the one its request came from, so
+   * nobody has to know or type it; on loopback (two instances on one
+   * machine) the address it says it has is used instead. Reached without the
+   * share token, since the code is what it presents, and only from the
+   * tailnet with no page and no proxy in between.
    */
-  add(addressRaw: unknown, codeRaw: unknown, nameRaw: unknown): Promise<NodeStatus> {
-    return this.serially(async () => {
-      const target = parseNodeAddress(addressRaw, DEFAULT_PORT);
-      if (!target) throw new Error("That is not an address: give the node's tailnet address, like 100.96.1.2 or 100.96.1.2:7717, or its name.");
-      const code = normalizeCode(codeRaw);
-      if (code.length !== CODE_LENGTH) throw new Error(`A pairing code is ${CODE_LENGTH} characters, like ABC-DEF.`);
-      const roster = this.ensureParent();
-      const first = await this.enrolPost(target, { code, roster: this.saved.roster });
-      const node = first.node as { id?: unknown; name?: unknown; keys?: Partial<NodeKeys> } | undefined;
-      if (!node || !isNodeId(node.id) || typeof node.keys?.sign !== "string" || typeof node.keys?.box !== "string") throw new Error("The node's answer was not one this kururu understands.");
-      if (node.id === this.me.id) throw new Error("That address is this node.");
-      const token = first.shareToken;
-      if (typeof token === "string" && token.length >= 16 && token.length <= 200) this.saved.tokens[node.id] = token;
-      const name = freeName(roster, nodeName(nameRaw) ?? nodeName(node.name) ?? "node", node.id);
-      const entry = { id: node.id, name, keys: { sign: node.keys.sign, box: node.keys.box }, address: target.address, port: target.port };
-      const nextRoster = withMember(roster, entry, Date.now());
-      const signed = { roster: nextRoster, signature: signRoster(rosterPayload(nextRoster)) };
-      if (!asSignedRoster(signed)) throw new Error("The node's keys are not keys this kururu can put in a roster.");
-      const second = await this.enrolPost(target, { code, roster: signed });
-      if (second.member !== true) throw new Error("The node did not take the roster.");
-      this.take(signed);
-      this.deps.log(`nodes: paired ${name} at ${target.address}:${target.port}`);
-      return this.status(memberOf(this.roster, node.id)!);
-    });
+  acceptJoin(req: IncomingMessage, body: unknown): { status: number; body: unknown } {
+    const refused = nodeRequestRefusal(req);
+    if (refused) return { status: 403, body: { error: refused } };
+    const b = (body && typeof body === "object" ? body : {}) as { code?: unknown; node?: Record<string, unknown>; shareToken?: unknown };
+    const check = checkCode(this.invitation, b.code, Date.now());
+    if (!check.ok) {
+      this.invitation = check.pairing;
+      this.changed();
+      return { status: 403, body: { error: codeRefusal(check.why) } };
+    }
+    const node = b.node ?? {};
+    const keys = (node.keys ?? {}) as Partial<NodeKeys>;
+    if (!isNodeId(node.id) || typeof keys.sign !== "string" || typeof keys.box !== "string") return { status: 400, body: { error: "The new PC's request was not one this kururu understands; update kururu there." } };
+    if (node.id === this.me.id) return { status: 400, body: { error: "That command is for another computer, not this one." } };
+    const port = typeof node.port === "number" && Number.isInteger(node.port) && node.port > 0 && node.port < 65536 ? node.port : DEFAULT_PORT;
+    const remote = (req.socket.remoteAddress ?? "").replace(/^::ffff:/, "");
+    const loopback = remote === "::1" || remote.startsWith("127.");
+    const said = typeof node.address === "string" && validHostName(node.address) ? node.address : null;
+    const address = loopback ? (said ?? "127.0.0.1") : remote;
+    let roster: Roster;
+    try {
+      roster = this.ensureParent();
+    } catch (err) {
+      return { status: 409, body: { error: err instanceof Error ? err.message : String(err) } };
+    }
+    const name = freeName(roster, nodeName(node.name) ?? "node", node.id);
+    const next = withMember(roster, { id: node.id, name, keys: { sign: keys.sign, box: keys.box }, address, port }, Date.now());
+    const signed = { roster: next, signature: signRoster(rosterPayload(next)) };
+    if (!asSignedRoster(signed)) return { status: 400, body: { error: "The new PC's keys are not keys this kururu can put in a roster." } };
+    const token = b.shareToken;
+    if (typeof token === "string" && token.length >= 16 && token.length <= 200) this.saved.tokens[node.id] = token;
+    this.invitation = null;
+    this.lastJoined = { name, at: Date.now() };
+    this.take(signed);
+    this.deps.log(`nodes: ${name} joined, from ${address}:${port}`);
+    return { status: 200, body: { roster: signed, name } };
   }
 
   rename(nodeId: unknown, nameRaw: unknown): Promise<NodesView> {
@@ -556,68 +573,66 @@ export class NodeHost {
   }
 
   // ---------------------------------------------------------------------------
-  // Pairing: the child's half
+  // Pairing: the new PC's half
   // ---------------------------------------------------------------------------
 
-  /** Show a pairing code for ten minutes, or stop. Refused on a parent with members: it pairs others, not itself. */
-  showCode(on: boolean): { code: string; expiresAt: number } | null {
-    if (!on) {
-      this.pairing = null;
-      this.changed();
-      return null;
-    }
-    if (this.off) throw new Error(`Nodes are off for this run: ${this.off}`);
-    if (this.role() === "parent" && (this.roster?.members.length ?? 0) > 1) throw new Error("This node is the parent of other nodes; it pairs them, it is not paired.");
-    this.pairing = { code: makeCode(randomBytes(CODE_LENGTH)), expiresAt: Date.now() + CODE_TTL_MS, misses: 0 };
-    this.changed();
-    return { code: this.pairing.code, expiresAt: this.pairing.expiresAt };
-  }
-
   /**
-   * `POST /api/nodes/enrol`, from a parent holding the code this node is
-   * showing. Answers with this node's id, keys and share token; and when
-   * the roster posted already lists this node, takes it and is a member.
-   * Reached without the share token — that is what the code is for — and
-   * only from the tailnet, with no proxy and no page in between.
+   * `kururu child join <mac> <code>`, or the same pasted into this node's own
+   * Settings → Nodes: post this node's id, keys, port and share token to the
+   * Mac with the code, and take the roster it answers with. The roster is
+   * checked against the key it names, which becomes this node's anchor —
+   * trust on first use, made safe by the code the person copied off the
+   * Mac's own screen.
    */
-  enrol(req: IncomingMessage, body: unknown): { status: number; body: unknown } {
-    const refused = nodeRequestRefusal(req);
-    if (refused) return { status: 403, body: { error: refused } };
-    const b = (body && typeof body === "object" ? body : {}) as { code?: unknown; roster?: unknown };
-    const check = checkCode(this.pairing, b.code, Date.now());
-    if (!check.ok) {
-      this.pairing = check.pairing;
-      this.changed();
-      return { status: 403, body: { error: codeRefusal(check.why) } };
-    }
-    const signed = asSignedRoster(b.roster);
-    if (!signed) return { status: 400, body: { error: "That is not a roster." } };
-    const role = this.role();
-    if (role === "parent" && (this.roster?.members.length ?? 0) > 1) return { status: 409, body: { error: "That node is the parent of other nodes, so it cannot be paired under another." } };
-    const sameParent = this.saved.anchor === signed.roster.signer;
-    if (role === "child" && !sameParent) return { status: 409, body: { error: "That node is in another parent's roster. Remove it there first." } };
-    const result = adoptRoster(sameParent ? this.saved.roster : null, signed, signed.roster.signer, verifySigned);
-    if (!result.adopted && result.why !== "same" && result.why !== "older") return { status: 400, body: { error: "That roster's signature does not check." } };
-    if (role === "parent") stopBeingParent();
-    if (!sameParent) this.saved = { anchor: signed.roster.signer, roster: null, tokens: {} };
-    if (result.adopted) {
-      // Straight in rather than through `take`: a node being paired is in no
-      // roster yet, so there is no membership to lose and nobody to relay to.
-      this.saved = { ...this.saved, roster: result.roster };
+  join(text: unknown): Promise<NodesView> {
+    return this.serially(async () => {
+      if (this.off) throw new Error(`Nodes are off for this run: ${this.off}`);
+      const target = parseJoin(text, DEFAULT_PORT);
+      if (!target) throw new Error("That is not a join command. On the Mac, Settings → Nodes → Add a computer shows one: kururu child join <address> <code>.");
+      const role = this.role();
+      if (role === "parent" && (this.roster?.members.length ?? 0) > 1) throw new Error("This node is the parent of other nodes, so it cannot join another.");
+      if (role === "child") {
+        const parent = memberOf(this.roster, this.roster!.parent)?.name ?? "a parent";
+        throw new Error(`This node is already paired with ${parent}. To pair it again, remove it in ${parent}'s Settings → Nodes first; it notices the next time the two link.`);
+      }
+      const host = target.address.includes(":") ? `[${target.address}]` : target.address;
+      let res: Response;
+      try {
+        res = await fetch(`http://${host}:${target.port}/api/nodes/join`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            code: target.code,
+            node: { id: this.me.id, name: this.selfName(), keys: this.me.keys, address: this.deps.address(), port: this.deps.port, version: this.deps.version },
+            shareToken: this.deps.shareToken(),
+          }),
+          signal: AbortSignal.timeout(JOIN_MS),
+        });
+      } catch (err) {
+        const said = err instanceof Error ? (err.cause instanceof Error ? err.cause.message : err.message) : String(err);
+        throw new Error(`Nothing answered at ${target.address}:${target.port} (${said}). Is the Mac awake, with sharing on, and is this PC on the same tailnet?`);
+      }
+      let answer: Record<string, unknown> = {};
+      try {
+        answer = (await res.json()) as Record<string, unknown>;
+      } catch {
+        // Not JSON is not a kururu that knows about nodes.
+      }
+      if (!res.ok) {
+        throw new Error(typeof answer.error === "string" ? answer.error : res.status === 404 ? "The Mac's kururu does not know about nodes yet; update it." : `The Mac answered ${res.status}.`);
+      }
+      const adopted = adoptRoster(null, answer.roster, null, verifySigned);
+      if (!adopted.adopted) throw new Error("The Mac's answer did not carry a roster this node could check.");
+      if (!memberOf(adopted.roster.roster, this.me.id)) throw new Error("The Mac's roster does not list this node.");
+      if (role === "parent") stopBeingParent();
+      this.saved = { anchor: adopted.roster.roster.signer, roster: adopted.roster, tokens: {} };
       this.save();
       this.syncPeers();
-    }
-    const member = memberOf(this.roster, this.me.id) !== undefined;
-    if (member) {
-      this.pairing = null;
-      this.deps.log(`nodes: paired into ${memberOf(this.roster, this.roster!.parent)?.name ?? "the parent"}'s roster as ${this.selfName()}`);
+      this.deps.log(`nodes: joined ${memberOf(this.roster, this.roster!.parent)?.name ?? "the parent"}'s roster as ${this.selfName()}`);
       this.mesh();
-    }
-    this.changed();
-    return {
-      status: 200,
-      body: { member, node: { id: this.me.id, name: this.selfName(), keys: this.me.keys, version: this.deps.version }, shareToken: this.deps.shareToken() },
-    };
+      this.changed();
+      return this.view();
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -822,7 +837,7 @@ export class NodeHost {
   /**
    * Every five seconds: a ping down every link, and the end of any that
    * has been silent past `AWAY_MS` — the only way a sleeping machine is
-   * noticed. And the pairing code's expiry, which a client draws.
+   * noticed. And the join code's expiry, which a client draws.
    */
   private heartbeat(): void {
     const now = Date.now();
@@ -833,8 +848,8 @@ export class NodeHost {
       } else link.send({ type: "ping", at: now });
     }
     this.settleAway(now);
-    if (this.pairing && now >= this.pairing.expiresAt) {
-      this.pairing = null;
+    if (this.invitation && now >= this.invitation.expiresAt) {
+      this.invitation = null;
       this.changed();
     }
   }
