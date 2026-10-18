@@ -118,6 +118,11 @@ const NOT_THEME = new Set([
   // itself: it exists so those two cannot drift apart, and there is nothing in
   // it for a theme to have an opinion about or for a skin to disagree with.
   "--bar-h",
+  // The height of what a tab holds, worked out from the skin's type so that
+  // every pane's strip and the heads beside them are one height. A constant
+  // of the stylesheet's own arithmetic, like `--bar-h`: a skin moves it by
+  // its type, never by naming it.
+  "--tab-row",
   // How far the reader's type has been zoomed on this device, written onto the
   // root by `web/src/zoom.ts`. A *multiplier* rather than a size, which is what
   // keeps it out of both lists: it is applied to `--fs-lg`, so the skin still
