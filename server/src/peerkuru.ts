@@ -135,6 +135,12 @@ export class PeerKurus {
   private readonly boards = new Map<string, { resolve: (result: McpResult) => void; timer: ReturnType<typeof setTimeout> }>();
   /** The state each message from another node was last reported back as, so a report is sent once per move. */
   private readonly reported = new Map<string, string>();
+  /**
+   * Which node each message from another node came from, by id. The mark
+   * says so too and survives a restart, but a slash command goes in bare
+   * (`peerWords`), and its state is still owed to whoever sent it.
+   */
+  private readonly origins = new Map<string, string>();
   private readonly said = new Set<string>();
   private lastPush = "";
   private lastPushAt = 0;
@@ -162,6 +168,7 @@ export class PeerKurus {
         // off the wire would be a node saying it is another.
         const words = cleanText(say.spoken ? `${VOICE_PREFIX} ${say.text}` : say.text);
         if (!words) return;
+        this.origins.set(say.id, nodeId);
         const entry = this.deps.outbox.fromPeer(key, say.id, say.at, peerWords(from, say.who, words));
         this.report(nodeId, entry, true);
         return;
@@ -257,9 +264,11 @@ export class PeerKurus {
   outboxMoved(entries: readonly OutboxEntry[]): void {
     for (const entry of entries) {
       const mark = entry.text ? readPeerMark(entry.text) : null;
-      const node = mark ? this.deps.nodes.byName(mark.node) : null;
-      if (node) this.report(node.id, entry, false);
+      const nodeId = this.origins.get(entry.id) ?? (mark ? this.deps.nodes.byName(mark.node)?.id : undefined);
+      if (nodeId) this.report(nodeId, entry, false);
     }
+    const ids = new Set(entries.map((entry) => entry.id));
+    for (const id of [...this.origins.keys()]) if (!ids.has(id)) this.origins.delete(id);
   }
 
   private report(nodeId: string, entry: OutboxEntry, always: boolean): void {
