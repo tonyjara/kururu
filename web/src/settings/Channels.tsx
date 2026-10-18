@@ -14,15 +14,21 @@
  * and it is the user's to make knowing what it is. The token goes to the
  * server once and is never sent back; what this draws afterwards is the
  * status every window is sent, whose `hint` is the last four of it.
+ *
+ * With other kururus linked, the bot is still one bot, read by one node at a
+ * time (`docs/nodes.md`, "One Telegram"), so the page grows a list of the
+ * nodes by rank: which reads the chat now, and which could. On a child it
+ * is that list and little else — the bot, the switch and the accounts are
+ * the parent's, set on the parent's page.
  */
 import { useState } from "react";
-import { channelReady, pairingLink, userLabel, type TelegramStatus } from "../../../shared/channels";
+import { channelReady, nodeSubject, pairingLink, userLabel, type LeadStatus, type TelegramStatus } from "../../../shared/channels";
 import type { ProfileSummary } from "../../../shared/model";
 import { QrCode } from "../components/Reach";
 import * as api from "../session";
 import { useKururu } from "../session";
 import { HeldFrom, LentTo, useHeld } from "./Secrets";
-import { A, Action, AddRow, Banner, Btn, DangerButton, Details, Empty, errorText, Group, Item, KeyRow, Mono, Outcome, P, Readout, Row, Select, Step, Steps, Toggle, when } from "./ui";
+import { A, Action, AddRow, Banner, Btn, DangerButton, Details, Dot, Empty, errorText, Group, Item, KeyRow, Mono, Outcome, P, Readout, Row, Select, Step, Steps, Toggle, when, type Tone } from "./ui";
 
 const BOTFATHER = "https://t.me/BotFather";
 
@@ -48,15 +54,45 @@ function Telegram({ status, profiles }: { status: TelegramStatus; profiles: Prof
   const bot = status.bot ? `@${status.bot.username}` : "the bot";
   const held = useHeld("telegram");
 
-  // The parent's bot, held so this node can take the chat over while the
-  // parent is away — which is phase 5. Until then there is nothing here to
-  // set or switch on: a second poller of one bot is a 409 for both.
+  // A child of a shared channel: the bot, the switch and the list are the
+  // parent's, and what this node has of its own is where it stands in the
+  // rank and which Kuru it speaks for.
+  const lead = status.lead;
+  if (lead?.heldFrom) {
+    const parent = nodeSubject(lead.heldFrom);
+    return (
+      <>
+        {error && <Banner tone="bad">{error}</Banner>}
+        <Group
+          title="Telegram"
+          foot={
+            held
+              ? `Reads the chat here while ${parent} is away; the token is held from ${parent}. The switch and the accounts are ${parent}'s, in its Settings → Channels.`
+              : `${parent}'s bot. This node's Kuru speaks in it through whichever node reads the chat. To let this node read it while ${parent} is away, lend it the token: ${parent}'s Settings → Nodes → this node → Secrets → Telegram.`
+          }
+        >
+          <Readout label="Kuru listens" tone={status.enabled ? "ok" : "off"} value={status.enabled ? "On" : "Off"} hint={`${parent}'s switch, carried here in the roster.`} />
+          {held && <HeldFrom kind="telegram" label="Token" />}
+          <Select label="Talks to" value={status.profileId ?? ""} ariaLabel="The profile whose Kuru Telegram talks to" onChange={(value) => change({ profileId: value || null })}>
+            <option value="">Whichever profile is active</option>
+            {profiles.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.name}
+              </option>
+            ))}
+          </Select>
+        </Group>
+        <WhoAnswers lead={lead} />
+      </>
+    );
+  }
+
+  // Held from a parent whose kururu is from before the chat was shared: its
+  // roster does not carry the channel, so this node cannot read it for the
+  // others, and nothing here is this node's to set.
   if (held) {
     return (
-      <Group
-        title="Telegram"
-        foot={`${held.from} answers this bot. This node holds its token so that it can take the chat over while ${held.from} is away; that part is not built yet, so the switch is on ${held.from}.`}
-      >
+      <Group title="Telegram" foot={`${held.from} answers this bot. Its kururu is too old to share the chat with this node; update it, and this node reads the chat while ${held.from} is away.`}>
         <HeldFrom kind="telegram" label="Token" />
       </Group>
     );
@@ -89,6 +125,8 @@ function Telegram({ status, profiles }: { status: TelegramStatus; profiles: Prof
           onChange={(speakReplies) => change({ speakReplies })}
         />
       </Group>
+
+      {lead && <WhoAnswers lead={lead} />}
 
       <Group title="Set up">
         <Steps>
@@ -152,7 +190,9 @@ function describe(status: TelegramStatus, ready: boolean): string {
   if (!status.hint) return "Not set up: the steps below take a few minutes.";
   const bot = status.bot ? `@${status.bot.username}` : "the bot";
   const parts: string[] = [];
+  const lead = status.lead;
   if (status.error) parts.push(status.error);
+  else if (status.enabled && lead && !lead.polls) parts.push(lead.holder ? `On; ${nodeSubject(lead.holder)} reads the chat for now` : "On; no node reads the chat right now");
   else if (status.enabled) parts.push(status.link === "listening" ? `On, listening as ${bot}` : `On, connecting as ${bot}…`);
   else if (status.pairing) parts.push(`Off; listening as ${bot} for the pairing code only`);
   else if (!ready) parts.push("Off: your account is not on the list yet");
@@ -248,4 +288,36 @@ function Test({ status }: { status: TelegramStatus }) {
       }}
     />
   );
+}
+
+/**
+ * The nodes by rank and where each stands on the chat: the one reading it,
+ * the ones that could take it over, and why the rest cannot. The rule is
+ * `LeadGate`'s; this only says what it decided, in the words of the
+ * plan's promise — thirty seconds to take over, a minute to hand back.
+ */
+function WhoAnswers({ lead }: { lead: LeadStatus }) {
+  const now = Date.now();
+  return (
+    <Group
+      title="Who reads the chat"
+      foot="One kururu at a time reads the bot: the highest-ranked that can. The next takes over thirty seconds after those above it go quiet, and hands the chat back a minute after they return. @name or /name in the chat, or a reply to a line, reaches that node's Kuru. Rank is set in Settings → Nodes on the parent."
+    >
+      {lead.standingDownUntil && lead.standingDownUntil > now && (
+        <Row label="Standing down" hint={`Telegram said another node read the bot at the same moment, so this one waits until ${new Date(lead.standingDownUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`} />
+      )}
+      {lead.nodes.map((node) => {
+        const { tone, line } = standing(node, lead);
+        return <Item key={node.id} lead={<Dot tone={tone} />} name={`${node.rank}. ${node.name}${node.self ? " (this node)" : ""}${node.parent ? " · parent" : ""}`} sub={line} />;
+      })}
+    </Group>
+  );
+}
+
+function standing(node: LeadStatus["nodes"][number], lead: LeadStatus): { tone: Tone; line: string } {
+  if (node.polls) return { tone: "ok", line: "Reads the chat now" };
+  if (node.self) return lead.eligible ? { tone: "off", line: "Can read it, and does while those above it are away" } : { tone: "warn", line: `Cannot read it: ${lead.why ?? "not eligible"}` };
+  if (!node.up) return { tone: "off", line: `Away${node.since ? ` since ${when(node.since)}` : ""}${node.eligible ? "; can read it when back" : ""}` };
+  if (node.eligible === null) return { tone: "off", line: "Its kururu is too old to read the chat for the others (kururu child update)" };
+  return node.eligible ? { tone: "off", line: "Can read it" } : { tone: "off", line: "Cannot read it: no token lent, the channel off, or no Claude login there" };
 }
