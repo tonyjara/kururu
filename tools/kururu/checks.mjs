@@ -560,7 +560,7 @@ export const STEPS = [
     async repair(ctx, io, rows, recheck) {
       if (ctx.saved.codex === undefined) {
         const has = Boolean(which("codex", ctx.env));
-        const answer = await io.ask(`Will agents on this box run Codex too?${has ? " (codex is installed)" : ""}`, ["yes", "no"], "codex");
+        const answer = await io.ask(`Will agents on this box run Codex too?${has ? " (codex is installed)" : ""}`, has ? ["yes", "no"] : ["no", "yes"], "codex");
         if (ctx.dryRun) io.say(`would remember: Codex ${answer === "yes" ? "wanted" : "not wanted"}`);
         else {
           remember(ctx, { codex: answer === "yes" });

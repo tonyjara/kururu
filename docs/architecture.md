@@ -364,7 +364,9 @@ argument that keeps `tailscale` commands out of kururu.
   on, because other people's programs run on that box and `tailscale serve`
   delivers every request from loopback. kururu's own callers then present the
   token as `Authorization: Bearer`, found by `server/localtoken.mjs` —
-  `KURURU_TOKEN` in the environment first, `access.json` second: the hooks,
+  `access.json` first, because a token rotated while an agent runs leaves
+  that agent's environment holding the old one, and `KURURU_TOKEN` second,
+  for a process that cannot see the config directory: the hooks,
   `status`, `reload-window`, the backup and restore CLIs. The ptys the server
   opens are handed `KURURU_TOKEN` while the switch is on (and only then), so
   an agent's hooks have it, nvim's buffer hook sends it from stdin, and both
