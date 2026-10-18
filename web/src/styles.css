@@ -4219,12 +4219,6 @@ html.pill-page #root {
   padding: 8px 8px 6px 12px;
   border-bottom: var(--border) var(--border-style) var(--line);
 }
-/* The Needs drawer's count in words, after the chips. Kuru's drawer had a
-   state word here too, and its chip says it now. */
-.kuru-head-state {
-  font-size: var(--fs-sm);
-  color: var(--dim);
-}
 .kuru-head-spacer {
   flex: 1;
 }
@@ -4759,9 +4753,6 @@ html.pill-page #root {
    the side and a row per thing; the ones working; and the quiet rest, folded
    to a line of names. See `NeedsDrawer.tsx`.
    -------------------------------------------------------------------------- */
-.needs-head-some {
-  color: var(--blocked);
-}
 .needs-next-caret {
   transform: rotate(-90deg);
 }
