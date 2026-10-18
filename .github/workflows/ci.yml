@@ -35,6 +35,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The command lines kururu types are tested under the shells people run
+      # them in, zsh among them, and Ubuntu's image has only bash.
+      - if: runner.os == 'Linux'
+        run: sudo apt-get install -y --no-install-recommends zsh
+
       # The server's runtime is node — Electron's 24 on the Mac, 24 or 26 on a
       # child — and node-gyp builds node-pty against whichever is on the PATH.
       - uses: actions/setup-node@v4
