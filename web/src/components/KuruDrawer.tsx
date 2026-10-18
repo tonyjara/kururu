@@ -75,6 +75,18 @@
  * also stops a reply already audible here, because a mute that lets the
  * sentence finish reads as a mute that did not work.
  *
+ * **Every node's Kuru, in the one drawer.** On a kururu linked with others
+ * (`docs/nodes.md`), each other node's Kuru comes on the same message
+ * (`peers`), and the list is all of them merged by time (`mergeNodes`),
+ * each line of another node's wearing its name. A chip per node narrows it
+ * to one; one that is away is greyed, with when it was last seen, and keeps
+ * its last items. The composer is this node's Kuru's unless the message
+ * starts `@omarchy`, and a peer's reply has Reply, which starts the message
+ * that way — the server sends it over the link into that node's outbox, the
+ * door Telegram uses, so "delivered" still means that Kuru said it took it.
+ * A card code in another node's words is not a door here: it names that
+ * node's board.
+ *
  * What it draws is the server's `kuru` message (`shared/kuru.ts`), already
  * merged: nothing in here decides what a message's state is or whether a
  * reply was heard. What it adds is this page's own two states for a clip the
@@ -83,7 +95,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cardCode } from "../../../shared/board";
 import { CHANNEL_NAMES, channelReady, isChannelKind, type TelegramStatus } from "../../../shared/channels";
-import { KURU_SEEN_MS, clipLength, splitCardCodes, type KuruConversation, type KuruItem, type KuruReply, type NoticeItem, type YouItem } from "../../../shared/kuru";
+import { KURU_SEEN_MS, addressOf, clipLength, mergeNodes, splitCardCodes, type KuruItem, type KuruReply, type NodeKuruItem, type NoticeItem, type PeerKuru, type YouItem } from "../../../shared/kuru";
 import { splitMentions } from "../../../shared/made";
 import type { AgentSnapshot, MascotConfig, Profile } from "../../../shared/model";
 import type { OutboxState, VoiceSettings } from "../../../shared/voice";
@@ -109,6 +121,26 @@ const SEEN_BATCH_MS = 300;
  * again.
  */
 const STOPPING_MS = 5000;
+
+/** Which node's conversation the list is narrowed to, remembered per viewer: null for every node. */
+const NODE_KEY = "kururu.kuru.node";
+
+function readNodeFilter(): string | null {
+  try {
+    return localStorage.getItem(NODE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeNodeFilter(node: string | null) {
+  try {
+    if (node === null) localStorage.removeItem(NODE_KEY);
+    else localStorage.setItem(NODE_KEY, node);
+  } catch {
+    // Not remembered past this window.
+  }
+}
 
 /** One of your messages as the drawer draws it: the server's states, and this page's two for a clip the server has not taken yet. */
 type RowState = OutboxState | "saving" | "recording";
@@ -167,8 +199,19 @@ export function KuruDrawer({
    */
   chips: ReactNode;
 }) {
-  const { kuru, channels, voice } = useKururu();
+  const { kuru, kuruPeers, channels, voice, nodes } = useKururu();
   const conversation = kuru.find((c) => c.profileId === profile.id) ?? null;
+  const selfName = nodes?.self.name ?? "here";
+  const peerNames = kuruPeers.map((peer) => peer.node.name);
+  const [nodeFilter, setNodeFilter] = useState<string | null>(readNodeFilter);
+  // A node that left the roster is not a filter any more.
+  const filter = nodeFilter !== null && nodeFilter !== selfName && !peerNames.includes(nodeFilter) ? null : nodeFilter;
+  const pickNode = (node: string | null) => {
+    setNodeFilter(node);
+    writeNodeFilter(node);
+  };
+  /** Reply on a peer's bubble: the composer starts `@node `, and has the keyboard. */
+  const [prefill, setPrefill] = useState<{ text: string; n: number } | null>(null);
   // The drawer is the active profile's, so Telegram is this conversation's
   // when it talks to whichever profile is active, or was pointed at this one.
   const telegram = channels?.telegram && channelReady(channels.telegram) && (channels.telegram.profileId ?? profile.id) === profile.id ? channels.telegram : null;
@@ -266,8 +309,11 @@ export function KuruDrawer({
     setMore((was) => was || conversation.more);
   }, [conversation]);
 
-  const items = [...known.values()].sort((a, b) => a.at - b.at);
-  const first = items[0]?.at ?? null;
+  const own = [...known.values()].sort((a, b) => a.at - b.at);
+  const first = own[0]?.at ?? null;
+  const merged = mergeNodes(own, kuruPeers);
+  const items = filter === null ? merged : merged.filter((item) => (item.node ?? selfName) === filter);
+  const away = filter !== null ? kuruPeers.find((peer) => peer.node.name === filter && peer.state !== "up") : undefined;
 
   const earlier = () => {
     if (loading) return;
@@ -333,7 +379,7 @@ export function KuruDrawer({
    * open, because the whole point is that a glance at the drawer is not
    * reading the reply at the top of a long list.
    */
-  const unheard = items.filter((item): item is KuruReply => item.kind === "kuru" && item.fate === "unheard" && item.utterance !== null).map((item) => item.utterance!);
+  const unheard = items.filter((item): item is NodeKuruItem & KuruReply => item.kind === "kuru" && item.fate === "unheard" && item.utterance !== null).map((item) => item.utterance!);
   const unheardKey = unheard.join("\n");
   useEffect(() => {
     const el = list.current;
@@ -454,6 +500,8 @@ export function KuruDrawer({
         </button>
       </header>
 
+      {kuruPeers.length > 0 && <NodeChips self={selfName} peers={kuruPeers} filter={filter} onPick={pickNode} />}
+
       <ol className="kuru-list" ref={list} onScroll={onScroll}>
         {more && (
           <li className="kuru-earlier">
@@ -469,24 +517,34 @@ export function KuruDrawer({
               <time dateTime={new Date(item.at).toISOString()}>{dayAt(item.at)}</time>
             </li>
           ) : item.kind === "you" ? (
-            <You key={item.id} item={item} state={item.state} note={item.note} />
+            <You key={item.id} item={item} state={item.state} note={item.note} node={item.node} to={item.node === null && item.text ? (addressOf(item.text, peerNames, item.via === "voice")?.node ?? null) : null} />
           ) : item.kind === "notice" ? (
-            <Notice key={item.id} item={item} cardOf={cardOf} onCard={onCard} />
+            <Notice key={item.id} item={item} node={item.node} cardOf={item.node === null ? cardOf : noCards} onCard={onCard} />
           ) : (
             <Reply
               key={item.id}
               item={item}
+              node={item.node}
               // Not `marked === item.utterance` alone: with nothing marked that
               // is null === null for every reply never spoken, and each of them
               // wore the accent of the one just scrolled to, for good.
               marked={marked !== null && marked === item.utterance}
               replaying={replayingId === item.id}
               onReplay={onReplay}
-              cardOf={cardOf}
+              onReplyTo={item.node === null ? null : () => setPrefill((was) => ({ text: `@${item.node} `, n: (was?.n ?? 0) + 1 }))}
+              cardOf={item.node === null ? cardOf : noCards}
               onCard={onCard}
               onFile={onFile}
             />
           ),
+        )}
+        {away && (
+          <li className="kuru-mark">
+            <span>
+              {away.node.name} {away.state === "away" ? "is away" : "is not linked yet"}
+              {away.lastSeen ? ` · last seen ${dayAt(away.lastSeen)}` : ""} · these are the last items it sent
+            </span>
+          </li>
         )}
         {saving.map((clip) => (
           <You
@@ -508,7 +566,7 @@ export function KuruDrawer({
 
       <Live live={live} working={working} profileId={profile.id} mascot={mascot} onTerminal={onTerminal} />
 
-      <Composer profileId={profile.id} onEditing={onEditing} talking={ui.phase === "listening"} />
+      <Composer profileId={profile.id} onEditing={onEditing} talking={ui.phase === "listening"} peers={kuruPeers} prefill={prefill} />
 
       {/* The edge you drag, on the sidebar's and the tree's terms: last in the
           tree and absolutely positioned, so it sits over the border rather
@@ -592,6 +650,55 @@ function Live({ live, working, profileId, mascot, onTerminal }: { live: KuruLive
   }
   return null;
 }
+
+/**
+ * One chip per node, under the header, on a kururu linked with others:
+ * every node's conversation, or one's. A node that is away is greyed, and
+ * says since when in its title; its last items are still there to read.
+ * Its count is its replies said here that nobody heard out, as the lines
+ * themselves are marked.
+ */
+function NodeChips({ self, peers, filter, onPick }: { self: string; peers: PeerKuru[]; filter: string | null; onPick: (node: string | null) => void }) {
+  return (
+    <nav className="kuru-nodes" aria-label="Whose conversation">
+      <button type="button" className={`kuru-node-chip ${filter === null ? "kuru-node-chip-on" : ""}`} aria-pressed={filter === null} onClick={() => onPick(null)}>
+        All
+      </button>
+      <button type="button" className={`kuru-node-chip ${filter === self ? "kuru-node-chip-on" : ""}`} aria-pressed={filter === self} onClick={() => onPick(self)} title="This node's Kuru">
+        {self}
+      </button>
+      {peers.map((peer) => {
+        const gone = peer.state !== "up";
+        const title = gone
+          ? `${peer.node.name} ${peer.state === "away" ? "is away" : "is not linked yet"}${peer.lastSeen ? `, last seen ${dayAt(peer.lastSeen)}` : ""}. Its last items are kept here.`
+          : peer.talks
+            ? `The Kuru on ${peer.node.name}. Start a message with @${peer.node.name} to talk to it.`
+            : `The kururu on ${peer.node.name} is too old to talk to; update it there.`;
+        return (
+          <button
+            key={peer.node.id}
+            type="button"
+            className={`kuru-node-chip ${filter === peer.node.name ? "kuru-node-chip-on" : ""} ${gone ? "kuru-node-chip-away" : ""}`}
+            aria-pressed={filter === peer.node.name}
+            onClick={() => onPick(peer.node.name)}
+            title={title}
+          >
+            {peer.node.name}
+            {peer.unheard > 0 && <span className="kuru-node-count">{peer.unheard}</span>}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+/** Whose line it is, beside the time, when it is another node's: `omarchy`. */
+function NodeTag({ node }: { node: string | null }) {
+  return node === null ? null : <span className="kuru-node">{node}</span>;
+}
+
+/** A card code in another node's words names that node's board, which is not a door here. */
+const noCards: CardOf = () => null;
 
 /**
  * The drawer's left edge, as something to take hold of — `FileTree.tsx`'s
@@ -693,13 +800,21 @@ function TelegramSwitch({ status }: { status: TelegramStatus }) {
   );
 }
 
-/** One of your messages. The state is passed beside the item so this page's `saving` can wear the row the server's states do. */
-function You({ item, state, note }: { item: YouItem; state: RowState; note: string | null }) {
+/**
+ * One of your messages. The state is passed beside the item so this page's
+ * `saving` can wear the row the server's states do. `node` is whose
+ * conversation it is in, for another node's; `to` is the node a message of
+ * this one's was addressed to with `@`, on its way there.
+ */
+function You({ item, state, note, node = null, to = null }: { item: YouItem; state: RowState; note: string | null; node?: string | null; to?: string | null }) {
   const word = state === "queued" ? (item.typedAt !== null ? "Sent" : STATE_WORD.queued) : STATE_WORD[state];
   const channel = isChannelKind(item.via) ? item.via : null;
   return (
     <li className={`kuru-item kuru-you kuru-you-${state}`}>
       <span className="kuru-meta">
+        <NodeTag node={node} />
+        {to && <span className="kuru-node" title={`For the Kuru on ${to}`}>→ {to}</span>}
+        {item.through && <span className="kuru-via" title={`Written or said at ${item.through}`}>from {item.through}</span>}
         {item.via === "voice" ? (
           <MicIcon />
         ) : channel ? (
@@ -738,17 +853,23 @@ function You({ item, state, note }: { item: YouItem; state: RowState; note: stri
  */
 function Reply({
   item,
+  node,
   marked,
   replaying,
   onReplay,
+  onReplyTo,
   cardOf,
   onCard,
   onFile,
 }: {
   item: KuruReply;
+  /** Whose Kuru said it, when that is another node's. */
+  node: string | null;
   marked: boolean;
   replaying: boolean;
   onReplay: (item: KuruReply) => void;
+  /** Reply to another node's Kuru: the composer starts `@node `. Null for this node's own. */
+  onReplyTo: (() => void) | null;
   cardOf: CardOf;
   onCard: (workspaceId: string | null, cardId: string) => void;
   /** A path in the reply was opened. */
@@ -775,12 +896,18 @@ function Reply({
         ) : (
           <SpeakerIcon />
         )}
+        <NodeTag node={node} />
         <time dateTime={new Date(item.at).toISOString()}>{saidAt(item.at)}</time>
         {active ? (
           <span className="kuru-state kuru-state-speaking">Speaking</span>
         ) : item.fate === "unheard" ? (
           <span className="kuru-state kuru-state-unheard">Unheard</span>
         ) : null}
+        {onReplyTo && (
+          <button type="button" className="kuru-reply-to" onClick={onReplyTo} title={`Reply to the Kuru on ${node}`}>
+            Reply
+          </button>
+        )}
       </span>
       <p className="kuru-text">
         {/* Paths first, each a link when the server found its file, then card codes in
@@ -829,13 +956,24 @@ function CardWords({ text, cardOf, onCard }: { text: string; cardOf: CardOf; onC
  * again; nothing about it is unread or needs clearing, so it keeps no state
  * past this row's.
  */
-function Notice({ item, cardOf, onCard }: { item: NoticeItem; cardOf: CardOf; onCard: (workspaceId: string | null, cardId: string) => void }) {
+function Notice({ item, node = null, cardOf, onCard }: { item: NoticeItem; node?: string | null; cardOf: CardOf; onCard: (workspaceId: string | null, cardId: string) => void }) {
   const [open, setOpen] = useState(false);
   const agent = item.agent;
+  // Another node's notice about its agents crosses without the reply it
+  // quoted (`peerItems`), so there is nothing behind a tap.
+  const more = item.text.trim().length > 0;
   return (
     <li className={`kuru-notice ${item.event === "blocked" ? "kuru-notice-blocked" : ""}`}>
-      <button type="button" className="kuru-notice-line" aria-expanded={open} onClick={() => setOpen((was) => !was)} title={open ? "Hide the message" : "Show the whole message"}>
-        <Icon name="caret" />
+      <button
+        type="button"
+        className="kuru-notice-line"
+        aria-expanded={more ? open : undefined}
+        disabled={!more}
+        onClick={() => setOpen((was) => !was)}
+        title={more ? (open ? "Hide the message" : "Show the whole message") : undefined}
+      >
+        {more && <Icon name="caret" />}
+        <NodeTag node={node} />
         <span className="kuru-notice-from">{item.from}</span>
         <span aria-hidden="true">·</span>
         {agent && <span className="kuru-notice-cut">{agent.name ? `"${agent.name}"` : agent.program}</span>}
@@ -843,7 +981,7 @@ function Notice({ item, cardOf, onCard }: { item: NoticeItem; cardOf: CardOf; on
         <span className={`kuru-notice-what ${agent ? "" : "kuru-notice-cut"}`}>{item.what}</span>
         <time dateTime={new Date(item.at).toISOString()}>{saidAt(item.at)}</time>
       </button>
-      {open && (
+      {open && more && (
         <p className="kuru-notice-text">
           <CardWords text={item.text} cardOf={cardOf} onCard={onCard} />
         </p>
@@ -883,12 +1021,45 @@ function writeDraft(profileId: string, text: string) {
  * grows with it up to `.kuru-field`'s `max-height`, so writing more than one
  * line does not hide the lines above it.
  */
-function Composer({ profileId, onEditing, talking }: { profileId: string; onEditing: (editing: boolean) => void; talking: boolean }) {
+function Composer({
+  profileId,
+  onEditing,
+  talking,
+  peers,
+  prefill,
+}: {
+  profileId: string;
+  onEditing: (editing: boolean) => void;
+  talking: boolean;
+  /** The other nodes' Kurus, which `@name` at the start of a message is for. */
+  peers: PeerKuru[];
+  /** Reply on a peer's bubble: start the message with this, and take the keyboard. */
+  prefill: { text: string; n: number } | null;
+}) {
   const [text, setText] = useState(() => readDraft(profileId));
   const field = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     setText(readDraft(profileId));
   }, [profileId]);
+  useEffect(() => {
+    if (!prefill) return;
+    // Whatever was already being written stays, after the address, unless
+    // it was already addressed to somebody.
+    setText((was) => {
+      const rest = was.replace(/^@[a-z][a-z0-9-]*\s*/i, "");
+      const next = `${prefill.text}${rest}`;
+      writeDraft(profileId, next);
+      return next;
+    });
+    const el = field.current;
+    if (el) {
+      el.focus();
+      requestAnimationFrame(() => el.setSelectionRange(el.value.length, el.value.length));
+    }
+    // Only a new ask, not a re-render, moves the cursor.
+  }, [prefill?.n]); // eslint-disable-line react-hooks/exhaustive-deps
+  const to = addressOf(text, peers.map((peer) => peer.node.name), false)?.node ?? null;
+  const toPeer = to ? peers.find((peer) => peer.node.name === to) : undefined;
   useLayoutEffect(() => {
     const el = field.current;
     if (!el) return;
@@ -914,13 +1085,19 @@ function Composer({ profileId, onEditing, talking }: { profileId: string; onEdit
         send();
       }}
     >
+      {toPeer && (
+        <p className="kuru-to" role="status">
+          To the Kuru on {toPeer.node.name}
+          {toPeer.state !== "up" ? " — away; it goes when it is back" : !toPeer.talks ? " — its kururu is too old to take it" : ""}
+        </p>
+      )}
       <div className="kuru-box">
         <textarea
           ref={field}
           className="kuru-field"
           rows={1}
           value={text}
-          placeholder="Say something to Kuru"
+          placeholder={peers.length ? `Say something to Kuru, or @${peers[0]!.node.name} …` : "Say something to Kuru"}
           aria-label="A message for Kuru"
           onChange={(event) => {
             setText(event.target.value);

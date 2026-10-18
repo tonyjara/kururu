@@ -47,6 +47,18 @@
  * keyed by it: three host restarts in one morning orphaned every message on
  * it. The wire still says `profileId`, resolved from the key at the moment
  * of sending.
+ *
+ * **A message for another node's Kuru goes by the same list.** `@omarchy
+ * start the build`, typed in the drawer or said aloud, is heard here like
+ * any other, waits its turn like any other, and is then handed to the link
+ * rather than to this Kuru (`addressed`, `relay`). The audio never leaves
+ * the Mac; the words do. Its state is the other node's report of it
+ * (`peerState`), since that node's Kuru is the one whose word "taken" is,
+ * and it is kept here until that word comes — through the other node being
+ * away, and through either restarting: handed again, it is the same id
+ * there, and the other node's outbox answers it with what it has become.
+ * The words keep their address on this list, so a restart knows where they
+ * were going without anything kept beside them.
  */
 import { mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { open, stat } from "node:fs/promises";
@@ -121,6 +133,18 @@ export interface OutboxDeps {
   talk: (who: object, on: boolean) => void;
   /** Kuru took a message — between turns or mid-way through one, where no prompt hook says so. For the channels, which need to know what a turn answered. */
   delivered?: (entry: StoredOutboxEntry) => void;
+  /**
+   * Whether a message's words are for another node's Kuru — `addressOf`'s
+   * grammar over the linked nodes' names — and if so which, and the words
+   * without the address. Null for this Kuru's.
+   */
+  addressed?: (text: string, spoken: boolean) => { nodeId: string; name: string; rest: string } | null;
+  /**
+   * Hand words to another node's outbox over the link: null when they went,
+   * else why not — that node is away, mostly — and the message waits, and
+   * `retry` hands it again when the link is back.
+   */
+  relay?: (nodeId: string, words: { id: string; at: number; text: string; spoken: boolean }) => string | null;
 }
 
 /** Where the audio is kept: the state directory, since a clip is a thing kururu wants back and nobody chose. */
@@ -349,10 +373,77 @@ export class Outbox {
     this.changed();
   }
 
+  /**
+   * Words from another node — its user's through its drawer, or its Kuru's
+   * through `ask_kuru` — already marked (`peerWords`), onto this Kuru's
+   * list, which takes them the way it takes Telegram's. Sent again with the
+   * same id, a message already here is left as it is, and one that failed
+   * is tried again: that is the other side's Resend. What it is now, for
+   * the answer.
+   */
+  fromPeer(profileKey: string, id: string, at: number, text: string): OutboxEntry {
+    const known = this.entries.find((entry) => entry.id === id);
+    if (known?.state === "failed") this.resend(id);
+    return known ? this.wire(known) : this.say(profileKey, id, at, text);
+  }
+
+  /** One message as the wire carries it, or null; for answering another node about one. */
+  entry(id: string): OutboxEntry | null {
+    const entry = this.entries.find((e) => e.id === id);
+    return entry ? this.wire(entry) : null;
+  }
+
+  /**
+   * What another node said became of a message this list handed it: still
+   * waiting there, typed into its Kuru, taken, or failed. Taken is
+   * delivered here too, and failed is failed with that node's reason and
+   * this list's Resend, which hands it over again.
+   */
+  peerState(id: string, report: { state: OutboxEntry["state"]; note: string | null; typedAt: number | null }): void {
+    const entry = this.entries.find((e) => e.id === id);
+    if (!entry || entry.state !== "queued") return;
+    const peer = this.peerOf(entry);
+    if (!peer) return;
+    if (report.state === "delivered") {
+      entry.state = "delivered";
+      entry.note = null;
+      entry.typedAt ??= report.typedAt ?? Date.now();
+      this.handed.delete(entry.id);
+      this.removeAudio(entry.id);
+      this.changed();
+      return;
+    }
+    if (report.state === "failed") {
+      this.fail(entry, `On ${peer.name}: ${report.note ?? "it did not reach the Kuru there."}`);
+      return;
+    }
+    entry.typedAt = report.typedAt;
+    entry.note = report.note ? `On ${peer.name}: ${report.note}` : `With the Kuru on ${peer.name}; waiting for it to take it.`;
+    this.changed();
+  }
+
+  /**
+   * A link to a node came up: whatever was waiting for it is handed over
+   * now, and so is whatever was handed to it and not yet heard of, since a
+   * link that dropped may have dropped it. The other side keeps one copy of
+   * an id however many times it is sent.
+   */
+  retry(nodeId: string): void {
+    for (const entry of this.entries) {
+      if (entry.state === "queued" && entry.typedAt === null && this.peerOf(entry)?.nodeId === nodeId) this.handed.delete(entry.id);
+    }
+    this.flow();
+  }
+
+  /** Where a message's words go, when that is another node; null for this Kuru. */
+  private peerOf(entry: Pick<StoredOutboxEntry, "text" | "ms">): { nodeId: string; name: string; rest: string } | null {
+    return entry.text && this.deps.addressed ? this.deps.addressed(entry.text, spokenMessage(entry)) : null;
+  }
+
   /** A prompt Kuru's session took, off its `UserPromptSubmit` report. Whatever typed message it carries is delivered. */
   prompted(profileKey: string, prompt: string): void {
     for (const entry of this.entries) {
-      if (entry.profileKey === profileKey && entry.state === "queued" && entry.typedAt !== null && entry.text && promptCarries(prompt, entry.text)) {
+      if (entry.profileKey === profileKey && entry.state === "queued" && entry.typedAt !== null && entry.text && !this.peerOf(entry) && promptCarries(prompt, entry.text)) {
         this.delivered(entry);
       }
     }
@@ -418,6 +509,11 @@ export class Outbox {
 
   private async hand(entry: StoredOutboxEntry): Promise<void> {
     if (!entry.text) return;
+    const peer = this.peerOf(entry);
+    if (peer) {
+      this.relayTo(entry, peer);
+      return;
+    }
     this.handed.add(entry.id);
     try {
       // The prefix tells Kuru a name may be misheard, which is true of a clip
@@ -447,6 +543,23 @@ export class Outbox {
     } finally {
       this.quiet(entry.id);
     }
+  }
+
+  /**
+   * Words for another node's Kuru, over the link. Sent, it waits for that
+   * node's reports; not sent, because the node is away, it waits for
+   * `retry`, and says so. The hush ends either way: the words have left
+   * this node's hands.
+   */
+  private relayTo(entry: StoredOutboxEntry, peer: { nodeId: string; name: string; rest: string }): void {
+    this.handed.add(entry.id);
+    const why = this.deps.relay ? this.deps.relay(peer.nodeId, { id: entry.id, at: entry.at, text: peer.rest, spoken: spokenMessage(entry) }) : "nodes are off";
+    if (why) {
+      this.handed.delete(entry.id);
+      entry.note = `Not sent: ${why}.`;
+    } else if (entry.typedAt === null) entry.note = `Sent to the Kuru on ${peer.name}.`;
+    this.quiet(entry.id);
+    this.changed();
   }
 
   private typed(entry: StoredOutboxEntry): void {
@@ -500,7 +613,8 @@ export class Outbox {
 
   /** Look in the transcripts every little while, for as long as something typed is unconfirmed. */
   private watch(): void {
-    const waiting = this.entries.some((e) => e.state === "queued" && e.typedAt !== null);
+    // Another node's words are its outbox's to confirm, and it reports.
+    const waiting = this.entries.some((e) => e.state === "queued" && e.typedAt !== null && !this.peerOf(e));
     if (waiting && !this.checker) this.checker = setInterval(() => void this.check(), CHECK_MS).unref();
     else if (!waiting && this.checker) {
       clearInterval(this.checker);
@@ -519,7 +633,7 @@ export class Outbox {
     if (this.checking) return;
     this.checking = true;
     try {
-      const typed = this.entries.filter((e) => e.state === "queued" && e.typedAt !== null);
+      const typed = this.entries.filter((e) => e.state === "queued" && e.typedAt !== null && !this.peerOf(e));
       const byProfile = new Map<string, StoredOutboxEntry[]>();
       for (const entry of typed) byProfile.set(entry.profileKey, [...(byProfile.get(entry.profileKey) ?? []), entry]);
       const now = Date.now();

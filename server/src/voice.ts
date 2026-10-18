@@ -567,9 +567,9 @@ export class Voice {
    * fate beside its words. Null when replies are not spoken, or there was
    * nothing to say.
    */
-  spoke(profileKey: string, reply: unknown): string | null {
+  spoke(profileKey: string, reply: unknown, id?: string): string | null {
     if (!this.settings.speak || typeof reply !== "string") return null;
-    return this.speak(profileKey, reply);
+    return this.speak(profileKey, reply, id ? { id } : {});
   }
 
   /**
@@ -580,18 +580,22 @@ export class Voice {
    * also for an audition, which only the window that asked should hear.
    * `replays` and `lead` are a missed reply said again, and `spoken` says the
    * text has been through `spokenText` already — a second pass would eat the
-   * underscores of a name the first one left alone.
+   * underscores of a name the first one left alone. `id` is an id the caller
+   * already knows the reply by — another node's reply, whose drawer item is
+   * found again by it after a restart — and is used once: asked again, the
+   * reply is not said twice.
    */
   speak(
     profileKey: string,
     text: string,
-    options: { lang?: VoiceLang; choice?: VoiceChoice; quiet?: boolean; lead?: LeadIn; replays?: string; spoken?: boolean } = {},
+    options: { lang?: VoiceLang; choice?: VoiceChoice; quiet?: boolean; lead?: LeadIn; replays?: string; spoken?: boolean; id?: string } = {},
   ): string | null {
     const spoken = options.spoken ? text.trim() : spokenText(text);
     if (!spoken) return null;
+    if (options.id && (this.utterances.has(options.id) || this.missed.some((entry) => entry.id === options.id))) return null;
     const lang = options.lang ?? detectLanguage(spoken, this.settings.languages);
     const n = ++this.utteranceCount;
-    const id = `u${n}-${Date.now().toString(36)}`;
+    const id = options.id ?? `u${n}-${Date.now().toString(36)}`;
     const quiet = options.quiet === true;
     const made: Utterance = {
       id,

@@ -20,9 +20,15 @@
  * within one call — and three identical broadcasts for one event is noise on
  * a phone's socket.
  *
+ * The other nodes' Kurus ride on the same message (`peers`), each already
+ * as this node's drawer should draw it (`peerkuru.ts`); the drawer merges
+ * them with this node's own (`mergeNodes`). And this node's own items are
+ * what it tells the others about its conversation, so a change here is
+ * also theirs to hear of (`moved`).
+ *
  * On the restartable side, like everything that reads the database.
  */
-import { KURU_PAGE, KURU_RECENT, kuruCounts, mergeConversation, type KuruConversation, type KuruFile, type KuruItem, type KuruPage } from "../../shared/kuru";
+import { KURU_PAGE, KURU_RECENT, kuruCounts, mergeConversation, type KuruConversation, type KuruFile, type KuruItem, type KuruPage, type PeerKuru } from "../../shared/kuru";
 import type { Turn } from "../../shared/store";
 import type { StoredMissed, StoredOutboxEntry } from "../../shared/voice";
 import type { ServerMessage } from "../../shared/wire";
@@ -46,6 +52,10 @@ export interface KuruDeps {
    * question about every terminal in the profile — so it is asked for here.
    */
   files?: (profileKey: string, reply: { id: string; text: string }) => KuruFile[];
+  /** The other nodes' Kurus, for every drawer. */
+  peers?: () => PeerKuru[];
+  /** Something moved: the other nodes may want this node's conversation again. */
+  moved?: () => void;
 }
 
 export class Kuru {
@@ -55,7 +65,13 @@ export class Kuru {
 
   /** What every client is told, on connect and after every change. */
   message(): ServerMessage {
-    return { type: "kuru", kuru: this.deps.profiles().map(({ id, key }) => this.conversation(id, key)) };
+    return { type: "kuru", kuru: this.deps.profiles().map(({ id, key }) => this.conversation(id, key)), peers: this.deps.peers?.() ?? [] };
+  }
+
+  /** One profile's newest items, as the drawer's window has them: what another node is told this node's Kuru said. */
+  items(profileKey: string): KuruItem[] {
+    const profile = this.deps.profiles().find((p) => p.key === profileKey);
+    return profile ? this.conversation(profile.id, profileKey).items : [];
   }
 
   /** Something the conversation is made of moved. Said once for a burst. */
@@ -64,6 +80,7 @@ export class Kuru {
     this.timer = setTimeout(() => {
       this.timer = null;
       this.deps.broadcast(this.message());
+      this.deps.moved?.();
     }, COALESCE_MS).unref();
   }
 

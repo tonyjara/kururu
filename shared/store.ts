@@ -25,7 +25,7 @@
  * each verb, and the one that cannot miss a road added later. Pure, tested.
  */
 import type { Board, BoardLane, Card, CardDates, CardRun, CardWorktree } from "./board";
-import { channelOfPrompt, type ChannelKind } from "./channels";
+import { channelOfPrompt, readPeerMark, type ChannelKind } from "./channels";
 import { sameMade } from "./made";
 import type { VoiceLang } from "./voice";
 
@@ -58,8 +58,12 @@ export function mintWorkspaceKey(): string {
 // Events
 // ---------------------------------------------------------------------------
 
-/** Who changed a board: a person at a window, the harness through a tool, the run automation, or an import. */
-export type Actor = "user" | "harness" | "automation" | "import";
+/**
+ * Who changed a board: a person at a window, the harness through a tool, the
+ * run automation, an import, or another node's Kuru through the link —
+ * `peer:omarchy`, by the name it had then.
+ */
+export type Actor = "user" | "harness" | "automation" | "import" | `peer:${string}`;
 
 export type EventKind = "created" | "edited" | "moved" | "sent" | "run" | "deleted" | "restored" | "imported";
 
@@ -328,9 +332,15 @@ export interface Conversation {
 /** The prefix the voice puts on words it heard, which is how a typed turn is told from a spoken one. */
 export const VOICE_PREFIX = "[voice]";
 
+/**
+ * Where a prompt came from, by its mark. Words from another node carry that
+ * node's mark ahead of the voice's (`peerWords`), and the voice's is still
+ * the truth about them: `[user@mac] [voice] …` was spoken, on the Mac.
+ */
 export function viaOf(text: string): TurnVia {
-  if (text.startsWith(VOICE_PREFIX)) return "voice";
-  return channelOfPrompt(text) ?? "typed";
+  const words = readPeerMark(text)?.rest ?? text;
+  if (words.startsWith(VOICE_PREFIX)) return "voice";
+  return channelOfPrompt(words) ?? "typed";
 }
 
 /**

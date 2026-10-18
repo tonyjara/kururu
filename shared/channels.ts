@@ -473,6 +473,86 @@ export function replySpoken(vias: ReadonlySet<string>, speakChannelReplies: bool
   return false;
 }
 
+// ---------------------------------------------------------------------------
+// Another node's words
+// ---------------------------------------------------------------------------
+
+/**
+ * Who on another kururu a message is from: the user, writing in that node's
+ * drawer or speaking to it with `@omarchy …`, or that node's Kuru, asking
+ * this one with `ask_kuru` (`docs/nodes.md`, "Kurus as peers").
+ */
+export type PeerWho = "user" | "kuru";
+
+/**
+ * The mark a message from another node is typed into Kuru behind, beside
+ * `[telegram]`: `[user@mac]` for the user, `[kuru@mac]` for the Kuru there.
+ *
+ * Both halves, rather than the bare `[mac]` the plan first wrote, because a
+ * node can be called anything a hostname can, and one called `voice`,
+ * `telegram` or `kururu` would have made its Kuru's every message read as
+ * speech, a phone or a notice. The `@` cannot appear in any of those marks,
+ * and saying who is the point: the user through another door is the user,
+ * and a colleague asking is a colleague.
+ */
+export function peerMark(node: string, who: PeerWho): string {
+  return `[${who}@${node}]`;
+}
+
+const PEER_MARK = /^\[(user|kuru)@([a-z][a-z0-9-]{0,23})\]\s*/;
+
+/**
+ * The words as they are typed into Kuru. The user's slash command goes in
+ * bare, as `channelWords` lets a phone's `/compact` compact; another Kuru's
+ * never does, since one Kuru clearing another's context is nobody's wish.
+ */
+export function peerWords(node: string, who: PeerWho, text: string): string {
+  return who === "user" && text.startsWith("/") ? text : `${peerMark(node, who)} ${text}`;
+}
+
+/** A prompt's peer mark, read off its front, and what follows it; null for a prompt without one. */
+export function readPeerMark(text: string): { node: string; who: PeerWho; rest: string } | null {
+  const match = PEER_MARK.exec(text);
+  return match ? { who: match[1] as PeerWho, node: match[2]!, rest: text.slice(match[0].length) } : null;
+}
+
+/**
+ * Where everything one of Kuru's turns answered came from, which is what
+ * decides who hears the reply: words from here (spoken or typed at this
+ * node), a channel's, and another node's — `user@mac`, `kuru@mac` — each by
+ * its mark.
+ */
+export interface TurnOrigin {
+  here: boolean;
+  channels: ChannelKind[];
+  peers: string[];
+}
+
+/**
+ * Whether this node says a turn's reply aloud: `replySpoken`'s rule, with
+ * another node's words counting as a channel's. A turn that answered only
+ * the Kuru on the Mac, or the user typing at the box's own page, has its
+ * reader already, and the reply goes back over the link to whoever asked.
+ */
+export function spokenHere(origin: TurnOrigin, speakChannelReplies: boolean): boolean {
+  if (origin.here) return true;
+  if (origin.peers.length) return speakChannelReplies && origin.channels.length > 0;
+  return replySpoken(new Set(origin.channels), speakChannelReplies);
+}
+
+/**
+ * Whether a reply another node's Kuru made is said aloud on this one. A
+ * child has no speakers, so with the lid open its Kuru talks through the
+ * Mac — but only to what the Mac's user said to it, or about its own agents
+ * (a turn that answered nothing: a notice). A turn that answered somebody at
+ * the child's own page, a phone in its channel, or this node's Kuru (which
+ * hears the answer in its tool call and says it in its own words) is not.
+ */
+export function peerReplySpoken(origin: TurnOrigin, self: string): boolean {
+  if (origin.peers.includes(`user@${self}`)) return true;
+  return !origin.here && origin.channels.length === 0 && origin.peers.length === 0;
+}
+
 /**
  * How long after its `attempt`th failure (from 1) a message to a channel is
  * tried again. Seconds at first — a Wi-Fi hiccup — then minutes, capped at

@@ -19,7 +19,7 @@
  * test can hold. `server/src/kuru.ts` gathers the inputs and broadcasts;
  * `web/src/components/KuruDrawer.tsx` draws the result.
  */
-import { channelOfMessage, isChannelKind, withoutChannelMark, type ChannelKind } from "./channels";
+import { channelOfMessage, isChannelKind, readPeerMark, withoutChannelMark, type ChannelKind } from "./channels";
 import { CROSS_SESSION_TAG, NOTICE_SENDER } from "./harness";
 import type { MadeFile } from "./made";
 import type { Turn } from "./store";
@@ -59,6 +59,8 @@ export interface YouItem {
   note: string | null;
   /** The outbox message behind it, for Resend and Discard. Null for a prompt typed straight into the terminal. */
   outboxId: string | null;
+  /** The node it was written or spoken at, when that was another kururu's drawer: `[user@mac]`. */
+  through?: string;
 }
 
 /**
@@ -184,9 +186,14 @@ export function spokenMessage(entry: Pick<OutboxLike, "ms">): boolean {
   return entry.ms > 0;
 }
 
-/** The words of a turn as a person said them: the voice's prefix is the recogniser's, not theirs, and a channel's mark is kururu's. */
+/**
+ * The words of a turn as a person said them: the voice's prefix is the
+ * recogniser's, not theirs, and a channel's or another node's mark is
+ * kururu's.
+ */
 export function plainWords(text: string): string {
-  return text.startsWith(VOICE_PREFIX) ? text.slice(VOICE_PREFIX.length).trim() : withoutChannelMark(text);
+  const words = readPeerMark(text)?.rest ?? text;
+  return words.startsWith(VOICE_PREFIX) ? words.slice(VOICE_PREFIX.length).trim() : withoutChannelMark(words);
 }
 
 /**
@@ -250,6 +257,17 @@ const KURURU_MARK = "[kururu]";
 /** A Claude Code background task reporting back, which arrives as a user turn of its own. */
 const TASK = /^<task-notification>[\s\S]*<\/task-notification>$/;
 
+/** A prompt without the wrappers that are never anybody's words: a paste envelope, a reminder, a command's record. */
+function unwrapPrompt(prompt: string): string {
+  return stripPastedContent(prompt.trim()).replace(PASTED_OPEN, "").replace(PASTED_CLOSE, "").replace(DROPPED, "").trim();
+}
+
+/** The other node a prompt came from, by its mark, and who there: `[user@mac]`, `[kuru@mac]`. Null for one from here. */
+export function promptPeer(prompt: string): { node: string; who: "user" | "kuru" } | null {
+  const peer = readPeerMark(unwrapPrompt(prompt));
+  return peer ? { node: peer.node, who: peer.who } : null;
+}
+
 /**
  * Read a prompt for who it is from.
  *
@@ -265,7 +283,7 @@ const TASK = /^<task-notification>[\s\S]*<\/task-notification>$/;
  * is nobody's line.
  */
 export function readPrompt(prompt: string): PromptReading {
-  let text = stripPastedContent(prompt.trim()).replace(PASTED_OPEN, "").replace(PASTED_CLOSE, "").replace(DROPPED, "").trim();
+  let text = unwrapPrompt(prompt);
   const envelope = ENVELOPE.exec(text);
   if (envelope) {
     const from = /\bfrom-name="([^"]*)"/.exec(envelope[1] ?? "")?.[1] ?? null;
@@ -275,6 +293,10 @@ export function readPrompt(prompt: string): PromptReading {
   }
   if (text.startsWith(KURURU_MARK)) return { kind: "notice", notice: kururuNotice(text) };
   if (TASK.test(text)) return { kind: "notice", notice: taskNotice(text) };
+  // Another node's Kuru asking, through `ask_kuru`: a colleague's words, not
+  // yours, so a line of their own as a notice is, with all of it a tap away.
+  const peer = readPeerMark(text);
+  if (peer?.who === "kuru") return { kind: "notice", notice: { from: `Kuru on ${peer.node}`, agent: null, what: firstClause(peer.rest), event: null, text: peer.rest.trim() } };
   const command = COMMAND.exec(text);
   if (command) text = `${command[1]!.trim()} ${command[2]?.trim() ?? ""}`.trim();
   return text ? { kind: "you", text } : null;
@@ -377,6 +399,8 @@ export function mergeConversation(args: {
     if (turn.role === "you") {
       const read = readPrompt(turn.text);
       if (read?.kind === "notice") {
+        // Another Kuru's message came by the outbox, and is this turn now.
+        if (turn.voiceId && byId.has(turn.voiceId)) linked.add(turn.voiceId);
         items.push({ kind: "notice", id: `t${turn.id}`, at: turn.at, ...read.notice });
         continue;
       }
@@ -385,6 +409,7 @@ export function mergeConversation(args: {
       if (!read) continue;
       const entry = turn.voiceId ? byId.get(turn.voiceId) : undefined;
       if (entry) linked.add(entry.id);
+      const through = readPeerMark(read.text)?.node;
       items.push({
         kind: "you",
         id: `t${turn.id}`,
@@ -400,6 +425,7 @@ export function mergeConversation(args: {
         typedAt: entry?.typedAt ?? null,
         note: null,
         outboxId: entry?.id ?? null,
+        ...(through ? { through } : {}),
       });
       continue;
     }
@@ -417,17 +443,25 @@ export function mergeConversation(args: {
   }
   for (const entry of args.outbox) {
     if (linked.has(entry.id)) continue;
+    const peer = entry.text ? readPeerMark(entry.text) : null;
+    if (peer?.who === "kuru") {
+      // On its way from another Kuru: the line it will be once taken.
+      items.push({ kind: "notice", id: entry.id, at: entry.at, from: `Kuru on ${peer.node}`, agent: null, what: firstClause(peer.rest), event: null, text: peer.rest.trim() });
+      continue;
+    }
+    const through = peer?.node;
     items.push({
       kind: "you",
       id: entry.id,
       at: entry.at,
-      text: entry.text,
+      text: entry.text && through ? plainWords(entry.text) : entry.text,
       via: youVia(null, entry),
       ms: entry.ms,
       state: entry.state,
       typedAt: entry.typedAt,
       note: entry.note,
       outboxId: entry.id,
+      ...(through ? { through } : {}),
     });
   }
   for (const entry of args.missed) {
@@ -487,4 +521,130 @@ export function splitCardCodes(text: string): TextPart[] {
   }
   if (last < text.length) parts.push({ text: text.slice(last) });
   return parts;
+}
+
+// ---------------------------------------------------------------------------
+// Other nodes' Kurus
+// ---------------------------------------------------------------------------
+
+/**
+ * Who a message of yours is for, when it is for another node's Kuru: the
+ * drawer's `@omarchy start the build`, or the same said aloud. Null for one
+ * that is this node's own, which is every message that does not open with a
+ * peer's name — a name nobody has, this node's own, or no name at all.
+ *
+ * Typed, the address is `@name` and nothing looser, so a sentence that
+ * happens to start with a word that is also a node's name stays here. A
+ * recogniser never writes an `@`, so spoken words are read for how somebody
+ * says it: "at omarchy, …", "hey omarchy …", "omarchy, …" — the bare name
+ * only with the comma a recogniser writes after an address, so "omarchy is
+ * slow today" stays here — and the `@` too, since some recognisers do turn
+ * "at" into one. A dash in a name may be heard as a space. The words that
+ * are left are what the peer is typed.
+ */
+export function addressOf(text: string, names: readonly string[], spoken: boolean): { node: string; rest: string } | null {
+  const said = text.trim();
+  for (const node of [...names].sort((a, b) => b.length - a.length)) {
+    const name = node.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/-/g, "[- ]?");
+    const shape = spoken ? `^(?:(?:@|at\\s+|hey\\s+)${name}(?:[,:!.]\\s*|\\s+)|${name}[,:!]\\s*)` : `^@${name}(?:[,:]\\s*|\\s+)`;
+    const match = new RegExp(shape, "i").exec(said);
+    if (!match) continue;
+    const rest = said.slice(match[0].length).trim();
+    // Spoken, a bare name with a space after it is only an address when
+    // something follows it that is worth sending.
+    if (rest) return { node, rest: spoken ? rest.charAt(0).toUpperCase() + rest.slice(1) : rest };
+  }
+  return null;
+}
+
+/**
+ * Another node's Kuru, as this one's drawer draws it: whose, whether it can
+ * be heard from, and its last items. `items` is what that node pushed about
+ * its own conversation (`peerItems`), with each reply's utterance and fate
+ * put right by this node — a reply is unheard *here*, or was never said
+ * here, whatever the node it came from thinks.
+ */
+export interface PeerKuru {
+  node: { id: string; name: string };
+  state: "up" | "connecting" | "away";
+  /** When it was last heard from: "last seen 23:10" for one that is away. */
+  lastSeen: number | null;
+  items: KuruItem[];
+  /** Its replies said aloud here that nobody heard out or read. */
+  unheard: number;
+  /** Whether its kururu takes messages for its Kuru at all — an older one does not, and `@` to it says so. */
+  talks: boolean;
+}
+
+/** How many items a node pushes about its conversation. The drawer's window is `KURU_RECENT`; another node's is a glance. */
+export const PEER_RECENT = 40;
+/** What one item's words are cut to on the link. A reply longer than this is read where it was made. */
+const PEER_TEXT_MAX = 6000;
+
+function capWords(text: string): string {
+  return text.length > PEER_TEXT_MAX ? `${text.slice(0, PEER_TEXT_MAX - 1)}…` : text;
+}
+
+/**
+ * This node's conversation as it crosses to another: the newest
+ * `PEER_RECENT` items, each without what only means something here.
+ *
+ * A reply loses its links, which name files on this disk, and its
+ * utterance and fate, which are this node's voice's. A notice from kururu
+ * or a background task loses its text — kururu's quotes an agent's last
+ * reply, which can quote a file with a secret in it, and that is the reason
+ * the Telegram channel never carries one either — and keeps its line: which
+ * agent, where, what happened, which the summary already says. Another
+ * Kuru's message keeps its words, since they were that Kuru's to begin with.
+ */
+export function peerItems(items: readonly KuruItem[]): KuruItem[] {
+  return items.slice(-PEER_RECENT).map((item): KuruItem => {
+    switch (item.kind) {
+      case "kuru": {
+        const { files: _files, ...rest } = item;
+        return { ...rest, text: capWords(item.text), utterance: null, fate: null };
+      }
+      case "notice":
+        return { ...item, text: item.from.startsWith("Kuru on ") ? capWords(item.text) : "" };
+      case "you":
+        return { ...item, text: item.text === null ? null : capWords(item.text) };
+      default:
+        return item;
+    }
+  });
+}
+
+/** An item of the merged drawer: whose conversation it is in, null for this node's own. */
+export type NodeKuruItem = KuruItem & { node: string | null };
+
+/**
+ * This node's conversation and every other node's, as one timeline.
+ *
+ * Nothing is copied into anybody's database to make it: each node's items
+ * are what that node said about its own conversation, tagged with its name,
+ * and the merge is by time. One rule is the merge's own. A message of yours
+ * sent from here to another Kuru is on this node's outbox until it arrives
+ * and on that node's turns once it has, under the same outbox id; once the
+ * other node's copy is here, delivered, it is the one drawn, since it is
+ * the one with Kuru's word that it was taken. Until then this node's is,
+ * with its Resend.
+ */
+export function mergeNodes(local: readonly KuruItem[], peers: readonly PeerKuru[]): NodeKuruItem[] {
+  const arrived = new Set<string>();
+  for (const peer of peers) for (const item of peer.items) if (item.kind === "you" && item.outboxId && item.state === "delivered") arrived.add(item.outboxId);
+  const out: NodeKuruItem[] = [];
+  for (const item of local) {
+    if (item.kind === "you" && item.outboxId && arrived.has(item.outboxId)) continue;
+    out.push({ ...item, node: null });
+  }
+  // Ids are each node's own and two nodes both have a `t12`, so another
+  // node's are made unique by its id. Its messages lose their outbox id:
+  // Resend and Discard are for this node's own list.
+  for (const peer of peers) {
+    for (const item of peer.items) {
+      const id = `${peer.node.id}/${item.id}`;
+      out.push(item.kind === "you" ? { ...item, id, outboxId: null, node: peer.node.name } : { ...item, id, node: peer.node.name });
+    }
+  }
+  return out.sort((a, b) => a.at - b.at || rank(a) - rank(b));
 }

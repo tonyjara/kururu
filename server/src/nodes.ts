@@ -50,6 +50,7 @@ import {
   FORWARDING_HEADERS,
   freeName,
   isNodeId,
+  isPeerMessage,
   joinCommand,
   leaderOf,
   LinkHandshake,
@@ -76,6 +77,7 @@ import {
   type NodeSummary,
   type NodesView,
   type Pairing,
+  type PeerMessage,
   type Roster,
   type SignedRoster,
   validHostName,
@@ -136,6 +138,10 @@ export interface NodeHostDeps {
     check: (peer: string, ask: unknown) => MoveCheck;
     adopt: (peer: string, offer: unknown) => Promise<MoveDone>;
   };
+  /** A Kuru's message from a linked member, already past the handshake — `peerkuru.ts`'s to read. */
+  peer?: (nodeId: string, message: PeerMessage) => void;
+  /** A link to a member came up: what the other side should be told about this node's Kuru goes now. */
+  linked?: (nodeId: string) => void;
 }
 
 interface PeerState {
@@ -306,8 +312,32 @@ export class NodeHost {
     return this.links.has(nodeId);
   }
 
+  /** What this node is called: its roster name, or the one it will be given. What `[kuru@mac]` says. */
   private selfName(): string {
     return memberOf(this.roster, this.me.id)?.name ?? defaultNodeName(this.deps.hostname, this.deps.platform);
+  }
+
+  /** A member by its name, as a Kuru or a person types it; never this node. */
+  byName(name: string): NodeStatus | null {
+    const wanted = name.trim().toLowerCase().replace(/^@/, "");
+    return this.statuses().find((n) => n.name === wanted) ?? null;
+  }
+
+  /**
+   * Say something to one member, if its link is up. False when it is not —
+   * there is no queue here, because what is worth holding for a node that
+   * is away is the caller's to hold and to say it is holding.
+   */
+  send(nodeId: string, message: PeerMessage): boolean {
+    const link = this.links.get(nodeId);
+    if (!link) return false;
+    link.send(message);
+    return true;
+  }
+
+  /** The members a link is up to now, by id. */
+  linkedIds(): string[] {
+    return [...this.links.keys()];
   }
 
   leader(): string | null {
@@ -834,7 +864,9 @@ export class NodeHost {
         link.close("refused");
         return;
       default:
-        // ping, and whatever a later phase says that this one does not know.
+        // The Kurus' messages are `peerkuru.ts`'s; a ping, and whatever a
+        // later phase says that this one does not know, are nothing here.
+        if (isPeerMessage(message)) this.deps.peer?.(link.peer!, message);
         return;
     }
   }
@@ -853,6 +885,7 @@ export class NodeHost {
     if (dialer) dialer.failures = 0;
     this.deps.log(`nodes: linked with ${memberOf(this.roster, peerId)?.name ?? peerId}`);
     link.send({ type: "summary", summary: this.summaryNow() });
+    this.deps.linked?.(peerId);
     this.changed();
     // Who this node sees changed, so its summary did.
     this.queueSummary();
