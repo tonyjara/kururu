@@ -3,6 +3,8 @@
 A plan, written 2026-10-18 from a read of the tree at `de21c93` and a read-only
 look at the Omarchy PC. Nothing in it is built. It is written so that an agent
 can take one phase, read the files it names, and know what "done" is.
+**Read "Decisions taken with the user" near the end first**: it was settled in
+conversation after the body and wins where the two differ.
 
 ## Summary
 
@@ -719,33 +721,88 @@ Total for phases 0–5: roughly 19–29 agent-days, in order, each shippable.
   key and project on it. A dedicated user is advice in the doc, not a step in
   the installer.
 
-## Questions for the user
+## Decisions taken with the user, 2026-10-18
 
-1. **Telegram routing**: prefixes with reply-to and `/to` as the baseline — or
-   try topics in the private chat first, accepting the reported 10.0 breakage?
-2. **The poller**: the Omarchy child by default, since it is always on? And is
-   it acceptable that a child that is down silences the chat until the role is
-   moved by hand?
-3. **The parent's Kuru and children's agents**: act only when asked, as
-   planned, or also be told each child's `done`/`blocked` edges (and risk two
-   Kurus answering one prompt)?
-4. **The child's Claude account**: the login already on the box, or the Mac's
-   account through a `setup-token` grant — per profile?
-5. **Secrets at rest on the child**: `0600` files as on the Mac, or wrapped
-   with `systemd-creds` and the TPM once shown to work?
-6. **A child's backups**: into the Mac's backup repository under `nodes/`, or
-   a repository of its own on the box?
-7. **The child's unix user**: the box's own account (in `wheel`, sudo with a
-   password, not in `docker`), or a dedicated one made by hand first?
-8. **Which workspaces move to the child first**, given the box also runs
-   production containers that are given CPU priority?
-9. **One window**: is "the picker opens the child" enough for a long while, or
-   is the remote pane wanted soon after phase 2?
-10. **`tailscale serve`** on the child for the phone's microphone: wanted, so
-    the loopback rule and the doc are written with it in mind?
-11. **Node names** for the chat and the sidebar: "Mac" and "Omarchy"?
-12. **The other agent gateway on the box**: does it hold a Telegram bot of its
-    own (so two tokens, no 409), and does it share the box's Claude login?
+Taken in conversation after the body above was written. **Where they differ
+from the body, these win**; the body's Telegram, Kuru, nodes and phase
+sections are to be rewritten to match in one pass once the open items below
+are settled.
+
+1. **Kurus are peers, one per node, each always on for its own node.** The
+   rule is *read anywhere, act locally, ask a peer to act remotely*. No Kuru
+   drives another node's agents: the forwarded agent tools in "Kuru across
+   nodes" are replaced by `ask_kuru(node, message, wait)` — the message typed
+   into the peer's outbox as `[mac] …`, `wait` returning at once or holding
+   for the peer's reply, capped at a few minutes — and `read_kuru(node)`,
+   which reads a peer's recent turns on demand. Nothing is pushed into a Kuru
+   when a link comes back; the user says "catch up" when it matters.
+   `kururu_status` lists every node. Board tools cross nodes directly
+   (`add_card`, `edit_card`, `move_card` take `node`); `run` stays local
+   because a run starts an agent. Memory is per Kuru, never shared.
+2. **One drawer, several Kurus.** The drawer merges every reachable node's
+   conversation by time, each bubble marked with its node, a chip per node to
+   filter; a node that is away shows its last turns and when it was last seen.
+   `@<node>` at the start of a message addresses that Kuru through its outbox
+   over the link; replying to its bubble does the same. Speech to a peer is
+   transcribed on the Mac and the words cross the link; a peer's replies are
+   spoken on the Mac.
+3. **Telegram.** Only Kuru speaks. The leader (below) polls. A bare message
+   goes to the leader's Kuru; `@omarchy` or `/omarchy` addresses a node, and
+   so does replying to one of its lines. A child's lines carry `[Omarchy]`;
+   the Mac's carry no mark. A message for a node that is away is held and the
+   chat is told once. No other program on the box holds a Telegram bot, and
+   none will.
+4. **Rank, and automatic failover.** A rank list on the Mac, the Mac first by
+   default and draggable. The leader is the highest-ranked node that is
+   reachable. A link pings every 5 s and a node is away after 30 s of silence;
+   the next node takes over at once and the chat gets one line. A higher node
+   takes back once its link has been up 60 s and the holder has been quiet
+   for 2 min, 10 min at most; the handover is a handshake (abort the poll, pass
+   the offset, the outgoing queue, the channel settings and the handled
+   message ids, then poll). A 409 is the partition tie-break: the lower-ranked
+   node backs off 5 min, the higher 30 s. Eligible to lead means holding the
+   Telegram grant and a Claude login. The "sent before the switch went on"
+   drop rule keys off the channel's own switch time, carried with the
+   settings, not a node's start.
+5. **A mesh with a roster.** Every node links to every other, the lower rank
+   dialing the higher; the Mac dials nobody and listens on its tailnet address
+   (Share on). The Mac signs a versioned roster — members, keys, addresses,
+   ranks — which replaces per-pair link tokens; a node proves its key on each
+   link; the newest roster passes along any link; removing a node or changing
+   rank is a new roster.
+6. **Parent is not leader.** The Mac is the parent whatever its rank: the
+   roster, enrolment, removal and every secret are its alone.
+7. **Names**: `mac`, `omarchy`.
+8. **The child's Claude account is the Mac's**, through `claude setup-token`
+   granted as a secret kind and set as `CLAUDE_CODE_OAUTH_TOKEN` on the child
+   profile's ptys, so it can be lent again elsewhere. A `/login` on the box is
+   a fallback, not the plan. Two Kurus and their agents then draw on one
+   plan, and the usage bar reads the Mac's.
+9. **The child runs as a dedicated user on the box**, made by hand before
+   phase 1: its own home, `loginctl enable-linger` for it (one root step, the
+   user's), its own node through mise or the system package, its own clones
+   of the repositories it works on, no sudo, no docker group. The box user's
+   existing Claude login, tmux sessions and `~/Projects` are not touched and
+   not used.
+
+## Still open
+
+Defaults in brackets; the plan proceeds on them unless told otherwise.
+
+1. **Secrets at rest on the child** [`0600` files now, as on the Mac;
+   `systemd-creds --user` with the TPM as a later phase once shown to work for
+   the dedicated user].
+2. **A child's backups** [pulled into the Mac's mirror under `nodes/<name>/`
+   over the link; no git on the box].
+3. **One profile per child** [yes: `@omarchy` is that profile's Kuru; `@mac`
+   is the profile the Telegram channel is pointed at, or the active one].
+4. **The failover timings** [as in decision 4].
+5. **One window** (terminals drawn through the Mac) [later; the picker and
+   the tray open the child].
+6. **`tailscale serve`** on the child for the phone's microphone [the user's
+   command, when wanted; the loopback rule is written for it either way].
+7. **Which workspaces move to the child first** [decided when phase 1 is done
+   and the child is running].
 
 ## Appendix — what was checked, read-only, on 2026-10-18
 
