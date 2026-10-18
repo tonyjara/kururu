@@ -307,9 +307,10 @@ async function restartHost(flags) {
     return 1;
   }
   const io = makeIo({ ...flags, yes: flags.yes === true ? "yes" : flags.yes });
-  const live = health.liveAgents ?? 0;
-  const answer = await io.ask(`Restart the pty host? It ends ${live} running agent${live === 1 ? "" : "s"}.`, ["no", "yes"], "yes").catch((err) => {
-    if (err instanceof Stop && err.code === 3) throw new Stop(`Restarting the pty host ends ${live} running agent${live === 1 ? "" : "s"}. Run it again with --yes to go ahead.`, { code: 3 });
+  const held = health.agents ?? 0;
+  const cost = `It ends every terminal it holds: ${held}, ${health.liveAgents ?? 0} of them agents.`;
+  const answer = await io.ask(`Restart the pty host? ${cost}`, ["no", "yes"], "yes").catch((err) => {
+    if (err instanceof Stop && err.code === 3) throw new Stop(`Restarting the pty host ends every terminal it holds: ${held}, ${health.liveAgents ?? 0} of them agents. Run it again with --yes to go ahead.`, { code: 3 });
     throw err;
   });
   if (answer !== "yes") return 1;
