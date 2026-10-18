@@ -26,7 +26,7 @@
  * The crypto is passed in — `node:crypto` on the server, a real key pair in
  * the test — so nothing here imports a runtime.
  */
-import type { PeerWho, TurnOrigin } from "./channels";
+import { adoptSharedTelegram, type PeerWho, type ReplyMap, type SharedTelegram, type TurnOrigin } from "./channels";
 import { cardCode } from "./board";
 import { agentName } from "./harness";
 import type { KuruItem } from "./kuru";
@@ -119,6 +119,14 @@ export interface Roster {
   signer: string;
   members: NodeEntry[];
   issuedAt: number;
+  /**
+   * The channel settings that are not secrets, as the parent last set them
+   * (phase 5): Telegram's allow-list, its switch and its switch time, and
+   * which bot. Absent from a roster signed before there were any, and from
+   * a parent with no channel. In the roster because every node judges the
+   * chat's messages by them, and only the parent may change them.
+   */
+  channels?: { telegram?: SharedTelegram };
 }
 
 export interface SignedRoster {
@@ -290,6 +298,19 @@ export function withoutMember(roster: Roster, id: string, now: number): Roster {
     roster.members.filter((m) => m.id !== id),
     now,
   );
+}
+
+/** The roster with these channel settings, or null when it already says exactly that. */
+export function withChannels(roster: Roster, telegram: SharedTelegram | null, now: number): Roster | null {
+  const before = roster.channels?.telegram ?? null;
+  if (canonical(before) === canonical(telegram)) return null;
+  const { channels: _old, ...rest } = roster;
+  return next(telegram ? { ...rest, channels: { telegram } } : rest, roster.members, now);
+}
+
+/** The Telegram settings a roster carries, checked; null for a roster with none. */
+export function rosterTelegram(roster: Roster | null | undefined): SharedTelegram | null {
+  return adoptSharedTelegram(roster?.channels?.telegram);
 }
 
 export function withChange(roster: Roster, id: string, change: Partial<Pick<NodeEntry, "name" | "address" | "port">>, now: number): Roster {
@@ -550,6 +571,13 @@ export interface NodeSummary {
   kuru: { unheard: number; undelivered: number };
   /** Whether this node thinks it leads. */
   leads: boolean;
+  /**
+   * Where this node stands on the Telegram poll (phase 5): whether it may
+   * poll — the token, the switch, a Claude login — and whether it does now.
+   * Absent from a kururu from before, which can never poll for the others
+   * and is read as not eligible.
+   */
+  lead?: { eligible: boolean; polls: boolean };
   /** The member ids it has a link up to. */
   sees: string[];
   /** Moves whenever its database is written; the parent pulls a backup when it does. */
@@ -587,6 +615,7 @@ export interface SummaryInput {
   leads: boolean;
   sees: readonly string[];
   dataMark: string;
+  lead?: { eligible: boolean; polls: boolean };
 }
 
 /**
@@ -646,6 +675,7 @@ export function summarize(input: SummaryInput): NodeSummary {
     sees: [...input.sees],
     dataMark: input.dataMark,
     talks: PEER_TALK,
+    ...(input.lead ? { lead: { ...input.lead } } : {}),
   };
 }
 
@@ -761,6 +791,17 @@ export type LinkMessage =
   | { type: "secrets-forget"; kind: string; seq: number; sig: string }
   | { type: "secrets-held"; held: Array<{ kind: string; digest: string; seq: number }> }
   | { type: "secrets-ack"; kind: string; op: "put" | "forget"; seq: number; ok: boolean; digest: string | null; hint: string | null; error: string | null }
+  // Phase 5, one Telegram (`LeadGate` below, `server/src/lead.ts`). The
+  // handshake by which the poll moves up the ranks, and the chat's words
+  // crossing between the node that polls and the others.
+  | { type: "lead-ask"; id: string; force: boolean }
+  | { type: "lead-busy"; id: string; why: string }
+  | { type: "lead-state"; id: string; state: LeadState | null }
+  | { type: "lead-ack"; id: string }
+  | { type: "telegram-in"; id: string; at: number; text: string }
+  | { type: "telegram-in-ack"; id: string }
+  | { type: "telegram-out"; id: string; at: number; text: string; silent: boolean; notice: boolean }
+  | { type: "telegram-out-ack"; id: string }
   | PeerMessage;
 
 /** The board verbs one Kuru may make on another node's boards directly. A run starts an agent, so it is never one of them. */
@@ -818,6 +859,14 @@ const LINK_TYPES = new Set<string>([
   "secrets-forget",
   "secrets-held",
   "secrets-ack",
+  "lead-ask",
+  "lead-busy",
+  "lead-state",
+  "lead-ack",
+  "telegram-in",
+  "telegram-in-ack",
+  "telegram-out",
+  "telegram-out-ack",
 ]);
 
 /** A frame off the socket, as a message with a known type, or null. The fields are each handler's to check. */
@@ -1071,4 +1120,313 @@ export function nodesText(nodes: readonly NodeStatus[]): string[] {
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// One Telegram: who polls
+// ---------------------------------------------------------------------------
+
+/*
+ * There is one bot and one chat, and Telegram lets one reader at a time
+ * hold its `getUpdates`: a second is answered 409. So among the nodes, one
+ * polls — the leader — and the others hand it their Kuru's lines and take
+ * the chat's words for them from it (`server/src/lead.ts`). Which node, and
+ * when the job moves, is the rule below; `docs/nodes.md`, "One Telegram",
+ * argues each number.
+ */
+
+/** Every node ranked above has been away this long before a lower one takes the poll: a server restart is back well within it. */
+export const LEAD_TAKEOVER_MS = 30_000;
+/** A higher node's link must have been up this long before it asks for the poll back: a Mac woken for seconds by Power Nap does not take it and sleep again. */
+export const LEAD_TAKEBACK_MS = 60_000;
+/** The holder is mid-conversation when the user wrote within this, and says busy. */
+export const LEAD_BUSY_MS = 2 * 60_000;
+/** A holder that keeps saying busy is asked with `force` after this, and yields. */
+export const LEAD_BUSY_MAX_MS = 10 * 60_000;
+/** A busy holder is asked again this often. */
+export const LEAD_ASK_EVERY_MS = 30_000;
+/** An ask with no answer at all is asked again after this. */
+export const LEAD_HANDOVER_MS = 15_000;
+/** After a 409, a node with an eligible node above it stands down this long… */
+export const LEAD_STAND_DOWN_MS = 5 * 60_000;
+/** …and the highest retries after this, so the higher of two pollers wins within a minute with no vote. */
+export const LEAD_RETRY_MS = 30_000;
+/**
+ * A server that did not hold the poll when it last stopped waits this long
+ * before polling with nobody seen holding it: the links come up and the
+ * summaries say who polls within a second or two, and polling sooner would
+ * be a 409 against a child that took over while this one was down.
+ */
+export const LEAD_SETTLE_MS = 10_000;
+/** The handled message ids kept and handed over: the last hundred. */
+export const LEAD_HANDLED_MAX = 100;
+
+/** A line waiting to reach the chat, as the holder keeps it and hands it over. `origin` is the node whose line it is. */
+export interface LeadOutgoing {
+  id: string;
+  chat: string;
+  text: string;
+  silent: boolean;
+  at: number;
+  origin: string;
+}
+
+/** A message from the chat waiting for a node that is away. */
+export interface LeadHeld {
+  node: string;
+  id: string;
+  at: number;
+  text: string;
+}
+
+/**
+ * Everything the poll's holder knows that the next holder needs: where the
+ * chat has been read to, what is waiting to go out, what is waiting for a
+ * node that is away, which node said which line, and the last messages
+ * handled — which closes the one double-delivery case, a holder that passed
+ * a message on and stopped before the poll after confirmed it.
+ */
+export interface LeadState {
+  botId: string | null;
+  offset: number;
+  outgoing: LeadOutgoing[];
+  held: LeadHeld[];
+  replies: ReplyMap;
+  handled: string[];
+  lastInAt: number | null;
+}
+
+const LEAD_LIST_MAX = 2_000;
+
+/** A handover off the wire, checked to the field. Null for anything else. */
+export function asLeadState(raw: unknown): LeadState | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const list = (value: unknown): unknown[] | null => (Array.isArray(value) && value.length <= LEAD_LIST_MAX ? value : null);
+  const outgoing = list(r.outgoing);
+  const held = list(r.held);
+  const replies = list(r.replies);
+  const handled = list(r.handled);
+  if (!outgoing || !held || !replies || !handled) return null;
+  if (!finite(r.offset) || r.offset < 0) return null;
+  const text = (value: unknown): value is string => typeof value === "string" && value.length <= 8_000;
+  const out: LeadOutgoing[] = [];
+  for (const item of outgoing) {
+    const o = (item ?? {}) as Record<string, unknown>;
+    if (typeof o.id !== "string" || o.id.length > 64 || typeof o.chat !== "string" || !/^\d{1,20}$/.test(o.chat) || !text(o.text) || !finite(o.at) || !isNodeId(o.origin)) return null;
+    out.push({ id: o.id, chat: o.chat, text: o.text, silent: o.silent === true, at: o.at, origin: o.origin });
+  }
+  const waiting: LeadHeld[] = [];
+  for (const item of held) {
+    const h = (item ?? {}) as Record<string, unknown>;
+    if (!isNodeId(h.node) || typeof h.id !== "string" || !PEER_ID.test(h.id) || !finite(h.at) || !text(h.text)) return null;
+    waiting.push({ node: h.node, id: h.id, at: h.at, text: h.text });
+  }
+  const map: ReplyMap = [];
+  for (const pair of replies) {
+    if (!Array.isArray(pair) || typeof pair[0] !== "string" || pair[0].length > 48 || !isNodeId(pair[1])) return null;
+    map.push([pair[0], pair[1]]);
+  }
+  if (!handled.every((id) => typeof id === "string" && id.length <= 64)) return null;
+  return {
+    botId: typeof r.botId === "string" && /^\d{1,20}$/.test(r.botId) ? r.botId : null,
+    offset: r.offset,
+    outgoing: out,
+    held: waiting,
+    replies: map,
+    handled: (handled as string[]).slice(-LEAD_HANDLED_MAX),
+    lastInAt: finite(r.lastInAt) ? r.lastInAt : null,
+  };
+}
+
+/** The chat's words for this node, from the node that polls. */
+export function asTelegramIn(message: LinkMessage): Extract<LinkMessage, { type: "telegram-in" }> | null {
+  if (message.type !== "telegram-in") return null;
+  const m = message as Partial<Extract<LinkMessage, { type: "telegram-in" }>>;
+  if (typeof m.id !== "string" || !PEER_ID.test(m.id) || !finite(m.at) || typeof m.text !== "string" || !m.text.trim() || m.text.length > SAY_MAX) return null;
+  return { type: "telegram-in", id: m.id, at: m.at, text: m.text };
+}
+
+/** A node's line, for the node that polls to post. */
+export function asTelegramOut(message: LinkMessage): Extract<LinkMessage, { type: "telegram-out" }> | null {
+  if (message.type !== "telegram-out") return null;
+  const m = message as Partial<Extract<LinkMessage, { type: "telegram-out" }>>;
+  if (typeof m.id !== "string" || !PEER_ID.test(m.id) || !finite(m.at) || typeof m.text !== "string" || !m.text.trim() || m.text.length > SAY_MAX) return null;
+  return { type: "telegram-out", id: m.id, at: m.at, text: m.text, silent: m.silent === true, notice: m.notice === true };
+}
+
+/** Another member, as the rule needs it. */
+export interface LeadPeer {
+  id: string;
+  rank: number;
+  up: boolean;
+  /**
+   * Up: since when its link has been up. Not up: when it was last heard
+   * from — this run, or the last by the seen file — and null for never.
+   */
+  since: number | null;
+  /** What its last summary said; null when it never said, which an older kururu never does. */
+  eligible: boolean | null;
+  /** Its last summary says it polls. Only believed while it is up. */
+  polls: boolean;
+}
+
+export interface LeadInput {
+  rank: number;
+  eligible: boolean;
+  /** This node polls now. */
+  polling: boolean;
+  peers: readonly LeadPeer[];
+}
+
+export type LeadStep =
+  | { do: "poll" }
+  | { do: "stop"; why: string }
+  /** Ask the node that polls to hand the poll over. */
+  | { do: "ask"; peer: string; force: boolean };
+
+/**
+ * When this node polls Telegram: the clock half of leadership, without the
+ * clock, as `SwapGate` is Auto Swap's.
+ *
+ * Every node runs it for itself, from its own links, and the answers agree
+ * because they are the same rule over the same roster:
+ *
+ * - **Who leads** is the highest-ranked eligible node among this one and
+ *   those it can reach. A node above that polls is the holder, and this
+ *   one stands aside even if it was polling too — a split that just healed.
+ * - **Taking over:** every eligible node above has been unheard for
+ *   `LEAD_TAKEOVER_MS` — this run: a node that starts gives the links that
+ *   long to come up, since one last heard of hours ago may be awake now and
+ *   polling. A node above that never said whether it was eligible counts
+ *   while it is away, since it may be polling unseen, and not while it is
+ *   up, since a node that can poll says so.
+ * - **Taking back:** a node that leads but sees a lower one polling waits
+ *   until that link has been up `LEAD_TAKEBACK_MS`, then asks. The holder
+ *   may answer busy; it is asked again every `LEAD_ASK_EVERY_MS`, and after
+ *   `LEAD_BUSY_MAX_MS` with `force`. `hurry` (a pairing on the parent, which
+ *   needs the poll) skips both waits.
+ * - **The tie-break:** a 409 means two pollers, which only a split tailnet
+ *   makes. A node with an eligible node above it stands down for
+ *   `LEAD_STAND_DOWN_MS`; the highest retries after `LEAD_RETRY_MS`.
+ *
+ * Times are passed in, so each rule is a test of arithmetic; the server's
+ * half is a timer and the messages (`server/src/lead.ts`).
+ */
+export class LeadGate {
+  private standDownUntil = -Infinity;
+  private asking: { peer: string; first: number; next: number } | null = null;
+  private hurryUntil = -Infinity;
+
+  /**
+   * `resumed`: this node held the poll when its last server stopped, so it
+   * carries on at once — counted as polling until the rule first says
+   * otherwise, and never again after.
+   */
+  constructor(
+    private startedAt: number,
+    private resumed: boolean,
+  ) {}
+
+  next(input: LeadInput, now: number): { step: LeadStep; wait: number | null } {
+    const step = this.decide({ ...input, polling: input.polling || this.resumed }, now);
+    if (step.step.do !== "poll") this.resumed = false;
+    return step;
+  }
+
+  private decide(input: LeadInput, now: number): { step: LeadStep; wait: number | null } {
+    if (!input.eligible) {
+      this.asking = null;
+      return { step: { do: "stop", why: "not eligible" }, wait: null };
+    }
+    if (now < this.standDownUntil) return { step: { do: "stop", why: "standing down after a 409" }, wait: this.standDownUntil - now };
+    const above = input.peers.filter((p) => p.rank < input.rank);
+    if (above.some((p) => p.up && p.polls)) {
+      this.asking = null;
+      return { step: { do: "stop", why: "a node above polls" }, wait: null };
+    }
+    // A node above that could poll is the leader; whoever holds the poll
+    // keeps it until that node asks for it.
+    if (above.some((p) => p.up && p.eligible === true)) {
+      this.asking = null;
+      return { step: input.polling ? { do: "poll" } : { do: "stop", why: "a node above leads" }, wait: null };
+    }
+    let wait: number | null = null;
+    for (const p of above) {
+      if (p.up || p.eligible === false) continue;
+      const left = Math.max(p.since ?? this.startedAt, this.startedAt) + LEAD_TAKEOVER_MS - now;
+      if (left > 0) wait = wait === null ? left : Math.min(wait, left);
+    }
+    if (wait !== null) return { step: input.polling ? { do: "poll" } : { do: "stop", why: "a node above went away only just now" }, wait };
+    // This node leads.
+    if (input.polling) {
+      this.asking = null;
+      return { step: { do: "poll" }, wait: null };
+    }
+    const holder = input.peers.find((p) => p.rank > input.rank && p.up && p.polls);
+    if (holder) {
+      const hurry = now < this.hurryUntil;
+      const steady = (holder.since ?? now) + LEAD_TAKEBACK_MS - now;
+      if (!hurry && steady > 0) return { step: { do: "stop", why: "waiting for the link to settle before asking" }, wait: steady };
+      const asking = this.asking?.peer === holder.id ? this.asking : null;
+      if (asking && asking.next > now) return { step: { do: "stop", why: "asked; waiting for the answer" }, wait: asking.next - now };
+      const first = asking?.first ?? now;
+      return { step: { do: "ask", peer: holder.id, force: hurry || now - first >= LEAD_BUSY_MAX_MS }, wait: null };
+    }
+    if (now - this.startedAt < LEAD_SETTLE_MS) return { step: { do: "stop", why: "just started" }, wait: this.startedAt + LEAD_SETTLE_MS - now };
+    return { step: { do: "poll" }, wait: null };
+  }
+
+  /** An ask went out. Unanswered, it is asked again after `LEAD_HANDOVER_MS`. */
+  asked(peer: string, now: number): void {
+    const first = this.asking?.peer === peer ? this.asking.first : now;
+    this.asking = { peer, first, next: now + LEAD_HANDOVER_MS };
+  }
+
+  /** The holder said busy. */
+  busy(peer: string, now: number): void {
+    if (this.asking?.peer === peer) this.asking = { ...this.asking, next: now + LEAD_ASK_EVERY_MS };
+  }
+
+  /** The poll is this node's now — handed over, or nobody had it. */
+  took(): void {
+    this.asking = null;
+    this.hurryUntil = -Infinity;
+  }
+
+  /** Something wants the poll here soon: skip the steady minute and a busy answer, for the next two minutes. */
+  hurry(now: number): void {
+    this.hurryUntil = now + 2 * 60_000;
+    if (this.asking) this.asking = { ...this.asking, next: now };
+  }
+
+  /**
+   * Telegram said 409: another node polls too. Which side of the tie this
+   * node is on is whether an eligible node ranks above it — one that never
+   * said counts, since it may be the other poller.
+   */
+  conflict(input: Pick<LeadInput, "rank" | "peers">, now: number): "higher" | "lower" {
+    const higher = !input.peers.some((p) => p.rank < input.rank && p.eligible !== false);
+    this.standDownUntil = now + (higher ? LEAD_RETRY_MS : LEAD_STAND_DOWN_MS);
+    this.asking = null;
+    return higher ? "higher" : "lower";
+  }
+
+  /**
+   * This node's process was frozen — a Mac asleep with its lid shut — and
+   * has just woken. Whatever it held may have been taken over meanwhile, and
+   * its links say nothing true yet, so the rule starts again as at a start:
+   * it waits for the links before polling, and asks for the poll back by
+   * the handshake if a lower node took it.
+   */
+  woke(now: number): void {
+    this.startedAt = now;
+    this.resumed = false;
+    this.asking = null;
+  }
+
+  /** Until when this node stands down after a 409, or null. */
+  standingDown(now: number): number | null {
+    return now < this.standDownUntil ? this.standDownUntil : null;
+  }
 }

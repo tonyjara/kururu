@@ -17,7 +17,7 @@
  * carries messages in, the harness's Stop report carries replies out, and
  * this only routes. On the restartable side, like both of them.
  */
-import { channelOfMessage, echoLine, isChannelKind, readPeerMark, spokenHere, type ChannelKind, type ChannelsStatus, type TurnOrigin } from "../../shared/channels";
+import { channelOfMessage, echoLine, isChannelKind, postedToChat, readPeerMark, spokenHere, type ChannelKind, type ChannelsStatus, type TurnOrigin } from "../../shared/channels";
 import { plainWords, promptPeer, readPrompt, youVia } from "../../shared/kuru";
 import { viaOf, type TurnVia } from "../../shared/store";
 import type { OutboxEntry } from "../../shared/voice";
@@ -155,16 +155,18 @@ export class Channels {
   /**
    * Kuru's turn ended with this reply, off its Stop report: every channel
    * that carries the profile gets it, whatever the turn was answering —
-   * a `[kururu]` notice included, which is most of what Kuru says unasked.
-   * What the turn answered comes back, for the other nodes, which hear the
-   * reply too (`peerkuru.ts`).
+   * a `[kururu]` notice included, which is most of what Kuru says unasked —
+   * but an answer to another node's Kuru alone (`postedToChat`). On a node
+   * that does not poll a shared channel, "gets it" is handed to the node
+   * that does (`telegram.ts`). What the turn answered comes back, for the
+   * other nodes, which hear the reply too (`peerkuru.ts`).
    */
   replied(profileKey: string, reply: unknown): { origin: TurnOrigin; answers: string[] } {
     const origin = this.origin(profileKey);
     const answers = [...(this.turns.get(profileKey)?.ids ?? [])];
     this.turns.delete(profileKey);
     this.telegram.stopTyping(profileKey);
-    if (typeof reply === "string" && reply.trim()) this.telegram.post(profileKey, reply.trim());
+    if (typeof reply === "string" && reply.trim() && postedToChat(origin)) this.telegram.post(profileKey, reply.trim());
     return { origin, answers };
   }
 

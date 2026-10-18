@@ -64,6 +64,8 @@ import {
   PING_MS,
   reranked,
   rosterPayload,
+  rosterTelegram,
+  withChannels,
   summaryKey,
   withChange,
   withMember,
@@ -82,6 +84,7 @@ import {
   type SignedRoster,
   validHostName,
 } from "../../shared/nodes";
+import type { SharedTelegram } from "../../shared/channels";
 import type { MoveCheck, MoveDone } from "../../shared/move";
 import { readConfigFile, writeConfigFile } from "./config";
 import { safeMirrorPath } from "./export";
@@ -142,6 +145,13 @@ export interface NodeHostDeps {
   peer?: (nodeId: string, message: PeerMessage) => void;
   /** A link to a member came up: what the other side should be told about this node's Kuru goes now. */
   linked?: (nodeId: string) => void;
+  /**
+   * Who leads, when something knows better than rank alone: the node that
+   * polls Telegram (`lead.ts`), which is the one job leading is. Null to
+   * fall back to `leaderOf`. Must not ask this host for its statuses, which
+   * ask for the leader.
+   */
+  leader?: () => string | null;
 }
 
 interface PeerState {
@@ -150,6 +160,8 @@ interface PeerState {
   lastSeen: number | null;
   error: string | null;
   summary: NodeSummary | null;
+  /** The summary was pushed on the link that is up now, not one before it: what it says about this moment can be believed. */
+  live?: boolean;
 }
 
 class Link {
@@ -395,7 +407,53 @@ export class NodeHost {
   }
 
   leader(): string | null {
-    return leaderOf(this.roster, new Set(this.links.keys()), this.me.id);
+    return this.deps.leader?.() ?? leaderOf(this.roster, new Set(this.links.keys()), this.me.id);
+  }
+
+  /** The last summary a member pushed, up or not. */
+  summaryOf(nodeId: string): NodeSummary | null {
+    return this.peers.get(nodeId)?.summary ?? null;
+  }
+
+  /**
+   * The summary a member pushed on the link that is up now, or null —
+   * never one kept from before it went away, which says what was true
+   * then. Whether a node polls Telegram is read off this one: a Mac's
+   * summary from before its lid closed says it polls, and it does not.
+   */
+  liveSummaryOf(nodeId: string): NodeSummary | null {
+    const peer = this.peers.get(nodeId);
+    return peer?.live && this.links.has(nodeId) ? peer.summary : null;
+  }
+
+  /** This node's rank in the roster, or null in none. */
+  ownRank(): number | null {
+    return memberOf(this.roster, this.me.id)?.rank ?? null;
+  }
+
+  /** The members, this node among them, by rank. Empty in no roster. */
+  members(): NodeEntry[] {
+    const roster = this.roster;
+    return roster && memberOf(roster, this.me.id) ? byRank(roster.members) : [];
+  }
+
+  /** The Telegram settings the roster carries: the parent's, signed there. */
+  rosterTelegram(): SharedTelegram | null {
+    return memberOf(this.roster, this.me.id) ? rosterTelegram(this.roster) : null;
+  }
+
+  /**
+   * The parent's Telegram settings into the roster, when they changed — a
+   * new roster, relayed like any other. Not a secret: the token is lent on
+   * its own (`secrets.ts`). Nothing on a node that is not the parent.
+   */
+  setChannels(telegram: SharedTelegram | null): void {
+    if (this.role() !== "parent") return;
+    void this.serially(async () => {
+      if (this.role() !== "parent") return;
+      const next = withChannels(this.roster!, telegram, Date.now());
+      if (next) this.publish(next);
+    }).catch((err: unknown) => this.deps.log(`nodes: the channel settings did not go into the roster: ${err instanceof Error ? err.message : String(err)}`));
   }
 
   private status(entry: NodeEntry): NodeStatus {
@@ -891,6 +949,7 @@ export class NodeHost {
       case "summary":
         if (peer && validSummary(message.summary)) {
           peer.summary = message.summary;
+          peer.live = true;
           this.queueSeen();
           this.changed();
         }
@@ -947,11 +1006,15 @@ export class NodeHost {
     if (old && old !== link) old.close("replaced by a newer link");
     const now = Date.now();
     const peer = this.peers.get(peerId);
-    if (peer) Object.assign(peer, { state: "up", since: now, lastSeen: now, error: null });
+    if (peer) Object.assign(peer, { state: "up", since: now, lastSeen: now, error: null, live: false });
     const dialer = this.dialers.get(peerId);
     if (dialer) dialer.failures = 0;
     this.deps.log(`nodes: linked with ${memberOf(this.roster, peerId)?.name ?? peerId}`);
     link.send({ type: "summary", summary: this.summaryNow() });
+    // That was this moment's, to this link alone: the next change goes to
+    // every link whatever the others last heard, or a change back to what
+    // they last heard would never reach this one.
+    this.lastSummaryKey = "";
     this.deps.linked?.(peerId);
     this.hook(this.upHooks, peerId);
     this.changed();

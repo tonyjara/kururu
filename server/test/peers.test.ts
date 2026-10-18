@@ -208,7 +208,7 @@ describe("one drawer", () => {
 describe("the link's Kuru messages", () => {
   it("are known types, and an older node's unknown ones are still ignored", () => {
     expect(parseLinkMessage(JSON.stringify({ type: "say", id: "abcdefgh" }))?.type).toBe("say");
-    expect(parseLinkMessage(JSON.stringify({ type: "lead-ask" }))).toBeNull();
+    expect(parseLinkMessage(JSON.stringify({ type: "topic-made" }))).toBeNull();
   });
 
   it("are checked field by field", () => {

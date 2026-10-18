@@ -254,6 +254,8 @@ export interface IncomingMessage {
   at: number;
   /** The words; null for a photo, a sticker, a voice note — anything without them. */
   text: string | null;
+  /** The message this one answers, when it was sent as a reply: how a reply to one of a node's lines finds that node (`routeOf`). */
+  replyTo: number | null;
 }
 
 /**
@@ -295,7 +297,9 @@ function messageFrom(updateId: number, value: unknown): IncomingMessage | null {
         }
       : null;
   const at = typeof raw.date === "number" && Number.isFinite(raw.date) ? raw.date * 1000 : 0;
-  return { updateId, messageId: raw.message_id, chatId: String(chat.id), chatType: chat.type, from, at, text: typeof raw.text === "string" ? raw.text : null };
+  const answered = raw.reply_to_message as Record<string, unknown> | undefined;
+  const replyTo = answered && typeof answered.message_id === "number" && Number.isFinite(answered.message_id) ? answered.message_id : null;
+  return { updateId, messageId: raw.message_id, chatId: String(chat.id), chatType: chat.type, from, at, text: typeof raw.text === "string" ? raw.text : null, replyTo };
 }
 
 /** The most of a message passed on. Telegram's own limit is 4096; this is that, so nothing a bot can be sent is cut. */
@@ -576,6 +580,224 @@ export function pollRetryMs(failures: number): number {
 }
 
 // ---------------------------------------------------------------------------
+// One bot, several nodes
+// ---------------------------------------------------------------------------
+
+/*
+ * With more than one kururu linked (`docs/nodes.md`), there is still one
+ * bot and one chat, and only one node may read it: Telegram answers a
+ * second `getUpdates` on the same token with a 409. So one node polls — the
+ * leader, by rank, among the nodes that can (`LeadGate` in `shared/nodes.ts`
+ * says which and when) — and every node's Kuru talks through it. What the
+ * chat sends is routed to a node by what it says (`routeOf`); what each
+ * Kuru says is marked with its node (`markLine`) and remembered by the
+ * message id Telegram gave it (`ReplyMap`), so a reply to a line finds the
+ * Kuru that said it.
+ */
+
+/**
+ * The parent's Telegram settings as the roster carries them: what every
+ * node needs to judge a message — the allow-list, the switch, the moment it
+ * went on — and which bot it is. Never the token, which is a secret and is
+ * lent on its own (`shared/secrets.ts`). In the roster rather than lent
+ * beside the token because a node that holds no token still needs to know
+ * the channel is on, to send its Kuru's replies to whichever node polls;
+ * and because the roster is signed by the parent, so a child cannot add an
+ * account to the list.
+ */
+export interface SharedTelegram {
+  enabled: boolean;
+  enabledAt: number | null;
+  allowed: AllowedUser[];
+  bot: TelegramBot | null;
+}
+
+/** The roster's copy, checked as the file's own settings are. Null for anything that is not one. */
+export function adoptSharedTelegram(value: unknown): SharedTelegram | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const settings = adoptTelegramSettings(raw);
+  return { enabled: settings.enabled, enabledAt: settings.enabledAt, allowed: settings.allowed, bot: adoptBot(raw.bot) };
+}
+
+/** What the parent puts in the roster from its own file. */
+export function sharedFrom(settings: TelegramSettings, bot: TelegramBot | null): SharedTelegram {
+  return { enabled: settings.enabled, enabledAt: settings.enabledAt, allowed: settings.allowed, bot };
+}
+
+/** A node's name as a person reads it in the chat: "Omarchy", "Box-2". */
+export function nodeTitle(name: string): string {
+  return name ? `${name[0]!.toUpperCase()}${name.slice(1)}` : name;
+}
+
+/** A node as the subject of a sentence: "the Mac" for the one called mac, which is what everybody calls it, else its title. */
+export function nodeSubject(name: string): string {
+  return name === "mac" ? "the Mac" : nodeTitle(name);
+}
+
+/** The same, starting a sentence. */
+function Subject(name: string): string {
+  const said = nodeSubject(name);
+  return `${said[0]!.toUpperCase()}${said.slice(1)}`;
+}
+
+/**
+ * A line of a node's Kuru as the chat shows it: `[Omarchy] …` for a child,
+ * the words alone for the parent, so a chat with one kururu reads as it did
+ * before there were nodes, and the Mac — the one the user mostly talks to —
+ * carries no noise. The mark goes on before the reply is cut into
+ * messages, so only the first of a long reply carries it; every part is
+ * remembered as that node's (`rememberSent`), so a reply to any part finds it.
+ */
+export function markLine(node: string | null, text: string): string {
+  return node ? `[${nodeTitle(node)}] ${text}` : text;
+}
+
+/**
+ * Which node said each line the bot sent, by chat and message id: how a
+ * reply in the chat — Telegram's "reply to this message" — reaches the Kuru
+ * that said what it replies to. Node ids, so a rename does not lose a line.
+ * Oldest first and bounded; a reply to a line older than the map goes to
+ * the leader, which is where a bare message goes anyway.
+ */
+export type ReplyMap = Array<[key: string, node: string]>;
+
+/** Lines remembered. A day of a chatty conversation, with room. */
+export const REPLY_MAP_MAX = 500;
+
+function sentKey(chat: string, messageId: number): string {
+  return `${chat}:${messageId}`;
+}
+
+/** The map with these sent messages remembered as this node's, the oldest dropped past the bound. */
+export function rememberSent(map: ReplyMap, chat: string, messageIds: readonly number[], node: string): ReplyMap {
+  const keys = new Set(messageIds.map((id) => sentKey(chat, id)));
+  const kept = map.filter(([key]) => !keys.has(key));
+  return [...kept, ...[...keys].map((key): [string, string] => [key, node])].slice(-REPLY_MAP_MAX);
+}
+
+/** The node whose line a message answers, or null. */
+export function repliedNode(map: ReplyMap, chat: string, replyTo: number | null): string | null {
+  if (replyTo === null) return null;
+  const key = sentKey(chat, replyTo);
+  for (let i = map.length - 1; i >= 0; i--) if (map[i]![0] === key) return map[i]![1];
+  return null;
+}
+
+/** Two maps as one, the second's word winning, in the order the second last heard them. */
+export function mergeReplies(older: ReplyMap, newer: ReplyMap): ReplyMap {
+  const keys = new Set(newer.map(([key]) => key));
+  return [...older.filter(([key]) => !keys.has(key)), ...newer].slice(-REPLY_MAP_MAX);
+}
+
+/** A member as the routing needs it. */
+export interface RouteNode {
+  id: string;
+  name: string;
+}
+
+/** Where a message from the chat goes, and the words that go: without the address that sent it there. */
+export interface Route {
+  node: string;
+  text: string;
+  /** What decided it, for the log and the tests. */
+  by: "address" | "reply" | "leader";
+}
+
+const ROUTE_ADDRESS = /^[@/]([a-z][a-z0-9-]{0,23})(?:@\w+)?(?:[\s,:]+|$)/i;
+
+/**
+ * Which node's Kuru a message from the chat is for.
+ *
+ * An address first: `@omarchy …`, or `/omarchy …`, since Telegram's apps
+ * autocomplete `@` against usernames and a `/` is a command the bot's menu
+ * can offer. It has to be a member's name and at the very front, so `/compact`
+ * is still Kuru's slash command and "ask @omarchy later" is still a sentence.
+ * Then a reply to one of a node's lines, by the map. Then the leader, which
+ * is the node reading the chat — the Kuru the user is talking to when they
+ * name nobody. An address wins over a reply because it is the more
+ * deliberate of the two: someone who replies to the Mac's line and writes
+ * `@omarchy` in it meant Omarchy.
+ */
+export function routeOf(input: { text: string; chat: string; replyTo: number | null; map: ReplyMap; nodes: readonly RouteNode[]; leader: string }): Route {
+  const match = ROUTE_ADDRESS.exec(input.text);
+  const named = match ? input.nodes.find((n) => n.name === match[1]!.toLowerCase()) : undefined;
+  if (match && named) return { node: named.id, text: input.text.slice(match[0].length).trim(), by: "address" };
+  const replied = repliedNode(input.map, input.chat, input.replyTo);
+  if (replied && input.nodes.some((n) => n.id === replied)) return { node: replied, text: input.text, by: "reply" };
+  return { node: input.leader, text: input.text, by: "leader" };
+}
+
+/** What the chat is told about a message addressed to nobody's words: `@omarchy` alone. */
+export function emptyAddress(name: string): string {
+  return `Write something after @${name} for ${nodeSubject(name)}'s Kuru.`;
+}
+
+/** A time of day the way the chat says it, for "away since 23:10". */
+function clockOf(at: number): string {
+  const d = new Date(at);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/**
+ * What the chat is told once, the first time a message waits for a node
+ * that is away: that it waits, and that it is not lost. Once per absence,
+ * not per message, since the second message waits the same way.
+ */
+export function heldLine(name: string, since: number | null): string {
+  return `${Subject(name)} is away${since ? ` (since ${clockOf(since)})` : ""}, so this waits for it and reaches its Kuru when it is back.`;
+}
+
+/**
+ * The one line the chat gets when a node takes the poll over because those
+ * ranked above it went away: who answers now, and since when the others
+ * were gone — so a reply marked `[Omarchy]` is not a surprise.
+ */
+export function tookLine(self: string, away: ReadonlyArray<{ name: string; since: number | null }>): string {
+  const gone = away.map((a) => `${nodeSubject(a.name)}${a.since ? ` since ${clockOf(a.since)}` : ""}`);
+  const said = gone.length === 0 ? "" : gone.length === 1 ? ` ${Subject(away[0]!.name)} has been away${away[0]!.since ? ` since ${clockOf(away[0]!.since)}` : ""}.` : ` Away: ${gone.join(", ")}.`;
+  return `${Subject(self)}'s Kuru is in charge.${said}`;
+}
+
+/** The line when the poll comes back up the ranks by the handshake. */
+export function backLine(self: string): string {
+  return `${Subject(self)}'s Kuru is back in charge.`;
+}
+
+/**
+ * Whether a Kuru's reply goes to the chat at all. Every reply does — a
+ * reply to the user anywhere, to a `[kururu]` notice — but one to another
+ * Kuru's `ask_kuru` alone, which is two colleagues talking: the asking Kuru
+ * hears the answer in its tool call and tells the user in its own words, and
+ * the chat would read the same thing twice.
+ */
+export function postedToChat(origin: TurnOrigin): boolean {
+  if (origin.here || origin.channels.length > 0 || origin.peers.length === 0) return true;
+  return origin.peers.some((peer) => !peer.startsWith("kuru@"));
+}
+
+/**
+ * Where the poll stands among the nodes, as Settings → Channels draws it.
+ * Null when this node is in no roster that carries the channel: then the
+ * page is the one it always was.
+ */
+export interface LeadStatus {
+  /** This node polls now. */
+  polls: boolean;
+  /** The node that polls, by this node's knowledge: itself, a linked peer that says so, or nobody. */
+  holder: string | null;
+  /** Whether this node may poll, and why not when it may not. */
+  eligible: boolean;
+  why: string | null;
+  /** On a child: the parent the token is held from; null on the parent. */
+  heldFrom: string | null;
+  /** A 409 seen and this node standing down until then. */
+  standingDownUntil: number | null;
+  /** Every member by rank, this node among them. */
+  nodes: Array<{ id: string; name: string; rank: number; self: boolean; parent: boolean; up: boolean; since: number | null; eligible: boolean | null; polls: boolean }>;
+}
+
+// ---------------------------------------------------------------------------
 // What a window is told
 // ---------------------------------------------------------------------------
 
@@ -610,6 +832,8 @@ export interface TelegramStatus {
   waiting: number;
   /** Messages from accounts not on the list, since the count was last cleared — how Settings says somebody found the bot. */
   ignored: { count: number; lastAt: number | null; last: string | null };
+  /** Who polls among the nodes, when this node is in a roster that carries the channel; null otherwise. */
+  lead: LeadStatus | null;
 }
 
 export interface ChannelsStatus {

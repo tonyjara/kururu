@@ -154,6 +154,18 @@ async function signedInAt(login: Login): Promise<number | null> {
 }
 
 /**
+ * Whether Claude Code is signed in for a config directory, or for the
+ * machine's own login when null — off the keychain item's attributes or
+ * the file's being there, never the credential itself. What tells a child
+ * it could answer Telegram for the others (`lead.ts`): a Kuru that cannot
+ * sign in cannot answer anybody.
+ */
+export async function claudeSignedIn(claudeDir: string | null): Promise<boolean> {
+  const login = claudeDir ? loginFor(claudeDir) : (await logins())[0];
+  return login ? (await signedInAt(login)) !== null : false;
+}
+
+/**
  * The most recently signed-in login. "The one I logged into last" is the only
  * rule that needs no settings screen and matches what somebody just did: they
  * ran `/login` somewhere and expect the bar to follow.
