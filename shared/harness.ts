@@ -316,7 +316,7 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
         title: str("One sentence, at most 200 characters."),
         body: str("Detail, markdown, at most 20,000 characters."),
         column: str("todo (default), doing, review or done; on the profile's board, one of its column ids from cards."),
-        isolate: bool("Run in a worktree of its own. Default: the project's setting."),
+        isolate: bool("Run in a worktree of its own. Default false."),
         run: bool("Hand it to an agent now. Default false."),
         launcher: str("With run: which agent and model, a launcher id. Default: Claude on its default model."),
       },
