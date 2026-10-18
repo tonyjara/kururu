@@ -135,6 +135,12 @@ const NOT_THEME = new Set([
   // be a theme that could put the strip anywhere in the window's tonal range,
   // including on the wrong side of the two surfaces it is meant to sit between.
   "--strip",
+  // The tone of the window's two bands and of every strip, derived from
+  // `--chrome` on `--strip`'s reasoning — one step below it in every palette,
+  // the installed ones drawn before it existed included — and the top band's
+  // height, a constant of the stylesheet like `--bar-h`.
+  "--chrome-low",
+  "--top-h",
   // How wide `.tab-actions` is, measured off the box by `Panes.tsx` so that
   // `.tab-new`'s sticky offset cannot fall out of step with a skin's button
   // size or a solo pane's "2/3". A length read off the DOM, like `--sidebar-w`
