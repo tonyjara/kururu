@@ -56,7 +56,7 @@ in this folder.
 | `src/hostlink.ts` | The protocol between the halves, and the local pair for tests |
 | `src/hostsock.ts` | That protocol over a unix socket. The framing, nothing else |
 | `src/proctitle.ts` | Naming a process without a Dock tile: on macOS a title registers it as an app of its bundle's kind, so node runs on Electron's `LSUIElement` helper and a main binary goes unnamed |
-| `src/hostlaunch.ts` | Starting the host as a launchd job, in a coalition of its own, on a clone of Kururu.app under `runtime/`. Why a Force Quit used to end every agent |
+| `src/hostlaunch.ts` | Starting the host as a launchd job, in a coalition of its own, on a clone of Kururu.app under `runtime/`. Why a Force Quit used to end every agent. On Linux, a transient systemd user unit, in a cgroup of its own |
 
 **The restartable half:**
 
@@ -127,6 +127,8 @@ in this folder.
 | `status.mjs` | The daemon has no face; this is it. Socket + `/api/agents`, then the end of `lifecycle.log` |
 | `reload-window.mjs` | An agent's ⌘R: asks the server, waits, prints what happened, and asks again across a server restart |
 | `kill-hosts.mjs` | Finds hosts by socket, asks, SIGTERMs |
+| `sockowner.mjs` | Who holds a unix socket: `lsof` on macOS, `ss` on Linux. The tools import it plain and the server through `sockowner.d.mts` |
+| `localtoken.mjs` | The token kururu's own callers present, for a server that wants it on loopback too: `KURURU_TOKEN`, then `access.json` |
 
 ## `web/` — React 19 + Vite. One build; the desktop is what it is shaped for
 

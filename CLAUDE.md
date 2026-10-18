@@ -68,8 +68,10 @@ a leftover tile is — ends a whole coalition. `server/src/hostlaunch.ts` starts
 the host as a launchd job instead, on a clone of Kururu.app it owns; never go
 back to spawning it as anybody's descendant. It is server code, so editing it
 costs a reconnect and changes only the *next* host. `bun run status` prints
-`coalition  shared` for a host started the old way. See
-[gotchas](docs/gotchas.md#running).
+`coalition  shared` for a host started the old way. On Linux the same file
+starts it as a transient systemd user unit, because a child's server is a
+service and a service's cgroup ends with it; `unit  shared` is the tell
+there. See [gotchas](docs/gotchas.md#running).
 
 **The trap, which has already cost a session:** a running `bun run dev` watches
 `server/src` and `shared`, so editing those restarts the user's server *while you
@@ -170,7 +172,12 @@ The load-bearing invariants, one line each, with the argument behind the link:
   Roots are never learned from a client. →
   [architecture](docs/architecture.md#the-servers-shape)
 - **The socket binds loopback and the `Origin` header is checked**, the second
-  before the token. → [architecture](docs/architecture.md#access)
+  before the token. Loopback is exempt from the token unless `loopbackToken`
+  (or `KURURU_LOOPBACK_TOKEN=1`) says otherwise, which a child sets; then
+  every local caller presents it, from `server/localtoken.mjs` or the
+  `KURURU_TOKEN` the server hands its ptys, and never on a command line.
+  `KURURU_BIND=tailscale` is a child's tailnet address, with loopback beside
+  it. → [architecture](docs/architecture.md#access)
 - **Anything that takes a number off the wire gets `Number.isFinite`.** A clamp is
   not a check, because NaN loses every comparison it is in. →
   [layout](docs/layout.md#numbers-off-the-wire)
