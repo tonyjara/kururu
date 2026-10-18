@@ -17,6 +17,8 @@ import { useState } from "react";
 import { formatCount, type WebCallRecord, type WebField, type WebProviderStatus, type WebStatus, type WebStep } from "../../../shared/web";
 import * as api from "../session";
 import { useKururu } from "../session";
+import { webKind } from "../../../shared/secrets";
+import { HeldFrom, LentTo, useHeld } from "./Secrets";
 import { A, Action, Banner, Details, Dot, Empty, errorText, Field, Group, IconBtn, Item, KeyRow, Mono, NumField, P, Readout, Toggle, when, type Tone } from "./ui";
 
 export function WebPage() {
@@ -99,6 +101,10 @@ function OrderLead({ n, tone }: { n: number; tone: Tone }) {
 
 /** One provider's card: its switch, what it can do, whether it answers, and what it asks for. */
 function ProviderGroup({ n, provider: p, attempt }: { n: number; provider: WebProviderStatus; attempt: (work: Promise<unknown>) => void }) {
+  // Lent by the parent: its address and key are the parent's, and a field
+  // here would be written over by the next push, so the line stands in for
+  // them. The switch, a budget and the figures stay this node's own.
+  const held = useHeld(webKind(p.id));
   return (
     <Group title={`${n} · ${p.label}`} foot={p.summary}>
       <Toggle label="On" hint={switchHint(p)} on={p.enabled} onChange={(enabled) => attempt(api.setWebProvider(p.id, { enabled }))} />
@@ -106,9 +112,13 @@ function ProviderGroup({ n, provider: p, attempt }: { n: number; provider: WebPr
       {p.kind === "service" && (
         <Readout label="Health" tone={healthTone(p)} value={p.ready ? (p.health.detail ?? "Not checked yet.") : "Not set up."} hint={p.health.at ? `Checked ${when(p.health.at)}` : undefined} />
       )}
-      {p.fields.map((field) => (
-        <FieldRow key={field.name} provider={p} field={field} attempt={attempt} />
-      ))}
+      {held && <HeldFrom kind={webKind(p.id)} />}
+      {p.fields
+        .filter((field) => !held || field.kind === "number")
+        .map((field) => (
+          <FieldRow key={field.name} provider={p} field={field} attempt={attempt} />
+        ))}
+      <LentTo kind={webKind(p.id)} />
       {p.readouts.map((r) => (
         <Readout key={r.label} label={r.label} value={r.value} tone={r.tone} />
       ))}

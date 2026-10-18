@@ -21,6 +21,7 @@ import type { ProfileSummary } from "../../../shared/model";
 import { QrCode } from "../components/Reach";
 import * as api from "../session";
 import { useKururu } from "../session";
+import { HeldFrom, LentTo, useHeld } from "./Secrets";
 import { A, Action, AddRow, Banner, Btn, DangerButton, Details, Empty, errorText, Group, Item, KeyRow, Mono, Outcome, P, Readout, Row, Select, Step, Steps, Toggle, when } from "./ui";
 
 const BOTFATHER = "https://t.me/BotFather";
@@ -45,6 +46,21 @@ function Telegram({ status, profiles }: { status: TelegramStatus; profiles: Prof
     api.setChannel("telegram", patch).catch((err: unknown) => setError(errorText(err)));
   };
   const bot = status.bot ? `@${status.bot.username}` : "the bot";
+  const held = useHeld("telegram");
+
+  // The parent's bot, held so this node can take the chat over while the
+  // parent is away — which is phase 5. Until then there is nothing here to
+  // set or switch on: a second poller of one bot is a 409 for both.
+  if (held) {
+    return (
+      <Group
+        title="Telegram"
+        foot={`${held.from} answers this bot. This node holds its token so that it can take the chat over while ${held.from} is away; that part is not built yet, so the switch is on ${held.from}.`}
+      >
+        <HeldFrom kind="telegram" label="Token" />
+      </Group>
+    );
+  }
 
   return (
     <>
@@ -105,6 +121,7 @@ function Telegram({ status, profiles }: { status: TelegramStatus; profiles: Prof
               removeAsk="Forget the bot, its token and your account?"
               onRemove={() => api.forgetChannel("telegram")}
             />
+            <LentTo kind="telegram" />
           </Step>
 
           <Step n={3} done={status.allowed.length > 0} title="Say which account is yours" line="Only accounts on this list can talk to Kuru; anyone else is ignored without an answer.">

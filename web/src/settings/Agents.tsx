@@ -1,7 +1,8 @@
 /**
  * Settings → General → Agents: what the new-tab button offers besides a
  * terminal, where the agents kururu starts itself open, when an idle card's
- * agent is put to sleep, and what Kuru does to the screen.
+ * agent is put to sleep, what Kuru does to the screen, and — on the Mac —
+ * lending this profile's Claude login to a node (`Secrets.tsx`).
  *
  * A switch per CLI and a switch per model under it. The CLI's switch leaves
  * its models' switches as they were rather than turning them off, so switching
@@ -25,6 +26,7 @@ import {
 } from "../../../shared/launchers";
 import type { AgentPlacement } from "../../../shared/agentpane";
 import * as api from "../session";
+import { LendLogin } from "./Secrets";
 import { Choice, Details, Group, Mono, NumField, P, Toggle } from "./ui";
 
 /** The three answers, as the segments say them; the third's tooltip is what off means. */
@@ -116,6 +118,8 @@ export function AgentsPage({
           </P>
         </Details>
       </Group>
+
+      <LendLogin profileId={profileId} profileName={profileName} perProfile={launch.loginsPerProfile} />
 
       <Group title="Kuru" foot={`For ${profileName}. C-a z takes you back.`}>
         <Toggle

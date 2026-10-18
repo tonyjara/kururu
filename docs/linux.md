@@ -68,14 +68,16 @@ only reads it, so the two cannot disagree about what is right.
 | the command | `~/.local/bin/kururu` links to this checkout | links it, and asks before moving a link that points elsewhere; never touches a file it did not write |
 | the user | which account runs the child, and what it can reach: sudo, docker, a home others can read | asks: this account or a dedicated one. For dedicated it prints `useradd` and `enable-linger` for root to run |
 | linger | `loginctl show-user` says `Linger=yes` | `loginctl enable-linger`, which most systems allow a user for themselves; otherwise it prints the `sudo` line |
-| Claude Code | `claude` on the PATH, `claude auth status` signed in to a subscription; Codex's `login status` if wanted | asks whether Codex is wanted. With a terminal, runs `claude auth login --claudeai`; without one, prints it |
+| Claude Code | `claude` on the PATH, `claude auth status` signed in to a subscription, or a token the Mac lent held (by hint, from `secrets-held.json`); Codex's `login status` if wanted | asks whether Codex is wanted. Not signed in, it asks which road (`--claude=login|lent`): with a terminal `login` runs `claude auth login --claudeai`, without one it prints it; `lent` goes on without a login, for the Mac to lend its own once paired, and the secrets step waits for it |
 | no API key | the keys and switches that outrank the login, in this shell, the user manager, the rc files, `environment.d`, `/etc/environment`, the unit, Claude's settings and Claude's stored key | guides: names file and line, never the value |
 | the tailnet | a 100.64/10 address on an interface; the port free or already kururu's | guides: `sudo tailscale up` is the user's, never the wizard's |
 | the service | the unit as this checkout would write it, enabled, active; `/api/health` on the tailnet address; the gate refusing loopback and the tailnet without the token, and every LAN address outright; the host in a `kururu-ptyhost-…` unit and current | writes the unit, `daemon-reload`, enables, starts or restarts, and waits for health |
 | the phone | a device on the tailnet has connected since the server started (`clients.remoteAt` in `/api/health`) | with a terminal: shows the QR and waits for the phone. Without one: tells the person to run `kururu share` in their own terminal |
 | pairing | `nodes` in `/api/health`: ✓ paired and the link to the Mac up; – not paired, which is a child working as built, or paired with the Mac away, as it is while the lid is shut; ✗ paired and the Mac never reached since this server started | with a terminal, asks for the Mac's join command (Enter skips, and the skip is kept); `--join="<address> <code>"` gives it. Without either it says how to pair and moves on, since pairing is optional |
 
-The secrets and leading rows arrive with phases 4 and 5.
+| secrets | what this box holds from the Mac, by kind and hint, off `secrets-held.json` (never a value): ✓ something held; – nothing lent, which is optional, or not paired; ✗ only when the Claude step was told `lent` and no token has come | says where on the Mac to switch it on, and with a terminal waits up to five minutes for it |
+
+The leading row arrives with phase 5.
 
 ### Asking, and stopping
 
@@ -83,7 +85,7 @@ With a terminal, the wizard asks and waits. Without one (an agent's tool, a
 pipe, `--no-input`) it never waits. It stops, and the exit status says why:
 
 - **3**: a question. The message names the flag that answers it:
-  `--account=this|dedicated`, `--codex=yes|no`, `--yes`
+  `--account=this|dedicated`, `--codex=yes|no`, `--claude=login|lent`, `--yes`
   (write over a differing unit and restart onto it), `--relink`.
 - **4**: a step only the person can do: sign in, `sudo`, `tailscale up`,
   remove a key. The message is the exact line to type.

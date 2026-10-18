@@ -15,6 +15,8 @@ import {
   lingerOn,
   parseArgs,
   parseShowEnvironment,
+  heldRows,
+  lentClaude,
   pairingRow,
   pairingState,
   parseVersion,
@@ -238,5 +240,34 @@ describe("pairing", () => {
     expect(never.state).toBe("fail");
     expect(never.detail).toBe("paired with mac, connecting");
     expect(never.fix).toContain("Mac awake");
+  });
+});
+
+describe("heldRows", () => {
+  const held = {
+    from: "n000000000001",
+    held: {
+      openrouter: { digest: "d", seq: 1, hint: "sk-or-v1-…abcd", since: 1, updated: 1 },
+      "claude-token:machine": { digest: "e", seq: 2, hint: "someone@example.com …wxyz", since: 1, updated: 1 },
+    },
+    seen: {},
+  };
+
+  it("lists what is held by kind and hint, a – when nothing is or the box stands alone", () => {
+    expect(heldRows(null, { paired: false, parent: null, name: null, claudeLent: false })).toEqual([{ title: "secrets", state: "skip", detail: "not paired, so nothing is lent" }]);
+    const none = heldRows({ held: {} }, { paired: true, parent: "mac", name: "omarchy", claudeLent: false });
+    expect(none[0]?.state).toBe("skip");
+    expect(none[0]?.detail).toContain("mac's Settings → Nodes → omarchy → Secrets");
+    const some = heldRows(held, { paired: true, parent: "mac", name: "omarchy", claudeLent: true });
+    expect(some).toEqual([{ title: "secrets", state: "ok", detail: "held from mac: openrouter sk-or-v1-…abcd, claude-token:machine someone@example.com …wxyz" }]);
+  });
+
+  it("is a ✗ only when Claude was to be lent and has not been", () => {
+    const rows = heldRows({ held: { openrouter: held.held.openrouter } }, { paired: true, parent: "mac", name: "omarchy", claudeLent: true });
+    expect(rows[1]?.state).toBe("fail");
+    expect(rows[1]?.fix).toContain("Lend this login to a node");
+    expect(lentClaude(held)).toEqual({ kind: "claude-token:machine", hint: "someone@example.com …wxyz" });
+    expect(lentClaude({ held: { openrouter: held.held.openrouter } })).toBeNull();
+    expect(lentClaude(null)).toBeNull();
   });
 });
