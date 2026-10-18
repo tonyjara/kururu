@@ -32,6 +32,17 @@
  * kururu to get a shell on it, so demanding a secret would be theatre that cost
  * the desktop window a round trip.
  *
+ * That argument is the Mac's, and it does not hold on a child. A box other
+ * people's long-running programs share is one where "running on the machine"
+ * is not "the user", and `tailscale serve` — which a child's phone wants for
+ * its microphone — delivers every request it forwards *from* loopback. So
+ * there is a switch, `loopbackToken` in `access.json` or
+ * `KURURU_LOOPBACK_TOKEN=1`, under which loopback presents the token like
+ * anybody else, and kururu's own callers on the machine present it: they read
+ * it out of this file (`server/localtoken.mjs`), and the agents kururu starts
+ * are handed it as `KURURU_TOKEN` (`tokenEnv`). Off by default, so the Mac
+ * behaves as it always has; on for a child.
+ *
  * ## The third thing, which is not about the network at all
  *
  * A web page you visit can open a WebSocket to `127.0.0.1` — the same-origin
@@ -66,6 +77,8 @@ export const COOKIE = "kururu_access";
 interface Access {
   share: boolean;
   token: string;
+  /** Whether loopback presents the token too. Absent is false: the Mac's arrangement. */
+  loopbackToken?: boolean;
 }
 
 /**
@@ -93,9 +106,14 @@ function load(): Access {
    * the button in the dialog — a deliberate choice, and the only safe direction
    * for a default to be wrong in.
    */
-  access = { share: saved.share === true, token };
-  if (token !== saved.token) writeConfigFile(FILE, access);
+  access = { share: saved.share === true, token, ...(saved.loopbackToken === true ? { loopbackToken: true } : {}) };
+  if (token !== saved.token) save(access);
   return access;
+}
+
+/** 0600, since the token in it is a shell on this machine to whoever holds it. */
+function save(value: Access): void {
+  writeConfigFile(FILE, value, 0o600);
 }
 
 /**
@@ -113,12 +131,87 @@ function load(): Access {
  * The environment wins over both, so that a deployment with its own idea of the
  * network — a container, a VM with one interface — can say so without a config
  * file, and so this can be tested without writing one.
+ *
+ * `KURURU_BIND=tailscale` is a child's: this machine's tailnet address and
+ * nothing else of its networks, found the way `reach.ts` finds it — in the
+ * interface list, never by asking `tailscale`. A child with no tailnet address
+ * when it starts binds loopback instead and says why (`bindProblem`): a
+ * server that refused to start would leave the box's own tools nothing to
+ * talk to, and loopback is the one bind that cannot be wrong. It is fixed
+ * when the server is next started, which is what `systemctl --user restart
+ * kururu` is.
  */
 let bound: string | null = null;
+let bindWhy: string | null = null;
+
+/** What `KURURU_BIND` and the saved decision come to, given this machine's tailnet address. Pure, for the test. */
+export function chooseBind(env: string | undefined, share: boolean, tailscale: string | null): { address: string; problem: string | null } {
+  if (env === "tailscale") {
+    if (tailscale) return { address: tailscale, problem: null };
+    return { address: "127.0.0.1", problem: "KURURU_BIND=tailscale, and this machine has no tailnet address yet, so this server is on loopback only until it is restarted" };
+  }
+  return { address: env || (share ? "0.0.0.0" : "127.0.0.1"), problem: null };
+}
 
 export function bindAddress(): string {
-  bound ??= process.env.KURURU_BIND || (load().share ? "0.0.0.0" : "127.0.0.1");
+  if (bound === null) {
+    const env = process.env.KURURU_BIND;
+    const chosen = chooseBind(env, env ? false : load().share, env === "tailscale" ? reach(0).tailscale : null);
+    bound = chosen.address;
+    bindWhy = chosen.problem;
+  }
   return bound;
+}
+
+/** Why the server is not where it was asked to be, or null when it is. */
+export function bindProblem(): string | null {
+  bindAddress();
+  return bindWhy;
+}
+
+/**
+ * Every address to listen on: the bind address, and loopback beside it when
+ * that is one other address and not every address. Every caller on this
+ * machine dials 127.0.0.1 — the hooks, the tools, the agents' MCP configs — so
+ * a child bound to its tailnet address alone would be a server its own agents
+ * cannot report to. Pure over the bind address, for the test.
+ */
+export function listenAddressesFor(address: string): string[] {
+  if (address === "127.0.0.1" || address === "0.0.0.0" || address === "::" || address === "::1" || address === "localhost") return [address];
+  return [address, "127.0.0.1"];
+}
+
+export function listenAddresses(): string[] {
+  return listenAddressesFor(bindAddress());
+}
+
+/**
+ * Whether loopback must present the token too, decided once and held for
+ * the reason the bind address is: the gate and the configs agents are
+ * started with must not disagree about it inside one process. The
+ * environment wins in both directions, `1` and `0`, over `access.json`.
+ */
+let loopbackHeld: boolean | null = null;
+
+export function loopbackTokenRequired(): boolean {
+  if (loopbackHeld === null) {
+    const env = process.env.KURURU_LOOPBACK_TOKEN;
+    loopbackHeld = env === "1" || env === "true" ? true : env === "0" || env === "false" ? false : load().loopbackToken === true;
+  }
+  return loopbackHeld;
+}
+
+/**
+ * What a pty the server opens is given on top of its own environment, so the
+ * agent in it can present the token: `KURURU_TOKEN`, while loopback wants
+ * one, and nothing otherwise. The hooks (`report-cli.ts`), `reload-window`,
+ * nvim's buffer hook and both MCP configs read it from there — the configs as
+ * `${KURURU_TOKEN}`, which Claude Code and Codex expand themselves, so the
+ * token is in no file and on no command line, where any user on the box
+ * could read it in `/proc`.
+ */
+export function tokenEnv(): Record<string, string> | undefined {
+  return loopbackTokenRequired() ? { KURURU_TOKEN: token() } : undefined;
 }
 
 /** What the socket is actually doing, which is what a client can rely on. */
@@ -153,14 +246,14 @@ export function sharing(): Sharing {
 export function setShare(share: boolean): Sharing {
   const current = load();
   access = { ...current, share };
-  writeConfigFile(FILE, access);
+  save(access);
   return sharing();
 }
 
 /** A fresh token, which is how "that phone is not mine any more" is expressed. */
 export function rotateToken(): Sharing {
   access = { ...load(), token: mint() };
-  writeConfigFile(FILE, access);
+  save(access);
   return sharing();
 }
 
@@ -255,16 +348,41 @@ export function originAllowed(req: IncomingMessage): boolean {
 
 export type Verdict = "ok" | "cross-origin" | "no-token";
 
+/** What the decision is made from, each found out once per request. */
+export interface GateFacts {
+  /** `originAllowed`: no page, or one of ours. */
+  origin: boolean;
+  /** The socket is bound somewhere other than loopback. */
+  shared: boolean;
+  /** The request came from this machine. */
+  loopback: boolean;
+  /** `loopbackTokenRequired`. */
+  loopbackToken: boolean;
+  /** It presented this server's token. */
+  token: boolean;
+}
+
 /**
  * The whole decision, in the order that makes the refusals mean something: a
  * page from somewhere else is refused whatever it presents, and a token is only
- * ever asked of somebody who is not on this machine.
+ * ever asked of somebody who is not on this machine — or, with the switch on,
+ * of everybody. Pure, which is what lets the test lay out every row.
  */
+export function decide(facts: GateFacts): Verdict {
+  if (!facts.origin) return "cross-origin";
+  if (facts.loopback) return !facts.loopbackToken || facts.token ? "ok" : "no-token";
+  if (!facts.shared) return "ok";
+  return facts.token ? "ok" : "no-token";
+}
+
 export function verdict(req: IncomingMessage, url: URL): Verdict {
-  if (!originAllowed(req)) return "cross-origin";
-  if (!isShared()) return "ok";
-  if (fromLoopback(req)) return "ok";
-  return hasToken(req, url) ? "ok" : "no-token";
+  return decide({
+    origin: originAllowed(req),
+    shared: isShared(),
+    loopback: fromLoopback(req),
+    loopbackToken: loopbackTokenRequired(),
+    token: hasToken(req, url),
+  });
 }
 
 /**

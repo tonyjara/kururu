@@ -33,6 +33,7 @@
  * the one that makes `/clear` empty the ring the moment it happens.
  */
 import { isAgentStatus } from "../../shared/model";
+import { tokenHeaders } from "../localtoken.mjs";
 import { asksNothing } from "./hooks";
 import { STANDARD_WINDOW, readContext } from "./transcript";
 
@@ -136,7 +137,8 @@ async function main(): Promise<void> {
   try {
     await fetch(`http://127.0.0.1:${port}/api/report`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      // The token for a server that wants it on loopback too; ignored by one that does not.
+      headers: { "content-type": "application/json", ...tokenHeaders() },
       body: JSON.stringify({ agent, status, context: context ?? undefined, message, transcript: path || undefined, inbox, reply }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });

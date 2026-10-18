@@ -9,6 +9,7 @@ import {
   matchDevCommand,
   parseListeners,
   parseProcTable,
+  parseSsListeners,
   resolveDevCommand,
   stopTargets,
 } from "../src/devservers";
@@ -74,6 +75,31 @@ describe("parseListeners", () => {
   it("drops ports that belong to the system, not to a project", () => {
     // 5432 is postgres; macOS itself holds 5000 and 7000.
     expect(parseListeners(sample).get(1238)).toBeUndefined();
+  });
+});
+
+/** The same reading off Linux's `ss -ltnpH`, which a child's box has where it has no `lsof`. */
+describe("parseSsListeners", () => {
+  const sample = [
+    'LISTEN 0      511          127.0.0.1:5173       0.0.0.0:*    users:(("node",pid=900,fd=23))',
+    'LISTEN 0      511              [::1]:5173          [::]:*    users:(("node",pid=900,fd=24))',
+    'LISTEN 0      244          127.0.0.1:5432       0.0.0.0:*    users:(("postgres",pid=1238,fd=7))',
+    'LISTEN 0      511                  *:3000             *:*    users:(("next-server (v1",pid=777,fd=22))',
+    "LISTEN 0      4096              [::]:22            [::]:*",
+  ].join("\n");
+
+  it("groups ports under the pid holding them, as lsof's reading does", () => {
+    const byPid = parseSsListeners(sample);
+    expect(byPid.get(900)).toEqual([5173]);
+    expect(byPid.get(777)).toEqual([3000]);
+  });
+
+  it("drops the same system ports, and the pid with nothing else", () => {
+    expect(parseSsListeners(sample).get(1238)).toBeUndefined();
+  });
+
+  it("is empty for an ss that printed nothing", () => {
+    expect(parseSsListeners("").size).toBe(0);
   });
 });
 

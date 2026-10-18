@@ -1,0 +1,50 @@
+# Typecheck and test on both systems kururu runs on.
+#
+# The Mac is where kururu was built and the release is made, and the release
+# workflow already refuses a tag that fails here. Linux is newer: a child
+# kururu (docs/plans/kururu-parent-child.md) is the same server on a box with
+# systemd, `ss` and no `lsof`, and nothing else in the repository would notice
+# a change that only breaks there. So every push runs both.
+#
+# Electron's download is skipped on both. Nothing under test imports it, and
+# a child never installs it; `desktop/brand.mjs` steps aside when there is no
+# bundle to stamp. node-pty has no Linux prebuild, so on Ubuntu its install
+# script compiles it with node-gyp, which the runner's toolchain covers.
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The server's runtime is node — Electron's 24 on the Mac, 24 or 26 on a
+      # child — and node-gyp builds node-pty against whichever is on the PATH.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test

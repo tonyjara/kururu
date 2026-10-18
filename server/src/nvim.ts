@@ -182,12 +182,22 @@ vim.api.nvim_create_autocmd({ "BufEnter", "BufWritePost", "BufFilePost" }, {
       path = path,
       filetype = vim.bo[ev.buf].filetype,
     })
-    vim.system({
+    local args = {
       "curl", "-s", "-m", "2", "-X", "POST",
       "-H", "content-type: application/json",
       "--data-binary", body,
       "http://127.0.0.1:${port}/api/nvim-buffer",
-    })
+    }
+    -- A server that wants its token on loopback too hands it to its ptys;
+    -- curl reads the header from stdin so it is on no command line.
+    local token = os.getenv("KURURU_TOKEN")
+    if token and token ~= "" then
+      table.insert(args, 2, "-H")
+      table.insert(args, 3, "@-")
+      vim.system(args, { stdin = "authorization: Bearer " .. token .. "\\n" })
+      return
+    end
+    vim.system(args)
   end,
 })
 -- Say where it is now, so a reader opened mid-session is not blank until the

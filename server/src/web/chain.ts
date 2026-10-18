@@ -132,6 +132,8 @@ export interface ChainOptions {
   clients(): number;
   /** This server's port, for the address agents are pointed at. */
   port(): number;
+  /** Whether agents' ptys carry `KURURU_TOKEN`, and so their configs must present it. Absent is no. */
+  tokenInPtys?(): boolean;
   now?: () => number;
 }
 
@@ -528,12 +530,13 @@ export class WebChain {
    */
   launchFlags(cli: AgentCli): string {
     if (!this.active()) return "";
-    if (cli === "codex") return ` ${codexWebFlags(this.options.port())}`;
+    const withToken = this.options.tokenInPtys?.() ?? false;
+    if (cli === "codex") return ` ${codexWebFlags(this.options.port(), withToken)}`;
     const path = join(stateDir(), LAUNCH_FILE);
     try {
       // Written now, because the port in it moves with the server.
       mkdirSync(stateDir(), { recursive: true });
-      writeFileSync(path, `${JSON.stringify(claudeWebConfig(this.options.port()), null, 2)}\n`, "utf8");
+      writeFileSync(path, `${JSON.stringify(claudeWebConfig(this.options.port(), withToken), null, 2)}\n`, "utf8");
       return ` --mcp-config=${quote(path)}`;
     } catch {
       return "";

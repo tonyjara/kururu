@@ -9,6 +9,7 @@
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { tokenHeaders } from "../localtoken.mjs";
 import { adoptBackupSettings, CONFIG_DIRS, CONFIG_FILES, EXCLUDED, type BackupStatus } from "../../shared/backup";
 import { Backup } from "./backup";
 import { configDir, readConfigFile } from "./config";
@@ -18,10 +19,15 @@ import { dataDir, dbPath, Store } from "./store";
 
 const PORT = Number(process.env.KURURU_PORT ?? 7717);
 
+/**
+ * Whether a server is answering, which any answer is: one that wants a token
+ * this command does not have is still a server holding the database, and
+ * running beside it would race it for the mirror.
+ */
 async function serverUp(): Promise<boolean> {
   try {
-    const response = await fetch(`http://127.0.0.1:${PORT}/api/health`, { signal: AbortSignal.timeout(1500) });
-    return response.ok;
+    await fetch(`http://127.0.0.1:${PORT}/api/health`, { headers: tokenHeaders(), signal: AbortSignal.timeout(1500) });
+    return true;
   } catch {
     return false;
   }
@@ -41,7 +47,7 @@ async function main(): Promise<void> {
     return;
   }
   if (await serverUp()) {
-    const response = await fetch(`http://127.0.0.1:${PORT}/api/backup/now`, { method: "POST" });
+    const response = await fetch(`http://127.0.0.1:${PORT}/api/backup/now`, { method: "POST", headers: tokenHeaders() });
     const status = (await response.json()) as BackupStatus & { error?: string | null };
     if (!response.ok) throw new Error(status.error ?? `the server answered ${response.status}`);
     if (status.error) throw new Error(status.error);

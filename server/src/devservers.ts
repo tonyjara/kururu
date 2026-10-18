@@ -9,7 +9,9 @@
  *
  * Two passes, both cheap and both over the whole machine at once: lsof for
  * pid → listening ports, ps for pid → argv. Cross-referencing them is what
- * turns "something is on :5173" into "vite, in ~/code/kururu".
+ * turns "something is on :5173" into "vite, in ~/code/kururu". On Linux the
+ * first pass is `ss -ltnp`, since a child's box has `ss` and need not have
+ * `lsof`; both come back as the same map (`listeners`).
  *
  * The port scan is machine-wide rather than per-agent, which is both a
  * limitation and a feature: a dev server you started in a plain terminal shows
@@ -17,6 +19,7 @@
  */
 import { execFile } from "node:child_process";
 import type { DevServer } from "../../shared/wire";
+import { parseSsTcp } from "../sockowner.mjs";
 import { processCwd } from "./cwd";
 
 /**
@@ -155,6 +158,20 @@ export function parseListeners(out: string): Map<number, number[]> {
     const ports = byPid.get(pid);
     if (!ports) byPid.set(pid, [port]);
     else if (!ports.includes(port)) ports.push(port); // same port on v4 and v6
+  }
+  return byPid;
+}
+
+/**
+ * `ss -ltnpH` into the same pid → ports, with the same ports left out. The
+ * reading itself is `sockowner.mjs`'s, beside the unix-socket one the tools
+ * use. Pure, for the test.
+ */
+export function parseSsListeners(out: string): Map<number, number[]> {
+  const byPid = new Map<number, number[]>();
+  for (const [pid, ports] of parseSsTcp(out)) {
+    const kept = ports.filter((port) => !IGNORED_PORTS.has(port));
+    if (kept.length) byPid.set(pid, kept);
   }
   return byPid;
 }
@@ -327,19 +344,29 @@ function run(cmd: string[]): Promise<string> {
 }
 
 /**
+ * Every listening TCP socket on the machine, or only `pid`'s: `lsof` on macOS,
+ * `ss` on Linux and `lsof` there when `ss` gave nothing — a box with neither
+ * finds no dev servers, which is what it always did without `lsof`.
+ */
+async function listeners(pid?: number): Promise<Map<number, number[]>> {
+  if (process.platform === "linux") {
+    const found = parseSsListeners(await run(["ss", "-ltnpH"]));
+    if (found.size) return pid === undefined ? found : new Map(found.has(pid) ? [[pid, found.get(pid)!]] : []);
+  }
+  const narrow = pid === undefined ? [] : ["-a", "-p", String(pid)];
+  return parseListeners(await run(["lsof", "-nP", ...narrow, "-iTCP", "-sTCP:LISTEN", "-F", "pn"]));
+}
+
+/**
  * Every dev server listening right now, lowest port first — ports are what the
  * user recognises ("the one on 5173"), so that is the sort.
  */
 export async function scanDevServers(self: Self): Promise<DevServer[]> {
-  const [lsofOut, psOut] = await Promise.all([
-    run(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pn"]),
-    run(["ps", "-eo", "pid=,ppid=,args="]),
-  ]);
-  const listeners = parseListeners(lsofOut);
+  const [listening, psOut] = await Promise.all([listeners(), run(["ps", "-eo", "pid=,ppid=,args="])]);
   const table = parseProcTable(psOut);
 
   const found: DevServer[] = [];
-  for (const [pid, ports] of listeners) {
+  for (const [pid, ports] of listening) {
     /**
      * Never kururu itself. The walk *up* the process tree is what makes this
      * necessary: the server is a bare `node dist/server.mjs` that nothing would
@@ -419,7 +446,7 @@ function signal(pids: number[], sig: NodeJS.Signals): { sent: number; denied: nu
  * in that time the server can have stopped and the pid, or the port, been taken
  * by something that is not a dev server at all. The narrow `lsof -p` is the
  * question "does this process still hold this port", asked of one process
- * instead of the machine.
+ * instead of the machine; `ss` has no such narrowing and is filtered after.
  *
  * SIGTERM first, because every dev server worth the name cleans up on it — vite
  * closes its watcher, next its workers — and then SIGKILL for whatever is still
@@ -432,11 +459,8 @@ export async function stopDevServer(
   pid: number,
   spare: (table: Map<number, ProcInfo>) => ReadonlySet<number>,
 ): Promise<number[]> {
-  const [lsofOut, psOut] = await Promise.all([
-    run(["lsof", "-nP", "-a", "-p", String(pid), "-iTCP", "-sTCP:LISTEN", "-F", "pn"]),
-    run(["ps", "-eo", "pid=,ppid=,args="]),
-  ]);
-  if (!parseListeners(lsofOut).get(pid)?.includes(port)) {
+  const [listening, psOut] = await Promise.all([listeners(pid), run(["ps", "-eo", "pid=,ppid=,args="])]);
+  if (!listening.get(pid)?.includes(port)) {
     throw new Error(`Nothing is serving :${port} from that process any more`);
   }
   const table = parseProcTable(psOut);
