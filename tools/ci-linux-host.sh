@@ -22,6 +22,13 @@
 # port and socket. CI only: it enables linger for the runner's user.
 set -euo pipefail
 
+# Never by hand: it enables linger and starts user units, and on a Mac it
+# would only reach for `sudo`.
+if [ "${CI:-}" != "true" ] || [ "$(uname -s)" != Linux ]; then
+  echo "tools/ci-linux-host.sh runs on a Linux CI runner only" >&2
+  exit 2
+fi
+
 K=/tmp/k2
 PORT=7817
 mkdir -p "$K"
