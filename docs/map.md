@@ -23,6 +23,7 @@ in this folder.
 | `store.ts` | The database's pure half: the keys a profile and a workspace are known by, a board change as events (`diffBoards`), a typed query as one FTS5 takes, the export's rows. See [data](data.md) |
 | `web.ts` | The web for agents, whatever provider answers: the chain's settings, what may be fetched, the calls checked, the one result shape, what counts as a failure (`resultVerdict`), pages wrapped as untrusted, the four tools' descriptions written from the chain's order, the launch flags, what a window is told. Pure, tested. See [web](web.md) |
 | `firecrawl.ts` | Firecrawl's API as two providers speak it: the key, the cloud's daily budget, request bodies, its answers read, a self-hosted address, `crawlNext`. Pure, tested |
+| `nodes.ts` | Every kururu as a node: the roster and its signature, `adoptRoster`, who dials and who leads, the pairing code, an address, the summary another node draws, `LinkHandshake` as a state machine. Pure, tested. See [nodes](nodes.md) |
 | `backup.ts` | What leaves the machine and what never does: the allow-list, the settings, the commit subject. See [data](data.md#backups) |
 | `days.ts` | Calendar days as strings, and the arithmetic over them. Why a card's date is not a timestamp |
 | `projects.ts` | What a repository has been told about itself, and how a card's worktree is named |
@@ -69,6 +70,8 @@ in this folder.
 | `src/export.ts` | The mirror: the database and the allowed config as a tree git can diff, and the tree read back for `restore` |
 | `src/backup.ts` | Every few minutes when something changed: mirror, commit, push to the user's private repository. Never forced |
 | `src/gitcmd.ts` | Running `git`, for the two files allowed to |
+| `src/nodes.ts` | `NodeHost`: pairing (`/api/nodes/enrol`, ahead of the gate), the roster taken and relayed, a link per pair (`/link`, ahead of the gate, proved by keys), pings and away, summaries pushed on change, the backup pull. See [nodes](nodes.md) |
+| `src/nodekeys.ts` | This node's Ed25519 and X25519 pairs and, on the parent, the roster's signing key, in `node.json` at `0600`. Never sent, never backed up |
 | `src/backup-cli.ts`, `src/restore-cli.ts` | `bun run backup` and `bun run restore` |
 | `src/share-cli.ts` | `bun run share`: the phone's link and the Share dialog's QR code, drawn in the terminal, for a server with no window to show them |
 | `src/lifecycle.ts` | Why this server started and why the last one stopped, appended to `lifecycle.log`: its own start and stops, crashes through `uncaughtExceptionMonitor`, the host as seen from outside, and whether its supervisor is still alive (`supervised()`). `/api/lifecycle` |

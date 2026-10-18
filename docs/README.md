@@ -16,6 +16,7 @@ The detail that used to be in `CLAUDE.md`. That file is now the operational brie
 | [channels.md](channels.md) | Talking to Kuru from Telegram: the allow-list and pairing, the token, long polling and what off means, what goes to the chat, and when a reply is not spoken |
 | [web.md](web.md) | The web for every agent kururu starts: four MCP tools on loopback behind an ordered chain of providers — our self-hosted Firecrawl, the hand-back to the agent's own tools, cloud Firecrawl — what counts as a failure, the keys never lent, the cloud's budget, untrusted pages, what leaves the machine, running one of your own, and how to add a provider |
 | [voice.md](voice.md) | Talking to the harness and hearing it: the talk key, on-device transcription through `yap`, Kokoro on the CPU, two languages, the phone's https problem |
+| [nodes.md](nodes.md) | The Mac and its children, linked: pairing by a code, the signed roster, one link per pair proved by keys, away by silence, the summaries every node draws, and the parent pulling a child's backup |
 | [linux.md](linux.md) | A child kururu: the headless server on a Linux box under systemd, the `kururu` command, its wizard and doctor, the unit, what a restart costs there, and the skill that walks an agent through it |
 | [packaging.md](packaging.md) | electron-builder, signing, notarizing, the updater, releases |
 | [gotchas.md](gotchas.md) | Errors that name something other than their cause |

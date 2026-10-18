@@ -389,6 +389,12 @@ argument that keeps `tailscale` commands out of kururu.
   the token is answered with the cookie, so the page's own bundle, fetched
   next with neither, is let in; the manifest is linked `use-credentials` for
   the same reason. Before, only a device that already had the cookie got in.
+- **Two routes are ahead of the gate, and only for other nodes**:
+  `/api/nodes/enrol`, whose token is the pairing code, and `/link`, which is
+  let in by a handshake signed with a key the roster lists. Neither takes a
+  share token, because no node holds another's. Both refuse an `Origin`, a
+  proxy's header, and any address off the tailnet and loopback
+  ([nodes](nodes.md#pairing)).
 - **The preview proxies bind the same address**, or kururu would be locked while
   the dev app beside it was not.
 - **The `Origin` header is checked, and that one is not about the network.** A
