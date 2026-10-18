@@ -1,0 +1,7 @@
+# Only the landing page in site/ is deployed to Vercel (project kururu-site,
+# root directory "site"); nothing else in the repository needs uploading, and
+# release/ alone is hundreds of megabytes of DMGs.
+/*
+!/site
+/site/node_modules
+/site/dist
