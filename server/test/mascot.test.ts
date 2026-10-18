@@ -303,6 +303,23 @@ describe("adopting one", () => {
     expect(adoptMascot({ ...DEFAULT_MASCOT, idle: null }).idle).toBeNull();
   });
 
+  it("keeps a clip for blocked and done when the sheet has one, and wears idle when it does not", () => {
+    const racer = adoptMascot({
+      ...DEFAULT_MASCOT,
+      blocked: { row: 2, col: 0, count: 2, cycle: 900 },
+      done: { row: 3, col: 0, count: 99, cycle: 880 },
+    });
+    expect(racer.blocked).toEqual({ row: 2, col: 0, count: 2, cycle: 900 });
+    // Clamped like every other clip, not refused.
+    expect(racer.done?.count).toBe(64);
+    // A file from before these existed meant "wear idle", which is null — not
+    // the default's idle clip copied into two more places.
+    const old = adoptMascot({ sheet: "green", working: DEFAULT_MASCOT.working, idle: DEFAULT_MASCOT.idle });
+    expect(old.blocked).toBeNull();
+    expect(old.done).toBeNull();
+    expect(adoptMascot({ ...racer, done: null }).done).toBeNull();
+  });
+
   it("refuses a sheet that is a path, since there is no nearest legal name", () => {
     expect(adoptMascot({ ...DEFAULT_MASCOT, sheet: "../secrets" }).sheet).toBe(DEFAULT_MASCOT.sheet);
   });

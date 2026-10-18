@@ -394,9 +394,11 @@ function SheetPicker({
  * same size as a jumping one. Null while it cannot answer.
  */
 function useTrim(src: string, mascot: MascotConfig): { x: number; y: number; size: number } | null {
-  const { frame, working, idle } = mascot;
+  const { frame, working, idle, blocked, done } = mascot;
   const [trim, setTrim] = useState<{ x: number; y: number; size: number } | null>(null);
-  const clips = useMemo(() => (idle ? [working, idle] : [working]), [working, idle]);
+  // Every clip the mascot has, the two Settings does not author included: a
+  // trim measured without the flag would crop the flag.
+  const clips = useMemo(() => [working, idle, blocked, done].filter((c): c is MascotClip => c !== null), [working, idle, blocked, done]);
   const key = useMemo(() => `${src}|${frame}|${clips.map((c) => `${c.row},${c.col},${c.count}`).join(";")}`, [src, frame, clips]);
 
   useEffect(() => {

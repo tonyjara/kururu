@@ -15,6 +15,13 @@
  * anything — which is the actual job. A mascot with no idle clip leaves those
  * states as the dot they always were, and the tooltip still names which one.
  *
+ * A mascot may also draw `blocked` and `done` a clip each, and then those two
+ * wear theirs instead of idle. That is not the old dots coming back: the badge
+ * still moves in every state, and what it gains is a picture per state where
+ * the sheet has one — a pit board, a chequered flag — rather than a colour.
+ * They are kept frozen rather than dropped to the dot under reduced motion,
+ * since frame one of a flag is still not frame one of anything else.
+ *
  * An idle animation that cannot animate falls back to the dot, and that rule is
  * here rather than in the stylesheet because it is a choice of *element*. Frozen
  * on frame one, a sitting frog and a crouching one are the same picture — so a
@@ -46,7 +53,8 @@ export function Status({ agent, mascot }: { agent: AgentSnapshot; mascot: Mascot
   const label = statusLabel(agent);
   const reduced = usePrefersReducedMotion();
   const still = mascot.motion === "never" || (mascot.motion === "system" && reduced);
-  const clip = state === "working" ? mascot.working : still ? null : mascot.idle;
+  const own = state === "blocked" ? mascot.blocked : state === "done" ? mascot.done : null;
+  const clip = state === "working" ? mascot.working : (own ?? (still ? null : mascot.idle));
   return (
     <span className={`status status-${state}`} title={label} aria-label={label} role="img">
       {clip ? <Mascot config={mascot} clip={clip} /> : <span className="status-dot" />}

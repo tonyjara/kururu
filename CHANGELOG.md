@@ -15,6 +15,17 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **Grand Prix and Paddock, a motor-racing pack in dark and light.** Settings →
+  Explore → Packs: carbon fibre or white garage walls, racing red, a kerb along
+  the top of the pane you are in, a chequer at each end of the status bar, and
+  a timing screen's colours for the agents — green while one works, purple when
+  it is done, flag yellow when it wants you. Its helmet mascot holds up a BOX
+  board when an agent is asking and waves a chequered flag when it has
+  finished, and its sound is five lights and a car going past.
+- **A mascot can draw a picture for "asking" and "done".** A mascot from the
+  registry may carry its own animation for those two states; every other mascot
+  wears its idle one as before.
+
 - **Stop Kuru from its drawer.** While Kuru works on a turn, a "Thinking…" line sits
   just above the chat box, in view however far up you have scrolled, with a
   **Stop** button that interrupts the turn as Esc in its terminal would. The line
