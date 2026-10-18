@@ -138,6 +138,16 @@
      had to answer for to give the same answer is a token that rots. */
   --bar-h: 38px;
 
+  /* The height of what a tab holds: the tallest of its status badge (16px,
+     `.status`), its label's line, and its close button (a 1.2em icon given
+     back 2px of its box). Stated once because three things are held to it —
+     every pane's strip, whatever is in it, the file tree's head and the
+     drawers' heads — and until it was, a strip with only its `+` in it was a
+     pixel and a half shorter than the one beside it with tabs, and the heads
+     beside them agreed with neither. Not a skin token, on `--bar-h`'s
+     reasoning: it is worked out from the skin's type, not chosen. */
+  --tab-row: max(16px, calc(1.4 * var(--fs-base)), calc(1.2 * var(--fs-base) + 2px));
+
   /* A board column's width: the one every column starts at, and the floor
      and the ceiling a drag is held to (`shared/board.ts`'s `LANE_WIDTH_MIN`
      and `LANE_WIDTH_MAX`, which this has to agree with by hand — one is the
@@ -2185,9 +2195,8 @@ a.machine-name:hover {
   border-color: transparent;
   font-family: var(--mono);
   font-size: var(--fs-base);
-  /* A tab's height is its close button's — a 1.2em icon in a 3px box, given
-     back 2px by its margin — so the title is held to that. */
-  min-height: calc(1.2em + 2px);
+  /* A tab's height — see `--tab-row` — so the title is held to that. */
+  min-height: var(--tab-row);
   box-sizing: content-box;
   color: var(--text);
   white-space: nowrap;
@@ -2553,6 +2562,9 @@ a.button {
   align-items: stretch;
   gap: 1px;
   padding: 3px 4px;
+  /* A tab's height and the strip's own padding and frame, so a strip is one
+     height whether it holds tabs or only its `+` — see `--tab-row`. */
+  min-height: calc(var(--tab-row) + 12px + 2 * var(--p-tab-w) + 2 * var(--p-tabstrip-w));
   /* Its own tone rather than the well's — see `--strip`. Two unfocused panes
      side by side would otherwise share one unbroken bar across the gutter
      between them, and the strip is the part of a pane that says where the pane
@@ -3112,10 +3124,12 @@ a.button {
   display: flex;
   align-items: center;
   gap: 6px;
-  /* Thin on a desktop, where it holds a count and the odd badge and nothing
-     is pressed; a thumb's height on a phone — see `--bar-h`. */
-  min-height: 26px;
-  padding: 3px 10px;
+  /* Thin on a desktop, where it holds the allowances, a count and the odd
+     badge; a thumb's height on a phone — see `--bar-h`. The ends are inset
+     further than the panes' gutter, so the rings and the count do not sit
+     on the window's edge. */
+  min-height: 30px;
+  padding: 3px 16px;
   /**
    * And clear of the home indicator, which `viewport-fit=cover` in `index.html`
    * otherwise lets this sit underneath — the bar is the bottom edge of the app,
@@ -3129,6 +3143,13 @@ a.button {
    */
   padding-bottom: max(3px, calc(env(safe-area-inset-bottom, 0px) - var(--keyboard, 0px)));
   background: var(--chrome);
+  /* The rule along its top, the whole width of the window, that says where
+     the panes and the drawers stop and the bar begins — both are the same
+     `--chrome`, and without it the bar reads as the well's bottom margin. A
+     shadow rather than a border because the skin owns this box's border, as
+     a frame (`--p-statusbar-frame`) and a width, and a theme's line under a
+     skin's picture is the one thing a skin cannot take off. */
+  box-shadow: inset 0 var(--border) 0 var(--line);
   font-size: var(--fs-base);
   color: var(--dim);
 }
@@ -3137,6 +3158,10 @@ a.button {
 }
 :root[data-narrow] .statusbar {
   min-height: var(--bar-h);
+  /* The old inset on a phone, whose bar has no pixel to spare: the wider one
+     cost the workspace's name its last letters. */
+  padding-left: 10px;
+  padding-right: 10px;
 }
 
 /* How many agents are running, across every profile, and how many of those
@@ -4136,6 +4161,46 @@ html.pill-page #root {
 }
 .kuru-head-spacer {
   flex: 1;
+}
+
+/* Beside the panes, the header is built to a tab strip's measurements so the
+   two read as one strip across the window: the same top as the panes' strips
+   (the well's gutter and the pane box's, the file tree's head's reckoning),
+   the same 3px above and below a row a tab's height, and so its rule lands on
+   the line where the strips end and the terminals begin. The row is held to a
+   tab's height by an empty, zero-width box of exactly that height
+   (`--tab-row`, a tab's padding and the skin's tab frame), so it follows the
+   skin's type the way the tabs do, and everything in it — stretched or
+   centred — is centred on the line the tabs are. A phone's sheet has no strip
+   beside it and keeps its own. */
+.kuru-drawer:not(.kuru-sheet) .kuru-head {
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding: calc(2 * var(--gutter) + 3px + var(--p-tabstrip-w)) 8px calc(3px + var(--p-tabstrip-w)) 12px;
+}
+.kuru-drawer:not(.kuru-sheet) .kuru-head::before {
+  content: "";
+  width: 0;
+  height: calc(var(--tab-row) + 6px + 2 * var(--p-tab-w));
+}
+.kuru-drawer:not(.kuru-sheet) .kuru-head .kuru-head-btn {
+  align-self: stretch;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.kuru-drawer:not(.kuru-sheet) .kuru-head .kuru-close {
+  align-self: stretch;
+  width: 24px;
+  height: auto;
+  border-radius: var(--radius-md);
+}
+/* With the sidebar away the panes start under the strip along the top, and
+   so does this — the file tree's head moves the same way. */
+.app-stage-top .kuru-drawer:not(.kuru-sheet) .kuru-head {
+  padding-top: calc(30px + 2 * var(--gutter) + 3px + var(--p-tabstrip-w));
+}
+.app-window.app-stage-top .kuru-drawer:not(.kuru-sheet) .kuru-head {
+  padding-top: calc(32px + 2 * var(--gutter) + 3px + var(--p-tabstrip-w));
 }
 .kuru-head-btn {
   display: inline-flex;
