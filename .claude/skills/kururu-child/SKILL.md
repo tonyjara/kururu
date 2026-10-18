@@ -156,6 +156,19 @@ by hint, and the setup's last step waits for the token when `--claude=lent`
 was the answer. Never ask the user to paste a key or a token to you, or into
 this box: the Mac sends it, sealed.
 
+## Reading the Telegram chat
+
+With the Mac's Telegram channel on, every paired kururu shares its one bot:
+the Mac reads the chat while it is awake, and this box takes it over when
+the Mac has been away for thirty seconds, then hands it back a minute after
+the Mac returns. For that this box needs the bot's token lent — the Mac's
+Settings → Nodes → <this box> → Secrets → **Telegram bot token** — and
+Claude signed in here. The doctor's `leading` row says whether it is
+eligible, why not, and whether it reads the chat now. It is optional and
+never a ✗: a box that cannot still speaks in the chat through the Mac. Never
+paste a bot token here, and never switch the channel on from this box: the
+switch and the accounts are the Mac's.
+
 ## Finishing
 
 When setup exits 0, the child is running. Then:

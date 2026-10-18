@@ -9,13 +9,14 @@ the child's own page says when the Mac went away. This is phase 2 of
 The Kurus talking to each other, phase 3, is [below](#kurus-as-peers), and so
 are lending secrets, phase 4 ([below](#lending-secrets)) — a project's own
 env files, ssh keys and GitHub login among them
-([below](#lending-a-projects-secrets)) — and moving a workspace, phase 6
-([below](#moving-a-workspace)). One Telegram is phase 5,
-and this file grows with it.
+([below](#lending-a-projects-secrets)) — moving a workspace, phase 6
+([below](#moving-a-workspace)), and one Telegram bot for every node, phase
+5 ([below](#one-telegram)).
 
 The code is `shared/nodes.ts` (the shapes and every rule, pure and tested),
-`server/src/nodekeys.ts` (the keys), `server/src/nodes.ts` (`NodeHost`) and
-`server/src/peerkuru.ts` (the Kurus).
+`server/src/nodekeys.ts` (the keys), `server/src/nodes.ts` (`NodeHost`),
+`server/src/peerkuru.ts` (the Kurus) and `server/src/lead.ts` (who reads
+the chat).
 
 ## Two words kept apart
 
@@ -23,10 +24,11 @@ The code is `shared/nodes.ts` (the shapes and every rule, pure and tested),
   node, removes one, renames one and sets the rank. A child can never add a
   member. A node becomes a parent the first time somebody adds a node from
   its Settings → Nodes; until then it is **alone**.
-- **The leader** is the highest-ranked node that is reachable, worked out by
-  each node from its own links (`leaderOf`). Rank is the parent's list, the
-  parent first by default, and draggable. In phase 2 leading means nothing
-  yet. Phase 5 hangs the Telegram poll on it.
+- **The leader** is the node that reads the Telegram chat for the others:
+  the highest-ranked one that can, among those each node can reach
+  (`LeadGate`, [below](#one-telegram)). Rank is the parent's list, the
+  parent first by default, and draggable. With no shared chat it is the
+  highest-ranked reachable node (`leaderOf`), and leads nothing.
 
 ## Pairing
 
@@ -523,9 +525,10 @@ anything.
   of the field: a value pasted there would be written over by the next push.
   The server refuses those setters for a held kind with the same sentence.
   The switch and the cloud Firecrawl's daily budget stay the child's own.
-- **A held Telegram token** cannot be switched on. The parent answers that
-  bot, and the child holds the token for phase 5's takeover while the parent
-  is away.
+- **A held Telegram token** cannot be switched on or off here: the switch and
+  the accounts are the parent's, carried in the roster. Holding it is what
+  lets the child read the chat for the others while the parent is away
+  ([below](#one-telegram)).
 - **A held Claude token** is set as `CLAUDE_CODE_OAUTH_TOKEN` on every
   terminal the child opens (`lentClaudeEnv` in `logins.ts`, read at each
   spawn, on a host with the `env` of protocol 2). It is the one credential
@@ -653,6 +656,126 @@ variables*, *vps · key vps_key (ed25519)*, *someone · …wxyz*), and
 `kururu child doctor`'s `secrets` row names them by hint too: `env …`,
 `ssh …`, `github …`.
 
+## One Telegram
+
+There is one bot and one chat for every node, and every node's Kuru speaks
+in it. Telegram lets one reader at a time hold a bot's `getUpdates` and
+answers a second with a 409, so one node reads the chat — **the leader** —
+and the others reach it through that node. The argument and the numbers
+are the plan's ([One Telegram](plans/kururu-parent-child.md#one-telegram));
+this is what was built.
+
+### What is shared, and with whom
+
+- **The settings ride in the roster.** The parent's switch, its switch time
+  and its allow-list, and which bot, go into the roster it signs
+  (`Roster.channels.telegram`) whenever they change on its Channels page. A
+  child judges every message by those, so only the parent can let an
+  account in or turn the chat off. The token is not in the roster: it is a
+  secret, lent on its own ([Kinds](#kinds)).
+- **Shared mode.** A node is in it when it is in a roster that carries the
+  channel, unless it is a child with a bot of its own pasted there — that
+  child keeps its own bot and chat, as before there were nodes. A child with
+  no token at all is still in it: its Kuru speaks in the chat through
+  whichever node reads it.
+- **Eligible to read the chat**: the channel is on, the node holds the
+  token (its own on the parent, lent on a child), and Claude is signed in
+  there (`leadEligibility` in `index.ts`). Each node says so in its summary
+  (`NodeSummary.lead`), with whether it reads the chat now. A kururu from
+  before says nothing, and is never counted as one that could.
+
+### Who reads it, and when that moves
+
+`LeadGate` in `shared/nodes.ts`, every node for itself, on its own links,
+with the times passed in:
+
+- **The highest-ranked eligible node among those it can reach** reads the
+  chat. One above that reads it already is left to it, even by a node that
+  was reading too (a split that healed).
+- **Taking over**: every eligible node above has been unheard for 30 s —
+  counted from this server's own start too, so a node that restarts gives
+  the links that long. The chat gets one line: *"Omarchy's Kuru is in
+  charge. The Mac has been away since 23:10."* A node that read the chat
+  when its server stopped carries on at once.
+- **Taking back**: a node that should lead and sees a lower one reading
+  waits for that link to be up for 60 s, then sends `lead-ask`. The holder
+  answers `lead-busy` while the user wrote in the chat in the last two
+  minutes or its Kuru is answering a chat message; it is asked again every
+  30 s, and after 10 min with `force`, which it does not refuse. Otherwise
+  it stops polling and answers `lead-state` with everything it knew — the
+  offset, the queue of lines going out, the messages held for nodes that
+  are away, the reply map, the last hundred message ids it passed on — and
+  the asker adopts it, acknowledges with `lead-ack`, and polls. The chat
+  gets *"The Mac's Kuru is back in charge."* Until the acknowledgement the
+  old holder keeps its copy aside, and puts it back if the link drops.
+- **A pairing** on the parent while a child reads the chat asks for it back
+  at once and with force: the code arrives through the poll.
+- **The 409**: two nodes that both read the chat are a split tailnet. The
+  one with an eligible node above it stands down for five minutes, the
+  highest retries after thirty seconds, and each says which in its log —
+  one line per 409.
+
+### Where a message goes
+
+`routeOf` in `shared/channels.ts`, on the node that reads the chat, after
+`judge` has let the message through:
+
+1. `@omarchy …` or `/omarchy …` at the very front, for a member's name
+   (`/omarchy@yourbot …` too) goes to that node's Kuru without the address.
+   `/compact` is still Kuru's slash command, unless a node is called
+   `compact`.
+2. A reply to one of a node's lines goes to that node, by the **reply map**:
+   every line sent is remembered by its chat and Telegram message id, as the
+   node whose line it was, the last 500.
+3. Anything else goes to the node reading the chat.
+
+A message for another node crosses as `telegram-in` and goes into that
+node's outbox under the same id, so it is typed into its Kuru as
+`[telegram] …` and its reply comes back the way every line does. The reader
+keeps it until `telegram-in-ack`; for a node that is away it is **held** —
+in the state the next holder is handed — and the chat is told once per
+absence: *"The Mac is away (since 23:10), so this waits for it and reaches
+its Kuru when it is back."* It goes the moment that node links, a day at
+most.
+
+### Every Kuru's lines
+
+A Kuru's reply, its `say` lines, a quiet echo of what the user typed or said
+at that node, and kururu's own "did not reach Kuru" warnings all go through
+`TelegramChannel.post`. On the node reading the chat they are queued and
+sent; on any other they are handed to it as `telegram-out`, kept on the node
+until `telegram-out-ack`, and handed again every 15 s and on every link that
+comes up — a line stuck on a node that cannot reach the reader waits there,
+for half a day. The reader marks each with the node it came from, by the
+link it arrived on: `[Omarchy] …`. The parent's lines carry no mark, so a
+chat with one kururu reads as it always did. A reply that answered only
+another node's Kuru (`ask_kuru`) is not posted (`postedToChat`): the asking
+Kuru says it in its own words.
+
+### What draws it
+
+- **Settings → Channels** lists the nodes by rank: which reads the chat now,
+  which could, and why not for the rest. On a child it is that list, the
+  switch as the parent set it, the token held from it, and *Talks to*.
+- **Settings → Nodes** marks the node that reads the chat as the leader.
+- **`kururu child doctor`** has a `leading` row: rank, eligible or why not,
+  and whether this box reads the chat now. Never a ✗.
+- **The role prompt**'s Telegram section says lines are marked by node and
+  which messages reach which Kuru.
+
+### The messages
+
+| message | from | what |
+|---|---|---|
+| `lead-ask {id, force}` | the node that should lead | hand the poll over |
+| `lead-busy {id, why}` | the holder | not now; asked again |
+| `lead-state {id, state}` | the holder | everything it knew, or `null` when it was not polling |
+| `lead-ack {id}` | the new holder | it has it; the old copy goes |
+| `telegram-in {id, at, text}` | the reader | the chat's words for this node's Kuru |
+| `telegram-in-ack {id}` | that node | in its outbox |
+| `telegram-out {id, at, text, silent, notice}` | any node | a line for the reader to post |
+| `telegram-out-ack {id}` | the reader | queued |
+
 ## Files
 
 | file | where | what |
@@ -668,6 +791,7 @@ variables*, *vps · key vps_key (ed25519)*, *someone · …wxyz*), and
 | `gh/` | config, `0700`, a child | a lent GitHub login: gh's `hosts.yml` and git's `git-credentials`, both `0600`; kururu's terminals are pointed at it. Never backed up |
 | `~/.ssh/kururu/` | home, `0700`, a child | lent ssh entries: each key, `.pub`, `.known_hosts` and `.conf`, brought in by one `Include` line at the top of `~/.ssh/config` |
 | a project's `.env*` | its checkout, `0600`, a child | a lent env file, at the path it has on the parent |
+| `telegram.json` | state, `0600` | the poll's place, and when the chat is shared: the held messages, the reply map, the handled ids, the lines on their way to the reader, and whether this node held the poll when it stopped. Never the token, which is in config |
 
 A `node.json` the server cannot read is left as it is, and nodes are off for
 that run. A new identity would be a member nobody enrolled.

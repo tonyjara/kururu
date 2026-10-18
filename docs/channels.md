@@ -25,6 +25,7 @@ its home.
 | The way out | `/api/report` → `Channels.replied` | Kuru's Stop report: the reply goes to every allowed account, whatever the turn answered — a `[kururu]` notice included. |
 | The page | `settings/Channels.tsx` | The switch at the top, then four steps, each ticked off as the server confirms it, with the controls inside them. |
 | The marks | `KuruDrawer.tsx`, `Search.tsx` | A turn from Telegram wears a paper plane and the word; search says "you, on Telegram". |
+| Among nodes | `server/src/lead.ts` | With other kururus linked: which node reads the chat (`LeadGate`), the handover between them, and the chat's words and every Kuru's lines crossing the links. See [nodes](nodes.md#one-telegram). |
 
 ## Who may talk to it
 
@@ -181,6 +182,17 @@ ask Kuru to read back to you while it is on. Bot
 chats are cloud chats, not end-to-end encrypted. Audio never does. With it
 off, nothing. The Settings page says this above the switch.
 
+## With other kururus
+
+Linked as [nodes](nodes.md), every kururu shares the parent's bot and chat:
+one node reads it at a time — the Mac while it is awake, the next by rank
+while it is away — and every Kuru speaks in it, each child's lines marked
+`[Omarchy] …`. `@omarchy` or `/omarchy` at the front of a message, or a
+reply to one of its lines, reaches that node's Kuru (`routeOf`). The
+switch, the switch time and the list ride in the roster, so they are set on
+the parent only; a child's page shows who reads the chat and why it can or
+cannot. All of it is [One Telegram](nodes.md#one-telegram).
+
 ## Adding a channel
 
 A kind in `CHANNEL_KINDS`, a prefix and a name beside it; its own module
@@ -198,7 +210,8 @@ string.
 - **One reader per token.** Two programs polling the same bot fight: each
   `getUpdates` ends the other with a 409. A restart under `bun run dev`
   makes one, harmlessly; a run of them means another kururu, or something
-  else, has the token — the page says so.
+  else, has the token — the page says so. Between linked nodes it is the
+  referee instead: rank decides who stands down ([nodes](nodes.md#who-reads-it-and-when-that-moves)).
 - **The isolated instance** wants `KURURU_TELEGRAM_API` pointed at a
   stand-in, or it talks to the real Telegram with whatever token you paste —
   see [testing](testing.md).
