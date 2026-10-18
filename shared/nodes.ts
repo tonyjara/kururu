@@ -378,7 +378,7 @@ export function validHostName(host: string): boolean {
 
 /**
  * What the user typed into "address" on the parent, as a host and a port:
- * `100.96.1.2`, `100.96.1.2:7717`, `omarchy1`, or the whole URL off the
+ * `100.96.1.2`, `100.96.1.2:7717`, `box1`, or the whole URL off the
  * child's Share page, query and all. Null for anything else.
  */
 export function parseNodeAddress(raw: unknown, defaultPort: number): { address: string; port: number } | null {
