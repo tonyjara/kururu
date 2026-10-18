@@ -180,3 +180,12 @@ describe("the tray menu", () => {
     expect(uptimeWords("00:40")).toBe("under a minute");
   });
 });
+
+describe("the nodes in the tray menu", () => {
+  it("offers each node by name, and greys one whose link is down with the reason", () => {
+    const view = { ...base, nodes: [{ id: "n1", name: "omarchy", why: null }, { id: "n2", name: "mac", why: "away since 23:10" }] };
+    expect(byId(view, "node:n1")).toEqual({ id: "node:n1", label: "    Open omarchy" });
+    expect(byId(view, "node:n2")).toEqual({ id: "node:n2", label: "    mac — away since 23:10", enabled: false });
+    expect(labels(base)).not.toContain("Nodes");
+  });
+});

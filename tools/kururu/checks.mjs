@@ -27,10 +27,13 @@ import { socketHolders } from "../../server/sockowner.mjs";
 import {
   atLeast,
   cgroupUnit,
+  formatCode,
   isHostUnit,
   keysInEnv,
   lanAddresses,
   lingerOn,
+  pairingRow,
+  pairingState,
   parseShowEnvironment,
   parseVersion,
   scanForKeys,
@@ -299,6 +302,72 @@ function token(ctx) {
 
 async function health(ctx, host = "127.0.0.1") {
   return get(`http://${host}:${ctx.port}/api/health`, token(ctx));
+}
+
+// --- pairing --------------------------------------------------------------------
+
+/**
+ * Show the pairing code and, when asked, wait for the Mac to take it — the
+ * one flow behind `kururu child code` and the wizard's pairing step.
+ *
+ * A code already showing with more than a minute left is shown again rather
+ * than replaced. That is what makes running it twice safe: a wizard stopped
+ * at this step and run again, or `child code --wait` after `child code`,
+ * must not burn the code the person is halfway through typing on the Mac.
+ *
+ * `wait` is milliseconds, capped at the code's own expiry; 0 shows and
+ * returns. Resolves to whether the child ended up paired and linked. Never
+ * prints the share token: the code is the only secret here, and it is good
+ * for ten minutes and five wrong tries.
+ */
+export async function pairWithParent(ctx, io, { wait }) {
+  const before = await health(ctx);
+  if (before.status !== 200) throw new Stop(`No server answers on :${ctx.port}${before.status ? ` (it said ${before.status})` : ""}. Set the child up first: kururu child setup`, { code: 1 });
+  const now = pairingState(before.body);
+  if (now.state === "unknown") throw new Stop("This server is from before pairing. Update it first: kururu child update", { code: 1 });
+  if (now.state === "parent") throw new Stop("This node is the parent of other nodes. It pairs them from its Settings → Nodes; it is not paired itself.", { code: 1 });
+  if (now.state === "linked") {
+    io.say(`Already paired with ${now.parent}, and linked. Nothing to do.`);
+    return true;
+  }
+  if (now.state === "waiting") io.say(`Paired with ${now.parent ?? "a parent"}, which is ${now.link}. A new code pairs it again, to the same Mac or another.`);
+
+  const headers = token(ctx) ? { authorization: `Bearer ${token(ctx)}` } : {};
+  const view = await get(`http://127.0.0.1:${ctx.port}/api/nodes`, token(ctx));
+  let shown = view.body?.pairing && view.body.pairing.expiresAt - Date.now() > 60_000 ? { ...view.body.pairing, address: view.body.self?.address, port: view.body.self?.port, name: view.body.self?.name } : null;
+  if (!shown) {
+    let response;
+    try {
+      response = await fetch(`http://127.0.0.1:${ctx.port}/api/nodes/code`, { method: "POST", headers, signal: AbortSignal.timeout(3000) });
+    } catch (err) {
+      throw new Stop(`The server did not answer the ask for a code: ${err?.cause?.code ?? err?.message ?? err}`, { code: 1 });
+    }
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body?.code) throw new Stop(body?.error ?? `The server refused a pairing code (${response.status}).`, { code: 1 });
+    shown = body;
+  }
+  if (!shown.address) throw new Stop("This box has no tailnet address, so the Mac could not reach it to pair. Bring the tailnet up (sudo tailscale up, yours to run), restart the server, and ask again.", { code: 4 });
+
+  const until = new Date(shown.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  console.log();
+  console.log(`    code     ${formatCode(shown.code)}`);
+  console.log(`    address  ${shown.address}:${shown.port}`);
+  console.log(`    name     ${shown.name}`);
+  console.log();
+  io.say(`On the Mac: Settings → Nodes → Add a node, then type the address and the code. The name is what the Mac will call this box, and can be changed there. The code is good until ${until}, for five wrong tries.`);
+  if (wait <= 0) return false;
+
+  io.say(`Waiting for the Mac${io.interactive ? " (Enter to stop waiting)" : ""}…`);
+  const deadline = Math.min(wait, shown.expiresAt - Date.now());
+  const linked = await io.waitFor(async () => pairingState((await health(ctx)).body).state === "linked", deadline);
+  const after = pairingState((await health(ctx)).body);
+  if (linked || after.state === "linked") {
+    io.say(`Paired with ${after.parent ?? "the Mac"}, and linked.`);
+    return true;
+  }
+  if (after.state === "waiting") io.say(`The Mac took the code, but the link to ${after.parent ?? "it"} is ${after.link} — it comes up by itself once the Mac can be reached; \`kururu child doctor\` says when.`);
+  else io.say(Date.now() >= shown.expiresAt ? "The code expired before the Mac took it. `kururu child code` shows a new one." : `Not paired yet. The code stays good until ${until}; \`kururu child code --wait\` goes on waiting for it.`);
+  return false;
 }
 
 // --- the steps ----------------------------------------------------------------
@@ -793,6 +862,54 @@ export const STEPS = [
       io.say("Waiting for the phone to open it (Enter to stop waiting)…");
       const seen = await io.waitFor(async () => Boolean((await health(ctx)).body?.clients?.remoteAt), 10 * 60_000);
       io.say(seen ? "The phone is in." : "No phone yet; `kururu share` shows the code again whenever you want it.");
+    },
+  },
+
+  {
+    id: "pairing",
+    title: "pairing with the Mac",
+    why: "Paired, the Mac's sidebar and Needs drawer show this box's workspaces and agents, its backups carry this box's boards, and this box's own page says when the Mac went away. It is optional: a child that stands alone works as it is. Pairing is a code this box shows and the person types into the Mac's Settings → Nodes, with this box's address beside it.",
+    /** Not paired is a `–`, so the wizard asks itself whether to offer — once: a no is kept. */
+    pending: (ctx, rows) => rows[0]?.state === "skip" && /not paired/.test(rows[0].detail ?? "") && ctx.saved.pair !== "no",
+    async check(ctx) {
+      const answer = await health(ctx);
+      return [pairingRow(answer.status === 200 ? answer.body : null)];
+    },
+    async repair(ctx, io, rows) {
+      if (rows[0]?.state === "fail") {
+        // Paired, and the parent is out of reach: nothing here can fix that,
+        // and a Mac that is asleep is not this box's to wake.
+        if (ctx.dryRun) return;
+        if (!io.interactive) throw new Stop(`${rows[0].detail}. The link comes back by itself once the Mac is awake and shared; run this again then. If the Mac removed this node, pair it again with \`kururu child code\`.`, { code: 4 });
+        io.say("Waiting a minute for the Mac (Enter to stop waiting)…");
+        await io.waitFor(async () => pairingState((await health(ctx)).body).state === "linked", 60_000);
+        return;
+      }
+      // Optional, so a run without a terminal and without --pair does not
+      // stop to ask: a child set up before pairing existed must still end
+      // "nothing to change". A yes is kept as well as a no, so a run stopped
+      // here to type the code on the Mac carries on from the code; it is
+      // cleared once the link is up, so a node the Mac later removes is
+      // asked again rather than stopped at.
+      if (!io.interactive && ctx.flags.pair === undefined && ctx.saved.pair !== "yes") {
+        io.say("Not paired, which is optional: `kururu child code` pairs it, or run this again with --pair=yes.");
+        return;
+      }
+      const answer = ctx.saved.pair === "yes" && ctx.flags.pair === undefined ? "yes" : await io.ask("Pair this child with the Mac now?", ["yes", "no"], "pair");
+      if (ctx.saved.pair !== answer) remember(ctx, { pair: answer });
+      if (answer !== "yes") {
+        io.say("Left standing alone. `kururu child code` pairs it whenever you want.");
+        return;
+      }
+      if (ctx.dryRun) {
+        io.say("would show a pairing code and this box's address, and wait for the Mac to take them");
+        return;
+      }
+      const linked = await pairWithParent(ctx, io, { wait: io.interactive ? 10 * 60_000 : 0 });
+      if (linked) remember(ctx, { pair: undefined });
+      if (!linked && !io.interactive) {
+        throw new Stop("Type the address and the code above into the Mac's Settings → Nodes → Add a node. Then run this again: the same code is shown, not a new one, for as long as it is good.", { code: 4 });
+      }
     },
   },
 ];

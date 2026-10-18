@@ -56,6 +56,7 @@ function undelivered(count) {
 /**
  * @param view  the runner's `view()` plus the app's own facts:
  *   `appVersion`, `packaged`, `windowOpen`, `talk` ({ on, status, altSpace }),
+ *   `nodes` ([{ id, name, why }], `why` null when it can be opened),
  *   `openAtLogin` ({ on, available, status })
  */
 function menuTemplate(view) {
@@ -128,6 +129,20 @@ function menuTemplate(view) {
     if (kuru.undelivered > 0) {
       items.push({ id: "kuru-failed", label: `${undelivered(kuru.undelivered)} to Kuru`, enabled: false });
       items.push({ id: "kuru-open", label: "    Open the conversation" });
+    }
+    items.push({ type: "separator" });
+  }
+
+  // --- the other kururus ----------------------------------------------------------
+  // Every member of the roster but this one, from the local server. One whose
+  // link is down stays in the list, greyed, with why: a Mac asleep is the
+  // node somebody looks for from a child, and a list without it would read
+  // as a node removed.
+  const nodes = view.nodes ?? [];
+  if (nodes.length) {
+    items.push({ id: "nodes", label: "Nodes", enabled: false });
+    for (const node of nodes) {
+      items.push(node.why ? { id: `node:${node.id}`, label: `    ${node.name} — ${node.why}`, enabled: false } : { id: `node:${node.id}`, label: `    Open ${node.name}` });
     }
     items.push({ type: "separator" });
   }

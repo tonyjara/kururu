@@ -9,12 +9,15 @@ import {
   atLeast,
   cgroupUnit,
   doctorExit,
+  formatCode,
   isHostUnit,
   keysInEnv,
   lanAddresses,
   lingerOn,
   parseArgs,
   parseShowEnvironment,
+  pairingRow,
+  pairingState,
   parseVersion,
   scanForKeys,
   settingsKeys,
@@ -208,5 +211,38 @@ describe("parseArgs", () => {
 
   it("never takes the next flag as a value", () => {
     expect(parseArgs(["--port", "--yes"], ["port"]).flags).toEqual({ port: true, yes: true });
+  });
+});
+
+describe("pairing", () => {
+  const health = (nodes: unknown) => ({ ok: true, nodes });
+  const child = (state: string, since: number | null = null) =>
+    health({ role: "child", name: "box", leader: null, nodes: [{ name: "mac", state, parent: true, since }, { name: "other", state: "up", parent: false, since: 1 }] });
+
+  it("shows a code as ABC-DEF, and anything else as it came", () => {
+    expect(formatCode("ABCDEF")).toBe("ABC-DEF");
+    expect(formatCode("ABC")).toBe("ABC");
+  });
+
+  it("reads where the node stands off the health answer", () => {
+    expect(pairingState({ ok: true })).toEqual({ state: "unknown" });
+    expect(pairingState(health({ role: "alone", nodes: [] }))).toEqual({ state: "alone" });
+    expect(pairingState(health({ role: "parent", nodes: [{}, {}] }))).toEqual({ state: "parent", count: 2 });
+    expect(pairingState(child("up"))).toEqual({ state: "linked", parent: "mac" });
+    expect(pairingState(child("away", 5))).toEqual({ state: "waiting", parent: "mac", link: "away", since: 5 });
+  });
+
+  it("is a – when not paired or the Mac is away, a ✓ when linked, and a ✗ only when the parent was never reached", () => {
+    expect(pairingRow(health({ role: "alone", nodes: [] })).state).toBe("skip");
+    expect(pairingRow(null).state).toBe("skip");
+    expect(pairingRow({ ok: true }).detail).toContain("kururu child update");
+    expect(pairingRow(child("up"))).toEqual({ title: "pairing", state: "ok", detail: "paired with mac, linked" });
+    const away = pairingRow(child("away", 1_000), 1_000 + 12 * 60_000);
+    expect(away.state).toBe("skip");
+    expect(away.detail).toContain("paired with mac, away for 12 min");
+    const never = pairingRow(child("connecting"));
+    expect(never.state).toBe("fail");
+    expect(never.detail).toBe("paired with mac, connecting");
+    expect(never.fix).toContain("Mac awake");
   });
 });
