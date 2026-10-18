@@ -332,6 +332,29 @@ export interface AccountUsage {
 }
 
 /**
+ * What the Codex account has spent, as Codex itself last wrote it down.
+ *
+ * Not asked of anybody. Codex records its rate limits in every session's
+ * rollout — the percentage of each window spent and when it resets, on each
+ * turn's token count — so this is read off the newest rollout on the disk and
+ * nothing leaves the machine for it; see `server/src/codexusage.ts`. The cost
+ * is that it is only as new as the last Codex turn on this Mac, which is why
+ * `at` is when Codex wrote it rather than when kururu read it, and a window
+ * whose reset has passed since is dropped rather than drawn at a figure that
+ * no longer applies.
+ *
+ * Null on the wire while Codex is not signed in here, which draws nothing.
+ */
+export interface CodexUsage {
+  /** The windows that have not reset since the reading — none, when they all have. */
+  limits: UsageLimit[];
+  /** When Codex recorded these, or null when no session has recorded any. */
+  at: number | null;
+  /** `plus`, `pro`… as Codex recorded it, or null. */
+  plan: string | null;
+}
+
+/**
  * One notification, composed by the server and ready to draw.
  *
  * The text is composed *there* and not here, and it is worth saying why, since
@@ -371,6 +394,7 @@ export type ServerMessage =
    * sidebar draws neither.
    */
   | { type: "usage"; usage: AccountUsage | null }
+  | { type: "codex-usage"; codex: CodexUsage | null }
   /**
    * Sent on connect, after every machine poll, and whenever the list changes:
    * every machine the sidebar watches, with its last reading. Whole, like

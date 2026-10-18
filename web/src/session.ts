@@ -28,6 +28,7 @@ import type { Action } from "../../shared/keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "../../shared/model";
 import type {
   AccountUsage,
+  CodexUsage,
   ClientMessage,
   DevServer,
   EditorChoice,
@@ -80,9 +81,11 @@ export interface KururuState {
   /**
    * What this machine's Claude account has spent. Null until a reading has
    * landed, which is not the same as a reading that says signed out — the
-   * sidebar draws neither, and only one of them is an answer.
+   * bottom bar draws neither, and only one of them is an answer.
    */
   usage: AccountUsage | null;
+  /** What the Codex account has spent, as Codex last wrote it down, or null while Codex is not signed in. */
+  codexUsage: CodexUsage | null;
   /** Every machine the sidebar watches, with its last reading. See `shared/machines.ts`. */
   machines: MachineStatus[];
   /** The OpenRouter account, or null when no key has been given. See `shared/openrouter.ts`. */
@@ -120,6 +123,7 @@ let state: KururuState = {
   branches: [],
   projects: [],
   usage: null,
+  codexUsage: null,
   machines: [],
   openrouter: null,
   web: null,
@@ -292,6 +296,9 @@ function connect(): void {
         break;
       case "usage":
         set({ usage: msg.usage });
+        break;
+      case "codex-usage":
+        set({ codexUsage: msg.codex });
         break;
       case "machines":
         set({ machines: msg.machines });

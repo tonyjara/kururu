@@ -220,6 +220,9 @@ The load-bearing invariants, one line each, with the argument behind the link:
   read at the moment of the fetch, never held, never logged, never on the wire —
   and no token refresh, because writing that store could log out a running agent
   to draw a bar. `server/src/usage.ts` is the only file that has seen it.
+  Codex's allowance beside it reaches nowhere: `server/src/codexusage.ts`
+  reads the `rate_limits` Codex writes into its own rollouts, and only stats
+  `auth.json` to know it is signed in.
 - **The OpenRouter key is one of the credentials kururu stores — a
   channel's bot token and the web providers' keys, below, are the others —
   and it only comes in.** A management key, pasted once in Settings, kept 0600 in

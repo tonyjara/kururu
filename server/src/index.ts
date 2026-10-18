@@ -87,6 +87,7 @@ import { processCwd, processCwds } from "./cwd";
 import { scanDevServers, stopDevServer } from "./devservers";
 import { readHead, repoAt } from "./git";
 import { pollUsage, usageSnapshot } from "./usage";
+import { codexUsageSnapshot, pollCodexUsage } from "./codexusage";
 import { clearOpenRouterKey, openRouterSnapshot, pollOpenRouter, setOpenRouterKey } from "./openrouter";
 // Every provider in web/providers/, each registering itself; the build makes this module from the directory.
 import "kururu:web-providers";
@@ -3880,6 +3881,11 @@ async function pollAccountUsage(): Promise<void> {
   // because a `/login` is the one thing that changes both.
   await refreshLogins();
   if (clients.size === 0) return;
+  // Codex's allowance on the same beat, though it is read off this disk and
+  // asks nobody: the profile's Codex home when profiles keep their logins, the
+  // machine's otherwise — the same rule as the Claude scope below.
+  const codexHome = loginsActive() ? codexDirFor(workspaces.active.loginKey) : null;
+  if (await pollCodexUsage(codexHome)) broadcast({ type: "codex-usage", codex: codexUsageSnapshot() });
   // The profile's own login when profiles keep them, because that is the
   // account its terminals are spending; otherwise whichever this machine was
   // signed into last, as before.
@@ -6406,6 +6412,7 @@ server.on("upgrade", (req, socket, head) => {
     send(ws, { type: "projects", projects: state.projects });
     send(ws, { type: "databases", databases: state.databases });
     send(ws, { type: "usage", usage: usageSnapshot() });
+    send(ws, { type: "codex-usage", codex: codexUsageSnapshot() });
     send(ws, { type: "machines", machines: machinesSnapshot() });
     send(ws, { type: "openrouter", openrouter: openRouterSnapshot() });
     send(ws, { type: "web", web: web.status() });

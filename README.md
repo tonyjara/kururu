@@ -312,8 +312,11 @@ Anything listening on this machine that looks like a dev server — `npm run dev
 works from the phone too. The section is folded by default; its heading says how
 many there are.
 
-The usage bars above it fold the same way: shut, you see the session's bar; open,
-every limit the account reports and whose account it is.
+The Claude and Codex allowances are at the left of the bottom bar: a gray mark
+and a ring for each window. Hover one (tap it on a phone) for the bars, when
+each resets, and whose account it is. Codex's figures are read from the
+sessions Codex itself records on this Mac, so they are as new as your last
+Codex turn here.
 
 ## Telling kururu what an agent is doing
 
@@ -495,7 +498,7 @@ into there last. Nothing is chosen: a profile is born with the name of its
 directory and keeps it through renames and restarts. Each profile starts as a
 fresh install of both tools — sign in, and set them up as you like; your
 `~/.claude` and `~/.codex` are never touched, and switching it off goes back to
-them. The usage bar follows the profile you are in. Deleting a profile leaves its
+them. The usage in the bottom bar follows the profile you are in. Deleting a profile leaves its
 directory where it is.
 
 The switch needs a pty host from this version. With an older one still running it

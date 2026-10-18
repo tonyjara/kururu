@@ -799,7 +799,6 @@ kbd {
    already says they are. They are small and fixed — three bars and a handful of
    links — so when the window is short they are the wrong place to find room;
    the list of agents is. */
-.side-usage,
 .side-openrouter,
 .side-machines,
 .side-dev {
@@ -1576,14 +1575,9 @@ kbd {
   color: var(--dim);
 }
 
-/* The account allowance, directly above the dev servers and pinned the same
-   way. Both sit under `.side-agents`, which is the section that grows, so the
-   two of them keep their height while the agent list takes what is left.
-
-   Above the dev servers rather than below because of what each one is for. A
-   dev server is a thing you go and click; this is a thing you notice. The
-   glance that matters happens on the way past, so it wants to be the last
-   section before the list you were actually reading, not the footer. */
+/* A list of bars: the allowances' in the bottom bar's popover (`Usage.tsx`),
+   and the OpenRouter and machine rows in the sidebar, which are drawn out of
+   the same parts so that two gauges that look alike mean alike. */
 .usage-list {
   list-style: none;
   margin: 0;
@@ -3289,6 +3283,119 @@ a.button {
   background: transparent;
   color: var(--blocked);
   font-weight: 500;
+}
+
+/* The Claude and Codex allowances at the bar's left end — see `Usage.tsx`.
+   A chip each: the gray mark, then a ring a window in the machines' ring
+   style, lit like the drawer chips while its bars are open. */
+.sb-usages {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.sb-usage {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.sb-usage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-md);
+  color: var(--dimmer);
+  font-size: var(--fs-sm);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.sb-usage-chip:hover,
+.sb-usage-on {
+  background: var(--chrome-high);
+}
+.sb-usage-mark {
+  display: inline-flex;
+  align-items: center;
+  color: var(--dimmer);
+  flex: none;
+}
+/* The bars, over the bar: the menu's box, opening upwards from the chip. */
+.usage-pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  width: 260px;
+  max-width: calc(100vw - 16px);
+  padding: 8px 0 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--chrome);
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elev-menu);
+  color: var(--text);
+  cursor: var(--cursor);
+}
+.usage-pop-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.usage-pop .usage-list {
+  padding-bottom: 0;
+}
+.usage-pop-empty {
+  padding: 0 12px;
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  color: var(--dim);
+}
+.usage-pop-foot {
+  padding: 0 12px;
+  font-size: var(--fs-xs);
+  color: var(--dimmer);
+  overflow-wrap: anywhere;
+}
+.sb-usage-fullest,
+.sb-usage-rest {
+  display: inline-flex;
+}
+/* A phone: the mark and the fullest window's ring alone, at a thumb's
+   height — a 390px bar with the toggle, the count and the thumb's four
+   buttons on it has room for one ring a chip — and the bars as a sheet
+   across the screen above the bar, since a box hung off a chip in the
+   middle of the bar would run off its edge. */
+:root[data-narrow] .sb-usage-chip {
+  height: 28px;
+  gap: 5px;
+  padding: 0 6px;
+}
+:root[data-narrow] .sb-usage-rest,
+:root[data-narrow] .sb-usage-chip .gauge-ring-label,
+:root[data-narrow] .sb-usage-chip .gauge-ring-pct {
+  display: none;
+}
+:root[data-narrow] .sb-usages {
+  flex: none;
+}
+/* The count's word goes on a phone too; the figure and the dot stay, and
+   the title says it in full. */
+:root[data-narrow] .sb-agents-word {
+  display: none;
+}
+:root[data-narrow] .usage-pop {
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  width: auto;
+  bottom: calc(var(--bar-h) + var(--keyboard, 0px) + 8px + env(safe-area-inset-bottom, 0px));
 }
 
 /* The two chips, which travel together — see `DrawerChips.tsx`. Out of the

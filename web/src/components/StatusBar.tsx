@@ -12,9 +12,11 @@
  * the tree is `C-a e` and a line in every pane's menu.
  *
  * **Everything on it stands at the right**, and whatever is added later goes
- * there too: the left end is empty on a desktop on purpose, so the bar reads
- * as one cluster against the edge the drawers open from rather than a row of
- * odd bits spread across the window.
+ * there too, so the bar reads as one cluster against the edge the drawers open
+ * from rather than a row of odd bits spread across the window. The one
+ * exception is the Claude and Codex allowances, at the left since they came
+ * down from the sidebar on 2026-10-18 (`Usage.tsx`): a pair of a different
+ * kind, whose bars open upwards over the panes rather than the drawers.
  *
  * What it holds is the count of agents that are running, across every profile,
  * by the rule `/api/health` and `bun run status` count by (`countsAsAgent`), so
@@ -37,6 +39,7 @@
  */
 import type { ReactNode } from "react";
 import { countsAsAgent, type AgentSnapshot } from "../../../shared/model";
+import { UsageChips } from "./Usage";
 
 interface Props {
   agents: readonly AgentSnapshot[];
@@ -92,6 +95,10 @@ export function StatusBar({
   return (
     <footer className="statusbar">
       {toggle}
+      {/* The allowances, the one thing at the left on a desktop: whose they
+          are and a ring a window, the bars on a hover or a tap. See
+          `Usage.tsx`. */}
+      <UsageChips />
       <span className="sb-spacer" />
 
       {prefixArmed && <span className="sb-badge sb-prefix">PREFIX</span>}
@@ -109,7 +116,7 @@ export function StatusBar({
       >
         <span className="sb-agents-dot" aria-hidden="true" />
         <span className="sb-agents-n">{running.length}</span>
-        <span>{running.length === 1 ? "agent" : "agents"}</span>
+        <span className="sb-agents-word">{running.length === 1 ? "agent" : "agents"}</span>
         {working > 0 && <span className="sb-agents-busy">· {working} working</span>}
       </span>
 

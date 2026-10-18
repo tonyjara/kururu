@@ -56,7 +56,7 @@ import type {
   Workspace,
 } from "../../../shared/model";
 import { defaultMascot, mascotFor, workspaceUnits } from "../../../shared/model";
-import type { AccountUsage, DevServer, GitAction, RepoGit } from "../../../shared/wire";
+import type { DevServer, GitAction, RepoGit } from "../../../shared/wire";
 import { formatBytes as formatSize, machineSeverity, type MachineStatus, type MachineUsed } from "../../../shared/machines";
 import {
   balanceOf,
@@ -72,13 +72,13 @@ import { agentLabel, agentSummary, remoteHost, remoteNote, shortenPath } from ".
 import { previewLabel, previewUrl } from "../preview";
 import * as api from "../session";
 import { useKururu } from "../session";
-import { limitLabel, limitMarks, limitTitle, resetIn, staleTitle } from "../usage";
 import { showCardNext } from "./Board";
 import { Menu, Popover, type MenuItem } from "./Menu";
 import type { DialogState } from "./Dialog";
 import { Icon } from "./Icon";
 import { MadeLinks } from "./MadeLinks";
 import { Mascot, Status } from "./Status";
+import { GaugeRing } from "./Usage";
 
 /**
  * How far the pointer may travel between `dragstart` and `dragend` for the
@@ -1309,10 +1309,9 @@ export function Sidebar({
         )}
       </section>
 
-      {/* The usage rings and the machines' first, because both are rows of
-          the same rings and read as one column of them; then OpenRouter's
-          balance, which is words. */}
-      <Usage />
+      {/* The machines' rings, then OpenRouter's balance, which is words. The
+          Claude and Codex allowances were a section here and are the bottom
+          bar's since 2026-10-18 — see `Usage.tsx`. */}
       <Machines />
       <OpenRouter />
       <DevServers />
@@ -1680,148 +1679,6 @@ function format(tokens: number): string {
 }
 
 /**
- * How much of this profile's Claude allowance is gone, as a bar per limit.
- *
- * It fills rather than drains, which is the one decision in here worth arguing
- * because it went the other way first. Every other measure in this window
- * climbs — the context ring on an agent row, and the figure `/usage` prints in
- * the terminal directly above this bar — and the two are read one after the
- * other. A reader who has just parsed a ring at 80% as "nearly out" should not
- * have to invert the next gauge to learn it means the same thing, and the
- * half-second that inversion takes is the whole of the glance this section is
- * for.
- *
- * The case for draining was that "how much have I got left before it stops" is
- * the question somebody actually asks, which is true and is why the figure
- * beside the bar and the tooltip on it both still answer it in words. Words can
- * carry the question; the shape carries the comparison.
- *
- * The colour is the *account's* severity, not a threshold kururu picked. Three
- * bands invented here would be three bands that disagree with the warning Claude
- * Code prints in the terminal directly above this bar.
- */
-function Usage() {
-  const { usage } = useKururu();
-  /**
-   * A tick, only so the countdowns move. The numbers themselves arrive on their
-   * own push once a minute; what goes stale between pushes is the *sentence*
-   * next to them — "resets in 2h 14m" is wrong thirty seconds later, and a
-   * reader who catches it disagreeing with the clock stops trusting the bar.
-   * Local to this component so the agent list does not re-render for it.
-   */
-  const [, tick] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => tick((n) => n + 1), 30_000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const [open, toggle] = useDisclosure("kururu.sidebar.usage", false);
-
-  const account = usage;
-  // Nothing known, or no login on this machine. Both draw nothing: a machine
-  // with no readable Claude login is not in an error state, it is one with
-  // nothing to say, and a row explaining that would be noise on every window.
-  if (!account || account.signedOut || account.limits.length === 0) return null;
-
-  return (
-    <section className="side-section side-usage">
-      <h2>
-        <SectionToggle open={open} onToggle={toggle} label="Usage">
-          {/* The staleness mark, which is the whole of the offline handling.
-              The bars keep their last numbers — see `AccountUsage.stale` for
-              why blanking them is worse — and this is the one thing that says
-              those numbers are not from now. */}
-          {account.stale && <span className="usage-stale" title={staleTitle(account.at)}>·</span>}
-        </SectionToggle>
-      </h2>
-      {/* Shut, every limit as a ring on one line, the machine row's shape. It used
-          to be the session's bar alone, on the argument that the weeks move by
-          a percent an afternoon; but a ring is small enough that the weeks cost
-          nothing to keep in view, and the week is the one that ends an
-          afternoon outright when it runs out. The reset countdowns go to the
-          tooltips — open is where they are read. */}
-      {open ? (
-        <ul className="usage-list">
-          {account.limits.map((limit) => (
-            <li key={`${limit.kind}:${limit.scope ?? ""}`} className="usage-item">
-              <span className="usage-head">
-                <span className="usage-name">{limitLabel(limit)}</span>
-                {/* "97%" alone is read as 97% *left* about as often as not, and
-                    the two readings are three percent apart at one end of the bar
-                    and ninety-four at the other. The word is four characters and
-                    removes the question. */}
-                <span className="usage-used">{Math.round(limit.percent)}% used</span>
-              </span>
-              <span
-                className="usage-bar"
-                role="meter"
-                aria-label={`${limitLabel(limit)} used`}
-                aria-valuenow={Math.round(limit.percent)}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                title={limitTitle(limit)}
-              >
-                <span
-                  className="usage-fill"
-                  data-severity={limit.severity}
-                  style={{ width: `${limit.percent}%` }}
-                />
-              </span>
-              {limit.resetsAt && <span className="usage-reset">{resetIn(limit.resetsAt)}</span>}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <ul className="usage-list">
-          <UsageRings account={account} />
-        </ul>
-      )}
-      {/* Whose allowance this is. With more than one Claude login on the
-          machine the bars are for whichever was signed into last — or, with
-          logins kept per profile, for the profile on screen — and two
-          accounts' percentages are otherwise indistinguishable. */}
-      {open && account.email && (
-        <p className="usage-account" title={account.email}>
-          {account.email}
-        </p>
-      )}
-    </section>
-  );
-}
-
-/**
- * The shut usage row: whose allowance on the left, a ring per limit on the
- * right. Named "Claude" rather than left blank because the heading already says
- * "Usage", and what the row has to add is which account it is — the email is
- * the name's tooltip, as the host is a machine name's.
- */
-function UsageRings({ account }: { account: AccountUsage }) {
-  const marks = limitMarks(account.limits);
-  return (
-    <li className="gauge-item">
-      <span className="gauge-name" title={account.email ?? undefined}>
-        Claude
-      </span>
-      <span className="gauge-rings">
-        {account.limits.map((limit, i) => {
-          const reset = limit.resetsAt ? resetIn(limit.resetsAt) : "";
-          return (
-            <GaugeRing
-              key={`${limit.kind}:${limit.scope ?? ""}`}
-              label={limitLabel(limit)}
-              mark={marks[i] ?? ""}
-              percent={limit.percent}
-              severity={limit.severity}
-              title={`${limitLabel(limit)}${reset ? ` — ${reset}` : ""}\n${limitTitle(limit)}`}
-            />
-          );
-        })}
-      </span>
-    </li>
-  );
-}
-
-/**
  * The OpenRouter account: what is left, and how fast it is going.
  *
  * Words rather than a bar, which is the departure from the two sections either
@@ -2046,52 +1903,6 @@ function MachineRing({ label, percent, figure }: { label: string; percent: numbe
       severity={machineSeverity(percent)}
       title={`${label} ${rounded}% used${figure && figure !== `${rounded}%` ? ` — ${figure}` : ""}`}
     />
-  );
-}
-
-/**
- * One figure as a ring, the context ring's shape: the shut form of a bar, for a
- * machine row and the usage row alike. The mark is a letter beside it rather than a
- * word, because three words and three rings do not fit beside a name in a
- * sidebar; the tooltip carries the whole sentence.
- */
-function GaugeRing({
-  label,
-  mark,
-  percent,
-  severity,
-  title,
-}: {
-  label: string;
-  mark: string;
-  percent: number;
-  severity: string;
-  title: string;
-}) {
-  const circumference = 2 * Math.PI * 5;
-  const rounded = Math.round(percent);
-  return (
-    <span
-      className="gauge-ring"
-      role="meter"
-      aria-label={`${label} used`}
-      aria-valuenow={rounded}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      title={title}
-    >
-      <svg className="ring" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" data-severity={severity}>
-        <circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" strokeWidth="2" opacity="0.2" />
-        <circle
-          cx="7" cy="7" r="5" fill="none" stroke="currentColor" strokeWidth="2"
-          strokeDasharray={`${(percent / 100) * circumference} ${circumference}`}
-          transform="rotate(-90 7 7)"
-          strokeLinecap="round"
-        />
-      </svg>
-      <span className="gauge-ring-label">{mark}</span>
-      <span className="gauge-ring-pct">{rounded}%</span>
-    </span>
   );
 }
 
