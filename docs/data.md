@@ -192,7 +192,8 @@ profile's Claude login. The files that go are named by name, and anything not na
 | `README.md` | what this is and how `bun run restore` uses it |
 | `nodes/<name>/` | each paired child's own mirror, the same tree, pulled over its link when its data moved ([nodes](nodes.md#backups)); `bun run restore <repo> --node <name>` reads it back onto a fresh child |
 
-Never: `access.json`, `openrouter.json`, `telegram.json`, `node.json`, `nodes.json`, `identities/`, `.claude.json`,
+Never: `access.json`, `openrouter.json`, `telegram.json`, `node.json`, `nodes.json`, the lent secrets' records
+(`grants.json`, `secrets-held.json`, `claude-lend.json`, `claude-token.json`), `identities/`, `.claude.json`,
 `history.jsonl`, the transcripts, every cache, the database binary (git
 keeps a whole copy per change; the text rebuilds it), and agents' replies.
 Secrets are left out rather than encrypted: an encrypted blob on GitHub is a

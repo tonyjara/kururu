@@ -199,6 +199,34 @@ export function LendLogin({ profileId, profileName, perProfile }: { profileId: s
     api.openClaudeLend(profileId).catch((err: unknown) => setError(errorText(err)));
   };
   const labelOf = (login: string) => (login === "machine" ? "this Mac's login" : `login ${login}`);
+  // Inside step 2 until a token is kept, then under the steps: a done step
+  // folds to its title, and this is how a token is replaced or forgotten.
+  const field = (
+    <>
+      <KeyRow
+        label="Token"
+        placeholder="sk-ant-oat01-…"
+        ariaLabel="The token claude setup-token printed"
+        stored={mine ? { hint: `${mine.hint}${mine.account ? ` · ${mine.account}` : ""}`, tone: "ok", text: labelOf(mine.login) } : null}
+        hint={
+          <>
+            Kept in <Mono>~/.config/kururu/claude-lend.json</Mono>, readable only by you, never sent to a window, never backed up, and sent to no node until it is
+            switched on for one.
+          </>
+        }
+        onSave={(token) => api.lendClaude(profileId, token)}
+        removeAsk="Forget the token here? A node holding it keeps it until it is switched off for that node."
+        onRemove={() => {
+          if (mine) void api.unlendClaude(mine.login);
+        }}
+      />
+      {others.map((lend) => (
+        <Row key={lend.login} label={labelOf(lend.login)} hint={`${lend.hint}${lend.account ? ` · ${lend.account}` : ""} · another profile's`}>
+          <DangerButton label="Forget" ask="Forget this token here? A node holding it keeps it until it is switched off for that node." onConfirm={() => void api.unlendClaude(lend.login)} />
+        </Row>
+      ))}
+    </>
+  );
 
   return (
     <Group
@@ -219,33 +247,13 @@ export function LendLogin({ profileId, profileName, perProfile }: { profileId: s
           </Details>
         </Step>
         <Step n={2} done={mine !== null} title="Paste it here">
-          <KeyRow
-            label="Token"
-            placeholder="sk-ant-oat01-…"
-            ariaLabel="The token claude setup-token printed"
-            stored={mine ? { hint: `${mine.hint}${mine.account ? ` · ${mine.account}` : ""}`, tone: "ok", text: labelOf(mine.login) } : null}
-            hint={
-              <>
-                Kept in <Mono>~/.config/kururu/claude-lend.json</Mono>, readable only by you, never sent to a window, never backed up, and sent to no node until it is
-                switched on for one.
-              </>
-            }
-            onSave={(token) => api.lendClaude(profileId, token)}
-            removeAsk="Forget the token here? A node holding it keeps it until it is switched off for that node."
-            onRemove={() => {
-              if (mine) void api.unlendClaude(mine.login);
-            }}
-          />
-          {others.map((lend) => (
-            <Row key={lend.login} label={labelOf(lend.login)} hint={`${lend.hint}${lend.account ? ` · ${lend.account}` : ""} · another profile's`}>
-              <DangerButton label="Forget" ask="Forget this token here? A node holding it keeps it until it is switched off for that node." onConfirm={() => void api.unlendClaude(lend.login)} />
-            </Row>
-          ))}
+          {mine === null && field}
         </Step>
         <Step n={3} done={Object.values(secrets.grants).some((grants) => grants.some((g) => g.on && kindOf(g.kind)?.family === "claude-token"))} title="Switch it on for the node">
           <Row label="" hint="Settings → Nodes, under the node's Secrets: Claude login, as a token." />
         </Step>
       </Steps>
+      {mine !== null && field}
     </Group>
   );
 }

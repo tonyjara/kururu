@@ -5,8 +5,9 @@ host and the same web app, built from the same checkout. It has no window and
 no voice, runs as a systemd user unit, and is reached by a phone over the
 tailnet. It keeps its agents working while the Mac's lid is closed. A child
 works alone, and can be paired with the Mac (phase 2): the Mac then draws its
-workspaces and agents, counts its asks, and backs up its boards. One drawer for
-every Kuru, secrets lent from the Mac and one Telegram are phases 3–6 of
+workspaces and agents, counts its asks, and backs up its boards, and can lend
+it keys (phase 4, [nodes](nodes.md#lending-secrets)). One drawer for every
+Kuru and one Telegram are phases 3 and 5 of
 [the plan](plans/kururu-parent-child.md#phases-as-cards).
 
 This file covers the `kururu` command, its wizard and doctor, pairing from the

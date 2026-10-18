@@ -585,6 +585,15 @@ describe("a parent lending to a child", () => {
     expect(grantView("codex-auth:machine")?.error).toMatch(/Codex login of its own/);
   });
 
+  it("lists a Codex login by its being there, and reads it only once it is lent", () => {
+    as("parent", () => {
+      mkdirSync(process.env.CODEX_HOME!, { recursive: true });
+      writeFileSync(join(process.env.CODEX_HOME!, "auth.json"), JSON.stringify({ tokens: { refresh_token: "parents" } }));
+    });
+    start(parent, () => child);
+    expect(as("parent", () => parent.secrets!.view().catalogue.find((c) => c.kind === "codex-auth:machine")?.hint)).toBe("signed in");
+  });
+
   it("puts a Codex login where there is none, and removes only that", () => {
     as("parent", () => {
       mkdirSync(process.env.CODEX_HOME!, { recursive: true });
@@ -601,6 +610,22 @@ describe("a parent lending to a child", () => {
     as("parent", () => parent.secrets!.grant(child.id, "codex-auth:machine", false));
     flush();
     expect(existsSync(path)).toBe(false);
+  });
+
+  it("forgets a removed node's grants, so joining again starts from nothing", () => {
+    parentFile("openrouter.json", { managementKey: OPENROUTER });
+    start(parent, () => child);
+    start(child, () => parent);
+    linkUp();
+    as("parent", () => parent.secrets!.grant(child.id, "openrouter", true));
+    flush();
+    const entry = child.entry;
+    // Removed: the roster no longer lists it.
+    child.entry = { ...entry, id: "n0000000000ff" };
+    as("parent", () => parent.secrets!.lookNow());
+    expect(JSON.parse(readFileSync(join(root, "parent", "config", "grants.json"), "utf8")).nodes).toEqual({});
+    child.entry = entry;
+    expect(as("parent", () => parent.secrets!.view().grants[child.id])).toBeUndefined();
   });
 
   it("lets go of everything when it leaves the roster, and on a start with no parent", () => {

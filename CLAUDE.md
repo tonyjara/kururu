@@ -220,8 +220,25 @@ The load-bearing invariants, one line each, with the argument behind the link:
   files, the boards and the harness conversation as text, the memory folders —
   and anything not named stays: the share token, the OpenRouter key, the
   Telegram bot token, the web providers' keys, `identities/`, every login,
-  a node's keys and the roster (`node.json`, `nodes.json`). Never `--force`, never a rewrite; a push the
+  a node's keys and the roster (`node.json`, `nodes.json`), and the lent
+  secrets' records (`grants.json`, `secrets-held.json`, `claude-lend.json`,
+  `claude-token.json`). Never `--force`, never a rewrite; a push the
   remote refuses stops and says so. → [data](docs/data.md#backups)
+- **A secret leaves the Mac only sealed, to a node it was lent to.** One
+  switch per child per kind in Settings → Nodes, off by default.
+  `shared/secrets.ts` names the kinds and which part of each file travels
+  (Telegram's token, never its switch); `NEVER_SHARED` names the files that
+  never go (the share token, the nodes' and the roster's keys), and a test
+  holds every `0600` write in the server to one list or the other. A push
+  is sealed to the child's X25519 key and signed by the parent's node key
+  (`server/src/seal.ts`). The child takes it only from its parent, writes it
+  as the same file the readers already read, refuses a held kind's setters,
+  and lets go of everything when it leaves the roster. A lent Claude token
+  is the one credential put in a pty's environment, as
+  `CLAUDE_CODE_OAUTH_TOKEN` (`lentClaudeEnv`), never a copied
+  `.credentials.json`; a Codex login is read only once it is switched on for
+  a node, copied once, and never written over the child's own. Hints only to a client, on both nodes, and no value in
+  a log. → [nodes](docs/nodes.md#lending-secrets)
 - **The usage bar reads a Claude credential and never writes one** — the
   machine's, or the active profile's when profiles keep their own logins. It is
   one of the few things in kururu that reach off the machine on the user's
@@ -235,7 +252,8 @@ The load-bearing invariants, one line each, with the argument behind the link:
   `auth.json` to know it is signed in.
 - **The OpenRouter key is one of the credentials kururu stores — a
   channel's bot token and the web providers' keys, below, are the others —
-  and it only comes in.** A management key, pasted once in Settings, kept 0600 in
+  and it only comes in, or goes out sealed to a node it is lent to.** A
+  management key, pasted once in Settings, kept 0600 in
   `~/.config/kururu/openrouter.json`, read per fetch and used for GETs only.
   A client is sent its `hint` and dollars, never the key. →
   `shared/openrouter.ts`

@@ -24,6 +24,7 @@ in this folder.
 | `web.ts` | The web for agents, whatever provider answers: the chain's settings, what may be fetched, the calls checked, the one result shape, what counts as a failure (`resultVerdict`), pages wrapped as untrusted, the four tools' descriptions written from the chain's order, the launch flags, what a window is told. Pure, tested. See [web](web.md) |
 | `firecrawl.ts` | Firecrawl's API as two providers speak it: the key, the cloud's daily budget, request bodies, its answers read, a self-hosted address, `crawlNext`. Pure, tested |
 | `nodes.ts` | Every kururu as a node: the roster and its signature, `adoptRoster`, who dials and who leads, the pairing code, an address, the summary another node draws, `LinkHandshake` as a state machine. Pure, tested. See [nodes](nodes.md) |
+| `secrets.ts` | The secrets the parent lends a child: the kinds (what part of which file travels, its hint, where it lands), the envelope's header, grant states and `plan`, the one rule for what to push and take back, and `NEVER_SHARED`. Pure, tested. See [nodes](nodes.md#lending-secrets) |
 | `backup.ts` | What leaves the machine and what never does: the allow-list, the settings, the commit subject. See [data](data.md#backups) |
 | `days.ts` | Calendar days as strings, and the arithmetic over them. Why a card's date is not a timestamp |
 | `projects.ts` | What a repository has been told about itself, and how a card's worktree is named |
@@ -72,6 +73,8 @@ in this folder.
 | `src/gitcmd.ts` | Running `git`, for the two files allowed to |
 | `src/nodes.ts` | `NodeHost`: joining (the Mac's `/api/nodes/join`, ahead of the gate, and the new computer's half), the roster taken and relayed, a link per pair (`/link`, ahead of the gate, proved by keys), pings and away, summaries pushed on change, the backup pull. See [nodes](nodes.md) |
 | `src/nodekeys.ts` | This node's Ed25519 and X25519 pairs and, on the parent, the roster's signing key, in `node.json` at `0600`. Never sent, never backed up |
+| `src/seal.ts` | A secret sealed to one node: X25519 with an ephemeral key, HKDF-SHA256, AES-256-GCM with the header as additional data; the parent's signature beside it |
+| `src/secrets.ts` | Lending, both halves: the parent's catalogue, grants, pushes on a tick, a link-up and a file change, and the acknowledgements; a child's take, write at `0600`, take-back, and letting go when it leaves the roster. See [nodes](nodes.md#lending-secrets) |
 | `src/backup-cli.ts`, `src/restore-cli.ts` | `bun run backup` and `bun run restore` |
 | `src/share-cli.ts` | `bun run share`: the phone's link and the Share dialog's QR code, drawn in the terminal, for a server with no window to show them |
 | `src/lifecycle.ts` | Why this server started and why the last one stopped, appended to `lifecycle.log`: its own start and stops, crashes through `uncaughtExceptionMonitor`, the host as seen from outside, and whether its supervisor is still alive (`supervised()`). `/api/lifecycle` |
@@ -192,7 +195,7 @@ for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` (the windo
 keymap, so it cannot document a dead key) · `VoicePill.tsx` (the microphone is
 open, and this is how loud the room is; dragged anywhere, ✕ or Esc to stop Kuru, a tap opens the drawer) ·
 `ReloadNotice.tsx` (who reloaded the window and why, for ten seconds after an agent did) ·
-`KuruDrawer.tsx` (the conversation with Kuru: every message's state, every reply's fate, a composer, the Telegram switch; opened by Kuru's chip in `DrawerChips.tsx`) · Settings is `web/src/settings/`, not a component: `ui.tsx` is the language every page is written in (a group is a card of rows; a row is a label and one control of a dozen kinds; the in-place danger question; lists, galleries, steps, details), `Settings.tsx` the shell and the list of pages, and one file per page (`Channels.tsx` is the Telegram walkthrough, `Firecrawl.tsx` the Firecrawl one).
+`KuruDrawer.tsx` (the conversation with Kuru: every message's state, every reply's fate, a composer, the Telegram switch; opened by Kuru's chip in `DrawerChips.tsx`) · Settings is `web/src/settings/`, not a component: `ui.tsx` is the language every page is written in (a group is a card of rows; a row is a label and one control of a dozen kinds; the in-place danger question; lists, galleries, steps, details), `Settings.tsx` the shell and the list of pages, and one file per page (`Channels.tsx` is the Telegram walkthrough, `Firecrawl.tsx` the Firecrawl one), and `Secrets.tsx` the lent secrets as four pages draw them: a child's grants under Nodes, what a child holds, the *Held from* line a key's page draws in place of its field, and Agents' *Lend this login to a node*.
 
 ## `desktop/` — Electron main + preload, and the esbuild step
 

@@ -229,6 +229,15 @@ export class Secrets {
       }
       return;
     }
+    // A node gone from the roster takes its grants with it, now rather than
+    // at the next save: its id is kept in its own `node.json`, so a node
+    // removed and joined again would otherwise be sent everything it was
+    // lent before, when joining again is meant to start from nothing.
+    if (role === "parent" && Object.keys(this.grants).some((node) => !this.deps.nodes.member(node))) {
+      for (const node of Object.keys(this.grants)) if (!this.deps.nodes.member(node)) this.reported.delete(node);
+      this.saveGrants();
+      this.deps.changed();
+    }
     const kinds = this.kinds();
     let moved = false;
     const seen = new Set<string>();
@@ -238,6 +247,22 @@ export class Secrets {
       const now = stamp(sourcePath(spec));
       if (this.stamps.get(kind) === now) continue;
       this.stamps.set(kind, now);
+      // A Codex login is Codex's file, which kururu otherwise only stats
+      // (`codexusage.ts`): it is read once somebody has switched it on for a
+      // node, and until then listed by being there.
+      if (spec.family === "codex-auth" && !this.lentAnywhere(kind)) {
+        const before = this.sources.get(kind);
+        if (now === "") {
+          if (before) {
+            this.sources.delete(kind);
+            moved = true;
+          }
+        } else if (!before) {
+          this.sources.set(kind, { digest: "unread", hint: "signed in" });
+          moved = true;
+        }
+        continue;
+      }
       const value = extract(spec, readSource(spec));
       const before = this.sources.get(kind);
       if (value === null) {
@@ -262,6 +287,10 @@ export class Secrets {
     if (!moved) return;
     if (role === "parent") for (const node of Object.keys(this.grants)) this.reconcile(node, false);
     this.deps.changed();
+  }
+
+  private lentAnywhere(kind: string): boolean {
+    return Object.values(this.grants).some((grants) => grants[kind]?.on === true);
   }
 
   /** Look now rather than within two seconds: a key was just pasted here. */
@@ -299,6 +328,9 @@ export class Secrets {
     if (on && !this.sources.has(spec.id)) throw new Error(`This Mac has no ${spec.label.toLowerCase()} to lend. Set it here first.`);
     this.grants[nodeId] = withGrant(this.grants[nodeId] ?? {}, spec.id, on, Date.now());
     this.saveGrants();
+    // Read afresh: a Codex login is only read once it is lent somewhere.
+    this.stamps.delete(spec.id);
+    this.look();
     this.deps.log(`secrets: ${spec.id} ${on ? "lent to" : "taken back from"} ${this.deps.nodes.member(nodeId)?.name ?? nodeId}`);
     this.reconcile(nodeId, true);
     this.deps.changed();
