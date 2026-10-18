@@ -3,19 +3,28 @@
 A plan, written 2026-10-18 from a read of the tree at `de21c93` and a read-only
 look at the Omarchy PC, then revised the same day with the user. Nothing in it
 is built. It is written so that an agent can take one phase, read the files it
-names, and know what "done" is. The first draft had one Kuru driving every
-node's agents and a Telegram poller set by hand; both are gone, for the
-reasons under *Kurus are peers* and *One Telegram*.
+names, and know what "done" is. Each phase is shaped as a card: its scope,
+what it depends on, what it can run beside, and how it is verified. The first
+draft had one Kuru driving every node's agents, a Telegram poller set by hand,
+and a child set up by hand; all three are gone, for the reasons under *Kurus
+are peers*, *One Telegram* and *Onboarding*.
 
 ## Summary
 
 The Mac keeps the kururu it has: the window, the voice, the talk key, the
 profiles and boards. Another PC gets a **child**: the same server and the
 same pty host, built from the same checkout, run as a systemd user service
-under a user of its own, with no window and no voice, serving the same web
-app to a phone over the tailnet. A child owns its own workspaces, boards,
-cards, agents and Kuru, in a database of its own, and keeps working when the
-Mac's lid is closed.
+with no window and no voice, serving the same web app to a phone over the
+tailnet. A child owns its own workspaces, boards, cards, agents and Kuru, in a
+database of its own, and keeps working when the Mac's lid is closed.
+
+**Setting one up is a wizard, not a checklist.** `kururu child setup` on the
+new machine checks and fixes or guides each prerequisite in turn — Claude Code
+and its login, node and bun, the user, linger and the service, the tailnet
+address, no API key in the way, pairing with the Mac — explains each, re-checks
+before moving on, is safe to run again, and ends with the same summary
+`kururu child doctor` prints later. A skill in the repository is how an agent
+on the new machine walks the user through it.
 
 **Nodes, ranks, a roster.** Every kururu is a *node*. The Mac is the
 **parent**: it enrols and removes nodes, signs the roster that says who is a
@@ -41,24 +50,25 @@ poll back after its link has been steady for a minute and the holder is quiet.
 **Secrets live on the parent and are lent, one grant at a time.** A small
 store of kururu's own: the `0600` files the parent already keeps, pushed sealed
 to a child's key, kept on the child as the same file every existing reader
-reads, taken back with one click. The child's Claude account is the Mac's,
-lent as a `claude setup-token` grant, so it can be lent again to a third
-machine.
+reads, taken back with one click. A child's Claude login is its own `/login`,
+checked by the wizard; lending the Mac's as a token is there for a machine
+where nobody can open a browser.
 
 **With the lid closed**, the phone opens the child's own address and sees the
 child's workspaces — everything that is still running — and a line saying the
 Mac has been away since when. Nothing on the Mac can be driven while it
 sleeps, and the plan does not pretend otherwise.
 
-The first phase is useful alone: a headless child on the Omarchy PC with its
-own phone UI over the tailnet, before any link, Telegram or secrets.
+The first phases are useful alone: a headless child on the Omarchy PC, set up
+by the wizard, with its own phone UI over the tailnet, before any link,
+Telegram or secrets.
 
 ## The architecture
 
 ```
                   the tailnet (WireGuard; Tailscale's identity and encryption)
    ┌──────────────── Mac: the parent, rank 1 ────────────────┐       ┌────────── Omarchy PC: a child, rank 2 ──────────┐
-   │  window ─┐                                               │       │  (a dedicated user; no window, no voice)         │
+   │  window ─┐                                               │       │  (no window, no voice; set up by the wizard)     │
    │  pill   ─┼─ ws ─▶ server :7717 ◀─ sock ─ host (launchd)  │       │     server :7717 ◀─ sock ─ host (systemd unit)  │
    │  phone  ─┘        │     ▲                                │       │       ▲      ▲                                   │
    │                   │     │ /api/report (hooks)            │       │       │      │ /api/report (hooks, local)        │
@@ -69,9 +79,10 @@ own phone UI over the tailnet, before any link, Telegram or secrets.
    │    here; secrets  │     replies, board verbs, sealed     │       │                                                  │
    │    pushed from    │     secrets, lead handshake,         │       │   Kuru (harness) ──▶ its own agents only          │
    │    here)          │     a workspace moved)               │       │   polls Telegram while it is the leader           │
-   │   Kuru (harness) ─┴─▶ its own agents only                │       └───────────────────────▲──────────────────────────┘
-   │   polls Telegram while it is the leader                  │                               │
-   └──────────────────────────────────────────────────────────┘        phone ── http://<child tailnet ip>:7717/?k=… ──┘
+   │   Kuru (harness) ─┴─▶ its own agents only                │       │   kururu child setup / doctor / update            │
+   │   polls Telegram while it is the leader                  │       └───────────────────────▲──────────────────────────┘
+   └──────────────────────────────────────────────────────────┘                               │
+                                                                        phone ── http://<child tailnet ip>:7717/?k=… ──┘
                                                                         api.telegram.org ◀── getUpdates, from the leader only
 ```
 
@@ -98,7 +109,7 @@ Read against the docs and the code; the file map is `docs/map.md`.
 | web app (`web/dist`) | one build for the window and the phone; `NARROW` (720px) and the coarse pointer decide the phone layout (`App.tsx`) | served unchanged; the phone is its only client |
 | access (`access.ts`) | loopback bound unless shared; one token in the QR; `Origin` checked; loopback exempt | bound to the tailnet address only; the token required on loopback too (see security) |
 | boards, turns, outbox (`store.ts`, `node:sqlite`) | `~/.local/share/kururu/kururu.db`, schema 4 | a database of its own, made on first start; nothing migrates |
-| profiles and logins (`logins.ts`) | `CLAUDE_CONFIG_DIR` / `CODEX_HOME` per profile under `~/.config/kururu/profiles/` | one profile, its Claude account lent from the Mac as a token |
+| profiles and logins (`logins.ts`) | `CLAUDE_CONFIG_DIR` / `CODEX_HOME` per profile under `~/.config/kururu/profiles/` | one profile, on the machine's own `/login` |
 | harness (`harness.ts`, `mcp.ts`, `/mcp`) | one Claude Code session per profile with kururu's verbs as MCP tools | the same, on the child, its own Kuru; peers reach it by name over the link |
 | hooks (`hooks.ts`, `report-cli.ts`) | `report.mjs` beside the server, `KURURU_PORT` in every pty | identical, and local — which is what the machines feature lacks |
 | web tools (`/mcp/web`, `web/chain.ts`) | loopback-only MCP, keys read per request from `0600` files | identical once the keys are granted; an agent on a child finally has `kururu_web` |
@@ -107,6 +118,7 @@ Read against the docs and the code; the file map is `docs/map.md`.
 | machines (`machines.ts`) | ssh gauges, shells and agents in tmux, status read off the screen | stays for boxes that cannot run a child; a child supersedes it for the Omarchy PC |
 | backups (`backup.ts`, `export.ts`) | mirror of the database and allowed config to a private repository | the parent pulls a child's export into its own mirror under `nodes/<name>/` |
 | voice (`voice.ts`, `kokoro.ts`) | `yap`, Kokoro, `say`; macOS-only ears | off; a peer's replies are spoken on the Mac |
+| the tools (`status.mjs`, `kill-hosts.mjs`, `reload-window.mjs`) | `bun run …` from a checkout | the same, behind one `kururu` command with `child setup`, `doctor`, `update`, `status` |
 | desktop (`desktop/`) | window, tray, talk key, updater | not installed |
 
 **What is tied to macOS**, from a grep of `process.platform` and the tools shelled out to:
@@ -154,6 +166,60 @@ parent drives over a private protocol. The reasons:
 What a child does not have: a window (so no `desktop/`), the voice, the talk
 key, a Dock, notifications beyond the foreground ones a phone page draws.
 
+### Onboarding: a skill, a wizard, a doctor
+
+Setting a child up by hand turned out to be a dozen steps across two machines
+— a user, linger, node, a login, a unit, a token, a pairing — each with a way
+to get it slightly wrong. So the steps are code, in three forms that share one
+list of checks:
+
+- **`kururu child setup`** is an interactive wizard that runs entirely in the
+  terminal of the new machine. It walks the prerequisites in order, and for
+  each one *checks*, then *fixes* what it safely can, *guides* what it cannot
+  (prints the exact command and waits), and *re-checks* before moving on. It is
+  idempotent — running it again on a working child changes nothing and says so
+  — and it ends with the doctor's summary.
+- **`kururu child doctor`** runs the same checks read-only, prints a table of
+  ✓, ✗ and – with the fix beside each ✗, and exits non-zero when something
+  fails, so it can be run after an update, after a reboot, or from the Mac
+  over ssh.
+- **The skill**, `.claude/skills/kururu-child/`, is how an agent on the new
+  machine walks the user through it: "use the kururu skill to set up a child".
+  It covers the two steps that come before the wizard can run — a clone of
+  the repository and a node to run it on — then runs the wizard with the user
+  there, relays each question, and never does the things the wizard refuses
+  to do itself. The release skill is the shape to copy.
+
+**The one command.** `tools/kururu.mjs` is plain node, like `run.mjs`, with
+`child setup`, `child doctor`, `child update`, `child status` and `child code`
+as subcommands; `child setup` links it to `~/.local/bin/kururu` so the
+command exists after the first run. Before that it is `node tools/kururu.mjs
+child setup`, which the skill says.
+
+**The checks**, in order, each with what the wizard does about it:
+
+| check | checks | fixes | guides |
+|---|---|---|---|
+| node and bun | `node` ≥ 24 and `bun` on this user's path, and the versions the checkout wants | — (it is running on node already) | `mise use -g node@26 bun@latest`, or the system package |
+| the checkout | a git checkout, `bun install` done, `pty.node` built, `bun run build` current | runs `bun install` and `bun run build`, and says when the build is older than the sources | — |
+| the user | which account runs the child: this one (default when the box is yours alone), or a dedicated one; home mode, no API key in rc files, sudo and docker group noted for what they mean under bypass permissions | — | `useradd`, the clones under that user, how to switch; never runs `sudo` on its own |
+| linger | `loginctl show-user` says `Linger=yes` | `loginctl enable-linger` for oneself, which needs no root on most systems; otherwise prints the `sudo` line | — |
+| Claude Code | `claude` on the path, its version, `claude auth status` signed in; `codex login status` if Codex is wanted | — | runs `claude` for `/login` with the copy-the-link flow explained, or takes a token from `claude setup-token` on the Mac if the user has one (phase 4 makes that a grant) |
+| no API key | `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `apiKeyHelper`, the cloud-provider switches: in this shell, in `systemctl --user show-environment`, in the unit, in the rc files, in Claude's settings `env` | — (it explains why: those outrank the login and bill as API usage) | which file to edit |
+| the tailnet | a `tailscale0` interface with an address, read as `reach.ts` reads it; the port free; the server, once up, answering on that address and refusing the LAN address and the token-less loopback | — | `sudo tailscale up` in the user's hands; the wizard **never runs `tailscale`** (rule 4), only reads the interface |
+| the service | the unit written, enabled, active; `/api/health` answering; the host a unit of its own; `lifecycle.log` clean | writes the unit, `daemon-reload`, enables, starts, waits for health | — |
+| the phone | the URL with the token printed and as a QR in the terminal | — | open it on the phone; the wizard waits for the first client and says it saw it |
+| pairing (phase 2) | a member of a roster, linked to the Mac | shows the pairing code and this node's address for ten minutes, waits for the Mac's enrolment, confirms the link | the user types code and address into the Mac's Settings → Nodes |
+| secrets (phase 4) | which kinds are held from the Mac, by hint | — | tick them on the Mac |
+| leading (phase 5) | eligible to lead, leads now, rank | — | — |
+
+The wizard explains before it acts, asks before anything that costs — a
+`useradd`, writing over an existing unit, a `/login` that would replace one —
+and prints what it would do when told `--dry-run`. It never prints a token or
+a key, only hints. It grows with the phases: the pairing, secrets and leading
+rows are added by the phases that build those things, so the steps the user
+did by hand this week become rows the wizard owns.
+
 ### Nodes, ranks and the roster
 
 Two words that are kept apart on purpose:
@@ -177,12 +243,12 @@ rank is a new roster; a node that is not in the newest roster is dropped and
 its key refused.
 
 **Enrolment** is pairing, like Telegram's. The child shows a six-character
-code (its own Settings → Nodes, or `bun run node:code` on the box, ten
-minutes); the parent's Settings → Nodes takes an address and the code and
-posts them with the roster; the child answers with its id, name, public keys
-and share token; the parent signs a roster with the new member and sends it
-back. The route refuses any remote address outside the CGNAT range tailscale
-uses, and any request with a forwarding header.
+code (the wizard's pairing step, `kururu child code`, or its own Settings →
+Nodes; ten minutes); the parent's Settings → Nodes takes an address and the
+code and posts them with the roster; the child answers with its id, name,
+public keys and share token; the parent signs a roster with the new member and
+sends it back. The route refuses any remote address outside the CGNAT range
+tailscale uses, and any request with a forwarding header.
 
 **Links are a full mesh.** Every node holds one link to every other member:
 the lower rank dials the higher, so the Mac dials nobody and only accepts,
@@ -298,9 +364,10 @@ reachable node's conversation at once:
 
 ### The phone with the lid closed
 
-The phone opens **the child's own address**, scanned once from any node's
-Share dialog (which draws each node's QR with that node's share token). The
-browser keeps the cookie per origin for a year, as it does for the Mac.
+The phone opens **the child's own address**, scanned once from the wizard's
+QR or any node's Share dialog (which draws each node's QR with that node's
+share token). The browser keeps the cookie per origin for a year, as it does
+for the Mac.
 
 What it shows is the child's own workspaces, agents, boards, Needs and drawer
 — the whole UI, the drawer with the Mac's Kuru greyed as away — not a mirror of
@@ -318,7 +385,7 @@ first.
 
 **Only Kuru speaks, and only the leader polls.** The bot token is a secret the
 parent grants; the allow-list and the switch ride in the roster. A node is
-eligible to lead when it holds the token grant and a Claude login.
+eligible to lead when it holds the token grant and is signed in to Claude.
 
 **Addressing.** A bare message from the chat goes to the leader's Kuru. A
 message starting `@omarchy` — or `/omarchy`, since Telegram's apps may
@@ -391,19 +458,19 @@ bootstrap secret per child, to solve a problem kururu is one small module away
 from.** The parent's at-rest story is unchanged (a FileVault disk and `0600`,
 the posture every key already has). The child's at-rest story is the same
 `0600` file; `systemd-creds --user` (systemd 256, TPM2-backed; the box has a
-TPM) is a later wrap, once shown to work for the dedicated user.
+TPM) is a later wrap, once shown to work for the child's user.
 
 The model:
 
 - **Kinds**, in a registry (`shared/secrets.ts`): the Telegram token, the
   OpenRouter key, each web provider's key file (`firecrawl.json`,
   `web-firecrawl-self.json`, `web-*.json`), a Claude long-lived token per Mac
-  login, a Codex `auth.json`. Each kind names its file on a node, how its hint
-  is read, what it unlocks, and how to revoke it at the source (BotFather
-  `/revoke`, the OpenRouter and Firecrawl dashboards, `claude setup-token`
-  again, `codex logout`). The share token, the roster's signing key, the
-  nodes' key pairs and the backup's git credentials are *not* kinds: they
-  never leave the node that minted them.
+  login (optional, see *Logins*), a Codex `auth.json`. Each kind names its
+  file on a node, how its hint is read, what it unlocks, and how to revoke it
+  at the source (BotFather `/revoke`, the OpenRouter and Firecrawl dashboards,
+  `claude setup-token` again, `codex logout`). The share token, the roster's
+  signing key, the nodes' key pairs and the backup's git credentials are *not*
+  kinds: they never leave the node that minted them.
 - **Grants** are per child per kind, off by default, ticked in Settings → Nodes
   → <node> → Secrets. A child holds only what is ticked. The Telegram grant is
   what makes a node eligible to lead.
@@ -419,50 +486,68 @@ The model:
   page shows the at-source step for that kind beside it.
 - **On the child's disk**: the granted files, and nothing else. A child's
   Settings page for a granted kind says "held from the Mac, hint …, since …"
-  and offers no field. A client is sent hints, never values, on both nodes, as
-  today.
+  and offers no field, and `kururu child doctor` lists them by hint. A client
+  is sent hints, never values, on both nodes, as today.
 - **Backups** leave all of it out, on both nodes: `nodes.json`, the roster's
   key, the token kinds, the logins. The allow-list in `shared/backup.ts` gains
   the new names in its "never" line.
 
-### CLI logins
+### Logins
 
-- **Claude Code: the Mac's account, lent.** `claude setup-token` on the Mac
-  makes a one-year token that only makes model requests; it is a kind, one per
-  Mac login directory, granted to the child's profile, and `loginEnv` sets it
-  as `CLAUDE_CODE_OAUTH_TOKEN` on every pty of that profile. That is the one
-  place a credential is allowed into a pty's environment, because that is how
-  Claude Code takes it and the same exposure the login file already has. It
-  outranks a `/login` on the box (precedence 5 over 7 in Claude Code's list),
-  so a login left there is a fallback and never a surprise. Never a copied
-  `.credentials.json`: its refresh token rotates, and two machines refreshing
-  one token sign each other out. Two Kurus and their agents then draw on one
-  plan, and the usage bar reads the Mac's.
-- **Codex.** OpenAI documents copying `auth.json` to a headless machine, and
-  `codex login --device-auth` on the box itself. The `codex-auth` kind carries
-  the file into the profile's `CODEX_HOME`.
-- **gh, git.** Out of scope; a child's git is the dedicated user's.
+- **Claude Code: the machine's own `/login`.** A child is signed in the way
+  any machine is — `claude`, `/login`, and when the browser cannot open over
+  ssh, `c` copies the link to open elsewhere and the code is pasted back. The
+  wizard checks `claude auth status` and walks that flow. It is a login of its
+  own on the same subscription, revocable on its own, and nothing is
+  propagated. `profiles keep their own logins` stays off on a child, so its
+  profile uses `~/.claude`.
+- **Lending the Mac's login is optional.** `claude setup-token` on the Mac
+  mints a one-year token that only makes model requests; as a secret kind it
+  can be granted to a child whose user cannot open a browser anywhere, and
+  `loginEnv` sets it as `CLAUDE_CODE_OAUTH_TOKEN` on that profile's ptys —
+  the one place a credential is allowed into a pty's environment, because
+  that is how Claude Code takes it. It outranks a `/login` on the machine.
+  Never a copied `.credentials.json`: its refresh token rotates, and two
+  machines refreshing one token sign each other out.
+- **It is subscription usage either way.** Both roads authenticate with the
+  claude.ai account and draw on the same plan limits as the Mac; the usage
+  bar on the Mac is the only gauge of that. What would bill as API usage is
+  `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or an `apiKeyHelper` in the
+  child's environment, which outrank both logins — the reason the wizard and
+  the doctor look for them everywhere a pty could inherit one.
+- **Codex.** `codex login` on the box, or `codex login --device-auth`; the
+  wizard checks `codex login status` when Codex is wanted. OpenAI also
+  documents copying `auth.json`, which the `codex-auth` kind carries into the
+  profile's `CODEX_HOME` for a box with no browser.
+- **gh, git.** The child's user needs its own read access to private
+  repositories, and push access if its agents push: `gh auth login` as that
+  user, or an SSH key. The wizard says so at the checkout step and does not
+  do it.
 
-### Linux: a dedicated user, the build, the service, the host, logs, updates
+### Linux: the user, the build, the service, the host, logs, updates
 
-- **A dedicated user on the box**, made by hand before phase 0: its own home,
-  `loginctl enable-linger` for it (one root step, the user's, so its services
-  run with nobody logged in), its own node through mise or the system package,
-  its own clones of the repositories it works on, no sudo, no docker group. The
-  box's own account — its Claude login, its tmux sessions from the machines
-  feature, its project folder — is not touched and not used.
-- **A checkout in that user's home, built there.** `desktop/dist/*.mjs` and
-  `web/dist` are plain JavaScript, but node-pty is native and has no Linux
-  prebuild, so it is compiled by node-gyp at install, which needs the box's
-  gcc, make and python (present) and the node headers (downloaded at build).
-  bun runs node-pty's install script by default; `bun install` is enough.
-  Electron's download is skipped (`ELECTRON_SKIP_BINARY_DOWNLOAD=1`); nothing
-  on a child imports it.
-- **Node 26**, named by its full path in the unit, since mise's shims are on an
-  interactive PATH and not on a service's. `node:sqlite` is unflagged from
-  22.13 and a release candidate from 25.7; the store's `backup()` call exists
-  in both.
-- **`kururu.service`**, a user unit the installer writes to
+- **Which user runs the child is the wizard's first question.** The machine's
+  own account is the default when the box is the user's alone: the login,
+  node and the clones are already there, and linger is one command. A
+  dedicated user — its own home, linger, node, clones, no sudo, no docker
+  group — is the stronger posture under bypass permissions, because an
+  injected `rm -rf` then stops at that user's clones; the wizard explains the
+  trade, prints the `useradd` and `enable-linger` lines for the user to run
+  as root, and never runs `sudo` itself. The Omarchy PC's own account is in
+  `wheel` with sudo behind a password and not in `docker`, which the wizard
+  reports as what it means.
+- **A checkout, built there.** `desktop/dist/*.mjs` and `web/dist` are plain
+  JavaScript, but node-pty is native and has no Linux prebuild, so it is
+  compiled by node-gyp at install, which needs gcc, make and python (present)
+  and the node headers (downloaded at build). bun runs node-pty's install
+  script by default; `bun install` is enough, and the wizard checks for
+  `pty.node` afterwards rather than assuming. Electron's download is skipped
+  (`ELECTRON_SKIP_BINARY_DOWNLOAD=1`); nothing on a child imports it.
+- **Node 26 or 24**, named by its full path in the unit, since mise's shims
+  are on an interactive PATH and not on a service's. `node:sqlite` is
+  unflagged from 22.13 and a release candidate from 25.7; the store's
+  `backup()` call exists in both.
+- **`kururu.service`**, a user unit the wizard writes to
   `~/.config/systemd/user/`, running `node server/run.mjs` (no `--watch`) with
   `KURURU_BIND=tailscale`, `KURURU_LOOPBACK_TOKEN=1`, `Restart=on-failure`,
   `KillMode=process`.
@@ -471,16 +556,18 @@ The model:
   --collect --property=KillMode=process … node ptyhostd.mjs`, the exact
   analogue of the launchd job: its own cgroup, so restarting or stopping
   `kururu.service` ends no agent, and `hostJobRunning` asks `systemctl --user
-  is-active`. `bun run status` says `unit <label>` where it says `coalition`
-  today.
+  is-active`. `kururu child status` says `unit <label>` where `bun run status`
+  says `coalition` today.
 - **Logs**: `lifecycle.log`, `ptyhost.log` and `server.log` where they are on
-  the Mac, plus `journalctl --user -u kururu` for the runner's stdout.
-- **Updates**: `bun run node:update` on the box — `git pull`, `bun install`,
-  `bun run build`, `systemctl --user restart kururu` — restarts the server
-  only; `/api/health` reports when the host is behind and a host restart is
-  owed, exactly as on the Mac. The GitHub release check stays a check.
+  the Mac, plus `journalctl --user -u kururu` for the runner's stdout; the
+  doctor prints the tail of `lifecycle.log`.
+- **Updates**: `kururu child update` — `git pull`, `bun install`, `bun run
+  build`, `systemctl --user restart kururu`, then the doctor — restarts the
+  server only; `/api/health` reports when the host is behind and a host
+  restart is owed, exactly as on the Mac. The GitHub release check stays a
+  check.
 - **Port**: 7717 is free on the box; a neighbouring port is held by something
-  else, which is why the port stays a setting.
+  else, which is why the port stays a setting and the wizard checks it.
 
 ### Security
 
@@ -488,7 +575,8 @@ The model:
   nothing else (`KURURU_BIND=tailscale`, resolved through `reach.ts`'s
   interface read, never a `tailscale` command). The enrolment route and `/link`
   refuse a remote address outside 100.64/10 and any request carrying
-  forwarding headers, as `/mcp/web` already does.
+  forwarding headers, as `/mcp/web` already does. The wizard verifies all
+  three from the box.
 - **The loopback exemption** (`verdict()` in `server/src/access.ts`, built on
   `fromLoopback` at line 176) is right for the Mac and wrong for a child. The
   argument was that anything on loopback already has a shell; on the Omarchy
@@ -497,14 +585,15 @@ The model:
   from loopback. So a child requires the token on loopback too
   (`KURURU_LOOPBACK_TOKEN=1`, also a field in `access.json`, default on for a
   child), and kururu's own callers on the box present it from `access.json`:
-  the hooks (`report.mjs`), `status.mjs`, `reload-window.mjs`, the backup CLI,
-  the harness's `--mcp-config` and the agents' `web-mcp.json` (both carry a
-  header). The Mac keeps its exemption until the user wants otherwise; the
-  switch exists on both.
+  the hooks (`report.mjs`), `kururu child status` and `doctor`,
+  `reload-window.mjs`, the backup CLI, the harness's `--mcp-config` and the
+  agents' `web-mcp.json` (both carry a header). The Mac keeps its exemption
+  until the user wants otherwise; the switch exists on both.
 - **Bypass permissions on a real machine.** A child's agents run as the
-  dedicated user, which owns its clones and nothing else, has no sudo and no
-  docker group, so an injected `rm -rf` reaches those clones, that user's
-  granted secrets and its tailnet shell, and no further.
+  child's user with everything that user can reach. Under the machine's own
+  account that is the account's files, keys and tailnet shell; under a
+  dedicated user it is that user's clones and granted secrets. The wizard
+  says which the user chose and what it means; it does not choose.
 - **What a child never holds**: the Mac's share token, the roster's signing
   key, the backup repository's credentials, any secret not granted.
 - **What a compromised child gets**: its granted secrets, its own agents, the
@@ -570,256 +659,290 @@ client the way `session.ts` is, reconnecting forever. `/mcp` is not reached
 across nodes: a peer's verbs arrive as messages into its Kuru, never as tool
 calls on its agents.
 
-## Phases
+## Phases, as cards
 
 Effort is in agent-days: one focused Claude Code session, with its tests and
-docs, is about a day. Each phase ends with its docs written — a `docs/nodes.md`
-grows through phases 2–6, `docs/linux.md` is phase 1's — and with the CLAUDE.md
-brief touched only where a rule changes. Before phase 0 the user makes the
-dedicated user on the box and enables linger for it.
+docs, is about a day. Each phase ends with its docs written — `docs/linux.md`
+is phase 1B's, a `docs/nodes.md` grows through phases 2–6 — and with the
+CLAUDE.md brief touched only where a rule changes. Every phase that touches
+the wizard adds its rows to `kururu child setup` and `doctor` and to the
+skill, so nothing the user did by hand this week survives as a hand step.
 
-### Phase 0 — a spike on the box (half a day)
+The order of dependencies, in one line: 0 and 1A first and together; 1B after
+both; 2 after 1A and 1B; 3, 4 and 6 after 2, beside each other; 5 after 3 and
+4.
 
-Run the current bundle on the Omarchy PC by hand, as the dedicated user, in an
-isolated instance (`docs/testing.md`), and write down what breaks. The point is
-to replace the list above with one measured on the box before anybody edits
-`hostlaunch.ts`.
+### Phase 0 — a spike on the box
 
-- clone into the user's home, `mise use bun@latest`,
-  `ELECTRON_SKIP_BINARY_DOWNLOAD=1 bun install`, `bun run build`; check
-  `node_modules/node-pty/build/Release/pty.node` exists and that the install
-  did not silently skip node-pty's script;
-- `KURURU_PORT=7817 KURURU_STATE_DIR=/tmp/k2 KURURU_DATA_DIR=/tmp/k2/data
-  XDG_CONFIG_HOME=/tmp/k2/config KURURU_BIND=<tailnet ip> node server/run.mjs
-  --no-build --entry desktop/dist/server.mjs`;
-- from the phone: the QR from `bun run status`'s address, a `sleep 30` tab, a
-  Claude tab (with `CLAUDE_CODE_OAUTH_TOKEN` exported by hand for the spike),
-  the harness;
-- try `systemd-run --user` from that context, and `systemd-creds --user
-  encrypt` for later;
-- note every stderr line; `bun run kill-ptyhosts /tmp/k2` after.
+**Scope.** Run the current bundle on the Omarchy PC by hand, in an isolated
+instance (`docs/testing.md`), and write down what breaks, with the file and
+line, so phases 1A and 1B replace the list in this document with one measured
+on the box. Clone into the user's home, `mise use bun@latest`,
+`ELECTRON_SKIP_BINARY_DOWNLOAD=1 bun install`, `bun run build`, check
+`node_modules/node-pty/build/Release/pty.node` exists; start the server with
+`KURURU_PORT=7817 KURURU_STATE_DIR=/tmp/k2 KURURU_DATA_DIR=/tmp/k2/data
+XDG_CONFIG_HOME=/tmp/k2/config KURURU_BIND=<tailnet ip> node server/run.mjs
+--no-build --entry desktop/dist/server.mjs`; from the phone open a `sleep 30`
+tab, a Claude tab (the box is signed in) and the harness; try
+`systemd-run --user` from that context and `systemd-creds --user encrypt` for
+later; `bun run kill-ptyhosts /tmp/k2` after. Half a day.
 
-Done: a list in the card of what failed, with the file and line.
+**Depends on.** Nothing in the tree. The box has node 26 through mise, gcc,
+make, python3 and a Claude login already.
 
-### Phase 1 — a headless child on Linux (4–6 days)
+**In parallel with.** 1A, which can start from this document's list and take
+the spike's findings as they land.
 
-Useful alone: the Omarchy PC runs kururu as a service, the phone drives it over
-the tailnet, agents survive a server restart, Kuru works there.
+**Verified by.** The card holds the list of failures with file and line, the
+stderr of the start, whether `systemd-run --user` and `systemd-creds --user`
+worked, and a screenshot or a sentence per phone check. Nothing is committed.
 
-Files and modules:
+### Phase 1A — Linux support in the server
 
-- `package.json`: scripts `node:install`, `node:update`, `node:status`,
-  `node:code` → `tools/node.mjs` (plain node, no bun at runtime), which writes
-  the unit, enables it, prints the phone URL with the token, and does the
-  update sequence. The installer checks for `pty.node` after `bun install`
-  rather than assuming.
-- `desktop/build.mjs`: the `spawn-helper` chmod loop covers `linux-x64` and
-  `linux-arm64` (harmless where absent).
-- `server/src/hostlaunch.ts`: `launchHostSystemd`, `hostUnitRunning`,
-  `launchedBySystemd(pid)` (read `/proc/<pid>/cgroup` for the unit name), the
-  unit name grammar; `index.ts`'s `startPtyHost` takes the Linux branch before
-  the detached fallback and records "as a transient systemd user unit".
-  `hostlaunch.test.ts` covers the `systemd-run` argv and the cgroup parse as
-  text.
-- `server/src/access.ts`: `KURURU_BIND=tailscale` resolved at bind;
-  `loopbackToken` in `access.json` and `KURURU_LOOPBACK_TOKEN`; `verdict`
-  stops exempting loopback when it is set. `access.test.ts` adds the verdict
-  table for it.
-- The callers that present the token on the box: `report-cli.ts` (the hook
-  settings written by `hooks.ts` carry it as an env for the hook),
-  `status.mjs`, `reload-window.mjs`, `backup-cli.ts`, the `web-mcp.json`
-  launch flags (`headers`) and the harness's `--mcp-config`.
-- `server/sockowner.mjs` (used by `status.mjs` and `kill-hosts.mjs`) and a TS
-  twin in `index.ts`'s `socketHolder`: `lsof` on macOS, `ss -xlpn` on Linux;
-  `devservers.ts`: `ss -ltnpH` parsed for listeners on Linux, with a test over
-  captured output.
-- `server/src/logins.ts`: `CLAUDE_CODE_OAUTH_TOKEN` from a token file in the
-  profile's login directory when one is there (phase 4 is what puts it there;
-  for phase 1 it is pasted by hand).
-- `server/src/voice.ts`: off darwin, the ears and the system voice say "not on
-  this platform" rather than "brew install yap"; Settings → Voice draws the
-  sentence.
-- `.github/workflows/ci.yml`: typecheck and `bun test` on `ubuntu-latest` and
-  `macos-latest`, so a darwin-only assumption fails in CI rather than on the
-  box.
-- `docs/linux.md`: the dedicated user, install, the unit, logs, update, the
-  host as a unit, what is missing (voice, window, Trash without `gio`).
-  `CLAUDE.md`'s hazard table gets one row: on a child, `systemctl --user
-  restart kururu` costs a reconnect and the host is its own unit.
+**Scope.** Everything in `server/` that assumes macOS, made to work on Linux
+without touching how the Mac runs. The host as a transient systemd user unit
+(`hostlaunch.ts`: `launchHostSystemd`, `hostUnitRunning`,
+`launchedBySystemd(pid)` off `/proc/<pid>/cgroup`, the unit name grammar;
+`index.ts`'s `startPtyHost` takes it before the detached fallback and records
+"as a transient systemd user unit"). `access.ts`: `KURURU_BIND=tailscale`
+resolved at bind through `reach.ts`, and `loopbackToken` in `access.json` /
+`KURURU_LOOPBACK_TOKEN` under which `verdict` stops exempting loopback; the
+callers that then present the token from `access.json` — the hook settings
+`hooks.ts` writes (as an env for `report.mjs`), `status.mjs`,
+`reload-window.mjs`, `backup-cli.ts`, the `web-mcp.json` launch flags and the
+harness's `--mcp-config` (both with a header). `server/sockowner.mjs` for
+`status.mjs` and `kill-hosts.mjs` and a TS twin for `index.ts`'s
+`socketHolder`: `lsof` on macOS, `ss -xlpn` on Linux; `devservers.ts` reads
+listeners from `ss -ltnpH` on Linux. `desktop/build.mjs`'s `spawn-helper`
+chmod loop covers `linux-x64` and `linux-arm64`. `voice.ts` says "not on this
+platform" off darwin instead of "brew install yap". A `.github/workflows/ci.yml`
+running typecheck and `bun test` on `ubuntu-latest` and `macos-latest`. 3–4
+days.
 
-Done when, on the Omarchy PC: `systemctl --user status kururu` is active with
-nobody logged in; the phone opens the tailnet URL with the token and nothing
+**Depends on.** Nothing; the spike's findings are folded in as they arrive.
+
+**In parallel with.** 0, and with 1B's CLI once the env names above are
+fixed (they are fixed here: `KURURU_BIND=tailscale`,
+`KURURU_LOOPBACK_TOKEN=1`).
+
+**Verified by.** `bun test` and typecheck green on both CI runners;
+`hostlaunch.test.ts` covers the `systemd-run` argv and the cgroup parse as
+text; `access.test.ts` has the verdict table with the loopback token on and
+off; `devservers.test.ts` parses captured `ss` output; on the Mac nothing
+changes (`bun run status` and the window behave as before, checked by hand).
+The end-to-end check on the box is 1B's.
+
+### Phase 1B — the child command, the wizard, the doctor, the skill
+
+**Scope.** `tools/kururu.mjs`, plain node, with `child setup`, `child doctor`,
+`child update`, `child status` and `child code` (the last a stub until phase
+2), linked to `~/.local/bin/kururu` by `setup`. The wizard walks the checks in
+the *Onboarding* table through the phone row: node and bun, the checkout
+built with `pty.node` present, the user (this account or a dedicated one,
+with the `useradd` and `enable-linger` lines printed and never run as root by
+the wizard), linger, Claude Code installed and signed in (and Codex if
+wanted), no API key anywhere a pty could inherit one, the tailnet address
+read off the interface and the port free, the unit written and started with
+`/api/health` answering on the tailnet address and refusing the LAN address
+and a token-less loopback, the host a unit of its own, and the phone URL with
+its QR, waiting for the first client. Each check explains, fixes or guides,
+re-checks, and the run is idempotent and has `--dry-run`. The doctor is the
+same checks read-only with a ✓/✗/– table, the fix beside each ✗, the tail of
+`lifecycle.log`, and a non-zero exit on failure. `child update` is pull,
+install, build, restart the server, doctor. The skill,
+`.claude/skills/kururu-child/SKILL.md`, covers the clone and the node before
+the wizard, then runs the wizard with the user and relays it; it says what
+the wizard refuses to do (`tailscale`, `sudo`, printing a secret).
+`docs/linux.md` documents all of it; `CLAUDE.md`'s hazard table gets one row
+(on a child, `systemctl --user restart kururu` costs a reconnect and the host
+is its own unit). 3–4 days.
+
+**Depends on.** 1A merged (the host unit, the bind and loopback rules, the
+`ss` fallbacks are what the wizard checks and the doctor reports).
+
+**In parallel with.** The CLI's skeleton and the check functions can be
+written beside 1A against the names fixed there; the verification waits for
+1A.
+
+**Verified by.** On the Omarchy PC, with the user present: an agent given
+"use the kururu skill to set up a child" reaches a running child without a
+hand step beyond the ones the wizard guides; `systemctl --user status kururu`
+is active with nobody logged in; the phone opens the printed URL and nothing
 answers on the LAN address or without the token, loopback included; an agent
-started from the phone survives `systemctl --user restart kururu`; its sidebar
-dot follows its hooks; the harness starts, is trusted, and answers in the
-drawer; `bun run status` on the box names the host's unit; `/api/health` says
-the host is current.
+started from the phone survives `systemctl --user restart kururu`; its
+sidebar dot follows its hooks; the harness starts, is trusted, and answers in
+the drawer; `kururu child doctor` prints all ✓ and exits 0; running `setup`
+again changes nothing and says so; `kururu child status` names the host's
+unit; `/api/health` says the host is current. Pure parts of the checks (the
+unit text, the table, the API-key scan over fixture files) have tests.
 
-Tests: the pure functions above; the Linux CI job; the phase-0 list re-run.
+### Phase 2 — nodes: the roster, the mesh, the mirror
 
-### Phase 2 — nodes: the roster, the mesh, the mirror (5–7 days)
+**Scope.** `shared/nodes.ts`: `NodeEntry`, the `Roster` and its signing
+payload, `NodeSummary` and `summarize(snapshot, …)`, `NodeStatus`, the pairing
+code, `leaderOf(roster, reachable, self)`, the `/link` message union, the
+handshake shapes, `adoptRoster`. `server/src/nodekeys.ts`: the node's Ed25519
+and X25519 pairs at `0600` in `node.json`, the Mac's roster signing key beside
+them. `server/src/nodes.ts`: `NodeHost` — the code, `enrol`, the `/link`
+route with the handshake, the coalesced `summary` push, the roster relay, the
+mesh's dial-up to every higher-ranked member with backoff, pings, the `away`
+timer, the `nodes` broadcast, `send(nodeId, message)`, the export pull for
+the backup; parent-only verbs refuse on a node without the signing key.
+`access.ts`: `/link`, `/api/nodes/*` and `/api/export` behind the handshake.
+`index.ts`: the routes, `nodes` and `leader` in the snapshot and
+`/api/health`; `backup.ts` writes `nodes/<name>/` from the pulls;
+`restore-cli.ts` takes `--node`. `web/src/settings/Nodes.tsx` (add by address
+and code, rename, drag to rank, remove, status, "Open"; on a child the code
+button and the roster), `Sidebar.tsx`'s section per node with the agents'
+dots and the Needs dot, `NeedsDrawer.tsx` and the tray count with a band per
+node, `Reach.tsx`'s QR per node, `connect.html`, `servers.js` and `menu.js`
+offering nodes. `kururu_status` lists nodes; the role's "Nodes" section says
+what a Kuru can see. The wizard and doctor gain the pairing row and `child
+code` becomes real. `nodes.json` and `node.json` join the backup's
+never-list. 5–7 days.
 
-Files and modules:
+**Depends on.** 1A (the bind and loopback rules, the Mac shared on its
+tailnet address) and 1B (the wizard's pairing step, a child to pair with).
 
-- `shared/nodes.ts`: `NodeEntry`, the `Roster` and its signing payload,
-  `NodeSummary`, `summarize(snapshot, …)` (pure, from the same facts
-  `kururu_status` reads), `NodeStatus`, the pairing code (reuse
-  `pairingCode`'s alphabet), `leaderOf(roster, reachable, self)`, the `/link`
-  message union, the handshake's challenge shapes, `adoptRoster` (newest
-  version wins, signature checked). Tested.
-- `server/src/nodekeys.ts`: the node's Ed25519 and X25519 pairs, made once,
-  kept at `0600` in `node.json`; the Mac's roster signing key beside them.
-- `server/src/nodes.ts`: `NodeHost` — the code, `enrol`, the `/link` route
-  with the handshake, the coalesced `summary` push, the roster relay, the
-  mesh's dial-up to every higher-ranked member with backoff, pings, the
-  `away` timer, the `nodes` broadcast, `send(nodeId, message)` for later
-  phases, the export pull for the backup. Every server runs it; parent-only
-  verbs (`enrol`, `remove`, `rerank`, sign) refuse on a node without the
-  signing key.
-- `server/src/access.ts`: `/link`, `/api/nodes/*` and `/api/export` behind the
-  handshake rather than a token.
-- `server/src/index.ts`: the routes; `nodes` and `leader` in the snapshot and
-  `/api/health`; `backup.ts` writes `nodes/<name>/` from the pulls;
-  `restore-cli.ts` takes `--node`.
-- `web/src/settings/Nodes.tsx`: on the parent, add by address and code,
-  rename, drag to rank, remove, each node's status, version, last seen, "Open";
-  on a child, the code button and the roster as it stands. `Sidebar.tsx`: a
-  section per node with its workspaces as rows wearing the agents' dots and
-  the Needs dot; the machine's gauges under it when the entry names one.
-  `NeedsDrawer.tsx` and the tray count: a band per node whose rows are links
-  to the node. `Reach.tsx`: a QR per node. `desktop/connect.html`,
-  `servers.js`, `menu.js`: nodes read from `nodes.json` offered in the picker
-  and as "Open <node>" in the tray.
-- `shared/harness.ts`: `kururu_status` lists nodes; the role gets a "Nodes"
-  section saying what a Kuru can see, and that acting is phase 3.
-- `shared/backup.ts`: `nodes.json` and `node.json` in the never-list.
+**In parallel with.** 4's pure half (`shared/secrets.ts`, `seal.ts` written
+against the key shapes fixed here) and 6's pure half (the refusal rule, the
+dialog's sentences).
 
-Done when: the parent's sidebar shows the Omarchy child's workspaces and
-agents live, with dots that change as the child's hooks report; the Needs tray
-counts a child's blocked agent and the drawer opens the child; the tray and
-the picker open the child; the child's own UI says the Mac is away within
-thirty seconds of the lid closing and shows its last summary; removing a node
-on the parent drops its links everywhere within one roster relay; the Mac's
-backup commit carries the child's boards.
+**Verified by.** `nodes.test.ts`: the summary, the code, the roster's
+signature and adoption, `leaderOf`, the link state machine over a fake socket
+pair. On the two machines: the Mac's sidebar shows the child's workspaces and
+agents live with dots that follow the child's hooks; the Needs tray counts a
+child's blocked agent and the drawer opens the child; the tray and the picker
+open the child; the child's own UI says the Mac is away within thirty seconds
+of the lid closing and shows its last summary; removing the node on the Mac
+drops the link on the child within one roster relay; the Mac's next backup
+commit carries the child's boards; `kururu child doctor` shows the pairing
+row ✓.
 
-Tests: `nodes.test.ts` for the summary, the code, the roster's signature and
-adoption, `leaderOf`, the link state machine over a fake socket pair
-(`hostlink.ts` has the pattern).
+### Phase 3 — Kurus as peers
 
-### Phase 3 — Kurus as peers (4–6 days)
+**Scope.** `shared/harness.ts`: `ask_kuru`, `read_kuru`, `node` on
+`add_card`, `edit_card`, `move_card` and `cards`, the `[<node>]` mark grammar
+beside `[telegram]`, `agentName` with the node, the role's Nodes section
+rewritten around *read anywhere, act locally, ask a peer*. `harness.ts`:
+`ask_kuru` through `NodeHost.send` into the peer's `Outbox.say` with the wait
+held on its `kuru-replied`; `read_kuru` off the cached `kuru-turns`; board
+verbs over the link into the peer's `*In` spellings with the actor
+`peer:<node>`; `noticeStatuses` keeps notices local. `shared/kuru.ts`,
+`server/src/kuru.ts`, `KuruDrawer.tsx`: the merged list tagged by node, the
+chips, the `@<node>` composer grammar, reply-to-bubble, away nodes with their
+last turns. `outbox.ts`: an entry for a peer delivered over the link with its
+state following the peer's reports back, audio staying on the Mac.
+`voice.ts`, `channels.ts`: a peer's `kuru-replied` spoken and marked missed
+on the local rules. 4–6 days.
 
-- `shared/harness.ts`: `ask_kuru`, `read_kuru`, `node` on `add_card`,
-  `edit_card`, `move_card` and `cards`, the `[<node>]` mark grammar beside
-  `[telegram]`, `agentName` with the node in `kururu_status`, the role's
-  Nodes section rewritten around *read anywhere, act locally, ask a peer*.
-- `server/src/harness.ts`: `ask_kuru` through `NodeHost.send` into the peer's
-  `Outbox.say`, with the wait held on the peer's `kuru-replied`; `read_kuru`
-  off the cached `kuru-turns`; board verbs over the link into the peer's
-  `workspaces.*In` spellings with the actor `peer:<node>`. `noticeStatuses`
-  keeps notices local, and a test says so.
-- `shared/kuru.ts`, `server/src/kuru.ts`, `KuruDrawer.tsx`: the merged list
-  tagged by node, the chips, the `@<node>` composer grammar, reply-to-bubble,
-  away nodes with their last turns.
-- `server/src/outbox.ts`: an entry whose destination is a peer is delivered
-  over the link and its state follows the peer's reports back; audio stays on
-  the Mac.
-- `server/src/voice.ts`, `channels.ts`: a peer's `kuru-replied` is spoken and
-  marked missed on the same rules as a local reply.
+**Depends on.** 2 (links, `send`, `kuru-turns`).
 
-Done when, from the Mac's drawer: `@omarchy start a Claude agent in <workspace>
-with this prompt` is answered by Omarchy's Kuru in the same drawer with its
-mark, and the agent appears in the child's agents' pane; the Mac's Kuru, asked
-"what is Omarchy doing", answers from `kururu_status` without asking; asked to
-get something done there, it uses `ask_kuru` and reports the peer's reply;
-`read_kuru` brings back the overnight turns only when asked; a spoken
-`@omarchy …` is answered aloud on the Mac.
+**In parallel with.** 4 and 6.
 
-Tests: the mark and `@` grammars, the merge, the routing of an outbox entry as
-pure functions; `harness.test.ts` with a fake link.
+**Verified by.** The mark and `@` grammars, the merge and the routing of an
+outbox entry as pure tests; `harness.test.ts` with a fake link. On the two
+machines, from the Mac's drawer: `@omarchy start a Claude agent in
+<workspace> with this prompt` is answered by Omarchy's Kuru in the same
+drawer with its mark and the agent appears in the child's agents' pane; the
+Mac's Kuru answers "what is Omarchy doing" from `kururu_status` without
+asking; asked to get something done there it uses `ask_kuru` and reports the
+reply; `read_kuru` brings the overnight turns only when asked; a spoken
+`@omarchy …` is answered aloud on the Mac; a test asserts a child's notices
+never reach the Mac's Kuru.
 
-### Phase 4 — secrets (4–6 days)
+### Phase 4 — secrets
 
-- `shared/secrets.ts`: the kinds registry, grant states, the envelope shape,
-  the hint readers; a test that every secret file kururu writes is either a
-  kind or named in the never-shared list.
-- `server/src/seal.ts`: `seal(publicKey, bytes)`, `unseal(privateKey, envelope)`
-  with X25519, HKDF-SHA256 and AES-256-GCM from `node:crypto`, over the keys
-  `nodekeys.ts` made. Round-trip and tamper tests.
-- `server/src/secrets.ts`: parent: catalogue, grants, pushes on grant, link-up
-  and file change, acks; child: take, write with `writeConfigFile(…, 0o600)`,
-  forget with `removeConfigFile`, status. The Claude kind lands as the token
-  file `logins.ts` reads for `CLAUDE_CODE_OAUTH_TOKEN`; the Codex kind is
-  written into the profile's `CODEX_HOME`.
-- Settings → Nodes → <node> → Secrets on the parent; the "held from" line on a
-  child's OpenRouter, Web and Channels pages; Settings → Agents on the Mac
-  gets "Lend this login to a node" which runs `claude setup-token` in a tab
-  and takes the pasted token as the kind.
-- `shared/backup.ts`: the new files in the never-list; the README text.
-- `docs/nodes.md`: the secrets section, with the at-source revocation per kind.
+**Scope.** `shared/secrets.ts`: the kinds registry, grant states, the
+envelope shape, the hint readers, and a test that every secret file kururu
+writes is a kind or named never-shared. `server/src/seal.ts`: `seal` and
+`unseal` with X25519, HKDF-SHA256 and AES-256-GCM over the keys from phase 2.
+`server/src/secrets.ts`: on the parent the catalogue, grants, pushes on grant,
+link-up and file change, acks; on a child take, write at `0600`, forget,
+status; the Claude token kind landing as the token file `logins.ts` reads for
+`CLAUDE_CODE_OAUTH_TOKEN`, the Codex kind into `CODEX_HOME`. Settings → Nodes
+→ <node> → Secrets on the parent; the "held from" line on a child's
+OpenRouter, Web and Channels pages; Settings → Agents on the Mac gets "Lend
+this login to a node", which runs `claude setup-token` in a tab and takes the
+pasted token as the kind. The wizard's login step offers the token road; the
+doctor lists held kinds by hint. The backup's never-list and README grow; the
+secrets section of `docs/nodes.md`. 4–6 days.
 
-Done when: granting the self-hosted Firecrawl and OpenRouter kinds makes the
-child's Settings → Web and sidebar balance ready with hints only; an agent on
-the child uses `kururu_web`; changing the key on the Mac reaches the child
-within seconds and the page shows the ack; unticking removes the file; the
-child's profile runs an agent as the Mac's account with no login on the box.
+**Depends on.** 2 (keys, link messages, Settings → Nodes). The pure half can
+be written beside 2.
 
-### Phase 5 — one Telegram, with failover (4–6 days)
+**In parallel with.** 3 and 6.
 
-- `shared/nodes.ts`: `LeadGate` — away, takeover, takeback, busy, the 409
-  backoffs — as arithmetic with the times passed in, like `SwapGate`.
-  `shared/channels.ts`: the node mark line, the reply map shape, `routeOf`
-  (reply-to, `@node`, `/node`, else the leader), the held-for-an-away-node
-  notice, the switch time read from the roster. Tested.
-- `server/src/telegram.ts`: the poll runs only while `leaderOf` says so;
-  outgoing entries carry an origin and sent ids fill the map; incoming are
-  judged as today and then routed — own node to `Outbox.say`, another node
-  through the link; held for a node that is away, with one notice; the
-  handover state (offset, queue, held, map, handled ids) given and taken
-  through `lead-state`.
-- `server/src/channels.ts`: `replied`, `aside` and the quiet echo on a
-  non-leader go to the leader over the link.
-- `server/src/nodes.ts`: the handshake messages; the roster carries the
-  channel settings; eligibility checked before a node is counted as a
-  candidate.
-- Settings → Channels: the rank list shown with who leads now and who is
-  eligible; on a child, the "polls here while the Mac is away, token held
-  from the Mac" line.
-- The role prompt's Telegram section says lines are marked by node and that a
-  bare message reached the leader.
+**Verified by.** Round-trip and tamper tests on `seal.ts`; the grant state
+machine as a pure test; the registry completeness test. On the two machines:
+granting the self-hosted Firecrawl and OpenRouter kinds makes the child's
+Settings → Web and sidebar balance ready with hints only; an agent on the
+child uses `kururu_web`; changing the key on the Mac reaches the child within
+seconds and the page shows the ack; unticking removes the file; a child whose
+user has no browser login runs an agent on a lent token; `kururu child
+doctor` lists the held kinds.
 
-Done when: with the lid closed, a message to the bot is answered by the
-Omarchy Kuru with its mark within a minute of the lid closing, and the chat
-was told once; with the Mac back, the poll returns to the Mac after a minute
-and the chat says so; `@omarchy` and a reply to one of its lines reach it
-while the Mac leads; a message for the Mac while it sleeps is held and
+### Phase 5 — one Telegram, with failover
+
+**Scope.** `shared/nodes.ts`: `LeadGate` — away, takeover, takeback, busy,
+the 409 backoffs — as arithmetic with the times passed in, like `SwapGate`.
+`shared/channels.ts`: the node mark line, the reply map shape, `routeOf`
+(reply-to, `@node`, `/node`, else the leader), the held-for-an-away-node
+notice, the switch time read from the roster. `telegram.ts`: the poll runs
+only while `leaderOf` says so; outgoing entries carry an origin and sent ids
+fill the map; incoming are judged as today and routed — own node to
+`Outbox.say`, another node over the link, held for a node that is away with
+one notice; the handover state (offset, queue, held, map, handled ids) given
+and taken through `lead-state`. `channels.ts`: `replied`, `aside` and the
+quiet echo on a non-leader go to the leader. `nodes.ts`: the handshake
+messages; the roster carries the channel settings; eligibility checked.
+Settings → Channels shows the rank list with who leads and who is eligible;
+on a child the "polls here while the Mac is away, token held from the Mac"
+line. The role prompt's Telegram section says lines are marked by node. The
+doctor gains the leading row. 4–6 days.
+
+**Depends on.** 3 (a message into a peer's outbox over the link; replies
+relayed) and 4 (the Telegram token as a grant, which is eligibility).
+
+**In parallel with.** 6. `LeadGate` and `routeOf` can be written beside 3
+and 4.
+
+**Verified by.** `LeadGate` and `routeOf` as pure tests; the fake Bot API
+from `channels.test.ts` for the map, the queue and the handover; a link test
+for the handshake. On the two machines: with the lid closed, a message to the
+bot is answered by the Omarchy Kuru with its mark within a minute, and the
+chat was told once; with the Mac back, the poll returns to the Mac after a
+minute and the chat says so; `@omarchy` and a reply to one of its lines reach
+it while the Mac leads; a message for the Mac while it sleeps is held and
 delivered on wake; a simulated split (a firewall rule between the two for a
 minute) ends with the Mac polling and one 409 in the child's log.
 
-Tests: `LeadGate` and `routeOf` as pure functions; the fake Bot API from
-`channels.test.ts` for the map, the queue and the handover; a link test for
-the handshake.
+### Phase 6 — moving a workspace to a child
 
-### Phase 6 — moving a workspace to a child (2–3 days)
+**Scope.** `shared/nodes.ts`: the `workspace-move` / `workspace-moved`
+shapes, the refusal rule (an agent running, a worktree standing) as a pure
+function over a workspace and its agents, the dialog's sentences.
+`nodes.ts` and `workspaces.ts`: the exchange with a move id, the export
+through `export.ts`'s rows, the adoption through the store's one road in with
+`imported` events, `newWorkspaceIn` on the target, removal on the
+acknowledgement with a `moved` event, idempotent on retry. `Sidebar.tsx`'s
+row menu gains **Move to <node>…**; `Dialog.tsx` draws the centred dialog
+with the folder field and the two lists. The harness gets `move_workspace`
+over the same exchange. 2–3 days.
 
-- `shared/nodes.ts`: `workspace-move` / `workspace-moved` shapes, the refusal
-  rule (an agent running, a worktree standing) as a pure function over the
-  workspace and its agents, the dialog's sentences.
-- `server/src/nodes.ts` and `workspaces.ts`: the exchange with a move id, the
-  export through `export.ts`'s rows, the adoption through the store's one
-  road in with `imported` events, `newWorkspaceIn` on the target, removal on
-  the acknowledgement with a `moved` event, idempotent on retry.
-- `Sidebar.tsx`'s row menu: **Move to <node>…**; `Dialog.tsx` for the
-  centred dialog with the folder field and the two lists.
-- The harness: `move_workspace(node, folder)` is one more call into the same
-  exchange, cheap once the exchange exists.
+**Depends on.** 2 (the link exchange, `newWorkspaceIn` reachable by a peer).
 
-Done when: a workspace with cards and an asleep run moves to the child, its
-cards and their histories appear on the child's board, the Mac's row is gone
-and the board is in Search → Deleted with the `moved` event, a second click on
-the same move id does nothing twice, and a workspace with a running agent is
-refused with the reason.
+**In parallel with.** 3, 4 and 5.
 
-### Later, each on its own
+**Verified by.** The refusal rule and the export-import round trip as tests
+(`store.test.ts` has the importer). On the two machines: a workspace with
+cards and an asleep run moves to the child, its cards and their histories
+appear on the child's board, the Mac's row is gone and the board is in
+Search → Deleted with the `moved` event; a second click on the same move id
+does nothing twice; a workspace with a running agent is refused with the
+reason; the move back works the same way.
+
+### Later, each on its own, not scheduled
 
 - **One window**: a remote pane type — a tab `{kind: "remote", node, agentId}`
   in the parent's layout whose emulator is fed from a second socket to the
@@ -831,19 +954,21 @@ refused with the reason.
 - **Topics in the private chat** instead of marks, after checking the Bot API
   10.0 report. 1–2 days.
 - **`systemd-creds --user`** wrapping of granted files on a child with a TPM.
-  1–2 days, after the spike shows it works for the dedicated user.
+  1–2 days, after the spike shows it works for the child's user.
 - **Push notifications** (roadmap 3): a child is the natural pusher, being
   always on.
 - **`tailscale serve`** on the child for the phone's microphone: the user's
   command, documented in `docs/linux.md`, gated on the loopback rule.
 
-Total for phases 0–6: roughly 24–35 agent-days, in order, each shippable.
+Total for phases 0–6: roughly 27–39 agent-days, with 0 and 1A together, then
+1B, then 2, then 3, 4 and 6 side by side, then 5.
 
 ## Risks
 
 - **node-pty from source.** node-gyp needs the node headers for mise's node
   26, downloaded at build; a box without internet at that moment fails the
-  install. The spike finds out.
+  install. The spike finds out, and the wizard says so when `pty.node` is
+  missing.
 - **A transient unit under a lingering user manager** is the design's load-
   bearing fact on Linux; if `systemd-run --user` refuses from the service's
   context, the fallback is `KillMode=process` on `kururu.service` with the host
@@ -851,11 +976,18 @@ Total for phases 0–6: roughly 24–35 agent-days, in order, each shippable.
   stop`. The spike tries both.
 - **`node:sqlite` is a release candidate** on node 26 and experimental-with-no-
   flag on node 24; the store uses five calls and `backup()`. A node major that
-  changes an option name breaks the child's start, which `lifecycle.log` says.
-- **The lent Claude token** lives a year, makes model requests only (no
-  Remote Control, no claude.ai connectors), and there are reports of 401s in
-  long-running sessions; the child's Settings says when it was lent and the
-  usage bar on the Mac is the only gauge of the shared plan.
+  changes an option name breaks the child's start, which `lifecycle.log` and
+  the doctor say.
+- **The wizard's reach.** It never runs `tailscale` or `sudo`, so two steps
+  stay the user's hands: bringing the tailnet up and making a dedicated user
+  or enabling linger for one. It prints the exact lines and waits.
+- **An API key in the way** bills as API usage and outranks the login; the
+  wizard and doctor scan every place a pty could inherit one, but a key
+  exported in a shell started later is outside their sight.
+- **A lent Claude token** lives a year, makes model requests only, and there
+  are reports of 401s in long-running sessions; the child's Settings says
+  when it was lent and the usage bar on the Mac is the only gauge of the
+  shared plan.
 - **Failover under a split tailnet** is settled by rank and the 409, which
   means up to a minute of two pollers and one message possibly answered by
   the lower node first. Rare, bounded, and logged on both sides.
@@ -876,15 +1008,16 @@ Total for phases 0–6: roughly 24–35 agent-days, in order, each shippable.
   the move id; a move interrupted before the target adopted anything leaves
   the source untouched, since removal waits for the acknowledgement.
 
-## What the user does by hand
+## What stays in the user's hands
 
-- Before phase 0: make the dedicated user on the box, `loginctl enable-linger`
-  for it, give it node (mise or the system package) and clones of the
-  repositories the child will work on.
-- When phase 4 arrives: `claude setup-token` on the Mac, once per login to
-  lend; `@BotFather` needs nothing new.
-- If the phone's microphone on the child is wanted: `tailscale serve` on the
-  box, after phase 1's loopback rule is in.
+- Bringing the tailnet up on a new machine (`tailscale up`), and `tailscale
+  serve` if the phone's microphone on a child is wanted.
+- Running the one or two root lines the wizard prints when a dedicated user
+  is chosen: the `useradd` and its `enable-linger`.
+- Typing a child's pairing code and address into the Mac's Settings → Nodes,
+  and ticking the secrets a child may hold.
+- The browser half of a `/login` on a machine with no browser, from the link
+  the wizard shows.
 
 ## Appendix — what was checked, read-only, on 2026-10-18
 
@@ -903,8 +1036,8 @@ Code 2.1.299 (signed in, credentials file `0600`), Codex and gh through mise,
 port 7717 free, another node service of the box user's on loopback, the box
 user in `wheel` with sudo behind a password and not in `docker`, and a
 `~/Projects` folder. The web's facts: `node:sqlite` history from nodejs.org;
-node-pty's prebuild listing from unpkg; `claude setup-token` and the
-credential locations and precedence from code.claude.com; Codex's `auth.json`
+node-pty's prebuild listing from unpkg; `claude setup-token`, the credential
+locations and the precedence list from code.claude.com; Codex's `auth.json`
 copy and `--device-auth` from developers.openai.com; `message_thread_id`,
 `reply_to_message` and private-chat topics from core.telegram.org and the
 aiogram changelog; `systemd-creds --user` from the Arch man page; Tailscale
