@@ -18,7 +18,13 @@ import { join } from "node:path";
 import {
   CHUNK_MAX,
   PAIRING_MS,
+  adoptSharedTelegram,
   adoptTelegramSettings,
+  asTelegramSwitch,
+  laterSwitch,
+  switchPayload,
+  switchTime,
+  withSwitch,
   carriesCode,
   channelMessageId,
   channelOfMessage,
@@ -619,5 +625,44 @@ describe("Channels", () => {
     channels.outboxMoved([entry("telegram-1-2", "failed")], () => "pk-main");
     expect(warned).toHaveLength(1);
     expect(warned[0]).toContain('"check the build" did not reach Kuru');
+  });
+});
+
+describe("the switch from any node", () => {
+  const allowed = [{ id: "111222333", name: "Tony", username: null, addedAt: 1 }];
+  const roster = adoptSharedTelegram({ enabled: true, enabledAt: 100, switchedAt: 100, switchedBy: "n0000000000a1", allowed, bot: null })!;
+  const flip = (enabled: boolean, at: number, by = "n0000000000b2") => ({ enabled, at, by, told: true, sig: "s" });
+
+  it("tells a roster from a parent that takes flips from one that predates them", () => {
+    expect(roster.switchedAt).toBe(100);
+    const old = adoptSharedTelegram({ enabled: true, enabledAt: 100, allowed, bot: null })!;
+    expect("switchedAt" in old).toBe(false);
+    expect(adoptSharedTelegram({ enabled: false, enabledAt: null, switchedAt: null, allowed, bot: null })!.switchedAt).toBeNull();
+  });
+
+  it("goes by the later word, a tie by node id, and on with nobody allowed is off", () => {
+    expect(withSwitch(roster, flip(false, 99))).toBe(roster);
+    expect(withSwitch(roster, flip(false, 101))).toMatchObject({ enabled: false, enabledAt: null, switchedAt: 101, switchedBy: "n0000000000b2" });
+    expect(withSwitch({ ...roster, enabled: false }, flip(true, 150))).toMatchObject({ enabled: true, enabledAt: 150 });
+    expect(withSwitch({ ...roster, allowed: [] }, flip(true, 150)).enabled).toBe(false);
+    expect(laterSwitch({ at: 5, by: "a" }, { at: 5, by: "b" })).toBe(true);
+    expect(laterSwitch({ at: 5, by: "b" }, { at: 5, by: "a" })).toBe(false);
+    expect(laterSwitch(null, { at: 1, by: null })).toBe(true);
+  });
+
+  it("stamps a new flip after the word it replaces, whatever this clock says", () => {
+    expect(switchTime(1_000, 400)).toBe(1_000);
+    expect(switchTime(1_000, 5_000)).toBe(5_001);
+    expect(switchTime(1_000, null)).toBe(1_000);
+  });
+
+  it("checks a flip off the wire, and signs every field but the signature", () => {
+    expect(asTelegramSwitch(flip(true, 5))).toEqual(flip(true, 5));
+    expect(asTelegramSwitch({ ...flip(true, 5), at: Number.NaN })).toBeNull();
+    expect(asTelegramSwitch({ ...flip(true, 5), enabled: "yes" })).toBeNull();
+    expect(asTelegramSwitch({ ...flip(true, 5), by: "../x" })).toBeNull();
+    const { sig: _sig, ...unsigned } = flip(true, 5);
+    expect(switchPayload(unsigned)).not.toBe(switchPayload({ ...unsigned, enabled: false }));
+    expect(switchPayload(unsigned)).not.toBe(switchPayload({ ...unsigned, told: false }));
   });
 });

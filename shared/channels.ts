@@ -146,6 +146,14 @@ export interface TelegramSettings {
    * that what you sent while it was off never reaches Kuru later.
    */
   enabledAt: number | null;
+  /**
+   * When the switch last moved, on or off, and which node moved it (by
+   * id; null for this one, or a file from before). What "last change wins"
+   * compares among nodes (`TelegramSwitch`): on the parent it is the
+   * roster's, and a node's switch made later than it is the newer word.
+   */
+  switchedAt: number | null;
+  switchedBy: string | null;
   allowed: AllowedUser[];
   /** The profile whose Kuru it talks to, by key. Null until chosen, which reads as the active profile. */
   profileKey: string | null;
@@ -153,7 +161,7 @@ export interface TelegramSettings {
   speakReplies: boolean;
 }
 
-export const TELEGRAM_DEFAULTS: TelegramSettings = { enabled: false, enabledAt: null, allowed: [], profileKey: null, speakReplies: false };
+export const TELEGRAM_DEFAULTS: TelegramSettings = { enabled: false, enabledAt: null, switchedAt: null, switchedBy: null, allowed: [], profileKey: null, speakReplies: false };
 
 /** The most accounts on the list. Somebody with two phones has two; a list of forty is a group, which a channel is not for. */
 export const ALLOWED_MAX = 8;
@@ -186,6 +194,8 @@ export function adoptTelegramSettings(value: unknown): TelegramSettings {
   return {
     enabled,
     enabledAt: enabled && typeof raw.enabledAt === "number" && Number.isFinite(raw.enabledAt) ? raw.enabledAt : null,
+    switchedAt: typeof raw.switchedAt === "number" && Number.isFinite(raw.switchedAt) ? raw.switchedAt : null,
+    switchedBy: typeof raw.switchedBy === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(raw.switchedBy) ? raw.switchedBy : null,
     allowed,
     profileKey: typeof raw.profileKey === "string" && raw.profileKey ? raw.profileKey : null,
     speakReplies: raw.speakReplies === true,
@@ -604,10 +614,17 @@ export function pollRetryMs(failures: number): number {
  * the channel is on, to send its Kuru's replies to whichever node polls;
  * and because the roster is signed by the parent, so a child cannot add an
  * account to the list.
+ *
+ * The switch is the one part a child may move too (`TelegramSwitch`), so
+ * the roster says when it last moved and from which node. `switchedAt` is
+ * absent — not null — in a roster from a parent from before that, which
+ * would never take a child's switch in, and a child does not offer one.
  */
 export interface SharedTelegram {
   enabled: boolean;
   enabledAt: number | null;
+  switchedAt?: number | null;
+  switchedBy?: string | null;
   allowed: AllowedUser[];
   bot: TelegramBot | null;
 }
@@ -617,12 +634,104 @@ export function adoptSharedTelegram(value: unknown): SharedTelegram | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
   const settings = adoptTelegramSettings(raw);
-  return { enabled: settings.enabled, enabledAt: settings.enabledAt, allowed: settings.allowed, bot: adoptBot(raw.bot) };
+  return {
+    enabled: settings.enabled,
+    enabledAt: settings.enabledAt,
+    ...("switchedAt" in raw ? { switchedAt: settings.switchedAt, switchedBy: settings.switchedBy } : {}),
+    allowed: settings.allowed,
+    bot: adoptBot(raw.bot),
+  };
 }
 
 /** What the parent puts in the roster from its own file. */
 export function sharedFrom(settings: TelegramSettings, bot: TelegramBot | null): SharedTelegram {
-  return { enabled: settings.enabled, enabledAt: settings.enabledAt, allowed: settings.allowed, bot };
+  return { enabled: settings.enabled, enabledAt: settings.enabledAt, switchedAt: settings.switchedAt, switchedBy: settings.switchedBy, allowed: settings.allowed, bot };
+}
+
+// ---------------------------------------------------------------------------
+// The switch, from any node
+// ---------------------------------------------------------------------------
+
+/*
+ * The roster is the parent's to sign, so a switch that rode in it alone
+ * could only be moved on the Mac — and the Mac is exactly the node that is
+ * shut when you are out with a phone and the box at home is the one
+ * reading the chat. So the switch has a second road: a node that is
+ * flipped makes a `TelegramSwitch`, signs it with its own node key, and
+ * hands it to every node it can reach, which hand it on, as they do the
+ * roster. Each node goes by the newest word it has, the roster's or a
+ * switch's, by the time it was made; the parent writes a newer switch into
+ * its own file, and so into the next roster, the moment it hears it, after
+ * which the switch has nothing left to say and is dropped.
+ *
+ * Only the switch. The allow-list is who may give Kuru orders with the
+ * user's authority, on every node at once; it stays the parent's to
+ * change, by a pairing the user confirms there, so that a child — a box
+ * other programs run on — cannot let an account in. The switch only lets
+ * the accounts the Mac already allowed in, or keeps them out, and whoever
+ * holds the token could read the bot anyway.
+ */
+
+/** One node's flip of the shared switch, as it crosses the links. */
+export interface TelegramSwitch {
+  enabled: boolean;
+  /** When it was made, by its node's clock, and never before the switch it replaced (`switchTime`). */
+  at: number;
+  /** The node that made it. Its key in the roster is what checks `sig`. */
+  by: string;
+  /** That node told the chat itself. One with no token could not, so the node that reads the chat does. */
+  told: boolean;
+  /** Ed25519 by `by`'s node key over `switchPayload`, base64. */
+  sig: string;
+}
+
+/** What a switch's signature covers: every field but the signature, under a label no other signed thing in kururu uses. */
+export function switchPayload(change: Omit<TelegramSwitch, "sig">): string {
+  return `kururu-telegram-switch\n${JSON.stringify([change.enabled, change.at, change.by, change.told])}`;
+}
+
+/** A switch off the wire or the disk, checked to the field; the signature is the receiver's to check against the roster. */
+export function asTelegramSwitch(raw: unknown): TelegramSwitch | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.enabled !== "boolean" || typeof r.at !== "number" || !Number.isFinite(r.at) || r.at <= 0) return null;
+  if (typeof r.by !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(r.by) || typeof r.sig !== "string" || r.sig.length > 200) return null;
+  return { enabled: r.enabled, at: r.at, by: r.by, told: r.told === true, sig: r.sig };
+}
+
+/**
+ * Whether `b` is a later word than `a`. By time, and a tie — two nodes
+ * flipped in the same millisecond — by node id, so every node picks the
+ * same one of the two.
+ */
+export function laterSwitch(a: { at: number; by: string | null } | null, b: { at: number; by: string | null }): boolean {
+  if (!a) return true;
+  return b.at > a.at || (b.at === a.at && (b.by ?? "") > (a.by ?? ""));
+}
+
+/**
+ * The time a new flip is made at: now, or just after the word it replaces
+ * if that one is stamped later — a node whose clock runs behind another's
+ * still makes the newest word when the user flips it, since the user saw
+ * the other one first.
+ */
+export function switchTime(now: number, current: number | null): number {
+  return Math.max(now, (current ?? 0) + 1);
+}
+
+/** The switch a roster's copy says, as a word to compare a node's against. Null when it never moved. */
+export function rosterSwitch(shared: SharedTelegram): { at: number; by: string | null } | null {
+  return typeof shared.switchedAt === "number" ? { at: shared.switchedAt, by: shared.switchedBy ?? null } : null;
+}
+
+/**
+ * The roster's settings with a node's switch over them, when the switch is
+ * the later word. On with nobody allowed is still off, as in the file.
+ */
+export function withSwitch(shared: SharedTelegram, change: TelegramSwitch | null): SharedTelegram {
+  if (!change || !laterSwitch(rosterSwitch(shared), change)) return shared;
+  const enabled = change.enabled && shared.allowed.length > 0;
+  return { ...shared, enabled, enabledAt: enabled ? change.at : null, switchedAt: change.at, switchedBy: change.by };
 }
 
 /** A node's name as a person reads it in the chat: "Omarchy", "Box-2". */
@@ -795,6 +904,13 @@ export interface LeadStatus {
   standingDownUntil: number | null;
   /** Every member by rank, this node among them. */
   nodes: Array<{ id: string; name: string; rank: number; self: boolean; parent: boolean; up: boolean; since: number | null; eligible: boolean | null; polls: boolean }>;
+  /**
+   * The switch, as this node goes by it: who last moved it and when, whether
+   * that word is still on its way to the parent's roster (`pending`), and
+   * why it cannot be turned on or off here — a sentence, or null when it can.
+   * Absent from a server from before, which a newer page may be drawn against.
+   */
+  switch?: { by: string | null; at: number | null; pending: boolean; refuseOn: string | null; refuseOff: string | null };
 }
 
 // ---------------------------------------------------------------------------

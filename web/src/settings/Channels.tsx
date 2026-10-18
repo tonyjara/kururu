@@ -18,8 +18,9 @@
  * With other kururus linked, the bot is still one bot, read by one node at a
  * time (`docs/nodes.md`, "One Telegram"), so the page grows a list of the
  * nodes by rank: which reads the chat now, and which could. On a child it
- * is that list and little else — the bot, the switch and the accounts are
- * the parent's, set on the parent's page.
+ * is that list, the switch — which is every node's, so the chat can be
+ * turned on from the box while the Mac is shut — and little else: the bot
+ * and the accounts are the parent's, set on the parent's page.
  */
 import { useState } from "react";
 import { channelReady, nodeSubject, pairingLink, userLabel, type LeadStatus, type TelegramStatus } from "../../../shared/channels";
@@ -54,12 +55,14 @@ function Telegram({ status, profiles }: { status: TelegramStatus; profiles: Prof
   const bot = status.bot ? `@${status.bot.username}` : "the bot";
   const held = useHeld("telegram");
 
-  // A child of a shared channel: the bot, the switch and the list are the
-  // parent's, and what this node has of its own is where it stands in the
-  // rank and which Kuru it speaks for.
+  // A child of a shared channel: the bot and the list are the parent's, and
+  // what this node has of its own is the switch — every node's, flipped
+  // for all of them — where it stands in the rank and which Kuru it speaks for.
   const lead = status.lead;
   if (lead?.heldFrom) {
     const parent = nodeSubject(lead.heldFrom);
+    const word = lead.switch;
+    const refused = !word ? "This node's kururu is from before the switch could be flipped here: update it, or switch it on the parent." : status.enabled ? word.refuseOff : word.refuseOn;
     return (
       <>
         {error && <Banner tone="bad">{error}</Banner>}
@@ -67,11 +70,17 @@ function Telegram({ status, profiles }: { status: TelegramStatus; profiles: Prof
           title="Telegram"
           foot={
             held
-              ? `Reads the chat here while ${parent} is away; the token is held from ${parent}. The switch and the accounts are ${parent}'s, in its Settings → Channels.`
+              ? `Reads the chat here while ${parent} is away; the token is held from ${parent}. The switch turns the chat on or off for every node, ${parent} too, even while it is away. The accounts are ${parent}'s, in its Settings → Channels.`
               : `${parent}'s bot. This node's Kuru speaks in it through whichever node reads the chat. To let this node read it while ${parent} is away, lend it the token: ${parent}'s Settings → Nodes → this node → Secrets → Telegram.`
           }
         >
-          <Readout label="Kuru listens" tone={status.enabled ? "ok" : "off"} value={status.enabled ? "On" : "Off"} hint={`${parent}'s switch, carried here in the roster.`} />
+          <Toggle
+            label="Kuru listens"
+            hint={refused ?? ([describeShared(status, lead), switchedLine(lead, status.enabled)].filter(Boolean).join(" · ") || undefined)}
+            on={status.enabled}
+            disabled={refused !== null}
+            onChange={(enabled) => change({ enabled })}
+          />
           {held && <HeldFrom kind="telegram" label="Token" />}
           <Select label="Talks to" value={status.profileId ?? ""} ariaLabel="The profile whose Kuru Telegram talks to" onChange={(value) => change({ profileId: value || null })}>
             <option value="">Whichever profile is active</option>
@@ -197,9 +206,34 @@ function describe(status: TelegramStatus, ready: boolean): string {
   else if (status.pairing) parts.push(`Off; listening as ${bot} for the pairing code only`);
   else if (!ready) parts.push("Off: your account is not on the list yet");
   else parts.push("Off");
+  const switched = switchedLine(lead, status.enabled);
+  if (switched) parts.push(switched);
   if (status.lastInAt) parts.push(`last message ${when(status.lastInAt)}`);
   if (status.waiting) parts.push(`${status.waiting} waiting to reach Telegram`);
   return parts.join(" · ");
+}
+
+/** The line under a child's switch: who reads the chat, when it is on. */
+function describeShared(status: TelegramStatus, lead: LeadStatus): string | null {
+  if (!status.enabled) return null;
+  if (lead.polls) return "On, and this node reads the chat";
+  return lead.holder ? `On; ${nodeSubject(lead.holder)} reads the chat` : "On; no node reads the chat right now";
+}
+
+/**
+ * Who last moved the switch, when that is news: another node did — the
+ * box, while the Mac was shut — or this child did, and the parent has not
+ * taken it into its roster yet because it is away.
+ */
+function switchedLine(lead: LeadStatus | null, on: boolean): string | null {
+  const word = lead?.switch;
+  if (!lead || !word?.by || word.at === null) return null;
+  const self = lead.nodes.find((n) => n.self)?.name;
+  const parent = lead.nodes.find((n) => n.parent)?.name;
+  if (word.by === self && !word.pending) return null;
+  if (word.by === parent && word.by !== self) return null;
+  const said = `${on ? "turned on" : "turned off"} ${word.by === self ? "here" : `from ${nodeSubject(word.by)}`} at ${when(word.at)}`;
+  return word.pending && parent ? `${said}; ${nodeSubject(parent)} takes it in when it is back` : said;
 }
 
 function Account({ status }: { status: TelegramStatus }) {

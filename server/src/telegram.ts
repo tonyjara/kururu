@@ -37,7 +37,8 @@
  * **Among several nodes** (`docs/nodes.md`, "One Telegram") the bot is one
  * bot and only one node may poll it, so this channel has a second way of
  * being: *shared*, when the roster carries the parent's settings. Then the
- * switch, the list and the switch time are the roster's, the poll runs only
+ * list is the roster's, the switch is the newest word among the roster's
+ * and the nodes' own flips (`TelegramSwitch`), the poll runs only
  * while `lead.ts` says this node leads, a message is routed to the node it
  * is for (`routeOf`) and held while that node is away, and every line out
  * remembers whose it was (`ReplyMap`) — and a node that does not poll hands
@@ -57,15 +58,20 @@ import {
   PAIRING_MS,
   emptyAddress,
   heldLine,
+  laterSwitch,
   markLine,
   mergeReplies,
   rememberSent,
   routeOf,
+  rosterSwitch,
   sharedFrom,
+  switchTime,
+  withSwitch,
   SEND_GIVE_UP_MS,
   TELEGRAM_DEFAULTS,
   adoptBot,
   adoptTelegramSettings,
+  asTelegramSwitch,
   botFrom,
   channelMessageId,
   chunkText,
@@ -89,6 +95,7 @@ import {
   type TelegramBot,
   type TelegramSettings,
   type TelegramStatus,
+  type TelegramSwitch,
 } from "../../shared/channels";
 import { LEAD_BUSY_MS, LEAD_HANDLED_MAX, isNodeId, type LeadHeld, type LeadState } from "../../shared/nodes";
 import { readConfigFile, removeConfigFile, writeConfigFile } from "./config";
@@ -185,6 +192,8 @@ interface ChannelState {
   relaying: Relay[];
   /** Shared: this node polled for the others when it last stopped, and carries on at once when it starts. */
   holding: boolean;
+  /** Shared, on a child: the newest flip of the switch it has heard that the roster does not carry yet. */
+  switch: TelegramSwitch | null;
 }
 
 const EMPTY_STATE: ChannelState = {
@@ -199,6 +208,7 @@ const EMPTY_STATE: ChannelState = {
   handled: [],
   relaying: [],
   holding: false,
+  switch: null,
 };
 
 function statePath(): string {
@@ -245,6 +255,7 @@ function readState(path: string): ChannelState {
             .map((r) => ({ id: r.id, at: r.at, text: r.text, silent: r.silent === true, notice: r.notice === true, sentAt: 0 }))
         : [],
       holding: raw.holding === true,
+      switch: asTelegramSwitch(raw.switch),
     };
   } catch {
     return structuredClone(EMPTY_STATE);
@@ -427,12 +438,13 @@ export class TelegramChannel {
   }
 
   /**
-   * The switch, the switch time and the list this node goes by: the
-   * roster's on a child of a shared channel, else its own file's. The
-   * parent's file is the roster's source, so on the parent the two agree.
+   * The switch, the switch time and the list this node goes by: on a child
+   * of a shared channel the roster's, with a newer flip of the switch over
+   * them; else its own file's. The parent's file is the roster's source, and
+   * takes every newer flip it hears, so on the parent the two agree.
    */
-  private get rules(): Pick<TelegramSettings, "enabled" | "enabledAt" | "allowed"> {
-    return this.shared?.settings ?? this.settings;
+  private get rules(): Pick<TelegramSettings, "enabled" | "enabledAt" | "allowed"> & Pick<SharedTelegram, "switchedAt" | "switchedBy"> {
+    return this.shared?.settings ? withSwitch(this.shared.settings, this.state.switch) : this.settings;
   }
 
   /** Whether Kuru's replies to Telegram are also said aloud on the Mac. */
@@ -502,6 +514,13 @@ export class TelegramChannel {
     const wasOn = this.rules.enabled;
     this.shared = next;
     if (!next) this.leading = false;
+    // A flip the roster now carries, or outdoes, has nothing left to say;
+    // nor has one on a node that is no longer a child of a shared channel.
+    const held = this.state.switch;
+    if (held && (!next?.settings || !laterSwitch(rosterSwitch(next.settings), held))) {
+      this.state.switch = null;
+      this.saveState();
+    }
     // A message for a node the roster no longer lists has nobody to wait
     // for, and one older than Telegram keeps anything is history.
     const now = Date.now();
@@ -510,15 +529,89 @@ export class TelegramChannel {
       this.state.held = kept;
       this.saveState();
     }
-    if (wasOn && !this.rules.enabled) {
-      this.state.outgoing = [];
-      this.state.relaying = [];
-      this.typing.clear();
-    }
+    this.rulesMoved(wasOn, false);
     if (before === JSON.stringify(next)) return;
     this.saveState();
     this.wake();
     this.deps.changed();
+  }
+
+  /** How many accounts are on the list this node goes by. */
+  get allowedCount(): number {
+    return this.rules.allowed.length;
+  }
+
+  /** Whether the channel is on, as this node goes by it. */
+  get switchedOn(): boolean {
+    return this.rules.enabled;
+  }
+
+  /** The newest word on the switch this node has: when it last moved, and from which node. Null when it never did. */
+  switchWord(): { at: number; by: string | null } | null {
+    const rules = this.rules;
+    return typeof rules.switchedAt === "number" ? { at: rules.switchedAt, by: rules.switchedBy ?? null } : null;
+  }
+
+  /** Whether the roster's copy is from a parent that takes a node's flip into it. Always, on the parent. */
+  get switchable(): boolean {
+    const settings = this.shared?.settings;
+    return !settings || settings.switchedAt !== undefined;
+  }
+
+  /** A flip this node holds that the roster does not carry yet: what it hands every node it links to. */
+  pendingSwitch(): TelegramSwitch | null {
+    const settings = this.shared?.settings;
+    const held = this.state.switch;
+    return settings && held && laterSwitch(rosterSwitch(settings), held) ? held : null;
+  }
+
+  /**
+   * A flip of the shared switch — made here (`lead.ts` signs it) or heard
+   * from another node — taken when it is the later word. On the parent it
+   * goes into the file, which is the next roster; on a child it is kept
+   * beside the roster until the roster says as much. True when taken, and
+   * then it is this node's to hand on.
+   *
+   * The chat is told once: by the node that made it, if that node holds the
+   * token, and otherwise — a node with none can only switch off — by the
+   * node reading the chat when it hears.
+   */
+  takeSwitch(change: TelegramSwitch): boolean {
+    const shared = this.shared;
+    if (!shared || !laterSwitch(this.switchWord(), change)) return false;
+    const wasOn = this.rules.enabled;
+    if (shared.settings) {
+      this.state.switch = change;
+    } else {
+      const enabled = change.enabled && this.settings.allowed.length > 0;
+      this.settings = { ...this.settings, enabled, enabledAt: enabled ? change.at : null, switchedAt: change.at, switchedBy: change.by };
+      this.save();
+    }
+    const tell = change.by === shared.self ? change.told : !change.told && this.leading;
+    this.rulesMoved(wasOn, tell);
+    this.saveState();
+    this.wake();
+    this.flush();
+    this.deps.changed();
+    return true;
+  }
+
+  /**
+   * The switch this node goes by moved, by the roster or by a flip. Off is
+   * "off" at once: nothing queued goes after it, here or on the way to the
+   * node that reads the chat; the notice, when this node is the one to send
+   * it, is the last thing sent.
+   */
+  private rulesMoved(wasOn: boolean, tell: boolean): void {
+    const on = this.rules.enabled;
+    if (wasOn && !on) {
+      this.state.outgoing = [];
+      this.state.relaying = [];
+      this.typing.clear();
+      if (tell) this.noticeAll(OFF_NOTICE);
+    } else if (!wasOn && on && tell) {
+      this.noticeAll(ON_NOTICE);
+    }
   }
 
   /** The parent's own settings as the roster carries them: null with no bot to share. */
@@ -743,7 +836,7 @@ export class TelegramChannel {
     }
   }
 
-  /** On a child of a shared channel, the switch and the list are the parent's: the roster's, signed there. */
+  /** On a child of a shared channel, the list is the parent's: the roster's, signed there. */
   private parentsOnly(what: string): void {
     if (!this.shared?.settings) return;
     const parent = this.shared.nodes.find((n) => n.id === this.shared!.parent)?.name ?? "the parent";
@@ -821,20 +914,26 @@ export class TelegramChannel {
     this.deps.changed();
   }
 
-  /** On or off, the profile, whether replies are spoken. Turning on needs a token and somebody to talk to. Throws the sentence. */
+  /**
+   * On or off, the profile, whether replies are spoken. Turning on needs a
+   * token and somebody to talk to. Throws the sentence. The switch of a
+   * shared channel is not flipped here but by a signed flip every node
+   * hears (`lead.ts`, then `takeSwitch`).
+   */
   set(change: { enabled?: boolean; profileKey?: string | null; speakReplies?: boolean }): TelegramStatus {
     const now = Date.now();
-    if (change.enabled !== undefined && change.enabled !== this.rules.enabled) this.parentsOnly("The switch");
+    if (change.enabled !== undefined && change.enabled !== this.rules.enabled && this.shared) throw new Error("A shared channel's switch is flipped for every node at once, through the links.");
     if (change.enabled === true && !this.settings.enabled) {
       if (!this.hint) throw new Error("Give kururu a bot token first.");
       if (this.settings.allowed.length === 0) throw new Error("Pair your Telegram account first: nobody is allowed to talk to Kuru yet.");
-      this.settings = { ...this.settings, enabled: true, enabledAt: now };
+      const at = switchTime(now, this.settings.switchedAt);
+      this.settings = { ...this.settings, enabled: true, enabledAt: at, switchedAt: at, switchedBy: null };
       this.noticeAll(ON_NOTICE);
     } else if (change.enabled === false && this.settings.enabled) {
       // The notice is the last thing sent, and nothing queued goes after it.
       this.state.outgoing = [];
       this.noticeAll(OFF_NOTICE);
-      this.settings = { ...this.settings, enabled: false, enabledAt: null };
+      this.settings = { ...this.settings, enabled: false, enabledAt: null, switchedAt: switchTime(now, this.settings.switchedAt), switchedBy: null };
       this.typing.clear();
       this.poller?.abort();
     }

@@ -139,6 +139,9 @@ function nodesOf(side: Side) {
     selfId: () => side.id,
     role: () => (side.rank === 1 ? "parent" : "child"),
     parentId: () => mac.id,
+    name: () => side.name,
+    // Each node's signing key is its id here, and a signature is that and the payload's hash (`fakeSign`).
+    member: (id: string) => [mac, box].filter((s) => s.id === id).map((s) => ({ id: s.id, name: s.name, rank: s.rank, keys: { sign: s.id, box: "" }, address: "", port: 0 }))[0],
     members,
     ownRank: () => side.rank,
     statuses: () => {
@@ -153,7 +156,7 @@ function nodesOf(side: Side) {
           since: linked ? upSince : downSince,
           lastSeen: linked ? now : downSince,
           error: null,
-          summary: { lead: { eligible: true, polls: o.telegram.polling } },
+          summary: { lead: { eligible: o.telegram.switchedOn, polls: o.telegram.polling } },
           leader: false,
           url: "",
           address: "",
@@ -161,8 +164,8 @@ function nodesOf(side: Side) {
         },
       ];
     },
-    summaryOf: (id: string) => (id === other(side).id ? { lead: { eligible: true, polls: other(side).telegram.polling } } : null),
-    liveSummaryOf: (id: string) => (linked && id === other(side).id ? { lead: { eligible: true, polls: other(side).telegram.polling } } : null),
+    summaryOf: (id: string) => (id === other(side).id ? { lead: { eligible: other(side).telegram.switchedOn, polls: other(side).telegram.polling } } : null),
+    liveSummaryOf: (id: string) => (linked && id === other(side).id ? { lead: { eligible: other(side).telegram.switchedOn, polls: other(side).telegram.polling } } : null),
     linked: (id: string) => linked && id === other(side).id,
     linkedIds: () => (linked ? [other(side).id] : []),
     nameOf: (id: string) => [mac, box].find((s) => s.id === id)?.name ?? null,
@@ -196,20 +199,29 @@ function makeSide(name: string, id: string, rank: number): Side {
   return side;
 }
 
+const fakeSign = (key: string, payload: string) => `${key}:${Bun.hash(payload).toString(36)}`;
+
 /** The node's lead, as a server builds it — again after a sleep, which is what a frozen process waking looks like to the rule. */
 function startLead(side: Side): void {
   side.lead = new TelegramLead({
     nodes: nodesOf(side) as never,
     telegram: side.telegram,
-    eligible: () => ({ eligible: true, why: null }),
+    // Eligible is the switch, as on a server whose token and Claude login are both there.
+    eligible: () => ({ eligible: side.telegram.switchedOn, why: side.telegram.switchedOn ? null : "the channel is off" }),
     ownBot: () => false,
     say: (id, _at, text) => {
       side.said.push({ id, text });
       return true;
     },
     changed: () => undefined,
+    // The parent's file into the roster, and the roster to every node at once.
+    switched: () => {
+      shared = mac.telegram.ownShared()!;
+    },
     log: (line) => void side.logs.push(line),
     now: () => now,
+    sign: (payload) => fakeSign(side.id, payload),
+    verify: (payload, signature, key) => signature === fakeSign(key, payload),
   });
 }
 
@@ -260,7 +272,7 @@ beforeEach(() => {
   const allowed = [{ id: ME, name: "Tony", username: null, addedAt: 1 }];
   // One bot: the Mac's own, and the box's lent copy of its token — the same file, here.
   writeFileSync(join(dir, "config", "kururu", "telegram.json"), JSON.stringify({ token: TOKEN, bot: BOT, enabled: true, enabledAt: Date.now() - 60_000, allowed }), { mode: 0o600 });
-  shared = adoptSharedTelegram({ enabled: true, enabledAt: Date.now() - 60_000, allowed, bot: BOT })!;
+  shared = adoptSharedTelegram({ enabled: true, enabledAt: Date.now() - 60_000, switchedAt: null, allowed, bot: BOT })!;
   bot = fakeBot();
   now = T0;
   linked = false;
@@ -462,14 +474,140 @@ describe("a shared channel on its own", () => {
     expect(box.telegram.status().waiting).toBe(0);
   });
 
-  it("leaves the switch and the list to the parent on a child", async () => {
+  it("leaves the list to the parent on a child, and the switch to the links", async () => {
     await macLeads();
-    expect(() => box.telegram.set({ enabled: false })).toThrow(/mac's/);
+    expect(() => box.telegram.set({ enabled: false })).toThrow(/through the links/);
     expect(() => box.telegram.pair(true)).toThrow(/mac's/);
+    expect(() => box.telegram.disallow(ME)).toThrow(/mac's/);
     expect(box.telegram.status().lead?.heldFrom).toBe("mac");
     expect(mac.telegram.status().lead?.nodes.map((n) => [n.name, n.polls])).toEqual([
       ["mac", true],
       ["box", false],
     ]);
+  });
+});
+
+describe("the switch, from any node", () => {
+  const notices = (text: string) => bot.sent.filter((m) => m.text === text).length;
+  const ON = "Kuru is listening here now.";
+  const OFF = "Kuru stopped listening here. Nothing you write reaches it until the channel is turned on again in kururu.";
+
+  it("is turned off from the box while the Mac reads the chat: the Mac stops at once, and takes it into the roster", async () => {
+    await macLeads();
+    box.lead!.flip(false);
+    expect(box.telegram.switchedOn).toBe(false);
+    await until(() => !mac.telegram.polling);
+    expect(mac.telegram.switchedOn).toBe(false);
+    expect(shared.enabled).toBe(false);
+    expect(shared.switchedBy).toBe(BOX_ID);
+    evaluate(mac, box);
+    expect(box.telegram.pendingSwitch()).toBeNull();
+    await until(() => notices(OFF) === 1);
+    await settle();
+    expect(notices(OFF)).toBe(1);
+    // Off is no request at all, on either node.
+    const polls = bot.calls.filter((c) => c.method === "getUpdates").length;
+    await settle();
+    expect(bot.calls.filter((c) => c.method === "getUpdates").length).toBe(polls);
+    expect(mac.telegram.status().lead?.switch.by).toBe("box");
+  });
+
+  it("is turned on from the box while the Mac is frozen, works at once, and reaches the Mac's roster when it wakes", async () => {
+    await macLeads();
+    mac.lead!.flip(false);
+    await until(() => !box.telegram.switchedOn);
+    sleepMac();
+    now += 5 * 60_000;
+    evaluate(box);
+
+    box.lead!.flip(true);
+    expect(box.telegram.switchedOn).toBe(true);
+    // The Mac said last that it could not read the chat, so the box does not wait thirty seconds for it.
+    evaluate(box);
+    await until(() => box.telegram.polling);
+    await until(() => notices(ON) === 1);
+    expect(box.telegram.status().lead?.switch).toMatchObject({ by: "box", pending: true });
+    bot.deliver("anything new?");
+    await until(() => box.said.some((m) => m.text === "anything new?"));
+    // The Mac's roster still says off, and the box's word is the later one.
+    expect(shared.enabled).toBe(false);
+
+    startLead(mac);
+    const woke = now + 60 * 60_000;
+    now = woke;
+    link();
+    await until(() => mac.telegram.switchedOn);
+    expect(shared).toMatchObject({ enabled: true, switchedBy: BOX_ID });
+    evaluate(mac, box);
+    expect(box.telegram.pendingSwitch()).toBeNull();
+    expect(box.telegram.switchedOn).toBe(true);
+    // And the chat moves back as it always does: a minute of steady link,
+    // then the handshake — busy at first, since the box was just written to.
+    now = woke + LEAD_TAKEBACK_MS;
+    evaluate(mac);
+    await until(() => mac.logs.some((l) => l.includes("is busy")));
+    now = woke + LEAD_TAKEBACK_MS + LEAD_BUSY_MAX_MS;
+    evaluate(mac);
+    await until(() => mac.telegram.polling && !box.telegram.polling);
+    expect(notices(ON)).toBe(1);
+  });
+
+  it("is the latest word: a flip on the Mac after the box's, made while they were apart, stands", async () => {
+    await macLeads();
+    sleepMac();
+    now += 60_000;
+    box.lead!.flip(false);
+    expect(box.telegram.pendingSwitch()).not.toBeNull();
+    // The Mac, awake again before its links are: switched off and on by hand there, later than the box.
+    startLead(mac);
+    now += 60_000;
+    mac.lead!.flip(false);
+    mac.lead!.flip(true);
+    expect(shared.enabled).toBe(true);
+    link();
+    await settle();
+    evaluate(mac, box);
+    expect(mac.telegram.switchedOn).toBe(true);
+    expect(box.telegram.switchedOn).toBe(true);
+    expect(box.telegram.pendingSwitch()).toBeNull();
+  });
+
+  it("is left to the parent when the parent's kururu is from before, since it would never take the flip in", async () => {
+    shared = adoptSharedTelegram({ enabled: true, enabledAt: Date.now() - 60_000, allowed: shared.allowed, bot: BOT })!;
+    await macLeads();
+    expect(() => box.lead!.flip(false)).toThrow("The Mac's kururu is from before the channel could be switched on any node");
+    expect(box.telegram.switchedOn).toBe(true);
+  });
+
+  it("ignores a flip that the node it names did not sign", async () => {
+    await macLeads();
+    mac.handlers.get("telegram-switch")!(BOX_ID, { type: "telegram-switch", switch: { enabled: false, at: Date.now() + 1000, by: BOX_ID, told: true, sig: fakeSign(MAC_ID, "x") } });
+    expect(mac.telegram.switchedOn).toBe(true);
+    expect(mac.logs.some((l) => l.includes("is not signed by it"))).toBe(true);
+    expect(mac.telegram.polling).toBe(true);
+  });
+
+  it("is not turned on from a node with no token, and says to lend it; off it is, and the Mac tells the chat", async () => {
+    await macLeads();
+    // The box again, with nothing in its config: no token lent.
+    box.lead?.close();
+    box.telegram.close();
+    box.handlers.clear();
+    box.up = [];
+    box.down = [];
+    process.env.XDG_CONFIG_HOME = join(dir, "empty");
+    box = makeSide("box", BOX_ID, 2);
+    process.env.XDG_CONFIG_HOME = join(dir, "config");
+    startLead(box);
+    evaluate(box);
+    expect(box.telegram.hasToken).toBe(false);
+
+    box.lead!.flip(false);
+    await until(() => !mac.telegram.polling);
+    await until(() => notices(OFF) === 1);
+    expect(() => box.lead!.flip(true)).toThrow("This node holds no bot token, so it could not read the chat. Lend it from the Mac's Settings → Nodes → box → Secrets → Telegram, then switch it on here.");
+    expect(box.telegram.status().lead?.switch.refuseOn).toContain("holds no bot token");
+    expect(box.telegram.status().lead?.switch.refuseOff).toBeNull();
+    expect(box.telegram.switchedOn).toBe(false);
   });
 });

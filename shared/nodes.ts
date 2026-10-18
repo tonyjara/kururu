@@ -26,7 +26,7 @@
  * The crypto is passed in — `node:crypto` on the server, a real key pair in
  * the test — so nothing here imports a runtime.
  */
-import { adoptSharedTelegram, type PeerWho, type ReplyMap, type SharedTelegram, type TurnOrigin } from "./channels";
+import { adoptSharedTelegram, type PeerWho, type ReplyMap, type SharedTelegram, type TelegramSwitch, type TurnOrigin } from "./channels";
 import { cardCode } from "./board";
 import { agentName } from "./harness";
 import type { KuruItem } from "./kuru";
@@ -124,7 +124,9 @@ export interface Roster {
    * (phase 5): Telegram's allow-list, its switch and its switch time, and
    * which bot. Absent from a roster signed before there were any, and from
    * a parent with no channel. In the roster because every node judges the
-   * chat's messages by them, and only the parent may change them.
+   * chat's messages by them, and only the parent may change the list. The
+   * switch any node may flip (`TelegramSwitch`), and the parent writes the
+   * newest flip it hears into the next roster.
    */
   channels?: { telegram?: SharedTelegram };
 }
@@ -802,6 +804,9 @@ export type LinkMessage =
   | { type: "telegram-in-ack"; id: string }
   | { type: "telegram-out"; id: string; at: number; text: string; silent: boolean; notice: boolean }
   | { type: "telegram-out-ack"; id: string }
+  // A node flipped the shared switch: signed by that node, handed on by
+  // every node that finds it newer than what it had.
+  | { type: "telegram-switch"; switch: TelegramSwitch }
   | PeerMessage;
 
 /** The board verbs one Kuru may make on another node's boards directly. A run starts an agent, so it is never one of them. */
@@ -867,6 +872,7 @@ const LINK_TYPES = new Set<string>([
   "telegram-in-ack",
   "telegram-out",
   "telegram-out-ack",
+  "telegram-switch",
 ]);
 
 /** A frame off the socket, as a message with a known type, or null. The fields are each handler's to check. */
