@@ -161,8 +161,21 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # A release that already exists is rebuilt, not refused: its files are
+        # replaced and its notes, date and place in the list are left alone. That
+        # is what a workflow_dispatch against an old tag is for — after a history
+        # rewrite moved the tags, the binaries had to be built again from the
+        # code the tags now name, and deleting a release to make room for
+        # `create` would have reordered the list and could have made an old
+        # version "Latest".
         run: |
-          gh release create "${{ steps.version.outputs.tag }}" \
-            --title "kururu ${{ steps.version.outputs.version }}" \
-            --notes-file "$RUNNER_TEMP/notes.md" \
-            release/*.dmg release/*.zip release/latest-mac.yml
+          TAG="${{ steps.version.outputs.tag }}"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" --clobber \
+              release/*.dmg release/*.zip release/latest-mac.yml
+          else
+            gh release create "$TAG" \
+              --title "kururu ${{ steps.version.outputs.version }}" \
+              --notes-file "$RUNNER_TEMP/notes.md" \
+              release/*.dmg release/*.zip release/latest-mac.yml
+          fi
