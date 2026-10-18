@@ -296,8 +296,13 @@ export function Panes({
               ? FULL
               : { ...box, visibility: "hidden" as const }
             : box;
+        /* Whether this pane touches the top of the stage, where its strip is
+           the middle of the window's top band — see `.pane-box-top` in the
+           stylesheet. From the geometry, as `chipsPane` is, because the tree
+           does not say which panes reach the top. */
+        const atTop = shown || zen ? true : !rect || rect.y <= 1e-6;
         return (
-          <div className="pane-box" key={pane.id} style={style}>
+          <div className={`pane-box ${atTop ? "pane-box-top" : ""}`} key={pane.id} style={style}>
             <Pane
               pane={pane}
               /* Always true in solo, since the pane drawn is the focused one by

@@ -138,6 +138,37 @@
      had to answer for to give the same answer is a token that rots. */
   --bar-h: 38px;
 
+  /* The window's top edge, which is one band: the strip the traffic lights
+     stand in, the top row of pane strips, the gutters between them and the
+     head of whichever drawer or tree is open on the right — all this tall,
+     all one tone, all ruled underneath, so the top of the window reads as a
+     title bar rather than as four headers that nearly agree. 38px is the
+     height macOS gives a window's toolbar, which is what `hiddenInset` is
+     emulating, so the traffic lights are centred on it; the tabs are centred
+     in it by the padding worked out at `.tabstrip`. A constant on `--bar-h`'s
+     reasoning, and the same number on purpose — the top and the bottom of
+     the window are the two edges of one frame. */
+  --top-h: 38px;
+
+  /* The tone of that frame — the top band, the status bar, and every pane's
+     tab strip — one step below `--chrome`, so the sidebar, the drawers and
+     the well read as the body of the window and the bands as what holds it.
+     Derived rather than themed, on `--strip`'s reasoning: it has to sit on the
+     far side of `--chrome` from the terminals in every palette, including the
+     installed ones drawn before it existed, and a theme answering for it
+     directly could put it anywhere. One step is smaller on a light palette,
+     because a light theme's chrome is already near white and the scaling that
+     turns Mocha's mantle into its crust would turn Latte's into mud — which is
+     why `applyTheme` writes it per theme (`chromeLow` in `web/src/theme.ts`)
+     and this is the dark step, for the first paint, like every default above
+     it. It began as a `light-dark()` over the two steps here, and the build
+     (Lightning CSS) lowers that to a pair of toggles keyed off the
+     stylesheet's own `color-scheme` declarations, which never see the one
+     `applyTheme` writes inline — so the light themes got the dark step. Mixed
+     towards black, which is not a colour here but a direction — "deeper", in
+     either appearance. */
+  --chrome-low: color-mix(in srgb, var(--chrome) 72%, black);
+
   /* The height of what a tab holds: the tallest of its status badge (16px,
      `.status`), its label's line, and its close button (a 1.2em icon given
      back 2px of its box). Stated once because three things are held to it —
@@ -159,15 +190,14 @@
   --board-col-min: 220px;
   --board-col-max: 640px;
 
-  /* The tab strip's ground: one step between the well the panes sit on and the
-     terminal inside them, so the strip is separable from both without a rule
-     under it. Derived from two theme tokens rather than being a third, so it
-     follows a palette that has never heard of it — which is also why it is not
-     something a theme fills in. It is here rather than written out at each of
-     the three rules that want it (the strip, the sticky block of pane controls,
-     and the gradient in front of that block) because those three have to agree
-     or the controls stop looking like part of the strip. */
-  --strip: color-mix(in srgb, var(--chrome) 60%, var(--bg));
+  /* The tab strip's ground. It was one step *between* the well and the
+     terminal; since the top band it is the band's own tone, so a strip in the
+     top row is a stretch of the band and a strip lower down is the same bar
+     on its own pane. Still a name of its own rather than `--chrome-low`
+     written three times, because the strip, the sticky block of pane controls
+     and the gradient in front of that block have to agree or the controls
+     stop looking like part of the strip. */
+  --strip: var(--chrome-low);
 
   --icon-close: "✕";
   --icon-run: "↯";
@@ -606,10 +636,14 @@ kbd {
  * 2026-10-18. Drawn in a browser tab too, where it is the sidebar's first
  * line, because a line that holds something is not thirty pixels of nothing.
  *
- * In the window it starts after the traffic lights and is centred on them.
- * The 78px is the inset the profile row wore when it stood up here, and the
- * 6px over a 26px line puts the middle of the row at the height the lights'
- * middle is at — the same height the profile name's middle was then.
+ * It is the left end of the top band — `--top-h` tall, the band's tone, the
+ * band's rule under it — and the strip over the panes while the sidebar is
+ * away is the same band's middle. In the window it starts after the traffic
+ * lights, which a 38px band is centred on; the 78px is the inset the profile
+ * row wore when it stood up here. The rule is an inset shadow and not a
+ * border for the reason the status bar's is: the pane strips this has to be
+ * one line with have the skin's border, and one mechanism along the whole
+ * band is what keeps it one line.
  */
 .sidebar-top,
 .stage-top {
@@ -617,14 +651,23 @@ kbd {
   align-items: center;
   flex: none;
   min-width: 0;
-  padding: 8px 8px 0 12px;
+  height: var(--top-h);
+  padding: 0 8px 0 12px;
+  background: var(--chrome-low);
+  box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--line);
 }
 .app-window .sidebar-top,
 .app-window .stage-top {
   display: flex;
-  height: 32px;
-  padding: 6px 8px 0 78px;
+  padding-left: 78px;
   -webkit-app-region: drag;
+}
+/* A sidebar a skin has painted keeps its picture to the top edge; the band's
+   rule still runs under the strip, so the line across the window holds. */
+@container not style(--p-sidebar-bg: none) {
+  .sidebar-top {
+    background: transparent;
+  }
 }
 
 .sidebar-head {
@@ -2158,46 +2201,36 @@ a.machine-name:hover {
   border-left: var(--border) var(--border-style) var(--line);
 }
 
-/* The header is built to a tab strip's measurements so that it lines up with
-   the panes' strips beside it: the same top (the well's gutter plus the pane
-   box's, which is two gutters), the same padding, and a title sized the way a
-   tab is, so the two rows are one line across the window rather than two that
-   nearly agree. The skin's strip and tab border widths are borrowed as
-   transparent borders for the same reason — a skin that thickens its strip
-   moves the tabs, and the header has to move with them. */
+/* The header is the right end of the top band: `--top-h` tall like the
+   sidebar's top and the pane strips it stands beside, the band's tone, the
+   band's rule under it, and everything in it centred on the line the tabs
+   are. It was built to a strip's measurements before there was a band — the
+   well's gutters as padding, the skin's strip border borrowed — so that the
+   two would nearly agree; a band one height everywhere needs none of that
+   arithmetic. */
 .files-head {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: 2px;
-  padding: 3px 4px;
-  padding-top: calc(2 * var(--gutter) + 3px);
+  height: var(--top-h);
+  padding: 0 4px 0 6px;
   min-width: 0;
-  border-width: var(--p-tabstrip-w);
-  border-style: solid;
-  border-color: transparent;
+  background: var(--chrome-low);
+  box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--line);
   -webkit-app-region: drag;
 }
-/* With the sidebar hidden on a desktop the stage carries the strip along the
-   top — the window's drag handle, and the toggle that brings the sidebar back
-   — and the panes start below it, so the tree's first row does too. */
-.app-stage-top .files-head {
-  padding-top: calc(30px + 2 * var(--gutter) + 3px);
-}
-.app-window.app-stage-top .files-head {
-  padding-top: calc(32px + 2 * var(--gutter) + 3px);
+/* Its buttons stretched to the row while the row was a tab's height; centred
+   in the band they are given that height instead, so they match the pane
+   buttons in the strips beside them. */
+.files-head .pane-btn {
+  height: calc(var(--tab-row) + 6px);
 }
 .files-root {
   display: flex;
   align-items: center;
   padding: 3px 4px;
-  border-width: var(--p-tab-w);
-  border-style: solid;
-  border-color: transparent;
   font-family: var(--mono);
   font-size: var(--fs-base);
-  /* A tab's height — see `--tab-row` — so the title is held to that. */
-  min-height: var(--tab-row);
-  box-sizing: content-box;
   color: var(--text);
   white-space: nowrap;
 }
@@ -2361,18 +2394,16 @@ a.machine-name:hover {
 .files-overlay .files-head {
   align-items: center;
   gap: 8px;
+  height: auto;
   padding: 8px 8px 6px 12px;
-  border-width: 0;
 }
 .app-window .files-overlay .files-head {
   padding-top: 34px;
 }
 .files-overlay .files-root {
   padding: 0;
-  border-width: 0;
   font-family: inherit;
   font-size: var(--fs-md);
-  min-height: 0;
 }
 
 /* The window's drag handle when there is no sidebar to hold it.
@@ -2396,7 +2427,6 @@ a.machine-name:hover {
    place the sidebar's header has them. */
 .stage-top {
   gap: 8px;
-  height: 30px;
 }
 
 .button {
@@ -2434,6 +2464,7 @@ a.button {
    -------------------------------------------------------------------------- */
 
 .panes {
+  position: relative;
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -2449,6 +2480,52 @@ a.button {
 }
 .app-zen .panes {
   padding: 0;
+}
+
+/* The top band's middle. With the sidebar up on a desktop (`.app-band`, set
+   by `App.tsx`) the panes start at the top of the window, so the top row of
+   strips is the band between the sidebar's top and the drawer's head: the
+   well's top gutter goes, and a pane box in that row (`.pane-box-top`, from
+   the pane's geometry in `Panes.tsx`) loses its own and the two corners it
+   would round against the edge. The gutters between those panes would still
+   show the well, which would notch the band once per pane; so the well paints
+   the band's tone and its rule across its own top `--top-h` first, under the
+   panes, and a gutter shows the band passing behind. With the sidebar away
+   `.stage-top` is the band and the panes sit under it with their gutter and
+   their corners, as they always did; zen has no band; a phone's one pane has
+   no gutter to show. A well a skin has painted keeps its picture, which is
+   the point of it, and the strips alone carry the band across. */
+.app-band .panes {
+  padding-top: 0;
+}
+.app-band .panes::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--top-h);
+  box-sizing: border-box;
+  background: var(--chrome-low);
+  box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--line);
+  pointer-events: none;
+}
+.app-band .pane-box-top {
+  padding-top: 0;
+}
+.app-band .pane-box-top .pane {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+@container not style(--p-well-bg: none) {
+  .app-band .panes::before {
+    display: none;
+  }
+}
+@container not style(--p-well-frame: none) {
+  .app-band .panes::before {
+    display: none;
+  }
 }
 
 /**
@@ -2538,11 +2615,17 @@ a.button {
 }
 
 /* The focused pane is the one the keyboard is going to, and with the borders
-   gone it has to say so some other way. The tab strip lifting to `--chrome-high`
-   is most of it; this is the rest — a hairline in the accent, mixed most of the
-   way out, on the reasoning `.agent-item-on` already uses for the same job.
-   Deliberately not grey: a grey ring here would be the border this sweep just
-   removed, reinstated on the one pane you are looking at.
+   gone it has to say so some other way. Its strip used to lift to
+   `--chrome-high`, and that was most of the signal; since the top band it
+   cannot, because with one pane up — which is most of the time — the lit strip
+   was the whole middle of the band, and a title bar lit in the middle is not
+   one bar. So the lift went into the band's rule instead: under the focused
+   pane's strip the hairline is the accent, two borders thick, where under
+   every other strip it is `--line`. The rest is the ring — a hairline in the
+   accent, mixed most of the way out, on the reasoning `.agent-item-on`
+   already uses for the same job. Deliberately not grey: a grey ring here
+   would be the border this sweep just removed, reinstated on the one pane you
+   are looking at.
 
    An `outline` rather than a second `box-shadow` because `box-shadow` is the
    skin's (`--frame-on`), and a skin whose frame is `none` cannot have anything
@@ -2554,7 +2637,16 @@ a.button {
   box-shadow: var(--frame-on);
 }
 .pane-on .tabstrip {
-  background: var(--chrome-high);
+  box-shadow: inset 0 calc(-1 * var(--border-thick)) 0 color-mix(in srgb, var(--accent) 65%, var(--chrome-low));
+}
+/* And not under the only pane there is. Focus is a choice between panes, and
+   with one on screen the accent would be a stripe across the middle of the
+   band saying something that is always true — the reasoning `.pane-switch`
+   and the phone's missing focus ring already follow. `:only-child` holds
+   because the dividers are the pane boxes' only siblings and a lone pane has
+   none. */
+.stagearea > .pane-box:only-child .pane-on .tabstrip {
+  box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--line);
 }
 
 /* --------------------------------------------------------------------------
@@ -2565,15 +2657,18 @@ a.button {
   display: flex;
   align-items: stretch;
   gap: 1px;
-  padding: 3px 4px;
-  /* A tab's height and the strip's own padding and frame, so a strip is one
-     height whether it holds tabs or only its `+` — see `--tab-row`. */
-  min-height: calc(var(--tab-row) + 12px + 2 * var(--p-tab-w) + 2 * var(--p-tabstrip-w));
-  /* Its own tone rather than the well's — see `--strip`. Two unfocused panes
-     side by side would otherwise share one unbroken bar across the gutter
-     between them, and the strip is the part of a pane that says where the pane
-     starts. */
+  /* The band's height, every strip, wherever its pane is — see `--top-h` —
+     with the tabs centred in it: the padding is what is left of the band once
+     a tab (`--tab-row`, its own 3px above and below, the skin's tab frame) and
+     the skin's strip frame are taken out, halved. A floor rather than a
+     height, so a strip holding something taller — a phone's thumb-sized
+     buttons — grows rather than clips. */
+  min-height: var(--top-h);
+  padding: calc((var(--top-h) - var(--tab-row) - 6px - 2 * var(--p-tab-w)) / 2 - var(--p-tabstrip-w)) 4px;
+  /* The band's tone — see `--strip` — and the band's rule along its bottom,
+     an inset shadow because the border here is the skin's. */
   background: var(--strip);
+  box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--line);
   flex: none;
   overflow-x: auto;
   /* Visible rather than `none`: the strip is the only way to the `+` once the
@@ -2726,9 +2821,6 @@ a.button {
   flex: none;
   background: var(--strip);
 }
-.pane-on .tab-new {
-  background: var(--chrome-high);
-}
 .tab-new::before {
   content: "";
   position: absolute;
@@ -2738,9 +2830,6 @@ a.button {
   width: 14px;
   background: linear-gradient(to right, transparent, var(--strip));
   pointer-events: none;
-}
-.pane-on .tab-new::before {
-  background: linear-gradient(to right, transparent, var(--chrome-high));
 }
 
 .tab-spacer {
@@ -2769,9 +2858,6 @@ a.button {
   flex: none;
   background: var(--strip);
 }
-.pane-on .tab-actions {
-  background: var(--chrome-high);
-}
 
 /* And a hand's width of fade in front of it, so a tab sliding underneath reads
    as going under something rather than being cut off. It is drawn on this side
@@ -2787,9 +2873,6 @@ a.button {
   width: 14px;
   background: linear-gradient(to right, transparent, var(--strip));
   pointer-events: none;
-}
-.pane-on .tab-actions::before {
-  background: linear-gradient(to right, transparent, var(--chrome-high));
 }
 
 .pane-btn {
@@ -2830,6 +2913,13 @@ a.button {
 :root[data-narrow] .pane-btn {
   min-width: 36px;
   font-size: var(--fs-xl);
+}
+/* A phone's strip is sized by its thumb targets rather than by the band — it
+   has no sidebar or drawer beside it to be one line with — so it keeps the
+   old 3px around a tab and grows to whatever is in it. */
+:root[data-narrow] .tabstrip {
+  min-height: 0;
+  padding: 3px 4px;
 }
 
 /* The corner of a pane in a window too narrow to tile: which pane this is, out
@@ -3146,13 +3236,14 @@ a.button {
    * negative the moment the keyboard is taller than the inset, which is always.
    */
   padding-bottom: max(3px, calc(env(safe-area-inset-bottom, 0px) - var(--keyboard, 0px)));
-  background: var(--chrome);
-  /* The rule along its top, the whole width of the window, that says where
-     the panes and the drawers stop and the bar begins — both are the same
-     `--chrome`, and without it the bar reads as the well's bottom margin. A
-     shadow rather than a border because the skin owns this box's border, as
-     a frame (`--p-statusbar-frame`) and a width, and a theme's line under a
-     skin's picture is the one thing a skin cannot take off. */
+  /* The frame's tone — this is the bottom edge of the frame the top band is
+     the top of, see `--chrome-low` — and the rule along its top, the whole
+     width of the window, that says where the panes and the drawers stop and
+     the bar begins. A shadow rather than a border because the skin owns this
+     box's border, as a frame (`--p-statusbar-frame`) and a width, and a
+     theme's line under a skin's picture is the one thing a skin cannot take
+     off. */
+  background: var(--chrome-low);
   box-shadow: inset 0 var(--border) 0 var(--line);
   font-size: var(--fs-base);
   color: var(--dim);
@@ -3500,9 +3591,9 @@ a.button {
   flex: none;
 }
 
-/* In the top-right pane's strip, at the head of its pinned controls. The
-   focused pane's strip is `--chrome-high`, which is the chips' own hover, so
-   there they light the way the pane's buttons beside them do. */
+/* In the top-right pane's strip, at the head of its pinned controls, where
+   they light the way the pane's buttons beside them do rather than with
+   their own hover — one hover per strip. */
 .tab-actions .drawer-chips {
   margin-right: 6px;
 }
@@ -4223,44 +4314,33 @@ html.pill-page #root {
   flex: 1;
 }
 
-/* Beside the panes, the header is built to a tab strip's measurements so the
-   two read as one strip across the window: the same top as the panes' strips
-   (the well's gutter and the pane box's, the file tree's head's reckoning),
-   the same 3px above and below a row a tab's height, and so its rule lands on
-   the line where the strips end and the terminals begin. The row is held to a
-   tab's height by an empty, zero-width box of exactly that height
-   (`--tab-row`, a tab's padding and the skin's tab frame), so it follows the
-   skin's type the way the tabs do, and everything in it — stretched or
-   centred — is centred on the line the tabs are. A phone's sheet has no strip
-   beside it and keeps its own. */
+/* Beside the panes, the head is the right end of the top band: `--top-h`
+   tall like the sidebar's top and the pane strips it stands beside, the
+   band's tone, the band's rule under it — drawn as the shadow the rest of the
+   band draws rather than the border above, so the two cannot be a pixel
+   apart — and everything in it centred on the line the tabs are, its buttons
+   a tab's height and its close a pane button's size. It was built to a
+   strip's measurements for a day, with the well's gutters as padding, and
+   nearly lined up; a band one height everywhere needs no arithmetic to. A
+   phone's sheet has no strip beside it and keeps its own head. */
 .kuru-drawer:not(.kuru-sheet) .kuru-head {
   flex-wrap: nowrap;
   gap: 6px;
-  padding: calc(2 * var(--gutter) + 3px + var(--p-tabstrip-w)) 8px calc(3px + var(--p-tabstrip-w)) 12px;
-}
-.kuru-drawer:not(.kuru-sheet) .kuru-head::before {
-  content: "";
-  width: 0;
-  height: calc(var(--tab-row) + 6px + 2 * var(--p-tab-w));
+  height: var(--top-h);
+  padding: 0 8px 0 12px;
+  background: var(--chrome-low);
+  border-bottom: 0;
+  box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--line);
 }
 .kuru-drawer:not(.kuru-sheet) .kuru-head .kuru-head-btn {
-  align-self: stretch;
+  height: calc(var(--tab-row) + 6px);
   padding-top: 0;
   padding-bottom: 0;
 }
 .kuru-drawer:not(.kuru-sheet) .kuru-head .kuru-close {
-  align-self: stretch;
   width: 24px;
-  height: auto;
+  height: calc(var(--tab-row) + 6px);
   border-radius: var(--radius-md);
-}
-/* With the sidebar away the panes start under the strip along the top, and
-   so does this — the file tree's head moves the same way. */
-.app-stage-top .kuru-drawer:not(.kuru-sheet) .kuru-head {
-  padding-top: calc(30px + 2 * var(--gutter) + 3px + var(--p-tabstrip-w));
-}
-.app-window.app-stage-top .kuru-drawer:not(.kuru-sheet) .kuru-head {
-  padding-top: calc(32px + 2 * var(--gutter) + 3px + var(--p-tabstrip-w));
 }
 .kuru-head-btn {
   display: inline-flex;
@@ -8243,9 +8323,6 @@ label.st-row {
   border-image: var(--p-tabstrip-frame);
   image-rendering: var(--image-rendering);
 }
-.pane-on .tabstrip {
-  background: var(--p-tabstrip-bg), var(--chrome-high);
-}
 /* The block of pane controls sits *on* the strip and has to be opaque, so the
    tabs pass under it — and on a painted strip a flat theme colour there is a
    light box on a dark bezel. It wears the strip's own picture instead: the tile
@@ -8255,16 +8332,12 @@ label.st-row {
    theme's colour and cannot follow a picture, so it is hidden when one is on;
    `@container style()` is what lets a stylesheet ask whether a custom property
    is `none`, and a browser without it merely keeps the fade. */
-.tab-actions,
-.pane-on .tab-actions {
+.tab-actions {
   background: var(--p-tabstrip-bg), var(--strip);
   border-image: var(--p-tabstrip-frame);
   border-image-width: 0;
   border-image-outset: 0;
   image-rendering: var(--image-rendering);
-}
-.pane-on .tab-actions {
-  background: var(--p-tabstrip-bg), var(--chrome-high);
 }
 @container not style(--p-tabstrip-frame: none) {
   .tab-actions::before {
@@ -8371,7 +8444,7 @@ label.st-row {
 }
 
 .statusbar {
-  background: var(--p-statusbar-bg), var(--chrome);
+  background: var(--p-statusbar-bg), var(--chrome-low);
   border-width: var(--p-statusbar-w);
   border-style: solid;
   border-color: transparent;

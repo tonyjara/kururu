@@ -45,6 +45,18 @@ export function cssName(token: string): string {
 }
 
 /** Applied to `<html>` rather than `<body>`, so `color-scheme` is inherited by everything including the scrollbars. */
+/**
+ * The tone one step below a theme's chrome — see `--chrome-low` in the
+ * stylesheet. Mixed towards black in both appearances, because black is not a
+ * colour here but a direction: deeper. A smaller step on a light palette, whose
+ * chrome is already near white; the dark step is what turns Mocha's mantle
+ * into its crust, and would turn Latte's into mud.
+ */
+export function chromeLow(theme: Theme): string {
+  const keep = theme.appearance === "light" ? 95 : 72;
+  return `color-mix(in srgb, ${theme.ui.chrome} ${keep}%, black)`;
+}
+
 export function applyTheme(theme: Theme): void {
   const root = document.documentElement;
   for (const [token, value] of Object.entries(theme.ui) as [keyof UiTokens, string][]) {
@@ -59,6 +71,17 @@ export function applyTheme(theme: Theme): void {
    */
   root.style.colorScheme = theme.appearance;
   root.dataset.theme = theme.id;
+  /**
+   * The one token that is derived rather than declared: the tone of the
+   * window's two bands and of every tab strip, one step below `chrome` — see
+   * `--chrome-low` in the stylesheet for what it is for and why no theme
+   * answers for it. Written here per theme rather than worked out in CSS,
+   * because the step is a different size on a light palette and a
+   * `light-dark()` in the stylesheet cannot tell which this is: the build
+   * lowers it to toggles keyed off the stylesheet's own `color-scheme`
+   * declarations, which never see the one written inline here.
+   */
+  root.style.setProperty("--chrome-low", chromeLow(theme));
   /**
    * The eight workspace tags, as properties rather than as a lookup.
    *

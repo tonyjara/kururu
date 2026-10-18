@@ -1415,9 +1415,11 @@ export function App() {
        decide which of those applies, which is the whole point of stating the
        breakpoint once. `app-window` says this is Electron rather than a browser
        tab, and exists for exactly one thing: the traffic lights, which float
-       over this corner and are not there on a phone. */
+       over this corner and are not there on a phone. `app-band` is the desktop
+       with its sidebar up, when the top row of pane strips is the middle of
+       the window's top band — see `.app-band` in the stylesheet. */
     <div
-      className={`app ${zen ? "app-zen" : ""} ${desktop() ? "app-window" : ""} ${sidebarOpen ? "" : "app-sidebar-hidden"} ${!sidebarOpen && !zen && !narrow ? "app-stage-top" : ""}`}
+      className={`app ${zen ? "app-zen" : ""} ${desktop() ? "app-window" : ""} ${sidebarOpen ? "" : "app-sidebar-hidden"} ${!sidebarOpen && !zen && !narrow ? "app-stage-top" : ""} ${sidebarOpen && !zen && !narrow ? "app-band" : ""}`}
       style={{ "--sidebar-w": `${sidebarWidth}px`, "--files-w": `${filesWidth}px`, "--drawer-w": `${drawerWidth}px` } as React.CSSProperties}
     >
       {/* Everything but the bottom bar, side by side: the sidebar, the panes,
