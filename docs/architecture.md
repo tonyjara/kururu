@@ -41,6 +41,24 @@ Anything that would make `ptyhost.ts` need editing belongs on the server side.
   file (`~/.local/state/kururu/ptyhost.log`) rather than somebody's stdout. A
   server that cannot reach launchd spawns it detached as before and the record
   says it shares a coalition; `bun run status` prints which kind is running.
+- **On Linux the host is a transient systemd user unit** (`launchHostSystemd`),
+  the same answer under another name: a child kururu's server is a systemd
+  service, systemd keeps whatever a service starts in the service's cgroup,
+  and `systemctl --user restart kururu` would end a host spawned from it. So
+  the server hands the host to the user manager with `systemd-run --user
+  --unit=kururu-ptyhost-<time>-<pid> --collect`, `Type=exec`,
+  `KillMode=process` (stopping it signals the host, which reaps its own ptys)
+  and `OOMPolicy=continue` (the kernel taking one agent's runaway build does
+  not stop the unit every agent is in). The environment goes by name only, so
+  no value is on a command line. `hostJobRunning` asks `systemctl --user
+  is-active`; `bun run status` prints `unit kururu-ptyhost-…` where the Mac
+  prints `coalition`, or `unit shared` for a host in the server's cgroup, read
+  off `/proc/<pid>/cgroup`. No systemd, or no user bus, is the detached
+  fallback, recorded as sharing the server's cgroup.
+- **The host is found by its socket, by whichever tool the system has**
+  (`server/sockowner.mjs`): `lsof` on macOS, `ss -xlpn` on Linux, where `lsof`
+  need not be installed. `status`, `kill-ptyhosts` and `lifecycle.ts` all ask
+  it; the dev-server scan reads `ss -ltnp` the same way (`devservers.ts`).
 - **The host runs on kururu's own copy of the app.** The bundle the server is
   on — or an installed Kururu.app, or the dev shell, in that order — is cloned
   under `runtime/` beside the socket (`cp -c`: a third of a second, no space
@@ -340,7 +358,28 @@ argument that keeps `tailscale` commands out of kururu.
   the file would draw a QR code for an address nothing is listening on. Hence
   `shared` *and* `wanted` on the wire.
 - **Loopback is exempt from the token** — anything that can connect from there
-  can already start a shell.
+  can already start a shell. That is the Mac's argument and a switch undoes
+  it: `loopbackToken` in `access.json`, or `KURURU_LOOPBACK_TOKEN=1` (`0`
+  forces it off), read once and held like the bind address. A child turns it
+  on, because other people's programs run on that box and `tailscale serve`
+  delivers every request from loopback. kururu's own callers then present the
+  token as `Authorization: Bearer`, found by `server/localtoken.mjs` —
+  `KURURU_TOKEN` in the environment first, `access.json` second: the hooks,
+  `status`, `reload-window`, the backup and restore CLIs. The ptys the server
+  opens are handed `KURURU_TOKEN` while the switch is on (and only then), so
+  an agent's hooks have it, nvim's buffer hook sends it from stdin, and both
+  MCP configs — the agents' `kururu_web` and the harness's `/mcp` — present
+  it as `${KURURU_TOKEN}`, which Claude Code and Codex expand themselves. The
+  token is in no file kururu writes for a CLI and on no command line, where
+  any user on a Linux box could read it in `/proc`. The desktop window does
+  not present it yet, so the switch stays off on a Mac with a window.
+- **`KURURU_BIND=tailscale` is a child's bind**: this machine's tailnet
+  address, found in the interface list as `reach.ts` finds it, never by
+  running `tailscale`. With no tailnet address at start it binds loopback and
+  says why in the record (`bindProblem`); a restart is what moves it. A server
+  bound to one address that is not loopback also listens on `127.0.0.1`
+  (`listenAddresses`), because every caller on the machine dials loopback.
+- **`access.json` is written 0600**, since the token in it is a shell.
 - **The preview proxies bind the same address**, or kururu would be locked while
   the dev app beside it was not.
 - **The `Origin` header is checked, and that one is not about the network.** A

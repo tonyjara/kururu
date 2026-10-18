@@ -53,3 +53,23 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test
+
+  # The fact a child stands on, on a real systemd: the pty host in a unit of
+  # its own, so stopping the server's unit ends no agent. See the script.
+  linux-host:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: test -f node_modules/node-pty/build/Release/pty.node
+      - run: bun run build:server
+      - run: tools/ci-linux-host.sh
