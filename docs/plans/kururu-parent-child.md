@@ -4,7 +4,9 @@ A plan, written 2026-10-18 from a read of the tree at `de21c93` and a read-only
 look at the Omarchy PC, then revised the same day with the user. **Built so
 far:** phase 0 (`docs/spikes/child-phase0.md`), 1A and 1B — a child set up by
 the skill and the wizard, verified on the Omarchy PC with the user there on
-2026-10-18 (`docs/linux.md`). Phase 2 onward is not built. It is written so that an agent can take one phase, read the files it
+2026-10-18 (`docs/linux.md`); and phase 2, nodes (`docs/nodes.md`), checked
+between the Mac and the box with throwaway instances and awaiting its
+two-machine checks with the user. Phase 3 onward is not built. It is written so that an agent can take one phase, read the files it
 names, and know what "done" is. Each phase is shaped as a card: its scope,
 what it depends on, what it can run beside, and how it is verified. The first
 draft had one Kuru driving every node's agents, a Telegram poller set by hand,
