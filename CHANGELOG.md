@@ -13,6 +13,291 @@ shows, so it is written once and read in three places — see
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-17
+
+Picking this up needs the pty host restarted, which ends the agents running in
+it. Nothing breaks while you put it off — the host speaks the same protocol as
+before — but the restart is what buys the release's most important fix: a host
+started by this version is a launchd job of its own, so a force quit in the Dock
+can no longer take every agent down with it. That only applies to the next host
+that starts; the one running now keeps the old arrangement until it is
+restarted, and `bun run status` says `coalition  shared` while it does. The
+first host started from an installed app may make macOS ask once for access to
+your files, and kururu waits for the answer. The wire between window and server
+changed too — Kuru's conversation, what needs you, the channels, the web, the
+boards — so a window and a server want to be on the same version.
+
+### Added
+
+- **Kuru has a drawer, and the whole conversation is in it.** The **Kuru** chip
+  at the right of the status bar, or `C-a a`, opens a drawer beside the panes
+  with every message you gave Kuru and every reply it made, spoken or typed, in
+  one timeline. Each of your messages shows whether it arrived, with
+  **Resend** or **Discard** on one that did not; each reply that nobody heard
+  to the end is marked where it sits, with a **Play** of its own, and stops
+  counting as unheard once it has been on screen in the open drawer for a
+  moment. A line at the foot says what Kuru is doing now, and the chip says the
+  same at a glance — thinking, speaking, asking, or off. Kururu's own notices
+  to Kuru are drawn as one quiet line rather than as words of yours, a card
+  code in a reply opens that card, and a file Kuru names opens with a click.
+  The drawer has a composer, so you can type to Kuru from anywhere, the phone
+  included, and the microphone button lives there now. **Terminal** in its
+  header is the old harness button: it starts, resumes or shows the session.
+  Clicking the pill opens the drawer at the reply it is showing, and the menu
+  bar offers **Play** and **Open the conversation** when there are replies
+  you missed or messages that did not get through.
+
+- **Talk to Kuru from Telegram.** Settings → **Channels** walks you through
+  making a bot, pasting its token, pairing your own account by sending the bot
+  a code this Mac shows, and switching it on. A message to the bot then reaches
+  Kuru exactly as if you had typed it in the drawer, every reply comes back to
+  the chat, and what you say or type at the Mac is copied there silently, so
+  the chat reads like the drawer. A reply to something sent only from Telegram
+  is not read aloud on the Mac, since you are not there to hear it. Only the
+  accounts you pair can reach Kuru; see Security for what else that means.
+
+- **What needs you, in one list.** The **Needs you** chip on the status bar
+  counts everything waiting on you across the profile's workspaces — an agent
+  asking something, a card in Review, a turn that finished while nobody was
+  watching, a card whose agent went away without finishing — and opens a
+  drawer that lists them by workspace, with what is still working below and
+  the quiet rest folded away. A row takes you to the terminal or the card.
+  `C-a i` opens it and `C-a o` goes to the next need from wherever you are, so
+  a prompt can be left for later. A workspace's row in the sidebar wears a dot
+  while something in it is waiting. Nothing in it is dismissed by hand; a row
+  leaves when the thing it describes has moved.
+
+- **A card's agent that sits idle is put to sleep, and the card wakes it.**
+  Agents are what drain a laptop's battery, and a card waiting in Review is an
+  agent nobody is using. After ten minutes of idleness — on by default, set in
+  Settings → Agents → **Idle card agents** — a card's agent is ended and its
+  card says "asleep after sitting idle" with a **resume** button; running the
+  card again picks up the same conversation, for Codex as well as Claude. Only
+  agents started from a card are ever touched, never one from the + menu, a
+  shell or the harness, and any doubt keeps one awake: a question or prompt on
+  its screen, words typed into its prompt and not sent, a command still
+  running under it, a last reply that asks you something, or a conversation
+  kururu cannot find on disk to resume.
+
+- **A link to what an agent made.** When an agent's last reply presents a file
+  as the result — a plan, a research note, the script you asked for — a link
+  to it appears under the agent's row, on its card and in the Needs you
+  drawer. Markdown opens in the reader; anything else opens in nvim at the
+  line the agent named. Two links at most, most rows have none, and a link
+  goes once its file does. A card keeps its links after its agent has gone.
+
+- **The agents kururu starts go to one pane.** A card's robot, a card picked
+  back up and an agent Kuru starts all open in the workspace's bottom pane,
+  which kururu makes by splitting the layout when there is none, so the top
+  half stays what you are reading. Settings → Agents chooses the bottom, the
+  top, or the old placement beside the board, and Settings → Workspaces can
+  say otherwise for one workspace. The keyboard stays where it was, and an
+  agent you open from a pane's + menu still opens where you asked.
+
+- **Web search and page reading for every agent kururu starts.** Agents meet
+  pages a plain fetch cannot read — a list drawn by JavaScript, a site that
+  walls off anything that is not a browser, a PDF. Settings → **Web** sets up
+  an ordered chain of providers, and every agent kururu starts gets four tools
+  (`scrape_page`, `crawl_site`, `map_site`, `search_web`) that go down it: a
+  Firecrawl you host yourself first, then a hand-back telling the agent to use
+  its own web search and fetch, and only when the agent says those failed too,
+  cloud Firecrawl on your credits. A challenge page or a wall counts as a
+  failure, every answer says which provider served it, and the page shows the
+  recent calls. The cloud is held to a page limit per call and a daily credit
+  budget. The tools appear once a provider other than the hand-back is set up,
+  in agents started after that.
+
+- **Search every card and every conversation, and get a deleted card back.**
+  **Search** on the profile's board looks through every card in the profile
+  and everything you and Kuru have said, accents folded, so "migr ord" finds
+  "Migración de órdenes". A card hit takes you to the card on its board and
+  lights it. **Deleted cards** lists every card deleted by hand, and
+  **Restore** puts one back in the column it left. Kuru can search too, and
+  read a card's history of moves and runs.
+
+- **Backups to a private repository of yours.** Settings → **Backups** takes
+  the address of an empty private git repository and, every few minutes when
+  something changed, commits and pushes the boards, Kuru's conversations, your
+  settings and styles, and the memory folders of the profiles kururu made.
+  `bun run backup` makes one now; `bun run restore <repository>` puts a new Mac
+  back from it. What goes and what never does are listed on the page.
+
+- **Agents on your other machines.** In a workspace that runs on a machine,
+  everything it opens for itself now opens there: agents from the + menu,
+  nvim, LazyGit, a card's robot and its resume, and the agents Kuru starts.
+  Before typing an agent's command kururu checks that the CLI is installed
+  and signed in there, and says what to run if it is not. Its status is read
+  off its screen, so the dot, notifications, the card and Kuru all follow it,
+  a poll or two late; the tab says so. A card that needs a worktree still runs
+  on this Mac, where the worktree is.
+
+- **LazyGit, a click away.** The + menu offers LazyGit, above nvim, and a
+  workspace row's ⋯ menu opens it in the workspace's main checkout.
+
+- **Escape stops Kuru mid-reply.** While Kuru is speaking, Escape is the
+  pill's ✕: the reply stops, and what was left of it is marked unheard in the
+  drawer. Any other Escape goes where it always went.
+
+- **The card the keyboard is on is lit on the board.** With the board in one
+  pane and an agent in the next, the card whose agent is in the focused pane
+  wears the accent.
+
+- **Board columns can be resized.** Drag a column's edge; double-click it to
+  go back to the default width.
+
+- **Text fields have a right-click menu.** Undo, Cut, Copy, Paste and Select
+  All in any field in the window, Learn Spelling on a misspelled word, and
+  Copy on selected text that is not editable. Terminals and kururu's own menus
+  are unchanged.
+
+- **An agent can reload the window instead of asking you to.** After a change
+  to the web app, an agent runs `bun run reload-window --why "…"` (Kuru has the
+  same as a tool), and the window and the floating pill reload themselves as
+  soon as you are not talking, typing or in a dialog, then say who asked and
+  why. A phone is never reloaded.
+
+- **Trial voices for Kuru.** When running from a checkout with the trial
+  engines downloaded, Settings → Voice offers four more text-to-speech engines
+  under "trial" headings, to hear as Kuru for a while beside Kokoro. Nothing
+  installs them for you, and the app does not carry them.
+
+### Changed
+
+- **Boards are kept in a database.** Cards used to ride in the layout file,
+  whose rules could lose them; they are now in `~/.local/share/kururu/kururu.db`,
+  every change written as it happens, a deleted card marked rather than gone,
+  and a history of what moved and who moved it — you, Kuru, or the automation.
+  Cards in an older layout file are taken in on the first start, and nothing
+  in a file can ever move or delete a card the database has. Settings → About
+  shows the file and its size.
+
+- **Settings is one list of pages.** The tabs are gone: the pages are listed
+  down the left in five groups — Appearance, General, Kuru, Connections and
+  System — and on a phone the list is the first screen and a page opens over
+  it. Styles is now **Explore**, and Machines is under Connections.
+
+- **The status bar is cut to what you reach for.** On the left, the sidebar's
+  toggle, the workspace's name and the mode badges; on the right, the Needs
+  you and Kuru chips and the file tree's toggle. The profile's name, the
+  `C-a ?` hint and the microphone went; the settings cog and the phone's QR
+  code are in the sidebar's header, beside the profile's name.
+
+- **A workspace row is its name.** The number and the branch line went — the
+  keys still go by position, and the row's tooltip says which is its. After
+  the name, `±3` counts files not committed and `↑2` `↓1` commits to push and
+  pull, only when there are any. The git and database buttons are a **⋯** menu
+  that appears on hover (always, on a touch screen), with the board, LazyGit,
+  the databases and the git verbs. An agent row lost its corner buttons:
+  **Hide**, **Go to card** and **Kill** are on its right-click menu, or a long
+  press on a phone.
+
+- **`C-a a` opens Kuru.** The agent finder moved to `C-a f`, and `C-a H` is no
+  longer bound.
+
+- **The harness runs in a folder of its own, on a model of its own.** It used
+  to start in whichever project was active and load that project's
+  instructions on every wake. Now it lives under kururu's data directory, and
+  always runs on Claude Opus 5.5 at high effort, compacting near 200k tokens,
+  whatever the profile's own `/model` says. Its memories are copied over on
+  the first start there, but that start is a new conversation: the old one is
+  filed under the old directory and cannot be resumed from the new one. The
+  boards and the drawer keep everything that was said.
+
+- **The question before Done is a dialog.** Moving a card with a worktree or a
+  running agent into Done asks in a dialog centred over the window rather than
+  at the foot of the card, focused on Yes.
+
+- **Codex conversations resume by id.** Kururu now finds the rollout a card's
+  Codex run wrote and resumes that conversation directly, rather than opening
+  Codex's picker.
+
+- **A machine that stays down stops being retried.** A shell on a machine
+  whose connection drops still reconnects on its own, but after three
+  failures in a row it says the machine has not answered and waits for you.
+  In a pinned workspace the + menu is the machine's menu, with a heading
+  saying where everything in it opens.
+
+- **Tab strips scroll with a mouse wheel**, and keep the tab you are on in view.
+
+- **Kururu's processes say what they are in Activity Monitor** — the server
+  as `Kururu server :7717`, the runner and the voice by name too — and none of
+  them takes a Dock tile of its own.
+
+### Fixed
+
+- **A Dock force quit could end every agent.** The pty host was spawned
+  detached but stayed in the macOS coalition of the app that started the
+  chain, and quitting a leftover Dock tile — which is a force quit — ended the
+  whole coalition, host and agents included. The host is now a launchd job
+  with a coalition of its own; see the note at the top.
+
+- **The window used a core while it sat idle.** Every terminal redrew itself
+  on every frame, on screen or not; an idle window now draws nothing, and a
+  terminal draws only when something on it changed. With several agents
+  running, the window's share of the CPU falls from around half a core to a
+  tenth of one.
+
+- **A long message reached its agent starting mid-word.** A line of more than
+  about a thousand characters, typed into Kuru or by Kuru into an agent, was
+  split by the terminal into a paste and some typing that landed in the wrong
+  order. Long lines are now typed in small pieces and arrive whole.
+
+- **The floating pill could disappear after a monitor change.** Its place is
+  now kept as a share of the display it was on, it is put back on a display
+  that exists whenever displays change, and the menu bar's **Reset Pill
+  Position** shows it where it lands for five seconds. **Logs** has a
+  floating pill log for whatever is still wrong.
+
+- **A hot reload could leave the microphone open.** Running from a checkout,
+  a save that hot-reloaded the voice while it was recording left the old copy
+  recording, unseen, and sending clips to Kuru. A reload now sends what was
+  recorded and closes the microphone.
+
+### Removed
+
+- **Workspace colours.** No rail, no picker, no colour on a new workspace;
+  the mascot already tells two workspaces apart. Board columns keep their
+  colours.
+- **The bar of every board on the profile's board.** The profile's board is
+  its own board again; which workspaces are waiting on you is the Needs you
+  drawer's job, and Search finds a card on any board.
+- **The harness button and its two badges in the sidebar.** The Kuru chip
+  and its drawer replace them.
+- **The agent count beside the menu-bar frog.**
+
+### Security
+
+- **Telegram is the one road off the machine for the conversation.** With
+  the channel on, what you and Kuru say goes through Telegram's servers, which
+  do not encrypt bot chats end to end, and the page says so above the switch.
+  Only accounts you pair can reach Kuru; a stranger who finds the bot, a group
+  or another bot gets no answer and reaches nothing, and the page tells you
+  they tried. Kururu's own notices are never forwarded, since they quote
+  agents' replies. Nothing listens on a port: kururu asks Telegram for new
+  messages, and nothing at all while the channel is off. The bot token is kept
+  readable only by you in `~/.config/kururu/telegram.json`, shown back only as
+  its last four characters, and never backed up.
+
+- **The web tools answer only programs on this Mac.** They are served at
+  `POST /mcp/web`, which refuses anything not on loopback, anything with an
+  `Origin`, and anything a proxy forwarded, whether or not sharing is on. The
+  URL or search words of every call go to the Firecrawl you host, and to
+  Firecrawl's servers when the chain reaches the cloud. Provider keys never
+  enter an agent's environment, are sent only to their own provider, are kept
+  readable only by you, and are never backed up. Agents on another machine do
+  not get the tools.
+
+- **Backups leave the machine, and secrets never do.** What is pushed is an
+  allow-list of named files; the share token, the OpenRouter key, the Telegram
+  token, the web providers' keys, every login and agents' replies all stay
+  behind, and a restore ends by listing them for you to put back. A push is
+  never forced: one the
+  repository refuses stops and says why.
+
+- **The reload an agent asks for goes through the same gate as everything
+  else** — loopback, the `Origin` check and the token — and reaches only pages
+  on this Mac.
+
 ## [0.3.0] - 2026-10-10
 
 Picking this up needs the pty host restarted, which ends the agents running in
@@ -484,7 +769,8 @@ same version.
   release's notes — which are this file.
 - **Installs from a DMG**, signed and notarized, or from the Homebrew tap.
 
-[Unreleased]: https://github.com/tonyjara/kururu/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/tonyjara/kururu/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/tonyjara/kururu/releases/tag/v0.4.0
 [0.3.0]: https://github.com/tonyjara/kururu/releases/tag/v0.3.0
 [0.2.0]: https://github.com/tonyjara/kururu/releases/tag/v0.2.0
 [0.1.0]: https://github.com/tonyjara/kururu/releases/tag/v0.1.0
