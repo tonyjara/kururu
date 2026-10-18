@@ -152,6 +152,7 @@ export function Settings({
   projects,
   projectSettings,
   initialTab,
+  resumed = false,
   narrow,
   onClose,
   onEditing,
@@ -174,6 +175,8 @@ export function Settings({
   agentPlacement: AgentPlacement;
   /** Which page this opening is about. Only the opening: where you go afterwards is this window's business. */
   initialTab: Tab;
+  /** Put back by the reload a theme pick does, so it opens on the page it was on even on a phone. */
+  resumed?: boolean;
   /** A phone, or a window as narrow as one: the list is a screen of its own and a page opens over it. */
   narrow: boolean;
   onClose: () => void;
@@ -181,8 +184,8 @@ export function Settings({
   onEditing: (on: boolean) => void;
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
-  /** On a phone, whether the list is showing rather than a page. Starts on the list unless a page was asked for by name. */
-  const [listing, setListing] = useState(narrow && initialTab === FIRST_TAB);
+  /** On a phone, whether the list is showing rather than a page. Starts on the list unless a page was asked for by name, or put back by a reload. */
+  const [listing, setListing] = useState(narrow && initialTab === FIRST_TAB && !resumed);
   const [, title, tagline] = pageOf(tab);
   const pill = usePill(tab);
 

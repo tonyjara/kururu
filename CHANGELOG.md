@@ -40,6 +40,11 @@ shows, so it is written once and read in three places — see
   goes once the turn has really ended, and anything you were typing stays in the
   box. Works on the phone too.
 
+### Fixed
+
+- **Putting on a pack or a theme from your phone keeps you on the Theme page.**
+  It dropped you back to the list of Settings pages after every press.
+
 ## [0.4.0] - 2026-10-17
 
 Picking this up needs the pty host restarted, which ends the agents running in
