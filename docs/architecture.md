@@ -379,7 +379,14 @@ argument that keeps `tailscale` commands out of kururu.
   says why in the record (`bindProblem`); a restart is what moves it. A server
   bound to one address that is not loopback also listens on `127.0.0.1`
   (`listenAddresses`), because every caller on the machine dials loopback.
-- **`access.json` is written 0600**, since the token in it is a shell.
+- **`access.json` is written 0600**, since the token in it is a shell, and
+  minted when the server starts if it will ask for one. A box with no window
+  shows it with `bun run share`: the link from `/api/reach` and the dialog's
+  QR code in the terminal, `--rotate` for a new token.
+- **The Share URL hands over the cookie itself.** Any request whose `?k=` is
+  the token is answered with the cookie, so the page's own bundle, fetched
+  next with neither, is let in; the manifest is linked `use-credentials` for
+  the same reason. Before, only a device that already had the cookie got in.
 - **The preview proxies bind the same address**, or kururu would be locked while
   the dev app beside it was not.
 - **The `Origin` header is checked, and that one is not about the network.** A

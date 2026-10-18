@@ -9,11 +9,12 @@
  * them, in plain JavaScript beside the two tools that run unbuilt, as
  * `sockowner.mjs` is.
  *
- * `KURURU_TOKEN` first, which is how the server hands it to the agents it
- * starts, and so to every hook and command they run; then `access.json`,
- * where the server keeps it, for a command typed in a terminal of somebody's
- * own. The directory is `config.ts`'s rule, spelt again because this file
- * cannot import that one.
+ * `access.json` first, where the server keeps it, because it is the current
+ * one: a token rotated while an agent runs leaves the agent's environment
+ * holding the old. Then `KURURU_TOKEN`, which is how the server hands it to
+ * the ptys it opens, for a process that cannot see the config directory. The
+ * directory is `config.ts`'s rule, spelt again because this file cannot
+ * import that one.
  */
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -21,15 +22,14 @@ import { join } from "node:path";
 
 /** The token, or null when there is none to present — a server that has never started here. */
 export function localToken(env = process.env) {
-  if (env.KURURU_TOKEN) return env.KURURU_TOKEN;
   try {
     const dir = env.KURURU_CONFIG_DIR || join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), "kururu");
-    const file = join(dir, "access.json");
-    const saved = JSON.parse(readFileSync(file, "utf8"));
-    return typeof saved?.token === "string" && saved.token.length >= 16 ? saved.token : null;
+    const saved = JSON.parse(readFileSync(join(dir, "access.json"), "utf8"));
+    if (typeof saved?.token === "string" && saved.token.length >= 16) return saved.token;
   } catch {
-    return null;
+    // None here; the environment is the other place.
   }
+  return env.KURURU_TOKEN || null;
 }
 
 /** `{ authorization }` to spread into a request's headers, or nothing. */

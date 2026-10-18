@@ -70,6 +70,7 @@ in this folder.
 | `src/backup.ts` | Every few minutes when something changed: mirror, commit, push to the user's private repository. Never forced |
 | `src/gitcmd.ts` | Running `git`, for the two files allowed to |
 | `src/backup-cli.ts`, `src/restore-cli.ts` | `bun run backup` and `bun run restore` |
+| `src/share-cli.ts` | `bun run share`: the phone's link and the Share dialog's QR code, drawn in the terminal, for a server with no window to show them |
 | `src/lifecycle.ts` | Why this server started and why the last one stopped, appended to `lifecycle.log`: its own start and stops, crashes through `uncaughtExceptionMonitor`, the host as seen from outside, and whether its supervisor is still alive (`supervised()`). `/api/lifecycle` |
 | `src/access.ts` | Bind address, the one token, the Origin check |
 | `src/config.ts` | `~/.config/kururu`, and how the settings files are written |

@@ -53,9 +53,19 @@ KURURU_PORT=7817 \
 KURURU_HOST_SOCK=/tmp/k2/ptyhost.sock \
 KURURU_STATE_DIR=/tmp/k2 \
 KURURU_DATA_DIR=/tmp/k2/data \
-XDG_CONFIG_HOME=/tmp/k2/config \
+KURURU_CONFIG_DIR=/tmp/k2/config/kururu \
 KURURU_STYLES_URL=http://127.0.0.1:8899
 ```
+
+Kururu's own variables only, and never an XDG one. The host's environment is
+every pty's, so an `XDG_CONFIG_HOME` given to the server reaches every shell it
+opens and rewires whatever else reads it: nvim came up with no config, and on
+the Omarchy PC mise lost its shims and Claude's wrapper installed itself into
+the scratch directory (`docs/spikes/child-phase0.md`, failure 7).
+`KURURU_CONFIG_DIR` is the config directory itself and moves kururu's alone;
+the variables only the server needs (`KURURU_BIND`, the runner's, the token's
+switch) are kept out of the host by `hostEnv`. `/tmp/k2/config/kururu` keeps
+the old layout, so an instance set up the old way finds its files.
 
 **The desktop app in isolation** takes three more, and is launched from
 `desktop/` with `env -u ELECTRON_RUN_AS_NODE` (see [gotchas](gotchas.md#running)):
@@ -92,12 +102,6 @@ also keeps the two esbuilds out of each other's `desktop/dist`. A client for
 it can be hidden Electron windows on the real preload, driven through
 `executeJavaScript`, with `app.dock.hide()` and a hard exit: an Electron tile
 left in the Dock is how a force quit reached a coalition on 2026-10-10.
-
-**The one trap in the isolated instance:** it sets `XDG_CONFIG_HOME`, and **nvim
-reads its config from there too**. So nvim comes up with no colourscheme and no
-per-mode cursor colours at all, which reads exactly like the cursor feature not
-working. `XDG_CONFIG_HOME=$HOME/.config nvim` on the command line is the fix —
-kururu stays isolated and nvim does not.
 
 ## What has been verified end to end
 

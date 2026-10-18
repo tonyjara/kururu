@@ -9,17 +9,21 @@
 # token on, and checks, in order:
 #
 #   1. the host was started as a transient systemd user unit of its own
-#   2. the gate refuses loopback without the token and lets it in with it,
-#      and the Share URL answers with the cookie
+#   2. the server answers on the address it was bound to and on loopback
+#      beside it, the gate refuses both without the token and lets both in
+#      with it, the Share URL answers with the cookie, and `bun run share`
+#      gives that URL
 #   3. `status` finds the host through `ss` and names its unit
-#   4. a terminal has the token in its environment and none of the
-#      server's own variables
+#   4. a terminal has the token in its environment, and none of the
+#      server's own variables or an XDG one the isolation set
 #   5. stopping the server's unit leaves the host and its terminal running
 #   6. a new server finds them again
 #   7. `kill-ptyhosts` finds the host by its socket and stops it
 #
 # Everything is under a scratch state, config and data directory, on its own
-# port and socket. CI only: it enables linger for the runner's user.
+# port and socket, isolated by kururu's own variables and no XDG one. The
+# server is bound to the runner's own address, the way a child is bound to
+# its tailnet one. CI only: it enables linger for the runner's user.
 set -euo pipefail
 
 # Never by hand: it enables linger and starts user units, and on a Mac it
@@ -31,6 +35,7 @@ fi
 
 K=/tmp/k2
 PORT=7817
+BIND=$(hostname -I | awk '{print $1}')
 mkdir -p "$K"
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 
@@ -44,8 +49,8 @@ systemctl --user is-system-running || true
 ENV=(
   "PATH=$PATH" "HOME=$HOME" "SHELL=/bin/bash" "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
   "KURURU_PORT=$PORT" "KURURU_HOST_SOCK=$K/ptyhost.sock" "KURURU_STATE_DIR=$K"
-  "KURURU_DATA_DIR=$K/data" "XDG_CONFIG_HOME=$K/config" "XDG_STATE_HOME=$K/xdg-state"
-  "KURURU_LOOPBACK_TOKEN=1"
+  "KURURU_DATA_DIR=$K/data" "KURURU_CONFIG_DIR=$K/config/kururu"
+  "KURURU_LOOPBACK_TOKEN=1" "KURURU_BIND=$BIND"
 )
 SETENV=()
 for pair in "${ENV[@]}"; do SETENV+=("--setenv=$pair"); done
@@ -67,7 +72,9 @@ start_server() {
 fail() { echo "FAIL: $*"; cat "$K"/*.out || true; tail -20 "$K/ptyhost.log" || true; tail -5 "$K/lifecycle.log" || true; exit 1; }
 
 start_server kururu-ci-server-1
+# Minted at start, before anybody asked: there is no window here to ask.
 TOKEN=$(node -p "require('$K/config/kururu/access.json').token")
+[ "$(stat -c %a "$K/config/kururu/access.json")" = 600 ] || fail "access.json is not 0600"
 AUTH="authorization: Bearer $TOKEN"
 
 echo "--- 1. the host's unit"
@@ -76,10 +83,13 @@ HOST=$(node server/status.mjs | sed -n 's/^pty host.*pid \([0-9]*\).*/\1/p')
 [ -n "$HOST" ] || fail "status found no host"
 grep -q 'kururu-ptyhost-' "/proc/$HOST/cgroup" || fail "the host is not in a unit of its own: $(cat /proc/$HOST/cgroup)"
 
-echo "--- 2. the gate"
-[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/health")" = 403 ] || fail "loopback got in without the token"
-[ "$(curl -s -o /dev/null -w '%{http_code}' -H "$AUTH" "http://127.0.0.1:$PORT/api/health")" = 200 ] || fail "loopback was refused with the token"
-curl -s -D - -o /dev/null "http://127.0.0.1:$PORT/?k=$TOKEN" | grep -qi '^set-cookie: kururu_access=' || fail "the Share URL set no cookie"
+echo "--- 2. the gate, on both addresses"
+for host in 127.0.0.1 "$BIND"; do
+  [ "$(curl -s -o /dev/null -w '%{http_code}' "http://$host:$PORT/api/health")" = 403 ] || fail "$host got in without the token"
+  [ "$(curl -s -o /dev/null -w '%{http_code}' -H "$AUTH" "http://$host:$PORT/api/health")" = 200 ] || fail "$host was refused with the token"
+done
+curl -s -D - -o /dev/null "http://$BIND:$PORT/?k=$TOKEN" | grep -qi '^set-cookie: kururu_access=' || fail "the Share URL set no cookie"
+[ "$(bun run --silent share --url)" = "http://$BIND:$PORT/?k=$TOKEN" ] || fail "bun run share gave $(bun run --silent share --url 2>&1)"
 
 echo "--- 3. status"
 node server/status.mjs | tee "$K/status.txt"
@@ -91,7 +101,8 @@ AGENT=$(curl -s -H "$AUTH" "http://127.0.0.1:$PORT/api/agents" | node -e 'let s=
 echo "--- 4. a terminal's environment"
 ENVIRON=$(tr '\0' '\n' < "/proc/$AGENT/environ")
 grep -qx "KURURU_TOKEN=$TOKEN" <<<"$ENVIRON" || fail "the terminal was not handed the token"
-! grep -q '^KURURU_LOOPBACK_TOKEN=' <<<"$ENVIRON" || fail "the terminal inherited the server's own switch"
+! grep -qE '^(KURURU_LOOPBACK_TOKEN|KURURU_BIND)=' <<<"$ENVIRON" || fail "the terminal inherited the server's own variables"
+! grep -q '^XDG_CONFIG_HOME=' <<<"$ENVIRON" || fail "the terminal inherited an XDG directory"
 
 echo "--- 5. stopping the server's unit"
 systemctl --user stop kururu-ci-server-1
