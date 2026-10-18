@@ -116,7 +116,7 @@ for (const host of running) {
   terminals += count;
   const age = uptime(host.pid);
   console.log(
-    `pty host  pid ${String(host.pid).padEnd(7)}${`${count} terminal${count === 1 ? "" : "s"}`.padEnd(14)}${dim(
+    `pty host  pid ${`${host.pid} `.padEnd(9)}${`${count} terminal${count === 1 ? "" : "s"}`.padEnd(14)}${dim(
       `${age ? `up ${age} · ` : ""}${short(host.path)}`,
     )}`,
   );
