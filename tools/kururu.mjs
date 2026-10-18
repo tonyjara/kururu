@@ -152,7 +152,7 @@ async function setup(flags) {
     for (const line of table(rows, markColour)) console.log(line);
     if (rows.every((row) => row.state !== "fail") && !step.pending?.(ctx, rows)) continue;
     try {
-      await step.repair(ctx, io, rows);
+      await step.repair(ctx, io, rows, () => step.check(ctx));
     } catch (err) {
       if (!(err instanceof Stop)) throw err;
       if (ctx.dryRun && err.code !== 2) {

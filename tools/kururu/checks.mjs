@@ -306,8 +306,9 @@ async function health(ctx, host = "127.0.0.1") {
 /**
  * Each step: a title, why it matters (said by the wizard before it looks),
  * `check` returning rows — `{ title, state, detail, fix }`, read-only, the
- * doctor's whole job — and `repair`, the wizard's, which fixes or guides and
- * throws `Stop` when it needs the person. After a repair the wizard checks
+ * doctor's whole job — and `repair(ctx, io, rows, recheck)`, the wizard's,
+ * which fixes or guides and throws `Stop` when it needs the person; `pending`,
+ * when a step has a question to ask even though nothing in it failed. After a repair the wizard checks
  * again, and goes on only when the step's rows have no failure.
  */
 export const STEPS = [
@@ -556,7 +557,7 @@ export const STEPS = [
     },
     /** Codex is a question even when Claude is fine: the step is not done until it is answered. */
     pending: (ctx) => ctx.saved.codex === undefined,
-    async repair(ctx, io, rows) {
+    async repair(ctx, io, rows, recheck) {
       if (ctx.saved.codex === undefined) {
         const has = Boolean(which("codex", ctx.env));
         const answer = await io.ask(`Will agents on this box run Codex too?${has ? " (codex is installed)" : ""}`, ["yes", "no"], "codex");
@@ -565,6 +566,7 @@ export const STEPS = [
           remember(ctx, { codex: answer === "yes" });
           ctx.changed.push(`Codex ${answer === "yes" ? "wanted" : "not wanted"}`);
         }
+        rows = await recheck();
       }
       const claude = rows.find((row) => row.title === "claude");
       if (claude?.state === "fail") {
