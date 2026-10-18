@@ -8520,6 +8520,12 @@ a.st-btn {
 .tab:hover {
   background: var(--p-tab-bg), var(--chrome-high);
 }
+/* The `+` is a `.tab` too, and the rule above took its ground away. It sticks
+   over the tabs that scroll under it, so on a phone a skin whose tab picture is
+   clear in the middle showed the titles through it; it keeps the strip's. */
+.tab-new {
+  background: var(--p-tab-bg), var(--strip);
+}
 .tab-on,
 .tab-on:hover {
   background: var(--p-tab-on-bg), var(--bg);
