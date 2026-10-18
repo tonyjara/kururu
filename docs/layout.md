@@ -825,12 +825,20 @@ last row clicked). Under `@media (hover: none)` it is on every row, as a tab's
 sidebar away. Each row is its own two-column grid, so the one row whose ⋯ is
 showing is the only name that gives way.
 
-**The ⋯ menu is what is done *in* a workspace**, the right-click menu what is
-done *to* one. **Open board**; **Open LazyGit**, a tab in the workspace's
-focused pane in its main checkout (`new-tab` with `workspaceId` and `lazygit`,
-the folder found by the server — on a pinned workspace, on the machine);
-**Databases** when the env files name one; then a disabled line saying where
-the main checkout stands, which was the git button's tooltip, and the git verbs.
+**The ⋯ and the right-click open one menu** (`workspaceItems`), since
+2026-10-18. Until then the ⋯ was what is done *in* a workspace and the
+right-click what is done *to* one — a line nobody reaching for a verb could
+see, so the two doors seemed to disagree. The order: **Open board**; **Open
+LazyGit**, a tab in the workspace's focused pane in its main checkout
+(`new-tab` with `workspaceId` and `lazygit`, the folder found by the server —
+on a pinned workspace, on the machine); **Databases** when the env files name
+one; a disabled line saying where the main checkout stands, which was the git
+button's tooltip, and the git verbs; then the row as a thing in a list —
+Rename, Mascot, Move up and down, the groups — and, past a line each, New
+workspace and Delete. The same rule holds on the boards: a card's caret and a
+right-click on the card open one menu, and so do a profile column's ⋯ and
+its head. The robot stays its own menu, because handing a card to an agent
+is one verb with nine model rows behind it.
 
 **The marks say what the main checkout has not finished**, always drawn and
 only when there is something: `±3` files uncommitted (`--blocked`), `↑2`

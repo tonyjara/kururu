@@ -2294,8 +2294,11 @@ a.machine-name:hover {
   color: var(--dimmer);
 }
 /* A long press is the phone's right-click, and iOS answers one on a button with
-   a callout and a text selection unless told not to. */
-.tree-row {
+   a callout and a text selection unless told not to. The sidebar's workspace
+   and agent rows open their menus the same way. */
+.tree-row,
+.ws-item,
+.agent-row {
   -webkit-touch-callout: none;
   user-select: none;
 }
