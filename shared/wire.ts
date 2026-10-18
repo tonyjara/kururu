@@ -47,6 +47,7 @@ import type { BackupStatus } from "./backup";
 import type { KuruConversation } from "./kuru";
 import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "./voice";
 import type { MachineStatus } from "./machines";
+import type { NodesView } from "./nodes";
 import type { WorkspaceDatabase } from "./databases";
 import type { NotifyEvent, NotifySettings } from "./notify";
 import type { MergeResolution, ProjectSettings } from "./projects";
@@ -403,6 +404,14 @@ export type ServerMessage =
    * which exist.
    */
   | { type: "machines"; machines: MachineStatus[] }
+  /**
+   * Sent on connect and whenever a link, a summary or the roster changes:
+   * this node, every other member with its last summary and whether it is
+   * up, and who leads. Whole, like `machines`. On the parent each node's
+   * `url` carries that node's share token, which every client here could
+   * read off the disk anyway; on a child it never does. See `shared/nodes.ts`.
+   */
+  | { type: "nodes"; nodes: NodesView }
   /**
    * Sent on connect and whenever the scan finds the list changed: every
    * database every workspace's env files name, with the password left out.
@@ -1346,6 +1355,20 @@ export type ClientMessage =
    * `ssh -t <host>`. By id, so the host it runs is the one the server has.
    */
   | { type: "open-machine-shell"; id: number; machineId: string; paneId?: string }
+  /**
+   * Settings → Nodes on the parent: pair a node by its address and the code
+   * it is showing. The server does the two posts to the node and signs the
+   * roster that takes it in; replied to with the new member, or why not.
+   */
+  | { type: "node-add"; id: number; address: string; code: string; name?: string }
+  /** A new name for a member, this node included. The parent's alone: it is a new roster. */
+  | { type: "node-rename"; id: number; nodeId: string; name: string }
+  /** The rank list, as the drag left it: every member's id, first first. The parent's alone. */
+  | { type: "node-rank"; id: number; order: string[] }
+  /** Take a member out of the roster. Its links drop as the new roster reaches each node. The parent's alone. */
+  | { type: "node-remove"; id: number; nodeId: string }
+  /** On a node to be paired: show a pairing code for ten minutes, or stop showing it. Replied to with the code. */
+  | { type: "node-code"; id: number; on: boolean }
   /**
    * Give the server an OpenRouter management key. The one message in the
    * protocol that carries a secret, and it only ever travels this way: it is
