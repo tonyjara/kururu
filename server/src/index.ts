@@ -91,7 +91,7 @@ import { dump as dumpRecording, forget as forgetRecording, recordBacklog, record
 import { processCwd, processCwds } from "./cwd";
 import { scanDevServers, stopDevServer } from "./devservers";
 import { readHead, repoAt } from "./git";
-import { accountEmail, pollUsage, usageSnapshot } from "./usage";
+import { accountEmail, claudeSignedIn, pollUsage, usageSnapshot } from "./usage";
 import { codexUsageSnapshot, pollCodexUsage } from "./codexusage";
 import { clearOpenRouterKey, openRouterSnapshot, pollOpenRouter, rereadOpenRouterKey, setOpenRouterKey } from "./openrouter";
 // Every provider in web/providers/, each registering itself; the build makes this module from the directory.
@@ -104,13 +104,14 @@ import { Kuru } from "./kuru";
 import { Channels } from "./channels";
 import { KURU_PAGE, KURU_SAY_MAX, type KuruFile } from "../../shared/kuru";
 import { mentionsIn, readsInReader, type MadeFile } from "../../shared/made";
-import { isChannelKind, type ChannelKind } from "../../shared/channels";
+import { isChannelKind, nodeSubject, type ChannelKind } from "../../shared/channels";
 import { Backup } from "./backup";
 import { mirrorFiles } from "./export";
 import { NodeHost, nodeRequestRefusal } from "./nodes";
 import { Mover } from "./move";
 import { nodeOfUtterance, PeerKurus, peerKey } from "./peerkuru";
 import { Secrets } from "./secrets";
+import { TelegramLead } from "./lead";
 import { adoptLendAsk, asksAnything, webKind, type KindSpec, type Lendable, type LendAsk, type SecretsView } from "../../shared/secrets";
 import { folderSentence, type MoveCheck } from "../../shared/move";
 import { summarize, type NodeSummary } from "../../shared/nodes";
@@ -507,6 +508,60 @@ function kuruKey(): string | null {
 
 /** The secrets this node lends its children, or holds from its parent. See `secrets.ts`. */
 let secrets!: Secrets;
+/** Which node polls Telegram for the others, and the chat's words crossing the links. Null until the links exist. See `lead.ts`. */
+let lead: TelegramLead | null = null;
+
+/**
+ * Whether Claude is signed in for this node's Kuru, as last looked: the
+ * machine's own login, the profile's when profiles keep their own, or a
+ * token the parent lent. Null until the first look, which counts as yes
+ * rather than keep a holder that restarts off the poll for a minute.
+ */
+let claudeReady: boolean | null = null;
+
+async function refreshClaudeReady(): Promise<void> {
+  if (!channels || !nodes) return;
+  const key = kuruKey();
+  const profile = key ? workspaces.profileByKey(key) : null;
+  const ready = Boolean(lentClaudeEnv()) || (await claudeSignedIn(loginsActive() && profile ? claudeDirFor(profile.loginKey) : null));
+  if (ready === claudeReady) return;
+  claudeReady = ready;
+  lead?.evaluate();
+  nodes?.queueSummary();
+}
+
+/**
+ * Whether this node may poll Telegram for the others (`lead.ts`), and the
+ * sentence that says why not. Eligible is the plan's three things: the
+ * channel is on — the parent's switch, in the roster — this node holds the
+ * bot's token — its own on the parent, lent on a child — and a Kuru that
+ * could answer, which is Claude signed in.
+ */
+function leadEligibility(): { eligible: boolean; why: string | null } {
+  const shared = nodes.rosterTelegram();
+  const parentId = nodes.parentId();
+  const parent = parentId ? (nodes.nameOf(parentId) ?? "the parent") : "the parent";
+  if (!shared) return { eligible: false, why: "the roster carries no Telegram channel" };
+  if (!shared.enabled) return { eligible: false, why: `the channel is off (${nodeSubject(parent)}'s Settings → Channels)` };
+  if (nodes.role() === "child") {
+    if (!secrets.heldFrom("telegram")) return { eligible: false, why: `${nodeSubject(parent)} has not lent this node the bot's token (its Settings → Nodes → ${nodes.name()} → Secrets → Telegram)` };
+  } else if (!channels.telegram.hasToken) return { eligible: false, why: "no bot token here" };
+  if (claudeReady === false) return { eligible: false, why: "Claude is not signed in here, so no Kuru could answer (claude, then /login)" };
+  return { eligible: true, why: null };
+}
+
+/** Where the poll stands, for `/api/health` and so the doctor's leading row. Null before the links exist. */
+function leadHealth(): { shared: boolean; eligible: boolean; why: string | null; polls: boolean; holder: string | null; rank: number | null } | null {
+  if (!lead) return null;
+  const eligible = leadEligibility();
+  const holder = lead.holder();
+  return { shared: channels.telegram.isShared, ...eligible, polls: channels.telegram.polling, holder: holder ? nodes.nameOf(holder) : null, rank: nodes.ownRank() };
+}
+
+/** The parent's Telegram settings into the roster, whenever they may have moved. A no-op anywhere else, and when nothing changed. */
+function syncRosterChannels(): void {
+  if (nodes?.role() === "parent") nodes.setChannels(channels.telegram.ownShared());
+}
 const clients = new Map<WebSocket, ClientState>();
 
 const state = {
@@ -592,6 +647,11 @@ function pushNodes(): void {
   queueMicrotask(() => {
     nodesQueued = false;
     broadcast({ type: "nodes", nodes: nodes.view() });
+    // A link, a roster or a summary moved, and any of them can move the
+    // poll — or whether this node could take it, which its summary says.
+    lead?.evaluate();
+    syncRosterChannels();
+    nodes.queueSummary();
   });
 }
 
@@ -622,6 +682,8 @@ function secretLanded(spec: KindSpec): void {
       return;
     case "telegram":
       channels.telegram.reread();
+      lead?.evaluate();
+      nodes.queueSummary();
       return;
     case "firecrawl-cloud":
     case "web":
@@ -682,6 +744,7 @@ function nodeSummary(leads: boolean, sees: string[]): NodeSummary {
     leads,
     sees,
     dataMark: `${marks.events}.${marks.turns}.${store.changes}@${STARTED_AT}`,
+    ...(lead ? { lead: { eligible: leadEligibility().eligible, polls: channels.telegram.polling } } : {}),
   });
 }
 
@@ -4197,8 +4260,10 @@ async function killNvims(ids: unknown): Promise<NvimCloseReport> {
 async function pollAccountUsage(): Promise<void> {
   // The login list first and regardless of who is connected: it reads this
   // machine and nothing else, like the other polls, and it is on this schedule
-  // because a `/login` is the one thing that changes both.
+  // because a `/login` is the one thing that changes both. Whether Kuru could
+  // answer the chat here, for the Telegram poll, is the same kind of look.
   await refreshLogins();
+  await refreshClaudeReady();
   if (clients.size === 0) return;
   // Codex's allowance on the same beat, though it is read off this disk and
   // asks nobody: the profile's Codex home when profiles keep their logins, the
@@ -4952,12 +5017,12 @@ function handleMessage(ws: WebSocket, raw: string): void {
       void replyAsync(ws, msg.id, async () => {
         const change: { enabled?: boolean; profileKey?: string | null; speakReplies?: boolean } = {};
         if (typeof msg.enabled === "boolean") change.enabled = msg.enabled;
-        // A token held from the parent is the parent's bot, which the parent
-        // polls; a second poller here would be a 409 for both. Phase 5 is
-        // what lets this node take the poll over while the parent is away.
-        if (change.enabled === true) {
+        // A token held from the parent is the parent's bot, and its switch
+        // is the parent's: it rides in the roster, and this node polls the
+        // bot for the others only while the rank says so (`lead.ts`).
+        if (change.enabled !== undefined) {
           const held = secrets.heldFrom("telegram");
-          if (held) throw new Error(`This bot's token is held from ${held.from}, which answers it. This box holds it to take the chat over while ${held.from} is away, which is not built yet.`);
+          if (held) throw new Error(`This bot is ${held.from}'s, and so is its switch: turn the channel on or off in ${held.from}'s Settings → Channels. This node answers the chat while ${held.from} is away.`);
         }
         if (typeof msg.speakReplies === "boolean") change.speakReplies = msg.speakReplies;
         if (msg.profileId === null) change.profileKey = null;
@@ -5779,8 +5844,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       pid: process.pid,
       clients: { now: clients.size, remoteAt: remoteClientAt },
       // This node among the others: its role, who leads, and each member's
-      // link — what `kururu child doctor` checks the pairing row against.
-      nodes: nodes.health(),
+      // link — what `kururu child doctor` checks the pairing row against —
+      // and where the Telegram poll stands, for its leading row.
+      nodes: { ...nodes.health(), lead: leadHealth() },
       // When and why this process started, and whether anything would start
       // it again. Without the file: this is asked every few seconds.
       life: lifeNow(),
@@ -7179,7 +7245,11 @@ async function attach(port: Port): Promise<void> {
     relay: (nodeId, words) => (peerKurus ? peerKurus.relay(nodeId, words) : "nodes are not up yet"),
   });
   channels = new Channels({
-    broadcast,
+    // And the parent's settings into the roster, when they are what moved.
+    broadcast: (msg) => {
+      broadcast(msg);
+      syncRosterChannels();
+    },
     // A channel's message takes the composer's road: the same outbox, so the
     // same order, the same confirmation by Kuru's own hook, the same Resend.
     say: (profileKey, id, at, text) => void outbox.say(profileKey, id, at, text),
@@ -7242,6 +7312,8 @@ async function attach(port: Port): Promise<void> {
     log: (line) => console.log(`kururu: ${line}`),
     moves: { check: (peer, ask) => mover.check(peer, ask), adopt: (peer, offer) => mover.adopt(peer, offer) },
     peer: (nodeId, message) => peerKurus?.message(nodeId, message),
+    // Leading is the Telegram poll, so the node that holds it leads.
+    leader: () => lead?.holder() ?? null,
     linked: (nodeId) => {
       peerKurus?.linked(nodeId);
       // The user's words for that node that were waiting go now.
@@ -7289,6 +7361,21 @@ async function attach(port: Port): Promise<void> {
     log: (line) => console.log(`kururu: ${line}`),
   });
   secrets = new Secrets({ nodes, landed: secretLanded, changed: pushSecrets, log: (line) => console.log(`kururu: ${line}`) });
+  lead = new TelegramLead({
+    nodes,
+    telegram: channels.telegram,
+    eligible: leadEligibility,
+    // A bot of the child's own, pasted there: not the parent's, so not shared.
+    ownBot: () => channels.telegram.hasToken && !secrets.heldFrom("telegram"),
+    say: (id, at, text) => {
+      const key = kuruKey();
+      if (!key) return false;
+      outbox.say(key, id, at, text);
+      return true;
+    },
+    changed: () => nodes.queueSummary(),
+    log: (line) => console.log(`kururu: ${line}`),
+  });
   for (const agentId of workspaces.allAgents()) {
     if (!live.has(agentId)) workspaces.removeTab(agentId);
   }
@@ -7300,8 +7387,13 @@ async function attach(port: Port): Promise<void> {
   // second one.
   outbox.resume();
   // And only then may a channel read what was sent to it: its messages go
-  // through the outbox, which is now ready to hand them over.
+  // through the outbox, which is now ready to hand them over. Whether this
+  // node polls the shared bot is the lead's to say first, or a node that
+  // does not hold the poll would ask Telegram once at start — and that is
+  // a 409 for the node that does.
+  lead.evaluate();
   channels.start();
+  void refreshClaudeReady();
   // An agent the host has but no layout mentions would be running with nothing
   // pointing at it — put it somewhere rather than leave it unreachable.
   const placed = new Set(workspaces.allAgents());
@@ -7677,6 +7769,7 @@ export function shutdown(): Promise<void> {
     closeAllPreviews();
     backup?.close();
     secrets?.close();
+    lead?.close();
     nodes?.close();
     peerKurus?.close();
     linkWss.close();

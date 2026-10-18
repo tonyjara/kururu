@@ -119,7 +119,7 @@ export function kindOf(id: unknown): KindSpec | null {
       id,
       family: "telegram",
       label: "Telegram bot token",
-      unlocks: "the bot's token, so this node can take over the chat while the parent is away (phase 5; until then it only holds it)",
+      unlocks: "the bot's token, so this node reads the chat for the others while the parent is away, and hands it back when the parent returns",
       revoke: "Send /revoke to @BotFather for the bot, then paste the new token on the parent: every node that holds it is sent the new one.",
       source: { in: "config", file: "telegram.json" },
       lands: { in: "config", file: "telegram.json" },
