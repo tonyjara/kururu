@@ -616,7 +616,10 @@ export function Sidebar({
           {/* Folded, the heading says what its rows would have: that something
               in there is waiting for you. */}
           {shut && waiting && <span className="unread" aria-label="waiting for you" />}
-          <span className="agent-group-n">{members.length}</span>
+          {/* No count of its workspaces since 2026-10-18: open, the rows are
+              right under it to be seen, and shut, how many there are was
+              never the question — whether one is waiting is, and the dot
+              answers that. */}
         </button>
       </li>
     );
@@ -1269,7 +1272,9 @@ export function Sidebar({
                   {shut && group.agents.some((agent) => agent.unread) && (
                     <span className="unread" aria-label="waiting for you" />
                   )}
-                  <span className="agent-group-n">{group.agents.length}</span>
+                  {/* No count of its agents, on the workspace groups' terms:
+                      the bottom bar counts the agents running, and a number on
+                      every heading was a column of figures nobody read. */}
                 </button>
                 {!shut && (
                   <ul className="agent-group-list">

@@ -1356,11 +1356,6 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.agent-group-n {
-  margin-left: auto;
-  font-family: var(--mono);
-  color: var(--dimmer);
-}
 
 .agent-title {
   min-width: 0;
