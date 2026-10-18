@@ -348,7 +348,7 @@ function usePill(tab: Tab): { text: string; tone: Tone } | null {
   switch (tab) {
     case "nodes": {
       if (!nodes) return null;
-      if (nodes.pairing) return { text: "Pairing", tone: "busy" };
+      if (nodes.invite) return { text: "Adding", tone: "busy" };
       if (nodes.role === "alone" || nodes.nodes.length === 0) return null;
       const away = nodes.nodes.filter((n) => n.state !== "up").length;
       return away ? { text: `${away} away`, tone: "off" } : { text: `${nodes.nodes.length} linked`, tone: "ok" };

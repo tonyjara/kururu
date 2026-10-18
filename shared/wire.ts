@@ -1356,19 +1356,23 @@ export type ClientMessage =
    */
   | { type: "open-machine-shell"; id: number; machineId: string; paneId?: string }
   /**
-   * Settings → Nodes on the parent: pair a node by its address and the code
-   * it is showing. The server does the two posts to the node and signs the
-   * roster that takes it in; replied to with the new member, or why not.
+   * Settings → Nodes → Add a computer: show a join command for ten minutes —
+   * this node's address and a single-use code, to run on the new PC — or
+   * stop showing it. Replied to with the command, or why not.
    */
-  | { type: "node-add"; id: number; address: string; code: string; name?: string }
+  | { type: "node-invite"; id: number; on: boolean }
+  /**
+   * On the new PC's own page: the join command the Mac showed, pasted. The
+   * server makes the post to the Mac and takes the roster it answers with;
+   * replied to with the nodes view, or why not.
+   */
+  | { type: "node-join"; id: number; text: string }
   /** A new name for a member, this node included. The parent's alone: it is a new roster. */
   | { type: "node-rename"; id: number; nodeId: string; name: string }
   /** The rank list, as the drag left it: every member's id, first first. The parent's alone. */
   | { type: "node-rank"; id: number; order: string[] }
   /** Take a member out of the roster. Its links drop as the new roster reaches each node. The parent's alone. */
   | { type: "node-remove"; id: number; nodeId: string }
-  /** On a node to be paired: show a pairing code for ten minutes, or stop showing it. Replied to with the code. */
-  | { type: "node-code"; id: number; on: boolean }
   /**
    * Give the server an OpenRouter management key. The one message in the
    * protocol that carries a secret, and it only ever travels this way: it is

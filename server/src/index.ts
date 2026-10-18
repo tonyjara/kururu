@@ -4573,8 +4573,11 @@ function handleMessage(ws: WebSocket, raw: string): void {
       });
       return;
 
-    case "node-add":
-      void replyAsync(ws, msg.id, () => nodes.add(msg.address, msg.code, msg.name));
+    case "node-invite":
+      reply(ws, msg.id, () => nodes.invite(msg.on === true));
+      return;
+    case "node-join":
+      void replyAsync(ws, msg.id, () => nodes.join(msg.text));
       return;
     case "node-rename":
       void replyAsync(ws, msg.id, () => nodes.rename(msg.nodeId, msg.name));
@@ -4584,9 +4587,6 @@ function handleMessage(ws: WebSocket, raw: string): void {
       return;
     case "node-remove":
       void replyAsync(ws, msg.id, () => nodes.remove(msg.nodeId));
-      return;
-    case "node-code":
-      reply(ws, msg.id, () => nodes.showCode(msg.on === true));
       return;
 
     case "remove-machine":
@@ -5387,13 +5387,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    * scanned the QR code yet and is an instruction, not an error.
    */
   /**
-   * Pairing, from a parent holding the code this node is showing — the one
-   * route ahead of the gate, because the code is its token: a parent never
-   * holds a child's share token before it has paired, and is handed it in
-   * the answer. `nodeRequestRefusal` keeps it to the tailnet with no page
-   * and no proxy in between, and five wrong codes burn the one showing.
+   * A new PC joining, with the code from the command this node is showing
+   * — ahead of the gate, because the code is its token: the PC holds
+   * nothing of this node's before it has joined. `nodeRequestRefusal`
+   * keeps it to the tailnet with no page and no proxy in between, and five
+   * wrong codes burn the one showing.
    */
-  if (url.pathname === "/api/nodes/enrol") {
+  if (url.pathname === "/api/nodes/join") {
     if (req.method !== "POST") {
       text(res, "POST only", 405);
       return;
@@ -5405,7 +5405,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       json(res, { error: "That is not JSON." }, 400);
       return;
     }
-    const answer = nodes.enrol(req, body);
+    const answer = nodes.acceptJoin(req, body);
     json(res, answer.body, answer.status);
     return;
   }
@@ -5503,8 +5503,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    * a process that no longer exists.
    */
   /**
-   * The nodes view, for a caller with no socket: `kururu child code` waits
-   * on it for the parent's enrolment, and the desktop's picker and tray
+   * The nodes view, for a caller with no socket: `kururu child join` reads
+   * it for the link coming up, and the desktop's picker and tray
    * read it for the nodes they offer. Behind the gate, since on the parent
    * each node's URL carries its share token.
    */
@@ -5512,12 +5512,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     json(res, nodes.view());
     return;
   }
-  /** Show a pairing code, for `kururu child code` on a box with no window. */
-  if (url.pathname === "/api/nodes/code" && req.method === "POST") {
+  /**
+   * Join the Mac, for `kururu child join <mac> <code>` on a box with no
+   * window: this server makes the post, since it holds the keys and the
+   * share token the Mac is handed. Behind the gate like everything else.
+   */
+  if (url.pathname === "/api/nodes/pair" && req.method === "POST") {
     try {
-      const shown = nodes.showCode(true);
-      const view = nodes.view();
-      json(res, { ...shown, address: view.self.address, port: view.self.port, name: view.self.name });
+      const body = (await readJsonBody(req)) as { text?: unknown } | null;
+      json(res, await nodes.join(body?.text));
     } catch (err) {
       json(res, { error: err instanceof Error ? err.message : String(err) }, 409);
     }
@@ -6582,7 +6585,7 @@ const linkWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 * 10
 function onUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
   /**
-   * Another node. Ahead of the token gate, like enrolment, because a node
+   * Another node. Ahead of the token gate, like joining, because a node
    * is not let in by the share token — nobody holds another's — but by the
    * handshake that follows, in which it signs a challenge with a key the
    * roster lists. What is checked here is only where it came from.

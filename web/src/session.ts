@@ -1149,11 +1149,16 @@ export function addMachine(name: string, host: string, panel: string): Promise<M
 }
 
 /**
- * Pair the node at `address` that is showing `code`. The server makes the two
- * posts and signs the roster; rejects with its sentence about why not.
+ * Settings → Nodes → Add a computer: show the join command for ten minutes,
+ * or stop showing it. Resolves with the command, or null once stopped.
  */
-export function addNode(address: string, code: string, name: string): Promise<NodeStatus> {
-  return request((id) => ({ type: "node-add", id, address, code, ...(name.trim() ? { name: name.trim() } : {}) })) as Promise<NodeStatus>;
+export function inviteNode(on: boolean): Promise<NodesView["invite"]> {
+  return request((id) => ({ type: "node-invite", id, on })) as Promise<NodesView["invite"]>;
+}
+
+/** On the new PC's own page: the Mac's join command, pasted. The server posts it to the Mac. */
+export function joinNode(text: string): Promise<NodesView> {
+  return request((id) => ({ type: "node-join", id, text })) as Promise<NodesView>;
 }
 
 /** A new name for a member, this node included. The parent's alone. */
@@ -1169,11 +1174,6 @@ export function rankNodes(order: string[]): Promise<unknown> {
 /** Out of the roster. Its links drop as the new roster reaches each node. */
 export function removeNode(nodeId: string): Promise<unknown> {
   return request((id) => ({ type: "node-remove", id, nodeId }));
-}
-
-/** Show a pairing code for ten minutes, or stop. Resolves with the code, or null once stopped. */
-export function nodeCode(on: boolean): Promise<{ code: string; expiresAt: number } | null> {
-  return request((id) => ({ type: "node-code", id, on })) as Promise<{ code: string; expiresAt: number } | null>;
 }
 
 /** Stop watching it, which also brings home every workspace pinned to it. */

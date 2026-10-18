@@ -5947,14 +5947,29 @@ label.st-row {
 a.st-btn {
   text-decoration: none;
 }
-/* A pairing code: read off one screen and typed into another, so it is big,
-   spaced, and in the face where 2 and Z do not look alike. */
-.st-code {
-  font-family: var(--mono);
-  font-size: var(--fs-xl);
-  font-weight: 600;
-  letter-spacing: 0.15em;
+/* A command to run on another computer: mono, wrapping rather than
+   scrolling sideways, and selected whole on one click for the phone that
+   has no clipboard over http. */
+.st-command {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--st-gap);
+  min-width: 0;
+}
+.st-command-text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0.5em 0.75em;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
   color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: all;
 }
 .st-item-busy {
   opacity: 0.8;

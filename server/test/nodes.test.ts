@@ -21,6 +21,7 @@ import {
   dialTargets,
   formatCode,
   freeName,
+  joinCommand,
   leaderOf,
   LinkHandshake,
   makeCode,
@@ -31,6 +32,7 @@ import {
   nodeUrl,
   normalizeCode,
   parseLinkMessage,
+  parseJoin,
   parseNodeAddress,
   reranked,
   rosterPayload,
@@ -185,28 +187,41 @@ describe("rank: who dials, who leads", () => {
   });
 });
 
-describe("the pairing code", () => {
-  it("is six characters from the unambiguous alphabet", () => {
-    const code = makeCode(new Uint8Array([0, 30, 31, 255, 8, 100]));
+describe("the join code and its command", () => {
+  it("is eight characters from the unambiguous alphabet", () => {
+    const code = makeCode(new Uint8Array([0, 30, 31, 255, 8, 100, 7, 9]));
     expect(code).toHaveLength(CODE_LENGTH);
-    expect(code).toMatch(/^[A-HJKMNP-Z2-9]{6}$/);
-    expect(formatCode("ABCDEF")).toBe("ABC-DEF");
+    expect(code).toMatch(/^[A-HJKMNP-Z2-9]{8}$/);
+    expect(formatCode("ABCDEFGH")).toBe("ABCD-EFGH");
+  });
+  it("is shown as one command with the Mac's address in it", () => {
+    expect(joinCommand("100.64.0.1", 7717, "ABCDEFGH")).toBe("kururu child join 100.64.0.1:7717 ABCD-EFGH");
+  });
+  it("is read back out of whatever was pasted", () => {
+    const want = { address: "100.64.0.1", port: 7717, code: "ABCDEFGH" };
+    expect(parseJoin("kururu child join 100.64.0.1:7717 ABCD-EFGH", 7717)).toEqual(want);
+    expect(parseJoin("  node tools/kururu.mjs child join 100.64.0.1 abcd-efgh\n", 7717)).toEqual(want);
+    expect(parseJoin("100.64.0.1:7717 ABCDEFGH", 7717)).toEqual(want);
+    expect(parseJoin("kururu child join 100.64.0.1:7717", 7717)).toBeNull();
+    expect(parseJoin("kururu child join 100.64.0.1:7717 ABC-DEF", 7717)).toBeNull();
+    expect(parseJoin("kururu child join https://x ABCD-EFGH", 7717)).toBeNull();
+    expect(parseJoin(42, 7717)).toBeNull();
   });
   it("takes what a person typed: case, a dash, spaces", () => {
-    expect(normalizeCode(" abc-def ")).toBe("ABCDEF");
-    expect(checkCode({ code: "ABCDEF", expiresAt: 10, misses: 0 }, "abc def", 5)).toEqual({ ok: true });
+    expect(normalizeCode(" abcd-efgh ")).toBe("ABCDEFGH");
+    expect(checkCode({ code: "ABCDEFGH", expiresAt: 10, misses: 0 }, "abcd efgh", 5)).toEqual({ ok: true });
   });
   it("expires, and a fifth wrong code burns it", () => {
-    expect(checkCode({ code: "ABCDEF", expiresAt: 10, misses: 0 }, "ABCDEF", 10)).toEqual({ ok: false, why: "expired", pairing: null });
-    expect(checkCode(null, "ABCDEF", 0)).toEqual({ ok: false, why: "none", pairing: null });
-    let pairing = { code: "ABCDEF", expiresAt: 100, misses: 0 };
+    expect(checkCode({ code: "ABCDEFGH", expiresAt: 10, misses: 0 }, "ABCDEFGH", 10)).toEqual({ ok: false, why: "expired", pairing: null });
+    expect(checkCode(null, "ABCDEFGH", 0)).toEqual({ ok: false, why: "none", pairing: null });
+    let pairing = { code: "ABCDEFGH", expiresAt: 100, misses: 0 };
     for (let i = 1; i < CODE_ATTEMPTS; i++) {
-      const miss = checkCode(pairing, "ZZZZZZ", 1);
+      const miss = checkCode(pairing, "ZZZZZZZZ", 1);
       expect(miss.ok).toBe(false);
       if (miss.ok || !miss.pairing) throw new Error("expected a miss that keeps the code");
       pairing = miss.pairing;
     }
-    expect(checkCode(pairing, "ZZZZZZ", 1)).toEqual({ ok: false, why: "burnt", pairing: null });
+    expect(checkCode(pairing, "ZZZZZZZZ", 1)).toEqual({ ok: false, why: "burnt", pairing: null });
   });
 });
 

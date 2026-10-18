@@ -25,36 +25,50 @@ The code is `shared/nodes.ts` (the shapes and every rule, pure and tested),
 
 ## Pairing
 
-Pairing works like Telegram's. The child shows a six-character code for ten
-minutes: `kururu child code`, the wizard's pairing step, or **Show code** in
-its Settings → Nodes. The person types the code and the child's address into
-the parent's Settings → Nodes → Add a node. Then the parent makes two posts
-to the child's `POST /api/nodes/enrol`:
+Pairing starts on the Mac and is one command on the new computer. Settings →
+Nodes → **Add a computer** says it in three steps: make sure the new
+computer has kururu (the clone and the wizard, or "use the kururu skill"),
+run this command on it, wait here. The command is shown ready to copy, with
+the Mac's address and a code in it:
 
-1. `{code, roster}` with the roster as it is. The child checks the code,
-   checks the roster's signature against the key the roster names (trust on
-   first use, made safe by the code the person carried between two screens),
-   keeps that key as its **anchor**, and answers with its id, name, public
-   keys and share token.
-2. `{code, roster}` again, with a roster the parent has just signed with the
-   child in it. The child takes it, is a member, burns the code and starts
-   dialling.
+```sh
+kururu child join 100.64.0.1:7717 ABCD-EFGH
+```
 
-If the second answer is lost, the child's first `hello` repairs it: that
-`hello` carries the roster the parent signed. The parent keeps the child's
-share token so that its Open links and QR codes let a device in. A child
-never holds another node's token.
+The code is eight characters, works once, and lasts ten minutes. Running the
+command makes the new computer's server post its id, name, public keys,
+port and share token, with the code, to the Mac's `POST /api/nodes/join`.
+The Mac checks and burns the code. It becomes a parent if it was alone, and
+signs a roster with the new member in it at the address the request came
+from. It answers with that roster. The new computer checks the roster's
+signature against the key the roster names (trust on first use, made safe
+by the code the person copied off the Mac's own screen), keeps that key as
+its **anchor**, and starts dialling. The Mac's page notices the join on its
+own (`joined` in the view) and says "omarchy joined". The same command can
+be pasted into the new computer's own Settings → Nodes ("Is this the new
+computer?"), or given to the wizard as `--join`.
 
-`/api/nodes/enrol` is the only route ahead of the token gate besides `/link`,
+It started the other way round: the new computer showed a code, and the
+person typed it and the computer's address into the Mac. Nobody could tell
+from the page what the code was for, where it came from or where it went.
+Both directions trust the same two things, a short-lived single-use code
+carried by the person and then only keys. This one is a copy and a paste,
+from the screen the person is already looking at.
+
+The parent keeps the new computer's share token, so that its Open links and
+QR codes let a device in. A child never holds another node's token.
+
+`/api/nodes/join` is the only route ahead of the token gate besides `/link`,
 because the code is its token. Both refuse:
 
 - any request with an `Origin` (a page);
 - any request with a proxy's header (`tailscale serve` delivers from loopback);
 - any remote address outside 100.64/10 and loopback (`nodeRequestRefusal`).
 
-A wrong code counts, and the fifth burns the code. A child already in
-another parent's roster refuses, and so does a parent that has members of
-its own. A lone parent being paired under another drops its signing key.
+A wrong code counts, and the fifth burns the code. A computer already in a
+roster refuses to join another: it is removed on its parent first, which it
+learns the next time the two link. A parent with members of its own refuses
+too. A lone parent that joins another drops its signing key.
 
 ## The roster
 
@@ -134,8 +148,10 @@ database, and the parent's are the parent's.
 
 - **Settings → Nodes** (`web/src/settings/Nodes.tsx`):
   - On the parent: the roster by rank with drag-to-rank (and ↑/↓ on a
-    phone), rename, remove, each node's state and Open, and Add a node.
-  - On a child: the parent's roster, read-only, and Show code to pair again.
+    phone), rename, remove, each node's state and Open, and Add a computer.
+  - On a child: the parent's roster, read-only.
+  - On a node in no roster: Add a computer, and the place to paste the
+    Mac's command when this is the new computer.
 - **The sidebar's Nodes section:** each node's workspaces with their agents'
   marks and the Needs dot, greyed with "away since" when not up. Each row is
   a link to the node.
@@ -187,10 +203,12 @@ place of the tailnet one. Give the second `KURURU_LOOPBACK_TOKEN=1` so it
 behaves like a child. Then:
 
 ```sh
+# node-invite on the parent's socket, {"type":"node-invite","id":1,"on":true}, replies with the command
 curl -X POST -H "Authorization: Bearer $(jq -r .token /tmp/kn2/config/access.json)" \
-  127.0.0.1:7872/api/nodes/code                      # the child's code
-# then node-add on the parent's socket: {"type":"node-add","id":1,"address":"127.0.0.1:7872","code":"…"}
+  -d '{"text":"kururu child join 127.0.0.1:7871 ABCD-EFGH"}' 127.0.0.1:7872/api/nodes/pair
 ```
+
+Name each socket `ptyhost.sock`, or `kill-ptyhosts` cannot find it afterwards.
 
 `kill -STOP` on a server's pid is a lid closing (no FIN), and `kill -CONT` opens it again.
 `kill -USR2` on its runner is a restart.

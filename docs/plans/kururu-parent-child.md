@@ -213,7 +213,7 @@ child setup`, which the skill says.
 | the tailnet | a `tailscale0` interface with an address, read as `reach.ts` reads it; the port free; the server, once up, answering on that address and refusing the LAN address and the token-less loopback | — | `sudo tailscale up` in the user's hands; the wizard **never runs `tailscale`** (rule 4), only reads the interface |
 | the service | the unit written, enabled, active; `/api/health` answering; the host a unit of its own; `lifecycle.log` clean | writes the unit, `daemon-reload`, enables, starts, waits for health | — |
 | the phone | the URL with the token printed and as a QR in the terminal | — | open it on the phone; the wizard waits for the first client and says it saw it |
-| pairing (phase 2) | a member of a roster, linked to the Mac | shows the pairing code and this node's address for ten minutes, waits for the Mac's enrolment, confirms the link | the user types code and address into the Mac's Settings → Nodes |
+| pairing (phase 2) | a member of a roster, linked to the Mac | takes the join command the Mac shows (`--join`, or pasted), joins, confirms the link | the user presses Add a computer on the Mac and copies its command here |
 | secrets (phase 4) | which kinds are held from the Mac, by hint | — | tick them on the Mac |
 | leading (phase 5) | eligible to lead, leads now, rank | — | — |
 
@@ -246,13 +246,17 @@ cannot see at the moment through one it can. Removing a node or changing a
 rank is a new roster; a node that is not in the newest roster is dropped and
 its key refused.
 
-**Enrolment** is pairing, like Telegram's. The child shows a six-character
-code (the wizard's pairing step, `kururu child code`, or its own Settings →
-Nodes; ten minutes); the parent's Settings → Nodes takes an address and the
-code and posts them with the roster; the child answers with its id, name,
-public keys and share token; the parent signs a roster with the new member and
-sends it back. The route refuses any remote address outside the CGNAT range
-tailscale uses, and any request with a forwarding header.
+**Enrolment** is one command, started on the parent. *(As built: the first
+build had the child show a code to type into the Mac with its address, and
+it read as a puzzle; it was turned round the same day.)* The parent's
+Settings → Nodes → Add a computer shows `kururu child join <its address>
+<code>`, the code single-use and good for ten minutes; run on the new
+machine, its server posts its id, name, public keys, port and share token
+with the code to the parent's `/api/nodes/join`; the parent signs a roster
+with the new member, at the address the request came from, and answers
+with it. The route refuses any remote address outside the CGNAT range
+tailscale uses, and any request with a forwarding header. See
+`docs/nodes.md`.
 
 **Links are a full mesh.** Every node holds one link to every other member:
 the lower rank dials the higher, so the Mac dials nobody and only accepts,

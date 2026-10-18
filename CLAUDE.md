@@ -295,7 +295,9 @@ The load-bearing invariants, one line each, with the argument behind the link:
   node; the parent (the Mac) signs a roster of members' public keys, and two
   nodes link — one WebSocket per pair, `/link`, the lower rank dialling the
   higher — by each signing the other's challenge with a key that roster
-  lists. Pairing is a code the child shows, posted to `/api/nodes/enrol`.
+  lists. Pairing is one command the Mac shows — `kururu child join
+  <address> <code>`, the code single-use for ten minutes — run on the new
+  computer, which posts to the Mac's `/api/nodes/join`.
   Those two routes are the only ones ahead of the token gate, and both
   refuse an `Origin`, a proxy's header and anything off the tailnet and
   loopback. What crosses a link is a summary a node pushes about itself,

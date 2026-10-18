@@ -22,15 +22,15 @@
  * left alone, which is what makes stopping and starting again a workflow
  * rather than a hazard.
  *
- *   kururu child setup [--dry-run] [--port=N] [--account=this|dedicated] [--codex=yes|no] [--pair=yes|no] [--yes]
+ *   kururu child setup [--dry-run] [--port=N] [--account=this|dedicated] [--codex=yes|no] [--join="<address> <code>"] [--yes]
  *   kururu child doctor           the same checks, read-only; exit 1 on a ✗
  *   kururu child update           pull, install, build, restart the server, doctor
  *   kururu child status           the service, then `bun run status`
- *   kururu child code [--wait[=S]] pair with the Mac: a code and this box's address to type there
+ *   kururu child join <address> <code>  join the Mac: the command its Settings → Nodes → Add a computer shows
  *   kururu child restart-host     a new pty host, which ends every agent it holds
  *   kururu share [--url|--rotate] the phone's link and QR code
  *
- * `doctor`, `update`, `status` and `code` answer without `child` too.
+ * `doctor`, `update`, `status` and `join` answer without `child` too.
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -38,7 +38,7 @@ import { networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
-import { context, lifecycleTail, pairWithParent, remember, Stop, STEPS } from "./kururu/checks.mjs";
+import { context, JOIN_HOW, joinParent, lifecycleTail, remember, Stop, STEPS } from "./kururu/checks.mjs";
 import { doctorExit, parseArgs, table, tailnetAddress } from "./kururu/pure.mjs";
 
 /** The checkout, found from this file and not the working directory, through the link in `~/.local/bin`. */
@@ -97,6 +97,21 @@ function makeIo(flags) {
           const answer = said === "" ? options[0] : options.find((option) => option.startsWith(said));
           if (answer) return answer;
         }
+      } finally {
+        rl.close();
+      }
+    },
+    /**
+     * A line of free text — the join command, pasted — or null for Enter.
+     * Without a terminal it is null at once: every caller treats the answer
+     * as optional and has a flag of its own for an agent to pass.
+     */
+    async askText(question) {
+      if (!interactive) return null;
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        const said = (await rl.question(`  ${question} `)).trim();
+        return said || null;
       } finally {
         rl.close();
       }
@@ -320,26 +335,27 @@ async function restartHost(flags) {
 }
 
 /**
- * Pair with the Mac: a code and this box's address, typed into the Mac's
- * Settings → Nodes. With a terminal it then waits, until the Mac has taken
- * the code and the link is up or the code runs out (Enter stops it).
- *
- * Without one it shows the code and returns 0 at once, since an agent's tool
- * shows nothing until the command ends and the person needs the code while
- * it is good; `--wait` (300 s, or `--wait=S`) then waits for the link, on the
- * same code — a code already showing is shown again, never replaced.
+ * Join the Mac: `kururu child join <address> <code>`, the command the Mac's
+ * Settings → Nodes → Add a computer shows, run here. Nothing to wait at a
+ * terminal for, so it behaves the same for a person and for an agent's tool.
  */
-async function code(flags) {
+async function joinMac(words) {
   linuxOnly();
+  const at = words.indexOf("join");
+  const rest = words.slice(at + 1);
+  if (rest.length !== 2) throw new Stop(`kururu child join wants the Mac's address and a code, as the Mac shows them. ${JOIN_HOW}`, { code: 2 });
   const ctx = context({ root: ROOT, env: process.env, flags });
-  const io = makeIo(flags);
-  const waitFlag = flags.wait === true ? 300 : Number(flags.wait ?? 0);
-  if (!Number.isFinite(waitFlag) || waitFlag < 0) throw new Stop(`--wait takes seconds, not ${flags.wait}`, { code: 2 });
-  const wait = io.interactive && flags.wait === undefined ? 10 * 60_000 : waitFlag * 1000;
-  const linked = await pairWithParent(ctx, io, { wait });
-  if (linked || wait > 0) return linked ? 0 : 1;
-  io.say(dim("Once both are typed on the Mac, `kururu child code --wait` waits for the link, and `kururu child doctor` shows the pairing row."));
-  return 0;
+  return (await joinParent(ctx, makeIo(flags), rest.join(" "))) ? 0 : 1;
+}
+
+/**
+ * Where `kururu child code` used to show a code to type into the Mac.
+ * Pairing starts on the Mac now, and this says so rather than "no such
+ * command" to anyone following an older note.
+ */
+function code() {
+  console.error(`kururu: pairing starts on the Mac now. ${JOIN_HOW}`);
+  return 2;
 }
 
 /** `bun run share`, from wherever `kururu` is typed, for this instance's port and config. */
@@ -372,7 +388,7 @@ function help() {
 
 // --- dispatch -----------------------------------------------------------------
 
-const VALUED = ["port", "unit", "account", "codex", "bin", "timeout"];
+const VALUED = ["port", "unit", "account", "codex", "bin", "timeout", "join"];
 const argv = process.argv.slice(2);
 const { flags, words } = parseArgs(argv, VALUED);
 const [first, second] = words;
@@ -385,7 +401,8 @@ const verbs = {
   status: () => status(flags),
   "restart-host": () => restartHost(flags),
   "wait-tailnet": () => waitTailnet(flags),
-  code: () => code(flags),
+  join: () => joinMac(words),
+  code,
   share: () => share(argv.slice(argv.indexOf("share") + 1)),
   help,
 };
