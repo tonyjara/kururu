@@ -479,17 +479,22 @@ agents no card claims), and a card in In progress whose agent went away
 without finishing (its run `ended`; nothing will move it). Not: a working
 agent, which will come to you and is counted apart; a card in To do, which
 is a reminder, or Done; a shell that finished a command off screen; and
-never the harness — Kuru asking is the status bar's chip, one subject per
+never the harness — Kuru asking is Kuru's chip, one subject per
 control. A card and its agent are one need, filed under the card's workspace
 wherever its tab was dragged; an agent on a To do or Done card shows as
 itself. Within a workspace the asking come first, then cards in board order,
 then agents in the sidebar's order. Every workspace is in one of three bands:
 `needs`, `working`, or `quiet`.
 
-**Where it is drawn.** The status bar's **Needs you** chip, left of Kuru's
+**Where it is drawn.** The **Needs you** chip, left of Kuru's
 — a tray and the count, with no words on any device; its title and label
 say what it is — counts the needs in the blocked ink and stays, dim and
-without a number, at zero. Behind it `NeedsDrawer.tsx`
+without a number, at zero. The two chips are one component
+(`DrawerChips.tsx`) put down in one place at a time: beside the profile's
+board in the sidebar's header while both drawers are shut, along the top of
+the panes when the sidebar is away, in the open drawer's header (where they
+stand in for its title) while one is open, and in the bottom bar on a
+phone. Behind it `NeedsDrawer.tsx`
 is a drawer like Kuru's, on its terms exactly — beside the panes, narrowing
 them rather than floating over them, not dimmed, and on a desktop closed
 only by its own ✕, the tray that opened it, or Escape: a click into the
@@ -754,8 +759,9 @@ Prefix is **ctrl+a**, ghosttown's. Press it twice to send `\x01` through. The �
 shortcuts (⌘D ⇧⌘D ⌘T ⇧⌘W ⌘[ ⌘]) are a second door onto the same action table in
 `App.tsx`, not a second implementation; ⌘W and ⌘R stay Electron's.
 
-**The prefix is a mode, so it is always labelled.** `StatusBar` shows PREFIX
-while it is armed. An unlabelled mode is what makes people distrust modal
+**The prefix is a mode, so it is always labelled.** `StatusBar` — the
+window-wide bar along the bottom, which otherwise holds the count of running
+agents — shows PREFIX while it is armed. An unlabelled mode is what makes people distrust modal
 interfaces — and the recovery, pressing it twice, has to be discoverable.
 
 **The keyboard is stored as the *difference* from the defaults.** A saved map

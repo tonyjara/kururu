@@ -323,7 +323,7 @@ The load-bearing invariants, one line each, with the argument behind the link:
 - **What needs you is one rule, in `shared/needs.ts`, and three drawings of
   it.** An agent asking, a card in Review, a turn that ended unseen, a card
   whose agent went without finishing; never a working agent, a To do, a
-  shell, or the harness. The status bar's tray counts it, `NeedsDrawer.tsx`
+  shell, or the harness. The Needs chip's tray counts it, `NeedsDrawer.tsx`
   lists it by workspace in three bands with Next a press away (`C-a i`,
   `C-a o`), and a workspace's sidebar row wears the dot. No component
   decides it again, and nothing in it is dismissed by hand — a row leaves

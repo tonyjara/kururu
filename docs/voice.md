@@ -33,7 +33,7 @@ conversation's *text*, never its audio; see [channels](channels.md).
 | The missed list | `server/src/voice.ts` `review`, `replay`, `seen` | Every reply nobody played to its end, kept as words in the database (see [data](data.md)) — see [what you missed](#what-you-missed). Not a message of its own: it is merged into the conversation below. |
 | The conversation | `shared/kuru.ts`, `server/src/kuru.ts` | The harness's turns out of the database, your messages out of the outbox and each reply's fate off the missed list, as one list per profile with two counts — the `kuru` message, sent on connect and on every change, and paged back through `GET /api/kuru`. See [the drawer](#the-drawer). |
 | The drawer | `KuruDrawer.tsx` | The conversation, beside the panes on a desktop (narrowing them, like the sidebar) and the whole screen on a phone: every message of yours with its state, every reply with its fate, a live row for what Kuru is doing, and a composer that types to Kuru through the outbox. Opened by the chip, the harness key, a tap on the pill, the floating pill and the menu bar. |
-| The chip | `StatusBar.tsx` `sb-kuru` | The one door onto the drawer, the second of the status bar's two drawer chips (the first is what needs you). Its mark is what Kuru is doing — a dim dot, the mascot hopping while it thinks, the speaker glyph while it speaks, the blocked ink and "asking" on a prompt, "off" when not running — and its news is text inside it: a red count with the mic for messages that did not get through. In flight and all delivered are not news and get no mark. It carried a count of unheard replies until 2026-10-12; the drawer marks each where it sits, which is all the count led to. |
+| The chip | `DrawerChips.tsx` `sb-kuru` | The one door onto the drawer, the second of the two drawer chips (the first is what needs you) — beside the profile's board while the drawers are shut, in the open drawer's header, in the bottom bar on a phone. Its mark is what Kuru is doing — a dim dot, the mascot hopping while it thinks, the speaker glyph while it speaks, the blocked ink and "asking" on a prompt, "off" when not running — and its news is text inside it: a red count with the mic for messages that did not get through. In flight and all delivered are not news and get no mark. It carried a count of unheard replies until 2026-10-12; the drawer marks each where it sits, which is all the count led to. |
 | The pill | `VoicePill.tsx` | A level meter and a line, over the panes, zen included. Says which gesture ends the recording, what was heard and where it went, what Kuru is saying. Dragged anywhere in the window by mouse or finger and drawn where this device left it (`web/src/place.ts`); a double click puts it back. Its ✕ is `dismissVoice`: Kuru stops mid-word and the rest of the reply, and what was queued behind it, is marked unheard; a clip being recorded is thrown away; words lingering go. Escape is the same ✕ while Kuru speaks. A plain click — one that travelled less than the drag's own slop, and landed outside the ✕ — toggles the drawer at the reply the pill is showing: open it unless it is already open, in which case this closes it, so a pill that only ever shows its last line is one tap from the whole conversation and one tap back. The pill is the live indicator; the drawer is the record. |
 | The button | `KuruDrawer.tsx` `kuru-mic` | The key for a thumb, in the drawer's composer: held, it records; tapped, it toggles. How a phone talks. It was on the status bar beside the chip until 2026-10-12 — two controls for one conversation, one of them on every device's one strip. |
 
@@ -211,7 +211,7 @@ reply in flight leaves that reply missed rather than forgotten. Each profile
 keeps its newest thirty (`MISSED_MAX`).
 
 **Getting them back.** The drawer marks each unheard reply where it sits
-in the conversation, with a **Play** of its own; the status bar's chip
+in the conversation, with a **Play** of its own; Kuru's chip
 carried the count until 2026-10-12 and no longer does. Saying (or typing) "what did I miss?" to Kuru
 plays all of them, oldest first, each starting "Earlier.": the role tells it
 to call `play_missed`, which queues them and hands their words back to it so
@@ -245,8 +245,10 @@ the chip, or `Esc` (from anywhere but its composer) closes it. On a narrow
 window it is a full-screen sheet with the usual close button, one sheet at a
 time, like the board and the databases, and there a click outside does close
 it. The harness key (`C-a a`) opens and
-shuts it; **Terminal** in its header is the old `open-harness` — started,
-resumed or revealed. The speaker in its header is Settings → Voice's **Speak
+shuts it. Its header leads with the two drawers' chips, Kuru's lit; the
+**Terminal** button that stood there went on 2026-10-18, and the old
+`open-harness` — started, resumed or revealed — is the **Start** or **Open
+terminal** at the foot of the list while Kuru is off or asking. The speaker in its header is Settings → Voice's **Speak
 replies**, the same setting written through the same `set-voice`, so the two
 always agree: a speaker while replies are read aloud, struck through while
 they are only on screen. Muting also stops a reply already audible, through

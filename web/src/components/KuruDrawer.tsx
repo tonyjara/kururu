@@ -70,7 +70,7 @@
  * reply was heard. What it adds is this page's own two states for a clip the
  * server does not have yet — recording, and saving — from the voice module.
  */
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cardCode } from "../../../shared/board";
 import { CHANNEL_NAMES, channelReady, isChannelKind, type TelegramStatus } from "../../../shared/channels";
 import { KURU_SEEN_MS, clipLength, splitCardCodes, type KuruConversation, type KuruItem, type KuruReply, type NoticeItem, type YouItem } from "../../../shared/kuru";
@@ -123,6 +123,7 @@ export function KuruDrawer({
   onEditing,
   onCard,
   onTerminal,
+  chips,
 }: {
   profile: Profile;
   agents: AgentSnapshot[];
@@ -142,6 +143,12 @@ export function KuruDrawer({
   onCard: (workspaceId: string | null, cardId: string) => void;
   /** Take me to Kuru's terminal — started, resumed or revealed. */
   onTerminal: () => void;
+  /**
+   * The two drawers' chips, which lead this header while the drawer is open —
+   * Kuru's lit, since it is this drawer, and the other the way across. See
+   * `DrawerChips.tsx`.
+   */
+  chips: ReactNode;
 }) {
   const { kuru, channels, voice } = useKururu();
   const conversation = kuru.find((c) => c.profileId === profile.id) ?? null;
@@ -413,28 +420,17 @@ export function KuruDrawer({
 
   return (
     <aside className={`kuru-drawer ${sheet ? "kuru-sheet" : ""}`} ref={root} role="dialog" aria-label="Kuru">
+      {/* The chips stand where the title was: Kuru's chip already says what
+          the title and its state word did — the mark, the name, and "asking"
+          or "off" — and a header carrying both would say Kuru twice. The
+          Terminal button went on 2026-10-18; the terminal is still a press
+          away from the line at the foot of the list while Kuru is asking or
+          off, which is when it was ever wanted. */}
       <header className="kuru-head">
-        <span className="kuru-head-mark" aria-hidden="true">
-          {live === "thinking" ? (
-            <span className="status status-working">
-              <Mascot config={mascot} clip={mascot.working} />
-            </span>
-          ) : live === "speaking" ? (
-            <SpeakerIcon />
-          ) : (
-            <span className={`kuru-dot kuru-dot-${live}`} />
-          )}
-        </span>
-        <h2 className="dialog-title">Kuru</h2>
-        <span className={`kuru-head-state kuru-head-state-${live}`} role="status">
-          {liveWord(live)}
-        </span>
+        {chips}
         <span className="kuru-head-spacer" />
         {voice && <SpeakSwitch settings={voice.settings} />}
         {telegram && <TelegramSwitch status={telegram} />}
-        <button className="kuru-head-btn" onClick={onTerminal} title={live === "off" ? "Start Kuru's session, in a terminal beside the board" : "Go to Kuru's terminal (C-a a opens this drawer)"}>
-          Terminal
-        </button>
         <button className="sidebar-close kuru-close" onClick={onClose} aria-label="Close" title="Close (Esc)">
           <Icon name="close" />
         </button>
@@ -604,11 +600,14 @@ function SpeakSwitch({ settings }: { settings: VoiceSettings }) {
 }
 
 /**
- * The Telegram channel's switch, beside Terminal: the same switch as
+ * The Telegram channel's switch, beside the speaker: the same switch as
  * Settings → Channels, here because the drawer is where you notice you are
  * leaving the Mac. Drawn only once the channel is set up — a token and an
  * account — since a switch that can only refuse is not a switch. Its ink
  * says on; a link that is failing says so in the warning ink and the title.
+ * The plane alone since 2026-10-18, on the speaker's terms: the words "on"
+ * and "off" were the widest thing in the header, the ink already says which,
+ * and the title and `aria-pressed` say it in words.
  */
 function TelegramSwitch({ status }: { status: TelegramStatus }) {
   const bot = status.bot ? `@${status.bot.username}` : "the bot";
@@ -619,13 +618,13 @@ function TelegramSwitch({ status }: { status: TelegramStatus }) {
       : `Telegram is off. Click to let ${bot} reach Kuru, and send Kuru's replies there.`;
   return (
     <button
-      className={`kuru-head-btn ${status.enabled ? (status.error ? "kuru-head-btn-warn" : "kuru-head-btn-on") : ""}`}
+      className={`kuru-head-btn kuru-head-icon ${status.enabled ? (status.error ? "kuru-head-btn-warn" : "kuru-head-btn-on") : ""}`}
       aria-pressed={status.enabled}
+      aria-label="Telegram"
       title={title}
       onClick={() => void api.setChannel("telegram", { enabled: !status.enabled }).catch(() => {})}
     >
       <PlaneIcon />
-      <span>{status.enabled ? "Telegram on" : "Telegram off"}</span>
     </button>
   );
 }
@@ -811,8 +810,9 @@ function writeDraft(profileId: string, text: string) {
 
 /**
  * Typing to Kuru. Enter sends and Shift+Enter is a new line, as every chat
- * box has agreed; Escape gives the keyboard back to the panes. The mic beside
- * it is the status bar's: held, it records; tapped, it toggles. What is typed
+ * box has agreed; Escape gives the keyboard back to the panes. The send and
+ * the mic are inside the box, at its foot: the mic held records, tapped
+ * toggles. What is typed
  * and not yet sent survives closing the drawer and reloading the page — a
  * thought half-written must not vanish because the drawer did — and the field
  * grows with it up to `.kuru-field`'s `max-height`, so writing more than one
@@ -849,67 +849,54 @@ function Composer({ profileId, onEditing, talking }: { profileId: string; onEdit
         send();
       }}
     >
-      <textarea
-        ref={field}
-        className="kuru-field"
-        rows={1}
-        value={text}
-        placeholder="Say something to Kuru"
-        aria-label="A message for Kuru"
-        onChange={(event) => {
-          setText(event.target.value);
-          writeDraft(profileId, event.target.value);
-        }}
-        onFocus={() => onEditing(true)}
-        onBlur={() => onEditing(false)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+      <div className="kuru-box">
+        <textarea
+          ref={field}
+          className="kuru-field"
+          rows={1}
+          value={text}
+          placeholder="Say something to Kuru"
+          aria-label="A message for Kuru"
+          onChange={(event) => {
+            setText(event.target.value);
+            writeDraft(profileId, event.target.value);
+          }}
+          onFocus={() => onEditing(true)}
+          onBlur={() => onEditing(false)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              send();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              field.current?.blur();
+            }
+          }}
+        />
+        <button type="submit" className="kuru-send" disabled={!text.trim()} title="Send (Enter)" aria-label="Send">
+          <Icon name="run" />
+        </button>
+        <button
+          type="button"
+          className={`kuru-mic ${talking ? "kuru-mic-listening" : ""}`}
+          onPointerDown={(event) => {
             event.preventDefault();
-            send();
-          } else if (event.key === "Escape") {
-            event.preventDefault();
-            event.stopPropagation();
-            field.current?.blur();
-          }
-        }}
-      />
-      <button type="submit" className="kuru-send" disabled={!text.trim()} title="Send (Enter)" aria-label="Send">
-        <Icon name="run" />
-      </button>
-      <button
-        type="button"
-        className={`kuru-mic ${talking ? "kuru-mic-listening" : ""}`}
-        onPointerDown={(event) => {
-          event.preventDefault();
-          talkDown();
-        }}
-        onPointerUp={talkUp}
-        onPointerCancel={talkUp}
-        onMouseDown={(event) => event.preventDefault()}
-        onContextMenu={(event) => event.preventDefault()}
-        title="Hold to talk to Kuru, tap to toggle"
-        aria-label="Talk to Kuru"
-        aria-pressed={talking}
-      >
-        <MicIcon />
-      </button>
+            talkDown();
+          }}
+          onPointerUp={talkUp}
+          onPointerCancel={talkUp}
+          onMouseDown={(event) => event.preventDefault()}
+          onContextMenu={(event) => event.preventDefault()}
+          title="Hold to talk to Kuru, tap to toggle"
+          aria-label="Talk to Kuru"
+          aria-pressed={talking}
+        >
+          <MicIcon />
+        </button>
+      </div>
     </form>
   );
-}
-
-function liveWord(live: KuruLive): string {
-  switch (live) {
-    case "off":
-      return "off";
-    case "thinking":
-      return "thinking";
-    case "asking":
-      return "asking";
-    case "speaking":
-      return "speaking";
-    default:
-      return "";
-  }
 }
 
 /** The time a thing was said: the clock today, and the day before that. */

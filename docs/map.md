@@ -169,7 +169,7 @@ in this folder.
 **Components:**
 
 `Panes.tsx` (flat positioned boxes, tab strips, dividers) · `Terminal.tsx` (a box
-for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` ·
+for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` (the window-wide bottom bar, and `WorkspaceToggle`) · `DrawerChips.tsx` ·
 `Status.tsx` (a dot, or the mascot) · `Icon.tsx` (a class name and an
 `aria-hidden` span) · `Dialog.tsx` (while one is up, no key reaches a pty) ·
 `Menu.tsx` · `Reader.tsx` (**the thing kururu was built for**; one draggable tab per document) ·
@@ -177,7 +177,7 @@ for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` ·
 `Search.tsx` (the search over every board and the conversations, and the deleted cards, in the profile board's sheet; a card hit is a door to the card) ·
 `ProfileBoard.tsx` (the profile's own cards, in a sheet over the window; its own and no other's) ·
 `ColorPicker.tsx` (a column's colour, from the profile board) ·
-`NeedsDrawer.tsx` (what needs you across the workspaces, in three bands, with the next one a press away; opened by the status bar's tray) ·
+`NeedsDrawer.tsx` (what needs you across the workspaces, in three bands, with the next one a press away; opened by the tray in `DrawerChips.tsx`) ·
 `Timeline.tsx` (that board by when its cards are for; holds only which weeks it is showing) ·
 `FileTree.tsx` (markdown to the reader, the rest to nvim; holds the reader's zoom) · `DocPicker.tsx` (an empty reader only) ·
 `MadeLinks.tsx` (the file or two an agent's turn ended in, under its sidebar row, on its card and on its Needs you row, and a path in Kuru's replies; a document to the reader, code to a new nvim tab) ·
@@ -185,7 +185,7 @@ for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` ·
 keymap, so it cannot document a dead key) · `VoicePill.tsx` (the microphone is
 open, and this is how loud the room is; dragged anywhere, ✕ or Esc to stop Kuru, a tap opens the drawer) ·
 `ReloadNotice.tsx` (who reloaded the window and why, for ten seconds after an agent did) ·
-`KuruDrawer.tsx` (the conversation with Kuru: every message's state, every reply's fate, a composer, the Telegram switch; opened by the status bar's chip) · Settings is `web/src/settings/`, not a component: `ui.tsx` is the language every page is written in (a group is a card of rows; a row is a label and one control of a dozen kinds; the in-place danger question; lists, galleries, steps, details), `Settings.tsx` the shell and the list of pages, and one file per page (`Channels.tsx` is the Telegram walkthrough, `Firecrawl.tsx` the Firecrawl one).
+`KuruDrawer.tsx` (the conversation with Kuru: every message's state, every reply's fate, a composer, the Telegram switch; opened by Kuru's chip in `DrawerChips.tsx`) · Settings is `web/src/settings/`, not a component: `ui.tsx` is the language every page is written in (a group is a card of rows; a row is a label and one control of a dozen kinds; the in-place danger question; lists, galleries, steps, details), `Settings.tsx` the shell and the list of pages, and one file per page (`Channels.tsx` is the Telegram walkthrough, `Firecrawl.tsx` the Firecrawl one).
 
 ## `desktop/` — Electron main + preload, and the esbuild step
 

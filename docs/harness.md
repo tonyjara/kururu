@@ -277,11 +277,12 @@ its reply aloud. Its `blocked` still notifies like any agent's. See
 
 ## Starting, resuming, where it lives
 
-`open-harness` (**Terminal** in the Kuru drawer's header, and its **Start**
-when the session is gone) means one thing — take me to the harness's
+`open-harness` (the Kuru drawer's **Start** when the session is gone, and
+**Open terminal** while it is asking; the header's **Terminal** went on
+2026-10-18) means one thing — take me to the harness's
 terminal — and the server decides which of three it is: running, reveal it;
-gone, resume its conversation; never started, start it. `C-a a` and the chip
-in the status bar open the drawer rather than the terminal: the drawer is
+gone, resume its conversation; never started, start it. `C-a a` and Kuru's chip
+(`DrawerChips.tsx`) open the drawer rather than the terminal: the drawer is
 where the conversation is — every prompt you gave and every reply, out of the
 database — and the terminal is for the tool calls and the prompts. See
 [voice](voice.md#the-drawer).

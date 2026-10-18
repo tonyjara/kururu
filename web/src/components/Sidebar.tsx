@@ -151,6 +151,18 @@ interface Props {
    * reaches a pty, and that is a promise only the app can keep.
    */
   onPrompt: (state: DialogState) => void;
+  /**
+   * The sidebar's toggle and the workspace's name, for the strip along the
+   * top — see `WorkspaceToggle` in `StatusBar.tsx`. Null on a phone, whose
+   * bottom bar has them.
+   */
+  toggle: ReactNode;
+  /**
+   * The two drawers' chips, for beside the board — or null while a drawer is
+   * open and they are in its header instead, and on a phone. See
+   * `DrawerChips.tsx`.
+   */
+  chips: ReactNode;
   /** Opens the settings dialog. The corner is the only way in. */
   onSettings: () => void;
   /** Opens the phone dialog — the addresses this server answers at, as QR codes. */
@@ -198,6 +210,8 @@ export function Sidebar({
   onPrompt,
   onBoard,
   needsYou,
+  toggle,
+  chips,
   onSettings,
   onReach,
   overlay,
@@ -911,8 +925,20 @@ export function Sidebar({
           Empty, and therefore drawn only in the Electron window: in a browser tab
           — which is what the phone loads — there is nothing floating over this
           corner and the strip would be thirty pixels of nothing at the top of the
-          screen. `app-window` on the root is what says which of the two this is. */}
-      <div className="sidebar-drag" aria-hidden="true" />
+          screen. `app-window` on the root is what says which of the two this is.
+
+          Since 2026-10-18 it is not empty on a desktop: the sidebar's toggle and
+          the workspace's name came up from the bar under the panes to stand
+          beside the traffic lights, where a window's title would be. So the
+          strip is drawn in a browser tab too when it has them — a line that
+          holds something is not thirty pixels of nothing — and stays the empty
+          drag handle on a phone's full-screen sidebar, which has its close
+          button for a way out. */}
+      {toggle ? (
+        <div className="sidebar-drag sidebar-top">{toggle}</div>
+      ) : (
+        <div className="sidebar-drag" aria-hidden="true" />
+      )}
 
       <header className="sidebar-head">
         <span
@@ -930,7 +956,7 @@ export function Sidebar({
           onClick={() => onRun("switch-profile")}
           title="Profiles (C-a s)"
         >
-          {profile.name}
+          <span className="profile-name">{profile.name}</span>
           <Icon name="caret" className="profile-caret" />
         </button>
         {/* The profile's board, beside the name because it is the profile's and
@@ -945,27 +971,13 @@ export function Sidebar({
           <Icon name="board" />
           {openCards > 0 && <span className="profile-board-count">{openCards}</span>}
         </button>
-        {/* Kuru is not here any more. It was a bot button beside the board with
-            a count on each corner, and it is now a chip in the status bar and
-            a drawer behind it — see `StatusBar.tsx` and `KuruDrawer.tsx`. */}
+        {/* What needs you and Kuru, beside the board while both their drawers
+            are shut: the board is the other thing in this row that opens a
+            view of everything, so the three doors sit together. With a drawer
+            open the chips are in its header instead, and this is null. See
+            `DrawerChips.tsx`. */}
+        {chips}
         <span className="sidebar-head-spacer" />
-        {/* Settings and the phone, at the far end of the header. They were the
-            sidebar's foot until 2026-10-12, where they sat on the status bar's
-            left end as three icon buttons from two components, next to a
-            second copy of the profile's name. Up here they are beside the
-            name they belong to — a profile is edited in Settings, and the
-            profile menu's last item already goes there — and the bottom edge
-            is one bar with one grammar. The QR code is for getting kururu
-            *onto* a phone, so a sidebar that is a phone's whole screen does
-            not draw it; a narrow desktop window gets it back when widened. */}
-        {!overlay && (
-          <button className="cog" onClick={onReach} title="Open on your phone" aria-label="Open on your phone">
-            <Icon name="share" />
-          </button>
-        )}
-        <button className="cog" onClick={onSettings} title="Settings (C-a g)" aria-label="Settings">
-          <Icon name="settings" />
-        </button>
         {/* The way out of a full-screen sidebar. Drawn only when it is one: as a
             column, the panes next to it are already the way out, and a close
             button beside a thing with a keyboard shortcut and a status-bar
@@ -1309,9 +1321,24 @@ export function Sidebar({
       <Machines />
       <DevServers />
 
-      {/* No foot. A new terminal was a button down here once, and then the cog
-          and the QR code were; the first is the tab strip's `+`, and the two
-          are in the header now, beside the profile they belong to. */}
+      {/* The foot: Settings and the phone's QR code, at the bottom left. They
+          were down here until 2026-10-12, went up into the header, and came
+          back on 2026-10-18 when the header took the drawers' chips — and this
+          time the foot has no bar beside it to meet, because the bar under the
+          panes is gone and the one along the bottom runs under this too. The
+          QR code is for getting kururu *onto* a phone, so a sidebar that is a
+          phone's whole screen does not draw it; a narrow desktop window gets
+          it back when widened. */}
+      <footer className="sidebar-foot">
+        <button className="cog" onClick={onSettings} title="Settings (C-a g)" aria-label="Settings">
+          <Icon name="settings" />
+        </button>
+        {!overlay && (
+          <button className="cog" onClick={onReach} title="Open on your phone" aria-label="Open on your phone">
+            <Icon name="share" />
+          </button>
+        )}
+      </footer>
 
       {/* The edge you drag. Last in the tree and absolutely positioned, so it
           sits over the border rather than taking a column of its own — a handle

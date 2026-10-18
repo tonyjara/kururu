@@ -53,7 +53,8 @@ import { Panes } from "./components/Panes";
 import { Reach } from "./components/Reach";
 import { Settings, TAB_NAMES as SETTINGS_TABS, type Tab as SettingsTab } from "./settings/Settings";
 import { Sidebar } from "./components/Sidebar";
-import { StatusBar } from "./components/StatusBar";
+import { StatusBar, WorkspaceToggle } from "./components/StatusBar";
+import { DrawerChips } from "./components/DrawerChips";
 import { VoicePill } from "./components/VoicePill";
 import { ReloadNotice } from "./components/ReloadNotice";
 import { installReload } from "./reload";
@@ -1371,6 +1372,33 @@ export function App() {
     );
   }
 
+  /**
+   * The two drawers' chips and the sidebar's toggle, made once and put down in
+   * whichever one place they belong right now — see `DrawerChips.tsx` and
+   * `WorkspaceToggle`. With a drawer open the chips are in its header and
+   * nowhere else; with both shut, beside the profile's board, or along the top
+   * of the panes when the sidebar is away. A phone keeps both in the bottom
+   * bar, because its sidebar is a screen with no header on show, and in the
+   * header of a drawer's sheet, which covers that bar.
+   */
+  const chips = (
+    <DrawerChips
+      kuru={{
+        live: kuruLive(profile, agents, kuruHere, voiceUi.phase === "speaking"),
+        undelivered: kuruHere?.undelivered ?? 0,
+        open: kuruDrawer.open,
+        mascot,
+      }}
+      onKuru={toggleKuru}
+      needs={{ count: needs?.count ?? 0, workspaces: needs?.inWorkspaces ?? 0, open: needsOpen }}
+      onNeeds={toggleNeeds}
+    />
+  );
+  const drawerOpen = kuruDrawer.open || (needsOpen && !!needs);
+  const toggle = (
+    <WorkspaceToggle name={workspace.name} sidebarOpen={sidebarOpen} onToggle={() => run("toggle-sidebar")} />
+  );
+
   return (
     /* The width is a custom property rather than an inline width on the aside,
        because two rules need it: the sidebar itself, and — while it is an
@@ -1380,9 +1408,13 @@ export function App() {
        tab, and exists for exactly one thing: the traffic lights, which float
        over this corner and are not there on a phone. */
     <div
-      className={`app ${zen ? "app-zen" : ""} ${desktop() ? "app-window" : ""} ${sidebarOpen ? "" : "app-sidebar-hidden"}`}
+      className={`app ${zen ? "app-zen" : ""} ${desktop() ? "app-window" : ""} ${sidebarOpen ? "" : "app-sidebar-hidden"} ${!sidebarOpen && !zen && !narrow ? "app-stage-top" : ""}`}
       style={{ "--sidebar-w": `${sidebarWidth}px`, "--files-w": `${filesWidth}px`, "--drawer-w": `${drawerWidth}px` } as React.CSSProperties}
     >
+      {/* Everything but the bottom bar, side by side: the sidebar, the panes,
+          a drawer, the tree. A row of its own since 2026-10-18 so that the bar
+          under it can run the whole width of the window. */}
+      <div className="app-body">
       {sidebarOpen && !zen && (
         <Sidebar
           profile={profile}
@@ -1396,6 +1428,8 @@ export function App() {
           focusedAgentId={focusedAgentOf(workspace)}
           needsYou={needyWorkspaces}
           onRun={run}
+          toggle={narrow ? null : toggle}
+          chips={narrow || drawerOpen ? null : chips}
           onDeleteWorkspace={confirmDeleteWorkspace}
           onEditing={setEditing}
           onPrompt={setDialog}
@@ -1436,7 +1470,18 @@ export function App() {
             sitting on a terminal with nothing to grab the window by at all —
             which mattered little while hiding it was a keyboard gesture and
             matters rather more now that a narrow window starts that way. */}
-        {!sidebarOpen && !zen && <div className="stage-drag" aria-hidden="true" />}
+        {/* On a desktop it carries what the sidebar's top would have: the
+            toggle that brings the sidebar back, the workspace's name, and the
+            drawers' chips while both drawers are shut. A phone has those in
+            its bottom bar and keeps the empty strip. */}
+        {!sidebarOpen && !zen && (narrow ? (
+          <div className="stage-drag" aria-hidden="true" />
+        ) : (
+          <div className="stage-top">
+            {toggle}
+            {!drawerOpen && chips}
+          </div>
+        ))}
         <main className="panes">
           <Panes
             node={workspace.layout}
@@ -1478,41 +1523,6 @@ export function App() {
         {touch && keybarOpen && !zen && (
           <Keybar agentId={focusedAgentOf(workspace)} keyboard={paneKeyboard} />
         )}
-        <StatusBar
-          workspace={workspace}
-          connected={connected}
-          prefixArmed={prefixArmed}
-          resizeMode={resizeMode}
-          /* The pointer's door onto `toggle-sidebar`. It has always had a key,
-             and a key is no use at all in the one state that needs this most:
-             the sidebar hidden on a phone, where there is no keyboard to press
-             it with and nothing on screen saying the list is still there. */
-          sidebarOpen={sidebarOpen}
-          onToggleSidebar={() => run("toggle-sidebar")}
-          filesOpen={filesOpen}
-          onToggleFiles={() => run("toggle-files")}
-          /* Null on a mouse, which is how the bar draws no toggle at all rather
-             than a disabled one: a control for a thing that cannot exist here is
-             worse than no control. */
-          keybarOpen={touch ? keybarOpen : null}
-          onToggleKeybar={() => setKeybarOpen((open) => !open)}
-          /* The jump between panes, drawn only where the panes are not all on
-             screen at once — on a wide window the one you would jump to is
-             already in front of you, and a click on it is the jump. Null rather
-             than a count on the rest, so the bar can tell "there is nothing to
-             jump to" from "there is nothing to jump *from*". */
-          panes={narrow ? panes(workspace.layout).length : null}
-          onLastPane={() => api.lastPane()}
-          kuru={{
-            live: kuruLive(profile, agents, kuruHere, voiceUi.phase === "speaking"),
-            undelivered: kuruHere?.undelivered ?? 0,
-            open: kuruDrawer.open,
-            mascot,
-          }}
-          onKuru={toggleKuru}
-          needs={{ count: needs?.count ?? 0, workspaces: needs?.inWorkspaces ?? 0, open: needsOpen }}
-          onNeeds={toggleNeeds}
-        />
       </div>
 
       {/* Over everything, zen included: a microphone that is open must say so
@@ -1537,6 +1547,7 @@ export function App() {
           onResize={resizeDrawer}
           onResetWidth={() => setDrawerWidth(DRAWER_DEFAULT)}
           onEditing={setEditing}
+          chips={chips}
           onTerminal={() => {
             api.openHarness();
             if (narrow) closeKuru();
@@ -1569,6 +1580,7 @@ export function App() {
           onClose={closeNeeds}
           onResize={resizeDrawer}
           onResetWidth={() => setDrawerWidth(DRAWER_DEFAULT)}
+          chips={chips}
           onGo={goToNeed}
           onNext={goNext}
           onWorkspace={(workspaceId) => {
@@ -1601,6 +1613,31 @@ export function App() {
       {filesOpen && !zen && narrow && (
         <div className="sidebar-scrim" onClick={() => setFilesOpen(false)} aria-hidden="true" />
       )}
+      </div>
+
+      {/* The bottom bar, the width of the window. See `StatusBar.tsx`. */}
+      <StatusBar
+        agents={agents}
+        connected={connected}
+        prefixArmed={prefixArmed}
+        resizeMode={resizeMode}
+        /* The toggle and the chips come down here on a phone only: its
+           sidebar is a screen, so there is no header on show to hold them. */
+        toggle={narrow ? toggle : null}
+        chips={narrow ? chips : null}
+        /* Null on a mouse, which is how the bar draws no toggle at all rather
+           than a disabled one: a control for a thing that cannot exist here is
+           worse than no control. */
+        keybarOpen={touch ? keybarOpen : null}
+        onToggleKeybar={() => setKeybarOpen((open) => !open)}
+        /* The jump between panes, drawn only where the panes are not all on
+           screen at once — on a wide window the one you would jump to is
+           already in front of you, and a click on it is the jump. Null rather
+           than a count on the rest, so the bar can tell "there is nothing to
+           jump to" from "there is nothing to jump *from*". */
+        panes={narrow ? panes(workspace.layout).length : null}
+        onLastPane={() => api.lastPane()}
+      />
 
       {help && <HelpOverlay keymap={keymap} onClose={() => setHelp(false)} />}
       {profileBoard && (

@@ -253,7 +253,10 @@ Each row is two lines:
 working until then.
 
 Clicking a row reveals that terminal where it already is; dragging one moves it.
-The profile menu is at the top, the cog and phone button at the bottom.
+The sidebar's toggle and the workspace's name are at the very top, beside the
+window's buttons; under them the profile menu, the board, and the two drawer
+chips; the cog and phone button at the bottom. The bar along the bottom of the
+window counts the agents running.
 
 ### The reader
 
@@ -286,7 +289,7 @@ keyboard in a reader; it is this device's and never reaches the server.
 
 ### The file tree
 
-`C-a e`, the folder at the right of the status bar, or **Show the file tree** in
+`C-a e`, or **Show the file tree** in
 any pane's menu opens the project down the
 right-hand side — the repository the workspace is in, or the directory its
 terminal is standing in. It re-reads what is open every few seconds, because
@@ -355,7 +358,7 @@ over its own copy, so nothing is reported twice.
 
 ## The harness
 
-The **Kuru** chip on the status bar, or `C-a a`, opens the profile's
+The **Kuru** chip beside the board, or `C-a a`, opens the profile's
 **harness**: one Claude Code session that oversees every agent in the profile.
 Talk to it as you would to any Claude, about all of them at once — "start an
 agent on the migration card", "what did the API worker say", "tell it to use
@@ -428,7 +431,7 @@ not encrypt bot chats end to end. See `docs/channels.md`.
 
 ## Settings
 
-The cog at the top of the sidebar, or `C-a g`. Five tabs, all server-side, in `~/.config/kururu` — so a
+The cog at the bottom of the sidebar, or `C-a g`. Five tabs, all server-side, in `~/.config/kururu` — so a
 change reaches a second window and the phone without being told.
 
 | | |

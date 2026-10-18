@@ -33,7 +33,7 @@
  * row leaves when its state does, which is the only way a list of needs
  * stays honest.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cardCode, type Card } from "../../../shared/board";
 import type { Need, ProfileNeeds, WorkspaceNeeds } from "../../../shared/needs";
 import { mascotFor, type AgentSnapshot, type MascotSet } from "../../../shared/model";
@@ -74,6 +74,7 @@ export function NeedsDrawer({
   onNext,
   onWorkspace,
   onBoard,
+  chips,
 }: {
   needs: ProfileNeeds;
   mascots: MascotSet;
@@ -93,6 +94,11 @@ export function NeedsDrawer({
   onWorkspace: (workspaceId: string) => void;
   /** This card, on its board, in its workspace. */
   onBoard: (workspaceId: string, cardId: string) => void;
+  /**
+   * The two drawers' chips, which lead this header while the drawer is open —
+   * this one's lit, and Kuru's the way across. See `DrawerChips.tsx`.
+   */
+  chips: ReactNode;
 }) {
   /**
    * On a phone the drawer is a sheet over the whole screen, so a click
@@ -158,9 +164,11 @@ export function NeedsDrawer({
 
   return (
     <aside className={`kuru-drawer needs-drawer ${sheet ? "kuru-sheet" : ""}`} ref={root} role="dialog" aria-label="Needs you">
+      {/* The chips where the tray and the title were — the lit tray is this
+          drawer's name, as Kuru's chip is Kuru's — and the count in words
+          after them, which the chip has no room to say. */}
       <header className="kuru-head">
-        <InboxIcon />
-        <h2 className="dialog-title">Needs you</h2>
+        {chips}
         <span className={`kuru-head-state ${needs.count ? "needs-head-some" : ""}`} role="status">
           {state}
         </span>

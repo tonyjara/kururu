@@ -440,7 +440,16 @@ button {
  */
 .app {
   display: flex;
+  flex-direction: column;
   height: calc(100% - var(--keyboard, 0px));
+}
+/* Everything above the bottom bar, side by side: the sidebar, the panes, a
+   drawer, the tree. A row of its own since 2026-10-18, so the status bar
+   under it can run the whole width of the window. */
+.app-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
 }
 
 .muted {
@@ -581,10 +590,37 @@ kbd {
   -webkit-app-region: drag;
 }
 
+/**
+ * The same strip with something in it: the sidebar's toggle and the
+ * workspace's name, up from the bar that ran under the panes until
+ * 2026-10-18. Drawn in a browser tab too, where it is the sidebar's first
+ * line, because a line that holds something is not thirty pixels of nothing.
+ *
+ * In the window it starts after the traffic lights and is centred on them.
+ * The 78px is the inset the profile row wore when it stood up here, and the
+ * 6px over a 26px line puts the middle of the row at the height the lights'
+ * middle is at — the same height the profile name's middle was then.
+ */
+.sidebar-top,
+.stage-top {
+  display: flex;
+  align-items: center;
+  flex: none;
+  min-width: 0;
+  padding: 8px 8px 0 12px;
+}
+.app-window .sidebar-top,
+.app-window .stage-top {
+  display: flex;
+  height: 32px;
+  padding: 6px 8px 0 78px;
+  -webkit-app-region: drag;
+}
+
 .sidebar-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 6px 8px 8px 12px;
   -webkit-app-region: drag;
 }
@@ -657,6 +693,14 @@ kbd {
 }
 .profile-btn:hover {
   background: var(--chrome-high);
+}
+/* The name gives way before the caret does: with the drawers' chips in the
+   header too, a long name is what is shortened, and the mark that says this
+   is a menu stays. */
+.profile-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* The one mark that says this name is a menu and not a label. Small and dim
    until you are on it: the sidebar header has one other thing in it and neither
@@ -1958,6 +2002,18 @@ a.machine-name:hover {
   background: var(--chrome-high);
 }
 
+/* The sidebar's foot: Settings and the QR code at the bottom left, back down
+   here since 2026-10-18 when the header took the drawers' chips. Last in a
+   column whose agent list takes the spare room, so it sits on the bottom
+   edge without a rule of its own to put it there. */
+.sidebar-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+}
+
 /* --------------------------------------------------------------------------
    The sidebar as a screen
 
@@ -2108,10 +2164,14 @@ a.machine-name:hover {
   border-color: transparent;
   -webkit-app-region: drag;
 }
-/* With the sidebar hidden the stage carries the window's drag strip and the
-   panes start below it, so the tree's first row does too. */
-.app-window.app-sidebar-hidden .files-head {
-  padding-top: calc(28px + 2 * var(--gutter) + 3px);
+/* With the sidebar hidden on a desktop the stage carries the strip along the
+   top — the window's drag handle, and the toggle that brings the sidebar back
+   — and the panes start below it, so the tree's first row does too. */
+.app-stage-top .files-head {
+  padding-top: calc(30px + 2 * var(--gutter) + 3px);
+}
+.app-window.app-stage-top .files-head {
+  padding-top: calc(32px + 2 * var(--gutter) + 3px);
 }
 .files-root {
   display: flex;
@@ -2299,30 +2359,6 @@ a.machine-name:hover {
   min-height: 0;
 }
 
-/* The status bar's door onto the tree, the bars button's twin. */
-.sb-files {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 20px;
-  border-radius: var(--radius-md);
-  color: var(--dimmer);
-  flex: none;
-}
-.sb-files-on {
-  color: var(--text);
-}
-.sb-files:hover {
-  color: var(--text);
-  background: var(--chrome-high);
-}
-:root[data-narrow] .sb-files {
-  width: 32px;
-  height: 28px;
-  color: var(--dim);
-}
-
 /* The window's drag handle when there is no sidebar to hold it.
    The traffic lights float over the top-left corner whether or not anything is
    drawn under them, so hiding the sidebar used to leave them sitting on a
@@ -2336,6 +2372,15 @@ a.machine-name:hover {
   height: 28px;
   flex: none;
   -webkit-app-region: drag;
+}
+/* The top of the panes while the sidebar is away on a desktop: the toggle
+   that brings it back, the workspace's name, and the drawers' chips while
+   both drawers are shut, so nothing the sidebar carried at its top goes
+   missing with it. The chips keep to the toggle's end, in the order and the
+   place the sidebar's header has them. */
+.stage-top {
+  gap: 8px;
+  height: 30px;
 }
 
 .button {
@@ -3064,8 +3109,9 @@ a.button {
   display: flex;
   align-items: center;
   gap: 6px;
-  /* The same edge as the sidebar's foot — see `--bar-h`. */
-  min-height: var(--bar-h);
+  /* Thin on a desktop, where it holds a count and the odd badge and nothing
+     is pressed; a thumb's height on a phone — see `--bar-h`. */
+  min-height: 26px;
   padding: 3px 10px;
   /**
    * And clear of the home indicator, which `viewport-fit=cover` in `index.html`
@@ -3086,11 +3132,63 @@ a.button {
 .app-zen .statusbar {
   display: none;
 }
+:root[data-narrow] .statusbar {
+  min-height: var(--bar-h);
+}
+
+/* How many agents are running, across every profile, and how many of those
+   are working — in the working ink, and only when there are any. The dot is
+   the agents' own badge at rest: hollow while nobody is running, the working
+   ink while somebody is working, the dim ink in between. */
+.sb-agents {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+.sb-agents-dot {
+  width: 7px;
+  height: 7px;
+  margin-right: 2px;
+  border-radius: var(--radius-round);
+  background: currentColor;
+}
+.sb-agents-n {
+  color: var(--text);
+  font-weight: 600;
+}
+.sb-agents-working .sb-agents-dot,
+.sb-agents-busy {
+  color: var(--working);
+}
+/* A phone's bar is full of the thumb's controls; the dot's ink says some are
+   working, and the Needs drawer lists them under Working. */
+:root[data-narrow] .sb-agents-busy {
+  display: none;
+}
+.sb-agents-none .sb-agents-dot {
+  background: transparent;
+  border: var(--border) var(--border-style) currentColor;
+}
+
+/* The sidebar's toggle and the workspace's name, together wherever they are:
+   up beside the traffic lights on a desktop, the bottom bar's left end on a
+   phone. The name is the window's title up there, and is set like one. */
+.ws-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 
 /* The pointer's door onto `toggle-sidebar`. Quiet, like the cog: it is a thing
    you reach for rather than a thing you read, and the status bar is already
    carrying the one badge in the window that is meant to shout. */
 .sb-bars {
+  -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3140,6 +3238,8 @@ a.button {
    shorten it, and a bar two lines tall is a bar that moved the keyboard. */
 .sb-workspace {
   color: var(--text);
+  font-weight: 700;
+  letter-spacing: 0.01em;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -3169,6 +3269,17 @@ a.button {
   background: transparent;
   color: var(--blocked);
   font-weight: 500;
+}
+
+/* The two chips, which travel together — see `DrawerChips.tsx`. Out of the
+   window's drag region wherever they land, since the sidebar's header and
+   the strip over the panes are both handles the window is dragged by. */
+.drawer-chips {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
 }
 
 /* Kuru's chip: the one door onto the drawer, and the one place its news is.
@@ -3879,32 +3990,11 @@ html.pill-page #root {
   padding: 8px 8px 6px 12px;
   border-bottom: var(--border) var(--border-style) var(--line);
 }
-.kuru-head .dialog-title {
-  margin: 0;
-}
-.kuru-head-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  flex: none;
-  color: var(--working);
-}
-/* What Kuru is doing, in a word, in the status inks the agents' badges use. */
+/* The Needs drawer's count in words, after the chips. Kuru's drawer had a
+   state word here too, and its chip says it now. */
 .kuru-head-state {
   font-size: var(--fs-sm);
   color: var(--dim);
-}
-.kuru-head-state-thinking,
-.kuru-head-state-speaking {
-  color: var(--working);
-}
-.kuru-head-state-asking {
-  color: var(--blocked);
-}
-.kuru-head-state-off {
-  color: var(--dimmer);
 }
 .kuru-head-spacer {
   flex: 1;
@@ -4265,27 +4355,40 @@ html.pill-page #root {
   color: var(--blocked);
 }
 
-/* Typing to Kuru, and the mic beside it — the status bar's, for a thumb that
-   is already here. Clear of the home indicator for the status bar's reason:
-   on a phone the sheet is the bottom edge of the window. */
+/* Typing to Kuru, and the mic beside it. Clear of the home indicator for the
+   status bar's reason: on a phone the sheet is the bottom edge of the window. */
 .kuru-composer {
   flex: none;
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
   padding: 8px 10px;
   padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
   border-top: var(--border) var(--border-style) var(--line);
 }
+/* The box, with the send and the mic inside it at its foot — one field with
+   two buttons in it rather than a field and two buttons beside it. They were
+   outside until 2026-10-18 and read as notches cut into the box's edge, as
+   tall as it was. Held to the last line as the text grows, as every chat box
+   has them, so a long draft grows away from them rather than around them. */
+.kuru-box {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-md);
+  border: var(--border) var(--border-style) var(--line);
+  background: var(--bg);
+}
+.kuru-box:focus-within {
+  border-color: var(--accent);
+}
 .kuru-field {
   flex: 1;
+  align-self: stretch;
   min-width: 0;
   max-height: 120px;
   overflow-y: auto;
-  padding: 6px 8px;
+  padding: 4px 5px;
   resize: none;
-  border-radius: var(--radius-md);
-  border: var(--border) var(--border-style) var(--line);
+  border: none;
   background: var(--bg);
   color: var(--text);
   font: inherit;
@@ -4294,15 +4397,14 @@ html.pill-page #root {
 }
 .kuru-field:focus {
   outline: none;
-  border-color: var(--accent);
 }
 .kuru-send,
 .kuru-mic {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   border-radius: var(--radius-md);
   color: var(--dim);
   flex: none;
@@ -4322,6 +4424,12 @@ html.pill-page #root {
 .kuru-mic-listening:hover {
   color: var(--on-danger);
   background: var(--danger-bg);
+}
+/* A thumb's size on a phone, still inside the box. */
+:root[data-narrow] .kuru-send,
+:root[data-narrow] .kuru-mic {
+  width: 32px;
+  height: 32px;
 }
 
 .help-list {
@@ -4354,10 +4462,6 @@ html.pill-page #root {
    the side and a row per thing; the ones working; and the quiet rest, folded
    to a line of names. See `NeedsDrawer.tsx`.
    -------------------------------------------------------------------------- */
-.needs-drawer .kuru-head > svg {
-  flex: none;
-  color: var(--dim);
-}
 .needs-head-some {
   color: var(--blocked);
 }
