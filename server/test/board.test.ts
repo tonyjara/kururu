@@ -28,6 +28,9 @@ import {
   renameLane,
   canResume,
   cardCode,
+  cardPrompt,
+  priorRunNote,
+  wakeFor,
   columnCards,
   editCard,
   emptyBoard,
@@ -38,8 +41,10 @@ import {
   setWorktree,
   startRun,
   type Board,
+  type CardRun,
 } from "../../shared/board";
 import { findLauncher, resumeCommand, withPrompt } from "../../shared/launchers";
+import { pickCodexRollout } from "../../shared/sessions";
 import { BOARD_TAB, findPane, isBoardTab, panes, visibleAgents } from "../../shared/layout";
 import type { Profile } from "../../shared/model";
 import { Workspaces } from "../src/workspaces";
@@ -687,5 +692,58 @@ describe("a column's width", () => {
     expect(adoptProfileBoard(JSON.parse(JSON.stringify(b))).widths).toEqual({ todo: 300 });
     expect(adoptBoard({ cards: [], next: 1, widths: { nope: 300, todo: 350 } })!.widths).toEqual({ todo: 350 });
     expect(adoptBoard({ cards: [], next: 1, widths: { todo: "350" } })!.widths).toBeUndefined();
+  });
+});
+
+describe("waking a card", () => {
+  const id = "0b6c2f1e-8d7a-4c3b-9e2f-1a2b3c4d5e6f";
+  const run = (launcher: string, sessionId: string | null, state: CardRun["state"]): CardRun => ({
+    agentId: null,
+    launcher,
+    label: launcher,
+    state,
+    startedAt: 1_000,
+    endedAt: 2_000,
+    sessionId,
+    cwd: "/work/site",
+  });
+
+  it("picks up a run the host took with it, not only one put to sleep", () => {
+    // KUR-124 and KUR-127 on 2026-10-18: Opus runs a crash left `ended`, and
+    // KUR-134 and KUR-135, `finished` and closed, all started over.
+    for (const state of ["ended", "finished", "asleep"] as const) {
+      expect(wakeFor(run("claude:claude-opus-5-5", id, state), "claude", false, false)).toEqual({ resume: true });
+    }
+    expect(wakeFor(run("codex:gpt-5.5", id, "ended"), "codex", false, false)).toEqual({ resume: true });
+  });
+
+  it("starts over when asked, or when a card never ran, with nothing to explain", () => {
+    expect(wakeFor(run("claude", id, "asleep"), "claude", true, false)).toEqual({ resume: false, why: null });
+    expect(wakeFor(null, "claude", false, false)).toEqual({ resume: false, why: null });
+  });
+
+  it("says why it cannot", () => {
+    expect(wakeFor(run("claude", id, "finished"), "claude", false, true)).toEqual({ resume: false, why: "its last agent's terminal is still open" });
+    expect(wakeFor(run("claude", null, "ended"), "claude", false, false)).toEqual({ resume: false, why: "its last run kept no conversation id" });
+    // Codex with no id would be its picker, which a harness cannot answer.
+    expect(wakeFor(run("codex", null, "asleep"), "codex", false, false).resume).toBe(false);
+    expect(wakeFor(run("codex:gpt-5.5", id, "ended"), "claude", false, false)).toEqual({
+      resume: false,
+      why: "its conversation is codex's, and claude cannot read it",
+    });
+  });
+
+  it("tells a new conversation the card has run, after the card's words so Codex's rollout still matches it", () => {
+    const before = run("claude:claude-opus-5-5", id, "ended");
+    const note = priorRunNote({ ...before, label: "Claude Opus 5.5" }, "its conversation is no longer on this Mac's disk");
+    expect(note).toContain("Claude Opus 5.5 in /work/site");
+    expect(note).toContain("could not be picked up (its conversation is no longer on this Mac's disk)");
+    expect(note).toContain("do not redo finished work");
+    expect(priorRunNote(before, null)).not.toContain("could not be picked up");
+
+    const card = { title: "F1 theme", body: "A full racing pack." };
+    const prompt = `${cardPrompt(card)}\n\n${note}`;
+    const rollout = { id, cwd: "/work/site", at: 5_000, prompt };
+    expect(pickCodexRollout([rollout], { startedAt: 5_000, cwd: "/work/site", prompt: cardPrompt(card) }, new Set())).toEqual(rollout);
   });
 });

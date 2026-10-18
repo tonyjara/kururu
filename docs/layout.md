@@ -471,11 +471,23 @@ the tmux session. The card stays in its column; nothing on disk is touched.
 
 **Running an asleep card resumes it.** The run line says "asleep after sitting
 idle" with a **resume** button, and the robot's menu leads with **Resume
-conversation**. `run-card` on an asleep card resumes rather than starting over
-— on the launcher asked for when it is the same CLI — unless the message says
-`fresh`, which the robot's launcher rows send on such a card and label "new
-conversation". The harness's `run_card` does the same, on the run's own
-launcher when none is named. `GET /api/sleep` lists every card's agent with why
+conversation**. `run-card` on a card whose last agent has gone resumes rather
+than starting over — asleep, lost with the pty host, closed by hand, alike
+(`wakeFor` in `shared/board.ts`) — on the launcher asked for when it is the
+same CLI, unless the message says `fresh`, which the robot's launcher rows send
+whenever there is a conversation to go back to and label "new conversation".
+It used to ask for `asleep` alone, and on 2026-10-18 every run the host took
+down came back `ended` and started over, rereading its card and redoing what
+was pushed. A Claude transcript is looked for before `--resume` is typed
+(`conversationKept`), since a resume that finds nothing is an agent that
+exits on its first line; Codex's and a machine's are believed. The harness's
+`run_card` does the same, on the run's own launcher when none is named, refuses
+a card whose agent is still open (that is `send_agent`'s), and says in its
+reply whether it resumed and, when it could not, why. **A new conversation on a
+card that has run is told so**: `priorRunNote` follows the card's words — after
+them, so a Codex rollout still matches its card's opening — with the last
+run's launcher, directory and the reason, and asks it to look before redoing
+anything. `GET /api/sleep` lists every card's agent with why
 it is still awake ("idle 4 min of 10", "waiting on you: its last reply asked
 something"), for whoever is wondering.
 
