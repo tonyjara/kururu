@@ -202,6 +202,9 @@ const SHAPE_KNOWN: { near: string; property: string; value: string }[] = [
   // on `.term textarea` itself. 16 is the browser's threshold, not a size the
   // type ramp chose, so it cannot come from `--fs-xl`.
   { near: ".term textarea", property: "font-size", value: "16px" },
+  // The same threshold for every other field a finger can focus, under
+  // `(pointer: coarse)` near the top of the file.
+  { near: "No field a finger can focus is under 16px", property: "font-size", value: "16px !important" },
 ];
 
 /** The `:root` declarations, as name → value. */

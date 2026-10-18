@@ -42,12 +42,19 @@ Padding, margin, gap, width and height are deliberately **not** checked —
 `SkinTokens` never tokenized them, they are facts about an element's own
 layout rather than a shape a skin gets a vote on, and checking them would turn
 the exception list into most of the stylesheet instead of a short one.
-`SHAPE_KNOWN` in the test is that short list: today it holds exactly one entry,
-the `16px` iOS Safari zooms the page to whenever an editable element's
-computed font size is under it on focus, and does not zoom back out, so
-`.term`'s focus-catching textarea cannot take its size from `--fs-xl` — a skin
-is entitled to make that eight pixels, which would silently bring the zoom
-back.
+`SHAPE_KNOWN` in the test is that short list: today it holds two entries,
+both the `16px` iOS Safari zooms the page to whenever an editable element's
+computed font size is under it on focus, and does not zoom back out. One is
+`.term`'s focus-catching textarea; the other is the floor every input,
+textarea, select and `contenteditable` gets under `(pointer: coarse)` —
+Kuru's composer, card editors, rename and search fields — with the only
+`!important` in the file so it wins over each field's own rule. Neither can
+take its size from `--fs-xl`: that step is 15px in the default skin, which is
+why the two filters that reached for it "to stop the zoom" never did, and a
+skin is entitled to make it eight. `.term` itself is left out, since its font
+is the terminal's cell. `index.html`'s viewport adds `maximum-scale=1` behind
+it, which stops the focus zoom on iOS for any field the floor misses while
+Safari still lets a pinch past it (Android does not).
 
 **A theme that is spelled right can still be unreadable, and that is checked
 too.** Both rules above pass happily on a palette whose label is dark grey on
