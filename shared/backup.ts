@@ -11,7 +11,8 @@
  *
  * **An allow-list, not a deny-list.** The config directory holds a share
  * token, an OpenRouter key, a Telegram bot token, a Firecrawl key, the leftovers of a removed
- * accounts feature with ssh keys in them, and every profile's Claude login. A deny-list that
+ * accounts feature with ssh keys in them, every profile's Claude login, and
+ * on a node the secrets it lends or was lent (`shared/secrets.ts`). A deny-list that
  * missed the next secret file would ship it; an allow-list that misses the
  * next harmless one ships nothing, which is the mistake to make. So the
  * files that go are named here by name, and anything not named stays.
@@ -106,6 +107,10 @@ export const EXCLUDED: readonly { what: string; why: string }[] = [
   { what: "node.json", why: "this node's private keys, and on the parent the key that signs the roster" },
   { what: "nodes.json", why: "the roster, and on the parent each child's share token" },
   { what: "child.json", why: "a child's own answers to its setup wizard: this machine's, not a decision to carry to another" },
+  { what: "grants.json", why: "which node was lent which secret: node ids that mean nothing once a node is paired anew" },
+  { what: "secrets-held.json", why: "on a child, what it holds from the parent, by hint" },
+  { what: "claude-lend.json", why: "Claude tokens made with claude setup-token to lend to nodes" },
+  { what: "claude-token.json", why: "on a child, the Claude token its parent lent it" },
   { what: "identities/", why: "ssh keys and gh tokens left by the removed accounts feature" },
   { what: "profiles/*/claude/.claude.json", why: "the Claude login and MCP configs" },
   { what: "profiles/*/claude/history.jsonl", why: "Claude Code's own prompt history, which may hold pasted secrets" },
@@ -133,8 +138,9 @@ export const BACKUP_README = `# kururu backup
 Written by kururu every few minutes, when something changed. Not a place to edit.
 
 - \`config/\` — \`~/.config/kururu\` minus its secrets: the share token, the
-  OpenRouter key, the Telegram bot token, the web providers' keys, logins and the old \`identities/\`
-  folder are never here.
+  OpenRouter key, the Telegram bot token, the web providers' keys, logins, the
+  Claude tokens made for lending, which node holds which secret, and the old
+  \`identities/\` folder are never here.
 - \`boards/<profile>/<workspace>.json\` — every board: columns, cards, each
   card's runs and its history of moves. Deleted cards are kept, marked.
 - \`conversations/<profile>/<session>.jsonl\` — the harness conversation: your
@@ -145,7 +151,8 @@ Written by kururu every few minutes, when something changed. Not a place to edit
 - \`state/session.json\` — the arrangement of panes.
 - \`nodes/<name>/\` — each child kururu's own mirror, the same tree as this
   one, pulled over its link whenever its boards changed while this Mac was
-  awake. A node's keys and the roster are never here, on either side.
+  awake. A node's keys, the roster and the secrets it was lent are never
+  here, on either side.
 
 To put it all back on a new Mac: clone kururu, then
 
@@ -155,5 +162,7 @@ and onto a fresh child, on that box: \`bun run restore <URL> --node <name>\`.
 
 Then \`/login\` in each profile, paste the OpenRouter key and the web providers' keys (Settings → Web) in Settings, set
 Telegram up again in Settings → Channels if you used it, and approve Input
-Monitoring for the talk key.
+Monitoring for the talk key. A child restored this way is paired again, and
+then ticked again in the Mac's Settings → Nodes → Secrets for whatever it
+was lent.
 `;

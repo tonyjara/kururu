@@ -47,7 +47,8 @@ import { mkdirSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { isLoginKey, type LoginSummary } from "../../shared/model";
-import { configPath } from "./config";
+import { CLAUDE_TOKEN_FILE, validClaudeToken } from "../../shared/secrets";
+import { configPath, readConfigFile } from "./config";
 import { accountEmail } from "./usage";
 
 /** The directory a profile's logins live in. Throws on a key that is not one. */
@@ -87,6 +88,28 @@ export function loginEnv(loginKey: string): Record<string, string> {
   mkdirSync(claude, { mode: 0o700, recursive: true });
   mkdirSync(codex, { mode: 0o700, recursive: true });
   return { CLAUDE_CONFIG_DIR: claude, CODEX_HOME: codex };
+}
+
+/**
+ * The Claude login a parent lent this node, as the variable Claude Code
+ * takes it in — or nothing.
+ *
+ * A child is signed in with its own `/login` as a rule; this is for a box
+ * whose user has no browser anywhere, where the parent's Settings → Agents
+ * made a token with `claude setup-token` and lent it (`secrets.ts` writes
+ * it here, `0600`). It is the one credential kururu puts into a pty's
+ * environment, because an environment variable is how Claude Code takes a
+ * token, and it outranks a `/login` on the machine — which is what lending
+ * one is for. Never a copied `.credentials.json`: its refresh token rotates,
+ * and two machines refreshing one token sign each other out.
+ *
+ * Read at every spawn and never held, so taking it back on the parent stops
+ * the next terminal having it; a terminal already open keeps the
+ * environment it was started with, as any environment is kept.
+ */
+export function lentClaudeEnv(): Record<string, string> | undefined {
+  const raw = readConfigFile(CLAUDE_TOKEN_FILE) as { token?: unknown } | null;
+  return validClaudeToken(raw?.token) ? { CLAUDE_CODE_OAUTH_TOKEN: raw.token } : undefined;
 }
 
 /**

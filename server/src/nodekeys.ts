@@ -161,6 +161,11 @@ export function boxPublicKey(publicKey: string): KeyObject {
   return createPublicKey({ key: Buffer.concat([X25519_SPKI, Buffer.from(publicKey, "base64")]), format: "der", type: "spki" });
 }
 
+/** This node's own X25519 private key, for opening what the parent sealed to it (`seal.ts`). Never exported from the process. */
+export function boxPrivateKey(): KeyObject {
+  return privateOf(load().box);
+}
+
 /** A fresh challenge for a link's handshake. */
 export function challenge(): string {
   return randomBytes(32).toString("base64");
