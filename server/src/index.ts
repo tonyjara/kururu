@@ -35,6 +35,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createServer as createNetServer } from "node:net";
 import { homedir, tmpdir, totalmem } from "node:os";
 import { dirname, extname, join } from "node:path";
+import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 import { adoptMascot, countsAsAgent, defaultMascot } from "../../shared/model";
@@ -71,7 +72,10 @@ import {
   USAGE_POLL_MS,
 } from "../../shared/wire";
 import {
-  bindAddress,
+  bindProblem,
+  listenAddresses,
+  loopbackTokenRequired,
+  tokenEnv,
   cookieHeader,
   hasToken,
   isShared,
@@ -268,7 +272,7 @@ import { adoptAppearance, themeFor, type Appearance } from "../../shared/theme";
 import { isStyleId, skinFor } from "../../shared/skin";
 import { HOST_PROTOCOL, HostLink, type Port } from "./hostlink";
 import { connectToHost, hostSocketPath, type SocketPort } from "./hostsock";
-import { hostJobRunning, hostRuntime, launchHost } from "./hostlaunch";
+import { hostJobRunning, hostRuntime, launchHost, launchHostSystemd, unitOf } from "./hostlaunch";
 import {
   hostEnding,
   lifeNow,
@@ -585,10 +589,26 @@ function spawnEnv(): Record<string, string> | undefined {
   return spawnEnvFor(workspaces.active.id);
 }
 
-/** The same, for a terminal opened in a profile that need not be the one on screen — the harness's case. */
+/**
+ * The same, for a terminal opened in a profile that need not be the one on
+ * screen — the harness's case. And `KURURU_TOKEN` beside the logins, while
+ * loopback wants the token (`tokenInPtys`).
+ */
 function spawnEnvFor(profileId: string): Record<string, string> | undefined {
   const profile = workspaces.profile(profileId);
-  return loginsActive() && profile ? loginEnv(profile.loginKey) : undefined;
+  const login = loginsActive() && profile ? loginEnv(profile.loginKey) : undefined;
+  const token = tokenInPtys() ? tokenEnv() : undefined;
+  return login || token ? { ...login, ...token } : undefined;
+}
+
+/**
+ * Whether the ptys this server opens carry `KURURU_TOKEN`: loopback wants the
+ * token (`access.ts`), and the host takes an `env`, which is protocol 2. The
+ * MCP configs name the variable only then, since a config asking for one that
+ * is not set is a server Claude Code will not start.
+ */
+function tokenInPtys(): boolean {
+  return loopbackTokenRequired() && hostProtocol >= 2;
 }
 
 /** Where a profile's Claude keeps its config, and so its transcripts: its own directory, or the machine's. */
@@ -3924,6 +3944,7 @@ const web = WebChain.fromRegistry({
   changed: () => broadcast({ type: "web", web: web.status() }),
   clients: () => clients.size,
   port: () => PORT,
+  tokenInPtys: () => tokenInPtys(),
 });
 web.start();
 
@@ -5281,7 +5302,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       res,
       allowed === "cross-origin"
         ? "kururu: refused — this page is not one kururu serves."
-        : "kururu: this server is shared, so it wants the token from its Share dialog. Scan the QR code again.",
+        : isShared()
+          ? "kururu: this server is shared, so it wants the token from its Share dialog. Scan the QR code again."
+          : "kururu: this server wants its token from this machine too — it is in access.json, and `Authorization: Bearer` is how to present it.",
       403,
     );
     return;
@@ -5303,7 +5326,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    * presented a valid one *means*.
    */
   if (url.pathname === "/api/access") {
-    if (!isShared()) {
+    if (!isShared() && !loopbackTokenRequired()) {
       json(res, { ok: true, shared: false });
       return;
     }
@@ -6369,16 +6392,26 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 // Listen
 // ---------------------------------------------------------------------------
 
-const server = createServer((req, res) => {
+function onRequest(req: IncomingMessage, res: ServerResponse): void {
   void handleRequest(req, res).catch(() => {
     if (!res.headersSent) text(res, "kururu: internal error", 500);
     else res.destroy();
   });
-});
+}
+
+/**
+ * One server per address in `listenAddresses()`, all answering alike. One
+ * almost always; two for a server bound to one address that is not loopback
+ * (a child's tailnet address), because every caller on this machine — the
+ * hooks, the tools, the agents' MCP configs — dials 127.0.0.1 and a socket
+ * on 100.x does not answer there.
+ */
+const servers = listenAddresses().map(() => createServer(onRequest));
+const server = servers[0]!;
 
 const wss = new WebSocketServer({ noServer: true });
 
-server.on("upgrade", (req, socket, head) => {
+function onUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
   if (url.pathname !== "/ws") {
     socket.destroy();
@@ -6438,12 +6471,15 @@ server.on("upgrade", (req, socket, head) => {
     ws.on("close", () => dropClient(ws));
     ws.on("error", () => dropClient(ws));
   });
-});
+}
 
-/** A websocket held open by a sleeping phone must not be hung up on. */
-server.keepAliveTimeout = 0;
-server.headersTimeout = 0;
-server.requestTimeout = 0;
+for (const each of servers) {
+  each.on("upgrade", onUpgrade);
+  /** A websocket held open by a sleeping phone must not be hung up on. */
+  each.keepAliveTimeout = 0;
+  each.headersTimeout = 0;
+  each.requestTimeout = 0;
+}
 
 // ---------------------------------------------------------------------------
 // Coming up
@@ -6544,6 +6580,7 @@ async function attach(port: Port): Promise<void> {
     host,
     version: VERSION,
     port: () => PORT,
+    tokenInPtys: () => tokenInPtys(),
     launch: () => launch,
     grid: ownedGrid,
     activity,
@@ -6734,6 +6771,12 @@ async function attach(port: Port): Promise<void> {
     console.log(
       `  reachable    ${isShared() ? "from other machines, with the token from the Share dialog" : "from this machine only"}`,
     );
+    console.log(`  listening    ${listenAddresses().join(", ")}${loopbackTokenRequired() ? " · the token wanted on loopback too" : ""}`);
+    const bindWhy = bindProblem();
+    if (bindWhy) {
+      console.error(`kururu: ${bindWhy}`);
+      record("start", bindWhy);
+    }
   });
 }
 
@@ -6756,19 +6799,24 @@ const PORT_WAIT_MS = 5_000;
  */
 function listenOnce(onListening: () => void): void {
   const deadline = Date.now() + PORT_WAIT_MS;
-  const retry = (err: NodeJS.ErrnoException) => {
-    if (err.code !== "EADDRINUSE" || Date.now() > deadline) throw err;
-    setTimeout(() => {
-      server.close();
-      server.listen(PORT, bindAddress());
-    }, 250);
-  };
-  server.on("error", retry);
-  server.once("listening", () => {
-    server.off("error", retry);
-    onListening();
+  const addresses = listenAddresses();
+  let left = servers.length;
+  servers.forEach((each, i) => {
+    const address = addresses[i]!;
+    const retry = (err: NodeJS.ErrnoException) => {
+      if (err.code !== "EADDRINUSE" || Date.now() > deadline) throw err;
+      setTimeout(() => {
+        each.close();
+        each.listen(PORT, address);
+      }, 250);
+    };
+    each.on("error", retry);
+    each.once("listening", () => {
+      each.off("error", retry);
+      if (--left === 0) onListening();
+    });
+    each.listen(PORT, address);
   });
-  server.listen(PORT, bindAddress());
 }
 
 /**
@@ -6808,7 +6856,9 @@ const HOST_LOG = join(dirname(SOCKET), "ptyhost.log");
  * it. The fallback is the arrangement every host had before, so it works; what
  * it lacks is a coalition of its own, and the record says that in as many
  * words, because a host that a Force Quit can reach is one somebody should know
- * about.
+ * about. On Linux the user manager takes launchd's place, as a transient unit,
+ * and what the fallback lacks there is a cgroup of its own: it is in this
+ * server's, and stopping the server's unit ends it.
  */
 async function startPtyHost(): Promise<string | null> {
   const entry = process.env.KURURU_PTYHOSTD || fileURLToPath(new URL("./ptyhostd.mjs", import.meta.url));
@@ -6831,6 +6881,15 @@ async function startPtyHost(): Promise<string | null> {
       refused = err instanceof Error ? err.message : String(err);
     }
   }
+  if (process.platform === "linux") {
+    try {
+      const { pid, label } = await launchHostSystemd(runtime, { log: HOST_LOG, cwd: process.cwd(), env: process.env });
+      record("host", `started a pty host (pid ${pid ?? "pending"}) as a transient systemd user unit (${label}), in a cgroup of its own, because none was answering${last}`, detail);
+      return label;
+    } catch (err) {
+      refused = err instanceof Error ? err.message : String(err);
+    }
+  }
 
   const log = openSync(HOST_LOG, "a");
   const child = spawn(runtime.exe, [runtime.entry], {
@@ -6842,9 +6901,12 @@ async function startPtyHost(): Promise<string | null> {
   });
   child.unref();
   closeSync(log);
-  const shared = refused
-    ? ` as a child of this server, because launchd refused it (${refused}) — it shares the coalition of the app that started this server, and a Force Quit of that app ends every agent`
-    : "";
+  const unit = unitOf(process.pid);
+  const shared = !refused
+    ? ""
+    : process.platform === "linux"
+      ? ` as a child of this server, because systemd-run refused it (${refused}) — it shares this server's cgroup${unit ? ` (${unit})` : ""}, and stopping or restarting that unit ends every agent`
+      : ` as a child of this server, because launchd refused it (${refused}) — it shares the coalition of the app that started this server, and a Force Quit of that app ends every agent`;
   record("host", `started a pty host (pid ${child.pid})${shared}${runtime.note ? `, ${runtime.note}` : ""}, because none was answering${last}`, detail);
   return null;
 }
@@ -6897,7 +6959,9 @@ async function linkToHost(): Promise<SocketPort> {
     if (!told) {
       told = true;
       console.error(
-        "kururu: the pty host is running but not listening yet — if macOS is asking whether Kururu may use a folder, it is waiting for that answer",
+        process.platform === "darwin"
+          ? "kururu: the pty host is running but not listening yet — if macOS is asking whether Kururu may use a folder, it is waiting for that answer"
+          : `kururu: the pty host is running but not listening yet — ${HOST_LOG} says what it is doing`,
       );
     }
   }
@@ -7034,8 +7098,10 @@ export function shutdown(): Promise<void> {
     }
     clients.clear();
     wss.close();
-    server.close();
-    server.closeAllConnections();
+    for (const each of servers) {
+      each.close();
+      each.closeAllConnections();
+    }
   })();
   return stopping;
 }

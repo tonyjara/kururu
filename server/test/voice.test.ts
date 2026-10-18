@@ -27,7 +27,7 @@ import {
   type MissedReply,
   type StoredMissed,
 } from "../../shared/voice";
-import { fateOf, modelPhonemes, type Utterance } from "../src/voice";
+import { fateOf, missingTool, modelPhonemes, type Utterance } from "../src/voice";
 
 describe("parseSayVoices", () => {
   const listing = [
@@ -328,5 +328,18 @@ describe("the missed list", () => {
       expect(LEAD_INS[lead].en.length).toBeGreaterThan(0);
       expect(LEAD_INS[lead].es.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("missingTool", () => {
+  test("is one Homebrew line on a Mac", () => {
+    expect(missingTool("yap", "darwin")).toBe("Not installed. In a terminal: brew install yap");
+    expect(missingTool("espeak-ng", "darwin")).toBe("Not installed. In a terminal: brew install espeak-ng");
+  });
+
+  test("says the ears are not on this platform anywhere else, rather than send somebody to brew", () => {
+    expect(missingTool("yap", "linux")).toContain("Not on this platform");
+    expect(missingTool("yap", "linux")).not.toContain("brew");
+    expect(missingTool("espeak-ng", "linux")).not.toContain("brew");
   });
 });

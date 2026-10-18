@@ -3,9 +3,28 @@
  * `launchctl` says back, and where a runtime lives. The `launchctl list` and
  * `print` samples are the shapes macOS 26 printed for the probe jobs this was
  * built against.
+ *
+ * And the same for Linux, where the host is a transient systemd user unit:
+ * the `systemd-run` command line, the unit-name grammar, and the reading of
+ * `/proc/<pid>/cgroup` that says whether a host is in a unit of its own. The
+ * cgroup samples are the shapes systemd's unified and hybrid hierarchies
+ * write.
  */
 import { describe, expect, test } from "bun:test";
-import { HOST_LABEL_PREFIX, hostJobPlist, isHostJob, jobPid, remapInto, staleHostJobs } from "../src/hostlaunch";
+import {
+  HOST_LABEL_PREFIX,
+  HOST_UNIT_PREFIX,
+  cgroupUnit,
+  hostJobPlist,
+  hostUnitName,
+  isHostJob,
+  isHostUnit,
+  jobPid,
+  remapInto,
+  staleHostJobs,
+  systemdRunArgv,
+  unitEnvNames,
+} from "../src/hostlaunch";
 
 const LIST = [
   "PID\tStatus\tLabel",
@@ -128,5 +147,129 @@ describe("hostJobPlist", () => {
     const { spawnSync } = await import("node:child_process");
     const done = spawnSync("plutil", ["-lint", "-"], { input: plist, encoding: "utf8" });
     expect(done.status).toBe(0);
+  });
+});
+
+describe("hostUnitName and isHostUnit", () => {
+  test("names a unit by the time and the pid that started it", () => {
+    expect(hostUnitName(1_760_000_000_000, 4410)).toBe(`${HOST_UNIT_PREFIX}mgj6k3cw-4410`);
+  });
+
+  test("knows its own names, with or without .service", () => {
+    const name = hostUnitName(Date.now(), 53271);
+    expect(isHostUnit(name)).toBe(true);
+    expect(isHostUnit(`${name}.service`)).toBe(true);
+  });
+
+  test("knows nobody else's — the server's unit least of all", () => {
+    expect(isHostUnit("kururu.service")).toBe(false);
+    expect(isHostUnit("kururu-ptyhost.service")).toBe(false);
+    expect(isHostUnit("kururu-ptyhost-mgk3z9-4410.scope")).toBe(false);
+    expect(isHostUnit("app-kururu-ptyhost-mgk3z9-4410.service")).toBe(false);
+    expect(isHostUnit(null)).toBe(false);
+  });
+});
+
+describe("unitEnvNames", () => {
+  test("is every variable systemd can carry, sorted", () => {
+    expect(unitEnvNames({ ZED: "last", PATH: "/usr/bin", HOME: "/home/me", TABS: "a\tb", LINES: "a\nb" })).toEqual(["HOME", "LINES", "PATH", "TABS", "ZED"]);
+  });
+
+  test("drops what systemd would refuse the whole start over", () => {
+    expect(unitEnvNames({ OK: "1", BELL: "a\u0007", ESC: "\u001b[0m", DEL: "\u007f", "NOT-A-NAME": "1", "9LIVES": "1" })).toEqual(["OK"]);
+  });
+
+  test("drops what describes the server's own unit, which the host's is not", () => {
+    const names = unitEnvNames({ PATH: "/usr/bin", INVOCATION_ID: "x", JOURNAL_STREAM: "8:1", NOTIFY_SOCKET: "/run/x", LISTEN_FDS: "1", XPC_SERVICE_NAME: "0" });
+    expect(names).toEqual(["PATH"]);
+  });
+
+  test("leaves out a variable that is not set", () => {
+    expect(unitEnvNames({ SET: "1", UNSET: undefined })).toEqual(["SET"]);
+  });
+});
+
+describe("systemdRunArgv", () => {
+  const unit = `${HOST_UNIT_PREFIX}mgk3z9-4410`;
+  const argv = systemdRunArgv(unit, {
+    program: ["/home/me/.local/share/mise/installs/node/26.8.2/bin/node", "/home/me/kururu/desktop/dist/ptyhostd.mjs"],
+    envNames: ["HOME", "PATH"],
+    cwd: "/home/me/kururu",
+    log: "/home/me/.local/state/kururu/ptyhost.log",
+  });
+
+  test("is a user unit of its own, under the name it was given", () => {
+    expect(argv[0]).toBe("--user");
+    expect(argv).toContain(`--unit=${unit}`);
+  });
+
+  test("leaves nothing behind when the host exits badly", () => {
+    expect(argv).toContain("--collect");
+  });
+
+  test("fails the start when the runtime cannot be run, rather than reporting one", () => {
+    expect(argv).toContain("--property=Type=exec");
+  });
+
+  /**
+   * The two that keep agents alive: stopping the unit signals the host and
+   * lets it reap its own ptys, and the kernel's OOM killer taking one agent's
+   * build does not stop the unit every other agent is in.
+   */
+  test("signals only the host when stopped, and survives an OOM kill inside it", () => {
+    expect(argv).toContain("--property=KillMode=process");
+    expect(argv).toContain("--property=OOMPolicy=continue");
+  });
+
+  test("appends both streams to the host's log", () => {
+    expect(argv).toContain("--property=StandardOutput=append:/home/me/.local/state/kururu/ptyhost.log");
+    expect(argv).toContain("--property=StandardError=append:/home/me/.local/state/kururu/ptyhost.log");
+  });
+
+  test("starts where it was asked to", () => {
+    expect(argv).toContain("--working-directory=/home/me/kururu");
+  });
+
+  test("passes the environment by name, so no value is on a command line", () => {
+    expect(argv.filter((arg) => arg.startsWith("--setenv="))).toEqual(["--setenv=HOME", "--setenv=PATH"]);
+  });
+
+  test("ends with the runtime and the entry, after a --", () => {
+    const end = argv.indexOf("--");
+    expect(argv.slice(end + 1)).toEqual(["/home/me/.local/share/mise/installs/node/26.8.2/bin/node", "/home/me/kururu/desktop/dist/ptyhostd.mjs"]);
+    expect(argv.slice(0, end).every((arg) => arg.startsWith("--"))).toBe(true);
+  });
+});
+
+describe("cgroupUnit", () => {
+  test("is the host's own unit under the unified hierarchy", () => {
+    const text = `0::/user.slice/user-1000.slice/user@1000.service/app.slice/${HOST_UNIT_PREFIX}mgk3z9-4410.service\n`;
+    expect(cgroupUnit(text)).toBe(`${HOST_UNIT_PREFIX}mgk3z9-4410.service`);
+    expect(isHostUnit(cgroupUnit(text))).toBe(true);
+  });
+
+  test("is the server's unit for a host spawned the old way, which is the shared case", () => {
+    const text = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/kururu.service\n";
+    expect(cgroupUnit(text)).toBe("kururu.service");
+    expect(isHostUnit(cgroupUnit(text))).toBe(false);
+  });
+
+  test("is a login session's scope for a host started from an ssh shell", () => {
+    expect(cgroupUnit("0::/user.slice/user-1000.slice/session-4.scope\n")).toBe("session-4.scope");
+  });
+
+  test("reads systemd's own line on a hybrid machine, and not a controller's that stops at the manager", () => {
+    const text = [
+      "12:memory:/user.slice/user-1000.slice/user@1000.service",
+      "11:cpu,cpuacct:/user.slice",
+      `1:name=systemd:/user.slice/user-1000.slice/user@1000.service/${HOST_UNIT_PREFIX}mgk3z9-4410.service`,
+      `0::/user.slice/user-1000.slice/user@1000.service/${HOST_UNIT_PREFIX}mgk3z9-4410.service`,
+    ].join("\n");
+    expect(cgroupUnit(text)).toBe(`${HOST_UNIT_PREFIX}mgk3z9-4410.service`);
+  });
+
+  test("is null for a process in no unit, or a file that says nothing", () => {
+    expect(cgroupUnit("0::/\n")).toBeNull();
+    expect(cgroupUnit("")).toBeNull();
   });
 });

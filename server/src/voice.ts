@@ -318,8 +318,8 @@ export class Voice {
   async look(): Promise<void> {
     const yap = findTool("yap");
     const espeak = findTool("espeak-ng");
-    this.ears = yap ? { ok: true, detail: yap } : { ok: false, detail: "Not installed. In a terminal: brew install yap" };
-    this.spanish = espeak ? { ok: true, detail: espeak } : { ok: false, detail: "Not installed. In a terminal: brew install espeak-ng" };
+    this.ears = yap ? { ok: true, detail: yap } : { ok: false, detail: missingTool("yap") };
+    this.spanish = espeak ? { ok: true, detail: espeak } : { ok: false, detail: missingTool("espeak-ng") };
     if (process.platform === "darwin" && !this.system.length) {
       try {
         const { stdout } = await run("/usr/bin/say", ["-v", "?"], { timeout: 10_000, maxBuffer: 1024 * 1024 });
@@ -351,8 +351,8 @@ export class Voice {
   async transcribe(path: string, ms: number): Promise<{ text: string; lang: VoiceLang } | null> {
     const yap = findTool("yap");
     if (!yap) {
-      this.ears = { ok: false, detail: "Not installed. In a terminal: brew install yap" };
-      throw new Error("yap is not installed — brew install yap");
+      this.ears = { ok: false, detail: missingTool("yap") };
+      throw new Error(`yap: ${missingTool("yap")}`);
     }
     const failures: string[] = [];
     const candidates = await Promise.all(
@@ -942,7 +942,7 @@ function abandoned(made: Utterance): boolean {
  */
 export async function phonemesEs(sentence: string): Promise<string> {
   const espeak = findTool("espeak-ng");
-  if (!espeak) throw new Error("espeak-ng is not installed — brew install espeak-ng");
+  if (!espeak) throw new Error(`espeak-ng: ${missingTool("espeak-ng")}`);
   const parts = sentence.split(/([,;:.!?¡¿…]+)/);
   let out = "";
   for (const part of parts) {
@@ -987,6 +987,19 @@ export function modelPhonemes(ipa: string): string {
   let ps = ipa.replace(/\s+/g, " ").trim();
   for (const [from, to] of ESPEAK_TO_MODEL) ps = ps.split(from).join(to);
   return ps.replaceAll(TIE, "").replaceAll("-", "");
+}
+
+/**
+ * What Settings → Voice says about a tool that is not there. On a Mac it is
+ * one Homebrew line away. `yap` is Apple's recogniser and nowhere else, so on
+ * any other system — a child, which has no voice of its own — the line says
+ * so rather than send somebody to a `brew` they do not have; `espeak-ng` is
+ * in every distribution's packages. Pure, for the test.
+ */
+export function missingTool(tool: "yap" | "espeak-ng", platform: NodeJS.Platform = process.platform): string {
+  if (platform === "darwin") return `Not installed. In a terminal: brew install ${tool}`;
+  if (tool === "yap") return "Not on this platform: the recogniser is Apple's, and this machine is heard through the Mac";
+  return "Not installed. It is espeak-ng in this system's packages";
 }
 
 /** A program by name, on the PATH or in Homebrew's two directories; its path, or null. */

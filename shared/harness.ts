@@ -973,10 +973,14 @@ The user may also write to you from Telegram, on their phone and usually away fr
  * loopback, with the profile and the session's own agent id in the address so
  * the endpoint knows whose verbs to answer with. The timeout raises Claude
  * Code's one-minute per-request limit, which a wait would otherwise hit.
+ * `withToken` is a server that wants its token on loopback too.
  */
-export function mcpConfig(port: number, profileId: string, sessionId: string): string {
+export function mcpConfig(port: number, profileId: string, sessionId: string, withToken = false): string {
   const url = `http://127.0.0.1:${port}/mcp?profile=${encodeURIComponent(profileId)}&session=${encodeURIComponent(sessionId)}`;
-  return JSON.stringify({ mcpServers: { [HARNESS_SERVER]: { type: "http", url, timeout: MCP_TIMEOUT_MS } } });
+  // The token by name, expanded by Claude Code from the pty's environment —
+  // never the token itself, since this config is on the harness's command line.
+  const headers = withToken ? { headers: { authorization: "Bearer ${KURURU_TOKEN}" } } : {};
+  return JSON.stringify({ mcpServers: { [HARNESS_SERVER]: { type: "http", url, timeout: MCP_TIMEOUT_MS, ...headers } } });
 }
 
 /** A harness off a blob or the disk: a session to resume and a launcher, or nothing. */

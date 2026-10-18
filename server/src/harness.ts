@@ -110,6 +110,8 @@ export interface HarnessDeps {
   host: HostLink;
   version: string;
   port: () => number;
+  /** Whether the harness's pty carries `KURURU_TOKEN`, and so its MCP config must present it. */
+  tokenInPtys: () => boolean;
   launch: () => LaunchSettings;
   /** The grid a terminal is drawn at, for rendering its backlog the size it was laid out at. */
   grid: (agentId: string) => { cols: number; rows: number };
@@ -1041,7 +1043,7 @@ export class Harness {
       resume ? "--resume" : "--session-id",
       sessionId!,
       "--mcp-config",
-      quote(mcpConfig(this.deps.port(), profileId, sessionId!)),
+      quote(mcpConfig(this.deps.port(), profileId, sessionId!, this.deps.tokenInPtys())),
       "--allowedTools",
       `mcp__${HARNESS_SERVER}`,
       "--append-system-prompt",

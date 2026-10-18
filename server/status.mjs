@@ -26,6 +26,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { tokenHeaders } from "./localtoken.mjs";
+import { socketHolders } from "./sockowner.mjs";
 
 const PORT = process.env.KURURU_PORT ?? 7717;
 const socket =
@@ -60,13 +62,8 @@ function row(label, value, note) {
 /** Who is holding the socket, or null. A file with nobody behind it is a corpse. */
 function holder() {
   if (!existsSync(socket)) return null;
-  try {
-    const pid = execFileSync("lsof", ["-t", socket], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-    return Number(pid.trim().split("\n")[0]) || null;
-  } catch {
-    // lsof exits non-zero when nothing holds it, and is absent on some systems.
-    return null;
-  }
+  // `lsof` on macOS and `ss` on Linux; nothing to ask reads as nobody, as it always did.
+  return socketHolders(socket)?.[0] ?? null;
 }
 
 function uptime(pid) {
@@ -130,7 +127,8 @@ function history() {
 
 async function ask(path) {
   try {
-    const response = await fetch(`${server}${path}`, { signal: AbortSignal.timeout(2000) });
+    // This machine's token for this machine's server, and never for one named on the line.
+    const response = await fetch(`${server}${path}`, { headers: remote ? {} : tokenHeaders(), signal: AbortSignal.timeout(2000) });
     return response.ok ? await response.json() : null;
   } catch {
     return null;
@@ -158,6 +156,28 @@ function launchedByLaunchd(pid) {
   }
 }
 
+/**
+ * The Linux half of the same question: the systemd unit the host is in, from
+ * `/proc/<pid>/cgroup`, read the way `cgroupUnit` in `server/src/hostlaunch.ts`
+ * reads it. A host the user manager started is in a `kururu-ptyhost-…` unit
+ * of its own; one spawned the old way is in the server's, and stopping that
+ * unit ends it and every agent.
+ */
+function unitOf(pid) {
+  if (process.platform !== "linux") return undefined;
+  try {
+    for (const line of readFileSync(`/proc/${pid}/cgroup`, "utf8").split("\n")) {
+      const [, controllers, ...rest] = line.split(":");
+      if (controllers !== "" && controllers !== "name=systemd") continue;
+      const unit = rest.join(":").split("/").reverse().find((part) => part.endsWith(".service") || part.endsWith(".scope"));
+      if (unit) return unit;
+    }
+    return null;
+  } catch {
+    return undefined;
+  }
+}
+
 // --- the host, which is this machine's question ------------------------------
 
 const pid = holder();
@@ -171,6 +191,16 @@ if (pid) {
       "coalition",
       down("shared"),
       "started inside an app's — a Force Quit of that app, or of a tile an agent's app left behind, ends every agent; the next host start moves it out",
+    );
+  }
+  const unit = unitOf(pid);
+  if (unit !== undefined && /^kururu-ptyhost-[0-9a-z]+-\d+\.service$/.test(unit ?? "")) {
+    row("unit", up(unit.replace(/\.service$/, "")), "a transient systemd user unit — stopping or restarting the server's unit reaches nobody in it");
+  } else if (unit !== undefined) {
+    row(
+      "unit",
+      down("shared"),
+      `in ${unit ?? "no unit at all"} — stopping or restarting that ends every agent; the next host start moves it into one of its own`,
     );
   }
 } else if (existsSync(socket)) {

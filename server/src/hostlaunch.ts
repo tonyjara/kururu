@@ -37,9 +37,18 @@
  * file has to bootstrap over. Stale ones (loaded, not running) are booted out
  * first, which ends nothing because nothing is running in them.
  *
- * A server that cannot reach launchd (Linux, an ssh session outside the
- * console's) is told why, and `index.ts` spawns the host the old way and says
- * so in the record.
+ * A server that cannot reach launchd (an ssh session outside the console's)
+ * is told why, and `index.ts` spawns the host the old way and says so in the
+ * record.
+ *
+ * **Linux has the same problem under another name.** A child kururu runs as a
+ * systemd user service, and systemd keeps every process a service starts in
+ * the service's cgroup, detached or not: `systemctl --user restart kururu`
+ * would end the host with the server and every agent with it, exactly as the
+ * Dock did. The answer is the same shape, too. The host is handed to the user
+ * manager as a transient unit of its own (`systemd-run --user`), so its
+ * cgroup is its own and stopping the server's unit reaches nobody in it. See
+ * `launchHostSystemd` for each property and why.
  *
  * Electron run as node prints a `task_name_for_pid … failure (5)` line into
  * `ptyhost.log` when it starts this way. It is Electron asking about its
@@ -63,7 +72,7 @@
  */
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { bundleOf } from "./proctitle";
@@ -341,6 +350,7 @@ function domain(): string {
  * somebody answers the prompt, and the checkout is under `~/Desktop`.
  */
 export function hostJobRunning(label: string): boolean {
+  if (label.startsWith(HOST_UNIT_PREFIX)) return hostUnitRunning(label);
   try {
     return /^\tstate = running$/m.test(launchctl(["print", `${domain()}/${label}`]));
   } catch {
@@ -423,4 +433,196 @@ export async function launchHost(runtime: Runtime, options: { dir: string; log: 
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   return { label, pid: null };
+}
+
+// ---------------------------------------------------------------------------
+// Linux: a transient systemd user unit
+// ---------------------------------------------------------------------------
+
+/** Every host unit's name starts with this, and nothing else's does. */
+export const HOST_UNIT_PREFIX = "kururu-ptyhost-";
+
+const SYSTEMCTL_TIMEOUT_MS = 10_000;
+
+/**
+ * Variables the server's own unit was given by systemd, which describe that
+ * unit and would be lies inside another: the user manager sets its own for
+ * the host's. `NOTIFY_SOCKET` and `LISTEN_*` most of all, since a host that
+ * inherited them would be answering for the server's unit.
+ */
+const SYSTEMD_ONLY = [
+  "INVOCATION_ID",
+  "JOURNAL_STREAM",
+  "SYSTEMD_EXEC_PID",
+  "MANAGERPID",
+  "NOTIFY_SOCKET",
+  "LISTEN_PID",
+  "LISTEN_FDS",
+  "LISTEN_FDNAMES",
+  "WATCHDOG_PID",
+  "WATCHDOG_USEC",
+  "MONITOR_SERVICE_RESULT",
+  "MONITOR_EXIT_CODE",
+  "MONITOR_EXIT_STATUS",
+];
+
+/**
+ * A unit name for a host started now by `pid`: the prefix, the time in base
+ * 36 and the pid, so two servers starting at once cannot ask for the same
+ * name. What `systemd-run --unit=` is given; systemd adds `.service`.
+ */
+export function hostUnitName(now: number, pid: number): string {
+  return `${HOST_UNIT_PREFIX}${now.toString(36)}-${pid}`;
+}
+
+/** Whether a unit name, with or without its `.service`, is one `hostUnitName` made. */
+export function isHostUnit(name: string | null | undefined): boolean {
+  return typeof name === "string" && /^kururu-ptyhost-[0-9a-z]+-\d+(\.service)?$/.test(name);
+}
+
+/**
+ * The variables the unit is given, by name. systemd refuses a whole start
+ * over one assignment it cannot carry — a name that is not one, a value with
+ * a control character other than a tab or a newline — so those are left out
+ * here rather than costing the host. Sorted, so two starts can be diffed.
+ */
+export function unitEnvNames(env: NodeJS.ProcessEnv): string[] {
+  return Object.keys(env)
+    .filter((key) => {
+      const value = env[key];
+      if (value === undefined || SYSTEMD_ONLY.includes(key) || LAUNCH_ONLY.includes(key)) return false;
+      return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && !/[\u0000-\u0008\u000b-\u001f\u007f]/.test(value);
+    })
+    .sort();
+}
+
+/**
+ * The `systemd-run` command line for a host unit. Pure, for the test.
+ *
+ * Each property is a decision:
+ *
+ * - `--user`, so the user manager owns it — the one that keeps running with
+ *   linger on when nobody is logged in, which a child depends on anyway.
+ * - `--collect`, so a host that exited badly is not left as a failed unit to
+ *   trip the next name; the record and `ptyhost.log` are where how it ended
+ *   is read, as on the Mac.
+ * - `Type=exec`, so `systemd-run` fails when the runtime cannot be executed
+ *   rather than reporting a start that never happened.
+ * - `KillMode=process`: stopping the unit signals the host and nobody else.
+ *   The host reaps its own ptys on SIGTERM, which is what `kill-ptyhosts`
+ *   and `/api/host/restart` rely on; systemd sweeping the cgroup behind it
+ *   would be a second, cruder answer to the same question.
+ * - `OOMPolicy=continue`. The default stops the whole unit when the kernel's
+ *   OOM killer takes any process in it, and every agent's build and test run
+ *   is in this cgroup: one runaway `bun test` would end every agent. With
+ *   this the kernel takes the process it chose and nothing else.
+ * - stdout and stderr appended to `ptyhost.log`, which is where every host
+ *   has written and where `lifecycle.ts` reads how the last one ended.
+ *
+ * The environment goes by name only, `--setenv=NAME`, and `systemd-run` reads
+ * each value out of its own environment. So no value is ever on a command
+ * line, where any user on the box could read it in `/proc` for as long as the
+ * start takes; it travels to the user manager over its private bus.
+ */
+export function systemdRunArgv(unit: string, job: { program: string[]; envNames: string[]; cwd: string; log: string }): string[] {
+  return [
+    "--user",
+    `--unit=${unit}`,
+    "--description=kururu pty host",
+    "--collect",
+    "--quiet",
+    "--property=Type=exec",
+    "--property=KillMode=process",
+    "--property=OOMPolicy=continue",
+    `--property=StandardOutput=append:${job.log}`,
+    `--property=StandardError=append:${job.log}`,
+    `--working-directory=${job.cwd}`,
+    ...job.envNames.map((name) => `--setenv=${name}`),
+    "--",
+    ...job.program,
+  ];
+}
+
+/**
+ * The unit a process is in, from `/proc/<pid>/cgroup`: the last `.service` or
+ * `.scope` on its path. cgroup v2 has one line, `0::/user.slice/…/app.slice/
+ * kururu-ptyhost-mgk3z9-4410.service`; a hybrid v1 machine has one per
+ * controller, and only the `name=systemd` one is read. Pure, for the test.
+ */
+export function cgroupUnit(text: string): string | null {
+  for (const line of text.split("\n")) {
+    const [, controllers, ...rest] = line.split(":");
+    // Only the unified line or systemd's own: a v1 controller's hierarchy
+    // can stop at `user@1000.service`, which is the manager and not the unit.
+    if (controllers !== "" && controllers !== "name=systemd") continue;
+    const path = rest.join(":");
+    const unit = path.split("/").reverse().find((part) => part.endsWith(".service") || part.endsWith(".scope"));
+    if (unit) return unit;
+  }
+  return null;
+}
+
+function systemctl(args: string[]): string {
+  const done = spawnSync("systemctl", ["--user", ...args], { encoding: "utf8", timeout: SYSTEMCTL_TIMEOUT_MS });
+  if (done.error) throw done.error;
+  return done.stdout ?? "";
+}
+
+/** The unit `pid` is in, or null: not Linux, gone, or not in one. */
+export function unitOf(pid: number): string | null {
+  if (process.platform !== "linux") return null;
+  try {
+    return cgroupUnit(readFileSync(`/proc/${pid}/cgroup`, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/** Whether `pid` is a host the user manager started, which is to say one in a cgroup of its own. */
+export function launchedBySystemd(pid: number): boolean {
+  return isHostUnit(unitOf(pid));
+}
+
+/** Whether a host unit is still running, or starting; `hostJobRunning`'s question, asked of systemd. */
+export function hostUnitRunning(unit: string): boolean {
+  try {
+    const state = systemctl(["is-active", unit]).trim();
+    return state === "active" || state === "activating";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Hand the host to the user manager and return once it has been started.
+ *
+ * Refused up front on a machine not booted with systemd, where the fallback
+ * in `index.ts` is the whole of the answer; anything `systemd-run` says when
+ * it refuses — no user bus in an ssh session without `pam_systemd`, most
+ * likely — comes back as the reason.
+ */
+export async function launchHostSystemd(runtime: Runtime, options: { log: string; cwd: string; env: NodeJS.ProcessEnv }): Promise<LaunchedHost> {
+  if (process.platform !== "linux") throw new Error("systemd is Linux's");
+  if (!existsSync("/run/systemd/system")) throw new Error("this machine was not booted with systemd");
+  const unit = hostUnitName(Date.now(), process.pid);
+  // Harmless under node, and the one thing that makes the host a node rather
+  // than a window when the runtime is Electron — as under launchd.
+  const env: NodeJS.ProcessEnv = { ...options.env, ELECTRON_RUN_AS_NODE: "1" };
+  const argv = systemdRunArgv(unit, { program: [runtime.exe, runtime.entry], envNames: unitEnvNames(env), cwd: options.cwd, log: options.log });
+  const done = spawnSync("systemd-run", argv, { encoding: "utf8", env, timeout: SYSTEMCTL_TIMEOUT_MS });
+  if (done.error) throw done.error;
+  if (done.status !== 0) {
+    const said = `${done.stderr ?? ""}${done.stdout ?? ""}`.trim().split("\n")[0];
+    throw new Error(`systemd-run: ${said || `exited ${done.status}`}`);
+  }
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      const pid = Number(systemctl(["show", "--property=MainPID", "--value", unit]).trim());
+      if (Number.isInteger(pid) && pid > 0) return { label: unit, pid };
+    } catch {
+      // Not answering yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return { label: unit, pid: null };
 }

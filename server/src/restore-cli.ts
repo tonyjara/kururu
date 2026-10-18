@@ -25,10 +25,15 @@ import { dataDir, Store } from "./store";
 
 const PORT = Number(process.env.KURURU_PORT ?? 7717);
 
+/**
+ * Whether a server is answering, which any answer is: one that refuses this
+ * command for want of a token is still a server holding the database this
+ * would write under it.
+ */
 async function serverUp(): Promise<boolean> {
   try {
-    const response = await fetch(`http://127.0.0.1:${PORT}/api/health`, { signal: AbortSignal.timeout(1500) });
-    return response.ok;
+    await fetch(`http://127.0.0.1:${PORT}/api/health`, { signal: AbortSignal.timeout(1500) });
+    return true;
   } catch {
     return false;
   }

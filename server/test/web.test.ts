@@ -277,6 +277,18 @@ describe("pointing an agent at the tools", () => {
     expect(config).not.toMatch(/fc-|authorization/i);
   });
 
+  /**
+   * A child wants the token on loopback too. The configs then present it by
+   * name, for the CLI to expand from the pty's environment, so the token is
+   * never in a file or on a command line.
+   */
+  it("presents the token by name only when the server wants it", () => {
+    const config = JSON.stringify(claudeWebConfig(7717, true));
+    expect(config).toContain('"authorization":"Bearer ${KURURU_TOKEN}"');
+    expect(codexWebFlags(7717, true)).toContain(`-c 'mcp_servers.kururu_web.bearer_token_env_var="KURURU_TOKEN"'`);
+    expect(codexWebFlags(7717)).not.toContain("KURURU_TOKEN");
+  });
+
   it("gives Codex the same as -c overrides, quoted for sh", () => {
     const flags = codexWebFlags(7817);
     expect(flags).toBe(

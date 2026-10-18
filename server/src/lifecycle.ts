@@ -28,6 +28,7 @@ import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, re
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { socketHolders } from "../sockowner.mjs";
 import {
   LIFECYCLE_FILE,
   LIFECYCLE_MAX_BYTES,
@@ -162,12 +163,9 @@ export function lifeNow(): Omit<LifecycleReport, "events" | "file"> {
  */
 export function socketHolder(path: string): number | null {
   if (!existsSync(path)) return null;
+  const pid = socketHolders(path)?.[0];
+  if (pid === undefined) return null;
   try {
-    const first = execFileSync("lsof", ["-t", path], { encoding: "utf8", timeout: 2_000, stdio: ["ignore", "pipe", "ignore"] })
-      .trim()
-      .split("\n")[0];
-    const pid = Number(first);
-    if (!Number.isInteger(pid) || pid <= 0) return null;
     const command = execFileSync("ps", ["-ww", "-o", "command=", "-p", String(pid)], { encoding: "utf8", timeout: 2_000 });
     return command.includes("ptyhost") ? pid : null;
   } catch {
@@ -273,11 +271,7 @@ export function hostEnding(log: string): HostEnding | null {
  */
 export function socketHeld(path: string): boolean | null {
   if (!existsSync(path)) return false;
-  try {
-    const holders = execFileSync("lsof", ["-t", path], { encoding: "utf8", timeout: 2_000, stdio: ["ignore", "pipe", "ignore"] });
-    return holders.trim().length > 0;
-  } catch (err) {
-    // lsof exits 1 when nothing holds the file. Absent or timed out, it has not answered.
-    return (err as { status?: number }).status === 1 ? false : null;
-  }
+  // `lsof` on macOS and `ss` on Linux (`sockowner.mjs`); null when neither answered.
+  const holders = socketHolders(path);
+  return holders === null ? null : holders.length > 0;
 }

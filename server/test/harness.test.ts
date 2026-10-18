@@ -401,6 +401,13 @@ describe("the rest", () => {
     expect(server.url).toBe("http://127.0.0.1:7717/mcp?profile=p1&session=s-1");
     expect(server.timeout).toBeGreaterThan(60_000);
   });
+
+  it("presents the token by name, for a server that wants it on loopback, and only then", () => {
+    const plain = JSON.parse(mcpConfig(7717, "p1", "s-1")) as { mcpServers: Record<string, { headers?: Record<string, string> }> };
+    expect(plain.mcpServers.kururu!.headers).toBeUndefined();
+    const config = JSON.parse(mcpConfig(7717, "p1", "s-1", true)) as { mcpServers: Record<string, { headers?: Record<string, string> }> };
+    expect(config.mcpServers.kururu!.headers).toEqual({ authorization: "Bearer ${KURURU_TOKEN}" });
+  });
 });
 
 function terminal(id: string, kind: AgentSnapshot["kind"], agent: string | null, title: string | null = null): AgentSnapshot {

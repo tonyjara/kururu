@@ -809,31 +809,41 @@ export function webUrl(port: number): string {
  * Claude Code expands `${…}` in an MCP config's headers, and a CLI that did
  * not would send the words, which the endpoint ignores as no agent it knows.
  */
-export function claudeWebConfig(port: number): object {
+export function claudeWebConfig(port: number, withToken = false): object {
   return {
     mcpServers: {
       [WEB_SERVER]: {
         type: "http",
         url: webUrl(port),
         timeout: WEB_TIMEOUT_MS,
-        headers: { [AGENT_HEADER]: "${KURURU_AGENT_ID}" },
+        headers: { [AGENT_HEADER]: "${KURURU_AGENT_ID}", ...(withToken ? TOKEN_HEADER : {}) },
       },
     },
   };
 }
 
 /**
+ * The header that presents the server's token, for a server that wants it on
+ * loopback too (`server/src/access.ts`). By name, `${KURURU_TOKEN}`, which the
+ * CLI expands from the pty's environment: the token is in no file kururu
+ * writes and on no command line.
+ */
+export const TOKEN_HEADER = { authorization: "Bearer ${KURURU_TOKEN}" } as const;
+
+/**
  * Codex's spelling of the same: `-c` overrides, which change this launch and
  * never `~/.codex/config.toml`. Codex reads the header's value out of the
- * environment variable it names. Single-quoted for `sh -c`; nothing in them
+ * environment variable it names, and the token out of the one
+ * `bearer_token_env_var` names. Single-quoted for `sh -c`; nothing in them
  * comes from anywhere but this file and the server's own port.
  */
-export function codexWebFlags(port: number): string {
+export function codexWebFlags(port: number, withToken = false): string {
   const at = `mcp_servers.${WEB_SERVER}`;
   return [
     `-c '${at}.url="${webUrl(port)}"'`,
     `-c '${at}.tool_timeout_sec=${WEB_TIMEOUT_MS / 1000}'`,
     `-c '${at}.env_http_headers={"${AGENT_HEADER}"="KURURU_AGENT_ID"}'`,
+    ...(withToken ? [`-c '${at}.bearer_token_env_var="KURURU_TOKEN"'`] : []),
   ].join(" ");
 }
 

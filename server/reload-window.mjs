@@ -28,6 +28,7 @@
  * after five minutes and so could not wait the ten an agent may ask for.
  */
 import { request } from "node:http";
+import { tokenHeaders } from "./localtoken.mjs";
 
 /** The server answers at its own deadline; this is the slack past it before deciding the server is not coming back. */
 const SLACK_MS = 30_000;
@@ -69,7 +70,7 @@ function post(port, body, waitMs) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
     const req = request(
-      { host: "127.0.0.1", port: Number(port), path: "/api/reload-window", method: "POST", headers: { "content-type": "application/json", "content-length": Buffer.byteLength(payload) } },
+      { host: "127.0.0.1", port: Number(port), path: "/api/reload-window", method: "POST", headers: { "content-type": "application/json", "content-length": Buffer.byteLength(payload), ...tokenHeaders() } },
       (res) => {
         const chunks = [];
         res.on("data", (chunk) => chunks.push(chunk));

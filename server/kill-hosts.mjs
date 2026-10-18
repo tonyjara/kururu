@@ -46,7 +46,7 @@
 import { execFileSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
-import { basename } from "node:path";
+import { socketsNamed } from "./sockowner.mjs";
 
 const flags = process.argv.slice(2);
 const force = flags.some((argument) => argument === "-y" || argument === "--yes");
@@ -81,21 +81,11 @@ function run(command, args) {
 
 /**
  * Every pty host on this machine, from the sockets rather than from the process
- * table. `lsof -U` prints the path last, and a host holds its listener and each
- * accepted connection under the same name — hence the dedupe by pid.
+ * table — `lsof -U` on macOS, `ss -xlpn` on Linux, through `sockowner.mjs`.
  */
 function hosts() {
-  const found = new Map();
-  for (const line of run("lsof", ["-U"]).split("\n")) {
-    const fields = line.trim().split(/\s+/);
-    const path = fields.at(-1);
-    const pid = Number(fields[1]);
-    if (!path || !pid || basename(path) !== "ptyhost.sock") continue;
-    // The guard, not the search: whatever is holding this has to be a host.
-    if (!run("ps", ["-ww", "-o", "command=", "-p", String(pid)]).includes("ptyhost")) continue;
-    if (!found.has(pid)) found.set(pid, { pid, path });
-  }
-  return [...found.values()];
+  // The guard, not the search: whatever is holding this has to be a host.
+  return socketsNamed("ptyhost.sock").filter((host) => run("ps", ["-ww", "-o", "command=", "-p", String(host.pid)]).includes("ptyhost"));
 }
 
 const uptime = (pid) => run("ps", ["-o", "etime=", "-p", String(pid)]).trim();
