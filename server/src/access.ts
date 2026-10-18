@@ -266,7 +266,7 @@ function isLoopbackAddress(host: string): boolean {
   return bare === "127.0.0.1" || bare === "::1" || bare === "localhost" || bare.startsWith("127.");
 }
 
-function fromLoopback(req: IncomingMessage): boolean {
+export function fromLoopback(req: IncomingMessage): boolean {
   const remote = req.socket.remoteAddress;
   return Boolean(remote && isLoopbackAddress(remote));
 }
