@@ -9,7 +9,8 @@
     <title>kururu</title>
     <link rel="icon" type="image/png" href="/favicon-32.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- With credentials: a manifest is fetched without them otherwise, and a shared server refuses a request with no cookie. -->
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
   </head>
   <body>
     <div id="root"></div>

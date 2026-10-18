@@ -37,7 +37,7 @@ const DEFAULTS = {
 };
 
 function configDir() {
-  return path.join(process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"), "kururu");
+  return process.env.KURURU_CONFIG_DIR || path.join(process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"), "kururu");
 }
 
 function file() {

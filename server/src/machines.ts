@@ -83,7 +83,7 @@ const TIMEOUT_MS = 25_000;
  * and the temp directory there is most of that already.
  */
 function controlPath(): string {
-  const dir = join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
+  const dir = process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
   try {
     mkdirSync(dir, { recursive: true });
   } catch {

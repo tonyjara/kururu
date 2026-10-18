@@ -272,7 +272,7 @@ import { adoptAppearance, themeFor, type Appearance } from "../../shared/theme";
 import { isStyleId, skinFor } from "../../shared/skin";
 import { HOST_PROTOCOL, HostLink, type Port } from "./hostlink";
 import { connectToHost, hostSocketPath, type SocketPort } from "./hostsock";
-import { hostJobRunning, hostRuntime, launchHost, launchHostSystemd, unitOf } from "./hostlaunch";
+import { hostEnv, hostJobRunning, hostRuntime, launchHost, launchHostSystemd, unitOf } from "./hostlaunch";
 import {
   hostEnding,
   lifeNow,
@@ -1652,10 +1652,15 @@ function agentCommandFor(launcher: Launcher, profileId: string): string {
   return launcherCommand(launcher, launch) + hooksFor(launcher, profileId) + web.launchFlags(launcher.cli);
 }
 
+/**
+ * Kururu's hooks for a Claude launch whose config directory does not already
+ * run them — a profile's own, or the machine's on a box nobody installed them
+ * on by hand, which is every child. `hookSettingsFlag` steps aside for a
+ * directory that has them, so the Mac's hand-installed hooks are not doubled.
+ */
 function hooksFor(launcher: Launcher, profileId: string): string {
-  const profile = workspaces.profile(profileId);
-  if (launcher.cli !== "claude" || !loginsActive() || !profile) return "";
-  return hookSettingsFlag(claudeDirFor(profile.loginKey));
+  if (launcher.cli !== "claude" || !workspaces.profile(profileId)) return "";
+  return hookSettingsFlag(claudeDirOf(profileId));
 }
 
 /**
@@ -5311,6 +5316,19 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   }
 
   /**
+   * The Share URL, opened on a device for the first time. It is `/?k=…`, and
+   * the exchange below lives in the page's own bundle — which the browser
+   * fetches next with neither the query nor a cookie, and was refused, so a
+   * fresh phone got a blank page and only a phone with last year's cookie
+   * worked (found on the Omarchy PC, and the Mac's gate is the same). So any
+   * request that has just presented the token in its address is answered
+   * with the cookie too, and the bundle that follows carries it.
+   */
+  if ((isShared() || loopbackTokenRequired()) && url.searchParams.has("k") && hasToken(req, url)) {
+    res.setHeader("set-cookie", cookieHeader(token()));
+  }
+
+  /**
    * One scanned QR code, turned into a device that keeps working.
    *
    * The token arrives as `?k=` on the address the phone opened, and the page
@@ -6762,14 +6780,23 @@ async function attach(port: Port): Promise<void> {
 
   listenOnce(() => {
     recordStart(PORT, VERSION);
+    /**
+     * Minted now on a server that will ask for it, rather than when somebody
+     * first asks: a child has no Share dialog to ask, and a box whose tools
+     * read `access.json` before the first request would find none.
+     */
+    if (isShared() || loopbackTokenRequired()) token();
     const built = existsSync(join(WEB_DIST, "index.html"));
-    console.log(`kururu server  http://localhost:${PORT}  (v${VERSION})`);
+    // The address it can be reached at, which on a child is not localhost.
+    const [first] = listenAddresses();
+    const at = !first || first === "127.0.0.1" || first === "0.0.0.0" || first === "::" ? "localhost" : first;
+    console.log(`kururu server  http://${at}:${PORT}  (v${VERSION})`);
     console.log(`  agents       ${state.agents.length} held by the pty host`);
     console.log(`  web app      ${built ? WEB_DIST : "not built — bun run build"}`);
     // Said every time, because which of the two a server is in is the one thing
     // about it somebody could be wrong about in a way that matters.
     console.log(
-      `  reachable    ${isShared() ? "from other machines, with the token from the Share dialog" : "from this machine only"}`,
+      `  reachable    ${isShared() ? `from other machines, with the token from ${loopbackTokenRequired() ? "access.json" : "the Share dialog"}` : "from this machine only"}`,
     );
     console.log(`  listening    ${listenAddresses().join(", ")}${loopbackTokenRequired() ? " · the token wanted on loopback too" : ""}`);
     const bindWhy = bindProblem();
@@ -6870,11 +6897,12 @@ async function startPtyHost(): Promise<string | null> {
   const dir = dirname(SOCKET);
   mkdirSync(dir, { recursive: true });
   const runtime = hostRuntime(process.execPath, entry, dir);
+  const env = hostEnv(process.env);
 
   let refused = "";
   if (process.platform === "darwin") {
     try {
-      const { pid, label } = await launchHost(runtime, { dir, log: HOST_LOG, cwd: process.cwd(), env: process.env });
+      const { pid, label } = await launchHost(runtime, { dir, log: HOST_LOG, cwd: process.cwd(), env });
       record("host", `started a pty host (pid ${pid ?? "pending"}) through launchd, in a coalition of its own, ${runtime.note}, because none was answering${last}`, detail);
       return label;
     } catch (err) {
@@ -6883,7 +6911,7 @@ async function startPtyHost(): Promise<string | null> {
   }
   if (process.platform === "linux") {
     try {
-      const { pid, label } = await launchHostSystemd(runtime, { log: HOST_LOG, cwd: process.cwd(), env: process.env });
+      const { pid, label } = await launchHostSystemd(runtime, { log: HOST_LOG, cwd: process.cwd(), env });
       record("host", `started a pty host (pid ${pid ?? "pending"}) as a transient systemd user unit (${label}), in a cgroup of its own, because none was answering${last}`, detail);
       return label;
     } catch (err) {
@@ -6897,7 +6925,7 @@ async function startPtyHost(): Promise<string | null> {
     stdio: ["ignore", log, log],
     // Harmless under node, and the one thing that makes this work if the binary
     // running us ever turns out to be Electron's.
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
   });
   child.unref();
   closeSync(log);

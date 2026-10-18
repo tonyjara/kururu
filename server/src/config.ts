@@ -23,9 +23,14 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync }
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-/** Read per call rather than captured, so a test can move it with `XDG_CONFIG_HOME`. */
+/**
+ * Read per call rather than captured, so a test can move it. `KURURU_CONFIG_DIR`
+ * is the directory itself and moves kururu's config alone; `XDG_CONFIG_HOME`
+ * moves every program's that reads it, and the ptys inherit it — an isolated
+ * instance on Linux that set it rewired mise in every shell it opened.
+ */
 export function configDir(): string {
-  return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "kururu");
+  return process.env.KURURU_CONFIG_DIR || join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "kururu");
 }
 
 export function configPath(name: string): string {

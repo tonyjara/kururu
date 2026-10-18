@@ -38,13 +38,15 @@ import type { Port } from "./hostlink";
  * reasoning: a socket is not a decision anybody made, it is a running process's
  * address, and losing it between versions costs nothing that is not rebuilt by
  * starting again. `KURURU_HOST_SOCK` overrides it, which is how a test gets its
- * own host and how two kururus can be run side by side on one machine.
+ * own host and how two kururus can be run side by side on one machine; failing
+ * that it is in `KURURU_STATE_DIR`, as every other file of the state is, so an
+ * instance given a state directory of its own cannot find the user's host.
  */
 export function hostSocketPath(): string {
   const override = process.env.KURURU_HOST_SOCK;
   if (override) return override;
-  const state = process.env.XDG_STATE_HOME || join(homedir(), ".local", "state");
-  return join(state, "kururu", "ptyhost.sock");
+  const state = process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
+  return join(state, "ptyhost.sock");
 }
 
 /**

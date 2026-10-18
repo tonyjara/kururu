@@ -23,7 +23,8 @@ import { join } from "node:path";
 export function localToken(env = process.env) {
   if (env.KURURU_TOKEN) return env.KURURU_TOKEN;
   try {
-    const file = join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), "kururu", "access.json");
+    const dir = env.KURURU_CONFIG_DIR || join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), "kururu");
+    const file = join(dir, "access.json");
     const saved = JSON.parse(readFileSync(file, "utf8"));
     return typeof saved?.token === "string" && saved.token.length >= 16 ? saved.token : null;
   } catch {
