@@ -102,7 +102,7 @@ echo "--- 4. a terminal's environment"
 ENVIRON=$(tr '\0' '\n' < "/proc/$AGENT/environ")
 grep -qx "KURURU_TOKEN=$TOKEN" <<<"$ENVIRON" || fail "the terminal was not handed the token"
 ! grep -qE '^(KURURU_LOOPBACK_TOKEN|KURURU_BIND)=' <<<"$ENVIRON" || fail "the terminal inherited the server's own variables"
-! grep -q '^XDG_CONFIG_HOME=' <<<"$ENVIRON" || fail "the terminal inherited an XDG directory"
+! grep -q "^XDG_[A-Z_]*=$K" <<<"$ENVIRON" || fail "the terminal inherited a scratch XDG directory: $(grep "^XDG_" <<<"$ENVIRON")"
 
 echo "--- 5. stopping the server's unit"
 systemctl --user stop kururu-ci-server-1
