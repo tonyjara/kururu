@@ -146,6 +146,11 @@ interface Props {
    * its header. See `chipsPane` below for which strip they go in.
    */
   chips: ReactNode;
+  /**
+   * The sidebar's toggle and the workspace's name while the sidebar is away,
+   * or null while it is up and carries them itself. See `leadPane` below.
+   */
+  lead: ReactNode;
 }
 
 /** A normalized rect as the four percentages CSS wants. */
@@ -178,6 +183,7 @@ export function Panes({
   onToggleFiles,
   onEditing,
   chips,
+  lead,
 }: Props) {
   const area = useRef<HTMLDivElement>(null);
   const [resizing, setResizing] = useState(false);
@@ -274,6 +280,23 @@ export function Panes({
           return !best || right > best.right ? { id: pane.id, right } : best;
         }, null)?.id);
 
+  /**
+   * And the pane whose strip carries the sidebar's toggle and the workspace's
+   * name while the sidebar is away: the top-left one, whose strip starts where
+   * the window does — where the sidebar's top strip had them, so putting the
+   * sidebar away shortens the band's left end to these two rather than moving
+   * the strips off the band's row. Chosen as `chipsPane` is, for its reasons.
+   */
+  const leadPane =
+    shown?.id ??
+    (zen
+      ? focusedPaneId
+      : all.reduce<{ id: string; left: number } | null>((best, pane) => {
+          const rect = boxes.get(pane.id);
+          if (!rect || rect.y > 1e-6) return best;
+          return !best || rect.x < best.left ? { id: pane.id, left: rect.x } : best;
+        }, null)?.id);
+
   return (
     /* A pane slides to a new position, but not while you are dragging its
        divider — there it has to track the pointer exactly, and an easing curve
@@ -330,6 +353,7 @@ export function Panes({
               focusedAgentId={focusedAgentId}
               onEditing={onEditing}
               chips={pane.id === chipsPane ? chips : null}
+              lead={pane.id === leadPane ? lead : null}
             />
           </div>
         );
@@ -666,6 +690,7 @@ function Pane({
   focusedAgentId,
   onEditing,
   chips,
+  lead,
 }: {
   pane: PaneState;
   focused: boolean;
@@ -691,6 +716,8 @@ function Pane({
   onEditing: (on: boolean) => void;
   /** The drawers' chips, in the one strip that carries them, and null in the rest. */
   chips: ReactNode;
+  /** The sidebar's toggle and the workspace's name, in the top-left strip while the sidebar is away. */
+  lead: ReactNode;
 }) {
   const showing = activeAgent(pane);
   const dragging = useDragging();
@@ -813,6 +840,11 @@ function Pane({
         onDragLeave={() => setDropAt(null)}
         onDrop={dropOnStrip}
       >
+        {/* The sidebar's toggle and the workspace's name, at the head of the
+            top-left pane's strip while the sidebar is away — see `leadPane`.
+            Pinned at the left in the stylesheet, as the controls are at the
+            right, so a strip full of tabs never scrolls it away. */}
+        {lead && <span className="strip-lead">{lead}</span>}
         {pane.agentIds.map((agentId, index) => {
           if (isBoardTab(agentId)) {
             return (

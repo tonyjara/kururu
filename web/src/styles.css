@@ -637,16 +637,16 @@ kbd {
  * line, because a line that holds something is not thirty pixels of nothing.
  *
  * It is the left end of the top band — `--top-h` tall, the band's tone, the
- * band's rule under it — and the strip over the panes while the sidebar is
- * away is the same band's middle. In the window it starts after the traffic
- * lights, which a 38px band is centred on; the 78px is the inset the profile
- * row wore when it stood up here. The rule is an inset shadow and not a
- * border for the reason the status bar's is: the pane strips this has to be
- * one line with have the skin's border, and one mechanism along the whole
- * band is what keeps it one line.
+ * band's rule under it. While the sidebar is away the same two things stand
+ * at the head of the top-left pane's strip instead (`.strip-lead`), so the
+ * band's left end shortens to them and the strips stay on its row. In the
+ * window it starts after the traffic lights, which a 38px band is centred on;
+ * the 78px is the inset the profile row wore when it stood up here. The rule
+ * is an inset shadow and not a border for the reason the status bar's is: the
+ * pane strips this has to be one line with have the skin's border, and one
+ * mechanism along the whole band is what keeps it one line.
  */
-.sidebar-top,
-.stage-top {
+.sidebar-top {
   display: flex;
   align-items: center;
   flex: none;
@@ -656,9 +656,12 @@ kbd {
   background: var(--chrome-low);
   box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--line);
 }
-.app-window .sidebar-top,
-.app-window .stage-top {
+/* The height is said again here because the empty drag strip above shares
+   this element's class and sets its own, 28px, with the same weight — and
+   this rule is the later one. */
+.app-window .sidebar-top {
   display: flex;
+  height: var(--top-h);
   padding-left: 78px;
   -webkit-app-region: drag;
 }
@@ -2420,15 +2423,6 @@ a.machine-name:hover {
   flex: none;
   -webkit-app-region: drag;
 }
-/* The top of the panes while the sidebar is away on a desktop: the toggle
-   that brings it back, the workspace's name, and the drawers' chips while
-   both drawers are shut, so nothing the sidebar carried at its top goes
-   missing with it. The chips keep to the toggle's end, in the order and the
-   place the sidebar's header has them. */
-.stage-top {
-  gap: 8px;
-}
-
 .button {
   flex: 1;
   padding: 6px 10px;
@@ -2482,19 +2476,21 @@ a.button {
   padding: 0;
 }
 
-/* The top band's middle. With the sidebar up on a desktop (`.app-band`, set
-   by `App.tsx`) the panes start at the top of the window, so the top row of
-   strips is the band between the sidebar's top and the drawer's head: the
-   well's top gutter goes, and a pane box in that row (`.pane-box-top`, from
-   the pane's geometry in `Panes.tsx`) loses its own and the two corners it
-   would round against the edge. The gutters between those panes would still
-   show the well, which would notch the band once per pane; so the well paints
-   the band's tone and its rule across its own top `--top-h` first, under the
-   panes, and a gutter shows the band passing behind. With the sidebar away
-   `.stage-top` is the band and the panes sit under it with their gutter and
-   their corners, as they always did; zen has no band; a phone's one pane has
-   no gutter to show. A well a skin has painted keeps its picture, which is
-   the point of it, and the strips alone carry the band across. */
+/* The top band's middle. On a desktop (`.app-band`, set by `App.tsx`) the
+   panes start at the top of the window, so the top row of strips is the band
+   between the sidebar's top and the drawer's head: the well's top gutter goes,
+   and a pane box in that row (`.pane-box-top`, from the pane's geometry in
+   `Panes.tsx`) loses its own and the two corners it would round against the
+   edge. The gutters between those panes would still show the well, which
+   would notch the band once per pane; so the well paints the band's tone and
+   its rule across its own top `--top-h` first, under the panes, and a gutter
+   shows the band passing behind. With the sidebar away the band starts at the
+   window's edge, with the toggle and the workspace's name at the head of the
+   top-left strip (`.strip-lead`) where the sidebar's top had them — the
+   sidebar folds into the band rather than dropping a bar over the panes. Zen
+   has no band; a phone's one pane has no gutter to show. A well a skin has
+   painted keeps its picture, which is the point of it, and the strips alone
+   carry the band across. */
 .app-band .panes {
   padding-top: 0;
 }
@@ -2835,6 +2831,35 @@ a.button {
 .tab-spacer {
   flex: 1;
   min-width: 8px;
+}
+
+/* The sidebar's toggle and the workspace's name at the head of the top-left
+   pane's strip while the sidebar is away — see `leadPane` in `Panes.tsx`.
+   Pinned at the strip's left as the pane's controls are at its right, with
+   the strip's own ground, so the tabs pass under it rather than carrying it
+   off the edge; and the window's drag handle, since with the sidebar away
+   nothing else under the traffic lights is. It starts where the sidebar's
+   top line starts — 12px in, or 78px in the window, after the lights — less
+   the well's gutter and the strip's padding already in front of it, so the
+   name and the toggle after it stand on the same pixels with the sidebar up
+   or away, and folding the sidebar moves neither. */
+.strip-lead {
+  position: sticky;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  margin-right: 6px;
+  padding-left: calc(12px - 2 * var(--gutter) - 4px);
+  padding-right: 6px;
+  background: var(--strip);
+  -webkit-app-region: drag;
+}
+.app-window .strip-lead {
+  padding-left: calc(78px - 2 * var(--gutter) - 4px);
+}
+.strip-lead .sb-workspace {
+  max-width: 24ch;
 }
 
 /* The pane's controls, which do not scroll with the tabs.
@@ -3309,16 +3334,10 @@ a.button {
   gap: 6px;
   min-width: 0;
 }
-/* The sidebar's top line: the name takes the room, so the toggle stands at
-   the far end, on the edge the sidebar folds towards. */
-.ws-toggle-last {
-  flex: 1;
-}
-.ws-toggle-last .sb-workspace {
-  flex: 1;
-}
-.ws-toggle-last .sb-bars {
-  margin-left: 0;
+/* On a phone the toggle leads and is nudged to the bar's edge, where the
+   thumb is; on a desktop it follows the name, with the row's own gap. */
+.ws-toggle-first .sb-bars {
+  margin-left: -4px;
 }
 
 /* The pointer's door onto `toggle-sidebar`. Quiet, like the cog: it is a thing
@@ -3331,7 +3350,6 @@ a.button {
   justify-content: center;
   width: 22px;
   height: 20px;
-  margin-left: -4px;
   border-radius: var(--radius-md);
   color: var(--dimmer);
   flex: none;
