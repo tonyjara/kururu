@@ -189,9 +189,11 @@ one node reads it at a time — the Mac while it is awake, the next by rank
 while it is away — and every Kuru speaks in it, each child's lines marked
 `[Omarchy] …`. `@omarchy` or `/omarchy` at the front of a message, or a
 reply to one of its lines, reaches that node's Kuru (`routeOf`). The
-switch, the switch time and the list ride in the roster, so they are set on
-the parent only; a child's page shows who reads the chat and why it can or
-cannot. All of it is [One Telegram](nodes.md#one-telegram).
+list rides in the roster, so it is set on the parent only; the switch is
+flipped on any node and reaches the others, the Mac when it is back
+([The switch, from any node](nodes.md#the-switch-from-any-node)). A child's
+page shows the switch, who reads the chat and why it can or cannot. All of
+it is [One Telegram](nodes.md#one-telegram).
 
 ## Adding a channel
 

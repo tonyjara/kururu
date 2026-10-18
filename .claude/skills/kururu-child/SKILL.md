@@ -166,8 +166,10 @@ Settings → Nodes → <this box> → Secrets → **Telegram bot token** — and
 Claude signed in here. The doctor's `leading` row says whether it is
 eligible, why not, and whether it reads the chat now. It is optional and
 never a ✗: a box that cannot still speaks in the chat through the Mac. Never
-paste a bot token here, and never switch the channel on from this box: the
-switch and the accounts are the Mac's.
+paste a bot token here: the bot and the accounts are the Mac's. The switch
+is every node's — this box's Settings → Channels turns the chat on or off
+for all of them, the Mac too, even while it is shut — once the token is
+lent here.
 
 ## Finishing
 
