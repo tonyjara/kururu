@@ -17,8 +17,8 @@
  * carries messages in, the harness's Stop report carries replies out, and
  * this only routes. On the restartable side, like both of them.
  */
-import { channelOfMessage, echoLine, replySpoken, type ChannelsStatus } from "../../shared/channels";
-import { plainWords, readPrompt, youVia } from "../../shared/kuru";
+import { channelOfMessage, echoLine, isChannelKind, readPeerMark, spokenHere, type ChannelKind, type ChannelsStatus, type TurnOrigin } from "../../shared/channels";
+import { plainWords, promptPeer, readPrompt, youVia } from "../../shared/kuru";
 import { viaOf, type TurnVia } from "../../shared/store";
 import type { OutboxEntry } from "../../shared/voice";
 import type { ServerMessage } from "../../shared/wire";
@@ -26,6 +26,18 @@ import { TelegramChannel, type TelegramDeps } from "./telegram";
 
 /** How long a burst of status changes settles before one broadcast says all of it — `kuru.ts`'s figure, for its reason. */
 const COALESCE_MS = 25;
+
+/**
+ * One turn of Kuru's, as far as who it answers: the doors its words came in
+ * by, the other nodes' marks among them (`user@mac`, `kuru@mac`), and the
+ * outbox messages it took, by id — which is how an `ask_kuru` on another
+ * node knows this reply is its answer.
+ */
+interface TurnWords {
+  vias: Set<TurnVia>;
+  peers: Set<string>;
+  ids: Set<string>;
+}
 
 export interface ChannelsDeps extends Omit<TelegramDeps, "changed"> {
   broadcast: (msg: ServerMessage) => void;
@@ -40,7 +52,7 @@ export class Channels {
    * a turn is seconds to minutes long and a restart in the middle of one
    * costs, at worst, one reply spoken that need not have been.
    */
-  private readonly turns = new Map<string, Set<TurnVia>>();
+  private readonly turns = new Map<string, TurnWords>();
   /** What each outbox message was last seen as, so a failure is told once, as it happens, and not again on every restart that finds it still failed. */
   private readonly seen = new Map<string, OutboxEntry["state"]>();
   private seeded = false;
@@ -77,10 +89,10 @@ export class Channels {
     this.timer.unref();
   }
 
-  private turn(profileKey: string): Set<TurnVia> {
-    let set = this.turns.get(profileKey);
-    if (!set) this.turns.set(profileKey, (set = new Set()));
-    return set;
+  private turn(profileKey: string): TurnWords {
+    let turn = this.turns.get(profileKey);
+    if (!turn) this.turns.set(profileKey, (turn = { vias: new Set(), peers: new Set(), ids: new Set() }));
+    return turn;
   }
 
   /**
@@ -97,6 +109,13 @@ export class Channels {
    * the machine. Kuru's answer to it is Kuru's own words, and goes.
    */
   prompted(profileKey: string, prompt: string): void {
+    // Another node's words, the user's there or its Kuru's, are that node's
+    // to answer and to echo: noted for the turn, and nothing to the chat.
+    const peer = promptPeer(prompt);
+    if (peer) {
+      this.turn(profileKey).peers.add(`${peer.who}@${peer.node}`);
+      return;
+    }
     // A background task's report is not yours either, and the drawer's
     // reading of a prompt is the one that decides, so a line it draws as a
     // notice is never echoed here as something you typed.
@@ -104,29 +123,49 @@ export class Channels {
     if (read?.kind !== "you") return;
     const text = read.text;
     const via = viaOf(text);
-    this.turn(profileKey).add(via);
+    this.turn(profileKey).vias.add(via);
     if (via === "voice" || via === "typed") this.telegram.post(profileKey, echoLine(via, plainWords(text)), { silent: true });
   }
 
   /** One of your messages reached Kuru — perhaps mid-turn, where no prompt hook fires — so the turn answers it too. */
-  delivered(profileKey: string, entry: Pick<OutboxEntry, "id" | "ms">): void {
-    this.turn(profileKey).add(youVia(null, entry));
+  delivered(profileKey: string, entry: Pick<OutboxEntry, "id" | "ms" | "text">): void {
+    const turn = this.turn(profileKey);
+    turn.ids.add(entry.id);
+    const peer = entry.text ? readPeerMark(entry.text) : null;
+    if (peer) turn.peers.add(`${peer.who}@${peer.node}`);
+    else turn.vias.add(youVia(null, entry));
   }
 
-  /** Whether what Kuru says now, at the end of this turn or mid-way through it, is said aloud on the Mac. See `replySpoken`. */
+  /** Where this turn's words came from so far. */
+  private origin(profileKey: string): TurnOrigin {
+    const turn = this.turns.get(profileKey);
+    const vias = [...(turn?.vias ?? [])];
+    return {
+      here: vias.some((via) => via === "voice" || via === "typed"),
+      channels: vias.filter((via): via is ChannelKind => isChannelKind(via)),
+      peers: [...(turn?.peers ?? [])],
+    };
+  }
+
+  /** Whether what Kuru says now, at the end of this turn or mid-way through it, is said aloud on the Mac. See `spokenHere`. */
   speaks(profileKey: string): boolean {
-    return replySpoken(this.turns.get(profileKey) ?? new Set(), this.telegram.speakReplies);
+    return spokenHere(this.origin(profileKey), this.telegram.speakReplies);
   }
 
   /**
    * Kuru's turn ended with this reply, off its Stop report: every channel
    * that carries the profile gets it, whatever the turn was answering —
    * a `[kururu]` notice included, which is most of what Kuru says unasked.
+   * What the turn answered comes back, for the other nodes, which hear the
+   * reply too (`peerkuru.ts`).
    */
-  replied(profileKey: string, reply: unknown): void {
+  replied(profileKey: string, reply: unknown): { origin: TurnOrigin; answers: string[] } {
+    const origin = this.origin(profileKey);
+    const answers = [...(this.turns.get(profileKey)?.ids ?? [])];
     this.turns.delete(profileKey);
     this.telegram.stopTyping(profileKey);
     if (typeof reply === "string" && reply.trim()) this.telegram.post(profileKey, reply.trim());
+    return { origin, answers };
   }
 
   /** A line Kuru said mid-turn through its `say` tool: in the drawer, so in the chat. */

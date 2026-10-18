@@ -49,7 +49,7 @@ import type { WebStatus } from "../../shared/web";
 import type { ChannelKind, ChannelsStatus, TelegramStatus } from "../../shared/channels";
 import type { BackupStatus } from "../../shared/backup";
 import type { SearchHit, SearchScope } from "../../shared/store";
-import type { KuruConversation, KuruPage } from "../../shared/kuru";
+import type { KuruConversation, KuruPage, PeerKuru } from "../../shared/kuru";
 import type { MadeFile } from "../../shared/made";
 import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "../../shared/voice";
 import type { MachineEntry, MachinePin, MachineStatus } from "../../shared/machines";
@@ -116,6 +116,8 @@ export interface KururuState {
    * `fetchKuru` pages back through what is older. See `shared/kuru.ts`.
    */
   kuru: KuruConversation[];
+  /** Every other node's Kuru, which the drawer draws beside this one's (`mergeNodes`). Empty on a node in no roster. */
+  kuruPeers: PeerKuru[];
   /** Your messages to Kuru, every profile's, in the order the server took them: the pill's line under Kuru's words. The drawer reads them merged into `kuru`. */
   outbox: OutboxEntry[];
   /** The channels — Telegram — or null until the server has said. Never a token. See `shared/channels.ts`. */
@@ -140,6 +142,7 @@ let state: KururuState = {
   databases: [],
   voice: null,
   kuru: [],
+  kuruPeers: [],
   outbox: [],
   channels: null,
 };
@@ -342,7 +345,7 @@ function connect(): void {
         if (reloadListener) deliver(() => reloadListener?.({ type: "cancel", id: msg.id }));
         break;
       case "kuru":
-        set({ kuru: Array.isArray(msg.kuru) ? msg.kuru : [] });
+        set({ kuru: Array.isArray(msg.kuru) ? msg.kuru : [], kuruPeers: Array.isArray(msg.peers) ? msg.peers : [] });
         break;
       case "outbox":
         set({ outbox: Array.isArray(msg.outbox) ? msg.outbox : [] });

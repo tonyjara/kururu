@@ -26,7 +26,12 @@
  * The crypto is passed in — `node:crypto` on the server, a real key pair in
  * the test — so nothing here imports a runtime.
  */
+import type { PeerWho, TurnOrigin } from "./channels";
+import { cardCode } from "./board";
+import { agentName } from "./harness";
+import type { KuruItem } from "./kuru";
 import type { AgentSnapshot, Profile } from "./model";
+import type { OutboxState } from "./voice";
 import { needsOf, type Band, type NeedKind } from "./needs";
 import { panes, terminalsOf } from "./layout";
 import type { MoveCheck, MoveCheckAsk, MoveDone, MoveOffer } from "./move";
@@ -548,7 +553,17 @@ export interface NodeSummary {
   sees: string[];
   /** Moves whenever its database is written; the parent pulls a backup when it does. */
   dataMark: string;
+  /**
+   * The version of the Kuru-to-Kuru messages this node speaks — `PEER_TALK`
+   * — or absent for a kururu from before them, which ignores every one. Said
+   * here so that a message for an old node's Kuru is refused with a reason
+   * rather than sent into silence.
+   */
+  talks?: number;
 }
+
+/** The version of `say`, `kuru-turns`, `kuru-replied` and the board verbs. See `NodeSummary.talks`. */
+export const PEER_TALK = 1;
 
 export const SUMMARY_WORKSPACES_MAX = 60;
 export const SUMMARY_AGENTS_MAX = 40;
@@ -629,6 +644,7 @@ export function summarize(input: SummaryInput): NodeSummary {
     leads: input.leads,
     sees: [...input.sees],
     dataMark: input.dataMark,
+    talks: PEER_TALK,
   };
 }
 
@@ -716,10 +732,10 @@ export function nodesNeedCount(nodes: readonly NodeStatus[]): number {
 // ---------------------------------------------------------------------------
 
 /**
- * Everything said on `/link`. Phase 2's messages; the later phases add
- * theirs to this union (`kuru-turns`, `say`, the lead handshake, …), and a
- * node that does not know a type ignores it rather than dropping the link,
- * so a node one phase behind is still a node.
+ * Everything said on `/link`. Phase 2's messages, then phase 3's for the
+ * Kurus (`PeerMessage`); the later phases add theirs to this union (the lead
+ * handshake, …), and a node that does not know a type ignores it rather
+ * than dropping the link, so a node one phase behind is still a node.
  */
 export type LinkMessage =
   | { type: "hello"; node: string; challenge: string; roster: SignedRoster | null; protocol: number; version: string }
@@ -737,9 +753,46 @@ export type LinkMessage =
   | { type: "workspace-move-checked"; id: string; check: MoveCheck | null; error: string | null }
   | { type: "workspace-move"; id: string; offer: MoveOffer }
   | { type: "workspace-moved"; id: string; done: MoveDone | null; error: string | null }
-  | { type: "bye"; reason: string };
+  | { type: "bye"; reason: string }
+  | PeerMessage;
 
-const LINK_TYPES = new Set<LinkMessage["type"]>([
+/** The board verbs one Kuru may make on another node's boards directly. A run starts an agent, so it is never one of them. */
+export type BoardVerb = "cards" | "add_card" | "edit_card" | "move_card";
+export const BOARD_VERBS: readonly BoardVerb[] = ["cards", "add_card", "edit_card", "move_card"];
+
+/**
+ * What the Kurus say to each other's nodes. `docs/nodes.md`, "Kurus as
+ * peers", is the argument; in short:
+ *
+ * - `kuru-turns`: a node's own conversation, its newest items
+ *   (`peerItems`), pushed whenever it changes, for the other drawers.
+ * - `say`: words for the receiving node's Kuru, into its outbox — the
+ *   user's (`@omarchy …` in a drawer) or the sending Kuru's (`ask_kuru`).
+ *   The receiver writes the mark itself, from the link's own peer: a mark
+ *   off the wire would be a node saying it is another.
+ * - `say-state`: what became of one, back to the node that sent it, each
+ *   time it moves, so the sender's drawer and `ask_kuru` follow it.
+ * - `kuru-replied`: a node's Kuru ended a turn with this reply; what the
+ *   turn answered says who should hear it (`peerReplySpoken`) and which
+ *   `ask_kuru` it answers.
+ * - `board` / `board-done`: one of `BOARD_VERBS` on the receiver's boards,
+ *   and the line that came of it.
+ */
+export type PeerMessage =
+  | { type: "kuru-turns"; items: KuruItem[] }
+  | { type: "say"; id: string; at: number; text: string; who: PeerWho; spoken: boolean }
+  | { type: "say-state"; id: string; state: OutboxState; note: string | null; typedAt: number | null }
+  | { type: "kuru-replied"; item: { id: string; at: number; text: string }; origin: TurnOrigin; answers: string[] }
+  | { type: "board"; id: string; verb: BoardVerb; args: Record<string, unknown> }
+  | { type: "board-done"; id: string; text: string; error: boolean };
+
+const PEER_TYPES: ReadonlySet<string> = new Set<PeerMessage["type"]>(["kuru-turns", "say", "say-state", "kuru-replied", "board", "board-done"]);
+
+export function isPeerMessage(message: LinkMessage): message is PeerMessage {
+  return PEER_TYPES.has(message.type);
+}
+
+const LINK_TYPES = new Set<string>([
   "hello",
   "prove",
   "refuse",
@@ -753,6 +806,7 @@ const LINK_TYPES = new Set<LinkMessage["type"]>([
   "workspace-move",
   "workspace-moved",
   "bye",
+  ...PEER_TYPES,
 ]);
 
 /** A frame off the socket, as a message with a known type, or null. The fields are each handler's to check. */
@@ -761,10 +815,94 @@ export function parseLinkMessage(raw: string): LinkMessage | null {
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
     const type = (parsed as { type?: unknown }).type;
-    return typeof type === "string" && LINK_TYPES.has(type as LinkMessage["type"]) ? (parsed as LinkMessage) : null;
+    return typeof type === "string" && LINK_TYPES.has(type) ? (parsed as LinkMessage) : null;
   } catch {
     return null;
   }
+}
+
+/** A peer message's id: the outbox's alphabet, so the id that crosses is the id the receiving outbox keeps. */
+const PEER_ID = /^[A-Za-z0-9_-]{8,64}$/;
+/** The most a `say` may carry: the drawer composer's own cap. */
+export const SAY_MAX = 20_000;
+/** The most items a `kuru-turns` may carry; a node pushes `PEER_RECENT`, and anything past twice that is not a node that means well. */
+const TURNS_MAX = 80;
+const OUTBOX_STATES: ReadonlySet<string> = new Set<OutboxState>(["transcribing", "queued", "delivered", "failed"]);
+const ITEM_KINDS: ReadonlySet<string> = new Set(["you", "kuru", "notice", "session"]);
+
+const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+
+/**
+ * Each peer message, checked: the shape a handler may rely on, or null.
+ * Members are the user's own machines, but a message is still a number off
+ * the wire, and a node on an older or newer build is the ordinary case, so
+ * nothing past here trusts a field it did not look at.
+ */
+export function asSay(message: PeerMessage): Extract<PeerMessage, { type: "say" }> | null {
+  if (message.type !== "say") return null;
+  const m = message as Partial<Extract<PeerMessage, { type: "say" }>>;
+  if (typeof m.id !== "string" || !PEER_ID.test(m.id) || !finite(m.at) || m.at <= 0) return null;
+  if (typeof m.text !== "string" || !m.text.trim() || m.text.length > SAY_MAX) return null;
+  if (m.who !== "user" && m.who !== "kuru") return null;
+  return { type: "say", id: m.id, at: m.at, text: m.text, who: m.who, spoken: m.spoken === true };
+}
+
+export function asSayState(message: PeerMessage): Extract<PeerMessage, { type: "say-state" }> | null {
+  if (message.type !== "say-state") return null;
+  const m = message as Partial<Extract<PeerMessage, { type: "say-state" }>>;
+  if (typeof m.id !== "string" || !PEER_ID.test(m.id) || typeof m.state !== "string" || !OUTBOX_STATES.has(m.state)) return null;
+  return {
+    type: "say-state",
+    id: m.id,
+    state: m.state,
+    note: typeof m.note === "string" ? m.note.slice(0, 400) : null,
+    typedAt: finite(m.typedAt) ? m.typedAt : null,
+  };
+}
+
+export function asReplied(message: PeerMessage): Extract<PeerMessage, { type: "kuru-replied" }> | null {
+  if (message.type !== "kuru-replied") return null;
+  const m = message as Partial<Extract<PeerMessage, { type: "kuru-replied" }>>;
+  const item = m.item;
+  if (!item || typeof item.id !== "string" || item.id.length > 64 || !finite(item.at) || typeof item.text !== "string" || !item.text.trim()) return null;
+  const o = (m.origin ?? {}) as Partial<TurnOrigin>;
+  const strings = (value: unknown, max: number): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === "string" && v.length <= 64).slice(0, max) : []);
+  return {
+    type: "kuru-replied",
+    item: { id: item.id, at: item.at, text: item.text.slice(0, SAY_MAX) },
+    origin: { here: o.here === true, channels: strings(o.channels, 8) as TurnOrigin["channels"], peers: strings(o.peers, 16) },
+    answers: strings(m.answers, 32).filter((id) => PEER_ID.test(id)),
+  };
+}
+
+export function asBoard(message: PeerMessage): Extract<PeerMessage, { type: "board" }> | null {
+  if (message.type !== "board") return null;
+  const m = message as Partial<Extract<PeerMessage, { type: "board" }>>;
+  if (typeof m.id !== "string" || !PEER_ID.test(m.id) || !(BOARD_VERBS as readonly unknown[]).includes(m.verb)) return null;
+  const args = m.args && typeof m.args === "object" && !Array.isArray(m.args) ? m.args : {};
+  return { type: "board", id: m.id, verb: m.verb!, args };
+}
+
+export function asBoardDone(message: PeerMessage): Extract<PeerMessage, { type: "board-done" }> | null {
+  if (message.type !== "board-done") return null;
+  const m = message as Partial<Extract<PeerMessage, { type: "board-done" }>>;
+  if (typeof m.id !== "string" || !PEER_ID.test(m.id) || typeof m.text !== "string") return null;
+  return { type: "board-done", id: m.id, text: m.text.slice(0, 40_000), error: m.error === true };
+}
+
+/** A node's pushed conversation: enough of each item's shape to draw it without a throw, and nothing more. */
+export function asKuruTurns(message: PeerMessage): KuruItem[] | null {
+  if (message.type !== "kuru-turns" || !Array.isArray(message.items) || message.items.length > TURNS_MAX) return null;
+  const ok = message.items.every((raw: unknown) => {
+    if (!raw || typeof raw !== "object") return false;
+    const item = raw as Record<string, unknown>;
+    if (typeof item.kind !== "string" || !ITEM_KINDS.has(item.kind) || typeof item.id !== "string" || item.id.length > 80 || !finite(item.at)) return false;
+    if (item.kind === "kuru") return typeof item.text === "string";
+    if (item.kind === "notice") return typeof item.from === "string" && typeof item.what === "string" && typeof item.text === "string";
+    if (item.kind === "you") return (item.text === null || typeof item.text === "string") && typeof item.state === "string" && OUTBOX_STATES.has(item.state);
+    return true;
+  });
+  return ok ? message.items : null;
 }
 
 /**
@@ -883,11 +1021,13 @@ function clock(at: number): string {
  * The other nodes, as `kururu_status` lists them to Kuru: each one's state,
  * its workspaces and its agents, from the last summary it pushed. Read
  * anywhere, act locally — the lines say the agents are another Kuru's to
- * drive, so a Kuru that sees a blocked agent on Omarchy tells the user
- * rather than reaching for a tool that cannot touch it.
+ * drive, so a Kuru that sees a blocked agent on Omarchy asks that Kuru or
+ * tells the user rather than reaching for a tool that cannot touch it. Each
+ * agent is named the way `agentName` names one here, with its node and
+ * without an id, since no tool on this node takes it.
  */
 export function nodesText(nodes: readonly NodeStatus[]): string[] {
-  const out: string[] = ["", "nodes (other kururus; read only from here — their agents are driven on that node):"];
+  const out: string[] = ["", "nodes (other kururus; read anything here, but their agents are driven by that node's Kuru — ask_kuru asks it, and read_kuru reads what it said):"];
   if (!nodes.length) {
     out.push("  (none — this kururu is not paired with another; Settings → Nodes)");
     return out;
@@ -895,17 +1035,26 @@ export function nodesText(nodes: readonly NodeStatus[]): string[] {
   for (const node of nodes) {
     const state =
       node.state === "up" ? "linked" : node.state === "away" ? `away${node.since ? ` since ${clock(node.since)}` : ""}${node.summary ? ", last summary shown" : ""}` : "not linked yet";
-    out.push(`  - ${node.name}${node.parent ? " (the parent)" : ""} · ${state}${node.leader ? " · leads" : ""} · ${node.url.replace(/\?.*$/, "")}`);
+    const talks = node.summary && (node.summary.talks ?? 0) < 1 ? " · its kururu is too old for ask_kuru (kururu child update there)" : "";
+    out.push(`  - ${node.name}${node.parent ? " (the parent)" : ""} · ${state}${node.leader ? " · leads" : ""}${talks} · ${node.url.replace(/\?.*$/, "")}`);
     const summary = node.summary;
     if (!summary) continue;
     out.push(`    profile ${summary.profile.name} · ${summary.needs.count} need${summary.needs.count === 1 ? "s" : ""} the user`);
     for (const workspace of summary.workspaces) {
       out.push(`    - ${workspace.name}${workspace.folder ? ` (${workspace.folder})` : ""} · ${workspace.band}`);
       for (const agent of workspace.agents) {
-        const name = agent.titleOverride || agent.agent || agent.lastAgent || agent.kind;
         const doing = agent.activity || agent.title;
         const ctx = agent.contextUsage ? ` · context ${Math.round((agent.contextUsage.used / agent.contextUsage.window) * 100)}%` : "";
-        out.push(`      - ${name}${agent.card ? ` on "${agent.card.title}"` : ""} · ${agent.exited ? "exited" : agent.status}${ctx}${doing ? ` · ${doing}` : ""}`);
+        const name = agentName({
+          id: null,
+          name: agent.titleOverride || null,
+          doing: agent.title || null,
+          program: agent.agent ?? agent.lastAgent ?? (agent.kind === "shell" ? "shell" : "agent"),
+          workspace: workspace.name,
+          card: agent.card ? { code: cardCode(workspace.name, agent.card.number), title: agent.card.title } : null,
+          node: node.name,
+        });
+        out.push(`      - ${name} · ${agent.exited ? "exited" : agent.status}${ctx}${doing ? ` · ${doing}` : ""}`);
       }
       for (const need of workspace.needs) out.push(`      ! ${need.kind}: ${need.title}`);
     }

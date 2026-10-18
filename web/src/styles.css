@@ -4583,6 +4583,68 @@ html.pill-page #root {
   align-items: center;
   gap: 3px;
 }
+/* Every node's Kuru in the one drawer: a chip per node under the header,
+   narrowing the list to one; a node that is away is greyed and keeps its
+   last items. The lit chip wears the accent the Telegram switch wears when
+   on, since it is the choice that is on. */
+.kuru-nodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 12px;
+  border-bottom: var(--border) var(--border-style) var(--line);
+}
+.kuru-node-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-lg);
+  border: var(--border) var(--border-style) var(--line);
+  color: var(--dim);
+  font-size: var(--fs-sm);
+}
+.kuru-node-chip:hover {
+  color: var(--text);
+  border-color: var(--line-high);
+}
+.kuru-node-chip-on {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.kuru-node-chip-away {
+  opacity: 0.55;
+}
+:root[data-narrow] .kuru-node-chip {
+  min-height: 32px;
+  padding: 2px 12px;
+}
+.kuru-node-count {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+/* Whose line it is, beside the time, when it is another node's — and where a
+   message of this one's is going, on its way there. A word, not a colour:
+   who spoke is the bubble's colour, and only two people speak. */
+.kuru-node {
+  color: var(--dim);
+  font-weight: 600;
+}
+.kuru-reply-to {
+  margin-left: auto;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  color: var(--dimmer);
+}
+.kuru-reply-to:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+.kuru-to {
+  margin: 0 0 4px;
+  font-size: var(--fs-sm);
+  color: var(--accent);
+}
 .kuru-close {
   margin-left: 0;
   width: 28px;

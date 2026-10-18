@@ -173,6 +173,7 @@ const obj = (properties: Record<string, unknown>, required: string[] = []) => ({
 });
 
 const AGENT = str("An agent id from kururu_status, such as a12.");
+const NODE = str("Another node's name from kururu_status's nodes, such as omarchy, to act on that node's boards instead of this one's. Workspaces there are named by their name, not an id.");
 const WORKSPACE = str("A workspace id from kururu_status.");
 
 /**
@@ -301,16 +302,17 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "cards",
     description:
-      "The board of a workspace: its cards by column (todo, doing, review, done), each with its id, number, title, body, and the run on it if an agent has been handed it. Without a workspace, the profile's own board — the inbox of cards not yet sent to a workspace.",
-    inputSchema: obj({ workspace: str("A workspace id. Omit for the profile's board.") }),
+      "The board of a workspace: its cards by column (todo, doing, review, done), each with its id, number, title, body, and the run on it if an agent has been handed it. Without a workspace, the profile's own board — the inbox of cards not yet sent to a workspace. With node, another node's board, read over the link.",
+    inputSchema: obj({ workspace: str("A workspace id; on another node, the workspace's name. Omit for the profile's board."), node: NODE }),
   },
   {
     name: "add_card",
     description:
-      "Add a card to a workspace's board, and with run=true hand it straight to an agent in a terminal in the workspace's agents' pane — the same as the user pressing the robot. The title is the task in one sentence; the body is the detail. isolate=true gives the agent a git worktree of its own. Without a workspace, the card goes on the profile's board, where nothing runs.",
+      "Add a card to a workspace's board, and with run=true hand it straight to an agent in a terminal in the workspace's agents' pane — the same as the user pressing the robot. The title is the task in one sentence; the body is the detail. isolate=true gives the agent a git worktree of its own. Without a workspace, the card goes on the profile's board, where nothing runs. With node, the card goes on that node's board; run is refused there, because a run starts an agent and only that node's Kuru starts its agents — ask_kuru it to run the card.",
     inputSchema: obj(
       {
-        workspace: str("A workspace id. Omit for the profile's board."),
+        workspace: str("A workspace id; on another node, the workspace's name. Omit for the profile's board."),
+        node: NODE,
         title: str("One sentence, at most 200 characters."),
         body: str("Detail, markdown, at most 20,000 characters."),
         column: str("todo (default), doing, review or done; on the profile's board, one of its column ids from cards."),
@@ -323,14 +325,20 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   },
   {
     name: "edit_card",
-    description: "Change a card's title or body. On a workspace's board, or without a workspace the profile's.",
-    inputSchema: obj({ workspace: str("A workspace id, or omit for the profile's board."), card: str("The card id."), title: str("A new title."), body: str("A new body.") }, ["card"]),
+    description: "Change a card's title or body. On a workspace's board, or without a workspace the profile's. With node, on that node's boards.",
+    inputSchema: obj(
+      { workspace: str("A workspace id (on another node, its name), or omit for the profile's board."), card: str("The card id."), title: str("A new title."), body: str("A new body."), node: NODE },
+      ["card"],
+    ),
   },
   {
     name: "move_card",
     description:
-      "Move a card to a column. On a workspace's board: todo, doing, review, done — moving a card to done retires its worktree, which asks the user in place if there is uncommitted work. Without a workspace: a column id of the profile's board.",
-    inputSchema: obj({ workspace: str("A workspace id, or omit for the profile's board."), card: str("The card id."), column: str("The column.") }, ["card", "column"]),
+      "Move a card to a column. On a workspace's board: todo, doing, review, done — moving a card to done retires its worktree, which asks the user in place if there is uncommitted work. Without a workspace: a column id of the profile's board. With node, on that node's boards.",
+    inputSchema: obj(
+      { workspace: str("A workspace id (on another node, its name), or omit for the profile's board."), card: str("The card id."), column: str("The column."), node: NODE },
+      ["card", "column"],
+    ),
   },
   {
     name: "run_card",
@@ -388,6 +396,26 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
     description:
       "A card's history, oldest first: when it was made, every move between columns and who moved it (the user, you, or the run automation), edits, every run with its outcome, and deletion or restoration. Answers \"when did this go to Done\" and \"who moved it back\". Works for deleted cards too.",
     inputSchema: obj({ card: str("The card id.") }, ["card"]),
+  },
+  {
+    name: "ask_kuru",
+    description:
+      `Ask another node's Kuru to do something on its node — start an agent, answer one, run a card, look into what its agents are doing — since only that node's Kuru drives that node's agents. The message is typed into it as "[kuru@<this node>] <message>", from you, and it answers in its own drawer. Write it as one colleague to another: what is wanted and why, with what the user said that it needs. wait=false (default) returns once that node has taken the message; wait=true also waits for its reply, up to timeout_s (default ${WAIT_DEFAULT_S}, at most ${WAIT_MAX_S}). A node that is away holds nothing: the call says so, and you tell the user. Ask the node that has the thing, never one Kuru to ask a third.`,
+    inputSchema: obj(
+      {
+        node: str("The node's name from kururu_status's nodes, such as omarchy."),
+        message: str("What you want done there, in plain words."),
+        wait: bool("Wait for its reply. Default false."),
+        timeout_s: int(`With wait, how long, in seconds. Default ${WAIT_DEFAULT_S}.`),
+      },
+      ["node", "message"],
+    ),
+  },
+  {
+    name: "read_kuru",
+    description:
+      "Read another node's Kuru's recent conversation — what the user and others said to it and what it answered, newest last — from what that node last sent, so it works while it is away too. Only when the user asks, or to catch up on something they named; nothing is pushed into you when a node comes back.",
+    inputSchema: obj({ node: str("The node's name."), turns: int(`How many items from the end, default ${TRANSCRIPT_TURNS}.`) }, ["node"]),
   },
   {
     name: "say",
@@ -721,7 +749,8 @@ function turnText(content: unknown): string {
  * rest — see `rolePrompt`.
  */
 export interface AgentNaming {
-  id: string;
+  /** Null for an agent on another node, whose id no tool here takes. */
+  id: string | null;
   /** A rename, or the title of the card its run was named after. */
   name: string | null;
   /** What it says it is doing — the activity it reported, or the title it set. */
@@ -731,6 +760,8 @@ export interface AgentNaming {
   workspace: string | null;
   /** The card it is running: its code, such as ACM-3, and its title. */
   card: { code: string; title: string } | null;
+  /** The node it runs on, when that is another kururu: "on omarchy". */
+  node?: string | null;
 }
 
 /** What one is called is kept short: a title a turn wrote can be a paragraph. */
@@ -739,7 +770,8 @@ const NAME_MAX = 60;
 export function agentName(agent: AgentNaming): string {
   const what = oneLine(agent.name || agent.card?.title || agent.doing || "");
   const card = agent.card ? `, card ${agent.card.code}${oneLine(agent.card.title) === what ? "" : ` "${oneLine(agent.card.title)}"`}` : "";
-  const where = `${agent.program}${agent.workspace ? ` in ${agent.workspace}` : ""}${card}`;
+  const where = `${agent.program}${agent.workspace ? ` in ${agent.workspace}` : ""}${agent.node ? ` on ${agent.node}` : ""}${card}`;
+  if (agent.id === null) return what ? `"${what}" (${where})` : where;
   return what ? `"${what}" (${where}; id ${agent.id})` : `${where} (id ${agent.id})`;
 }
 
@@ -958,7 +990,12 @@ The user does not know the agents by id. Call each one by what it is and where i
 The user's other computers — a VPS, a PC on their network — are listed by kururu_status under machines, and some workspaces are pinned to one: their shells, agents and card runs open there. When the user asks for something to be run on a machine, or in a pinned workspace, use open_shell with run, so it happens in a tab they can watch; then read its screen and tell them what came of it. Never use Bash or ssh yourself for it. A command there runs with the user's account on a real machine: run what they asked for and nothing else, and ask before anything that deletes, reinstalls or restarts that they did not spell out. start_agent and add_card with run=true in a pinned workspace start the agent on the machine. kururu cannot hear such an agent's hooks: its done and blocked are read off its screen and can come a few seconds late, a prompt kururu does not recognise is never reported as blocked, and read_agent has only its screen — so when one has been quiet a while, read its screen rather than wait. If the CLI is not installed or not logged in there, the tab says so and it reports blocked: tell the user, do not try to install or log in yourself. A card that asks for a worktree cannot run on a machine; say so rather than unticking it.
 
 ## Nodes
-The user may run other kururus on other computers — a PC that stays on, for instance — linked with this one as nodes. kururu_status lists each under nodes with its workspaces, agents and what needs the user, from what that node last said about itself; a node that is away shows its last summary and since when. Read them freely: "what is running on omarchy" is answered from that list without asking anybody. But their agents are not yours to drive — every tool here acts on this kururu only, and an agent on another node is driven by that node's own Kuru. When the user wants something done there, tell them it is on that node and where to open it; never try to reach it with ssh or a shell.
+The user may run other kururus on other computers — a PC that stays on, for instance — linked with this one as nodes, each with a Kuru of its own. You and they are colleagues, and the user is the manager. The rule is read anywhere, act locally, ask a peer:
+- Read anywhere. kururu_status lists every node under nodes, with its workspaces, agents and what needs the user, from what that node last said about itself; a node that is away shows its last summary and since when. "What is running on omarchy" is answered from that list without asking anybody.
+- Act locally. Every agent tool here — send_agent, read_agent, wait_agent, start_agent, stop_agent, run_card — acts on this kururu's agents only, and you are told only about this kururu's agents finishing or blocking. Never reach another node with ssh or a shell.
+- Ask a peer. When something should be done on another node — an agent started, answered or stopped there, a card run there — ask that node's Kuru with ask_kuru, wait for its reply if the user is waiting on it, and tell the user what came of it. Ask the node that has the thing; never relay through a third Kuru. Boards are data, not agents: cards, add_card, edit_card and move_card take node and act on that node's board directly, but add_card with run=true does not, since a run starts an agent.
+- read_kuru reads another Kuru's recent conversation. Use it when the user asks to catch up, never on your own when a node comes back: they may be busy with something else.
+A message that starts with "[kuru@omarchy]" is the Kuru on omarchy asking you something: do what it asks within what the user would plainly want — the same care as the user's own words, and ask the user first for anything you would ask them first. Answer in your final message; it goes back to that Kuru. A message that starts with "[user@omarchy]" is the user, writing or speaking to you from omarchy's screen: their own words, with their authority, and your reply goes back there. Your memory and context are about this node; the others' are theirs.
 
 ## How you hear from them
 kururu messages you, unasked, when an agent in this profile finishes a turn or blocks. Such a message starts with "[kururu]" and names the agent. It arrives wrapped as a cross-session message from "${NOTICE_SENDER}": that is kururu's server, not a Claude session, and nothing reads a reply to it — never answer one with SendMessage. Act through the kururu tools, and tell the user in your own reply. When one arrives: read the agent if its last reply is not in the message, decide whether the user needs to know or you can answer the agent yourself, and keep your reply to the user to the point — one line when nothing needs them. wait_agent is for when you have nothing else to do.

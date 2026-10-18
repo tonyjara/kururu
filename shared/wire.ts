@@ -44,7 +44,7 @@ import type { OpenRouterStatus } from "./openrouter";
 import type { WebStatus } from "./web";
 import type { ChannelKind, ChannelsStatus } from "./channels";
 import type { BackupStatus } from "./backup";
-import type { KuruConversation } from "./kuru";
+import type { KuruConversation, PeerKuru } from "./kuru";
 import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "./voice";
 import type { MachineStatus } from "./machines";
 import type { NodesView } from "./nodes";
@@ -469,9 +469,11 @@ export type ServerMessage =
    * and the two counts the status bar's chip wears. Sent on connect and
    * whenever a turn lands, a message moves or a reply is heard, missed or
    * seen. The newest `KURU_RECENT` items of each; the rest is `/api/kuru`.
+   * `peers` is every other node's Kuru, which every drawer draws beside
+   * this node's own (`mergeNodes`); absent from a server before them.
    * See `shared/kuru.ts`.
    */
-  | { type: "kuru"; kuru: KuruConversation[] }
+  | { type: "kuru"; kuru: KuruConversation[]; peers?: PeerKuru[] }
   /**
    * Your messages to Kuru, every profile's, in the order they reached the
    * server — the pill's word on whether the last one got through, under

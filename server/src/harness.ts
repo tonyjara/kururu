@@ -86,7 +86,7 @@ import {
 import { findLauncher, launcherCommand, visibleLaunchers, withPrompt, type AgentCli, type LaunchSettings, type Launcher } from "../../shared/launchers";
 import { remoteShellOf, validRemoteDir, type MachineEntry, type MachineStatus } from "../../shared/machines";
 import { folderSentence, planText, type MoveDone, type MovePlan } from "../../shared/move";
-import { nodesText, type NodeStatus } from "../../shared/nodes";
+import { BOARD_VERBS, nodesText, type BoardVerb, type NodeStatus } from "../../shared/nodes";
 import type { MadeFile } from "../../shared/made";
 import type { AgentSnapshot, AgentStatus, HarnessState } from "../../shared/model";
 import { isNotifyEvent } from "../../shared/notify";
@@ -94,7 +94,7 @@ import { readScreen } from "../../shared/onscreen";
 import type { MissedReply } from "../../shared/voice";
 import { RELOAD_TIMEOUT_MAX_MS, RELOAD_TIMEOUT_MIN_MS, RELOAD_TIMEOUT_MS, WHY_MAX, oneLine, outcomeText, type ReloadOutcome } from "../../shared/reload";
 import { COLUMN_LABELS } from "../../shared/board";
-import type { CardEvent, SearchHit, SearchScope } from "../../shared/store";
+import type { Actor, CardEvent, SearchHit, SearchScope } from "../../shared/store";
 import type { McpResult } from "./mcp";
 import { harnessHome, prepareHarnessHome } from "./harnesshome";
 import type { HostLink } from "./hostlink";
@@ -140,6 +140,17 @@ export interface HarnessDeps {
   machines: () => readonly MachineStatus[];
   /** The other kururus this one is linked with, each with the last summary it pushed. See `shared/nodes.ts`. */
   nodes?: () => readonly NodeStatus[];
+  /**
+   * The other nodes' Kurus and boards, over the links: `ask_kuru`,
+   * `read_kuru` and the board verbs with a `node`. See `peerkuru.ts`.
+   * `self` is this node's own name, which a `node` naming it means here.
+   */
+  peers?: {
+    self: () => string;
+    ask: (node: string, message: string, wait: boolean, timeoutS: number) => Promise<McpResult>;
+    read: (node: string, turns: number) => McpResult;
+    board: (node: string, verb: BoardVerb, args: Record<string, unknown>) => Promise<McpResult>;
+  };
   /** The command line of a tmux-session shell on a machine, in the first free slot, typing `run` there. */
   shellOn: (machine: MachineEntry, workspaceName: string, dir: string, run?: string) => Promise<string>;
   /** The same for an agent: `command` is the launcher's line, and kururu's install-and-login check goes ahead of it. */
@@ -639,10 +650,21 @@ export class Harness {
    * checked to be in that profile first: a harness is "on top of all spaces"
    * in its profile and of nothing in another, which is what a profile is.
    */
-  async call(profileId: string, selfId: string | null, name: string, args: Record<string, unknown>): Promise<McpResult> {
+  async call(profileId: string, selfId: string | null, name: string, args: Record<string, unknown>, actor: Actor = "harness"): Promise<McpResult> {
     const ws = this.deps.workspaces;
     const profile = ws.profile(profileId);
     if (!profile) return fail("That profile is gone.");
+    // A board verb aimed at another node goes over the link, whole; one
+    // naming this node is this node's. A run is never one of them.
+    const node = str(args.node);
+    if (node && (BOARD_VERBS as readonly string[]).includes(name) && node.toLowerCase() !== this.deps.peers?.self().toLowerCase()) {
+      if (!this.deps.peers) return fail("This kururu is not linked with any other node.");
+      if (name === "add_card" && args.run === true) {
+        return fail(`A run starts an agent, and only ${node}'s Kuru starts the agents there. Add the card without run, then ask_kuru ${node} to run it.`);
+      }
+      const { node: _node, run: _run, launcher: _launcher, ...rest } = args;
+      return this.deps.peers.board(node, name as BoardVerb, rest);
+    }
     // Every tool aimed at one agent passes through here or names the agent it
     // made, so this is the one place Auto Swap is told — `SWAP_TOOLS` decides.
     const follow = (agentId: string): void => {
@@ -875,10 +897,10 @@ export class Harness {
         const id = mintCardId();
         const fields = { title, body: str(args.body), column: str(args.column) || undefined, isolate: typeof args.isolate === "boolean" ? args.isolate : undefined };
         if (!workspaceId) {
-          ws.as("harness", () => ws.editProfileBoard(profileId, (board) => addCard(board, fields, id, Date.now())));
+          ws.as(actor, () => ws.editProfileBoard(profileId, (board) => addCard(board, fields, id, Date.now())));
           return ok(`Added card ${id} "${title}" to the profile's board.`);
         }
-        ws.as("harness", () => {
+        ws.as(actor, () => {
           ws.ensureBoardIn(profileId, workspaceId);
           ws.editBoardIn(profileId, workspaceId, (board) => addCard(board, fields, id, Date.now()));
         });
@@ -897,7 +919,7 @@ export class Harness {
         if (!cardId) return fail("A card id is needed.");
         const fields = { title: args.title === undefined ? undefined : str(args.title), body: args.body === undefined ? undefined : str(args.body) };
         const workspaceId = workspaceArg(false);
-        ws.as("harness", () => {
+        ws.as(actor, () => {
           if (workspaceId) ws.editBoardIn(profileId, workspaceId, (board) => editCard(board, cardId, fields));
           else ws.editProfileBoard(profileId, (board) => editCard(board, cardId, fields));
         });
@@ -910,10 +932,10 @@ export class Harness {
         if (!cardId || !column) return fail("A card id and a column are needed.");
         const workspaceId = workspaceArg(false);
         if (workspaceId) {
-          ws.as("harness", () => ws.editBoardIn(profileId, workspaceId, (board) => moveCard(board, cardId, column)));
+          ws.as(actor, () => ws.editBoardIn(profileId, workspaceId, (board) => moveCard(board, cardId, column)));
           if (column === "done") this.deps.stopDev(workspaceId, cardId);
         } else {
-          ws.as("harness", () => ws.editProfileBoard(profileId, (board) => moveCard(board, cardId, column)));
+          ws.as(actor, () => ws.editProfileBoard(profileId, (board) => moveCard(board, cardId, column)));
         }
         return ok(`Moved card ${cardId} to ${column}.`);
       }
@@ -1002,6 +1024,23 @@ export class Harness {
         return ok([head, ...lines].join("\n"));
       }
 
+      case "ask_kuru": {
+        if (!this.deps.peers) return fail("This kururu is not linked with any other node.");
+        const to = str(args.node);
+        const message = str(args.message);
+        if (!to || !message) return fail("A node and a message are needed.");
+        if (to.toLowerCase() === this.deps.peers.self().toLowerCase()) return fail("That is this node, and you are its Kuru.");
+        const seconds = Math.min(WAIT_MAX_S, Math.max(1, int(args.timeout_s) ?? WAIT_DEFAULT_S));
+        return this.deps.peers.ask(to, message, args.wait === true, seconds);
+      }
+
+      case "read_kuru": {
+        if (!this.deps.peers) return fail("This kururu is not linked with any other node.");
+        const to = str(args.node);
+        if (!to) return fail("A node is needed.");
+        return this.deps.peers.read(to, Math.max(1, Math.min(40, int(args.turns) ?? TRANSCRIPT_TURNS)));
+      }
+
       case "say": {
         const text = str(args.text);
         if (!text) return fail("Nothing to say.");
@@ -1031,6 +1070,22 @@ export class Harness {
       default:
         return fail(`No such tool: ${name}`);
     }
+  }
+
+  /**
+   * A board verb another node's Kuru asked for, over the link, on this
+   * profile's boards: the same verb its own tool call would be, with the
+   * workspace named by its name (ids are each node's own and change), never
+   * a run, and every change recorded as `peer:<node>` in the card's history.
+   */
+  peerBoard(profileId: string, verb: BoardVerb, args: Record<string, unknown>, from: string): Promise<McpResult> {
+    const profile = this.deps.workspaces.profile(profileId);
+    if (!profile) return Promise.resolve(fail("This node's Kuru profile is gone."));
+    const wanted = str(args.workspace).toLowerCase();
+    const workspace = wanted ? profile.workspaces.find((w) => w.name.toLowerCase() === wanted || w.key === wanted || w.id === wanted) : undefined;
+    if (wanted && !workspace) return Promise.resolve(fail(`No workspace "${str(args.workspace)}" on this node. kururu_status lists them under nodes.`));
+    const { node: _node, run: _run, launcher: _launcher, workspace: _workspace, ...rest } = args;
+    return this.call(profileId, null, verb, workspace ? { ...rest, workspace: workspace.id } : rest, `peer:${from}`);
   }
 
   // ---------------------------------------------------------------------------
@@ -1489,7 +1544,16 @@ function stamp(at: number): string {
 
 /** One event of a card's history as a sentence. */
 function eventLine(event: CardEvent): string {
-  const by = event.actor === "user" ? "the user" : event.actor === "harness" ? "you" : event.actor === "automation" ? "the run automation" : "an import";
+  const by =
+    event.actor === "user"
+      ? "the user"
+      : event.actor === "harness"
+        ? "you"
+        : event.actor === "automation"
+          ? "the run automation"
+          : event.actor.startsWith("peer:")
+            ? `the Kuru on ${event.actor.slice("peer:".length)}`
+            : "an import";
   const detail = event.detail ?? {};
   switch (event.kind) {
     case "created":

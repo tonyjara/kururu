@@ -109,6 +109,7 @@ import { Backup } from "./backup";
 import { mirrorFiles } from "./export";
 import { NodeHost, nodeRequestRefusal } from "./nodes";
 import { Mover } from "./move";
+import { nodeOfUtterance, PeerKurus, peerKey } from "./peerkuru";
 import { summarize, type NodeSummary } from "../../shared/nodes";
 import { hostname } from "node:os";
 import { Store, dataDir, dbPath } from "./store";
@@ -489,6 +490,17 @@ let backup!: Backup;
 let nodes!: NodeHost;
 /** A workspace moved to or from another node. See `move.ts`. */
 let mover!: Mover;
+/** The other nodes' Kurus: asking them, reading them, and their conversations in the drawer. Null until the links exist. See `peerkuru.ts`. */
+let peerKurus: PeerKurus | null = null;
+
+/**
+ * The profile whose Kuru is this node's Kuru to the other nodes — the one
+ * `@mac` names, that their messages go to and whose conversation they draw:
+ * the one Telegram is pointed at, else the active one. A child has one.
+ */
+function kuruKey(): string | null {
+  return channels.telegram.profileKey() ?? workspaces.active.key;
+}
 const clients = new Map<WebSocket, ClientState>();
 
 const state = {
@@ -1971,10 +1983,10 @@ function cardHistoryOf(cardId: string): { card: Card; workspaceName: string | nu
  * is kept too, as its own conversation named by its transcript, so the
  * search finds what an agent said about a card.
  */
-function recordTurn(agentId: string, report: { status?: string; message?: string }, body: Record<string, unknown>, utterance: string | null): void {
+function recordTurn(agentId: string, report: { status?: string; message?: string }, body: Record<string, unknown>, utterance: string | null): number | null {
   const profileId = workspaces.profileOf(agentId);
   const profile = profileId ? workspaces.profile(profileId) : null;
-  if (!profile) return;
+  if (!profile) return null;
   const reply = typeof body.reply === "string" ? body.reply.trim() : "";
   const at = Date.now();
   const cwd = host.find(agentId)?.cwd ?? null;
@@ -1984,17 +1996,18 @@ function recordTurn(agentId: string, report: { status?: string; message?: string
       if (report.status === "working" && report.message?.trim()) store.recordTurn({ ...base, role: "you", text: report.message.trim() });
       // The reply names the utterance it was said as, so the drawer can put
       // its fate — being said, unheard, heard — beside the words.
-      if (report.status === "done" && reply) store.recordTurn({ ...base, role: "kuru", text: reply, voiceId: utterance });
+      const turn = report.status === "done" && reply ? store.recordTurn({ ...base, role: "kuru", text: reply, voiceId: utterance }) : null;
       kuru.changed();
-      return;
+      return turn;
     }
-    if (report.status !== "done" || !reply) return;
+    if (report.status !== "done" || !reply) return null;
     const sessionId = sessionOfTranscript(typeof body.transcript === "string" ? body.transcript : null);
-    if (!sessionId) return;
+    if (!sessionId) return null;
     store.recordTurn({ conversationId: sessionId, profileKey: profile.key, kind: "agent", launcher: null, cwd, role: "agent", text: reply, at });
   } catch (err) {
     console.error(`kururu: a turn could not be written down: ${err instanceof Error ? err.message : String(err)}`);
   }
+  return null;
 }
 
 /**
@@ -4874,13 +4887,22 @@ function handleMessage(ws: WebSocket, raw: string): void {
       const key = typeof msg.profileId === "string" ? workspaces.keyOf(msg.profileId) : null;
       if (!key || !Array.isArray(msg.utterances)) return;
       const ids = msg.utterances.filter((id): id is string => typeof id === "string" && id.length <= 80).slice(0, 200);
-      if (ids.length) voice.seen(key, ids);
+      // Another node's replies said here are on the list under that node's
+      // key, and are read in the same drawer.
+      const byKey = new Map<string, string[]>();
+      for (const id of ids) {
+        const node = nodeOfUtterance(id);
+        const at = node ? peerKey(node) : key;
+        byKey.set(at, [...(byKey.get(at) ?? []), id]);
+      }
+      for (const [at, some] of byKey) voice.seen(at, some);
       return;
     }
 
     case "kuru-replay": {
       const key = typeof msg.profileId === "string" ? workspaces.keyOf(msg.profileId) : null;
-      if (key && typeof msg.utterance === "string") voice.replayOne(key, msg.utterance, typeof msg.text === "string" ? msg.text.slice(0, KURU_SAY_MAX) : undefined);
+      const node = typeof msg.utterance === "string" ? nodeOfUtterance(msg.utterance) : null;
+      if (key && typeof msg.utterance === "string") voice.replayOne(node ? peerKey(node) : key, msg.utterance, typeof msg.text === "string" ? msg.text.slice(0, KURU_SAY_MAX) : undefined);
       return;
     }
 
@@ -5892,11 +5914,16 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       const reply = (body as Record<string, unknown>).reply;
       const ended = spokenKey !== null && parsed.report.status === "done";
       const utterance = ended && channels.speaks(spokenKey) ? voice.spoke(spokenKey, reply) : null;
-      if (ended) channels.replied(spokenKey, reply);
+      const answered = ended ? channels.replied(spokenKey, reply) : null;
       // And the conversation, written down: the prompt on its way in and
       // the reply on its way out, for the search and the drawer. Before the
       // cap below, which is the sidebar's and not the record's.
-      recordTurn(agentId, parsed.report, body as Record<string, unknown>, utterance);
+      const turn = recordTurn(agentId, parsed.report, body as Record<string, unknown>, utterance);
+      // And the other nodes hear the reply of this node's Kuru, with what it
+      // answered, under the id their drawers will see it by. See `peerkuru.ts`.
+      if (answered && spokenKey === kuruKey() && typeof reply === "string" && reply.trim()) {
+        peerKurus?.replied({ id: turn !== null ? `t${turn}` : `r${Date.now().toString(36)}`, at: Date.now(), text: reply.trim() }, answered.origin, answered.answers);
+      }
       // And what the turn ended in, for the links under the agent's row and
       // on its card. See `noteMade`.
       noteMade(agentId, parsed.report, body as Record<string, unknown>);
@@ -6846,6 +6873,13 @@ async function attach(port: Port): Promise<void> {
     openTerminal: openTerminalAt,
     machines: machinesSnapshot,
     nodes: () => nodes.statuses(),
+    // Through the variables: the links and the peers are built further down.
+    peers: {
+      self: () => nodes.name(),
+      ask: (node, message, wait, timeoutS) => (peerKurus ? peerKurus.ask(node, message, wait, timeoutS) : Promise.resolve({ text: "Nodes are not up yet.", isError: true })),
+      read: (node, turns) => (peerKurus ? peerKurus.read(node, turns) : { text: "Nodes are not up yet.", isError: true }),
+      board: (node, verb, args) => (peerKurus ? peerKurus.board(node, verb, args) : Promise.resolve({ text: "Nodes are not up yet.", isError: true })),
+    },
     shellOn: (machine, workspaceName, dir, run) =>
       run ? commandOn(machine, workspaceName, dir, run) : Promise.resolve(sessionShell(machine, workspaceName, dir)),
     agentOn,
@@ -6918,6 +6952,8 @@ async function attach(port: Port): Promise<void> {
       if (msg.type === "outbox") {
         kuru.changed();
         channels.outboxMoved(msg.outbox, (id) => workspaces.keyOf(id));
+        // And another node's words here report back to it as they move.
+        peerKurus?.outboxMoved(msg.outbox);
       }
     },
     index: { load: () => store.loadOutbox(), save: (entries) => store.saveOutbox(entries), remove: (id) => store.removeVoice(id) },
@@ -6936,6 +6972,9 @@ async function attach(port: Port): Promise<void> {
     },
     talk: (who, on) => voice.talk(who, on),
     delivered: (entry) => channels.delivered(entry.profileKey, entry),
+    // `@omarchy …`, for another node's Kuru, goes over the link. See `peerkuru.ts`.
+    addressed: (text, spoken) => peerKurus?.addressed(text, spoken) ?? null,
+    relay: (nodeId, words) => (peerKurus ? peerKurus.relay(nodeId, words) : "nodes are not up yet"),
   });
   channels = new Channels({
     broadcast,
@@ -6962,6 +7001,8 @@ async function attach(port: Port): Promise<void> {
     missed: (key) => voice.missedFor(key),
     broadcast,
     files: kuruFiles,
+    peers: () => peerKurus?.peers() ?? [],
+    moved: () => peerKurus?.conversationMoved(),
   });
   backup = new Backup({
     store,
@@ -6994,6 +7035,38 @@ async function attach(port: Port): Promise<void> {
     changed: pushNodes,
     log: (line) => console.log(`kururu: ${line}`),
     moves: { check: (peer, ask) => mover.check(peer, ask), adopt: (peer, offer) => mover.adopt(peer, offer) },
+    peer: (nodeId, message) => peerKurus?.message(nodeId, message),
+    linked: (nodeId) => {
+      peerKurus?.linked(nodeId);
+      // The user's words for that node that were waiting go now.
+      outbox.retry(nodeId);
+    },
+  });
+  peerKurus = new PeerKurus({
+    nodes,
+    kuruKey,
+    items: () => {
+      const key = kuruKey();
+      return key ? kuru.items(key) : [];
+    },
+    outbox: {
+      fromPeer: (profileKey, id, at, text) => outbox.fromPeer(profileKey, id, at, text),
+      peerState: (id, report) => outbox.peerState(id, report),
+      all: () => {
+        const message = outbox.message();
+        return message.type === "outbox" ? message.outbox : [];
+      },
+    },
+    speak: (key, text, utterance) => voice.spoke(key, text, utterance),
+    missed: (key) => voice.missedFor(key),
+    board: (verb, args, from) => {
+      const key = kuruKey();
+      const profileId = key ? workspaces.profileIdOf(key) : null;
+      return profileId ? harness.peerBoard(profileId, verb, args, from) : Promise.resolve({ text: "This node has no Kuru profile.", isError: true });
+    },
+    changed: () => kuru.changed(),
+    stateDir: dirname(snapshotPath()),
+    log: (line) => console.log(`kururu: ${line}`),
   });
   mover = new Mover({
     workspaces,
@@ -7397,6 +7470,7 @@ export function shutdown(): Promise<void> {
     closeAllPreviews();
     backup?.close();
     nodes?.close();
+    peerKurus?.close();
     linkWss.close();
     store?.close();
     void closeDatabasePools();
