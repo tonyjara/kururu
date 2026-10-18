@@ -408,6 +408,9 @@ first.
 **Only Kuru speaks, and only the leader polls.** The bot token is a secret the
 parent grants; the allow-list and the switch ride in the roster. A node is
 eligible to lead when it holds the token grant and is signed in to Claude.
+The switch can be flipped from any node — a flip signed by that node, last
+change winning, taken into the roster when the parent hears it — and the
+allow-list only on the parent (*As built*, phase 5, below).
 
 **Addressing.** A bare message from the chat goes to the leader's Kuru. A
 message starting `@omarchy` — or `/omarchy`, since Telegram's apps may
@@ -909,7 +912,8 @@ doctor` lists the held kinds.
 - **Only the secret part of a file travels**, and the digest is over that
   part. The Telegram kind is the token and the bot, never the Mac's switch
   or allow-list, which would have made the child a second poller. A child
-  holding it cannot switch it on; phase 5 made holding it the takeover.
+  holding it cannot switch it on; phase 5 made holding it the takeover, and
+  later any node's switch (a signed flip over the links, not the file).
 - **A Codex login does not follow its source.** Codex refreshes `auth.json`
   itself, so pushing the Mac's refreshes would be two machines refreshing
   one login. It is copied once, and *Push again* sends the Mac's again. It is
@@ -1033,9 +1037,35 @@ minute) ends with the Mac polling and one 409 in the child's log.
   does.
 - **A child with a bot of its own keeps it**, outside the roster's channel,
   as before; one with no token at all is still shared, and its Kuru speaks
-  through the reader. The roster's settings are set on the parent only, so
-  a child's switch and list are read-only, and pairing on the parent while
-  a child reads the chat asks for it back at once and with force.
+  through the reader. The list is set on the parent only, and pairing on
+  the parent while a child reads the chat asks for it back at once and with
+  force.
+- **The switch from any node** (KUR-132's follow-up, the same day). As
+  first built, the switch rode only in the roster, so a child's was
+  read-only — and with the Mac shut, the user at the box's page was told
+  the channel could only be switched on from the Mac, which is the one
+  moment the box exists for. Now a flip on any node is a `TelegramSwitch`:
+  signed with that node's key, stamped no earlier than one past the word it
+  replaces, handed to every node it can reach and on from each, and taken
+  where it is the latest word; it works at once, and a child keeps it until
+  the Mac writes it into its file and the next roster, which it does the
+  moment their link comes up. Last change wins, by the clocks, which the
+  tailnet's machines keep by NTP. The allow-list stays the parent's: it is
+  who may give Kuru orders on every node, and a child is a box other
+  programs run on; the switch only admits accounts the Mac already
+  allowed. A node with no token cannot switch it on, since the node the
+  user stands at is often the only one awake to read the chat, and the
+  page says to lend it; it can always switch off, and then the reader
+  tells the chat. A parent from before this carries no `switchedAt` and
+  would never take a flip in, so a child under one refuses with a reason.
+  Verified with two throwaway kururus and a stand-in Bot API: the Mac off
+  and frozen, the box switched it on and polled at once, a message reached
+  its Kuru, the Mac took the flip into roster v6 on thawing and the poll
+  back a minute later; the box switched it off while the Mac polled and the
+  Mac stopped at once; a box with no token was refused with the lending
+  sentence, switched off, and the Mac told the chat; the Mac frozen while
+  polling, the box took over and switched off, and the thawed Mac never
+  polled. No 409 in any of it.
 - **Every crossing is acknowledged** — `telegram-in-ack`, `telegram-out-ack`
   and `lead-ack` beside the plan's four — and the sender keeps what it sent
   until then: a held message until the node has it in its outbox, a line

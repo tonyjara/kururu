@@ -340,8 +340,11 @@ The load-bearing invariants, one line each, with the argument behind the link:
   never a run. A notice crosses into another drawer without the reply it
   quoted. → [nodes](docs/nodes.md#kurus-as-peers)
 - **One Telegram bot for every node, read by one node at a time.** The
-  parent's switch, switch time and allow-list ride in the roster it signs,
-  so only the parent sets them; the token is lent on its own. `LeadGate`
+  parent's allow-list rides in the roster it signs, so only the parent
+  sets it; the switch rides there too, but any node may flip it — a
+  `TelegramSwitch` signed by that node and handed on, the latest word
+  winning, written into the roster when the parent hears it — and only a
+  node holding the token may turn it on. The token is lent on its own. `LeadGate`
   (`shared/nodes.ts`) says which node polls — the highest-ranked eligible
   one it can reach; 30 s of silence to take over, a minute of steady link
   and a holder that is not mid-conversation to take back; rank settles a

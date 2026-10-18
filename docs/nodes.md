@@ -667,18 +667,21 @@ this is what was built.
 
 ### What is shared, and with whom
 
-- **The settings ride in the roster.** The parent's switch, its switch time
-  and its allow-list, and which bot, go into the roster it signs
-  (`Roster.channels.telegram`) whenever they change on its Channels page. A
+- **The settings ride in the roster.** The parent's switch, when it last
+  moved and from which node, its allow-list, and which bot go into the
+  roster it signs (`Roster.channels.telegram`) whenever they change. A
   child judges every message by those, so only the parent can let an
-  account in or turn the chat off. The token is not in the roster: it is a
+  account in. The switch is the exception: any node may flip it
+  ([below](#the-switch-from-any-node)), and the parent writes the newest
+  flip into the next roster. The token is not in the roster: it is a
   secret, lent on its own ([Kinds](#kinds)).
 - **Shared mode.** A node is in it when it is in a roster that carries the
   channel, unless it is a child with a bot of its own pasted there — that
   child keeps its own bot and chat, as before there were nodes. A child with
   no token at all is still in it: its Kuru speaks in the chat through
   whichever node reads it.
-- **Eligible to read the chat**: the channel is on, the node holds the
+- **Eligible to read the chat**: the channel is on — the switch as this
+  node last heard it, from the roster or a node's flip — the node holds the
   token (its own on the parent, lent on a child), and Claude is signed in
   there (`leadEligibility` in `index.ts`). Each node says so in its summary
   (`NodeSummary.lead`), with whether it reads the chat now. A kururu from
@@ -714,6 +717,64 @@ with the times passed in:
   one with an eligible node above it stands down for five minutes, the
   highest retries after thirty seconds, and each says which in its log —
   one line per 409.
+
+### The switch, from any node
+
+The channel is turned on and off from whichever node's Settings → Channels
+the user has in front of them — the Mac's, the box's, or either one's
+phone link — and the Mac need not be awake. The case it is for: out with a
+phone, the Mac shut, the box at home the one that could read the chat.
+
+- **A flip is signed and handed on.** `TelegramLead.flip` makes a
+  `TelegramSwitch` (`shared/channels.ts`): on or off, when, which node, and
+  whether that node told the chat. It is signed with the node's own key —
+  the one the roster lists for it, the link handshake's — and sent as
+  `telegram-switch` to every node this one can reach, and to each one that
+  links later while it is still news. A node checks the signature against
+  the roster's key for the node named in it, not the peer it came from, so
+  it crosses the mesh by any road, and takes it only when it is the later
+  word, which is also what stops it going round.
+- **Last change wins.** Each node goes by the latest word it has, the
+  roster's or a flip's, by the time it was made, a tie by node id. A new
+  flip is stamped no earlier than one past the word it replaces
+  (`switchTime`), so a node whose clock runs behind another's still makes
+  the newest word when the user flips it there.
+- **It works at once.** The node that flips goes by it there and then, and
+  so does every node that hears it; eligibility is the switch as each node
+  has it, so off stops the poll on whichever node holds it the moment that
+  node hears, and on lets `LeadGate` pick one poller among the nodes that
+  can. A Mac that was last heard saying it could not read the chat — it was
+  off — is not waited for: the box polls as soon as it is switched on.
+- **The Mac takes it in when it is back.** A child keeps a flip the roster
+  does not carry yet in `telegram.json` (state) and hands it to the Mac when
+  their link comes up. The Mac writes it into its own `telegram.json` —
+  switch, switch time, and who flipped it — and so into the next roster,
+  after which every child drops its copy. Nothing is lost by the Mac being
+  shut, and nothing a child said is undone by the Mac coming back with an
+  older roster. A flip on the Mac made later than the box's while the two
+  were apart is the later word and stands.
+- **Told once.** The node that flips tells the chat — *"Kuru is listening
+  here now."* or *"Kuru stopped listening here…"* — if it holds the token.
+  A node with none can only switch off, and then the node reading the chat
+  says it when it hears.
+- **What a node may not do.** Turn it on without a token of its own: the
+  node the user is standing at is often the only one awake to read the
+  chat, so a box with nothing lent says *"This node holds no bot token, so
+  it could not read the chat. Lend it from the Mac's Settings → Nodes → box
+  → Secrets → Telegram, then switch it on here."* Off it always may. And
+  nothing, on or off, when the roster comes from a parent from before this
+  (its copy has no `switchedAt`), which would never take the flip in: the
+  page says to switch it there or update it. A node on a split tailnet that
+  cannot reach the holder cannot stop it; the holder stops when the link
+  comes back.
+- **The list stays the parent's.** The allow-list is who may give Kuru
+  orders with the user's authority, on every node at once. A child is a
+  box other programs run on, and an account it let in would reach the
+  Mac's Kuru too; so the list is changed only on the Mac, by a pairing the
+  user confirms there, and signed into the roster. The switch lets in only
+  the accounts the Mac already allowed, or keeps them out, and whoever holds
+  the token could read the bot anyway — so it is safe to let any member
+  flip it.
 
 ### Where a message goes
 
@@ -756,7 +817,12 @@ Kuru says it in its own words.
 
 - **Settings → Channels** lists the nodes by rank: which reads the chat now,
   which could, and why not for the rest. On a child it is that list, the
-  switch as the parent set it, the token held from it, and *Talks to*.
+  switch — live, with the refusal under it when it cannot be flipped here —
+  the token held from the parent, and *Talks to*. Under the switch, on any
+  node: who flipped it last when that was another node (*turned on from
+  Box at 23:10*), and on a child whose flip the Mac has not taken in yet,
+  *the Mac takes it in when it is back*. The drawer's switch, drawn for a
+  node with a token and a list, is the same flip.
 - **Settings → Nodes** marks the node that reads the chat as the leader.
 - **`kururu child doctor`** has a `leading` row: rank, eligible or why not,
   and whether this box reads the chat now. Never a ✗.
@@ -775,6 +841,7 @@ Kuru says it in its own words.
 | `telegram-in-ack {id}` | that node | in its outbox |
 | `telegram-out {id, at, text, silent, notice}` | any node | a line for the reader to post |
 | `telegram-out-ack {id}` | the reader | queued |
+| `telegram-switch {switch}` | any node, and each node that takes it | a signed flip of the switch, handed on |
 
 ## Files
 
@@ -791,7 +858,7 @@ Kuru says it in its own words.
 | `gh/` | config, `0700`, a child | a lent GitHub login: gh's `hosts.yml` and git's `git-credentials`, both `0600`; kururu's terminals are pointed at it. Never backed up |
 | `~/.ssh/kururu/` | home, `0700`, a child | lent ssh entries: each key, `.pub`, `.known_hosts` and `.conf`, brought in by one `Include` line at the top of `~/.ssh/config` |
 | a project's `.env*` | its checkout, `0600`, a child | a lent env file, at the path it has on the parent |
-| `telegram.json` | state, `0600` | the poll's place, and when the chat is shared: the held messages, the reply map, the handled ids, the lines on their way to the reader, and whether this node held the poll when it stopped. Never the token, which is in config |
+| `telegram.json` | state, `0600` | the poll's place, and when the chat is shared: the held messages, the reply map, the handled ids, the lines on their way to the reader, whether this node held the poll when it stopped, and on a child a flip of the switch the roster does not carry yet. Never the token, which is in config |
 
 A `node.json` the server cannot read is left as it is, and nodes are off for
 that run. A new identity would be a member nobody enrolled.
