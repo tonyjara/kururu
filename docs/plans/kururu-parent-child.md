@@ -14,8 +14,10 @@ the Mac with a stand-in Claude and awaiting its two-machine checks. Its
 marks are `[kuru@mac]` and `[user@mac]` rather than the bare `[mac]` below,
 for the reason `docs/nodes.md` gives; and phase 4, lending secrets
 (`docs/nodes.md#lending-secrets`), checked between two throwaway nodes on the
-Mac with fake keys and awaiting its two-machine checks. Phase 5 is being
-built. It is written so that an agent can take one phase, read the files it
+Mac with fake keys and awaiting its two-machine checks; and phase 4b, a
+project's own secrets — env files, ssh keys, a GitHub login — lent to a
+node and offered by the move dialog (`docs/nodes.md#lending-a-projects-secrets`),
+checked the same way. Phase 5 is being built. It is written so that an agent can take one phase, read the files it
 names, and know what "done" is. Each phase is shaped as a card: its scope,
 what it depends on, what it can run beside, and how it is verified. The first
 draft had one Kuru driving every node's agents, a Telegram poller set by hand,
@@ -921,6 +923,60 @@ doctor` lists the held kinds.
   one over a newer.
 - `NodeHost` gained `on(type, handler)`, link-up and link-down hooks, an
   unpair hook and `send(peer, message)`, for this and the later phases.
+
+### Phase 4b — a project's secrets
+
+**Scope.** Moving a workspace (phase 6) left behind what the project needs
+to run on the node, and the dialog said "copy what it needs by hand". The
+first real use is Holapy to the Omarchy PC (HOL-58). Three more families of
+kind on phase 4's road: a workspace's env files (`.env`, `.env.local`,
+`.env.production` and the like, detected and picked), into the matching
+checkout on the node at `0600`, following the Mac's file and removed when
+switched off; an ssh `Host` entry with its key, so agents there can deploy
+and connect, removed with its entry when switched off; a GitHub login for a
+chosen gh account, so the node can clone and push. Seen in Settings → Nodes
+beside phase 4's switches and in the Move to <node>… dialog, which offers to
+lend them with the move; Kuru gets `lend_secrets`, previewing first and
+never handed a value; the doctor's secrets row names them by hint.
+
+**Depends on.** 4 (grants, the envelope, pushes) and 6 (the folder check).
+
+**Verified by.** The text rules as pure tests (`server/test/vault.test.ts`:
+env names, ssh config blocks and what travels, hashed `known_hosts`, key
+preambles, gh's `hosts.yml`, the `Include` line in and out); each family
+round-tripped between a parent and a child `Secrets` with fake keys in
+`secrets.test.ts`, with no value in any view, record or log line; two
+throwaway nodes on the Mac on free ports with a scratch home. On the two
+machines: Holapy's `.env.local` lent with its move lands in its checkout on
+the box and follows an edit on the Mac; the VPS's entry lets an agent there
+`ssh` it; a lent gh login clones a private repository there; switching each
+off removes it.
+
+**As built**, 2026-10-18:
+
+- **An env file is lent to one node**, its kind a hash of node, checkout
+  and file, and where it lands travels inside the seal — so the folder is
+  part of the digest and pointing the lend somewhere else is a push. The
+  lend is kept in `grants.json` beside the grants and outlives the
+  workspace here, which is what lets a moved project's env files keep
+  following the Mac's.
+- **Never over the node's own.** An env file that is there and says
+  something else, or a `Host` the node's config already has, refuses the
+  grant with the reason, as a Codex login does. The same bytes are taken
+  as lent already.
+- **ssh lands beside, never in.** `~/.ssh/kururu/<alias>.conf` and one
+  `Include` line at the top of `~/.ssh/config`; only portable directives
+  travel, because `UseKeychain` is fatal on Linux and a `ProxyCommand` is a
+  program on the Mac. The host's `known_hosts` lines travel with it.
+- **A GitHub login is a directory, not an environment.** gh's `hosts.yml`
+  and git's credential file in `~/.config/kururu/gh`, with kururu's
+  terminals pointed there by `GH_CONFIG_DIR` and `GIT_CONFIG_*` — paths
+  only. The Claude token stays the one credential in a pty's environment.
+- **Keys and tokens are read only once lent.** Until then an entry or an
+  account is listed by being there, as a Codex login is; env files are read
+  for their count of variables.
+- **Nothing is pre-ticked.** The move dialog offers, suggests with a
+  reason, and lends what the user ticks, after the move lands.
 
 ### Phase 5 — one Telegram, with failover
 

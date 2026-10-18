@@ -111,7 +111,8 @@ import { NodeHost, nodeRequestRefusal } from "./nodes";
 import { Mover } from "./move";
 import { nodeOfUtterance, PeerKurus, peerKey } from "./peerkuru";
 import { Secrets } from "./secrets";
-import { webKind, type KindSpec } from "../../shared/secrets";
+import { adoptLendAsk, asksAnything, webKind, type KindSpec, type Lendable, type LendAsk, type SecretsView } from "../../shared/secrets";
+import { folderSentence, type MoveCheck } from "../../shared/move";
 import { summarize, type NodeSummary } from "../../shared/nodes";
 import { hostname } from "node:os";
 import { Store, dataDir, dbPath } from "./store";
@@ -221,7 +222,7 @@ import {
 import { hookSettingsFlag } from "./hooks";
 import { Harness } from "./harness";
 import { mcpAnswer } from "./mcp";
-import { claudeDirFor, codexDirFor, lentClaudeEnv, loginDir, loginEnv, scanLogins } from "./logins";
+import { claudeDirFor, codexDirFor, lentClaudeEnv, lentGhEnv, loginDir, loginEnv, scanLogins } from "./logins";
 import {
   adoptLaunch,
   findLauncher,
@@ -743,9 +744,11 @@ function spawnEnvFor(profileId: string): Record<string, string> | undefined {
   const login = loginsActive() && profile ? loginEnv(profile.loginKey) : undefined;
   const token = tokenInPtys() ? tokenEnv() : undefined;
   // A Claude login the parent lent this node, on a child whose user has no
-  // browser anywhere: needs the host's `env` too, so protocol 2.
+  // browser anywhere, and a GitHub login it lent so agents can clone and
+  // push: both need the host's `env` too, so protocol 2.
   const lent = hostProtocol >= 2 ? lentClaudeEnv() : undefined;
-  return login || token || lent ? { ...login, ...token, ...lent } : undefined;
+  const gh = hostProtocol >= 2 ? lentGhEnv() : undefined;
+  return login || token || lent || gh ? { ...login, ...token, ...lent, ...gh } : undefined;
 }
 
 /**
@@ -763,6 +766,88 @@ function claudeDirOf(profileId: string): string {
   const profile = workspaces.profile(profileId);
   if (loginsActive() && profile) return claudeDirFor(profile.loginKey);
   return process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+}
+
+/**
+ * The checkout a workspace's env files are read from: the repository its
+ * folders are in, the focused one first, as the branch walk finds it. Found
+ * by the server, as every root is, and never a path a client sent; null for
+ * a workspace in no repository. Not `state.projects`, whose root is the
+ * workspace's first folder even when that is no repository — a new
+ * workspace's shell at home, whose env files would be every project's.
+ */
+async function checkoutOf(workspace: Workspace): Promise<string | null> {
+  for (const dir of focusedDirs(workspace)) {
+    const repo = await repoFor(dir);
+    if (repo) return repo.root;
+  }
+  return null;
+}
+
+function workspaceIn(profileId: string, workspaceId: string): Workspace {
+  const workspace = workspaces.profile(profileId)?.workspaces.find((w) => w.id === workspaceId);
+  if (!workspace) throw new Error("That workspace is gone.");
+  return workspace;
+}
+
+/**
+ * What a workspace could lend a node — its env files, the ssh entries and
+ * GitHub logins this Mac has, the ones it seems to need first — with the
+ * node's word on the folder its env files would go to. Hints only.
+ */
+async function lendOffer(profileId: string, workspaceId: string, nodeId: string, folder: string | null): Promise<Lendable> {
+  const workspace = workspaceIn(profileId, workspaceId);
+  const name = nodes.nameOf(nodeId);
+  if (!name) throw new Error("That node is not in the roster.");
+  const root = await checkoutOf(workspace);
+  let check: MoveCheck | null = null;
+  let checkError: string | null = null;
+  try {
+    check = await mover.folderCheck(profileId, workspaceId, nodeId, folder, root);
+  } catch (err) {
+    checkError = err instanceof Error ? err.message : String(err);
+  }
+  const pinned = workspace.machine ? (findMachine(workspace.machine.machineId)?.host ?? null) : null;
+  return secrets.offer({ node: { id: nodeId, name }, workspace: { id: workspace.id, name: workspace.name }, root, pinned, check, checkError });
+}
+
+/**
+ * Lend a node what was asked of a workspace's. The folder its env files go
+ * to is asked of the node again now, whatever a client said it checked:
+ * it is where the node will write, and the node is the one who knows.
+ */
+async function lendSecrets(profileId: string, workspaceId: string, nodeId: string, folder: string | null, raw: unknown): Promise<{ view: SecretsView; lent: string[]; to: string | null }> {
+  const ask = adoptLendAsk(raw);
+  if (!asksAnything(ask)) throw new Error("Nothing was named to lend.");
+  const workspace = workspaceIn(profileId, workspaceId);
+  const root = await checkoutOf(workspace);
+  let to: string | null = null;
+  if (ask.env.length) {
+    const check = await mover.folderCheck(profileId, workspaceId, nodeId, folder, root);
+    if (check.problem) throw new Error(folderSentence(check.problem, nodes.nameOf(nodeId) ?? "the node", check.shown));
+    to = check.folder;
+  }
+  return { ...secrets.lendProject(nodeId, { root, to, workspace: workspace.name }, ask), to };
+}
+
+/**
+ * Move a workspace, and lend the node what the dialog ticked once it is
+ * there: into the folder the move was made to, which the node has just
+ * judged. The checkout here is found first, while the workspace still is.
+ * A move that is refused or fails lends nothing; a lend that fails after a
+ * move that worked is said beside it, since the move is done.
+ */
+async function moveAndLend(profileId: string, workspaceId: string, nodeId: string, folder: string, raw: unknown, actor: Actor) {
+  const ask = adoptLendAsk(raw ?? {});
+  const root = asksAnything(ask) ? await checkoutOf(workspaceIn(profileId, workspaceId)) : null;
+  const moved = await mover.move(profileId, workspaceId, nodeId, folder, actor);
+  if (!asksAnything(ask)) return { ...moved, lent: [] as string[], lendError: null };
+  try {
+    const { lent } = secrets.lendProject(nodeId, { root, to: moved.done.folder, workspace: moved.done.name }, ask);
+    return { ...moved, lent, lendError: null };
+  } catch (err) {
+    return { ...moved, lent: [] as string[], lendError: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /**
@@ -4732,7 +4817,13 @@ function handleMessage(ws: WebSocket, raw: string): void {
       void replyAsync(ws, msg.id, () => mover.plan(workspaces.active.id, String(msg.workspaceId), String(msg.nodeId), typeof msg.folder === "string" ? msg.folder : null));
       return;
     case "node-move":
-      void replyAsync(ws, msg.id, () => mover.move(workspaces.active.id, String(msg.workspaceId), String(msg.nodeId), String(msg.folder ?? ""), "user"));
+      void replyAsync(ws, msg.id, () => moveAndLend(workspaces.active.id, String(msg.workspaceId), String(msg.nodeId), String(msg.folder ?? ""), msg.lend, "user"));
+      return;
+    case "secrets-offer":
+      void replyAsync(ws, msg.id, () => lendOffer(workspaces.active.id, String(msg.workspaceId), String(msg.nodeId), typeof msg.folder === "string" ? msg.folder : null));
+      return;
+    case "secrets-lend":
+      void replyAsync(ws, msg.id, () => lendSecrets(workspaces.active.id, String(msg.workspaceId), String(msg.nodeId), typeof msg.folder === "string" ? msg.folder : null, msg.ask));
       return;
 
     case "secret-grant":
@@ -7012,6 +7103,8 @@ async function attach(port: Port): Promise<void> {
     showFile: showFileFor,
     movePlan: (profileId, workspaceId, nodeId, folder) => mover.plan(profileId, workspaceId, nodeId, folder),
     moveWorkspace: (profileId, workspaceId, nodeId, folder) => mover.move(profileId, workspaceId, nodeId, folder, "harness"),
+    lendOffer: (profileId, workspaceId, nodeId, folder) => lendOffer(profileId, workspaceId, nodeId, folder),
+    lendSecrets: (profileId, workspaceId, nodeId, folder, ask) => lendSecrets(profileId, workspaceId, nodeId, folder, ask),
   });
   // The reports a remote agent's hooks cannot send, read off its screen.
   screens = new OnScreen({

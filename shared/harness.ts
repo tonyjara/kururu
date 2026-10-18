@@ -367,13 +367,30 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "move_workspace",
     description:
-      "Move a workspace of this profile to another node (kururu_status lists them under nodes). Its name and its board go there, every card with its history, and it leaves this list. The code, env files, databases, panes and terminals do not move: the node works in its own checkout of the project, which must already be there. Refused while an agent runs in it or a card has a worktree standing. Without confirm it only says what would move and stay and whether the folder there will do: call it that way first and tell the user. Call it with confirm=true only after they have said yes, because it closes the workspace's terminals here.",
+      "Move a workspace of this profile to another node (kururu_status lists them under nodes). Its name and its board go there, every card with its history, and it leaves this list. The code, databases, panes and terminals do not move: the node works in its own checkout of the project, which must already be there. Its env files, ssh keys and a GitHub login stay too unless lent with lend_secrets — call that first, while the workspace is still here. Refused while an agent runs in it or a card has a worktree standing. Without confirm it only says what would move and stay and whether the folder there will do: call it that way first and tell the user. Call it with confirm=true only after they have said yes, because it closes the workspace's terminals here.",
     inputSchema: obj(
       {
         workspace: WORKSPACE,
         node: str("The node's name, such as omarchy."),
         folder: str("The project's folder on that node, ~/… or /…. Default: the node's guess, the same folder name under its projects folder."),
         confirm: bool("true to move it. Absent or false only shows what would happen."),
+      },
+      ["workspace", "node"],
+    ),
+  },
+  {
+    name: "lend_secrets",
+    description:
+      "Lend another node what a workspace of this profile needs to run there: its env files (.env.local and the like, written into the project's checkout on that node), ssh Host entries with their keys (for a deploy or a shell from there), and a GitHub login (so it can clone and push). Sealed to that node and kept in step when they change here; Settings → Nodes takes each back. Only this Mac lends, and only to a node in its roster. Without confirm it lists what could be lent, by hint only — file names and how many variables, host aliases and key names, account names — which ones the project seems to need and why, and what is lent already: call it that way first and tell the user. Call it with confirm=true and the names the user agreed to, never more. You are never given a value, and never ask for one. Lend before move_workspace: after the move the workspace is not here to lend from.",
+    inputSchema: obj(
+      {
+        workspace: WORKSPACE,
+        node: str("The node's name, such as omarchy."),
+        folder: str("The project's checkout on that node, ~/… or /…, for env files. Default: the node's guess, as move_workspace makes it."),
+        env: { type: "array", items: { type: "string" }, description: "Env files to lend, by the names the preview lists, such as .env.local. [\"all\"] for every one it lists." },
+        ssh: { type: "array", items: { type: "string" }, description: "ssh Host aliases to lend, by the names the preview lists." },
+        github: str("A GitHub account to lend, by the name the preview lists. One per node: lending another replaces it."),
+        confirm: bool("true to lend them. Absent or false only lists what could be lent."),
       },
       ["workspace", "node"],
     ),

@@ -31,21 +31,29 @@
  */
 import { tokenHint, validTelegramToken, adoptBot } from "./channels";
 import { firecrawlHint, validFirecrawlKey } from "./firecrawl";
+import type { MoveCheck } from "./move";
 import { keyHint, validOpenRouterKey } from "./openrouter";
 import { canonical } from "./nodes";
+import { checkGhValue, checkSshValue, ENV_TEXT_MAX, envHint, envPathOk, GH_ACCOUNT, ghHint, SSH_ALIAS, sshHint, type GhValue, type SshValue } from "./vault";
 
 // ---------------------------------------------------------------------------
 // Kinds
 // ---------------------------------------------------------------------------
 
-export type KindFamily = "telegram" | "openrouter" | "firecrawl-cloud" | "web" | "claude-token" | "codex-auth";
+export type KindFamily = "telegram" | "openrouter" | "firecrawl-cloud" | "web" | "claude-token" | "codex-auth" | "env" | "ssh" | "gh";
 
 /** Where a kind is read on the parent, or written on a child. */
 export type SecretPlace =
   /** A file in `~/.config/kururu`. */
   | { in: "config"; file: string }
   /** `auth.json` in a Codex home: the parent's for that login, the child's default one. */
-  | { in: "codex-home" };
+  | { in: "codex-home" }
+  /** An env file in a project's checkout: the parent's, read where the lend says; the child's, at the folder the lend names. */
+  | { in: "project" }
+  /** A Host entry and its key: `~/.ssh` on the parent, `~/.ssh/kururu` on a child. */
+  | { in: "ssh" }
+  /** A GitHub login: gh's on the parent, `~/.config/kururu/gh` on a child. */
+  | { in: "gh" };
 
 export interface KindSpec {
   /** `openrouter`, `web:firecrawl-self`, `claude-token:machine`, `codex-auth:0123456789ab`. */
@@ -77,6 +85,13 @@ export interface KindSpec {
   group: string | null;
   /** For the families with one per Mac login: `machine` or the login key. */
   login: string | null;
+  /**
+   * Lent to one node only, the kind's id made from that node and what it
+   * lends. An env file is, because where it lands — the checkout on that
+   * node — is part of what travels, and the digest that says a push is owed
+   * has to be the same on both ends.
+   */
+  perNode: boolean;
 }
 
 /** The web providers' files are `web-<id>.json` (`providerFile`); an id is what fits that name. */
@@ -111,6 +126,7 @@ export function kindOf(id: unknown): KindSpec | null {
       follows: true,
       group: null,
       login: null,
+      perNode: false,
     };
   }
   if (id === "openrouter") {
@@ -125,6 +141,7 @@ export function kindOf(id: unknown): KindSpec | null {
       follows: true,
       group: null,
       login: null,
+      perNode: false,
     };
   }
   if (id === "firecrawl-cloud") {
@@ -139,6 +156,7 @@ export function kindOf(id: unknown): KindSpec | null {
       follows: true,
       group: null,
       login: null,
+      perNode: false,
     };
   }
   const web = /^web:(.+)$/.exec(id);
@@ -157,6 +175,7 @@ export function kindOf(id: unknown): KindSpec | null {
       follows: true,
       group: null,
       login: null,
+      perNode: false,
     };
   }
   const claude = /^claude-token:(.+)$/.exec(id);
@@ -174,6 +193,7 @@ export function kindOf(id: unknown): KindSpec | null {
       follows: true,
       group: "claude-token",
       login,
+      perNode: false,
     };
   }
   const codex = /^codex-auth:(.+)$/.exec(id);
@@ -191,6 +211,59 @@ export function kindOf(id: unknown): KindSpec | null {
       follows: false,
       group: "codex-auth",
       login,
+      perNode: false,
+    };
+  }
+  const env = /^env:([0-9a-f]{12})$/.exec(id);
+  if (env) {
+    return {
+      id,
+      family: "env",
+      label: "Env file",
+      unlocks: "the project's env file in its checkout there, for its agents and dev servers",
+      revoke: "Change what it holds at each service it names (a database password, an API key), then save the new file here: the node is sent it within seconds.",
+      source: { in: "project" },
+      lands: { in: "project" },
+      follows: true,
+      group: null,
+      login: null,
+      perNode: true,
+    };
+  }
+  const ssh = /^ssh:(.+)$/.exec(id);
+  if (ssh) {
+    const alias = ssh[1]!;
+    if (!SSH_ALIAS.test(alias)) return null;
+    return {
+      id,
+      family: "ssh",
+      label: `SSH host ${alias}`,
+      unlocks: `ssh ${alias} from its terminals, for an agent's deploy or a shell there, with the host's key already known`,
+      revoke: `Take the key's line out of ~/.ssh/authorized_keys on ${alias} (or the provider's list of keys), then make a new key here and put that one there.`,
+      source: { in: "ssh" },
+      lands: { in: "ssh" },
+      follows: true,
+      group: null,
+      login: null,
+      perNode: false,
+    };
+  }
+  const gh = /^gh:(.+)$/.exec(id);
+  if (gh) {
+    const account = gh[1]!;
+    if (!GH_ACCOUNT.test(account)) return null;
+    return {
+      id,
+      family: "gh",
+      label: `GitHub login ${account}`,
+      unlocks: `git clone and push over https to github.com, and gh, as ${account}, in its terminals; it outranks a gh login of the node's own there`,
+      revoke: "On github.com, Settings → Applications → Authorized OAuth Apps → GitHub CLI → Revoke ends it everywhere, this Mac too; then gh auth login again here.",
+      source: { in: "gh" },
+      lands: { in: "gh" },
+      follows: true,
+      group: "gh",
+      login: null,
+      perNode: false,
     };
   }
   return null;
@@ -217,6 +290,38 @@ export const NEVER_SHARED: readonly { file: string; why: string }[] = [
   { file: GRANTS_FILE, why: "which node holds what: node ids that mean nothing after a new pairing" },
   { file: HELD_FILE, why: "what this child holds from the parent, by hint" },
 ];
+
+/**
+ * An env file lent to one node: where it is read on the parent and where it
+ * goes there. Kept beside the grants, by kind, in `grants.json`. `from` is a
+ * checkout the server found itself — a workspace's repository — never a path
+ * a client sent, and it outlives the workspace: a project moved to the node
+ * keeps its env files following the Mac's.
+ */
+export interface EnvLend {
+  node: string;
+  /** The checkout on the parent, absolute. */
+  from: string;
+  /** The file, relative to it. */
+  file: string;
+  /** The checkout on the node, absolute, as the node resolved it. */
+  to: string;
+  /** The workspace's name when it was lent, for the page and the hint. */
+  workspace: string;
+}
+
+/** The env lends out of a grants file, every field checked. */
+export function adoptEnvLends(raw: unknown): Record<string, EnvLend> {
+  const out: Record<string, EnvLend> = {};
+  for (const [kind, rawLend] of Object.entries(record(record(raw)?.env) ?? {})) {
+    const l = record(rawLend);
+    if (!l || kindOf(kind)?.family !== "env") continue;
+    const path = (v: unknown): v is string => typeof v === "string" && v.startsWith("/") && v.length <= 1024 && !v.includes("\0");
+    if (typeof l.node !== "string" || !/^n[0-9a-f]{12}$/.test(l.node) || !path(l.from) || !path(l.to) || !envPathOk(l.file)) continue;
+    out[kind] = { node: l.node, from: l.from, file: l.file, to: l.to, workspace: typeof l.workspace === "string" ? l.workspace.slice(0, 60) : "" };
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // What travels: the secret part of a file, and its hint
@@ -273,7 +378,31 @@ export function extract(spec: KindSpec, raw: unknown): unknown {
     }
     case "codex-auth":
       return codexValue(raw);
+    case "env":
+      return envValue(raw);
+    case "ssh":
+      return checkSshValue(raw) && raw.alias === spec.id.slice(4) ? raw : null;
+    case "gh":
+      return checkGhValue(raw) && raw.account === spec.id.slice(3) ? raw : null;
   }
+}
+
+/** An env file as it travels: where it lands, the file, its text, and the workspace it was lent for. */
+export interface EnvValue {
+  /** The checkout on the node, absolute. */
+  folder: string;
+  file: string;
+  text: string;
+  workspace: string;
+}
+
+function envValue(raw: unknown): EnvValue | null {
+  const r = record(raw);
+  if (!r || Object.keys(r).length !== 4) return null;
+  const { folder, file, text, workspace } = r;
+  if (typeof folder !== "string" || !folder.startsWith("/") || folder.length > 1024 || /[\0\r\n]/.test(folder)) return null;
+  if (!envPathOk(file) || typeof text !== "string" || text.length > ENV_TEXT_MAX || typeof workspace !== "string" || workspace.length > 60) return null;
+  return { folder, file, text, workspace };
 }
 
 /** Whether what arrived is what that kind's `extract` makes. A child takes nothing else. */
@@ -293,6 +422,10 @@ export function checkValue(spec: KindSpec, value: unknown): boolean {
       return validClaudeToken(v.token);
     case "codex-auth":
       return codexValue(v) !== null;
+    case "env":
+    case "ssh":
+    case "gh":
+      return extract(spec, v) !== null;
   }
 }
 
@@ -374,6 +507,14 @@ export function hintOf(spec: KindSpec, value: unknown): string {
       if (email) return email;
       return typeof v.OPENAI_API_KEY === "string" ? `API key …${v.OPENAI_API_KEY.slice(-4)}` : "signed in";
     }
+    case "env": {
+      const env = envValue(value);
+      return env ? envHint(env.folder, env.file, env.text) : "";
+    }
+    case "ssh":
+      return checkSshValue(value) ? sshHint(value.alias, value.keyName, value.key) : "";
+    case "gh":
+      return checkGhValue(value) ? ghHint(value) : "";
   }
 }
 
@@ -680,6 +821,10 @@ export interface CatalogueEntry {
   follows: boolean;
   /** The parent's hint for what it holds, or null when it holds none. */
   hint: string | null;
+  /** Why it cannot be lent though it is listed: an ssh entry whose key is in an agent rather than a file. */
+  note: string | null;
+  /** For an env file: the one node it is lent to, and from where to where. */
+  project: { node: string; workspace: string; file: string; from: string; to: string } | null;
 }
 
 export interface GrantView {
@@ -750,6 +895,101 @@ export function grantText(view: GrantView, node: string): string {
     case "failed":
       return `${node} refused it: ${view.error ?? "no reason given"}`;
     case "missing":
+      return missingText(view.kind);
+  }
+}
+
+function missingText(kind: string): string {
+  switch (kindOf(kind)?.family) {
+    case "env":
+      return "the file is gone from this Mac's checkout; the node keeps the copy it has";
+    case "ssh":
+      return "this Mac has no key file for that entry now; the node keeps the copy it has";
+    case "gh":
+      return "gh on this Mac is not signed in as that account now; the node keeps the token it has";
+    default:
       return "this Mac has none to lend: set it on this Mac first";
   }
+}
+
+// ---------------------------------------------------------------------------
+// A project's secrets, offered for one node
+// ---------------------------------------------------------------------------
+
+/** One thing a workspace could lend a node, as the move dialog and Settings draw it and Kuru reads it. */
+export interface LendCandidate {
+  kind: string;
+  /** The file, the alias or the account. */
+  name: string;
+  /** The parent's hint for it, or null when there is nothing to lend. */
+  hint: string | null;
+  /** Why it cannot be lent, when it cannot. */
+  note: string | null;
+  /** Why it is offered for this project in particular: a deploy script names the host, the account owns the remote. Null for one merely there. */
+  why: string | null;
+  /** How it stands for that node now, if it was ever lent. */
+  grant: GrantView | null;
+}
+
+/** What a workspace could lend a node: its env files, the ssh hosts and the GitHub logins this Mac has, suggested ones first. */
+export interface Lendable {
+  node: { id: string; name: string };
+  workspace: { id: string; name: string };
+  /** The checkout here its env files are read from, as `~/…`; null when the workspace is in none. */
+  from: string | null;
+  /** The node's word on the folder they would go to. */
+  check: MoveCheck | null;
+  checkError: string | null;
+  env: LendCandidate[];
+  ssh: LendCandidate[];
+  github: LendCandidate[];
+}
+
+/** What to lend: env files by path, ssh entries by alias, one GitHub account. Anything not named is left as it is. */
+export interface LendAsk {
+  env: string[];
+  ssh: string[];
+  github: string | null;
+}
+
+/** An ask off the wire, bounded. */
+export function adoptLendAsk(raw: unknown): LendAsk {
+  const r = record(raw) ?? {};
+  const list = (v: unknown, ok: (s: string) => boolean) => (Array.isArray(v) ? [...new Set(v.filter((s): s is string => typeof s === "string" && ok(s)))].slice(0, 32) : []);
+  return {
+    env: list(r.env, envPathOk),
+    ssh: list(r.ssh, (s) => SSH_ALIAS.test(s)),
+    github: typeof r.github === "string" && GH_ACCOUNT.test(r.github) ? r.github : null,
+  };
+}
+
+/** Whether an ask asks for anything. */
+export function asksAnything(ask: LendAsk): boolean {
+  return ask.env.length > 0 || ask.ssh.length > 0 || ask.github !== null;
+}
+
+function candidateLine(c: LendCandidate, node: string): string {
+  const why = c.why ? ` (${c.why})` : "";
+  if (c.note) return `${c.name}: cannot be lent — ${c.note}`;
+  // Once it is lent, how it stands says the hint the node holds it by.
+  if (c.grant && c.grant.state !== "off") return `${c.name}${why} — ${grantText(c.grant, node)}`;
+  return `${c.name}${c.hint ? `: ${c.hint}` : ""}${why}`;
+}
+
+/**
+ * The offer as Kuru reads it from `lend_secrets`: the same lists the
+ * dialog draws, by hint. Never a value — there is none here to give.
+ */
+export function lendableText(l: Lendable): string {
+  const node = l.node.name;
+  const lines = [`What ${l.workspace.name} could lend ${node}, by hint only:`];
+  if (l.check) {
+    const where = l.check.problem ? `not usable (${l.check.problem}) — ${l.check.shown}` : l.check.shown;
+    lines.push(`Env files would go to ${where} on ${node}.`);
+  } else lines.push(`The folder on ${node} was not checked: ${l.checkError ?? "no answer"}.`);
+  lines.push(l.from ? `Env files in ${l.from}:` : "Env files: the workspace is in no checkout here, so none.");
+  if (l.from) lines.push(...(l.env.length ? l.env.map((c) => `- ${candidateLine(c, node)}`) : ["- none (.env.example and backups are never offered)"]));
+  lines.push("SSH hosts in this Mac's ~/.ssh/config:", ...(l.ssh.length ? l.ssh.map((c) => `- ${candidateLine(c, node)}`) : ["- none"]));
+  lines.push("GitHub logins gh has here:", ...(l.github.length ? l.github.map((c) => `- ${candidateLine(c, node)}`) : ["- none"]));
+  return lines.join("\n");
 }

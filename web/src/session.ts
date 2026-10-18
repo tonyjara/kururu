@@ -55,7 +55,7 @@ import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, V
 import type { MachineEntry, MachinePin, MachineStatus } from "../../shared/machines";
 import type { NodeStatus, NodesView } from "../../shared/nodes";
 import type { MoveDone, MovePlan } from "../../shared/move";
-import { EMPTY_SECRETS, type SecretsView } from "../../shared/secrets";
+import { EMPTY_SECRETS, type Lendable, type LendAsk, type SecretsView } from "../../shared/secrets";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { ReloadAsk, ReloadHold, ReloadPage } from "../../shared/reload";
 import type { Grid } from "./grid";
@@ -1196,9 +1196,32 @@ export function moveWorkspacePlan(workspaceId: string, nodeId: string, folder: s
   return request((id) => ({ type: "node-move-plan", id, workspaceId, nodeId, folder })) as Promise<MovePlan>;
 }
 
-/** Move it. Resolves once the node has it and it has left this list; rejects with why, and then nothing here changed. */
-export function moveWorkspaceTo(workspaceId: string, nodeId: string, folder: string): Promise<{ done: MoveDone; node: string; url: string }> {
-  return request((id) => ({ type: "node-move", id, workspaceId, nodeId, folder })) as Promise<{ done: MoveDone; node: string; url: string }>;
+/** What a move answered, and what was lent with it or why not. */
+export interface MoveResult {
+  done: MoveDone;
+  node: string;
+  url: string;
+  lent: string[];
+  lendError: string | null;
+}
+
+/**
+ * Move it, and lend the node what `lend` names once it is there. Resolves
+ * once the node has it and it has left this list; rejects with why, and
+ * then nothing here changed and nothing was lent.
+ */
+export function moveWorkspaceTo(workspaceId: string, nodeId: string, folder: string, lend?: LendAsk): Promise<MoveResult> {
+  return request((id) => ({ type: "node-move", id, workspaceId, nodeId, folder, ...(lend ? { lend } : {}) })) as Promise<MoveResult>;
+}
+
+/** What a workspace could lend a node, by hint, and the node's word on the folder — its guess when null. The parent's alone. */
+export function lendOffer(workspaceId: string, nodeId: string, folder: string | null): Promise<Lendable> {
+  return request((id) => ({ type: "secrets-offer", id, workspaceId, nodeId, folder })) as Promise<Lendable>;
+}
+
+/** Lend a node what `ask` names of a workspace's; env files into the folder the node is asked about again. */
+export function lendSecrets(workspaceId: string, nodeId: string, folder: string | null, ask: LendAsk): Promise<{ view: SecretsView; lent: string[]; to: string | null }> {
+  return request((id) => ({ type: "secrets-lend", id, workspaceId, nodeId, folder, ask })) as Promise<{ view: SecretsView; lent: string[]; to: string | null }>;
 }
 
 /** Lend a kind to a node, or take it back. The parent's alone. */

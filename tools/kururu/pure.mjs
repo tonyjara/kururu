@@ -367,8 +367,22 @@ export function lentClaude(held) {
 }
 
 /**
+ * One held secret as the doctor names it: kururu's own keys by kind and
+ * hint; a project's by what they are, since an env file's kind is a hash
+ * and its hint already says which file of which checkout, and an ssh
+ * entry's and a GitHub login's hints start with the alias and the account.
+ */
+export function heldName(kind, hint) {
+  const tail = typeof hint === "string" ? hint : "";
+  if (kind.startsWith("env:")) return `env ${tail}`.trim();
+  if (kind.startsWith("ssh:")) return `ssh ${tail || kind.slice(4)}`.trim();
+  if (kind.startsWith("gh:")) return `github ${tail || kind.slice(3)}`.trim();
+  return `${kind} ${tail}`.trim();
+}
+
+/**
  * The doctor's secrets row: what this child holds from its parent, by
- * kind and hint. Nothing lent is a `–` — lending is optional, a child signed
+ * kind and hint, a project's env files, ssh hosts and GitHub login among them. Nothing lent is a `–` — lending is optional, a child signed
  * in with its own `/login` needs none of it — unless the wizard was told
  * Claude would be lent, and it has not been: then the agents have no login,
  * and that is the `✗`.
@@ -381,7 +395,7 @@ export function heldRows(held, { paired, parent, name, claudeLent, isParent = fa
   const entries = held && typeof held === "object" && held.held && typeof held.held === "object" ? Object.entries(held.held) : [];
   const rows = [
     entries.length
-      ? { title: "secrets", state: "ok", detail: `held from ${from}: ${entries.map(([kind, entry]) => `${kind} ${entry?.hint ?? ""}`.trim()).join(", ")}` }
+      ? { title: "secrets", state: "ok", detail: `held from ${from}: ${entries.map(([kind, entry]) => heldName(kind, entry?.hint)).join(", ")}` }
       : { title: "secrets", state: "skip", detail: `nothing held from ${from} (optional) — switch them on in ${where}` },
   ];
   if (claudeLent && !lentClaude(held)) {

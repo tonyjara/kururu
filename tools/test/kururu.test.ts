@@ -263,6 +263,19 @@ describe("heldRows", () => {
     expect(some).toEqual([{ title: "secrets", state: "ok", detail: "held from mac: openrouter sk-or-v1-…abcd, claude-token:machine someone@example.com …wxyz" }]);
   });
 
+  it("names a project's env files, ssh hosts and GitHub login by hint, never by hash", () => {
+    const project = {
+      held: {
+        "env:0123456789ab": { digest: "d", seq: 1, hint: "holapy/.env.local · 14 variables", since: 1, updated: 1 },
+        "ssh:vps": { digest: "d", seq: 1, hint: "vps · key vps_key (ed25519)", since: 1, updated: 1 },
+        "gh:someone": { digest: "d", seq: 1, hint: "someone · …wxyz", since: 1, updated: 1 },
+      },
+    };
+    expect(heldRows(project, { paired: true, parent: "mac", name: "omarchy", claudeLent: false })[0]?.detail).toBe(
+      "held from mac: env holapy/.env.local · 14 variables, ssh vps · key vps_key (ed25519), github someone · …wxyz",
+    );
+  });
+
   it("is a ✗ only when Claude was to be lent and has not been", () => {
     const rows = heldRows({ held: { openrouter: held.held.openrouter } }, { paired: true, parent: "mac", name: "omarchy", claudeLent: true });
     expect(rows[1]?.state).toBe("fail");

@@ -926,7 +926,7 @@ export const STEPS = [
   {
     id: "secrets",
     title: "secrets held from the Mac",
-    why: "The Mac can lend a paired child its keys — the self-hosted Firecrawl for the agents' web, the OpenRouter balance, a Claude login as a token — sealed to this box's key, one switch each in the Mac's Settings → Nodes → <this box> → Secrets. They are kept here at 0600 as the same files the Mac keeps, listed here by hint, and let go of if this box leaves the roster. All optional.",
+    why: "The Mac can lend a paired child its keys — the self-hosted Firecrawl for the agents' web, the OpenRouter balance, a Claude login as a token — and a project's own: its env files into its checkout here, an ssh host with its key under ~/.ssh/kururu, a GitHub login for clone and push. Each is sealed to this box's key, one switch each in the Mac's Settings → Nodes → <this box>, or lent with a move. They are kept here at 0600, listed here by hint, and let go of if this box leaves the roster. All optional.",
     async check(ctx) {
       const answer = await health(ctx);
       const at = pairingState(answer.status === 200 ? answer.body : null);

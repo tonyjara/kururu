@@ -1,7 +1,8 @@
 /**
  * The secrets lent between nodes, as Settings draws them in four places:
- * a child's grants on the parent's Nodes page, what a child holds on its
- * own, the line a key's own page draws instead of its field, and the
+ * a child's grants on the parent's Nodes page — kururu's own keys, then a
+ * project's env files, ssh hosts and GitHub logins — what a child holds on
+ * its own, the line a key's own page draws instead of its field, and the
  * Agents page's "Lend this login to a node".
  *
  * One file rather than a line in each page, because the four are the same
@@ -14,12 +15,16 @@
  * Hints only, on both nodes: the server never sends a value or a digest to
  * a page.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { NodeStatus } from "../../../shared/nodes";
-import { grantText, kindOf, type CatalogueEntry, type GrantView, type HeldView } from "../../../shared/secrets";
+import { folderSentence } from "../../../shared/move";
+import { grantText, kindOf, type CatalogueEntry, type GrantView, type HeldView, type Lendable } from "../../../shared/secrets";
 import * as api from "../session";
 import { useKururu } from "../session";
-import { Btn, DangerButton, Details, errorText, Group, KeyRow, Mono, Outcome, P, Readout, Row, Step, Steps, Toggle, when } from "./ui";
+import { Btn, DangerButton, Details, errorText, Field, Group, KeyRow, Mono, Outcome, P, Readout, Row, Select, Step, Steps, Toggle, when } from "./ui";
+
+/** The families that are a project's rather than kururu's own: drawn in groups of their own under a node. */
+const PROJECT_FAMILIES = new Set(["env", "ssh", "gh"]);
 
 /** What this node holds of a kind from its parent, or null — a kind it holds of its own, or not at all. */
 export function useHeld(kind: string): { held: HeldView; from: string } | null {
@@ -103,36 +108,201 @@ export function NodeSecrets({ node }: { node: NodeStatus }) {
   };
   // Kinds this Mac has, then kinds it has none of; a kind nobody has set and
   // nobody holds is listed too, dimmed, so the page says what could be lent.
-  const entries = [...secrets.catalogue].sort((a, b) => Number(b.hint !== null) - Number(a.hint !== null));
+  const entries = [...secrets.catalogue].filter((entry) => !PROJECT_FAMILIES.has(entry.family)).sort((a, b) => Number(b.hint !== null) - Number(a.hint !== null));
 
   return (
-    <Group
-      title={`Secrets lent to ${node.name}`}
-      foot={`${node.name} holds only what is switched on here: each is sealed to its key, sent over its link and written as the same file this Mac keeps. Off takes it back.`}
-    >
-      {entries.map((entry) => (
-        <SecretRow key={entry.kind} node={node} entry={entry} grant={grants.get(entry.kind)} attempt={attempt} />
-      ))}
+    <>
+      <Group
+        title={`Secrets lent to ${node.name}`}
+        foot={`${node.name} holds only what is switched on here: each is sealed to its key, sent over its link and written as the same file this Mac keeps. Off takes it back.`}
+      >
+        {entries.map((entry) => (
+          <SecretRow key={entry.kind} node={node} entry={entry} grant={grants.get(entry.kind)} attempt={attempt} />
+        ))}
+        {error && <Row label="" hint={<Outcome bad>{error}</Outcome>} />}
+        <Details summary="How lending works">
+          <P>
+            Each secret is sealed to {node.name}'s own key with a key made for that one push, so only {node.name} can open it, and signed by this Mac, so {node.name} takes it
+            from nobody else. It is sent when you switch it on, whenever {node.name} links, and within seconds of the key changing here. A Codex login is the exception:
+            Codex refreshes it on each machine by itself, so it is copied once, and Push again sends this Mac's again.
+          </P>
+          <P>
+            Off removes the file from {node.name}. It does not end the credential: anything that read it while it was there could have kept it. The line under each one says
+            how to end it at the source as well.
+          </P>
+        </Details>
+      </Group>
+      <ProjectSecrets node={node} grants={grants} attempt={attempt} />
+    </>
+  );
+}
+
+/**
+ * Under a node's own keys, what a project needs to run there: the env files
+ * already lent to it, grouped by the workspace they were lent for (which
+ * may have moved there since), a way to lend another workspace's, and every
+ * ssh host and GitHub login this Mac has. Each a switch, off by default,
+ * as every grant is.
+ */
+function ProjectSecrets({ node, grants, attempt }: { node: NodeStatus; grants: Map<string, GrantView>; attempt: (work: Promise<unknown>) => void }) {
+  const { secrets } = useKururu();
+  const env = secrets.catalogue.filter((entry) => entry.family === "env" && entry.project?.node === node.id);
+  const ssh = secrets.catalogue.filter((entry) => entry.family === "ssh");
+  const github = secrets.catalogue.filter((entry) => entry.family === "gh");
+  const projects = new Map<string, CatalogueEntry[]>();
+  for (const entry of env) {
+    const key = `${entry.project!.workspace}\n${entry.project!.from}\n${entry.project!.to}`;
+    projects.set(key, [...(projects.get(key) ?? []), entry]);
+  }
+  const anyHeld = (list: CatalogueEntry[]) => list.some((entry) => grants.get(entry.kind)?.on);
+  const [allHosts, setAllHosts] = useState(false);
+  const hosts = allHosts ? ssh : ssh.filter((entry) => grants.get(entry.kind)?.on || grants.get(entry.kind)?.forgotAt);
+
+  return (
+    <>
+      <Group
+        title={`Projects' env files lent to ${node.name}`}
+        foot={`Each goes into the project's checkout on ${node.name} at 0600, never over a file of its own there, and is sent again within seconds when it changes here. Off removes it from ${node.name}.`}
+      >
+        {[...projects.values()].map((list) => {
+          const { workspace, from, to } = list[0]!.project!;
+          return (
+            <div key={`${from}${to}`}>
+              <Row label={workspace || from} hint={<>From <Mono>{from}</Mono> to <Mono>{to}</Mono></>} />
+              {list.map((entry) => (
+                <SecretRow key={entry.kind} node={node} entry={{ ...entry, label: entry.project!.file }} grant={grants.get(entry.kind)} attempt={attempt} />
+              ))}
+            </div>
+          );
+        })}
+        <LendWorkspace node={node} />
+      </Group>
+      {(ssh.length > 0 || github.length > 0) && (
+        <Group
+          title={`SSH hosts and GitHub for ${node.name}`}
+          foot={`An ssh host goes with its key and its known hosts, beside ${node.name}'s own ~/.ssh/config and brought in by one Include line, never over a Host of its own. A GitHub login goes where only kururu's terminals there look, and outranks a gh login of ${node.name}'s own in them.`}
+        >
+          {hosts.map((entry) => (
+            <SecretRow key={entry.kind} node={node} entry={entry} grant={grants.get(entry.kind)} attempt={attempt} />
+          ))}
+          {!allHosts && hosts.length < ssh.length && (
+            <Row label="" hint={`${ssh.length - hosts.length} host${ssh.length - hosts.length === 1 ? "" : "s"} in this Mac's ~/.ssh/config${anyHeld(ssh) ? " not lent" : ""}.`}>
+              <Btn onClick={() => setAllHosts(true)}>Show them</Btn>
+            </Row>
+          )}
+          {github.map((entry) => (
+            <SecretRow key={entry.kind} node={node} entry={entry} grant={grants.get(entry.kind)} attempt={attempt} />
+          ))}
+        </Group>
+      )}
+    </>
+  );
+}
+
+/**
+ * Lend a workspace's env files to a node without moving it: pick the
+ * workspace, the node says which folder there is its checkout (its guess
+ * first, as the move dialog makes it), and each env file is a switch. The
+ * folder is asked of the node again when one is switched on.
+ */
+function LendWorkspace({ node }: { node: NodeStatus }) {
+  const { snapshot } = useKururu();
+  const [workspaceId, setWorkspaceId] = useState("");
+  const [folder, setFolder] = useState<string | null>(null);
+  const [offer, setOffer] = useState<Lendable | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const workspaces = snapshot?.profile.workspaces ?? [];
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    let live = true;
+    setError(null);
+    api.lendOffer(workspaceId, node.id, folder).then(
+      (next) => {
+        if (!live) return;
+        setOffer(next);
+        if (folder === null && next.check) setFolder(next.check.shown);
+      },
+      (err: unknown) => live && setError(errorText(err)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [workspaceId, folder, node.id]);
+
+  const lend = (file: string, on: boolean) => {
+    const kind = offer?.env.find((c) => c.name === file)?.kind;
+    setBusy(true);
+    setError(null);
+    const work = on ? api.lendSecrets(workspaceId, node.id, folder, { env: [file], ssh: [], github: null }) : kind ? api.grantSecret(node.id, kind, false) : Promise.resolve();
+    work
+      .then(() => api.lendOffer(workspaceId, node.id, folder).then(setOffer))
+      .catch((err: unknown) => setError(errorText(err)))
+      .finally(() => setBusy(false));
+  };
+
+  const check = offer?.check ?? null;
+  return (
+    <>
+      <Select
+        label="Lend a workspace's env files"
+        hint={`Into its checkout on ${node.name}, which must be there already: the same folder a move would use.`}
+        value={workspaceId}
+        onChange={(id) => {
+          setWorkspaceId(id);
+          setFolder(null);
+          setOffer(null);
+        }}
+      >
+        <option value="">Choose a workspace…</option>
+        {workspaces.map((w) => (
+          <option key={w.id} value={w.id}>
+            {w.name}
+          </option>
+        ))}
+      </Select>
+      {workspaceId && offer && (
+        <>
+          <Field
+            label={`Its folder on ${node.name}`}
+            hint={check ? (check.problem ? <Outcome bad>{folderSentence(check.problem, node.name, check.shown)}</Outcome> : folderSentence(null, node.name, check.shown)) : (offer.checkError ?? "Asking…")}
+            value={folder ?? ""}
+            mono
+            onCommit={(value) => setFolder(value.trim() || null)}
+          />
+          {offer.env.length === 0 ? (
+            <Row label="" hint={offer.from ? `No env files in ${offer.from} (.env.example and backups are never offered).` : "This workspace is in no checkout here."} />
+          ) : (
+            offer.env.map((c) => (
+              <Toggle
+                key={c.kind}
+                label={<Mono>{c.name}</Mono>}
+                hint={c.note ?? (c.grant && c.grant.state !== "off" ? grantText(c.grant, node.name) : `${c.hint} · in ${offer.from}`)}
+                on={c.grant?.on ?? false}
+                disabled={busy || c.note !== null || (!c.grant?.on && (check === null || check.problem !== null))}
+                onChange={(on) => lend(c.name, on)}
+              />
+            ))
+          )}
+        </>
+      )}
       {error && <Row label="" hint={<Outcome bad>{error}</Outcome>} />}
-      <Details summary="How lending works">
-        <P>
-          Each secret is sealed to {node.name}'s own key with a key made for that one push, so only {node.name} can open it, and signed by this Mac, so {node.name} takes it
-          from nobody else. It is sent when you switch it on, whenever {node.name} links, and within seconds of the key changing here. A Codex login is the exception:
-          Codex refreshes it on each machine by itself, so it is copied once, and Push again sends this Mac's again.
-        </P>
-        <P>
-          Off removes the file from {node.name}. It does not end the credential: anything that read it while it was there could have kept it. The line under each one says
-          how to end it at the source as well.
-        </P>
-      </Details>
-    </Group>
+    </>
   );
 }
 
 function SecretRow({ node, entry, grant, attempt }: { node: NodeStatus; entry: CatalogueEntry; grant: GrantView | undefined; attempt: (work: Promise<unknown>) => void }) {
   const on = grant?.on ?? false;
   const none = entry.hint === null;
-  const line = grant && grant.state !== "off" ? grantText(grant, node.name) : none ? "This Mac has none to lend yet." : `Lends ${entry.hint} · unlocks ${entry.unlocks}.`;
+  const line =
+    grant && grant.state !== "off"
+      ? grantText(grant, node.name)
+      : entry.note
+        ? `Cannot be lent: ${entry.note}.`
+        : none
+          ? "This Mac has none to lend yet."
+          : `Lends ${entry.hint} · unlocks ${entry.unlocks}.`;
   const again = grant?.on && (grant.state === "failed" || grant.older) && node.state === "up";
   return (
     <>

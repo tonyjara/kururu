@@ -25,10 +25,13 @@
  * workspace to another node asks that node whether the folder will do, as
  * the folder is typed, and says what goes and what stays before anything
  * does — the worktree rule's reasoning, that anything ending work asks in
- * the middle of the screen and not at the foot of a row.
+ * the middle of the screen and not at the foot of a row. Under the lists it
+ * offers to lend the node what the project needs to run there — its env
+ * files, an ssh host, a GitHub login — each a box ticked by hand.
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { folderSentence, type MoveDone, type MovePlan } from "../../../shared/move";
+import { folderSentence, type MovePlan } from "../../../shared/move";
+import { grantText, type LendAsk, type LendCandidate, type Lendable } from "../../../shared/secrets";
 import * as api from "../session";
 import { Icon } from "./Icon";
 
@@ -342,6 +345,72 @@ function Pick({ state, onClose }: { state: Extract<DialogState, { kind: "pick" }
   );
 }
 
+/**
+ * The move dialog's "Lend with it": the workspace's env files, then the ssh
+ * hosts and GitHub logins this Mac has — the ones the project seems to need
+ * shown, the rest behind a press. Nothing is ticked to begin with: a secret
+ * leaves this Mac only by a decision about that secret, as on Settings →
+ * Nodes. One already lent to the node is drawn ticked and fixed; taking it
+ * back is Settings' job, not a move's. Lent once the move has landed, into
+ * the folder it landed in.
+ */
+function LendWith({ offer, ask, onAsk, disabled }: { offer: Lendable; ask: LendAsk; onAsk: (ask: LendAsk) => void; disabled: boolean }) {
+  const [all, setAll] = useState(false);
+  const node = offer.node.name;
+  const hosts = all ? offer.ssh : offer.ssh.filter((c) => c.why || c.grant?.on);
+  const logins = all ? offer.github : offer.github.filter((c) => c.why || c.grant?.on);
+  const hidden = offer.ssh.length - hosts.length + (offer.github.length - logins.length);
+  if (!offer.env.length && !offer.ssh.length && !offer.github.length) return null;
+  const toggle = (list: string[], name: string, on: boolean) => (on ? [...list, name] : list.filter((n) => n !== name));
+
+  const row = (c: LendCandidate, ticked: boolean, set: (on: boolean) => void) => {
+    const lent = c.grant?.on === true;
+    return (
+      <li key={c.kind} className="dialog-lend-row">
+        <label>
+          <input type="checkbox" checked={lent || ticked} disabled={disabled || lent || c.note !== null || c.hint === null} onChange={(event) => set(event.target.checked)} />
+          <span className="dialog-lend-name">{c.name}</span>
+        </label>
+        <span className="dialog-lend-hint">
+          {c.note ?? [c.hint !== c.name ? c.hint : null, c.why, lent && c.grant ? grantText(c.grant, node) : null].filter(Boolean).join(" · ")}
+        </span>
+      </li>
+    );
+  };
+
+  return (
+    <>
+      <h3 className="dialog-move-head">Lend {node} with it</h3>
+      <p className="dialog-move-check">
+        Sealed to {node} and kept in step when they change here; Settings → Nodes takes each back. Values never leave this Mac any other way.
+      </p>
+      {offer.env.length > 0 && (
+        <>
+          <p className="dialog-lend-group">Env files in {offer.from}, into the project's folder on {node}</p>
+          <ul className="dialog-lend-list">{offer.env.map((c) => row(c, ask.env.includes(c.name), (on) => onAsk({ ...ask, env: toggle(ask.env, c.name, on) })))}</ul>
+        </>
+      )}
+      {hosts.length > 0 && (
+        <>
+          <p className="dialog-lend-group">SSH hosts, with their keys</p>
+          <ul className="dialog-lend-list">{hosts.map((c) => row(c, ask.ssh.includes(c.name), (on) => onAsk({ ...ask, ssh: toggle(ask.ssh, c.name, on) })))}</ul>
+        </>
+      )}
+      {logins.length > 0 && (
+        <>
+          <p className="dialog-lend-group">GitHub login, to clone and push (one per node)</p>
+          <ul className="dialog-lend-list">{logins.map((c) => row(c, ask.github === c.name, (on) => onAsk({ ...ask, github: on ? c.name : null })))}</ul>
+        </>
+      )}
+      {hidden > 0 && !all && (
+        <button className="button button-quiet dialog-lend-more" onClick={() => setAll(true)} disabled={disabled}>
+          {hidden} more host{hidden === 1 ? "" : "s"} and login{hidden === 1 ? "" : "s"} on this Mac
+        </button>
+      )}
+    </>
+  );
+}
+
 /** How long the folder field sits still before the node is asked about it. */
 const CHECK_AFTER_MS = 500;
 
@@ -358,8 +427,24 @@ function Move({ state, onClose }: { state: Extract<DialogState, { kind: "move" }
   const [checked, setChecked] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
-  const [moved, setMoved] = useState<{ done: MoveDone; node: string; url: string } | null>(null);
+  const [moved, setMoved] = useState<api.MoveResult | null>(null);
+  const [offer, setOffer] = useState<Lendable | null>(null);
+  const [lend, setLend] = useState<LendAsk>({ env: [], ssh: [], github: null });
   const asked = useRef(0);
+
+  // What it could lend, once: the lists do not depend on the folder, which
+  // the plan's own check is about. A node that cannot be lent to (this is
+  // not the parent) is simply no section.
+  useEffect(() => {
+    let live = true;
+    api.lendOffer(state.workspaceId, state.nodeId, null).then(
+      (next) => live && setOffer(next),
+      () => live && setOffer(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [state.workspaceId, state.nodeId]);
 
   const ask = (value: string | null) => {
     const n = ++asked.current;
@@ -401,7 +486,8 @@ function Move({ state, onClose }: { state: Extract<DialogState, { kind: "move" }
     if (!ready || !check) return;
     setMoving(true);
     setError(null);
-    api.moveWorkspaceTo(state.workspaceId, state.nodeId, check.folder).then(
+    const lending = lend.env.length || lend.ssh.length || lend.github ? lend : undefined;
+    api.moveWorkspaceTo(state.workspaceId, state.nodeId, check.folder, lending).then(
       (result) => {
         setMoving(false);
         setMoved(result);
@@ -425,6 +511,12 @@ function Move({ state, onClose }: { state: Extract<DialogState, { kind: "move" }
           {moved.done.name} is on {moved.node} now{moved.done.again ? " (it had already arrived)" : ""}: {moved.done.cards} card
           {moved.done.cards === 1 ? "" : "s"}, in its profile {moved.done.profile}. Its board here is in Search → Deleted.
         </p>
+        {moved.lent.length > 0 && (
+          <p className="dialog-move-done">
+            Lent {moved.node} {moved.lent.join(", ")}: sealed to it and sent now. Settings → Nodes shows when it holds each, and takes each back.
+          </p>
+        )}
+        {moved.lendError && <p className="dialog-move-refused">Nothing was lent: {moved.lendError}</p>}
         <div className="dialog-actions">
           {moved.url && (
             <a className="button button-quiet" href={moved.url} target="_blank" rel="noreferrer">
@@ -484,6 +576,7 @@ function Move({ state, onClose }: { state: Extract<DialogState, { kind: "move" }
               <li key={line}>{line}</li>
             ))}
           </ul>
+          {offer && <LendWith offer={offer} ask={lend} onAsk={setLend} disabled={moving} />}
         </>
       )}
       {error && <p className="dialog-move-refused">{error}</p>}

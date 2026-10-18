@@ -148,6 +148,20 @@ export class Mover {
     return { node, workspace: { id: workspace.id, name: workspace.name }, ...lists, check, checkError };
   }
 
+  /**
+   * The other node's word on a folder for this workspace, its guess when
+   * none is given: the check the dialog makes, for lending env files into
+   * that checkout without moving anything.
+   */
+  async folderCheck(profileId: string, workspaceId: string, nodeId: string, folder: string | null, checkout: string | null = null): Promise<MoveCheck> {
+    this.target(nodeId);
+    const { workspace } = this.where(profileId, workspaceId);
+    // The checkout's own name when it is known: env files go into the
+    // project, and a pane standing in a subfolder or at home is not it.
+    const name = basename(checkout) || basename(this.deps.dirsOf(workspace)[0] ?? null) || workspace.name;
+    return this.askFolder(nodeId, { workspaceName: workspace.name, basename: name, folder });
+  }
+
   private async askFolder(nodeId: string, ask: MoveCheckAsk): Promise<MoveCheck> {
     const name = this.deps.nodes.nameOf(nodeId) ?? "That node";
     const answer = await this.deps.nodes.ask(nodeId, (id) => ({ type: "workspace-move-check", id, ask }), CHECK_MS, `${name} did not answer about the folder. Is its kururu up to date?`);
