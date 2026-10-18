@@ -54,19 +54,29 @@ a generic "Running your own Firecrawl".
   styles registry, the Kokoro model download, OpenRouter, Telegram, Firecrawl,
   the backup push — waits for the user to open, set or switch something on.
 
-## In the history, waiting on the user
+## The history, rewritten
 
-All of it is pushed and public; removing any of it means rewriting history and
-force-pushing, which also moves the `v0.1.0`–`v0.3.0` tags their releases were
-built from. None of it is a credential.
+On the user's yes, the same evening, every commit and tag was rewritten with
+`git filter-repo` and force-pushed (`main`, `v0.1.0`–`v0.4.0`), after a mirror
+backup of the old history was taken outside the repository. Nothing else used
+the repository: no worktrees, no other clones, no uncommitted work.
 
-| what | commits | severity |
-|---|---|---|
-| The Firecrawl deployment write-up (addresses, interfaces, firewall, containers) | `2e26930`, `96e5bc3` | medium — a map of a private network; nothing in it is reachable from outside the tailnet by its own checks |
-| Client and project names, the machine's name and login, the Mac's user name and folders, a profile name, two of the user's Tailscale addresses | most commits since September | low |
-| The owner's legal name and Apple team id, in a note about notarizing | removed in a later commit | informational — the same string is the public signature of every signed build |
-| The commit email on every commit | all 62 | low — future commits can use GitHub's noreply address |
+| what | done |
+|---|---|
+| The Firecrawl deployment write-up | its section replaced, in every version of `docs/web.md`, by the generic one the tree has; three commit messages that named the machine reworded |
+| Client and project names, the machine's name and login, the Mac's user name and folders, a profile name, the user's Tailscale addresses, a place in a search fixture | the same neutral examples as the tree, in every commit; the newest commit's tree came out byte-identical |
+| The owner's legal name in a note about notarizing | `<name>`; the team id stays, as it is in the signature anyway |
+| The commit email | GitHub's noreply address on every commit and tag, and in this repository's git config |
 
-The DMGs and zips already on GitHub (0.3.0 checked; the earlier ones built the
-same way) still carry the old source maps, with those comments in them. Replacing them means deleting release assets, which is also
-the user's call.
+Checked afterwards on a fresh clone of GitHub: no match for any of it in
+`git log --all -p` or in any author, committer or tagger. Every rewritten tag
+typechecks and passes its tests. A private LAN address remains in a QR test's
+fixture, where changing it would change the expected matrix.
+
+**GitHub still serves the old commits by their full hash** until it collects
+them, which a force-push does not do; only GitHub Support can purge those
+cached views. The repository has no forks and no pull requests holding them.
+
+The 0.1.0–0.3.0 DMGs and zips, which carried the old source maps, were rebuilt
+from the rewritten tags by the release workflow (dispatched from `main`, which
+now replaces the files of a release that exists) and replaced in place.
