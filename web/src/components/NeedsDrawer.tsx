@@ -156,22 +156,16 @@ export function NeedsDrawer({
   const waiting = needs.workspaces.filter((w) => w.band === "needs");
   const working = needs.workspaces.filter((w) => w.band === "working");
   const quiet = needs.workspaces.filter((w) => w.band === "quiet");
-  const state =
-    needs.count === 0
-      ? "nothing needs you"
-      : `${needs.count} in ${needs.inWorkspaces} ${needs.inWorkspaces === 1 ? "workspace" : "workspaces"}`;
   const mascot = (w: WorkspaceNeeds) => mascotFor(mascots, w.workspace.mascotId);
 
   return (
     <aside className={`kuru-drawer needs-drawer ${sheet ? "kuru-sheet" : ""}`} ref={root} role="dialog" aria-label="Needs you">
       {/* The chips where the tray and the title were — the lit tray is this
-          drawer's name, as Kuru's chip is Kuru's — and the count in words
-          after them, which the chip has no room to say. */}
+          drawer's name, as Kuru's chip is Kuru's. The count in words after
+          them went on 2026-10-18: the chip already counts, and the list under
+          it says the rest. */}
       <header className="kuru-head">
         {chips}
-        <span className={`kuru-head-state ${needs.count ? "needs-head-some" : ""}`} role="status">
-          {state}
-        </span>
         <span className="kuru-head-spacer" />
         <button
           className="kuru-head-btn"
