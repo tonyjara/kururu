@@ -37,7 +37,7 @@ import {
 import { isLoginKey } from "../../shared/model";
 import type { ServerMessage } from "../../shared/wire";
 import { readConfigFile, writeConfigFile } from "./config";
-import { writeMirror } from "./export";
+import { OWNED, writeMirror, writeTree } from "./export";
 import { git } from "./gitcmd";
 import type { Store } from "./store";
 
@@ -53,6 +53,15 @@ export interface BackupDeps {
   configDir: () => string;
   stateDir: () => string;
   dataDir: () => string;
+  /**
+   * Each child's mirror whose data moved since the last pull, fetched over
+   * its link (`nodes.ts`). Written under `nodes/<name>/` and committed with
+   * this Mac's own, since a child runs no git: its boards are backed up as
+   * often as the Mac is awake.
+   */
+  nodeMirrors?: () => Promise<{ pulled: Array<{ name: string; files: ReadonlyMap<string, string | Buffer> }>; failed: string[] }>;
+  /** Whether any child's data moved since its last pull. */
+  nodeMirrorsOwed?: () => boolean;
 }
 
 export class Backup {
@@ -142,6 +151,7 @@ export class Backup {
   /** Whether anything that goes into the mirror has changed since the last run. */
   private dirty(): boolean {
     if (!this.seen) return true;
+    if (this.deps.nodeMirrorsOwed?.()) return true;
     return this.seen.changes !== this.deps.store.changes || this.seen.files !== this.fingerprint();
   }
 
@@ -193,6 +203,13 @@ export class Backup {
       await this.prepare(dir, this.settings.url);
       const changes = this.deps.store.changesSince(this.marks);
       const written = writeMirror(dir, { store: this.deps.store, configDir: this.deps.configDir(), stateDir: this.deps.stateDir() });
+      // A child's tree is replaced whole each pull — its own walk decided
+      // what goes, on its own disk — and a child that has gone keeps the
+      // files of its last pull, since removing them is deleting a backup.
+      const fromNodes = this.deps.nodeMirrors ? await this.deps.nodeMirrors() : { pulled: [], failed: [] };
+      for (const node of fromNodes.pulled) {
+        written.changed += writeTree(join(dir, "nodes", node.name), node.files, OWNED).changed;
+      }
       await git(["add", "-A"], dir);
       const staged = (await git(["status", "--porcelain"], dir)).trim();
       if (staged) {
@@ -204,7 +221,7 @@ export class Backup {
       }
       this.seen = { changes: this.deps.store.changes, files: this.fingerprint() };
       await this.push(dir);
-      this.error = null;
+      this.error = fromNodes.failed.length ? `This Mac's backup went; a node's did not: ${fromNodes.failed.join("; ")}` : null;
       void this.deps.store.copyDaily(at).catch(() => undefined);
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);

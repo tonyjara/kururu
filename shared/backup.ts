@@ -103,6 +103,9 @@ export const EXCLUDED: readonly { what: string; why: string }[] = [
   { what: "telegram.json", why: "the Telegram bot token, with the channel's switch and allowed accounts beside it" },
   { what: "firecrawl.json", why: "the cloud Firecrawl API key, with its daily budget beside it" },
   { what: "web-*.json", why: "the web providers' keys and addresses: the self-hosted Firecrawl's, and any added later" },
+  { what: "node.json", why: "this node's private keys, and on the parent the key that signs the roster" },
+  { what: "nodes.json", why: "the roster, and on the parent each child's share token" },
+  { what: "child.json", why: "a child's own answers to its setup wizard: this machine's, not a decision to carry to another" },
   { what: "identities/", why: "ssh keys and gh tokens left by the removed accounts feature" },
   { what: "profiles/*/claude/.claude.json", why: "the Claude login and MCP configs" },
   { what: "profiles/*/claude/history.jsonl", why: "Claude Code's own prompt history, which may hold pasted secrets" },
@@ -140,10 +143,15 @@ Written by kururu every few minutes, when something changed. Not a place to edit
 - \`profiles/<login>/settings.json\` — each profile's Claude settings, with
   its \`env\` block dropped.
 - \`state/session.json\` — the arrangement of panes.
+- \`nodes/<name>/\` — each child kururu's own mirror, the same tree as this
+  one, pulled over its link whenever its boards changed while this Mac was
+  awake. A node's keys and the roster are never here, on either side.
 
 To put it all back on a new Mac: clone kururu, then
 
     bun run restore <this repository's URL>
+
+and onto a fresh child, on that box: \`bun run restore <URL> --node <name>\`.
 
 Then \`/login\` in each profile, paste the OpenRouter key and the web providers' keys (Settings → Web) in Settings, set
 Telegram up again in Settings → Channels if you used it, and approve Input

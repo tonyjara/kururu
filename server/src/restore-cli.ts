@@ -13,10 +13,17 @@
  *
  * It ends by saying what it could not put back: the logins, the OpenRouter
  * and web providers' keys and the share token are not in the backup, on purpose.
+ *
+ * `--node <name>` is the same, run on a fresh child: a child runs no git,
+ * and the parent keeps its mirror under `nodes/<name>/` in its own
+ * repository (`nodes.ts`, `backup.ts`), so that subtree is what is read.
+ * The child is paired again afterwards — its keys and the roster were never
+ * in the backup — and the restored boards are its own from then on.
  */
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { validRepoUrl } from "../../shared/backup";
+import { nodeName } from "../../shared/nodes";
 import { configDir } from "./config";
 import { readMirror, restoreFiles } from "./export";
 import { git } from "./gitcmd";
@@ -42,8 +49,11 @@ async function serverUp(): Promise<boolean> {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const replace = args.includes("--replace");
-  const source = args.find((arg) => !arg.startsWith("--"));
-  if (!source) throw new Error("usage: bun run restore <repository url or path> [--replace]");
+  const nodeAt = args.indexOf("--node");
+  const node = nodeAt === -1 ? null : nodeName(args[nodeAt + 1]);
+  if (nodeAt !== -1 && !node) throw new Error("--node wants the node's name, as the parent's Settings → Nodes shows it");
+  const source = args.find((arg, i) => !arg.startsWith("--") && (nodeAt === -1 || i !== nodeAt + 1));
+  if (!source) throw new Error("usage: bun run restore <repository url or path> [--replace] [--node <name>]");
   if (await serverUp()) throw new Error(`a kururu server is up on :${PORT}; stop it first, since it holds the database and the files this writes`);
 
   const dir = join(dataDir(), "backup");
@@ -60,7 +70,9 @@ async function main(): Promise<void> {
     console.log(`cloning into ${dir}`);
     await git(["clone", "-q", source, dir], dataDir(), { batch: true, timeout: 120_000 });
   }
-  const mirror = existsSync(join(dir, "boards")) || existsSync(join(dir, "README.md")) ? dir : source;
+  const whole = existsSync(join(dir, "boards")) || existsSync(join(dir, "README.md")) ? dir : source;
+  const mirror = node ? join(whole, "nodes", node) : whole;
+  if (node && !existsSync(mirror)) throw new Error(`the backup has no nodes/${node}/: the parent pulls a child's boards only while the two are linked`);
 
   const { data, skipped } = readMirror(mirror);
   for (const file of skipped) console.warn(`  skipped, would not parse: ${file}`);
@@ -75,6 +87,7 @@ async function main(): Promise<void> {
   for (const path of files.written) console.log(`  wrote ${path}`);
   for (const path of files.skipped) console.log(`  left alone (exists; --replace to overwrite): ${path}`);
 
+  if (node) console.log(`\nThis box's boards are back. Pair it with the parent again (\`kururu child code\`): its keys and the roster were never in the backup.`);
   console.log(`
 Done. What the backup never carried, and so what is left to do by hand:
   - /login in each profile (Settings → Profiles says which are signed in)

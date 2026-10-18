@@ -106,6 +106,10 @@ import { KURU_PAGE, KURU_SAY_MAX, type KuruFile } from "../../shared/kuru";
 import { mentionsIn, readsInReader, type MadeFile } from "../../shared/made";
 import { isChannelKind, type ChannelKind } from "../../shared/channels";
 import { Backup } from "./backup";
+import { mirrorFiles } from "./export";
+import { NodeHost, nodeRequestRefusal } from "./nodes";
+import { summarize, type NodeSummary } from "../../shared/nodes";
+import { hostname } from "node:os";
 import { Store, dataDir, dbPath } from "./store";
 import { isSearchScope, sessionOfTranscript, type Actor, type SearchHit } from "../../shared/store";
 import { configDir } from "./config";
@@ -467,6 +471,8 @@ let sleeper!: Sleeper;
 /** The database: boards, conversations and the voice's lists. Opened in `attach()`, before anything is served. See `store.ts`. */
 let store!: Store;
 let backup!: Backup;
+/** This kururu among the others: pairing, the roster and the links. See `nodes.ts`. */
+let nodes!: NodeHost;
 const clients = new Map<WebSocket, ClientState>();
 
 const state = {
@@ -538,6 +544,68 @@ function pushSnapshot(): void {
   queueMicrotask(() => {
     snapshotQueued = false;
     broadcast({ type: "snapshot", snapshot: snapshot() });
+    // Every change a snapshot carries is a change the other nodes' summary
+    // of this one may carry too; `queueSummary` coalesces and compares.
+    nodes?.queueSummary();
+  });
+}
+
+/** The nodes view to every client, once per turn of the loop however many things moved. */
+let nodesQueued = false;
+function pushNodes(): void {
+  if (nodesQueued) return;
+  nodesQueued = true;
+  queueMicrotask(() => {
+    nodesQueued = false;
+    broadcast({ type: "nodes", nodes: nodes.view() });
+  });
+}
+
+/** When this process started, which a node's data mark carries so a restart is a pull. */
+const STARTED_AT = Date.now();
+
+/**
+ * Where the other nodes dial this one: `KURURU_NODE_ADDRESS` when set — two
+ * isolated instances on one machine are tested on loopback — else the
+ * tailnet address off the interface list, as the Share dialog finds it.
+ */
+function nodeAddress(): string | null {
+  return process.env.KURURU_NODE_ADDRESS || reach(0).tailscale;
+}
+
+/** Why no other node could dial this one, or null when one could. */
+function nodeUnreachable(): string | null {
+  const address = nodeAddress();
+  if (!address) return "This machine has no tailnet address, so no other node can reach it. Bring Tailscale up, then restart the server.";
+  const listening = listenAddresses();
+  if (listening.includes("0.0.0.0") || listening.includes("::") || listening.includes(address)) return null;
+  return process.platform === "darwin"
+    ? "This Mac is not shared, so no node can reach it. Turn sharing on in the Share dialog first."
+    : `This server listens on ${listening.join(", ")}, not on ${address}, so no node can reach it.`;
+}
+
+/**
+ * What this node tells the others about itself: the profile on screen, as
+ * `kururu_status` would say it. See `summarize`.
+ */
+function nodeSummary(leads: boolean, sees: string[]): NodeSummary {
+  const profile = workspaces.active;
+  const mine = new Set(workspaces.agentsIn(profile.id));
+  const marks = store.marks();
+  return summarize({
+    at: Date.now(),
+    version: VERSION,
+    host: hostInfo,
+    profile,
+    agents: host.agents.filter((agent) => mine.has(agent.id)).map(overlay),
+    folderOf: (workspaceId) => {
+      const workspace = profile.workspaces.find((w) => w.id === workspaceId);
+      return workspace ? (workspaceDirs(workspace)[0] ?? null) : null;
+    },
+    kuru: kuru.counts(profile.key),
+    leads,
+    sees,
+    dataMark: `${marks.events}.${marks.turns}.${store.changes}@${STARTED_AT}`,
   });
 }
 
@@ -4505,6 +4573,22 @@ function handleMessage(ws: WebSocket, raw: string): void {
       });
       return;
 
+    case "node-add":
+      void replyAsync(ws, msg.id, () => nodes.add(msg.address, msg.code, msg.name));
+      return;
+    case "node-rename":
+      void replyAsync(ws, msg.id, () => nodes.rename(msg.nodeId, msg.name));
+      return;
+    case "node-rank":
+      void replyAsync(ws, msg.id, () => nodes.rank(msg.order));
+      return;
+    case "node-remove":
+      void replyAsync(ws, msg.id, () => nodes.remove(msg.nodeId));
+      return;
+    case "node-code":
+      reply(ws, msg.id, () => nodes.showCode(msg.on === true));
+      return;
+
     case "remove-machine":
       if (typeof msg.machineId !== "string") return;
       removeMachine(msg.machineId);
@@ -5302,6 +5386,30 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    * and is worth saying so about, while a missing token is a phone that has not
    * scanned the QR code yet and is an instruction, not an error.
    */
+  /**
+   * Pairing, from a parent holding the code this node is showing — the one
+   * route ahead of the gate, because the code is its token: a parent never
+   * holds a child's share token before it has paired, and is handed it in
+   * the answer. `nodeRequestRefusal` keeps it to the tailnet with no page
+   * and no proxy in between, and five wrong codes burn the one showing.
+   */
+  if (url.pathname === "/api/nodes/enrol") {
+    if (req.method !== "POST") {
+      text(res, "POST only", 405);
+      return;
+    }
+    let body: unknown;
+    try {
+      body = await readJsonBody(req, 64 * 1024);
+    } catch {
+      json(res, { error: "That is not JSON." }, 400);
+      return;
+    }
+    const answer = nodes.enrol(req, body);
+    json(res, answer.body, answer.status);
+    return;
+  }
+
   const allowed = verdict(req, url);
   if (allowed !== "ok") {
     text(
@@ -5379,6 +5487,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       kuru: { profileId: workspaces.active.id, ...kuru.counts(workspaces.active.key) },
       pid: process.pid,
       clients: { now: clients.size, remoteAt: remoteClientAt },
+      // This node among the others: its role, who leads, and each member's
+      // link — what `kururu child doctor` checks the pairing row against.
+      nodes: nodes.health(),
       // When and why this process started, and whether anything would start
       // it again. Without the file: this is asked every few seconds.
       life: lifeNow(),
@@ -5391,6 +5502,28 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    * the moment of asking, because the lines that matter most were written by
    * a process that no longer exists.
    */
+  /**
+   * The nodes view, for a caller with no socket: `kururu child code` waits
+   * on it for the parent's enrolment, and the desktop's picker and tray
+   * read it for the nodes they offer. Behind the gate, since on the parent
+   * each node's URL carries its share token.
+   */
+  if (url.pathname === "/api/nodes") {
+    json(res, nodes.view());
+    return;
+  }
+  /** Show a pairing code, for `kururu child code` on a box with no window. */
+  if (url.pathname === "/api/nodes/code" && req.method === "POST") {
+    try {
+      const shown = nodes.showCode(true);
+      const view = nodes.view();
+      json(res, { ...shown, address: view.self.address, port: view.self.port, name: view.self.name });
+    } catch (err) {
+      json(res, { error: err instanceof Error ? err.message : String(err) }, 409);
+    }
+    return;
+  }
+
   if (url.pathname === "/api/lifecycle") {
     json(res, lifecycleReport());
     return;
@@ -6440,8 +6573,28 @@ const wss = new WebSocketServer({ noServer: true });
  */
 let remoteClientAt: string | null = null;
 
+/**
+ * The links between nodes: their own server, for the larger frames a
+ * child's backup is, and so a link is never mistaken for a client.
+ */
+const linkWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 * 1024 });
+
 function onUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
+  /**
+   * Another node. Ahead of the token gate, like enrolment, because a node
+   * is not let in by the share token — nobody holds another's — but by the
+   * handshake that follows, in which it signs a challenge with a key the
+   * roster lists. What is checked here is only where it came from.
+   */
+  if (url.pathname === "/link") {
+    if (nodeRequestRefusal(req)) {
+      socket.destroy();
+      return;
+    }
+    linkWss.handleUpgrade(req, socket, head, (ws) => nodes.accept(ws));
+    return;
+  }
   if (url.pathname !== "/ws") {
     socket.destroy();
     return;
@@ -6477,6 +6630,7 @@ function onUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
     send(ws, { type: "usage", usage: usageSnapshot() });
     send(ws, { type: "codex-usage", codex: codexUsageSnapshot() });
     send(ws, { type: "machines", machines: machinesSnapshot() });
+    send(ws, { type: "nodes", nodes: nodes.view() });
     send(ws, { type: "openrouter", openrouter: openRouterSnapshot() });
     send(ws, { type: "web", web: web.status() });
     send(ws, { type: "voice", voice: voice.status() });
@@ -6618,6 +6772,7 @@ async function attach(port: Port): Promise<void> {
     agentCommand: agentCommandFor,
     openTerminal: openTerminalAt,
     machines: machinesSnapshot,
+    nodes: () => nodes.statuses(),
     shellOn: (machine, workspaceName, dir, run) =>
       run ? commandOn(machine, workspaceName, dir, run) : Promise.resolve(sessionShell(machine, workspaceName, dir)),
     agentOn,
@@ -6739,6 +6894,30 @@ async function attach(port: Port): Promise<void> {
     configDir,
     stateDir: () => dirname(snapshotPath()),
     dataDir,
+    // Each child's mirror, pulled over its link when its data moved, for
+    // `nodes/<name>/` — through the variable, built on the next line.
+    nodeMirrors: () => nodes.mirrors(),
+    nodeMirrorsOwed: () => nodes.mirrorsOwed(),
+  });
+  nodes = new NodeHost({
+    version: VERSION,
+    port: PORT,
+    hostname: hostname(),
+    platform: process.platform,
+    stateDir: dirname(snapshotPath()),
+    address: nodeAddress,
+    unreachable: nodeUnreachable,
+    shareToken: () => token(),
+    summary: nodeSummary,
+    exportFiles: () => {
+      const marks = store.marks();
+      return {
+        mark: `${marks.events}.${marks.turns}.${store.changes}@${STARTED_AT}`,
+        files: mirrorFiles({ store, configDir: configDir(), stateDir: dirname(snapshotPath()) }),
+      };
+    },
+    changed: pushNodes,
+    log: (line) => console.log(`kururu: ${line}`),
   });
   for (const agentId of workspaces.allAgents()) {
     if (!live.has(agentId)) workspaces.removeTab(agentId);
@@ -7127,6 +7306,8 @@ export function shutdown(): Promise<void> {
     if (workspaces) writeSnapshot(workspaces.all(), workspaces.active.id);
     closeAllPreviews();
     backup?.close();
+    nodes?.close();
+    linkWss.close();
     store?.close();
     void closeDatabasePools();
     // The Kokoro process, so it goes now rather than when it notices.

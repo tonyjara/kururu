@@ -85,6 +85,7 @@ import {
 } from "../../shared/harness";
 import { findLauncher, launcherCommand, visibleLaunchers, withPrompt, type AgentCli, type LaunchSettings, type Launcher } from "../../shared/launchers";
 import { remoteShellOf, validRemoteDir, type MachineEntry, type MachineStatus } from "../../shared/machines";
+import { nodesText, type NodeStatus } from "../../shared/nodes";
 import type { MadeFile } from "../../shared/made";
 import type { AgentSnapshot, AgentStatus, HarnessState } from "../../shared/model";
 import { isNotifyEvent } from "../../shared/notify";
@@ -136,6 +137,8 @@ export interface HarnessDeps {
   ) => Promise<AgentSnapshot>;
   /** The user's machines, with whether the last look at each got in. See `shared/machines.ts`. */
   machines: () => readonly MachineStatus[];
+  /** The other kururus this one is linked with, each with the last summary it pushed. See `shared/nodes.ts`. */
+  nodes?: () => readonly NodeStatus[];
   /** The command line of a tmux-session shell on a machine, in the first free slot, typing `run` there. */
   shellOn: (machine: MachineEntry, workspaceName: string, dir: string, run?: string) => Promise<string>;
   /** The same for an agent: `command` is the launcher's line, and kururu's install-and-login check goes ahead of it. */
@@ -1258,6 +1261,7 @@ export class Harness {
       }
     }
     if (!any) out.push("  (none)");
+    if (this.deps.nodes) out.push(...nodesText(this.deps.nodes()));
     out.push("", "launchers:");
     for (const launcher of visibleLaunchers(this.deps.launch())) out.push(`  - ${launcher.id}: ${launcher.label}`);
     return out.join("\n");

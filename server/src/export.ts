@@ -34,26 +34,26 @@ export interface MirrorSources {
 }
 
 /** The subtrees this module owns in the mirror: anything else in the directory is left alone, `.git` first of all. */
-const OWNED = ["config", "boards", "conversations", "memory", "profiles", "state"] as const;
+export const OWNED = ["config", "boards", "conversations", "memory", "profiles", "state"] as const;
 
 /**
  * Write the mirror under `dir`. Returns how many files are now in it and
  * how many were written or removed by this pass.
  */
 export function writeMirror(dir: string, sources: MirrorSources): { files: number; changed: number } {
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const kept = new Set<string>();
-  let changed = 0;
+  return writeTree(dir, mirrorFiles(sources), OWNED);
+}
+
+/**
+ * Every file the mirror holds, by its path in the mirror, read now. Apart
+ * from writing it so that a child can hand its mirror to the parent over the
+ * link (`nodes.ts`), which writes it under `nodes/<name>/` with the same
+ * `writeTree` — one walk of the allow-list, wherever the result lands.
+ */
+export function mirrorFiles(sources: MirrorSources): Map<string, string | Buffer> {
+  const files = new Map<string, string | Buffer>();
   const put = (rel: string, content: string | Buffer): void => {
-    kept.add(rel);
-    const path = join(dir, rel);
-    if (existsSync(path)) {
-      const was = readFileSync(path);
-      if (typeof content === "string" ? was.toString("utf8") === content : was.equals(content)) return;
-    }
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, content);
-    changed++;
+    files.set(rel, content);
   };
 
   put("README.md", BACKUP_README);
@@ -98,17 +98,47 @@ export function writeMirror(dir: string, sources: MirrorSources): { files: numbe
 
   const session = join(sources.stateDir, "session.json");
   if (existsSync(session)) put(join("state", "session.json"), readFileSync(session));
+  return files;
+}
 
-  // What this pass did not write, in the subtrees it owns, is gone.
-  for (const sub of OWNED) {
+/**
+ * Put `files` under `dir`, writing only what differs, and remove whatever
+ * this pass did not write in the subtrees named in `owned` — everything
+ * else there, `.git` and `nodes/` first of all, is left alone.
+ */
+export function writeTree(dir: string, files: ReadonlyMap<string, string | Buffer>, owned: readonly string[]): { files: number; changed: number } {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  let changed = 0;
+  for (const [rel, content] of files) {
+    const path = join(dir, rel);
+    if (existsSync(path)) {
+      const was = readFileSync(path);
+      if (typeof content === "string" ? was.toString("utf8") === content : was.equals(content)) continue;
+    }
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, content);
+    changed++;
+  }
+  for (const sub of owned) {
     for (const file of walk(join(dir, sub))) {
       const rel = join(sub, file);
-      if (kept.has(rel)) continue;
+      if (files.has(rel)) continue;
       rmSync(join(dir, rel), { force: true });
       changed++;
     }
   }
-  return { files: kept.size, changed };
+  return { files: files.size, changed };
+}
+
+/**
+ * A mirror's paths as they may be written: relative, inside, no `..`, no
+ * `.git`. For one that arrived over a link, which is another machine's say
+ * about where a file goes in this one's repository.
+ */
+export function safeMirrorPath(rel: string): boolean {
+  if (!rel || rel.length > 512 || rel.includes("\0") || rel.startsWith("/") || rel.includes("\\")) return false;
+  const parts = rel.split("/");
+  return parts.every((part) => part !== "" && part !== "." && part !== ".." && part !== ".git");
 }
 
 /** A profile's Claude settings with the keys that hold secrets taken out, or null for a file that is not JSON. */
