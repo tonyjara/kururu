@@ -17,7 +17,10 @@ for the reason `docs/nodes.md` gives; and phase 4, lending secrets
 Mac with fake keys and awaiting its two-machine checks; and phase 4b, a
 project's own secrets — env files, ssh keys, a GitHub login — lent to a
 node and offered by the move dialog (`docs/nodes.md#lending-a-projects-secrets`),
-checked the same way. Phase 5 is being built. It is written so that an agent can take one phase, read the files it
+checked the same way; and phase 5, one Telegram
+(`docs/nodes.md#one-telegram`), checked in one process against a stand-in
+Bot API and between two throwaway nodes on the Mac with a stand-in Claude,
+and awaiting its two-machine checks. It is written so that an agent can take one phase, read the files it
 names, and know what "done" is. Each phase is shaped as a card: its scope,
 what it depends on, what it can run beside, and how it is verified. The first
 draft had one Kuru driving every node's agents, a Telegram poller set by hand,
@@ -906,7 +909,7 @@ doctor` lists the held kinds.
 - **Only the secret part of a file travels**, and the digest is over that
   part. The Telegram kind is the token and the bot, never the Mac's switch
   or allow-list, which would have made the child a second poller. A child
-  holding it cannot switch it on until phase 5 makes that a takeover.
+  holding it cannot switch it on; phase 5 made holding it the takeover.
 - **A Codex login does not follow its source.** Codex refreshes `auth.json`
   itself, so pushing the Mac's refreshes would be two machines refreshing
   one login. It is copied once, and *Push again* sends the Mac's again. It is
@@ -1012,6 +1015,42 @@ minute and the chat says so; `@omarchy` and a reply to one of its lines reach
 it while the Mac leads; a message for the Mac while it sleeps is held and
 delivered on wake; a simulated split (a firewall rule between the two for a
 minute) ends with the Mac polling and one 409 in the child's log.
+
+**As built**, 2026-10-18, beside the scope above:
+
+- **Eligible is the switch, the token and a Claude login**, and each node
+  says it in its summary (`lead {eligible, polls}`) — so the rule reads who
+  could poll off the links it already has, and a kururu from before, which
+  never says, is never counted as one that could while it is up.
+- **Leading is among the eligible.** A node above that is up but cannot
+  poll is passed over at once; one that is away counts until it has been
+  unheard for 30 s, measured from this server's start too, so a child that
+  restarts while the Mac is awake gives the links time to come up before
+  polling. A node that held the poll when its server stopped carries on at
+  once, which a `bun run dev` restart of the holder relies on. The lead is
+  asked before the channel's first poll, for the same reason: a single
+  `getUpdates` from a node that does not hold it is a 409 for the one that
+  does.
+- **A child with a bot of its own keeps it**, outside the roster's channel,
+  as before; one with no token at all is still shared, and its Kuru speaks
+  through the reader. The roster's settings are set on the parent only, so
+  a child's switch and list are read-only, and pairing on the parent while
+  a child reads the chat asks for it back at once and with force.
+- **Every crossing is acknowledged** — `telegram-in-ack`, `telegram-out-ack`
+  and `lead-ack` beside the plan's four — and the sender keeps what it sent
+  until then: a held message until the node has it in its outbox, a line
+  until the reader has queued it, a handover until the new holder adopted
+  it, and back into the queue if the link drops first.
+- **A reply that answered only another Kuru's `ask_kuru` is not posted**
+  (`postedToChat`), for the reason `peerReplySpoken` does not speak it: the
+  asking Kuru says it in its own words. Every other reply is, the `[kururu]`
+  notices' included.
+- **The address wins over a reply**: `@mac` written in a reply to one of
+  Omarchy's lines goes to the Mac. `/compact` stays a slash command, unless
+  a node is called `compact`.
+- Held messages wait at most a day, Telegram's own horizon, and go for a
+  node that leaves the roster; a line on its way to the reader waits half a
+  day, as a line on its way to Telegram does.
 
 ### Phase 6 — moving a workspace to a child
 

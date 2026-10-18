@@ -75,10 +75,8 @@ only reads it, so the two cannot disagree about what is right.
 | the service | the unit as this checkout would write it, enabled, active; `/api/health` on the tailnet address; the gate refusing loopback and the tailnet without the token, and every LAN address outright; the host in a `kururu-ptyhost-…` unit and current | writes the unit, `daemon-reload`, enables, starts or restarts, and waits for health |
 | the phone | a device on the tailnet has connected since the server started (`clients.remoteAt` in `/api/health`) | with a terminal: shows the QR and waits for the phone. Without one: tells the person to run `kururu share` in their own terminal |
 | pairing | `nodes` in `/api/health`: ✓ paired and the link to the Mac up; – not paired, which is a child working as built, or paired with the Mac away, as it is while the lid is shut; ✗ paired and the Mac never reached since this server started | with a terminal, asks for the Mac's join command (Enter skips, and the skip is kept); `--join="<address> <code>"` gives it. Without either it says how to pair and moves on, since pairing is optional |
-
 | secrets | what this box holds from the Mac, by kind and hint, off `secrets-held.json` (never a value): ✓ something held; – nothing lent, which is optional, or not paired; ✗ only when the Claude step was told `lent` and no token has come | says where on the Mac to switch it on, and with a terminal waits up to five minutes for it |
-
-The leading row arrives with phase 5.
+| leading | whether this box can read the shared Telegram chat while the Mac is away, off `/api/health`'s `nodes.lead`: its rank, ✓ eligible or reading it now, – not eligible with the reason (no token lent, the channel off, Claude not signed in), or not paired. Never ✗ | nothing: the token is lent from the Mac's Settings → Nodes → Secrets ([nodes](nodes.md#one-telegram)) |
 
 ### Asking, and stopping
 

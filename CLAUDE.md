@@ -339,6 +339,18 @@ The load-bearing invariants, one line each, with the argument behind the link:
   the receiver, never off the wire. Board verbs with a `node` act directly,
   never a run. A notice crosses into another drawer without the reply it
   quoted. → [nodes](docs/nodes.md#kurus-as-peers)
+- **One Telegram bot for every node, read by one node at a time.** The
+  parent's switch, switch time and allow-list ride in the roster it signs,
+  so only the parent sets them; the token is lent on its own. `LeadGate`
+  (`shared/nodes.ts`) says which node polls — the highest-ranked eligible
+  one it can reach; 30 s of silence to take over, a minute of steady link
+  and a holder that is not mid-conversation to take back; rank settles a
+  409 — and `server/src/lead.ts` hands the offset, queue, held messages,
+  reply map and handled ids over before the new holder polls. A node that
+  does not hold the poll never calls `getUpdates`, not even once at start:
+  that is a 409 for the one that does. Every Kuru's lines go through the
+  reader, marked `[Omarchy]` but the parent's; `@node`, `/node` or a reply
+  to a node's line reaches that Kuru (`routeOf`). → [nodes](docs/nodes.md#one-telegram)
 - **A shell on another machine is a command line, never a host change.** A
   machine is an ssh host the user named (Settings → Machines, `vps.json`); its
   shell is `ssh -t` in an ordinary pty, built and read back by
