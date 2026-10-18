@@ -259,6 +259,21 @@ function makeNode(id: string, name: string, peers: Map<string, TestNode>): TestN
   return node;
 }
 
+/**
+ * Wait out the millisecond. A history is ordered by when, then by row id,
+ * and the id is only this database's order of writing: a line copied back
+ * from the other node is written after one made here, whenever it
+ * happened. So two steps whose order a test reads off a history must not
+ * share a millisecond, or the tie goes to the id and the order can flip —
+ * which it did in CI about one run in ten.
+ */
+function nextMs(): void {
+  const now = Date.now();
+  while (Date.now() === now) {
+    // A millisecond at most.
+  }
+}
+
 function holapyOn(node: TestNode): Workspace | undefined {
   return node.ws.active.workspaces.find((w) => w.name === "Holapy");
 }
@@ -294,11 +309,13 @@ describe("the exchange", () => {
 
     // The answer is lost: the box has it, the Mac keeps its copy and says so.
     mac.dropNext = true;
+    nextMs();
     await expect(mac.mover.move(profile.id, wsId, box.id, plan.check!.folder, "user")).rejects.toThrow("did not answer, so nothing was removed here");
     expect(holapyOn(mac)?.id).toBe(wsId);
     expect(holapyOn(box)).toBeDefined();
 
     // Pressed again: the same move, answered the same way, made once.
+    nextMs();
     const moved = await mac.mover.move(profile.id, wsId, box.id, plan.check!.folder, "user");
     expect(moved.done).toMatchObject({ name: "Holapy", cards: 3, again: true, profile: "main" });
     expect(box.ws.active.workspaces.filter((w) => w.name === "Holapy")).toHaveLength(1);
@@ -336,7 +353,9 @@ describe("the exchange", () => {
     box.agents = [terminal("a7", { kind: "agent", agent: "claude", exited: true })];
 
     // And back: the same rows taken up again, no event twice.
+    nextMs();
     box.ws.editBoardIn(box.ws.active.id, there.id, (b) => editCard(b, "c3", { title: "Landing nueva" }));
+    nextMs();
     const back = await box.mover.move(box.ws.active.id, there.id, mac.id, "~/Projects/holapy", "user");
     expect(back.done).toMatchObject({ cards: 3, again: false });
     const home = holapyOn(mac)!;
