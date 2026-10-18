@@ -233,6 +233,17 @@ export class NodeHost {
   private readonly asks = new Map<string, Ask>();
   /** The data mark of each node's last backup pull. */
   private readonly pulled = new Map<string, string>();
+  /**
+   * What the later phases hang on a link: a handler per message type, and
+   * the moments a link comes up or goes and this node leaves the roster.
+   * Phase 2's messages and phase 6's moves are cases in `onFrame`, and
+   * phase 3's Kurus go to `deps.peer`; the secrets (`secrets.ts`) register
+   * theirs here, and a later phase can too, without growing it.
+   */
+  private readonly handlers = new Map<string, (peer: string, message: LinkMessage) => void>();
+  private readonly upHooks: Array<(peer: string) => void> = [];
+  private readonly downHooks: Array<(peer: string) => void> = [];
+  private readonly unpairHooks: Array<() => void> = [];
   private lastSummaryKey = "";
   private lastSummaryAt = 0;
   private summaryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -312,6 +323,49 @@ export class NodeHost {
     return this.links.has(nodeId);
   }
 
+  /** The roster's parent, whoever holds the roster: this node on the parent. Null in no roster. */
+  parentId(): string | null {
+    const roster = this.roster;
+    return roster && memberOf(roster, this.me.id) ? roster.parent : null;
+  }
+
+  /** A member as the roster lists it, keys and all. */
+  member(id: string): NodeEntry | undefined {
+    return memberOf(this.roster, id);
+  }
+
+  // ---------------------------------------------------------------------------
+  // What the later phases hang on a link
+  // ---------------------------------------------------------------------------
+
+  /** Handle every message of this type that arrives on an up link, given the peer it came from. One handler a type. */
+  on(type: LinkMessage["type"], handler: (peer: string, message: LinkMessage) => void): void {
+    this.handlers.set(type, handler);
+  }
+
+  onLinkUp(hook: (peer: string) => void): void {
+    this.upHooks.push(hook);
+  }
+
+  onLinkDown(hook: (peer: string) => void): void {
+    this.downHooks.push(hook);
+  }
+
+  /** This node left the roster: removed by the parent, or paired anew. */
+  onUnpair(hook: () => void): void {
+    this.unpairHooks.push(hook);
+  }
+
+  private hook<T extends unknown[]>(hooks: ReadonlyArray<(...args: T) => void>, ...args: T): void {
+    for (const hook of hooks) {
+      try {
+        hook(...args);
+      } catch (err) {
+        this.deps.log(`nodes: a link hook failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
   /** What this node is called: its roster name, or the one it will be given. What `[kuru@mac]` says. */
   private selfName(): string {
     return memberOf(this.roster, this.me.id)?.name ?? defaultNodeName(this.deps.hostname, this.deps.platform);
@@ -328,7 +382,7 @@ export class NodeHost {
    * there is no queue here, because what is worth holding for a node that
    * is away is the caller's to hold and to say it is holding.
    */
-  send(nodeId: string, message: PeerMessage): boolean {
+  send(nodeId: string, message: LinkMessage): boolean {
     const link = this.links.get(nodeId);
     if (!link) return false;
     link.send(message);
@@ -452,6 +506,7 @@ export class NodeHost {
     for (const dialer of this.dialers.values()) if (dialer.timer) clearTimeout(dialer.timer);
     this.dialers.clear();
     this.peers.clear();
+    this.hook(this.unpairHooks);
     this.changed();
   }
 
@@ -863,11 +918,23 @@ export class NodeHost {
       case "refuse":
         link.close("refused");
         return;
-      default:
-        // The Kurus' messages are `peerkuru.ts`'s; a ping, and whatever a
-        // later phase says that this one does not know, are nothing here.
-        if (isPeerMessage(message)) this.deps.peer?.(link.peer!, message);
+      default: {
+        // The Kurus' messages are `peerkuru.ts`'s; a later phase's that it
+        // registered are its handler's; a ping, and whatever this one does
+        // not know, are nothing here.
+        if (isPeerMessage(message)) {
+          this.deps.peer?.(link.peer!, message);
+          return;
+        }
+        const handler = this.handlers.get(message.type);
+        if (!handler) return;
+        try {
+          handler(link.peer!, message);
+        } catch (err) {
+          this.deps.log(`nodes: handling ${message.type} failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
         return;
+      }
     }
   }
 
@@ -886,6 +953,7 @@ export class NodeHost {
     this.deps.log(`nodes: linked with ${memberOf(this.roster, peerId)?.name ?? peerId}`);
     link.send({ type: "summary", summary: this.summaryNow() });
     this.deps.linked?.(peerId);
+    this.hook(this.upHooks, peerId);
     this.changed();
     // Who this node sees changed, so its summary did.
     this.queueSummary();
@@ -917,6 +985,7 @@ export class NodeHost {
       ask.reject(new Error("the link dropped"));
     }
     this.deps.log(`nodes: ${memberOf(this.roster, peerId)?.name ?? peerId} went away`);
+    this.hook(this.downHooks, peerId);
     this.queueSeen();
     this.changed();
     this.queueSummary();

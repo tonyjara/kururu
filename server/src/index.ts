@@ -91,9 +91,9 @@ import { dump as dumpRecording, forget as forgetRecording, recordBacklog, record
 import { processCwd, processCwds } from "./cwd";
 import { scanDevServers, stopDevServer } from "./devservers";
 import { readHead, repoAt } from "./git";
-import { pollUsage, usageSnapshot } from "./usage";
+import { accountEmail, pollUsage, usageSnapshot } from "./usage";
 import { codexUsageSnapshot, pollCodexUsage } from "./codexusage";
-import { clearOpenRouterKey, openRouterSnapshot, pollOpenRouter, setOpenRouterKey } from "./openrouter";
+import { clearOpenRouterKey, openRouterSnapshot, pollOpenRouter, rereadOpenRouterKey, setOpenRouterKey } from "./openrouter";
 // Every provider in web/providers/, each registering itself; the build makes this module from the directory.
 import "kururu:web-providers";
 import { WebChain, callerAgent, fileStore, localCaller } from "./web/chain";
@@ -110,6 +110,8 @@ import { mirrorFiles } from "./export";
 import { NodeHost, nodeRequestRefusal } from "./nodes";
 import { Mover } from "./move";
 import { nodeOfUtterance, PeerKurus, peerKey } from "./peerkuru";
+import { Secrets } from "./secrets";
+import { webKind, type KindSpec } from "../../shared/secrets";
 import { summarize, type NodeSummary } from "../../shared/nodes";
 import { hostname } from "node:os";
 import { Store, dataDir, dbPath } from "./store";
@@ -219,7 +221,7 @@ import {
 import { hookSettingsFlag } from "./hooks";
 import { Harness } from "./harness";
 import { mcpAnswer } from "./mcp";
-import { claudeDirFor, codexDirFor, loginDir, loginEnv, scanLogins } from "./logins";
+import { claudeDirFor, codexDirFor, lentClaudeEnv, loginDir, loginEnv, scanLogins } from "./logins";
 import {
   adoptLaunch,
   findLauncher,
@@ -501,6 +503,9 @@ let peerKurus: PeerKurus | null = null;
 function kuruKey(): string | null {
   return channels.telegram.profileKey() ?? workspaces.active.key;
 }
+
+/** The secrets this node lends its children, or holds from its parent. See `secrets.ts`. */
+let secrets!: Secrets;
 const clients = new Map<WebSocket, ClientState>();
 
 const state = {
@@ -587,6 +592,43 @@ function pushNodes(): void {
     nodesQueued = false;
     broadcast({ type: "nodes", nodes: nodes.view() });
   });
+}
+
+/** The secrets view to every client, once per turn of the loop. */
+let secretsQueued = false;
+function pushSecrets(): void {
+  if (secretsQueued) return;
+  secretsQueued = true;
+  queueMicrotask(() => {
+    secretsQueued = false;
+    if (secrets) broadcast({ type: "secrets", secrets: secrets.view() });
+  });
+}
+
+/**
+ * A lent kind was written or taken back on this node, under a reader that
+ * holds what it read: each one reads its file again and tells the windows.
+ * The web providers and a lent Claude token are read per request and per
+ * spawn, so they need only the windows told.
+ */
+function secretLanded(spec: KindSpec): void {
+  switch (spec.family) {
+    case "openrouter":
+      if (rereadOpenRouterKey()) {
+        broadcast({ type: "openrouter", openrouter: openRouterSnapshot() });
+        void pollOpenRouterAccount();
+      }
+      return;
+    case "telegram":
+      channels.telegram.reread();
+      return;
+    case "firecrawl-cloud":
+    case "web":
+      broadcast({ type: "web", web: web.status() });
+      return;
+    default:
+      return;
+  }
 }
 
 /** When this process started, which a node's data mark carries so a restart is a pull. */
@@ -695,7 +737,10 @@ function spawnEnvFor(profileId: string): Record<string, string> | undefined {
   const profile = workspaces.profile(profileId);
   const login = loginsActive() && profile ? loginEnv(profile.loginKey) : undefined;
   const token = tokenInPtys() ? tokenEnv() : undefined;
-  return login || token ? { ...login, ...token } : undefined;
+  // A Claude login the parent lent this node, on a child whose user has no
+  // browser anywhere: needs the host's `env` too, so protocol 2.
+  const lent = hostProtocol >= 2 ? lentClaudeEnv() : undefined;
+  return login || token || lent ? { ...login, ...token, ...lent } : undefined;
 }
 
 /**
@@ -713,6 +758,19 @@ function claudeDirOf(profileId: string): string {
   const profile = workspaces.profile(profileId);
   if (loginsActive() && profile) return claudeDirFor(profile.loginKey);
   return process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+}
+
+/**
+ * Which login "Lend this login" lends, for a profile: its own directory
+ * while profiles keep their own logins, else the machine's — and whose
+ * account it is, as Claude Code recorded it there.
+ */
+async function lendingLogin(profileId: unknown): Promise<{ login: string; account: string | null }> {
+  const profile = typeof profileId === "string" ? workspaces.profile(profileId) : undefined;
+  if (!profile) throw new Error("That profile is gone.");
+  if (loginsActive()) return { login: profile.loginKey, account: await accountEmail(join(claudeDirFor(profile.loginKey), ".claude.json")) };
+  const dir = process.env.CLAUDE_CONFIG_DIR;
+  return { login: "machine", account: await accountEmail(dir ? join(dir, ".claude.json") : join(homedir(), ".claude.json")) };
 }
 
 /** The same for Codex, whose rollouts are where a card's Codex conversation is found (`sleep.ts`). */
@@ -4672,6 +4730,33 @@ function handleMessage(ws: WebSocket, raw: string): void {
       void replyAsync(ws, msg.id, () => mover.move(workspaces.active.id, String(msg.workspaceId), String(msg.nodeId), String(msg.folder ?? ""), "user"));
       return;
 
+    case "secret-grant":
+      reply(ws, msg.id, () => secrets.grant(msg.nodeId, msg.kind, msg.on === true));
+      return;
+    case "secret-push":
+      reply(ws, msg.id, () => secrets.pushAgain(msg.nodeId, msg.kind));
+      return;
+    case "claude-lend":
+      void replyAsync(ws, msg.id, async () => {
+        const { login, account } = await lendingLogin(msg.profileId);
+        return secrets.lend(login, msg.token, account);
+      });
+      return;
+    case "claude-unlend":
+      reply(ws, msg.id, () => secrets.unlend(msg.login));
+      return;
+    case "claude-lend-open":
+      void replyAsync(ws, msg.id, async () => {
+        if (nodes.role() === "child") throw new Error("A child does not lend logins; its parent does.");
+        if (typeof msg.profileId !== "string" || msg.profileId !== workspaces.active.id) throw new Error("Open this from the profile whose login you are lending.");
+        // In the focused pane, as the profile's login: the tab's environment
+        // is the profile's, so the token minted is that account's. Local even
+        // in a workspace pinned to a machine: the login is this Mac's.
+        const agent = await openTerminal(workspaces.focusedPaneId, { command: "claude setup-token", kind: "shell", local: true });
+        return { id: agent.id };
+      });
+      return;
+
     case "remove-machine":
       if (typeof msg.machineId !== "string") return;
       removeMachine(msg.machineId);
@@ -4710,6 +4795,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
 
     case "set-openrouter-key":
       void replyAsync(ws, msg.id, async () => {
+        secrets.refuseIfHeld("openrouter");
         const status = await setOpenRouterKey(msg.key);
         broadcast({ type: "openrouter", openrouter: status });
         return status;
@@ -4717,6 +4803,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
       return;
 
     case "clear-openrouter-key":
+      if (secrets.heldFrom("openrouter")) return;
       clearOpenRouterKey();
       broadcast({ type: "openrouter", openrouter: null });
       return;
@@ -4733,12 +4820,16 @@ function handleMessage(ws: WebSocket, raw: string): void {
     case "set-web-provider":
       void replyAsync(ws, msg.id, async () => {
         if (msg.enabled !== undefined) web.setEnabled(msg.provider, msg.enabled);
+        if (msg.field !== undefined && typeof msg.provider === "string") secrets.refuseIfHeld(webKind(msg.provider));
         return msg.field !== undefined ? web.setField(msg.provider, msg.field, msg.value) : web.status();
       });
       return;
 
     case "clear-web-provider-field":
-      reply(ws, msg.id, () => web.clearField(msg.provider, msg.field));
+      reply(ws, msg.id, () => {
+        if (typeof msg.provider === "string") secrets.refuseIfHeld(webKind(msg.provider));
+        return web.clearField(msg.provider, msg.field);
+      });
       return;
 
     case "test-web-provider":
@@ -4749,17 +4840,27 @@ function handleMessage(ws: WebSocket, raw: string): void {
     // Each names its kind, and only Telegram is one; the rest is the
     // channel's own to check, and each refusal is a sentence for the page.
     case "channel-token":
-      void replyAsync(ws, msg.id, () => channelFor(msg.kind).setToken(msg.token));
+      void replyAsync(ws, msg.id, async () => {
+        secrets.refuseIfHeld("telegram");
+        return channelFor(msg.kind).setToken(msg.token);
+      });
       return;
 
     case "channel-forget":
-      if (isChannelKind(msg.kind)) channelFor(msg.kind).forget();
+      if (isChannelKind(msg.kind) && !secrets.heldFrom("telegram")) channelFor(msg.kind).forget();
       return;
 
     case "channel-set":
       void replyAsync(ws, msg.id, async () => {
         const change: { enabled?: boolean; profileKey?: string | null; speakReplies?: boolean } = {};
         if (typeof msg.enabled === "boolean") change.enabled = msg.enabled;
+        // A token held from the parent is the parent's bot, which the parent
+        // polls; a second poller here would be a 409 for both. Phase 5 is
+        // what lets this node take the poll over while the parent is away.
+        if (change.enabled === true) {
+          const held = secrets.heldFrom("telegram");
+          if (held) throw new Error(`This bot's token is held from ${held.from}, which answers it. This box holds it to take the chat over while ${held.from} is away, which is not built yet.`);
+        }
         if (typeof msg.speakReplies === "boolean") change.speakReplies = msg.speakReplies;
         if (msg.profileId === null) change.profileKey = null;
         else if (typeof msg.profileId === "string") {
@@ -6731,6 +6832,7 @@ function onUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
     send(ws, { type: "codex-usage", codex: codexUsageSnapshot() });
     send(ws, { type: "machines", machines: machinesSnapshot() });
     send(ws, { type: "nodes", nodes: nodes.view() });
+    send(ws, { type: "secrets", secrets: secrets.view() });
     send(ws, { type: "openrouter", openrouter: openRouterSnapshot() });
     send(ws, { type: "web", web: web.status() });
     send(ws, { type: "voice", voice: voice.status() });
@@ -7032,7 +7134,11 @@ async function attach(port: Port): Promise<void> {
         files: mirrorFiles({ store, configDir: configDir(), stateDir: dirname(snapshotPath()) }),
       };
     },
-    changed: pushNodes,
+    changed: () => {
+      pushNodes();
+      // A link up or down is a grant that can be sent now, or cannot.
+      pushSecrets();
+    },
     log: (line) => console.log(`kururu: ${line}`),
     moves: { check: (peer, ask) => mover.check(peer, ask), adopt: (peer, offer) => mover.adopt(peer, offer) },
     peer: (nodeId, message) => peerKurus?.message(nodeId, message),
@@ -7082,6 +7188,7 @@ async function attach(port: Port): Promise<void> {
     home: homedir(),
     log: (line) => console.log(`kururu: ${line}`),
   });
+  secrets = new Secrets({ nodes, landed: secretLanded, changed: pushSecrets, log: (line) => console.log(`kururu: ${line}`) });
   for (const agentId of workspaces.allAgents()) {
     if (!live.has(agentId)) workspaces.removeTab(agentId);
   }
@@ -7469,6 +7576,7 @@ export function shutdown(): Promise<void> {
     if (workspaces) writeSnapshot(workspaces.all(), workspaces.active.id);
     closeAllPreviews();
     backup?.close();
+    secrets?.close();
     nodes?.close();
     peerKurus?.close();
     linkWss.close();

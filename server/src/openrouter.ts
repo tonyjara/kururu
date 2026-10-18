@@ -176,6 +176,22 @@ export async function setOpenRouterKey(raw: unknown): Promise<OpenRouterStatus> 
   return openRouterSnapshot()!;
 }
 
+/**
+ * The key changed on the disk under this module — lent by the parent, or
+ * taken back (`secrets.ts`) — so the hint is read again, and a reading taken
+ * with the old key is not drawn under the new one. Says whether anything
+ * moved.
+ */
+export function rereadOpenRouterKey(): boolean {
+  const key = storedKey();
+  const next = key && keyHint(key);
+  if (next === hint) return false;
+  generation++;
+  hint = next;
+  known = { reading: null, stale: false, error: null };
+  return true;
+}
+
 /** Forget the key: off the disk, and the chip off the bottom bar. */
 export function clearOpenRouterKey(): void {
   removeConfigFile(FILE);

@@ -35,6 +35,7 @@ import type { OutboxState } from "./voice";
 import { needsOf, type Band, type NeedKind } from "./needs";
 import { panes, terminalsOf } from "./layout";
 import type { MoveCheck, MoveCheckAsk, MoveDone, MoveOffer } from "./move";
+import type { SealedSecret } from "./secrets";
 
 /**
  * The link's own version, said in `hello`. Bumped when a message changes
@@ -754,6 +755,12 @@ export type LinkMessage =
   | { type: "workspace-move"; id: string; offer: MoveOffer }
   | { type: "workspace-moved"; id: string; done: MoveDone | null; error: string | null }
   | { type: "bye"; reason: string }
+  // Phase 4, the lent secrets (`shared/secrets.ts`). Put and forget go from
+  // the parent only; held and ack come back from the child.
+  | { type: "secrets-put"; envelope: SealedSecret }
+  | { type: "secrets-forget"; kind: string; seq: number; sig: string }
+  | { type: "secrets-held"; held: Array<{ kind: string; digest: string; seq: number }> }
+  | { type: "secrets-ack"; kind: string; op: "put" | "forget"; seq: number; ok: boolean; digest: string | null; hint: string | null; error: string | null }
   | PeerMessage;
 
 /** The board verbs one Kuru may make on another node's boards directly. A run starts an agent, so it is never one of them. */
@@ -807,6 +814,10 @@ const LINK_TYPES = new Set<string>([
   "workspace-moved",
   "bye",
   ...PEER_TYPES,
+  "secrets-put",
+  "secrets-forget",
+  "secrets-held",
+  "secrets-ack",
 ]);
 
 /** A frame off the socket, as a message with a known type, or null. The fields are each handler's to check. */

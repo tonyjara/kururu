@@ -48,6 +48,7 @@ import type { KuruConversation, PeerKuru } from "./kuru";
 import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "./voice";
 import type { MachineStatus } from "./machines";
 import type { NodesView } from "./nodes";
+import type { SecretsView } from "./secrets";
 import type { WorkspaceDatabase } from "./databases";
 import type { NotifyEvent, NotifySettings } from "./notify";
 import type { MergeResolution, ProjectSettings } from "./projects";
@@ -412,6 +413,14 @@ export type ServerMessage =
    * read off the disk anyway; on a child it never does. See `shared/nodes.ts`.
    */
   | { type: "nodes"; nodes: NodesView }
+  /**
+   * The secrets lent between nodes: on the parent, what it could lend and
+   * each child's grants with how each stands; on a child, what it holds and
+   * from whom. Hints only, on both — never a value, never a digest. Sent on
+   * connect and whenever a grant, a push or an acknowledgement moves. See
+   * `shared/secrets.ts`.
+   */
+  | { type: "secrets"; secrets: SecretsView }
   /**
    * Sent on connect and whenever the scan finds the list changed: every
    * database every workspace's env files name, with the password left out.
@@ -1383,6 +1392,23 @@ export type ClientMessage =
   | { type: "node-move-plan"; id: number; workspaceId: string; nodeId: string; folder: string | null }
   /** Move it: the board goes over the link, and the workspace leaves this list once the node has it. Replied to with what was made there. */
   | { type: "node-move"; id: number; workspaceId: string; nodeId: string; folder: string }
+  /**
+   * Settings → Nodes → a node's Secrets: lend a kind to it, or take it back.
+   * The parent's alone. Replied to with the secrets view, or why not.
+   */
+  | { type: "secret-grant"; id: number; nodeId: string; kind: string; on: boolean }
+  /** Send a lent kind again though the node holds a version: a Codex login after the parent's changed. */
+  | { type: "secret-push"; id: number; nodeId: string; kind: string }
+  /**
+   * Settings → Agents → Lend this login to a node: the token `claude
+   * setup-token` printed, for the profile's login. Kept on this Mac for
+   * lending, and sent nowhere until a node is ticked for it.
+   */
+  | { type: "claude-lend"; id: number; profileId: string; token: string }
+  /** Forget a token made for lending: `machine` or a login key. Nodes holding it keep it until unticked. */
+  | { type: "claude-unlend"; id: number; login: string }
+  /** A tab in the focused pane running `claude setup-token` as the profile's login, for the token to paste back. */
+  | { type: "claude-lend-open"; id: number; profileId: string }
   /**
    * Give the server an OpenRouter management key. The one message in the
    * protocol that carries a secret, and it only ever travels this way: it is

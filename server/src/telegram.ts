@@ -230,6 +230,30 @@ export class TelegramChannel {
     this.state = readState();
   }
 
+  /**
+   * The file changed under this channel — a token lent by the parent, or
+   * taken back (`secrets.ts`) — so it is read again as at start. The switch
+   * is whatever the file says, which for a lent token is off: a held token
+   * is the parent's bot, and a second poller of one bot is a 409 for both.
+   */
+  reread(): void {
+    const stored = readStored();
+    const token = storedToken();
+    const hint = token ? tokenHint(token) : null;
+    if (hint !== this.hint) {
+      this.generation++;
+      this.parked = false;
+      this.failures = 0;
+      this.error = null;
+      this.endPairing();
+    }
+    this.settings = stored.settings;
+    this.bot = token ? stored.bot : null;
+    this.hint = hint;
+    this.wake();
+    this.deps.changed();
+  }
+
   /** Start polling, if there is anything to poll for, and send whatever was waiting when the last server went. */
   start(): void {
     if (!this.looping) void this.loop();
