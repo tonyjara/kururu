@@ -29,7 +29,7 @@ const { pillLog } = require("./talkkey");
  * @param {import("./talkkey").TalkKey} options.talk
  * @param {string} options.version
  * @param {boolean} options.packaged
- * @param {object} options.actions  `openWindow`, `closeWindow`, `windowOpen`, `quit`, `serverChanged`, `webRebuilt`
+ * @param {object} options.actions  `openWindow`, `closeWindow`, `windowOpen`, `nodes`, `openNode`, `quit`, `serverChanged`, `webRebuilt`
  */
 function createTray({ runner, talk, version, packaged, actions }) {
   const image = nativeImage.createFromPath(path.join(__dirname, "icon", "trayTemplate.png"));
@@ -46,6 +46,7 @@ function createTray({ runner, talk, version, packaged, actions }) {
       packaged,
       home: homedir(),
       windowOpen: actions.windowOpen(),
+      nodes: actions.nodes(),
       source: config.source,
       savedCheckout: config.checkout,
       talk: talk.state(),
@@ -65,6 +66,8 @@ function createTray({ runner, talk, version, packaged, actions }) {
       ...item,
       ...(item.submenu ? { submenu: attach(item.submenu) } : {}),
       ...(item.id && clicks[item.id] ? { click: () => void clicks[item.id]() } : {}),
+      // One item per node, by id, so the click names the node and not a menu position.
+      ...(item.id?.startsWith("node:") ? { click: () => void actions.openNode(item.id.slice("node:".length)) } : {}),
     }));
 
   // Built fresh on every click, so the record is read off the disk at that

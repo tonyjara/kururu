@@ -38,6 +38,7 @@ const path = require("node:path");
 const { readDesktop, writeDesktop } = require("./desktop");
 const { Runner, hostSocket } = require("./runner");
 const { candidates, forget, normalize, remember } = require("./servers");
+const { fetchNodes, nodeChoices, whyNot } = require("./nodes");
 const { TalkKey } = require("./talkkey");
 const { createTray } = require("./tray");
 const { editMenuTemplate } = require("./editmenu");
@@ -210,7 +211,10 @@ async function openPage(base) {
  * the moment a checkout's server answers, it gets one in front of it.
  */
 function pointPill() {
-  const base = connected ?? (runner.health ? LOCAL : null);
+  // The pill is this Mac's ears and mouth, and a node has neither: with the
+  // window on a child it stays on the local server.
+  const onNode = connected !== null && nodeList.some((node) => node.address === connected);
+  const base = (onNode ? null : connected) ?? (runner.health ? LOCAL : null);
   if (!base) {
     talk.setPage(null);
     return;
@@ -323,7 +327,13 @@ function endAgents() {
  */
 async function reachable(base) {
   try {
-    const response = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(1200) });
+    // A node's own token when one is known, since a child asks it of every
+    // caller and would answer this probe 403 — "nothing answered" — without.
+    const token = nodeTokens.get(base);
+    const response = await fetch(`${base}/api/health`, {
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+      signal: AbortSignal.timeout(1200),
+    });
     return response.ok;
   } catch {
     return false;
@@ -335,9 +345,34 @@ let entries = candidates().map((entry) => ({ ...entry, reachable: false }));
 let sweeping = false;
 let sweepTimer = null;
 
+/**
+ * The other kururus the local server knows of, as `nodes.js` reads them —
+ * kept from the last answer, so the picker can still offer a child while the
+ * Mac's own server is down, which is when the picker is up at all. Each
+ * node's token is held beside it in memory, by origin, for the probes and
+ * the first page; it is never drawn and never written down.
+ */
+let nodeList = [];
+const nodeTokens = new Map();
+/** Which nodes answered the picker's last sweep, by id: the picker asks the node itself, not the link. */
+let nodesUp = new Set();
+
+async function refreshNodes() {
+  const view = await fetchNodes(LOCAL);
+  if (!view) return;
+  nodeList = nodeChoices(view);
+  for (const node of nodeList) if (node.token) nodeTokens.set(node.address, node.token);
+}
+
+/** Every ten seconds, which is a loopback GET; the tray reads the list when it is clicked. */
+setInterval(() => void refreshNodes(), 10_000).unref();
+void refreshNodes();
+
 function pushPickerState() {
   if (!win || win.isDestroyed()) return;
-  win.webContents.send("picker:state", { entries, checking: sweeping });
+  // The token stays here: the picker is told a name, an address and a state.
+  const nodes = nodeList.map((node) => ({ id: node.id, name: node.name, address: node.address, reachable: nodesUp.has(node.id) }));
+  win.webContents.send("picker:state", { entries, nodes, checking: sweeping });
 }
 
 /**
@@ -357,8 +392,13 @@ async function sweep() {
   entries = candidates().map((entry) => ({ ...entry, reachable: false }));
   pushPickerState();
 
+  await refreshNodes();
   const results = await Promise.all(entries.map((entry) => reachable(entry.address)));
   for (let i = 0; i < entries.length; i++) entries[i].reachable = results[i];
+  // Nodes are offered, never connected to by the sweep: going to another
+  // machine is a choice, and the sweep's job is finding this one's server.
+  const nodeResults = await Promise.all(nodeList.map((node) => reachable(node.address)));
+  nodesUp = new Set(nodeList.filter((_node, i) => nodeResults[i]).map((node) => node.id));
   sweeping = false;
   pushPickerState();
 
@@ -443,21 +483,58 @@ function stopSweeping() {
  * otherwise; `openPage` waits for vite to answer, because a failed `loadURL`
  * is not retried and the window would sit on ERR_CONNECTION_REFUSED.
  */
-async function connect(address) {
+async function connect(address, { node = false } = {}) {
   const base = normalize(address);
   if (!base) return { error: "That does not look like an address." };
   if (!(await reachable(base))) return { error: `Nothing answered at ${base}.` };
 
   stopSweeping();
-  remember(base);
+  // A node is not remembered: `servers.json` is the picker's memory of where
+  // this Mac's server lives, and the sweep connects to the newest entry that
+  // answers — so a child opened once would be where the next launch landed.
+  if (!node) remember(base);
   connected = base;
   startWatchingServer();
   pointPill();
 
-  const page = await openPage(base);
+  const page = withToken(await openPage(base), base);
   if (connected === base) await win?.loadURL(page);
   buildMenu();
   return { ok: true };
+}
+
+/**
+ * A node's page with its token in the address, once: the server answers a
+ * `?k=` with the cookie (`server/src/index.ts`), so this window is let in
+ * for a year and every later load is the bare address. Only on the node's
+ * own origin — never on a vite page in front of it.
+ */
+function withToken(page, base) {
+  const token = nodeTokens.get(base);
+  if (!token || originOf(page) !== base) return page;
+  const url = new URL(page);
+  url.searchParams.set("k", token);
+  return url.toString();
+}
+
+/**
+ * The tray's "Open <node>" and the picker's node rows: the window, made if
+ * there is none, pointed at that node. Refused for one whose link is down,
+ * with the reason `whyNot` gives.
+ */
+async function openNode(id) {
+  const node = nodeList.find((each) => each.id === id);
+  if (!node) return { error: "That node is not in the roster any more." };
+  if (node.token) nodeTokens.set(node.address, node.token);
+  if (!win || win.isDestroyed()) createWindow();
+  const result = await connect(node.address, { node: true });
+  if (result.error && !connected) showPicker();
+  if (win && !win.isDestroyed()) {
+    win.show();
+    win.focus();
+    app.focus({ steal: true });
+  }
+  return result.error ? { error: `${node.name}: ${whyNot(node) ?? result.error}` } : result;
 }
 
 /**
@@ -755,6 +832,7 @@ ipcMain.on("kururu:raise-main", (_event, focus) => {
 
 ipcMain.on("picker:ready", () => pushPickerState());
 ipcMain.handle("picker:connect", (_event, address) => connect(address));
+ipcMain.handle("picker:connect-node", (_event, id) => openNode(String(id)));
 ipcMain.handle("picker:forget", (_event, address) => {
   forget(address);
   void sweep();
@@ -831,6 +909,12 @@ app.whenReady().then(async () => {
       // The menu's Open under Kuru's lines: the window, with the drawer up.
       openKuru: () => openKuru(null, openWindow()),
       windowOpen: () => Boolean(win && !win.isDestroyed()),
+      // The other kururus, with their links' state, and the window sent to one.
+      nodes: () => nodeList.map((node) => ({ id: node.id, name: node.name, why: whyNot(node) })),
+      openNode: async (id) => {
+        const result = await openNode(id);
+        if (result.error) dialog.showErrorBox("Kururu could not open that node", result.error);
+      },
       quit: () => app.quit(),
       serverChanged: () => {
         pointPill();

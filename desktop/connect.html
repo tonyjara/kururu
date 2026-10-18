@@ -93,6 +93,9 @@
       input::placeholder { color: var(--dimmer); }
       input:focus { outline: none; border-color: var(--dim); }
 
+      .section { color: var(--dimmer); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 6px; }
+      .section[hidden], #nodes[hidden] { display: none; }
+
       .error { color: #ff9f43; margin: 12px 0 0; min-height: 18px; font-size: 12px; }
       .hint { color: var(--dimmer); margin: 18px 0 0; font-size: 12px; }
       .hint code { font-family: var(--mono); color: var(--dim); }
@@ -108,6 +111,11 @@
       </p>
 
       <ul id="list"></ul>
+
+      <!-- The other kururus this machine's server last listed: a child that
+           stays on while this server is down is what this list is for. -->
+      <p class="section" id="nodes-title" hidden>Nodes</p>
+      <ul id="nodes" hidden></ul>
 
       <form id="add">
         <input id="address" placeholder="100.101.102.103  ·  vm:7717  ·  https://box.ts.net" spellcheck="false" autocomplete="off" />
@@ -126,6 +134,34 @@
       const form = document.getElementById("add");
       const address = document.getElementById("address");
       const error = document.getElementById("error");
+      const nodes = document.getElementById("nodes");
+      const nodesTitle = document.getElementById("nodes-title");
+
+      /** A node by name, its address beside it, opened through the main process, which holds its token. */
+      function renderNodes(state) {
+        nodes.replaceChildren();
+        const list = state.nodes ?? [];
+        nodes.hidden = nodesTitle.hidden = list.length === 0;
+        for (const node of list) {
+          const row = document.createElement("li");
+          row.className = node.reachable ? "up" : state.checking ? "checking" : "";
+          const dot = document.createElement("span");
+          dot.className = "dot";
+          const label = document.createElement("span");
+          label.className = "addr";
+          label.textContent = `${node.name}  ·  ${node.address.replace(/^https?:\/\//, "")}`;
+          const open = document.createElement("button");
+          open.textContent = node.reachable ? "Open" : "Try";
+          if (node.reachable) open.className = "go";
+          open.onclick = async () => {
+            error.textContent = "";
+            const result = await window.picker.connectNode(node.id);
+            if (result && result.error) error.textContent = result.error;
+          };
+          row.append(dot, label, open);
+          nodes.append(row);
+        }
+      }
 
       /** Re-rendered wholesale on every sweep; the list is a handful of rows. */
       function render(state) {
@@ -167,6 +203,7 @@
 
           list.append(row);
         }
+        renderNodes(state);
       }
 
       async function go(value) {

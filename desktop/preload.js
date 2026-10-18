@@ -24,7 +24,7 @@ const isPicker = location.protocol === "file:" && location.pathname.endsWith("co
 
 if (isPicker) {
   contextBridge.exposeInMainWorld("picker", {
-    /** Told on every probe sweep: which addresses are known, and which answered. */
+    /** Told on every probe sweep: which addresses and nodes are known, and which answered. */
     onState(listener) {
       ipcRenderer.on("picker:state", (_event, state) => listener(state));
     },
@@ -34,6 +34,10 @@ if (isPicker) {
     },
     connect(address) {
       return ipcRenderer.invoke("picker:connect", address);
+    },
+    /** One of the nodes the local server knows, by id: the main process holds its address and token. */
+    connectNode(id) {
+      return ipcRenderer.invoke("picker:connect-node", id);
     },
     forget(address) {
       return ipcRenderer.invoke("picker:forget", address);

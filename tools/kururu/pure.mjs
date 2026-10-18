@@ -290,3 +290,72 @@ export function parseArgs(argv, valued = []) {
   }
   return { flags, words };
 }
+
+/** `ABC-DEF`, as `shared/nodes.ts` shows a pairing code: read off one screen, typed into another. */
+export function formatCode(code) {
+  const text = String(code ?? "");
+  return text.length === 6 ? `${text.slice(0, 3)}-${text.slice(3)}` : text;
+}
+
+/**
+ * Where this node stands with the Mac, from `/api/health`'s `nodes`:
+ * `unknown` for a server from before nodes, `alone` for one in no roster,
+ * `parent` for one that pairs others, and for a child `linked` or `waiting`
+ * — waiting being a parent that is away or not yet dialled, with its name
+ * and since when. One reading, for the doctor's row and for `child code`'s
+ * wait, so the two cannot disagree about what "paired" is.
+ */
+export function pairingState(health) {
+  const nodes = health?.nodes;
+  if (!nodes || typeof nodes.role !== "string") return { state: "unknown" };
+  if (nodes.role === "alone") return { state: "alone" };
+  const members = Array.isArray(nodes.nodes) ? nodes.nodes : [];
+  if (nodes.role === "parent") return { state: "parent", count: members.length };
+  const parent = members.find((node) => node?.parent);
+  if (!parent) return { state: "waiting", parent: null, link: "connecting", since: null };
+  if (parent.state === "up") return { state: "linked", parent: parent.name };
+  return { state: "waiting", parent: parent.name, link: parent.state, since: typeof parent.since === "number" ? parent.since : null };
+}
+
+/**
+ * The doctor's pairing row. Not paired is a `–`, never a `✗`: a child that
+ * stands alone is a child working as built, and a doctor that failed it for
+ * that would fail every standalone child forever. A parent that is *away* —
+ * was linked, and went quiet — is a `–` too: that is a Mac with its lid
+ * shut, which is the whole reason a child exists, and a doctor run after a
+ * reboot at night must not exit 1 for it. Paired with a parent this node
+ * has not reached since its server started is the `✗`, because then
+ * something is wrong — the Mac unshared, a wrong address, the tailnet down.
+ */
+export function pairingRow(health, now = Date.now()) {
+  const at = pairingState(health);
+  switch (at.state) {
+    case "unknown":
+      return { title: "pairing", state: "skip", detail: health ? "this server is from before pairing — kururu child update" : "no server to ask" };
+    case "alone":
+      return { title: "pairing", state: "skip", detail: "not paired with a Mac (optional) — kururu child code" };
+    case "parent":
+      return { title: "pairing", state: "skip", detail: `the parent of ${at.count} node${at.count === 1 ? "" : "s"}, not a child` };
+    case "linked":
+      return { title: "pairing", state: "ok", detail: `paired with ${at.parent}, linked` };
+    default: {
+      if (at.link === "away") {
+        return { title: "pairing", state: "skip", detail: `paired with ${at.parent ?? "a parent"}, away${at.since ? ` for ${ago(now - at.since)}` : ""} — as it is while its lid is shut; the link comes back by itself` };
+      }
+      return {
+        title: "pairing",
+        state: "fail",
+        detail: `paired with ${at.parent ?? "a parent this roster does not name"}, ${at.link}`,
+        fix: "is the Mac awake, with sharing on? Its Settings → Nodes says whether a node can reach it; the link comes back by itself",
+      };
+    }
+  }
+}
+
+/** A duration as a person says it: "40 s", "12 min", "3 h". */
+function ago(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 90) return `${s} s`;
+  if (s < 90 * 60) return `${Math.round(s / 60)} min`;
+  return `${Math.round(s / 3600)} h`;
+}

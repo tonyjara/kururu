@@ -37,6 +37,7 @@ files:
   - preload.js
   - connect.html
   - servers.js
+  - nodes.js
   - desktop.js
   - runner.js
   - vite.js
