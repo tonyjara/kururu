@@ -717,7 +717,7 @@ export const STEPS = [
         const current = answer.body.host?.current !== false;
         rows.push(
           current
-            ? { title: "pty host", state: "ok", detail: `${unit.replace(/\.service$/, "")}, ${answer.body.liveAgents ?? 0} agents, current` }
+            ? { title: "pty host", state: "ok", detail: `${unit.replace(/\.service$/, "")}, current, holding ${answer.body.agents ?? 0} terminal${answer.body.agents === 1 ? "" : "s"}` }
             : { title: "pty host", state: "fail", detail: `${unit.replace(/\.service$/, "")} speaks an older protocol than this server`, fix: "kururu child restart-host, which ends every agent it holds" },
         );
       }

@@ -236,8 +236,18 @@ async function update(flags) {
     return 1;
   }
   const before = git(["rev-parse", "HEAD"]).stdout.trim();
+  console.log(dim(`$ git pull --ff-only`));
+  if (spawnSync("git", ["-C", ROOT, "pull", "--ff-only"], { stdio: "inherit" }).status !== 0) {
+    console.error("kururu child update: the pull failed; the running server is untouched.");
+    return 1;
+  }
+  const after = git(["rev-parse", "HEAD"]).stdout.trim();
+  if (before === after) {
+    console.log(`Already current at ${after.slice(0, 7)}; nothing rebuilt or restarted.`);
+    return doctor(flags);
+  }
+  console.log(`${before.slice(0, 7)} → ${after.slice(0, 7)}`);
   const steps = [
-    ["git", ["-C", ROOT, "pull", "--ff-only"]],
     ["bun", ["install", "--frozen-lockfile"]],
     ["bun", ["run", "build"]],
   ];
@@ -249,8 +259,6 @@ async function update(flags) {
       return 1;
     }
   }
-  const after = git(["rev-parse", "HEAD"]).stdout.trim();
-  console.log(before === after ? "Already current; restarting onto the build all the same." : `${before.slice(0, 7)} → ${after.slice(0, 7)}`);
   console.log(dim(`$ systemctl --user restart ${ctx.unit}`));
   const restarted = spawnSync("systemctl", ["--user", "restart", `${ctx.unit}.service`], { stdio: "inherit", env: ctx.env });
   if (restarted.status !== 0) return 1;
