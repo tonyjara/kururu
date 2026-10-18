@@ -408,3 +408,24 @@ export function heldRows(held, { paired, parent, name, claudeLent, isParent = fa
   }
   return rows;
 }
+
+/**
+ * The doctor's leading row: whether this box can read the shared Telegram
+ * chat for the others while those ranked above it are away, whether it
+ * does now, and its rank — off `/api/health`'s `nodes.lead`. Never a `✗`:
+ * leading is optional, and a child that cannot lead is a child that leaves
+ * the chat to the Mac, which is how most will be. The `–` says why not, in
+ * the words the server used, so the fix is in the line.
+ */
+export function leadingRow(health) {
+  const nodes = health?.nodes;
+  if (!nodes || typeof nodes.role !== "string") return { title: "leading", state: "skip", detail: health ? "this server is from before leading — kururu child update" : "no server to ask" };
+  if (nodes.role === "alone") return { title: "leading", state: "skip", detail: "not paired, so there is no shared chat to read" };
+  const lead = nodes.lead;
+  if (!lead || typeof lead !== "object") return { title: "leading", state: "skip", detail: "this server is from before leading — kururu child update" };
+  const rank = typeof lead.rank === "number" ? `rank ${lead.rank}` : "no rank";
+  if (!lead.shared) return { title: "leading", state: "skip", detail: `${rank}; not one of the shared bot's readers${lead.why ? ` — ${lead.why}` : ""}` };
+  if (lead.polls) return { title: "leading", state: "ok", detail: `${rank}; reads the Telegram chat for the others now` };
+  if (lead.eligible) return { title: "leading", state: "ok", detail: `${rank}; eligible — reads the chat while those above it are away${lead.holder ? ` (${lead.holder} reads it now)` : ""}` };
+  return { title: "leading", state: "skip", detail: `${rank}; not eligible (optional): ${lead.why ?? "no reason given"}` };
+}

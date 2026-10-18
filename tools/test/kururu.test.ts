@@ -12,6 +12,7 @@ import {
   isHostUnit,
   keysInEnv,
   lanAddresses,
+  leadingRow,
   lingerOn,
   parseArgs,
   parseShowEnvironment,
@@ -212,6 +213,26 @@ describe("parseArgs", () => {
 
   it("never takes the next flag as a value", () => {
     expect(parseArgs(["--port", "--yes"], ["port"]).flags).toEqual({ port: true, yes: true });
+  });
+});
+
+describe("leading", () => {
+  const health = (lead: unknown, role = "child") => ({ ok: true, nodes: { role, name: "box", leader: "mac", nodes: [], lead } });
+  const lead = (over: Record<string, unknown>) => ({ shared: true, eligible: true, why: null, polls: false, holder: "mac", rank: 2, ...over });
+
+  it("is a ✓ that says whether this box reads the chat, and its rank", () => {
+    expect(leadingRow(health(lead({ polls: true, holder: "box" })))).toEqual({ title: "leading", state: "ok", detail: "rank 2; reads the Telegram chat for the others now" });
+    expect(leadingRow(health(lead({})))).toEqual({ title: "leading", state: "ok", detail: "rank 2; eligible — reads the chat while those above it are away (mac reads it now)" });
+  });
+
+  it("is never a ✗: not eligible is a – with the reason", () => {
+    const row = leadingRow(health(lead({ eligible: false, why: "the Mac has not lent this node the bot's token" })));
+    expect(row.state).toBe("skip");
+    expect(row.detail).toContain("not eligible (optional): the Mac has not lent");
+    expect(leadingRow(health(lead({ shared: false, eligible: false, why: "the roster carries no Telegram channel" }))).detail).toContain("not one of the shared bot's readers");
+    expect(leadingRow(health(undefined)).detail).toContain("kururu child update");
+    expect(leadingRow({ ok: true, nodes: { role: "alone", nodes: [] } }).state).toBe("skip");
+    expect(leadingRow(null).detail).toBe("no server to ask");
   });
 });
 

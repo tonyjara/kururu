@@ -31,6 +31,7 @@ import {
   isHostUnit,
   keysInEnv,
   lanAddresses,
+  leadingRow,
   lentClaude,
   lingerOn,
   pairingRow,
@@ -946,6 +947,16 @@ export const STEPS = [
       if (!io.interactive) throw new Stop(`${missing.detail}. ${missing.fix[0].toUpperCase()}${missing.fix.slice(1)}. Then run this again.`, { code: 4 });
       io.say(`${missing.fix[0].toUpperCase()}${missing.fix.slice(1)}. Waiting for it (Enter to stop waiting)…`);
       await io.waitFor(async () => !(await recheck()).some((row) => row.state === "fail"), 5 * 60_000);
+    },
+  },
+
+  {
+    id: "leading",
+    title: "reading the Telegram chat",
+    why: "With the Mac's Telegram bot shared among the nodes, one kururu reads the chat at a time: the Mac while it is awake, and the next by rank while it is away. This box can be that one when the Mac lends it the bot's token (Settings → Nodes → <this box> → Secrets → Telegram) and Claude is signed in here. Optional: a box that cannot still speaks in the chat through whichever node reads it.",
+    async check(ctx) {
+      const answer = await health(ctx);
+      return [leadingRow(answer.status === 200 ? answer.body : null)];
     },
   },
 ];
