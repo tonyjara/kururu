@@ -253,10 +253,11 @@ Each row is two lines:
 working until then.
 
 Clicking a row reveals that terminal where it already is; dragging one moves it.
-The sidebar's toggle and the workspace's name are at the very top, beside the
-window's buttons; under them the profile menu, the board, and the two drawer
-chips; the cog and phone button at the bottom. The bar along the bottom of the
-window counts the agents running.
+The workspace's name and the sidebar's toggle are at the very top, beside the
+window's buttons; under them the profile menu and the board; the cog and phone
+button at the bottom. The Needs you and Kuru chips are in the top-right pane's
+tab strip, and the bar along the bottom of the window counts the agents
+running.
 
 ### The reader
 
@@ -358,7 +359,7 @@ over its own copy, so nothing is reported twice.
 
 ## The harness
 
-The **Kuru** chip beside the board, or `C-a a`, opens the profile's
+The **Kuru** chip in the top-right pane's strip, or `C-a a`, opens the profile's
 **harness**: one Claude Code session that oversees every agent in the profile.
 Talk to it as you would to any Claude, about all of them at once — "start an
 agent on the migration card", "what did the API worker say", "tell it to use

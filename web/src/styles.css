@@ -3178,6 +3178,17 @@ a.button {
   gap: 6px;
   min-width: 0;
 }
+/* The sidebar's top line: the name takes the room, so the toggle stands at
+   the far end, on the edge the sidebar folds towards. */
+.ws-toggle-last {
+  flex: 1;
+}
+.ws-toggle-last .sb-workspace {
+  flex: 1;
+}
+.ws-toggle-last .sb-bars {
+  margin-left: 0;
+}
 
 /* The pointer's door onto `toggle-sidebar`. Quiet, like the cog: it is a thing
    you reach for rather than a thing you read, and the status bar is already
@@ -3275,6 +3286,17 @@ a.button {
   align-items: center;
   gap: 4px;
   flex: none;
+}
+
+/* In the top-right pane's strip, at the head of its pinned controls. The
+   focused pane's strip is `--chrome-high`, which is the chips' own hover, so
+   there they light the way the pane's buttons beside them do. */
+.tab-actions .drawer-chips {
+  margin-right: 6px;
+}
+.tab-actions .sb-needs:hover,
+.tab-actions .sb-kuru:hover {
+  background: var(--line);
 }
 
 /* Kuru's chip: the one door onto the drawer, and the one place its news is.

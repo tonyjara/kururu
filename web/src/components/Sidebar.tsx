@@ -157,12 +157,6 @@ interface Props {
    * bottom bar has them.
    */
   toggle: ReactNode;
-  /**
-   * The two drawers' chips, for beside the board — or null while a drawer is
-   * open and they are in its header instead, and on a phone. See
-   * `DrawerChips.tsx`.
-   */
-  chips: ReactNode;
   /** Opens the settings dialog. The corner is the only way in. */
   onSettings: () => void;
   /** Opens the phone dialog — the addresses this server answers at, as QR codes. */
@@ -211,7 +205,6 @@ export function Sidebar({
   onBoard,
   needsYou,
   toggle,
-  chips,
   onSettings,
   onReach,
   overlay,
@@ -936,7 +929,8 @@ export function Sidebar({
           strip is drawn in a browser tab too when it has them — a line that
           holds something is not thirty pixels of nothing — and stays the empty
           drag handle on a phone's full-screen sidebar, which has its close
-          button for a way out. */}
+          button for a way out. The name leads and the toggle stands at the
+          far end, on the edge the sidebar folds towards. */}
       {toggle ? (
         <div className="sidebar-drag sidebar-top">{toggle}</div>
       ) : (
@@ -974,12 +968,6 @@ export function Sidebar({
           <Icon name="board" />
           {openCards > 0 && <span className="profile-board-count">{openCards}</span>}
         </button>
-        {/* What needs you and Kuru, beside the board while both their drawers
-            are shut: the board is the other thing in this row that opens a
-            view of everything, so the three doors sit together. With a drawer
-            open the chips are in its header instead, and this is null. See
-            `DrawerChips.tsx`. */}
-        {chips}
         <span className="sidebar-head-spacer" />
         {/* The way out of a full-screen sidebar. Drawn only when it is one: as a
             column, the panes next to it are already the way out, and a close
@@ -1328,9 +1316,9 @@ export function Sidebar({
 
       {/* The foot: Settings and the phone's QR code, at the bottom left. They
           were down here until 2026-10-12, went up into the header, and came
-          back on 2026-10-18 when the header took the drawers' chips — and this
-          time the foot has no bar beside it to meet, because the bar under the
-          panes is gone and the one along the bottom runs under this too. The
+          back on 2026-10-18 — and this time the foot has no bar beside it to
+          meet, because the bar under the panes is gone and the one along the
+          bottom runs under this too. The
           QR code is for getting kururu *onto* a phone, so a sidebar that is a
           phone's whole screen does not draw it; a narrow desktop window gets
           it back when widened. */}

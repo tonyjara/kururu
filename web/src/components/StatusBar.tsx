@@ -7,9 +7,14 @@
  * chips and the file tree's folder; on 2026-10-18 the user had it taken away
  * and this put in its place. The toggle and the name went up beside the
  * traffic lights (`WorkspaceToggle`, below, drawn by the sidebar and by the
- * strip over the panes when there is no sidebar), the chips went beside the
- * profile's board (`DrawerChips.tsx`), and the folder went altogether — the
- * tree is `C-a e` and a line in every pane's menu.
+ * strip over the panes when there is no sidebar), the chips went to the
+ * top-right pane's strip (`DrawerChips.tsx`), and the folder went altogether —
+ * the tree is `C-a e` and a line in every pane's menu.
+ *
+ * **Everything on it stands at the right**, and whatever is added later goes
+ * there too: the left end is empty on a desktop on purpose, so the bar reads
+ * as one cluster against the edge the drawers open from rather than a row of
+ * odd bits spread across the window.
  *
  * What it holds is the count of agents that are running, across every profile,
  * by the rule `/api/health` and `bun run status` count by (`countsAsAgent`), so
@@ -26,9 +31,9 @@
  * rather than a column, so there is no header to put a toggle or a chip in
  * while the panes are up, and the bottom edge is the half of the screen a
  * thumb reaches. So on a narrow window the bar opens with the toggle and the
- * workspace, and ends with the jump to the other pane, the key bar's toggle
- * and the two chips — the thumb's only doors onto things a keyboard does for
- * free.
+ * workspace at the left, and the right holds the count, the jump to the other
+ * pane, the key bar's toggle and the two chips — the thumb's only doors onto
+ * things a keyboard does for free.
  */
 import type { ReactNode } from "react";
 import { countsAsAgent, type AgentSnapshot } from "../../../shared/model";
@@ -87,12 +92,17 @@ export function StatusBar({
   return (
     <footer className="statusbar">
       {toggle}
+      <span className="sb-spacer" />
 
-      {/* The count, first on a desktop because it is the bar's one standing
-          fact. Running is the number and working is the news: an agent at a
-          prompt is still holding its context and its tokens, so it counts, and
-          the working ones are said beside it — in their ink — only when there
-          are any, since "0 working" is a word for nothing. */}
+      {prefixArmed && <span className="sb-badge sb-prefix">PREFIX</span>}
+      {resizeMode && <span className="sb-badge sb-resize">RESIZE hjkl · esc</span>}
+      {!connected && <span className="sb-badge sb-off">reconnecting…</span>}
+
+      {/* The count, the bar's one standing fact. Running is the number and
+          working is the news: an agent at a prompt is still holding its
+          context and its tokens, so it counts, and the working ones are said
+          beside it — in their ink — only when there are any, since "0
+          working" is a word for nothing. */}
       <span
         className={`sb-agents ${working > 0 ? "sb-agents-working" : running.length === 0 ? "sb-agents-none" : ""}`}
         title={`${running.length} ${running.length === 1 ? "agent is" : "agents are"} running, across every profile${working > 0 ? ` — ${working} working` : ""}`}
@@ -103,11 +113,6 @@ export function StatusBar({
         {working > 0 && <span className="sb-agents-busy">· {working} working</span>}
       </span>
 
-      {prefixArmed && <span className="sb-badge sb-prefix">PREFIX</span>}
-      {resizeMode && <span className="sb-badge sb-resize">RESIZE hjkl · esc</span>}
-      {!connected && <span className="sb-badge sb-off">reconnecting…</span>}
-
-      <span className="sb-spacer" />
       {/* The other pane, in one press.
           A narrow window draws one pane at a time, and somebody watching two
           agents crosses between them every few seconds — which is a move worth a
@@ -154,15 +159,19 @@ export function StatusBar({
 
 /**
  * The sidebar's toggle and the workspace's name, which go together wherever
- * they are drawn: the bars to open or put away the list of workspaces, and the
- * name of the one the panes belong to.
+ * they are drawn: the button that opens or puts away the sidebar, and the name
+ * of the workspace the panes belong to.
  *
  * They were the left end of the bar under the panes, and on 2026-10-18 they
  * went up into the strip the traffic lights stand in — the sidebar's top line
- * while there is a sidebar, the top of the panes while there is not — so the
- * toggle is in the same place either way and the name sits where a window's
- * title would. On a phone they are still the bottom bar's left end, where a
- * thumb is.
+ * while there is a sidebar, the top of the panes while there is not — and the
+ * name sits where a window's title would. On a phone they are still the
+ * bottom bar's left end, where a thumb is.
+ *
+ * `toggleLast` is the sidebar's top line: the name leads and the toggle stands
+ * at the far end, on the edge the sidebar folds towards. With the sidebar away
+ * the toggle comes first, just after the traffic lights, which is where a Mac
+ * app keeps the button that brings its sidebar back.
  *
  * The name is heavier than it was. With the bar it was one quiet label among
  * several; up here it is the window's title, and it is read as one.
@@ -170,41 +179,50 @@ export function StatusBar({
 export function WorkspaceToggle({
   name,
   sidebarOpen,
+  toggleLast,
   onToggle,
 }: {
   name: string;
   sidebarOpen: boolean;
+  toggleLast: boolean;
   onToggle: () => void;
 }) {
+  const button = (
+    <button
+      className="sb-bars"
+      onClick={onToggle}
+      title={sidebarOpen ? "Hide the sidebar (C-a b)" : "Show the sidebar (C-a b)"}
+      aria-label={sidebarOpen ? "Hide the sidebar" : "Show the sidebar"}
+      aria-expanded={sidebarOpen}
+    >
+      <SidebarIcon />
+    </button>
+  );
   return (
-    <span className="ws-toggle">
-      <button
-        className="sb-bars"
-        onClick={onToggle}
-        title={sidebarOpen ? "Hide the sidebar (C-a b)" : "Show the sidebar (C-a b)"}
-        aria-label={sidebarOpen ? "Hide the sidebar" : "Show the sidebar"}
-        aria-expanded={sidebarOpen}
-      >
-        <BarsIcon />
-      </button>
+    <span className={`ws-toggle ${toggleLast ? "ws-toggle-last" : ""}`}>
+      {!toggleLast && button}
       <span className="sb-workspace">{name}</span>
+      {toggleLast && button}
     </span>
   );
 }
 
 /**
- * Three lines, which is what every application on every platform has agreed
- * means "the list of things". Drawn rather than taken from the skin's icon set
- * for the reason the cog and the QR code in the sidebar are: the set names the
- * glyphs a *skin* is expected to restyle, and a fourth entry in it would be a
- * fourth thing every future skin has to answer for to gain nothing — this one
- * is the same three lines in any chrome.
+ * A window with its left column ruled off: the sidebar, which is the thing
+ * this button opens and closes. It was three lines until 2026-10-18, and three
+ * lines say "a list of things" — a menu — where this says which part of the
+ * window moves. Drawn rather than taken from the skin's icon set for the
+ * reason the cog and the QR code in the sidebar are: the set names the glyphs
+ * a *skin* is expected to restyle, and a new entry in it would be one more
+ * thing every future skin has to answer for to gain nothing — this is the
+ * same drawing in any chrome.
  */
-function BarsIcon() {
+function SidebarIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-         strokeLinecap="round" aria-hidden="true">
-      <path d="M4 7h16M4 12h16M4 17h16" />
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9 4v16" />
     </svg>
   );
 }
@@ -216,7 +234,7 @@ function BarsIcon() {
  * you are *in*, so a diagram of one says "panes" and leaves you to guess the
  * verb — and the verb is the whole button, since the switcher in the pane's own
  * corner is already the noun. Drawn here rather than taken from the skin's icon
- * set on `BarsIcon`'s reasoning.
+ * set on `SidebarIcon`'s reasoning.
  */
 function SwapIcon() {
   return (
@@ -230,7 +248,7 @@ function SwapIcon() {
 
 /**
  * A keyboard, drawn here rather than taken from the skin's icon set on
- * `BarsIcon`'s reasoning: the set names the glyphs a skin is expected to
+ * `SidebarIcon`'s reasoning: the set names the glyphs a skin is expected to
  * restyle, and this is a picture of a physical object that means the same thing
  * in any chrome.
  */

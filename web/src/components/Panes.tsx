@@ -39,7 +39,7 @@
  * over the rebuild in the first place. Neither a tab switch nor a layout change
  * rebuilds anything now.
  */
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { keysByAction, type Action } from "../../../shared/keys";
 import {
   activeAgent,
@@ -138,6 +138,11 @@ interface Props {
    * belong to the field while there is one.
    */
   onEditing: (on: boolean) => void;
+  /**
+   * The two drawers' chips, or null while a drawer is open and they are in
+   * its header. See `chipsPane` below for which strip they go in.
+   */
+  chips: ReactNode;
 }
 
 /** A normalized rect as the four percentages CSS wants. */
@@ -169,6 +174,7 @@ export function Panes({
   filesOpen,
   onToggleFiles,
   onEditing,
+  chips,
 }: Props) {
   const area = useRef<HTMLDivElement>(null);
   const [resizing, setResizing] = useState(false);
@@ -213,6 +219,27 @@ export function Panes({
    * the same way it already outlives a tab switch or a workspace change.
    */
   const shown = solo ? soloPane(node, focusedPaneId) : null;
+
+  /**
+   * The pane whose strip carries the drawers' chips: the one in the top-right
+   * corner, whose strip ends where the window does — the corner the drawers
+   * open from, so the door and the drawer it opens are on the same edge. One
+   * pane and not the focused one, because chips that jumped from strip to
+   * strip as the focus moved would be two buttons you had to find again after
+   * every click; and not every pane, because the same two doors drawn three
+   * times is three times the reading for one fact. In zen and solo there is
+   * one pane on screen, and it is that one.
+   */
+  const chipsPane =
+    shown?.id ??
+    (zen
+      ? focusedPaneId
+      : all.reduce<{ id: string; right: number } | null>((best, pane) => {
+          const rect = boxes.get(pane.id);
+          if (!rect || rect.y > 1e-6) return best;
+          const right = rect.x + rect.w;
+          return !best || right > best.right ? { id: pane.id, right } : best;
+        }, null)?.id);
 
   return (
     /* A pane slides to a new position, but not while you are dragging its
@@ -261,6 +288,7 @@ export function Panes({
               launchers={launchers}
               focusedAgentId={focusedAgentId}
               onEditing={onEditing}
+              chips={pane.id === chipsPane ? chips : null}
             />
           </div>
         );
@@ -591,6 +619,7 @@ function Pane({
   launchers,
   focusedAgentId,
   onEditing,
+  chips,
 }: {
   pane: PaneState;
   focused: boolean;
@@ -609,6 +638,8 @@ function Pane({
   /** For a board pane: the terminal in the focused pane, which may be another one. */
   focusedAgentId: string | null;
   onEditing: (on: boolean) => void;
+  /** The drawers' chips, in the one strip that carries them, and null in the rest. */
+  chips: ReactNode;
 }) {
   const showing = activeAgent(pane);
   const dragging = useDragging();
@@ -866,8 +897,14 @@ function Pane({
             thing that should never be behind a menu. There were four here for a
             while — two splits, the switcher and close — and a corner that holds
             every control a pane will ever grow is a corner that runs out of
-            room; `paneMenu` is the list that does not. */}
+            room; `paneMenu` is the list that does not.
+
+            The drawers' chips lead the block in the top-right pane while both
+            drawers are shut: pinned with the controls, so a strip full of tabs
+            never scrolls them away, and measured with them, so `.tab-new`
+            keeps clear of them too. */}
         <span className="tab-actions" ref={actionsRef}>
+          {chips}
           <PaneMenuButton solo={solo} onOpen={onMenu} />
           <button
             className="pane-btn"

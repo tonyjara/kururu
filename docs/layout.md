@@ -490,11 +490,10 @@ then agents in the sidebar's order. Every workspace is in one of three bands:
 — a tray and the count, with no words on any device; its title and label
 say what it is — counts the needs in the blocked ink and stays, dim and
 without a number, at zero. The two chips are one component
-(`DrawerChips.tsx`) put down in one place at a time: beside the profile's
-board in the sidebar's header while both drawers are shut, along the top of
-the panes when the sidebar is away, in the open drawer's header (where they
-stand in for its title) while one is open, and in the bottom bar on a
-phone. Behind it `NeedsDrawer.tsx`
+(`DrawerChips.tsx`) put down in one place at a time: in the top-right
+pane's tab strip, ahead of its menu and ✕, while both drawers are shut
+(`chipsPane` in `Panes.tsx`); in the open drawer's header, where they stand
+in for its title, while one is open; and in the bottom bar on a phone. Behind it `NeedsDrawer.tsx`
 is a drawer like Kuru's, on its terms exactly — beside the panes, narrowing
 them rather than floating over them, not dimmed, and on a desktop closed
 only by its own ✕, the tray that opened it, or Escape: a click into the

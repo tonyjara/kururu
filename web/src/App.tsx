@@ -1376,10 +1376,10 @@ export function App() {
    * The two drawers' chips and the sidebar's toggle, made once and put down in
    * whichever one place they belong right now — see `DrawerChips.tsx` and
    * `WorkspaceToggle`. With a drawer open the chips are in its header and
-   * nowhere else; with both shut, beside the profile's board, or along the top
-   * of the panes when the sidebar is away. A phone keeps both in the bottom
-   * bar, because its sidebar is a screen with no header on show, and in the
-   * header of a drawer's sheet, which covers that bar.
+   * nowhere else; with both shut, in the top-right pane's tab strip, beside
+   * its menu and its ✕ — the corner the drawers open from. A phone keeps both
+   * in the bottom bar, because its strip is a thumb's row already full, and
+   * in the header of a drawer's sheet, which covers that bar.
    */
   const chips = (
     <DrawerChips
@@ -1395,8 +1395,17 @@ export function App() {
     />
   );
   const drawerOpen = kuruDrawer.open || (needsOpen && !!needs);
+  /* The name first and the toggle at the far end while the sidebar is up —
+     the toggle on the edge the sidebar closes towards — and the toggle first,
+     just after the traffic lights, while it is away, the way a Mac app's
+     sidebar button sits. A phone's bar has it first, under the thumb. */
   const toggle = (
-    <WorkspaceToggle name={workspace.name} sidebarOpen={sidebarOpen} onToggle={() => run("toggle-sidebar")} />
+    <WorkspaceToggle
+      name={workspace.name}
+      sidebarOpen={sidebarOpen}
+      toggleLast={sidebarOpen && !narrow}
+      onToggle={() => run("toggle-sidebar")}
+    />
   );
 
   return (
@@ -1429,7 +1438,6 @@ export function App() {
           needsYou={needyWorkspaces}
           onRun={run}
           toggle={narrow ? null : toggle}
-          chips={narrow || drawerOpen ? null : chips}
           onDeleteWorkspace={confirmDeleteWorkspace}
           onEditing={setEditing}
           onPrompt={setDialog}
@@ -1471,15 +1479,13 @@ export function App() {
             which mattered little while hiding it was a keyboard gesture and
             matters rather more now that a narrow window starts that way. */}
         {/* On a desktop it carries what the sidebar's top would have: the
-            toggle that brings the sidebar back, the workspace's name, and the
-            drawers' chips while both drawers are shut. A phone has those in
-            its bottom bar and keeps the empty strip. */}
+            toggle that brings the sidebar back and the workspace's name. A
+            phone has those in its bottom bar and keeps the empty strip. */}
         {!sidebarOpen && !zen && (narrow ? (
           <div className="stage-drag" aria-hidden="true" />
         ) : (
           <div className="stage-top">
             {toggle}
-            {!drawerOpen && chips}
           </div>
         ))}
         <main className="panes">
@@ -1506,6 +1512,9 @@ export function App() {
             filesOpen={filesOpen}
             onToggleFiles={() => run("toggle-files")}
             onEditing={setEditing}
+            /* The drawers' chips while both drawers are shut, for the
+               top-right pane's strip. See `DrawerChips.tsx`. */
+            chips={narrow || drawerOpen ? null : chips}
           />
         </main>
         {/* Between the panes and the status bar, which puts it directly above
