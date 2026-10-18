@@ -213,7 +213,7 @@ export function context({ root, env, flags }) {
 }
 
 /** Write the answers back, so a second run asks nothing it was told. */
-function remember(ctx, values) {
+export function remember(ctx, values) {
   Object.assign(ctx.saved, values);
   if (ctx.dryRun) return;
   mkdirSync(ctx.configDir, { recursive: true });
