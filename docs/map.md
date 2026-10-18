@@ -218,6 +218,14 @@ open, and this is how loud the room is; dragged anywhere, ✕ or Esc to stop Kur
 - `tools/schema.mjs` — publishes the token and part vocabulary to
   `../kururu-styles`. Bun, because it imports TypeScript.
 - `tools/release-notes.mjs` — one version's section out of `CHANGELOG.md`.
+- `tools/kururu.mjs` — the `kururu` command on a child: `child setup`,
+  `doctor`, `update`, `status`, `restart-host`, `share`. Plain node, since it
+  runs before `bun install`. `tools/kururu/checks.mjs` is the one list of
+  checks the wizard repairs from and the doctor reads; `tools/kururu/pure.mjs`
+  is their text-in, text-out half, tested in `tools/test/`. See
+  [linux](linux.md).
+- `.claude/skills/kururu-child/` — how an agent on a new box walks the user
+  through the wizard.
 - `assets/` — served at runtime, found the way `web/dist` is (`KURURU_ASSETS`).
   `sounds/` holds the croak (`KURURU_SOUNDS` overrides); `spritesheets/` holds the
   frog and `guide.png`.

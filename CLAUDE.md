@@ -50,6 +50,7 @@ agents.** Quitting the window does not. Restarting the server does not.
 | `server/src/` *except* the row below | a reconnect — `C-a B`, or automatic under `bun run dev` |
 | `server/run.mjs` | nothing, until a runner is next started — the one running keeps the copy it loaded |
 | `server/src/agents/`, `ptyhostd.ts`, `ptyhost.ts`, `hostlink.ts`, `hostsock.ts` | **every agent the user is running** |
+| on a child: `systemctl --user restart kururu`, `kururu child update` | a reconnect — the host is a systemd unit of its own; only `kururu child restart-host` ends agents, and it asks. See [linux](docs/linux.md) |
 
 So batch changes to the host, and say so before asking for one to be restarted. A
 live pty cannot be handed to a replacement process, and that irreducible fact is
