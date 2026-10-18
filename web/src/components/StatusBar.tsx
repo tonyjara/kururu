@@ -14,8 +14,9 @@
  * **Everything on it stands at the right**, and whatever is added later goes
  * there too, so the bar reads as one cluster against the edge the drawers open
  * from rather than a row of odd bits spread across the window. The exception
- * is the left end's gauges — the Claude and Codex allowances (`Usage.tsx`)
- * and the machines (`Machines.tsx`), down from the sidebar on 2026-10-18:
+ * is the left end's gauges — the Claude and Codex allowances (`Usage.tsx`),
+ * the machines (`Machines.tsx`) and the OpenRouter balance (`OpenRouter.tsx`),
+ * down from the sidebar on 2026-10-18:
  * things of a different kind, whose detail opens upwards over the panes
  * rather than the drawers.
  *
@@ -41,6 +42,7 @@
 import type { ReactNode } from "react";
 import { countsAsAgent, type AgentSnapshot } from "../../../shared/model";
 import { MachinesChip } from "./Machines";
+import { OpenRouterChip } from "./OpenRouter";
 import { UsageChips } from "./Usage";
 
 interface Props {
@@ -78,8 +80,8 @@ interface Props {
   onLastPane: () => void;
   /** The two drawers' chips, on a phone; null where they are at the top. */
   chips: ReactNode;
-  /** Settings → Machines, from the foot of the machines chip's popover. */
-  onMachinesSettings: () => void;
+  /** A page of Settings, from the foot of the machines or OpenRouter chip's popover. */
+  onSettings: (page: "machines" | "openrouter") => void;
 }
 
 export function StatusBar({
@@ -93,7 +95,7 @@ export function StatusBar({
   panes,
   onLastPane,
   chips,
-  onMachinesSettings,
+  onSettings,
 }: Props) {
   const running = agents.filter(countsAsAgent);
   const working = running.filter((agent) => agent.status === "working").length;
@@ -101,11 +103,13 @@ export function StatusBar({
     <footer className="statusbar">
       {toggle}
       {/* The left end on a desktop: the allowances — whose they are and a
-          ring a window — and the machines, a glyph in the colour of the
-          worst load and how many are connected. Each opens its detail on a
-          hover or a tap. See `Usage.tsx` and `Machines.tsx`. */}
+          ring a window — the machines, a glyph in the colour of the worst
+          load and how many are connected, and the OpenRouter balance. Each
+          opens its detail on a hover or a tap. See `Usage.tsx`,
+          `Machines.tsx` and `OpenRouter.tsx`. */}
       <UsageChips />
-      <MachinesChip onSettings={onMachinesSettings} />
+      <MachinesChip onSettings={() => onSettings("machines")} />
+      <OpenRouterChip onSettings={() => onSettings("openrouter")} />
       <span className="sb-spacer" />
 
       {prefixArmed && <span className="sb-badge sb-prefix">PREFIX</span>}

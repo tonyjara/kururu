@@ -852,10 +852,9 @@ kbd {
   min-height: 25vh;
 }
 /* And the two boxes under it are pinned, which is what every comment about them
-   already says they are. They are small and fixed — three bars and a handful of
-   links — so when the window is short they are the wrong place to find room;
-   the list of agents is. */
-.side-openrouter,
+   already says they are. They are small and fixed — a row a node and a handful
+   of links — so when the window is short they are the wrong place to find
+   room; the list of agents is. */
 .side-nodes,
 .side-dev {
   flex: none;
@@ -1791,8 +1790,8 @@ kbd {
 }
 
 /* The OpenRouter balance: the figure itself carries the colour, because there
-   is no bar to — see `OpenRouter` in Sidebar.tsx. The bars' three meanings,
-   but as ink: `danger` rather than `dangerBg`, which is a fill. */
+   is no ring to — see `OpenRouter.tsx`. The rings' three meanings, but as
+   ink: `danger` rather than `dangerBg`, which is a fill. */
 .or-balance {
   font-family: var(--mono);
   font-size: var(--fs-sm);
@@ -3677,6 +3676,50 @@ a.button {
 }
 .machines-foot {
   display: flex;
+}
+
+/* The OpenRouter chip, after the machines — see `OpenRouter.tsx`. The gray
+   mark and the balance in its colour, at the bar's size rather than the
+   sidebar's; whole dollars on a phone, so the workspace's name keeps its
+   room. */
+.sb-openrouter .sb-usage-chip {
+  gap: 5px;
+}
+.or-pending {
+  color: var(--dimmer);
+}
+.or-short {
+  display: none;
+}
+:root[data-narrow] .or-full {
+  display: none;
+}
+:root[data-narrow] .or-short {
+  display: inline;
+}
+/* And when even that does not fit, the amount goes and the mark stays, before
+   the workspace's name loses a letter. A phone's bar with the allowances and
+   the machines on it already leaves the name a few letters, so the chip is
+   the one thing on it that gives way first: a shrink far above everything
+   else's takes the squeeze until the chip is down to its mark, and only then
+   does the name start to go. The amount wraps onto a second line the chip
+   clips rather than being hidden by a guess at the width, so it comes back
+   the moment there is room; the title still says it. */
+:root[data-narrow] .sb-openrouter {
+  flex: 0 1000 auto;
+  /* The mark and the chip's padding either side of it. */
+  min-width: 21px;
+}
+:root[data-narrow] .sb-openrouter .sb-usage-chip {
+  min-width: 0;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  overflow: hidden;
+}
+:root[data-narrow] .sb-openrouter .sb-usage-chip > * {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
 }
 
 /* The two chips, which travel together — see `DrawerChips.tsx`. Out of the

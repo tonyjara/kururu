@@ -1,5 +1,5 @@
 /**
- * Settings → Connections → OpenRouter: the key the sidebar's balance is read with.
+ * Settings → Connections → OpenRouter: the key the bottom bar's balance is read with.
  *
  * One key and the words around it, and the words are the page: before anybody
  * pastes a key that can delete every other key on their account, it has to say
@@ -20,7 +20,7 @@ export function OpenRouterPage() {
   const { openrouter } = useKururu();
   return (
     <>
-      <Group title="Account" foot="Your balance in the sidebar, with what every key on the account has spent today, this week and this month. Asked once a minute while a window is open.">
+      <Group title="Account" foot="Your balance on the bottom bar, with what every key on the account has spent today, this week and this month. Asked once a minute while a window is open.">
         <Readout
           label="Key"
           tone={!openrouter ? "off" : openrouter.error ? "bad" : openrouter.reading ? "ok" : "busy"}
