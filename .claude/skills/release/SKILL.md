@@ -86,11 +86,14 @@ already exists.
    `server/package.json`, `web/package.json`, `desktop/package.json`. They are
    kept identical on purpose: the app stamps its version into the server bundle
    at build time, and a server reporting a different number from the window
-   drawing it is a bug report nobody can act on.
+   drawing it is a bug report nobody can act on. Then `bun install`, which
+   writes the workspaces' new versions into `bun.lock`; left behind, every
+   fresh clone's install dirties the tree, and a child's `kururu child
+   update` refuses to pull over a dirty one.
 4. **Commit, tag, push.**
 
    ```sh
-   git add CHANGELOG.md package.json server/package.json web/package.json desktop/package.json
+   git add CHANGELOG.md bun.lock package.json server/package.json web/package.json desktop/package.json
    git commit -m "release 0.2.0"
    git tag -a v0.2.0 -m "kururu 0.2.0"
    git push origin main --follow-tags
