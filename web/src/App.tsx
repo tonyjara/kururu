@@ -64,6 +64,7 @@ import { closeKuru, kuruLive, openKuru, toggleKuru, useKuruDrawer } from "./kuru
 import { closeNeeds, toggleNeeds, useNeedsDrawer } from "./needs";
 import { NeedsDrawer } from "./components/NeedsDrawer";
 import { needsOf, nextNeed, type Need } from "../../shared/needs";
+import { nodesNeedCount } from "../../shared/nodes";
 import { showCardNext } from "./components/Board";
 import type { VoiceGlobalState } from "./desktop";
 import { installSpeech, installTalkKey, setSpeechVolume, setVoiceProfile, setVoiceRemote, useVoiceUi } from "./voice";
@@ -233,7 +234,7 @@ function resumeSettings(): SettingsTab | null {
 }
 
 export function App() {
-  const { snapshot, connected, projects, voice, machines, kuru } = useKururu();
+  const { snapshot, connected, projects, voice, machines, kuru, nodes } = useKururu();
   const voiceUi = useVoiceUi();
   /**
    * The Kuru drawer: open or not, and the reply to open at. Module state
@@ -1381,6 +1382,16 @@ export function App() {
    * in the bottom bar, because its strip is a thumb's row already full, and
    * in the header of a drawer's sheet, which covers that bar.
    */
+  /**
+   * The other nodes' needs, added to this one's on the chip: each node's own
+   * count off its summary, a node that is away counting nothing, since what
+   * it last said is no longer known to be true. See `nodesNeedCount`.
+   */
+  const linked = nodes?.nodes ?? [];
+  const nodeNeeds = {
+    count: nodesNeedCount(linked),
+    workspaces: linked.reduce((n, node) => n + (node.state === "up" ? (node.summary?.needs.inWorkspaces ?? 0) : 0), 0),
+  };
   const chips = (
     <DrawerChips
       kuru={{
@@ -1390,7 +1401,7 @@ export function App() {
         mascot,
       }}
       onKuru={toggleKuru}
-      needs={{ count: needs?.count ?? 0, workspaces: needs?.inWorkspaces ?? 0, open: needsOpen }}
+      needs={{ count: (needs?.count ?? 0) + nodeNeeds.count, workspaces: (needs?.inWorkspaces ?? 0) + nodeNeeds.workspaces, open: needsOpen }}
       onNeeds={toggleNeeds}
     />
   );
@@ -1584,6 +1595,7 @@ export function App() {
       {needsOpen && needs && (
         <NeedsDrawer
           needs={needs}
+          nodes={linked}
           mascots={snapshot.mascots}
           agents={agents}
           sheet={narrow}

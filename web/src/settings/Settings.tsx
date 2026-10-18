@@ -38,6 +38,7 @@ import { ChannelsPage } from "./Channels";
 import { ExplorePage } from "./Explore";
 import { KeyboardPage } from "./Keyboard";
 import { MachinesPage } from "./Machines";
+import { NodesPage } from "./Nodes";
 import { MascotPage } from "./Mascot";
 import { NotificationsPage } from "./Notifications";
 import { OpenRouterPage } from "./OpenRouter";
@@ -62,6 +63,7 @@ export type Tab =
   | "voice"
   | "channels"
   | "machines"
+  | "nodes"
   | "web"
   | "openrouter"
   | "backups"
@@ -104,6 +106,7 @@ const GROUPS: ReadonlyArray<{ label: string; pages: ReadonlyArray<readonly [Tab,
   {
     label: "Connections",
     pages: [
+      ["nodes", "Nodes", "The other kururus this one is linked with, and pairing a new one."],
       ["machines", "Machines", "Your other computers, watched over ssh."],
       ["web", "Web", "Search and page reading for agents: who is asked, in what order."],
       ["openrouter", "OpenRouter", "Your balance in the sidebar."],
@@ -316,6 +319,8 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
       return <VoicePage />;
     case "channels":
       return <ChannelsPage profiles={p.profiles} />;
+    case "nodes":
+      return <NodesPage />;
     case "machines":
       return <MachinesPage onClose={p.onClose} />;
     case "web":
@@ -339,8 +344,15 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
  * glance at whether Telegram is listening, and this is.
  */
 function usePill(tab: Tab): { text: string; tone: Tone } | null {
-  const { channels, web, openrouter, backup } = useKururu();
+  const { channels, web, openrouter, backup, nodes } = useKururu();
   switch (tab) {
+    case "nodes": {
+      if (!nodes) return null;
+      if (nodes.pairing) return { text: "Pairing", tone: "busy" };
+      if (nodes.role === "alone" || nodes.nodes.length === 0) return null;
+      const away = nodes.nodes.filter((n) => n.state !== "up").length;
+      return away ? { text: `${away} away`, tone: "off" } : { text: `${nodes.nodes.length} linked`, tone: "ok" };
+    }
     case "channels": {
       const t = channels?.telegram;
       if (!t || !t.hint) return null;
