@@ -8,7 +8,7 @@
  * much of the allowance is gone is the same kind of fact: a glance on the way
  * past, not a thing you go and read. So the rings are on the bar, and the bars
  * open over it: on a hover with a mouse, on a tap on a phone, which has no
- * hover to give.
+ * hover to give — the dance is `BarChip.tsx`'s, shared with the machines.
  *
  * A mark rather than the word, because two of these side by side are told
  * apart by whose logo it is faster than by reading, and gray because it names
@@ -29,7 +29,8 @@
  * in the terminal. Codex states none, so `codexusage.ts` says where its amber
  * and red begin, and says so.
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { BarChip } from "./BarChip";
 import type { UsageLimit } from "../../../shared/wire";
 import { useKururu } from "../session";
 import { limitLabel, limitMarks, limitTitle, resetIn, staleTitle } from "../usage";
@@ -88,18 +89,9 @@ export function UsageChips() {
   );
 }
 
-/** How long the bars stay up after the pointer leaves, so it can cross the gap into them. */
-const HOVER_LEAVE_MS = 160;
-
 /**
- * One allowance: the mark and its rings, and the bars over them.
- *
- * Open on a mouse's hover and shut when it leaves — the popover is inside the
- * same box, so moving onto it is not leaving. A press pins it instead, which
- * is the only way a phone can open it and a way for a mouse to keep it while
- * reading; a pinned one shuts on a press anywhere else or Escape. `mousedown`
- * is prevented for the drawer chips' reason: looking at the allowance must not
- * take the focus off a terminal.
+ * One allowance: the mark and its rings on the chip, and the bars in the
+ * popover — `BarChip.tsx` has the hover, the pin and the tap.
  */
 function UsageChip({
   name,
@@ -118,10 +110,6 @@ function UsageChip({
   /** What the bars say when there are none. */
   empty?: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const [pinned, setPinned] = useState(false);
-  const box = useRef<HTMLSpanElement>(null);
-  const leave = useRef<ReturnType<typeof setTimeout> | null>(null);
   const marks = limitMarks(limits);
   /**
    * The fullest window, which is the one ring a phone's bar has room for —
@@ -131,120 +119,73 @@ function UsageChip({
    */
   const fullest = limits.reduce((best, limit, i) => (limit.percent > (limits[best]?.percent ?? -1) ? i : best), 0);
 
-  useEffect(() => {
-    if (!pinned) return;
-    const away = (event: PointerEvent) => {
-      if (!box.current?.contains(event.target as Node)) {
-        setPinned(false);
-        setOpen(false);
-      }
-    };
-    const key = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setPinned(false);
-      setOpen(false);
-    };
-    document.addEventListener("pointerdown", away, true);
-    document.addEventListener("keydown", key, true);
-    return () => {
-      document.removeEventListener("pointerdown", away, true);
-      document.removeEventListener("keydown", key, true);
-    };
-  }, [pinned]);
-  useEffect(() => () => {
-    if (leave.current) clearTimeout(leave.current);
-  }, []);
-
   return (
-    <span
-      className="sb-usage"
-      ref={box}
-      onPointerEnter={(event) => {
-        if (event.pointerType !== "mouse") return;
-        if (leave.current) clearTimeout(leave.current);
-        setOpen(true);
-      }}
-      onPointerLeave={(event) => {
-        if (event.pointerType !== "mouse" || pinned) return;
-        leave.current = setTimeout(() => setOpen(false), HOVER_LEAVE_MS);
-      }}
+    <BarChip
+      label={`${name} usage`}
+      chip={
+        <>
+          <span className="sb-usage-mark" aria-hidden="true">
+            {icon}
+          </span>
+          {limits.map((limit, i) => (
+            <span key={`${limit.kind}:${limit.scope ?? ""}`} className={i === fullest ? "sb-usage-fullest" : "sb-usage-rest"}>
+              <GaugeRing label={limitLabel(limit)} mark={marks[i] ?? ""} percent={limit.percent} severity={limit.severity} title="" />
+            </span>
+          ))}
+          {stale && <span className="usage-stale">·</span>}
+        </>
+      }
     >
-      <button
-        className={`sb-usage-chip ${open ? "sb-usage-on" : ""}`}
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => {
-          const next = !pinned;
-          setPinned(next);
-          setOpen(next);
-        }}
-        aria-expanded={open}
-        aria-label={`${name} usage`}
-        title={open ? undefined : `${name} usage`}
-      >
+      <span className="usage-pop-head">
         <span className="sb-usage-mark" aria-hidden="true">
           {icon}
         </span>
-        {limits.map((limit, i) => (
-          <span key={`${limit.kind}:${limit.scope ?? ""}`} className={i === fullest ? "sb-usage-fullest" : "sb-usage-rest"}>
-            <GaugeRing label={limitLabel(limit)} mark={marks[i] ?? ""} percent={limit.percent} severity={limit.severity} title="" />
+        {name}
+        {stale && (
+          <span className="usage-stale" title={stale}>
+            ·
           </span>
-        ))}
-        {stale && <span className="usage-stale">·</span>}
-      </button>
-      {open && (
-        <span className="usage-pop" role="dialog" aria-label={`${name} usage`}>
-          <span className="usage-pop-head">
-            <span className="sb-usage-mark" aria-hidden="true">
-              {icon}
-            </span>
-            {name}
-            {stale && (
-              <span className="usage-stale" title={stale}>
-                ·
+        )}
+      </span>
+      {limits.length > 0 ? (
+        <ul className="usage-list">
+          {limits.map((limit) => (
+            <li key={`${limit.kind}:${limit.scope ?? ""}`} className="usage-item">
+              <span className="usage-head">
+                <span className="usage-name">{limitLabel(limit)}</span>
+                {/* "97%" alone is read as 97% *left* about as often as not,
+                    and the two readings are three percent apart at one end
+                    of the bar and ninety-four at the other. The word is four
+                    characters and removes the question. */}
+                <span className="usage-used">{Math.round(limit.percent)}% used</span>
               </span>
-            )}
-          </span>
-          {limits.length > 0 ? (
-            <ul className="usage-list">
-              {limits.map((limit) => (
-                <li key={`${limit.kind}:${limit.scope ?? ""}`} className="usage-item">
-                  <span className="usage-head">
-                    <span className="usage-name">{limitLabel(limit)}</span>
-                    {/* "97%" alone is read as 97% *left* about as often as not,
-                        and the two readings are three percent apart at one end
-                        of the bar and ninety-four at the other. The word is four
-                        characters and removes the question. */}
-                    <span className="usage-used">{Math.round(limit.percent)}% used</span>
-                  </span>
-                  <span
-                    className="usage-bar"
-                    role="meter"
-                    aria-label={`${limitLabel(limit)} used`}
-                    aria-valuenow={Math.round(limit.percent)}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    title={limitTitle(limit)}
-                  >
-                    <span className="usage-fill" data-severity={limit.severity} style={{ width: `${limit.percent}%` }} />
-                  </span>
-                  {limit.resetsAt && <span className="usage-reset">{resetIn(limit.resetsAt)}</span>}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <span className="usage-pop-empty">{empty}</span>
-          )}
-          {stale && <span className="usage-pop-foot">{stale}</span>}
-          {foot && <span className="usage-pop-foot">{foot}</span>}
-        </span>
+              <span
+                className="usage-bar"
+                role="meter"
+                aria-label={`${limitLabel(limit)} used`}
+                aria-valuenow={Math.round(limit.percent)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                title={limitTitle(limit)}
+              >
+                <span className="usage-fill" data-severity={limit.severity} style={{ width: `${limit.percent}%` }} />
+              </span>
+              {limit.resetsAt && <span className="usage-reset">{resetIn(limit.resetsAt)}</span>}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <span className="usage-pop-empty">{empty}</span>
       )}
-    </span>
+      {stale && <span className="usage-pop-foot">{stale}</span>}
+      {foot && <span className="usage-pop-foot">{foot}</span>}
+    </BarChip>
   );
 }
 
 /**
- * One figure as a ring, the context ring's shape: the shut form of a bar, for a
- * machine row in the sidebar and an allowance on the bottom bar alike. The mark is a letter beside it rather than a
+ * One figure as a ring, the context ring's shape: the shut form of a bar, for an
+ * allowance on the bottom bar and a machine's row in its popover alike. The mark is a letter beside it rather than a
  * word, because three words and three rings do not fit beside a name in a
  * sidebar; the tooltip carries the whole sentence.
  */

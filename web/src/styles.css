@@ -810,7 +810,6 @@ kbd {
    links — so when the window is short they are the wrong place to find room;
    the list of agents is. */
 .side-openrouter,
-.side-machines,
 .side-dev {
   flex: none;
 }
@@ -1742,28 +1741,7 @@ kbd {
   opacity: 0.55;
 }
 
-/* The machines section, built out of the usage bar's parts — see `Machines`
-   in Sidebar.tsx for why the two gauges are drawn alike. Its own list because a
-   machine is a group of bars rather than one, and because a few machines with
-   their containers open is taller than a sidebar's foot should be: it scrolls
-   inside a cap, in the dev list's idiom, rather than pushing the agents away. */
-.machine-list {
-  list-style: none;
-  margin: 0;
-  padding: 0 12px 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  overflow-y: auto;
-  max-height: 35vh;
-}
-
-.machine-item {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
+/* A machine's name, in the bottom bar's machines popover — see `Machines.tsx`. */
 .machine-name,
 .gauge-name {
   font-size: var(--fs-sm);
@@ -1788,11 +1766,9 @@ a.machine-name:hover {
   overflow-wrap: anywhere;
 }
 
-/* Shut, a machine row or the usage row: the name, then the rings, on one line.
-   After `.machine-item` so its row beats that column. The name gives way first —
-   the rings are the reason the row is there — and the rings wrap rather than
-   run off the edge, since an account with a scoped week for two models is four
-   of them, which a narrow sidebar does not have the width for. */
+/* A machine's row in the machines popover: the name, then the rings, on one
+   line. The name gives way first — the rings are the reason the row is there —
+   and the rings wrap rather than run off the edge. */
 .gauge-item {
   display: flex;
   flex-direction: row;
@@ -3165,6 +3141,9 @@ a.button {
      cost the workspace's name its last letters. */
   padding-left: 10px;
   padding-right: 10px;
+  /* Tighter between items too, since the machines chip joined the
+     allowances: every pixel here is the workspace's name. */
+  gap: 3px;
 }
 
 /* How many agents are running, across every profile, and how many of those
@@ -3402,8 +3381,8 @@ a.button {
    middle of the bar would run off its edge. */
 :root[data-narrow] .sb-usage-chip {
   height: 28px;
-  gap: 5px;
-  padding: 0 6px;
+  gap: 4px;
+  padding: 0 4px;
 }
 :root[data-narrow] .sb-usage-rest,
 :root[data-narrow] .sb-usage-chip .gauge-ring-label,
@@ -3424,6 +3403,65 @@ a.button {
   right: 8px;
   width: auto;
   bottom: calc(var(--bar-h) + var(--keyboard, 0px) + 8px + env(safe-area-inset-bottom, 0px));
+}
+
+/* The machines chip, beside the allowances — see `Machines.tsx`. The glyph
+   is gray like theirs until a machine's CPU, memory or disk crosses the
+   rings' own thresholds, then wears the rings' amber and red as ink; the
+   count of machines connected sits after it, "2/3" with the stale dot when
+   one cannot be reached. */
+.sb-machines-mark[data-severity="warning"] {
+  color: var(--working);
+}
+.sb-machines-mark[data-severity="critical"] {
+  color: var(--danger);
+}
+.sb-machines-n {
+  font-variant-numeric: tabular-nums;
+}
+/* A phone's bar has the toggle, the name, the allowances and the thumb's four
+   buttons on it already: the glyph alone there, its colour and the stale dot
+   still saying what matters, and the count in its popover. */
+:root[data-narrow] .sb-machines-n {
+  display: none;
+}
+.sb-machines .sb-usage-chip {
+  gap: 5px;
+}
+/* Wider than the allowances' popover: a row is a name, three rings and a
+   Shell. */
+.sb-machines .usage-pop {
+  width: 320px;
+}
+.machines-head-words {
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--dimmer);
+  font-size: var(--fs-xs);
+}
+.machines-list {
+  gap: 10px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.machines-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.machines-row .gauge-item {
+  justify-content: flex-start;
+}
+.machines-row .machine-name {
+  flex: 1;
+}
+.machines-shell {
+  flex: none;
+  padding: 1px 7px;
+  font-size: var(--fs-xs);
+}
+.machines-foot {
+  display: flex;
 }
 
 /* The two chips, which travel together — see `DrawerChips.tsx`. Out of the

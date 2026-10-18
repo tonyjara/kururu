@@ -82,7 +82,7 @@ in this folder.
 | `src/transcript.ts` | How full a Claude Code window is, off its transcript. Ported |
 | `src/usage.ts` | The plan allowance, off a Claude credential — the machine's or the profile's. Read, never written |
 | `src/codexusage.ts` | The Codex allowance, off the `rate_limits` in the newest rollout of the Codex home in use. No credential, no request |
-| `src/machines.ts` | The sidebar's machines (a VPS, a PC on the tailnet): the user's own `ssh`, `BatchMode`, one fixed read-only script, `tmux ls` before a session that types something, `tmux kill-session` when a session tab is closed, and two fixed reads of an agent's conversation files for `sleep.ts`. A client names a host and nothing else (`shared/machines.ts`, [machines](machines.md)) |
+| `src/machines.ts` | The bottom bar's machines (a VPS, a PC on the tailnet): the user's own `ssh`, `BatchMode`, one fixed read-only script, `tmux ls` before a session that types something, `tmux kill-session` when a session tab is closed, and two fixed reads of an agent's conversation files for `sleep.ts`. A client names a host and nothing else (`shared/machines.ts`, [machines](machines.md)) |
 | `src/onscreen.ts` | Reads each remote agent's screen every two seconds and posts the status through `host.report`, as a hook would have ([machines](machines.md#status-read-off-the-screen)) |
 | `src/sleep.ts` | Ends a card's agent that has sat idle, once its conversation is made sure of, through the close button's own `endTerminal`; learns Codex runs' ids. `GET /api/sleep` says why each is still awake ([layout](layout.md#idle-card-agents)) |
 | `src/made.ts` | A reply's paths found on this disk under allowed roots, and each agent's links kept in `made.json` beside `session.json` — by id *and* spawn time, since a restart must not lose them and a reused id must not inherit them |
@@ -173,7 +173,7 @@ in this folder.
 **Components:**
 
 `Panes.tsx` (flat positioned boxes, tab strips, dividers) · `Terminal.tsx` (a box
-for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` (the window-wide bottom bar, and `WorkspaceToggle`) · `Usage.tsx` (the Claude and Codex allowances on that bar, and their bars on hover or tap) · `DrawerChips.tsx` ·
+for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` (the window-wide bottom bar, and `WorkspaceToggle`) · `Usage.tsx` (the Claude and Codex allowances on that bar, and their bars on hover or tap) · `BarChip.tsx` (a bar chip's hover-and-pin popover, which the allowances and the machines share) · `Machines.tsx` (the machines on that bar: a glyph in the worst load's colour, the connected count, each machine's rings and Shell in the popover) · `DrawerChips.tsx` ·
 `Status.tsx` (a dot, or the mascot) · `Icon.tsx` (a class name and an
 `aria-hidden` span) · `Dialog.tsx` (while one is up, no key reaches a pty) ·
 `Menu.tsx` · `Reader.tsx` (**the thing kururu was built for**; one draggable tab per document) ·

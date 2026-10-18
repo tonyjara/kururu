@@ -13,10 +13,11 @@
  *
  * **Everything on it stands at the right**, and whatever is added later goes
  * there too, so the bar reads as one cluster against the edge the drawers open
- * from rather than a row of odd bits spread across the window. The one
- * exception is the Claude and Codex allowances, at the left since they came
- * down from the sidebar on 2026-10-18 (`Usage.tsx`): a pair of a different
- * kind, whose bars open upwards over the panes rather than the drawers.
+ * from rather than a row of odd bits spread across the window. The exception
+ * is the left end's gauges — the Claude and Codex allowances (`Usage.tsx`)
+ * and the machines (`Machines.tsx`), down from the sidebar on 2026-10-18:
+ * things of a different kind, whose detail opens upwards over the panes
+ * rather than the drawers.
  *
  * What it holds is the count of agents that are running, across every profile,
  * by the rule `/api/health` and `bun run status` count by (`countsAsAgent`), so
@@ -39,6 +40,7 @@
  */
 import type { ReactNode } from "react";
 import { countsAsAgent, type AgentSnapshot } from "../../../shared/model";
+import { MachinesChip } from "./Machines";
 import { UsageChips } from "./Usage";
 
 interface Props {
@@ -76,6 +78,8 @@ interface Props {
   onLastPane: () => void;
   /** The two drawers' chips, on a phone; null where they are at the top. */
   chips: ReactNode;
+  /** Settings → Machines, from the foot of the machines chip's popover. */
+  onMachinesSettings: () => void;
 }
 
 export function StatusBar({
@@ -89,16 +93,19 @@ export function StatusBar({
   panes,
   onLastPane,
   chips,
+  onMachinesSettings,
 }: Props) {
   const running = agents.filter(countsAsAgent);
   const working = running.filter((agent) => agent.status === "working").length;
   return (
     <footer className="statusbar">
       {toggle}
-      {/* The allowances, the one thing at the left on a desktop: whose they
-          are and a ring a window, the bars on a hover or a tap. See
-          `Usage.tsx`. */}
+      {/* The left end on a desktop: the allowances — whose they are and a
+          ring a window — and the machines, a glyph in the colour of the
+          worst load and how many are connected. Each opens its detail on a
+          hover or a tap. See `Usage.tsx` and `Machines.tsx`. */}
       <UsageChips />
+      <MachinesChip onSettings={onMachinesSettings} />
       <span className="sb-spacer" />
 
       {prefixArmed && <span className="sb-badge sb-prefix">PREFIX</span>}

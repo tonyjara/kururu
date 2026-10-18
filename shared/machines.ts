@@ -238,6 +238,46 @@ export function machineSeverity(percent: number): "normal" | "warning" | "critic
   return percent >= 90 ? "critical" : percent >= 75 ? "warning" : "normal";
 }
 
+/** Used as a percentage of total, or null when there is no total to be a share of. */
+export function usedShare(part: MachineUsed | null): number | null {
+  if (!part || part.total <= 0) return null;
+  return Math.min(100, (part.used / part.total) * 100);
+}
+
+/** The fullest reading on any machine — see `worstLoad`. */
+export interface WorstLoad {
+  id: string;
+  name: string;
+  label: "CPU" | "RAM" | "Disk";
+  percent: number;
+}
+
+/**
+ * The fullest reading on any machine — which machine, which of CPU, memory
+ * and disk, and how full — or null while no machine has reported one. It is
+ * what colours the bottom bar's machines glyph and names the culprit in its
+ * title, so that "something is maxing out" is one glance and "what" is one
+ * hover. A stale reading counts: it is still the best thing known, and its
+ * row says how old it is.
+ */
+export function worstLoad(machines: readonly MachineStatus[]): WorstLoad | null {
+  let worst: WorstLoad | null = null;
+  for (const machine of machines) {
+    const reading = machine.reading;
+    if (!reading) continue;
+    const metrics: readonly (readonly [WorstLoad["label"], number | null])[] = [
+      ["CPU", reading.cpu],
+      ["RAM", usedShare(reading.mem)],
+      ["Disk", usedShare(reading.disk)],
+    ];
+    for (const [label, percent] of metrics) {
+      if (percent === null || !Number.isFinite(percent)) continue;
+      if (!worst || percent > worst.percent) worst = { id: machine.id, name: machine.name, label, percent };
+    }
+  }
+  return worst;
+}
+
 /** `8131476 * 1024` → `7.8G`. Binary units, one decimal under ten, because that is what `free -h` prints. */
 export function formatBytes(n: number): string {
   const units = ["B", "K", "M", "G", "T"];

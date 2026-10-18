@@ -60,7 +60,7 @@ import type {
 } from "../../../shared/model";
 import { defaultMascot, mascotFor, workspaceUnits } from "../../../shared/model";
 import type { DevServer, GitAction, RepoGit } from "../../../shared/wire";
-import { formatBytes as formatSize, machineSeverity, type MachineStatus, type MachineUsed } from "../../../shared/machines";
+import type { MachineStatus } from "../../../shared/machines";
 import {
   balanceOf,
   balanceSeverity,
@@ -81,7 +81,6 @@ import type { DialogState } from "./Dialog";
 import { Icon } from "./Icon";
 import { MadeLinks } from "./MadeLinks";
 import { Mascot, Status } from "./Status";
-import { GaugeRing } from "./Usage";
 
 /**
  * How far the pointer may travel between `dragstart` and `dragend` for the
@@ -1346,10 +1345,11 @@ export function Sidebar({
         )}
       </section>
 
-      {/* The machines' rings, then OpenRouter's balance, which is words. The
-          Claude and Codex allowances were a section here and are the bottom
-          bar's since 2026-10-18 — see `Usage.tsx`. */}
-      <Machines />
+      {/* OpenRouter's balance, in words. The Claude and Codex allowances and
+          the machines were sections here too and are the bottom bar's since
+          2026-10-18 (`Usage.tsx`, `Machines.tsx`). The balance stays: it is a
+          dollar figure, not a gauge, it is here only once a key has been
+          given, and a phone's bar has no room for a fourth chip. */}
       <OpenRouter />
       <DevServers />
 
@@ -1761,28 +1761,6 @@ function OpenRouterBalance({ reading, stale, open }: { reading: OpenRouterReadin
   );
 }
 
-/**
- * The machines somebody asked to watch — a VPS, a PC on the tailnet — a bar
- * each for CPU, memory and disk.
- *
- * Under the usage bars and drawn with their parts, because it is the same kind
- * of glance — a thing you notice on the way past rather than go and read — and
- * two gauges that look alike should mean alike: a fill is what is *spent*.
- *
- * Shut, one line per machine with the three percentages, which is enough to see
- * that nothing is on fire. Open, the bars.
- *
- * A shell button stood at the end of every row until 2026-10-18. It pushed
- * the rings out of the column the usage rings above them stand in, and it is
- * a thing done once — answering ssh's question for a row that cannot get in —
- * so it is a **Shell** on the machine's row in Settings → Machines now, beside
- * the error that says why it is wanted.
- *
- * Draws nothing until one has been added in Settings, like the dev servers: an
- * empty section on every window for a feature most people never use is noise.
- * The disclosure keeps the key it had as the VPS section, so a section somebody
- * shut stays shut across the rename.
- */
 /** "on devbox · ~/code" under a pinned workspace's name, or nothing. */
 function pinnedTo(workspace: Workspace, machines: MachineStatus[]): ReactNode {
   const pin = workspace.machine;
@@ -1793,129 +1771,6 @@ function pinnedTo(workspace: Workspace, machines: MachineStatus[]): ReactNode {
       on {machine.name} · {pin.dir}
     </span>
   );
-}
-
-function Machines() {
-  const { machines } = useKururu();
-  const [open, toggle] = useDisclosure("kururu.sidebar.vps", true);
-  if (machines.length === 0) return null;
-  const failing = machines.some((machine) => machine.error);
-
-  return (
-    <section className="side-section side-machines">
-      <h2>
-        <SectionToggle open={open} onToggle={toggle} label="Machines">
-          {failing && (
-            <span className="usage-stale" title="A machine could not be reached. Its numbers are the last ones read.">
-              ·
-            </span>
-          )}
-        </SectionToggle>
-      </h2>
-      <ul className="machine-list">
-        {machines.map((machine) => (
-          <MachineRow key={machine.id} server={machine} open={open} />
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-function MachineRow({ server, open }: { server: MachineStatus; open: boolean }) {
-  const reading = server.reading;
-  const title = [server.host, server.error && `Last attempt: ${server.error}`].filter(Boolean).join("\n");
-  const name = server.panel ? (
-    <a className="machine-name" href={server.panel} target="_blank" rel="noreferrer noopener" title={`${title}\n→ ${server.panel}`}>
-      {server.name}
-    </a>
-  ) : (
-    <span className="machine-name" title={title}>
-      {server.name}
-    </span>
-  );
-  if (!reading) {
-    return (
-      <li className="machine-item">
-        <span className="usage-head">
-          {name}
-          <span className="usage-used">{server.error ? "unreachable" : "…"}</span>
-        </span>
-        {server.error && <span className="machine-error">{server.error}</span>}
-      </li>
-    );
-  }
-
-  const cpu = reading.cpu;
-  const mem = share(reading.mem);
-  const disk = share(reading.disk);
-  const memFigure = reading.mem && `${formatSize(reading.mem.used)} / ${formatSize(reading.mem.total)}`;
-  const diskFigure = reading.disk && `${formatSize(reading.disk.used)} / ${formatSize(reading.disk.total)}`;
-
-  /* Shut, a ring each on the name's own line — the same three figures and the
-     same colours as the bars, in one row's height rather than four. */
-  if (!open) {
-    return (
-      <li className={`machine-item gauge-item ${server.stale ? "machine-stale" : ""}`}>
-        {name}
-        <span className="gauge-rings">
-          {cpu !== null && <MachineRing label="CPU" percent={cpu} figure={`${Math.round(cpu)}%`} />}
-          {mem !== null && <MachineRing label="RAM" percent={mem} figure={memFigure ?? ""} />}
-          {disk !== null && <MachineRing label="Disk" percent={disk} figure={diskFigure ?? ""} />}
-        </span>
-      </li>
-    );
-  }
-
-  return (
-    <li className={`machine-item ${server.stale ? "machine-stale" : ""}`}>
-      <span className="usage-head">{name}</span>
-      {cpu !== null && <MachineMeter label="CPU" percent={cpu} figure={`${Math.round(cpu)}%`} />}
-      {mem !== null && memFigure && <MachineMeter label="RAM" percent={mem} figure={memFigure} />}
-      {disk !== null && diskFigure && <MachineMeter label="Disk" percent={disk} figure={diskFigure} />}
-      {server.error && <span className="machine-error">{server.error}</span>}
-    </li>
-  );
-}
-
-function MachineRing({ label, percent, figure }: { label: string; percent: number; figure: string }) {
-  const rounded = Math.round(percent);
-  return (
-    <GaugeRing
-      label={label}
-      mark={label[0] ?? ""}
-      percent={percent}
-      severity={machineSeverity(percent)}
-      title={`${label} ${rounded}% used${figure && figure !== `${rounded}%` ? ` — ${figure}` : ""}`}
-    />
-  );
-}
-
-function MachineMeter({ label, percent, figure }: { label: string; percent: number; figure: string }) {
-  return (
-    <div className="machine-meter">
-      <span className="usage-head">
-        <span className="usage-name">{label}</span>
-        <span className="usage-used">{figure}</span>
-      </span>
-      <span
-        className="usage-bar"
-        role="meter"
-        aria-label={`${label} used`}
-        aria-valuenow={Math.round(percent)}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        title={`${Math.round(percent)}% used`}
-      >
-        <span className="usage-fill" data-severity={machineSeverity(percent)} style={{ width: `${percent}%` }} />
-      </span>
-    </div>
-  );
-}
-
-/** Used as a percentage of total, or null when there is no total to be a share of. */
-function share(part: MachineUsed | null): number | null {
-  if (!part || part.total <= 0) return null;
-  return Math.min(100, (part.used / part.total) * 100);
 }
 
 /** How long a dev server's stop button keeps asking before it lets the question go. */
