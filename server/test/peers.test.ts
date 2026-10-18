@@ -186,14 +186,22 @@ describe("one drawer", () => {
     ]);
   });
 
-  it("draws a message sent to another Kuru once: here until it arrives there, theirs after", () => {
+  it("draws a message sent to another Kuru once: on the outbox until it arrives, the turn after", () => {
     const sent = you("m-1", 5, "m-1", "queued");
-    expect(mergeNodes([sent], [peer([you("x", 6, "m-1", "queued")])]).map((item) => item.node)).toEqual([null, "omarchy"]);
-    const arrived = mergeNodes([sent], [peer([you("t7", 6, "m-1")])]);
+    // On its way: this node's copy, and the other's own outbox copy too.
+    expect(mergeNodes([sent], [peer([you("m-1", 6, "m-1", "queued")])]).map((item) => item.node)).toEqual([null, "omarchy"]);
+    const arrived = mergeNodes([{ ...sent, state: "delivered" }], [peer([you("t7", 6, "m-1")])]);
     expect(arrived).toHaveLength(1);
     expect(arrived[0]!.node).toBe("omarchy");
     // Resend is this node's own list's, never another's.
     expect((arrived[0] as YouItem).outboxId).toBeNull();
+  });
+
+  it("and the other way round, on the node it arrived at", () => {
+    const turn = you("t1", 6, "m-1");
+    const theirs = you("m-1", 5, "m-1");
+    const merged = mergeNodes([turn], [peer([theirs])]);
+    expect(merged.map((item) => [item.node, item.id])).toEqual([[null, "t1"]]);
   });
 });
 

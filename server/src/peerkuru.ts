@@ -526,7 +526,8 @@ function itemLine(item: KuruItem): string {
       return `Kuru: ${item.text}`;
     case "notice": {
       const agent = item.agent ? `${item.agent.name ? `"${item.agent.name}"` : item.agent.program}${item.agent.workspace ? ` in ${item.agent.workspace}` : ""} ` : "";
-      return `${item.from}: ${agent}${item.what}${item.from.startsWith("Kuru on ") && item.text ? ` — ${item.text}` : ""}`;
+      // Another Kuru's whole message, which is its own; kururu's line, whose quote stayed on its node.
+      return item.from.startsWith("Kuru on ") && item.text ? `${item.from}: ${item.text}` : `${item.from}: ${agent}${item.what}`;
     }
     case "session":
       return "(a new conversation began)";

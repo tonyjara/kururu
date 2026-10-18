@@ -622,26 +622,28 @@ export type NodeKuruItem = KuruItem & { node: string | null };
  *
  * Nothing is copied into anybody's database to make it: each node's items
  * are what that node said about its own conversation, tagged with its name,
- * and the merge is by time. One rule is the merge's own. A message of yours
- * sent from here to another Kuru is on this node's outbox until it arrives
- * and on that node's turns once it has, under the same outbox id; once the
- * other node's copy is here, delivered, it is the one drawn, since it is
- * the one with Kuru's word that it was taken. Until then this node's is,
- * with its Resend.
+ * and the merge is by time. One rule is the merge's own. A message sent from
+ * one node's drawer to another node's Kuru is on the first node's outbox,
+ * as an item of its own, and on the second's turns once that Kuru took it,
+ * under the same outbox id — so it is in two conversations at once, either
+ * way round. Once some node has it as a turn, that copy is the one drawn,
+ * since it carries Kuru's word that it was taken; until then the outbox's
+ * copy is, with its state and, on the node that sent it, its Resend.
  */
 export function mergeNodes(local: readonly KuruItem[], peers: readonly PeerKuru[]): NodeKuruItem[] {
-  const arrived = new Set<string>();
-  for (const peer of peers) for (const item of peer.items) if (item.kind === "you" && item.outboxId && item.state === "delivered") arrived.add(item.outboxId);
-  const out: NodeKuruItem[] = [];
-  for (const item of local) {
-    if (item.kind === "you" && item.outboxId && arrived.has(item.outboxId)) continue;
-    out.push({ ...item, node: null });
-  }
+  // An item that is a turn has an id of its own beside the outbox id; one
+  // that is only on an outbox is known by the outbox id itself.
+  const outboxOnly = (item: KuruItem): boolean => item.kind === "you" && item.outboxId !== null && item.id === item.outboxId;
+  const taken = new Set<string>();
+  for (const item of [...local, ...peers.flatMap((peer) => peer.items)]) if (item.kind === "you" && item.outboxId && !outboxOnly(item)) taken.add(item.outboxId);
+  const shown = (item: KuruItem): boolean => !(outboxOnly(item) && taken.has((item as YouItem).outboxId!));
+  const out: NodeKuruItem[] = local.filter(shown).map((item) => ({ ...item, node: null }));
   // Ids are each node's own and two nodes both have a `t12`, so another
   // node's are made unique by its id. Its messages lose their outbox id:
   // Resend and Discard are for this node's own list.
   for (const peer of peers) {
     for (const item of peer.items) {
+      if (!shown(item)) continue;
       const id = `${peer.node.id}/${item.id}`;
       out.push(item.kind === "you" ? { ...item, id, outboxId: null, node: peer.node.name } : { ...item, id, node: peer.node.name });
     }

@@ -8,7 +8,11 @@ the skill and the wizard, verified on the Omarchy PC with the user there on
 between the Mac and the box with throwaway instances and awaiting its
 two-machine checks with the user; and phase 6, moving a workspace
 (`docs/nodes.md#moving-a-workspace`), checked between two throwaway nodes on
-the Mac and awaiting its two-machine checks. Phases 3–5 are being built. It is written so that an agent can take one phase, read the files it
+the Mac and awaiting its two-machine checks; and phase 3, Kurus as peers
+(`docs/nodes.md#kurus-as-peers`), checked between two throwaway nodes on
+the Mac with a stand-in Claude and awaiting its two-machine checks. Its
+marks are `[kuru@mac]` and `[user@mac]` rather than the bare `[mac]` below,
+for the reason `docs/nodes.md` gives. Phases 4 and 5 are being built. It is written so that an agent can take one phase, read the files it
 names, and know what "done" is. Each phase is shaped as a card: its scope,
 what it depends on, what it can run beside, and how it is verified. The first
 draft had one Kuru driving every node's agents, a Telegram poller set by hand,
