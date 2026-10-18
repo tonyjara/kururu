@@ -323,6 +323,13 @@ export function App() {
    */
   const [settings, setSettings] = useState<SettingsTab | null>(resumeSettings);
   /**
+   * Whether this opening is the one a theme's reload put back. On a phone the
+   * cog's page is the list, so a resumed `theme` read as the cog and dropped
+   * somebody who had just pressed a pack onto the list instead of the page they
+   * pressed it on. A resumed page is a page asked for by name.
+   */
+  const [settingsResumed, setSettingsResumed] = useState(() => settings !== null);
+  /**
    * The profile menu, and the button it hangs under.
    *
    * View state like Settings and the help overlay: which profile you are *in* is
@@ -1699,8 +1706,12 @@ export function App() {
           projects={projects}
           projectSettings={snapshot.projectSettings}
           initialTab={settings}
+          resumed={settingsResumed}
           narrow={narrow}
-          onClose={() => setSettings(null)}
+          onClose={() => {
+            setSettings(null);
+            setSettingsResumed(false);
+          }}
           onEditing={setEditing}
         />
       )}
