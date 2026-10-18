@@ -321,15 +321,19 @@ export async function retireWorktree(
     }
   } else {
     await git(["fetch", ".", `${branch}:${base}`], root);
-    /*
-     * `branch -d` asks whether the branch is merged into HEAD, and HEAD is
-     * whatever the main tree happens to be on — not the base it was just
-     * merged into. Its other notion of merged is "into its upstream", so the
-     * upstream is pointed at the base and the same forceless `-d` answers the
-     * right question. The setting goes with the branch when it is deleted.
-     */
-    await git(["branch", `--set-upstream-to=${base}`, branch], root);
   }
+  /*
+   * `branch -d` asks whether the branch is merged into its upstream when it
+   * has one, and into HEAD only when it does not. Both are the wrong
+   * question: HEAD is whatever the main tree happens to be on, and an agent
+   * that pushed with `-u` and then rebased leaves an upstream that is behind
+   * forever — "not yet merged to origin/…, even though it is merged to HEAD",
+   * a merge that refuses with all its work already on the base. So the
+   * upstream is pointed at the base, on both roads, and the same forceless
+   * `-d` answers the right question. The setting goes with the branch when it
+   * is deleted.
+   */
+  await git(["branch", `--set-upstream-to=${base}`, branch], root);
 
   if (standing) await git(["worktree", "remove", path], root);
   else await git(["worktree", "prune"], root).catch(() => undefined);
