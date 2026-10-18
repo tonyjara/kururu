@@ -77,6 +77,7 @@ import {
   loopbackTokenRequired,
   tokenEnv,
   cookieHeader,
+  fromLoopback,
   hasToken,
   isShared,
   rotateToken,
@@ -5377,6 +5378,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       // it. The frog is the one presence a Mac with no window open has.
       kuru: { profileId: workspaces.active.id, ...kuru.counts(workspaces.active.key) },
       pid: process.pid,
+      clients: { now: clients.size, remoteAt: remoteClientAt },
       // When and why this process started, and whether anything would start
       // it again. Without the file: this is asked every few seconds.
       life: lifeNow(),
@@ -6431,6 +6433,13 @@ const server = servers[0]!;
 
 const wss = new WebSocketServer({ noServer: true });
 
+/**
+ * When a client last connected from anywhere but this machine, or null. It is
+ * how `kururu child setup` knows the phone it printed a code for has opened
+ * it: a child has no window, so a first client from elsewhere is the phone.
+ */
+let remoteClientAt: string | null = null;
+
 function onUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
   if (url.pathname !== "/ws") {
@@ -6452,6 +6461,7 @@ function onUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
     return;
   }
   wss.handleUpgrade(req, socket, head, (ws) => {
+    if (!fromLoopback(req)) remoteClientAt = new Date().toISOString();
     clients.set(ws, {
       watching: new Set(),
       warm: new Set(),
