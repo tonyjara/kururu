@@ -354,3 +354,42 @@ function ago(ms) {
   if (s < 90 * 60) return `${Math.round(s / 60)} min`;
   return `${Math.round(s / 3600)} h`;
 }
+
+/**
+ * The Claude token this child holds from its parent, out of
+ * `secrets-held.json` — `{ kind, hint }`, or null. The file has kinds,
+ * hints and digests and never a value, which is why the doctor may read it.
+ */
+export function lentClaude(held) {
+  const entries = held && typeof held === "object" && held.held && typeof held.held === "object" ? Object.entries(held.held) : [];
+  const found = entries.find(([kind, entry]) => kind.startsWith("claude-token:") && entry && typeof entry.hint === "string");
+  return found ? { kind: found[0], hint: found[1].hint } : null;
+}
+
+/**
+ * The doctor's secrets row: what this child holds from its parent, by
+ * kind and hint. Nothing lent is a `–` — lending is optional, a child signed
+ * in with its own `/login` needs none of it — unless the wizard was told
+ * Claude would be lent, and it has not been: then the agents have no login,
+ * and that is the `✗`.
+ */
+export function heldRows(held, { paired, parent, name, claudeLent }) {
+  const from = parent ?? "the Mac";
+  const where = `${from}'s Settings → Nodes → ${name ?? "this node"} → Secrets`;
+  if (!paired) return [{ title: "secrets", state: "skip", detail: "not paired, so nothing is lent" }];
+  const entries = held && typeof held === "object" && held.held && typeof held.held === "object" ? Object.entries(held.held) : [];
+  const rows = [
+    entries.length
+      ? { title: "secrets", state: "ok", detail: `held from ${from}: ${entries.map(([kind, entry]) => `${kind} ${entry?.hint ?? ""}`.trim()).join(", ")}` }
+      : { title: "secrets", state: "skip", detail: `nothing held from ${from} (optional) — switch them on in ${where}` },
+  ];
+  if (claudeLent && !lentClaude(held)) {
+    rows.push({
+      title: "claude token",
+      state: "fail",
+      detail: `Claude is to be lent by ${from}, and is not held yet`,
+      fix: `on ${from}: Settings → Agents → Lend this login to a node, then ${where} → Claude login, as a token`,
+    });
+  }
+  return rows;
+}

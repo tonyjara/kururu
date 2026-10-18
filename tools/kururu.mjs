@@ -22,7 +22,7 @@
  * left alone, which is what makes stopping and starting again a workflow
  * rather than a hazard.
  *
- *   kururu child setup [--dry-run] [--port=N] [--account=this|dedicated] [--codex=yes|no] [--join="<address> <code>"] [--yes]
+ *   kururu child setup [--dry-run] [--port=N] [--account=this|dedicated] [--codex=yes|no] [--claude=login|lent] [--join="<address> <code>"] [--yes]
  *   kururu child doctor           the same checks, read-only; exit 1 on a ✗
  *   kururu child update           pull, install, build, restart the server, doctor
  *   kururu child status           the service, then `bun run status`

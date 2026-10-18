@@ -27,9 +27,11 @@ import { socketHolders } from "../../server/sockowner.mjs";
 import {
   atLeast,
   cgroupUnit,
+  heldRows,
   isHostUnit,
   keysInEnv,
   lanAddresses,
+  lentClaude,
   lingerOn,
   pairingRow,
   pairingState,
@@ -569,10 +571,14 @@ export const STEPS = [
   {
     id: "claude",
     title: "Claude Code",
-    why: "Every agent and the child's Kuru are Claude Code, signed in on this machine with its own /login: the same subscription as the Mac, revocable on its own, and nothing copied from the Mac. Codex is optional.",
+    why: "Every agent and the child's Kuru are Claude Code, signed in on this machine with its own /login: the same subscription as the Mac, revocable on its own, and nothing copied from the Mac. Where nobody can open a browser, the Mac can lend its login as a token instead, once this box is paired. Codex is optional.",
     async check(ctx) {
       const rows = [];
       const claude = which("claude", ctx.env);
+      // A token the Mac lent (`secrets.ts` writes it, kururu's ptys get it as
+      // CLAUDE_CODE_OAUTH_TOKEN). This shell does not have it, so `claude auth
+      // status` here cannot see it; the held file says it is there, by hint.
+      const lent = lentClaude(readJson(join(ctx.configDir, "secrets-held.json")));
       if (!claude) {
         rows.push({ title: "claude", state: "fail", detail: "not on this PATH", fix: "curl -fsSL https://claude.ai/install.sh | bash" });
       } else {
@@ -584,12 +590,20 @@ export const STEPS = [
             return null;
           }
         })();
-        if (!status?.loggedIn) {
-          rows.push({ title: "claude", state: "fail", detail: `${version}, not signed in`, fix: "claude auth login --claudeai" });
+        if (!status?.loggedIn && lent) {
+          rows.push({ title: "claude", state: "ok", detail: `${version}, signed in by a token the Mac lent (${lent.hint}), in kururu's terminals` });
+        } else if (!status?.loggedIn && ctx.saved.claudeRoad === "lent") {
+          rows.push({ title: "claude", state: "skip", detail: `${version}, to be lent by the Mac once this box is paired (the secrets step checks it)` });
+        } else if (!status?.loggedIn) {
+          rows.push({ title: "claude", state: "fail", detail: `${version}, not signed in`, fix: "claude auth login --claudeai, or have the Mac lend its login after pairing" });
         } else if (status.authMethod !== "claude.ai") {
           rows.push({ title: "claude", state: "fail", detail: `${version}, signed in by ${status.authMethod}, which bills as API usage`, fix: "claude auth logout, then claude auth login --claudeai" });
         } else {
-          rows.push({ title: "claude", state: "ok", detail: `${version}, signed in to ${status.subscriptionType ?? "a"} subscription` });
+          rows.push({
+            title: "claude",
+            state: "ok",
+            detail: `${version}, signed in to ${status.subscriptionType ?? "a"} subscription${lent ? `; a token the Mac lent (${lent.hint}) outranks it in kururu's terminals` : ""}`,
+          });
         }
       }
       if (ctx.saved.codex === true) {
@@ -621,13 +635,31 @@ export const STEPS = [
       const claude = rows.find((row) => row.title === "claude");
       if (claude?.state === "fail") {
         if (!which("claude", ctx.env)) throw new Stop("Install Claude Code, then run this again:\n  curl -fsSL https://claude.ai/install.sh | bash");
-        if (!io.interactive) {
-          throw new Stop(
-            "Sign Claude Code in on this box, in a terminal of your own:\n  claude auth login --claudeai\nIt prints a link; over ssh, open it on any device, sign in to the same Claude account as the Mac, and paste the code back. Then run this again.",
-          );
+        const own =
+          "Sign Claude Code in on this box, in a terminal of your own:\n  claude auth login --claudeai\nIt prints a link; over ssh, open it on any device, sign in to the same Claude account as the Mac, and paste the code back. Then run this again.";
+        if (!io.interactive && ctx.flags.claude === undefined) {
+          throw new Stop(`${own}\nOr, where no browser can be opened anywhere, have the Mac lend its login once this box is paired: run this again with --claude=lent.`, { code: 3 });
         }
-        io.say("Signing Claude Code in. It prints a link: open it on any device, sign in to the same Claude account as the Mac, and paste the code back here.");
-        if (!ctx.dryRun) spawnSync("claude", ["auth", "login", "--claudeai"], { stdio: "inherit", env: ctx.env });
+        // Two roads, the box's own login first: it is revocable on its own and
+        // needs nothing from the Mac. The token is for a user with no browser.
+        const road = await io.ask(
+          "Sign Claude in here with its own /login, or have the Mac lend its login as a token after pairing? (login is better wherever a browser can be opened, even on a phone)",
+          ["login", "lent"],
+          "claude",
+        );
+        if (road === "lent") {
+          if (ctx.dryRun) io.say("would remember: Claude to be lent by the Mac");
+          else {
+            remember(ctx, { claudeRoad: "lent" });
+            ctx.changed.push("Claude to be lent by the Mac");
+          }
+          io.say("Going on without a login here. Once this box is paired, the Mac's Settings → Agents → Lend this login to a node makes the token, and its Settings → Nodes → Secrets sends it; the secrets step at the end waits for it.");
+        } else {
+          if (ctx.saved.claudeRoad !== undefined && !ctx.dryRun) remember(ctx, { claudeRoad: undefined });
+          if (!io.interactive) throw new Stop(own);
+          io.say("Signing Claude Code in. It prints a link: open it on any device, sign in to the same Claude account as the Mac, and paste the code back here.");
+          if (!ctx.dryRun) spawnSync("claude", ["auth", "login", "--claudeai"], { stdio: "inherit", env: ctx.env });
+        }
       }
       const codex = rows.find((row) => row.title === "codex");
       if (ctx.saved.codex === true && codex?.state !== "ok") {
@@ -888,6 +920,31 @@ export const STEPS = [
       }
       await joinParent(ctx, io, text);
       if (ctx.saved.pair !== undefined) remember(ctx, { pair: undefined });
+    },
+  },
+
+  {
+    id: "secrets",
+    title: "secrets held from the Mac",
+    why: "The Mac can lend a paired child its keys — the self-hosted Firecrawl for the agents' web, the OpenRouter balance, a Claude login as a token — sealed to this box's key, one switch each in the Mac's Settings → Nodes → <this box> → Secrets. They are kept here at 0600 as the same files the Mac keeps, listed here by hint, and let go of if this box leaves the roster. All optional.",
+    async check(ctx) {
+      const answer = await health(ctx);
+      const at = pairingState(answer.status === 200 ? answer.body : null);
+      const paired = at.state === "linked" || at.state === "waiting";
+      return heldRows(readJson(join(ctx.configDir, "secrets-held.json")), {
+        paired,
+        parent: at.parent ?? null,
+        name: answer.body?.nodes?.name ?? null,
+        claudeLent: ctx.saved.claudeRoad === "lent",
+      });
+    },
+    async repair(ctx, io, rows, recheck) {
+      const missing = rows.find((row) => row.state === "fail");
+      if (!missing) return;
+      if (ctx.dryRun) return;
+      if (!io.interactive) throw new Stop(`${missing.detail}. ${missing.fix[0].toUpperCase()}${missing.fix.slice(1)}. Then run this again.`, { code: 4 });
+      io.say(`${missing.fix[0].toUpperCase()}${missing.fix.slice(1)}. Waiting for it (Enter to stop waiting)…`);
+      await io.waitFor(async () => !(await recheck()).some((row) => row.state === "fail"), 5 * 60_000);
     },
   },
 ];

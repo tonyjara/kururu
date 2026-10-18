@@ -97,6 +97,11 @@ The questions, so you can explain them when asked:
 - `--yes` agrees to writing over a unit that differs from the one this
   checkout would write, and to restarting the server onto it. That costs any
   open phone a reconnect. No agent ends.
+- `--claude=login|lent` is asked only when Claude Code is not signed in here.
+  `login` is the box's own `/login`, and it is the one to recommend wherever a
+  browser can be opened, even on a phone. `lent` is for a user with no browser
+  anywhere: the wizard goes on without a login, and once the box is paired the
+  Mac lends its own as a token (see *Secrets* below).
 - `--join="<address> <code>"` pairs this child with the Mac, from the command
   the Mac shows. It is optional: a child works alone, and without it the
   wizard says how to pair and moves on. See *Pairing* below.
@@ -112,6 +117,7 @@ The hand steps you will most likely relay:
   attempt was refused.
 - **No tailnet address:** `sudo tailscale up`.
 - **Pairing with the Mac:** see *Pairing*.
+- **A token to be lent:** see *Secrets*.
 
 ## Pairing
 
@@ -132,6 +138,23 @@ If it says the Mac is not showing a command, or the command expired, ask for a
 new one: Add a computer again. If nothing answers at the address, the Mac is
 asleep, not shared (its Share dialog), or not on the same tailnet; say which
 the message names. The doctor's pairing row is ✓ once linked.
+
+## Secrets
+
+Once paired, the Mac can lend this box its keys: the self-hosted Firecrawl
+(which gives the agents here `kururu_web`), the OpenRouter balance, a Claude
+login as a token, the Telegram bot's token, a Codex login. Each is one switch
+on the Mac, off until the user turns it on. Nothing is done here: tell them,
+
+> On the Mac, open Settings → Nodes. Under **Secrets lent to <this box>**,
+> switch on what this box should have.
+
+For a Claude token, first: Settings → Agents → **Lend this login to a node**
+on the Mac, which opens a tab running `claude setup-token`; they paste what it
+prints into the field beside it. The doctor's `secrets` row lists what is held
+by hint, and the setup's last step waits for the token when `--claude=lent`
+was the answer. Never ask the user to paste a key or a token to you, or into
+this box: the Mac sends it, sealed.
 
 ## Finishing
 

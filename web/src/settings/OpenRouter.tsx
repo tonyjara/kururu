@@ -12,12 +12,14 @@
  */
 import * as api from "../session";
 import { useKururu } from "../session";
+import { HeldFrom, LentTo, useHeld } from "./Secrets";
 import { A, Details, Group, KeyRow, Mono, P, Readout, Step, Steps } from "./ui";
 
 const KEYS_URL = "https://openrouter.ai/settings/management-keys";
 
 export function OpenRouterPage() {
   const { openrouter } = useKururu();
+  const held = useHeld("openrouter");
   return (
     <>
       <Group title="Account" foot="Your balance on the bottom bar, with what every key on the account has spent today, this week and this month. Asked once a minute while a window is open.">
@@ -26,8 +28,19 @@ export function OpenRouterPage() {
           tone={!openrouter ? "off" : openrouter.error ? "bad" : openrouter.reading ? "ok" : "busy"}
           value={!openrouter ? "None yet" : openrouter.error ? openrouter.error : openrouter.reading ? `${openrouter.hint}, connected` : `${openrouter.hint}, connecting…`}
         />
+        <HeldFrom kind="openrouter" />
+        <LentTo kind="openrouter" />
       </Group>
+      {!held && <SetUp />}
+    </>
+  );
+}
 
+/** The two steps, on a node that keeps its own key. One holding the parent's has nothing to set. */
+function SetUp() {
+  const { openrouter } = useKururu();
+  return (
+    <>
       <Group title="Set up">
         <Steps>
           <Step n={1} done={openrouter !== null} title="Make a management key" line="Not the kind your projects use: OpenRouter only tells the balance to a management key.">
@@ -35,7 +48,7 @@ export function OpenRouterPage() {
             <Details summary="What a management key can do">
               <P>
                 It cannot run a model, but it can create and delete your API keys. kururu only ever reads with it. It is kept in <Mono>~/.config/kururu/openrouter.json</Mono>,
-                readable only by you, never sent back to a window and never in a backup.
+                readable only by you, never sent back to a window and never in a backup. It goes to another node only if you lend it there, in Settings → Nodes.
               </P>
             </Details>
           </Step>

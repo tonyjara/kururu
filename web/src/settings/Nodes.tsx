@@ -21,6 +21,10 @@
  * in place, as every destructive control in Settings does: Settings is
  * already modal, and a confirm over a confirm is a stack.
  *
+ * Each child's secrets sit under the roster on the parent, a group per
+ * node, and what a child holds sits under its read-only roster
+ * (`Secrets.tsx`).
+ *
  * It holds nothing but what is being typed; the list is the server's.
  */
 import { useEffect, useRef, useState } from "react";
@@ -28,6 +32,7 @@ import type { NodeStatus, NodesView } from "../../../shared/nodes";
 import { nodeState } from "../nodes";
 import * as api from "../session";
 import { useKururu } from "../session";
+import { HeldList, NodeSecrets } from "./Secrets";
 import { Banner, Btn, DangerButton, Details, Dot, Empty, errorText, Group, IconBtn, Item, Mono, Outcome, P, Row, Step, Steps, useTyping, type Tone } from "./ui";
 
 /** A row of the rank list: this node or another, in one shape so the drag treats them alike. */
@@ -56,6 +61,8 @@ export function NodesPage() {
   return (
     <>
       {nodes.role === "child" ? <ChildRoster view={nodes} /> : <ParentRoster view={nodes} />}
+      {nodes.role === "child" && <HeldList />}
+      {nodes.role === "parent" && nodes.nodes.map((node) => <NodeSecrets key={node.id} node={node} />)}
       {nodes.role === "alone" && <JoinMac />}
     </>
   );

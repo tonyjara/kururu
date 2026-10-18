@@ -55,6 +55,7 @@ import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, V
 import type { MachineEntry, MachinePin, MachineStatus } from "../../shared/machines";
 import type { NodeStatus, NodesView } from "../../shared/nodes";
 import type { MoveDone, MovePlan } from "../../shared/move";
+import { EMPTY_SECRETS, type SecretsView } from "../../shared/secrets";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { ReloadAsk, ReloadHold, ReloadPage } from "../../shared/reload";
 import type { Grid } from "./grid";
@@ -96,6 +97,12 @@ export interface KururuState {
    * `shared/nodes.ts`.
    */
   nodes: NodesView | null;
+  /**
+   * The secrets lent between nodes: on the parent what it could lend and how
+   * each grant stands, on a child what it holds and from whom. Hints only.
+   * See `shared/secrets.ts`.
+   */
+  secrets: SecretsView;
   /** The OpenRouter account, or null when no key has been given. See `shared/openrouter.ts`. */
   openrouter: OpenRouterStatus | null;
   /** The web for the agents — its providers in order — or null until the server has said. Never a key. See `shared/web.ts`. */
@@ -136,6 +143,7 @@ let state: KururuState = {
   codexUsage: null,
   machines: [],
   nodes: null,
+  secrets: EMPTY_SECRETS,
   openrouter: null,
   web: null,
   backup: null,
@@ -317,6 +325,9 @@ function connect(): void {
         break;
       case "nodes":
         set({ nodes: msg.nodes });
+        break;
+      case "secrets":
+        set({ secrets: msg.secrets });
         break;
       case "openrouter":
         set({ openrouter: msg.openrouter });
@@ -1188,6 +1199,30 @@ export function moveWorkspacePlan(workspaceId: string, nodeId: string, folder: s
 /** Move it. Resolves once the node has it and it has left this list; rejects with why, and then nothing here changed. */
 export function moveWorkspaceTo(workspaceId: string, nodeId: string, folder: string): Promise<{ done: MoveDone; node: string; url: string }> {
   return request((id) => ({ type: "node-move", id, workspaceId, nodeId, folder })) as Promise<{ done: MoveDone; node: string; url: string }>;
+}
+
+/** Lend a kind to a node, or take it back. The parent's alone. */
+export function grantSecret(nodeId: string, kind: string, on: boolean): Promise<SecretsView> {
+  return request((id) => ({ type: "secret-grant", id, nodeId, kind, on })) as Promise<SecretsView>;
+}
+
+/** Send a lent kind again, though the node holds a version of it. */
+export function pushSecret(nodeId: string, kind: string): Promise<SecretsView> {
+  return request((id) => ({ type: "secret-push", id, nodeId, kind })) as Promise<SecretsView>;
+}
+
+/** The token `claude setup-token` printed, kept on this Mac for lending as the profile's login. */
+export function lendClaude(profileId: string, token: string): Promise<SecretsView> {
+  return request((id) => ({ type: "claude-lend", id, profileId, token })) as Promise<SecretsView>;
+}
+
+export function unlendClaude(login: string): Promise<SecretsView> {
+  return request((id) => ({ type: "claude-unlend", id, login })) as Promise<SecretsView>;
+}
+
+/** A tab running `claude setup-token` as the profile's login. */
+export function openClaudeLend(profileId: string): Promise<unknown> {
+  return request((id) => ({ type: "claude-lend-open", id, profileId }));
 }
 
 /** Stop watching it, which also brings home every workspace pinned to it. */
