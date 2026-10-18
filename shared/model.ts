@@ -260,20 +260,32 @@ export interface MascotConfig {
   /** What it does while the agent is going. The one this started as. */
   working: MascotClip;
   /**
-   * What it does while the agent is stopped and nothing is wrong — or `null` for
-   * the dot it used to be.
-   *
-   * Only `idle` gets one. `blocked` and `done` are stopped too, but they are
-   * stopped *at you*: they are the two states that want a human, and leaving
-   * them as coloured dots is what makes them stand out from a sidebar where
-   * everything else is moving. `exited` keeps its dot for the same reason from
-   * the other direction — there is nothing left in there to animate.
+   * What it does while the agent is stopped — or `null` for the dot it used to
+   * be. Every state that is not `working` wears it unless the mascot drew that
+   * state a clip of its own, below; see `Status.tsx` for why stopped states
+   * stopped being dots.
    *
    * Nullable because a sheet may hold only one animation worth having, and
    * because the dot was a perfectly good answer for two years. Adding one is a
    * drag in Settings.
    */
   idle: MascotClip | null;
+  /**
+   * What it does while the agent is asking, and when its turn has ended — or
+   * `null` to wear `idle` like every other stopped state.
+   *
+   * These came with a pack that had a picture for each — a pit board for a car
+   * waiting on its crew, a chequered flag for one that finished — and a mascot
+   * that has them is saying which of the two stopped states this is without a
+   * tooltip, which is more than the idle clip can. Null is the default and the
+   * common case: most sheets have one resting pose, and a frog that sat down
+   * differently for each state would be drawing a distinction it does not have
+   * a picture for. Settings does not author them; they arrive from the
+   * registry, and the picker keeps them because every edit goes through
+   * `adoptMascot` with the rest of the config.
+   */
+  blocked: MascotClip | null;
+  done: MascotClip | null;
 }
 
 /**
@@ -313,6 +325,8 @@ export const DEFAULT_MASCOT: MascotConfig = {
   motion: "always",
   working: { row: 1, col: 7, count: 4, cycle: 720 },
   idle: DEFAULT_IDLE,
+  blocked: null,
+  done: null,
 };
 
 /** A sheet name is a name, never a path — same rule as a column's colour. */
@@ -394,6 +408,10 @@ export function adoptMascot(value: unknown): MascotConfig {
           : flat
             ? null
             : DEFAULT_MASCOT.idle,
+    // Absent is null rather than the default's, unlike `idle`: the default has
+    // none, and a file from before these existed meant "wear idle".
+    blocked: raw.blocked ? adoptClip(raw.blocked, DEFAULT_IDLE) : null,
+    done: raw.done ? adoptClip(raw.done, DEFAULT_IDLE) : null,
   };
 }
 

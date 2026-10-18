@@ -478,6 +478,17 @@ The badge beside a working agent (`Status.tsx`).
   reports `blocked` a minute after every turn) that read as the mascot failing to
   draw. The notification is what says an agent wants you; the badge only says
   whether it is going.
+- **A mascot may draw `blocked` and `done` a clip each, and most do not.** Both
+  are nullable and null — the default, and what an older file reads as — wears
+  idle. They came with the Grand Prix pack, whose `racer` has a picture for
+  each state (a pit board, a chequered flag), and they are not the old dots
+  back: the badge still moves in every state, it just says *which* stopped
+  state with a picture where the sheet has one. Settings does not author them;
+  they arrive from the registry and survive edits because every edit goes
+  through `adoptMascot`, and the picker's trim is measured across them too, or
+  editing the racer would crop its flag. Frozen under reduced motion they keep
+  their first frame rather than falling to the dot, because frame one of a
+  flag is still not frame one of anything else.
 - **An idle animation that cannot animate becomes the dot again.** Under
   `motion: never` a frozen idle sprite and a frozen working one are the same
   picture, so idle would cost the one distinction the badge exists to draw. This

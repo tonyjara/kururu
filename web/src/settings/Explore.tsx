@@ -387,6 +387,8 @@ function Shot({ entry, volume }: { entry: CatalogEntry; volume: number }) {
       motion: "always",
       working: clip(p.working, frame),
       idle: null,
+      blocked: null,
+      done: null,
     };
     return (
       <span className="st-shot st-shot-mascot" aria-hidden>
