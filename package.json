@@ -26,6 +26,7 @@
     "kill-ptyhosts": "node server/kill-hosts.mjs",
     "reload-window": "node server/reload-window.mjs",
     "backup": "bun server/src/backup-cli.ts",
+    "share": "bun server/src/share-cli.ts",
     "restore": "bun server/src/restore-cli.ts",
     "dist": "bun run build && electron-builder --projectDir desktop --mac",
     "dist:unsigned": "bun run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --projectDir desktop --mac",

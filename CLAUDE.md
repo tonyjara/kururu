@@ -95,6 +95,7 @@ bun run status         # is the host up, is a server up, what are they holding
 bun run kill-ptyhosts  # THE destructive one: ends every agent. --list to dry-run
 bun run reload-window --why "…"  # an agent's ⌘R: waits for a safe moment, says what happened
 bun run backup         # a backup now, through the server when one is up; --check lists what goes
+bun run share          # the phone's link and its QR code in the terminal, for a box with no window; --rotate, --url
 bun run restore <repo> # a new Mac put back from the backup; refuses while a server is up
 bun run typecheck      # root tsconfig + web tsconfig
 bun test               # pure functions only — see docs/testing.md

@@ -5598,7 +5598,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    * a timer earning nothing. See `reach.ts`.
    */
   if (url.pathname === "/api/reach") {
-    json(res, { ...reach(PORT), ...sharing() });
+    // `listening` for `bun run share`, which has no page to ask and must not
+    // offer a LAN address to a child that listens on its tailnet one alone.
+    json(res, { ...reach(PORT), ...sharing(), listening: listenAddresses() });
     return;
   }
 
