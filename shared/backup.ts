@@ -111,6 +111,7 @@ export const EXCLUDED: readonly { what: string; why: string }[] = [
   { what: "secrets-held.json", why: "on a child, what it holds from the parent, by hint" },
   { what: "claude-lend.json", why: "Claude tokens made with claude setup-token to lend to nodes" },
   { what: "claude-token.json", why: "on a child, the Claude token its parent lent it" },
+  { what: "gh/", why: "on a child, the GitHub login its parent lent it, as gh's hosts.yml and git's credential file" },
   { what: "identities/", why: "ssh keys and gh tokens left by the removed accounts feature" },
   { what: "profiles/*/claude/.claude.json", why: "the Claude login and MCP configs" },
   { what: "profiles/*/claude/history.jsonl", why: "Claude Code's own prompt history, which may hold pasted secrets" },

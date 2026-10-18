@@ -43,12 +43,13 @@
  * The key is checked here as well as where it is minted, because this is the
  * one place it becomes a path. `files.ts`'s rule: refuse, never clamp.
  */
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { isLoginKey, type LoginSummary } from "../../shared/model";
 import { CLAUDE_TOKEN_FILE, validClaudeToken } from "../../shared/secrets";
-import { configPath, readConfigFile } from "./config";
+import { ghEnv } from "../../shared/vault";
+import { configDir, configPath, readConfigFile } from "./config";
 import { accountEmail } from "./usage";
 
 /** The directory a profile's logins live in. Throws on a key that is not one. */
@@ -110,6 +111,27 @@ export function loginEnv(loginKey: string): Record<string, string> {
 export function lentClaudeEnv(): Record<string, string> | undefined {
   const raw = readConfigFile(CLAUDE_TOKEN_FILE) as { token?: unknown } | null;
   return validClaudeToken(raw?.token) ? { CLAUDE_CODE_OAUTH_TOKEN: raw.token } : undefined;
+}
+
+/**
+ * The environment that points a terminal at a GitHub login the parent lent
+ * this node, or nothing. `secrets.ts` writes the login into
+ * `~/.config/kururu/gh` as gh's own `hosts.yml` and a credential file for
+ * git; this names the directory to gh (`GH_CONFIG_DIR`) and the file to git
+ * as its helper for github.com (`GIT_CONFIG_*`, which git reads like `-c`).
+ * Paths only — the token stays in its `0600` files, which is the difference
+ * from the Claude token above: gh and git both take a login from a file, so
+ * there is no reason to put this one in an environment. It outranks a
+ * `gh auth login` of the node's own in kururu's terminals, and leaves that
+ * login where it is for everything else.
+ *
+ * Read at every spawn, as the Claude token is.
+ */
+export function lentGhEnv(): Record<string, string> | undefined {
+  const dir = join(configDir(), "gh");
+  if (!existsSync(join(dir, "hosts.yml")) || !existsSync(join(dir, "git-credentials"))) return undefined;
+  const count = Number(process.env.GIT_CONFIG_COUNT);
+  return ghEnv(dir, Number.isSafeInteger(count) && count > 0 ? count : 0) ?? undefined;
 }
 
 /**

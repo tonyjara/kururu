@@ -86,6 +86,7 @@ import {
 import { findLauncher, launcherCommand, visibleLaunchers, withPrompt, type AgentCli, type LaunchSettings, type Launcher } from "../../shared/launchers";
 import { remoteShellOf, validRemoteDir, type MachineEntry, type MachineStatus } from "../../shared/machines";
 import { folderSentence, planText, type MoveDone, type MovePlan } from "../../shared/move";
+import { lendableText, type LendAsk, type Lendable } from "../../shared/secrets";
 import { BOARD_VERBS, nodesText, type BoardVerb, type NodeStatus } from "../../shared/nodes";
 import type { MadeFile } from "../../shared/made";
 import type { AgentSnapshot, AgentStatus, HarnessState } from "../../shared/model";
@@ -189,6 +190,9 @@ export interface HarnessDeps {
   /** `move_workspace`: what moving a workspace to a node would do, and doing it. See `move.ts`. */
   movePlan?: (profileId: string, workspaceId: string, nodeId: string, folder: string | null) => Promise<MovePlan>;
   moveWorkspace?: (profileId: string, workspaceId: string, nodeId: string, folder: string) => Promise<{ done: MoveDone; node: string }>;
+  /** `lend_secrets`: what a workspace could lend a node, by hint, and lending it. See `secrets.ts`. */
+  lendOffer?: (profileId: string, workspaceId: string, nodeId: string, folder: string | null) => Promise<Lendable>;
+  lendSecrets?: (profileId: string, workspaceId: string, nodeId: string, folder: string | null, ask: LendAsk) => Promise<{ lent: string[]; to: string | null }>;
 }
 
 type WaitState = "done" | "blocked" | "exited";
@@ -1002,6 +1006,32 @@ export class Harness {
         return ok(
           `Moved ${plan.workspace.name} to ${moved.node}${moved.done.again ? " (it had arrived already)" : ""}: workspace ${moved.done.name} in ${plan.check.shown}, ${moved.done.cards} cards, in ${moved.done.profile}. It is gone from this list, and its board here is in Search → Deleted. ${moved.node}'s own Kuru drives it from now on.`,
         );
+      }
+
+      case "lend_secrets": {
+        const workspaceId = workspaceArg(true)!;
+        const nodeName = str(args.node);
+        const node = this.deps.nodes?.().find((n) => n.name === nodeName);
+        if (!node) return fail(`No node ${nodeName || "(none)"}. kururu_status lists them under nodes.`);
+        if (!this.deps.lendOffer || !this.deps.lendSecrets) return fail("This kururu cannot lend secrets.");
+        const folder = str(args.folder) || null;
+        const offer = await this.deps.lendOffer(profileId, workspaceId, node.id, folder);
+        if (args.confirm !== true) return ok(lendableText(offer));
+        const names = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+        const env = names(args.env);
+        const ask: LendAsk = {
+          env: env.includes("all") ? offer.env.filter((c) => !c.note).map((c) => c.name) : env,
+          ssh: names(args.ssh),
+          github: str(args.github) || null,
+        };
+        // Only what the preview offered: a name it did not list is a guess, and a guess is not lent.
+        const offered = (list: Lendable["env"], wanted: string[]) => wanted.filter((name) => !list.some((c) => c.name === name && !c.note));
+        const unknown = [...offered(offer.env, ask.env), ...offered(offer.ssh, ask.ssh), ...(ask.github ? offered(offer.github, [ask.github]) : [])];
+        if (unknown.length) return fail(`Not offered for ${offer.workspace.name}: ${unknown.join(", ")}. Call lend_secrets without confirm to see what is.`);
+        if (!ask.env.length && !ask.ssh.length && !ask.github) return fail("Name what to lend: env, ssh or github.");
+        const { lent, to } = await this.deps.lendSecrets(profileId, workspaceId, node.id, folder, ask);
+        const where = to ? ` Env files go into ${to} there.` : "";
+        return ok(`Lent ${node.name} ${lent.join(", ")}: sealed to it and sent now, or when it next links.${where} Settings → Nodes on this Mac shows when it holds each, and takes each back.`);
       }
 
       case "search": {

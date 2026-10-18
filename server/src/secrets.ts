@@ -23,15 +23,26 @@
  * the web providers, `telegram.ts` — so none of them knows it was lent. A
  * child that leaves the roster lets go of everything it held, at once.
  *
+ * **A project's own secrets** go the same road: a workspace's env files, an
+ * ssh Host entry and its key, a GitHub login (`shared/vault.ts` has their
+ * rules, `vault.ts` their disk). An env file is lent to one node, into the
+ * checkout there the node itself said will do, and its kind is made from
+ * the two — so where it lands is part of what is digested and a new folder
+ * is a push like a new key. Its lend outlives the workspace here, which is
+ * the point: a project moved to the node keeps its env files following
+ * the Mac's.
+ *
  * On the restartable side, with nothing near a pty: a lent Claude token
- * reaches a pty through `logins.ts`, read at spawn.
+ * and a lent GitHub login reach a pty through `logins.ts`, read at spawn.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isLoginKey } from "../../shared/model";
+import { tilde, type MoveCheck } from "../../shared/move";
 import type { LinkMessage } from "../../shared/nodes";
 import {
+  adoptEnvLends,
   adoptGrants,
   adoptHeld,
   asSealed,
@@ -57,18 +68,44 @@ import {
   withReport,
   type CatalogueEntry,
   type ClaudeLend,
+  type EnvLend,
+  type EnvValue,
   type GrantRecord,
   type GrantView,
   type HeldFile,
   type Holding,
   type KindSpec,
+  type LendAsk,
+  type LendCandidate,
+  type Lendable,
   type SecretsView,
 } from "../../shared/secrets";
+import { envHint, sshHint, type GhValue, type SshValue } from "../../shared/vault";
 import { configDir, configPath, readConfigFile, removeConfigFile, writeConfigFile } from "./config";
 import { codexDirFor } from "./logins";
 import { boxPrivateKey, identity, signAsNode, verifySigned } from "./nodekeys";
 import type { NodeHost } from "./nodes";
 import { digestOf, seal, unseal } from "./seal";
+import {
+  envKind,
+  envStamp,
+  findEnvFiles,
+  ghAccountsHere,
+  ghHostsPath,
+  ghToken,
+  hostsMentioned,
+  placeEnv,
+  placeGh,
+  placeSsh,
+  readEnvSource,
+  readSshSource,
+  remoteOwnerOf,
+  removeGh,
+  removeSsh,
+  sshHosts,
+  sshStamp,
+  stampOf,
+} from "./vault";
 
 /** How often the parent looks at its secret files. A stat each; "within seconds" is the promise for a rotated key. */
 const LOOK_MS = 2_000;
@@ -82,7 +119,18 @@ export interface SecretsDeps {
   /** Something the page draws moved. */
   changed: () => void;
   log: (line: string) => void;
+  /** The home `~/.ssh` and gh's config are under, on either side. The process's own when not given; a test gives each side its own. */
+  home?: string;
+  /** A GitHub account's token, read now. `gh auth token` when not given; a test gives a stand-in rather than run gh. */
+  ghToken?: (account: string) => string | null;
 }
+
+/**
+ * Families that are listed by being there and read only once lent to some
+ * node: a Codex login is Codex's file, an ssh key is the user's, a gh
+ * token is in the Keychain. Kururu otherwise never reads any of them.
+ */
+const LISTED_UNTIL_LENT = new Set(["codex-auth", "ssh", "gh"]);
 
 /** The Codex home a login uses: `machine` is the default one, as every pty without a profile login has it. */
 function codexHome(login: string): string {
@@ -90,29 +138,6 @@ function codexHome(login: string): string {
   return codexDirFor(login);
 }
 
-/** What a kind is on the parent's disk this moment, or null. Read, used, dropped. */
-function readSource(spec: KindSpec): unknown {
-  if (spec.source.in === "config") return readConfigFile(spec.source.file);
-  try {
-    return JSON.parse(readFileSync(join(codexHome(spec.login ?? "machine"), "auth.json"), "utf8")) as unknown;
-  } catch {
-    return null;
-  }
-}
-
-/** A file's mtime and size, or nothing: enough to notice a save. */
-function stamp(path: string): string {
-  try {
-    const info = statSync(path);
-    return `${info.mtimeMs}:${info.size}`;
-  } catch {
-    return "";
-  }
-}
-
-function sourcePath(spec: KindSpec): string {
-  return spec.source.in === "config" ? configPath(spec.source.file) : join(codexHome(spec.login ?? "machine"), "auth.json");
-}
 
 interface Source {
   digest: string;
@@ -147,12 +172,16 @@ export class Secrets {
   private readonly inflight = new Map<string, Map<string, { digest: string; seq: number; op: "put" | "forget" }>>();
   private readonly timer: ReturnType<typeof setInterval>;
 
+  /** The env files lent, by kind: where each is read here and where it goes there. */
+  private envLends: Record<string, EnvLend>;
+
   // --- a child's -------------------------------------------------------------
   private held: HeldFile;
 
   constructor(private readonly deps: SecretsDeps) {
     const raw = readConfigFile(GRANTS_FILE) as { lastSeq?: unknown } | null;
     this.grants = adoptGrants(raw);
+    this.envLends = adoptEnvLends(raw);
     this.lastSeq = typeof raw?.lastSeq === "number" && Number.isFinite(raw.lastSeq) ? raw.lastSeq : 0;
     this.held = adoptHeld(readConfigFile(HELD_FILE));
     const nodes = deps.nodes;
@@ -189,6 +218,75 @@ export class Secrets {
     return this.deps.nodes.role() === "parent";
   }
 
+  private get home(): string {
+    return this.deps.home ?? homedir();
+  }
+
+  /** What a kind is on the parent's disk this moment, or null. Read, used, dropped. */
+  private readSource(spec: KindSpec): unknown {
+    switch (spec.source.in) {
+      case "config":
+        return readConfigFile(spec.source.file);
+      case "codex-home":
+        try {
+          return JSON.parse(readFileSync(join(codexHome(spec.login ?? "machine"), "auth.json"), "utf8")) as unknown;
+        } catch {
+          return null;
+        }
+      case "project": {
+        const lend = this.envLends[spec.id];
+        return lend ? readEnvSource(lend) : null;
+      }
+      case "ssh":
+        return readSshSource(this.home, spec.id.slice("ssh:".length));
+      case "gh": {
+        const account = spec.id.slice("gh:".length);
+        const token = this.deps.ghToken ? this.deps.ghToken(account) : ghToken(this.home, account);
+        return token ? ({ account, token } satisfies GhValue) : null;
+      }
+    }
+  }
+
+  /** What moves when a kind should be read again: its file's mtime and size, or the files it is made of. */
+  private stampOf(spec: KindSpec): string {
+    switch (spec.source.in) {
+      case "config":
+        return stampOf(configPath(spec.source.file));
+      case "codex-home":
+        return stampOf(join(codexHome(spec.login ?? "machine"), "auth.json"));
+      case "project": {
+        const lend = this.envLends[spec.id];
+        return lend ? envStamp(lend) : "";
+      }
+      case "ssh":
+        return sshStamp(this.home, spec.id.slice("ssh:".length));
+      case "gh":
+        return stampOf(ghHostsPath(this.home));
+    }
+  }
+
+  /**
+   * The hint a kind is listed by before it is lent anywhere, or null when it
+   * is not here: read without the secret, since until then kururu has no
+   * business reading it.
+   */
+  private listedHint(spec: KindSpec): string | null {
+    switch (spec.family) {
+      case "codex-auth":
+        return existsSync(join(codexHome(spec.login ?? "machine"), "auth.json")) ? "signed in" : null;
+      case "ssh": {
+        const host = sshHosts(this.home).find((h) => h.alias === spec.id.slice("ssh:".length));
+        return host?.keyPath ? sshHint(host.alias, host.keyPath.split("/").pop()!, null) : null;
+      }
+      case "gh": {
+        const account = ghAccountsHere(this.home).find((a) => a.account === spec.id.slice("gh:".length));
+        return account ? `${account.account}${account.active ? " · gh's active account" : ""}` : null;
+      }
+      default:
+        return null;
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // The parent: what there is to lend
   // ---------------------------------------------------------------------------
@@ -205,6 +303,9 @@ export class Secrets {
       // No config directory yet.
     }
     for (const login of Object.keys(readLends().tokens)) kinds.add(`claude-token:${login}`);
+    for (const host of sshHosts(this.home)) kinds.add(`ssh:${host.alias}`);
+    for (const { account } of ghAccountsHere(this.home)) kinds.add(`gh:${account}`);
+    for (const kind of Object.keys(this.envLends)) kinds.add(kind);
     if (existsSync(join(codexHome("machine"), "auth.json"))) kinds.add("codex-auth:machine");
     try {
       for (const key of readdirSync(configPath("profiles")).filter(isLoginKey)) if (existsSync(join(codexDirFor(key), "auth.json"))) kinds.add(`codex-auth:${key}`);
@@ -244,26 +345,28 @@ export class Secrets {
     for (const kind of kinds) {
       const spec = kindOf(kind)!;
       seen.add(kind);
-      const now = stamp(sourcePath(spec));
+      const now = this.stampOf(spec);
       if (this.stamps.get(kind) === now) continue;
       this.stamps.set(kind, now);
       // A Codex login is Codex's file, which kururu otherwise only stats
-      // (`codexusage.ts`): it is read once somebody has switched it on for a
+      // (`codexusage.ts`), an ssh key is the user's and a gh token is the
+      // Keychain's: each is read once somebody has switched it on for a
       // node, and until then listed by being there.
-      if (spec.family === "codex-auth" && !this.lentAnywhere(kind)) {
+      if (LISTED_UNTIL_LENT.has(spec.family) && !this.lentAnywhere(kind)) {
         const before = this.sources.get(kind);
-        if (now === "") {
+        const hint = this.listedHint(spec);
+        if (hint === null) {
           if (before) {
             this.sources.delete(kind);
             moved = true;
           }
-        } else if (!before) {
-          this.sources.set(kind, { digest: "unread", hint: "signed in" });
+        } else if (before?.digest !== "unread" || before.hint !== hint) {
+          this.sources.set(kind, { digest: "unread", hint });
           moved = true;
         }
         continue;
       }
-      const value = extract(spec, readSource(spec));
+      const value = extract(spec, this.readSource(spec));
       const before = this.sources.get(kind);
       if (value === null) {
         if (before) {
@@ -311,7 +414,11 @@ export class Secrets {
       if (Object.keys(kept).length) nodes[node] = kept;
     }
     this.grants = nodes;
-    writeConfigFile(GRANTS_FILE, { nodes, lastSeq: this.lastSeq }, 0o600);
+    // An env lend goes with its grant: one nobody holds, ticked or took back is nothing to keep.
+    const env: Record<string, EnvLend> = {};
+    for (const [kind, lend] of Object.entries(this.envLends)) if (nodes[lend.node]?.[kind]) env[kind] = lend;
+    this.envLends = env;
+    writeConfigFile(GRANTS_FILE, { nodes, lastSeq: this.lastSeq, env }, 0o600);
   }
 
   private seq(): number {
@@ -325,16 +432,33 @@ export class Secrets {
     if (typeof nodeId !== "string" || nodeId === this.me || !this.deps.nodes.member(nodeId)) throw new Error("That node is not in the roster.");
     const spec = kindOf(kind);
     if (!spec) throw new Error("That is not a kind of secret kururu lends.");
-    if (on && !this.sources.has(spec.id)) throw new Error(`This Mac has no ${spec.label.toLowerCase()} to lend. Set it here first.`);
-    this.grants[nodeId] = withGrant(this.grants[nodeId] ?? {}, spec.id, on, Date.now());
-    this.saveGrants();
-    // Read afresh: a Codex login is only read once it is lent somewhere.
-    this.stamps.delete(spec.id);
-    this.look();
-    this.deps.log(`secrets: ${spec.id} ${on ? "lent to" : "taken back from"} ${this.deps.nodes.member(nodeId)?.name ?? nodeId}`);
+    if (spec.perNode && this.envLends[spec.id]?.node !== nodeId) throw new Error("That env file is lent to another node, or to none; lend it from the workspace.");
+    this.setGrants(nodeId, [spec], on);
     this.reconcile(nodeId, true);
     this.deps.changed();
     return this.view();
+  }
+
+  /** Tick or untick some kinds for a node, saved, looked at afresh and logged; pushing is the caller's. */
+  private setGrants(nodeId: string, specs: KindSpec[], on: boolean): void {
+    // Looked at first, so a key written a moment ago is there to lend.
+    this.look();
+    for (const spec of specs) if (on && !this.sources.has(spec.id)) throw new Error(`This Mac has no ${spec.family === "env" ? `${this.envLends[spec.id]?.file ?? "such env file"}` : spec.label.toLowerCase()} to lend. Set it here first.`);
+    let grants = this.grants[nodeId] ?? {};
+    for (const spec of specs) grants = withGrant(grants, spec.id, on, Date.now());
+    this.grants[nodeId] = grants;
+    this.saveGrants();
+    const name = this.deps.nodes.member(nodeId)?.name ?? nodeId;
+    for (const spec of specs) this.deps.log(`secrets: ${this.nameOf(spec)} ${on ? "lent to" : "taken back from"} ${name}`);
+    // Read afresh: a Codex login, an ssh key and a gh token are only read once they are lent somewhere.
+    for (const spec of specs) this.stamps.delete(spec.id);
+    this.look();
+  }
+
+  /** How a kind is named in a log line: its id, and for an env file which file of which workspace. Never a value. */
+  private nameOf(spec: KindSpec): string {
+    const lend = this.envLends[spec.id];
+    return lend ? `${spec.id} (${lend.file} of ${lend.workspace || lend.from})` : spec.id;
   }
 
   /** Send a kind again, though the node holds a version: for a kind that does not follow its source, after the parent's copy changed. */
@@ -347,6 +471,134 @@ export class Secrets {
     this.put(nodeId, spec);
     this.deps.changed();
     return this.view();
+  }
+
+  // ---------------------------------------------------------------------------
+  // The parent: a project's secrets, for one node
+  // ---------------------------------------------------------------------------
+
+  /** How one kind stands for one node, as the page draws it, or null when it was never lent there. */
+  private grantViewOf(nodeId: string, kind: string): GrantView | null {
+    const grant = this.grants[nodeId]?.[kind];
+    const spec = kindOf(kind);
+    if (!grant || !spec) return null;
+    const source = this.sources.get(kind)?.digest ?? null;
+    return {
+      kind,
+      on: grant.on,
+      state: grantState({ grant, spec, source, ready: this.deps.nodes.linked(nodeId) }),
+      hint: grant.hint,
+      heldSince: grant.heldSince,
+      error: grant.failed?.error ?? null,
+      forgotAt: grant.forgotAt,
+      older: !spec.follows && grant.holds !== null && source !== null && grant.holds.digest !== source,
+    };
+  }
+
+  /**
+   * What a workspace could lend a node: the env files in its checkout here,
+   * every ssh entry and GitHub login this Mac has — the ones this project
+   * looks like it needs first, and why. `root` is the checkout the server
+   * found for the workspace, never a path a client sent; `pinned` is the
+   * machine its shells are pinned to, which is a host it plainly needs.
+   * Env files are read for their count of variables and dropped; keys and
+   * tokens are not read at all.
+   */
+  offer(input: {
+    node: { id: string; name: string };
+    workspace: { id: string; name: string };
+    root: string | null;
+    pinned: string | null;
+    check: MoveCheck | null;
+    checkError: string | null;
+  }): Lendable {
+    if (!this.isParent()) throw new Error("Only the parent lends secrets, and this node is not it.");
+    this.look();
+    const { node, root } = input;
+    const env: LendCandidate[] = [];
+    if (root) {
+      for (const file of findEnvFiles(root)) {
+        const kind = envKind(node.id, root, file);
+        const value = readEnvSource({ node: node.id, from: root, file, to: root, workspace: input.workspace.name });
+        env.push({ kind, name: file, hint: value ? envHint(root, file, value.text) : null, note: value ? null : "too big to be an env file, or not readable", why: null, grant: this.grantViewOf(node.id, kind) });
+      }
+    }
+    const hosts = sshHosts(this.home);
+    const mentioned = root ? hostsMentioned(root, hosts.map((h) => h.alias)) : new Map<string, string>();
+    const ssh: LendCandidate[] = hosts
+      .filter((host) => kindOf(`ssh:${host.alias}`))
+      .map((host) => {
+        const kind = `ssh:${host.alias}`;
+        const itself = host.alias.toLowerCase() === node.name.toLowerCase();
+        const why = itself ? null : input.pinned === host.alias ? "its shells are pinned to it" : mentioned.has(host.alias) ? `${mentioned.get(host.alias)} names it` : null;
+        return { kind, name: host.alias, hint: this.sources.get(kind)?.hint ?? null, note: host.note, why, grant: this.grantViewOf(node.id, kind) };
+      });
+    const owner = root ? remoteOwnerOf(root) : null;
+    const accounts = ghAccountsHere(this.home);
+    const github: LendCandidate[] = accounts.map(({ account, active }) => {
+      const kind = `gh:${account}`;
+      const why = owner && owner.toLowerCase() === account.toLowerCase() ? "it owns the checkout's origin on github.com" : !owner && active ? "gh's active account here" : null;
+      return { kind, name: account, hint: this.sources.get(kind)?.hint ?? account, note: null, why, grant: this.grantViewOf(node.id, kind) };
+    });
+    const first = (a: LendCandidate, b: LendCandidate) => Number(b.why !== null) - Number(a.why !== null);
+    return {
+      node,
+      workspace: input.workspace,
+      from: root ? tilde(root, this.home) : null,
+      check: input.check,
+      checkError: input.checkError,
+      env,
+      ssh: ssh.sort(first),
+      github: github.sort(first),
+    };
+  }
+
+  /**
+   * Lend a node what was asked of a workspace's: its env files into `to`,
+   * the checkout the node said will do, and the ssh entries and GitHub login
+   * named. Every env file of this checkout already lent to the node is
+   * pointed at `to` as well, so one project never lands in two places.
+   * Nothing named is taken back: unticking is `grant`'s.
+   */
+  lendProject(nodeId: string, input: { root: string | null; to: string | null; workspace: string }, ask: LendAsk): { view: SecretsView; lent: string[] } {
+    if (!this.isParent()) throw new Error("Only the parent lends secrets, and this node is not it.");
+    const member = this.deps.nodes.member(nodeId);
+    if (nodeId === this.me || !member) throw new Error("That node is not in the roster.");
+    const specs: KindSpec[] = [];
+    const lent: string[] = [];
+    if (ask.env.length) {
+      const { root, to } = input;
+      if (!root) throw new Error("This workspace is in no checkout here, so it has no env files to lend.");
+      if (!to) throw new Error(`Which folder on ${member.name}? Its env files go into the project's checkout there.`);
+      const found = new Set(findEnvFiles(root));
+      for (const file of ask.env) if (!found.has(file)) throw new Error(`${file} is not an env file in ${tilde(root, this.home)}.`);
+      for (const [kind, lend] of Object.entries(this.envLends)) if (lend.node === nodeId && lend.from === root) this.envLends[kind] = { ...lend, to };
+      for (const file of ask.env) {
+        const kind = envKind(nodeId, root, file);
+        this.envLends[kind] = { node: nodeId, from: root, file, to, workspace: input.workspace.slice(0, 60) };
+        specs.push(kindOf(kind)!);
+        lent.push(file);
+      }
+    }
+    for (const alias of ask.ssh) {
+      const spec = kindOf(`ssh:${alias}`);
+      const host = sshHosts(this.home).find((h) => h.alias === alias);
+      if (!spec || !host) throw new Error(`This Mac's ~/.ssh/config has no Host ${alias}.`);
+      if (host.note) throw new Error(`Host ${alias} cannot be lent: ${host.note}.`);
+      specs.push(spec);
+      lent.push(`ssh ${alias}`);
+    }
+    if (ask.github) {
+      const spec = kindOf(`gh:${ask.github}`);
+      if (!spec || !ghAccountsHere(this.home).some((a) => a.account === ask.github)) throw new Error(`gh on this Mac is not signed in as ${ask.github}.`);
+      specs.push(spec);
+      lent.push(`GitHub ${ask.github}`);
+    }
+    if (!specs.length) return { view: this.view(), lent };
+    this.setGrants(nodeId, specs, true);
+    this.reconcile(nodeId, true);
+    this.deps.changed();
+    return { view: this.view(), lent };
   }
 
   /** What `plan` says to send a node, sent. Only to a node that is linked and has said what it holds. */
@@ -364,7 +616,7 @@ export class Secrets {
   private put(nodeId: string, spec: KindSpec): void {
     const member = this.deps.nodes.member(nodeId);
     if (!member) return;
-    const value = extract(spec, readSource(spec));
+    const value = extract(spec, this.readSource(spec));
     if (value === null) return;
     const seq = this.seq();
     let envelope;
@@ -566,20 +818,29 @@ export class Secrets {
    * a kind written outside kururu's own directory.
    */
   private write(spec: KindSpec, value: unknown): string | undefined {
-    if (spec.lands.in === "config") {
-      const file = spec.lands.file;
-      const next = landed(spec, value, readConfigFile(file));
-      writeConfigFile(file, next, 0o600);
-      if (JSON.stringify(readConfigFile(file)) !== JSON.stringify(next)) throw new Error(`could not write ~/.config/kururu/${file}`);
-      return undefined;
+    switch (spec.lands.in) {
+      case "config": {
+        const file = spec.lands.file;
+        const next = landed(spec, value, readConfigFile(file));
+        writeConfigFile(file, next, 0o600);
+        if (JSON.stringify(readConfigFile(file)) !== JSON.stringify(next)) throw new Error(`could not write ~/.config/kururu/${file}`);
+        return undefined;
+      }
+      case "project":
+        return placeEnv(value as EnvValue, this.home, (path) => this.placedHere(path), this.held.held[spec.id]?.placed);
+      case "ssh":
+        return placeSsh(value as SshValue, this.home, this.parentName());
+      case "gh":
+        return placeGh(value as GhValue, configDir());
+      case "codex-home":
+        break;
     }
     // A Codex login, into the Codex home every pty here uses. Over a login
     // this node made itself it does not go: that is somebody's `codex
     // login`, and a grant is not a reason to sign it out.
     const home = codexHome("machine");
     const path = join(home, "auth.json");
-    const ours = Object.values(this.held.held).some((entry) => entry.placed === path);
-    if (existsSync(path) && !ours) throw new Error(`this node has a Codex login of its own in ${path}; run codex logout there first, or leave it unticked`);
+    if (existsSync(path) && !this.placedHere(path)) throw new Error(`this node has a Codex login of its own in ${path}; run codex logout there first, or leave it unticked`);
     mkdirSync(home, { recursive: true, mode: 0o700 });
     const temp = `${path}.kururu-tmp`;
     writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
@@ -588,15 +849,35 @@ export class Secrets {
     return path;
   }
 
+  /** Whether this node put the file at that path there, from a push: what it may write over and remove. */
+  private placedHere(path: string): boolean {
+    return Object.values(this.held.held).some((entry) => entry.placed === path);
+  }
+
+  private parentName(): string {
+    const parent = this.deps.nodes.parentId();
+    return (parent && this.deps.nodes.member(parent)?.name) || "the parent";
+  }
+
   /** Remove a kind from where it landed, leaving what was the child's own. */
   private unwrite(spec: KindSpec, placed: string | undefined): void {
-    if (spec.lands.in === "config") {
-      const next = forgotten(spec, readConfigFile(spec.lands.file));
-      if (next === null) removeConfigFile(spec.lands.file);
-      else writeConfigFile(spec.lands.file, next, 0o600);
-      return;
+    switch (spec.lands.in) {
+      case "config": {
+        const next = forgotten(spec, readConfigFile(spec.lands.file));
+        if (next === null) removeConfigFile(spec.lands.file);
+        else writeConfigFile(spec.lands.file, next, 0o600);
+        return;
+      }
+      case "ssh":
+        removeSsh(this.home, spec.id.slice("ssh:".length));
+        return;
+      case "gh":
+        removeGh(configDir());
+        return;
+      case "project":
+      case "codex-home":
+        if (placed) rmSync(placed, { force: true });
     }
-    if (placed) rmSync(placed, { force: true });
   }
 
   private onForget(peer: string, message: Extract<LinkMessage, { type: "secrets-forget" }>): void {
@@ -665,9 +946,21 @@ export class Secrets {
     const grants: Record<string, GrantView[]> = {};
     const lends: ClaudeLend[] = [];
     if (role !== "child") {
+      const hosts = new Map<string, { note: string | null }>(sshHosts(this.home).map((host) => [`ssh:${host.alias}`, host]));
       for (const kind of this.kinds()) {
         const spec = kindOf(kind)!;
-        catalogue.push({ kind, family: spec.family, label: spec.label, unlocks: spec.unlocks, revoke: spec.revoke, follows: spec.follows, hint: this.sources.get(kind)?.hint ?? null });
+        const lend = this.envLends[kind];
+        catalogue.push({
+          kind,
+          family: spec.family,
+          label: spec.label,
+          unlocks: spec.unlocks,
+          revoke: spec.revoke,
+          follows: spec.follows,
+          hint: this.sources.get(kind)?.hint ?? null,
+          note: hosts.get(kind)?.note ?? null,
+          project: lend ? { node: lend.node, workspace: lend.workspace, file: lend.file, from: tilde(lend.from, this.home), to: lend.to } : null,
+        });
       }
       for (const [login, entry] of Object.entries(readLends().tokens)) lends.push({ login, account: entry.account, hint: `…${entry.token.slice(-4)}`, at: entry.at });
     }

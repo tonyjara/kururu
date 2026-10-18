@@ -13,7 +13,8 @@
  *   run and event and its dates. The other node adopts them through the
  *   store's one road in for a move and says so on each card.
  * - **What stays is everything that is about this machine**: the code, the
- *   env files and the database the project points at, the pane arrangement,
+ *   env files (unless they are lent, which `secrets.ts` does beside the
+ *   move and never as part of it) and the database the project points at, the pane arrangement,
  *   the terminals, a dev server, a machine pin, the links to files agents
  *   made here, and the conversations behind the cards' runs. The folder on
  *   the other node is a checkout that is already there, never a copy; a
@@ -223,7 +224,9 @@ export function movePlan(input: PlanInput): { refusal: string | null; moves: str
   stays.push(
     `The code. Nothing is copied: ${node} uses its own checkout of the project, which must already be there. Push what is not pushed here, and pull it there.`,
   );
-  stays.push(`Env files (.env and the like) in ${input.folder ? input.folder : "the folder"}. Copy what ${node} needs by hand; they are never sent.`);
+  stays.push(
+    `Env files (.env and the like) in ${input.folder ? input.folder : "the folder"}, unless they are lent to ${node}: then each is sealed to it, written into its checkout, and sent again when it changes here.`,
+  );
   if (input.databases.length) {
     const names = input.databases.slice(0, 3).map((db) => `${db.database} on ${db.host}:${db.port}`);
     stays.push(

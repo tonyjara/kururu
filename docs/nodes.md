@@ -7,8 +7,10 @@ workspaces, agents and asks, the Mac's backup carries the child's boards, and
 the child's own page says when the Mac went away. This is phase 2 of
 [the plan](plans/kururu-parent-child.md#phase-2--nodes-the-roster-the-mesh-the-mirror).
 The Kurus talking to each other, phase 3, is [below](#kurus-as-peers), and so
-are lending secrets, phase 4 ([below](#lending-secrets)), and moving a
-workspace, phase 6 ([below](#moving-a-workspace)). One Telegram is phase 5,
+are lending secrets, phase 4 ([below](#lending-secrets)) — a project's own
+env files, ssh keys and GitHub login among them
+([below](#lending-a-projects-secrets)) — and moving a workspace, phase 6
+([below](#moving-a-workspace)). One Telegram is phase 5,
 and this file grows with it.
 
 The code is `shared/nodes.ts` (the shapes and every rule, pure and tested),
@@ -349,10 +351,16 @@ or one of the usual names, else home. Then come two lists, worded in
   a new conversation. An asleep run arrives `ended`, so the card does not
   promise a resume.
 - **Stays:** the code (the other node uses its own checkout, so push here
-  and pull there), the env files, any database the project points at, the
-  panes (it arrives with one pane in its folder), the open terminals (they
-  close), the cards' dev servers, a machine pin, the links to files agents
-  made, and this node's copy of the board, which goes to Search → Deleted.
+  and pull there), the env files unless they are lent, any database the
+  project points at, the panes (it arrives with one pane in its folder), the
+  open terminals (they close), the cards' dev servers, a machine pin, the
+  links to files agents made, and this node's copy of the board, which goes
+  to Search → Deleted.
+- **Lend with it:** under the two lists, on the parent, the workspace's env
+  files, then the ssh hosts and GitHub logins this Mac has — the ones the
+  project seems to need shown, the rest behind a press — each a box, none
+  ticked. What is ticked is lent once the move has landed, into the folder
+  it landed in. See [Lending a project's secrets](#lending-a-projects-secrets).
 
 **Refused** while it is the profile's only workspace, while Kuru's own tab is
 in it, while an agent is running in it or on one of its cards (a shell
@@ -544,6 +552,107 @@ The token only makes model requests and lasts a year. It is never a copied
 when Claude is not signed in (`--claude=login|lent`), and with `lent` its
 `secrets` step waits for the token once the box is paired.
 
+### Lending a project's secrets
+
+Moving a workspace leaves behind what the project needs to run: its
+`.env.local`, the key its deploy script uses, a login that can push. These
+are three more families of kind on the same road — sealed, signed, one
+grant per node per kind, off until switched on, pushed on a change, taken
+back when switched off. The difference is that each is a file some other
+program owns, so the rules are about not breaking that program's file. The
+code is `shared/vault.ts` (what each file is read as, pure and tested) and
+`server/src/vault.ts` (the disk); `secrets.ts` decides when.
+
+| kind | on the parent | on the child | what travels |
+|---|---|---|---|
+| `env:<id>` | an env file in a workspace's checkout | the same relative path in the project's checkout there, `0600` | the file, the folder it goes to, the workspace's name |
+| `ssh:<alias>` | a `Host` entry in `~/.ssh/config`, its key, its `known_hosts` lines | `~/.ssh/kururu/<alias>`, `.pub`, `.known_hosts`, `.conf`, and one `Include` line in `~/.ssh/config` | the entry's portable lines, the key, the host's public keys |
+| `gh:<account>` | gh's token for that account on github.com | `~/.config/kururu/gh/`: gh's `hosts.yml` and git's credential file | the account and its token |
+
+**An env file is lent to one node.** Its kind is a hash of the node, the
+checkout here and the file, and where it lands is part of what travels, so
+the digest that says a push is owed is the same on both ends and a new
+folder there is a push like a new key. The lend (`node`, `from`, `file`,
+`to`, the workspace's name) is kept beside the grants in `grants.json`.
+`from` is a checkout the server found for the workspace, never a path a
+client sent, and it outlives the workspace: a project moved to the node
+keeps its env files following the Mac's. Only `.env` and its dotted kin
+are offered, down to two folders (`apps/web/.env`), never in
+`node_modules` or build output, and never `.env.example` or a backup
+(`isEnvFile`, the databases scan's rule).
+
+On the child the folder is judged again (`judgeFolder`: inside home, a
+directory, a checkout) and the file is written at the same relative path,
+never through a link. **It never goes over a file of the node's own** that
+says something else. The grant is refused with that reason, as a Codex
+login is; a file with the same bytes is taken as lent already. A lend
+pointed at another folder removes the copy in the old one.
+
+**An ssh entry lands beside the node's config, never in it.** Only the
+directives that mean the same on any machine travel: `HostName`, `User`,
+`Port`, `ProxyJump`, keep-alives, forwards and algorithms. What does not is
+named in a comment at the top of the entry's file: paths, the Keychain
+(`UseKeychain` is a fatal "Bad configuration option" on Linux), an
+`IdentityAgent` socket, and a `ProxyCommand`, which is a program on the Mac.
+The entry gets `IdentityFile ~/.ssh/kururu/<alias>`, `IdentitiesOnly yes`,
+and the host's lines from the Mac's `known_hosts` (plain or hashed) as a
+second `UserKnownHostsFile`, so an agent's first `ssh` there is not a
+question it cannot answer. One line at the top of `~/.ssh/config`,
+`Include ~/.ssh/kururu/*.conf`, brings them in; it is written through a
+link if the config is one, and goes again with the last entry (the file
+too, if that line was all it held). **An entry is refused when the node's
+own config has a `Host` by one of its names**: a lent entry read first
+would take its place without anyone seeing. A key in an agent rather than a
+file (1Password's `IdentityAgent`) is listed and cannot be lent; a key with
+a passphrase can be, and its hint says so, since an agent there cannot type
+it.
+
+**A GitHub login lands where only kururu's terminals look.** gh keeps its
+tokens in the Keychain on a Mac; the parent asks `gh auth token --user
+<account>` for one only once it is switched on for a node (or reads it from
+`hosts.yml`, when gh keeps it there). The child writes gh's own `hosts.yml`
+and a `git-credentials` line into `~/.config/kururu/gh/`, and every
+terminal kururu opens gets `GH_CONFIG_DIR` pointing there and, through
+`GIT_CONFIG_*`, git's `store` helper for `https://github.com` — after an
+empty helper, which clears the node's own for that host, so the lent login
+outranks a `gh auth login` there the way a lent Claude token outranks a
+`/login` (`lentGhEnv` in `logins.ts`, read at each spawn). Paths only: the
+token stays in its `0600` files, never in an environment. Only github.com.
+One login per node: switching one on switches off the other.
+
+**What is offered.** `Secrets.offer` lists, for a workspace and a node, the
+env files in its checkout (read for their count of variables and dropped),
+every lendable `Host` entry and every gh account — keys and tokens unread —
+the ones the project seems to need first, and why: the host its shells are
+pinned to, a host its scripts or notes name (`hostsMentioned`: the top of
+the checkout and `ops/`, `scripts/`, `deploy/` and the like, a few hundred
+small files, never an env file), the account that owns the checkout's
+`origin`. A host with the node's own name is not suggested.
+
+**Where it is lent from:**
+
+- **The move dialog**, under what moves and stays: *Lend <node> with it*,
+  nothing ticked. What is ticked is lent once the move has landed, into the
+  folder it landed in; a lend that fails after a move that worked is said
+  beside the move, since the move is done.
+- **Settings → Nodes**, under each node's own keys: *Projects' env files
+  lent to <node>*, grouped by workspace with each file's switch, and
+  *Lend a workspace's env files*, which picks a workspace, asks the node for
+  its folder (its guess first, as the move dialog does) and gives each file
+  a switch; then *SSH hosts and GitHub for <node>*.
+- **Kuru's `lend_secrets`.** Without `confirm` it returns `lendableText`:
+  the same lists by hint — file names and how many variables, aliases and
+  key file names, account names — which are suggested and why, and what is
+  lent already. With `confirm: true` it lends only names the preview
+  offered. It is never given a value, and its description says to lend
+  before `move_workspace`, after which the workspace is not here to lend
+  from.
+
+On the child, Settings → Nodes lists each by hint (*storefront/.env.local · 14
+variables*, *vps · key vps_key (ed25519)*, *someone · …wxyz*), and
+`kururu child doctor`'s `secrets` row names them by hint too: `env …`,
+`ssh …`, `github …`.
+
 ## Files
 
 | file | where | what |
@@ -552,10 +661,13 @@ when Claude is not signed in (`--claude=login|lent`), and with `lent` its
 | `nodes.json` | config, `0600` | the newest roster, the anchor, and on the parent each child's share token. Never backed up |
 | `nodes-seen.json` | state | each node's last summary and when it was heard; rebuilt by the next summary |
 | `kuru-peers.json` | state | each node's last pushed Kuru conversation, for the drawer while it is away; rebuilt by the next push |
-| `grants.json` | config, `0600`, the parent | which child may hold which kind, and what each said it holds, by digest and hint. Never backed up |
+| `grants.json` | config, `0600`, the parent | which child may hold which kind, and what each said it holds, by digest and hint; and each lent env file's checkout here and folder there. Never backed up |
 | `claude-lend.json` | config, `0600`, the parent | the Claude tokens made for lending, one per Mac login. Never backed up, never sent until switched on for a node |
 | `secrets-held.json` | config, `0600`, a child | what it holds from the parent: kinds, hints, digests, push numbers, never a value. The doctor reads it |
 | `claude-token.json` | config, `0600`, a child | a lent Claude token, which `logins.ts` sets as `CLAUDE_CODE_OAUTH_TOKEN` |
+| `gh/` | config, `0700`, a child | a lent GitHub login: gh's `hosts.yml` and git's `git-credentials`, both `0600`; kururu's terminals are pointed at it. Never backed up |
+| `~/.ssh/kururu/` | home, `0700`, a child | lent ssh entries: each key, `.pub`, `.known_hosts` and `.conf`, brought in by one `Include` line at the top of `~/.ssh/config` |
+| a project's `.env*` | its checkout, `0600`, a child | a lent env file, at the path it has on the parent |
 
 A `node.json` the server cannot read is left as it is, and nodes are off for
 that run. A new identity would be a member nobody enrolled.

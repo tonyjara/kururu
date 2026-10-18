@@ -4236,6 +4236,43 @@ html.pill-page #root {
   margin: 4px 0 0;
   font-size: var(--fs-base);
 }
+/* Lend with it: a box per secret, its name and its hint on one line where
+   they fit, the hint under the name on a phone where they do not. */
+.dialog-lend-group {
+  margin: 8px 0 2px;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.dialog-lend-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.dialog-lend-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  padding: 2px 0;
+  font-size: var(--fs-base);
+}
+.dialog-lend-row label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.dialog-lend-name {
+  font-family: var(--mono);
+}
+.dialog-lend-hint {
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.dialog-lend-more {
+  margin-top: 6px;
+}
 
 .dialog-list {
   list-style: none;

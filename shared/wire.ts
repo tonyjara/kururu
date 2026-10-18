@@ -48,7 +48,7 @@ import type { KuruConversation, PeerKuru } from "./kuru";
 import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "./voice";
 import type { MachineStatus } from "./machines";
 import type { NodesView } from "./nodes";
-import type { SecretsView } from "./secrets";
+import type { LendAsk, SecretsView } from "./secrets";
 import type { WorkspaceDatabase } from "./databases";
 import type { NotifyEvent, NotifySettings } from "./notify";
 import type { MergeResolution, ProjectSettings } from "./projects";
@@ -1390,8 +1390,21 @@ export type ClientMessage =
    * Replied to with a `MovePlan`. Asked again as the folder is edited.
    */
   | { type: "node-move-plan"; id: number; workspaceId: string; nodeId: string; folder: string | null }
-  /** Move it: the board goes over the link, and the workspace leaves this list once the node has it. Replied to with what was made there. */
-  | { type: "node-move"; id: number; workspaceId: string; nodeId: string; folder: string }
+  /**
+   * Move it: the board goes over the link, and the workspace leaves this list
+   * once the node has it. `lend` is what the dialog ticked to lend the node
+   * with it, lent once it is there. Replied to with what was made there, and
+   * what was lent or why not.
+   */
+  | { type: "node-move"; id: number; workspaceId: string; nodeId: string; folder: string; lend?: LendAsk }
+  /**
+   * What a workspace could lend a node: its env files, this Mac's ssh entries
+   * and GitHub logins, with the node's word on the folder (its guess when
+   * null). Hints only. Replied to with a `Lendable`. The parent's alone.
+   */
+  | { type: "secrets-offer"; id: number; workspaceId: string; nodeId: string; folder: string | null }
+  /** Lend them: switched on for the node, env files into the folder the node is asked about again. Replied to with the secrets view and what was lent. */
+  | { type: "secrets-lend"; id: number; workspaceId: string; nodeId: string; folder: string | null; ask: LendAsk }
   /**
    * Settings → Nodes → a node's Secrets: lend a kind to it, or take it back.
    * The parent's alone. Replied to with the secrets view, or why not.

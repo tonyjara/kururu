@@ -222,7 +222,8 @@ The load-bearing invariants, one line each, with the argument behind the link:
   Telegram bot token, the web providers' keys, `identities/`, every login,
   a node's keys and the roster (`node.json`, `nodes.json`), and the lent
   secrets' records (`grants.json`, `secrets-held.json`, `claude-lend.json`,
-  `claude-token.json`). Never `--force`, never a rewrite; a push the
+  `claude-token.json`, a lent GitHub login's `gh/`). Never `--force`,
+  never a rewrite; a push the
   remote refuses stops and says so. → [data](docs/data.md#backups)
 - **A secret leaves the Mac only sealed, to a node it was lent to.** One
   switch per child per kind in Settings → Nodes, off by default.
@@ -237,7 +238,14 @@ The load-bearing invariants, one line each, with the argument behind the link:
   is the one credential put in a pty's environment, as
   `CLAUDE_CODE_OAUTH_TOKEN` (`lentClaudeEnv`), never a copied
   `.credentials.json`; a Codex login is read only once it is switched on for
-  a node, copied once, and never written over the child's own. Hints only to a client, on both nodes, and no value in
+  a node, copied once, and never written over the child's own. A project's
+  own secrets go the same road (`shared/vault.ts`, `server/src/vault.ts`):
+  an env file into the node's checkout, never over one of its own; an ssh
+  entry and its key under `~/.ssh/kururu` with one `Include` line, never
+  over a `Host` of its own; a GitHub login as gh's and git's files in
+  `~/.config/kururu/gh`, reached by path (`GH_CONFIG_DIR`), never by an
+  environment variable holding it. Keys and tokens are read only once lent;
+  Kuru's `lend_secrets` previews first and is never handed a value. Hints only to a client, on both nodes, and no value in
   a log. → [nodes](docs/nodes.md#lending-secrets)
 - **The usage bar reads a Claude credential and never writes one** — the
   machine's, or the active profile's when profiles keep their own logins. It is

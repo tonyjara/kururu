@@ -18,6 +18,9 @@ import type { LinkMessage, NodeEntry } from "../../shared/nodes";
 import {
   adoptGrants,
   adoptHeld,
+  adoptLendAsk,
+  asksAnything,
+  lendableText,
   asSealed,
   checkValue,
   emptyGrant,
@@ -38,10 +41,12 @@ import {
   type GrantRecord,
   type SealedSecret,
 } from "../../shared/secrets";
-import { lentClaudeEnv } from "../src/logins";
+import { lentClaudeEnv, lentGhEnv } from "../src/logins";
 import { boxPrivateKey, forgetIdentity, identity, signAsNode, verifySigned } from "../src/nodekeys";
 import { digestOf, seal, unseal } from "../src/seal";
 import { Secrets } from "../src/secrets";
+import { envKind } from "../src/vault";
+import { fakeOpenSshKey } from "./fakekey";
 
 // Made-up values in the shapes the validators want. None is anybody's.
 const OPENROUTER = `sk-or-v1-${"0123456789abcdef".repeat(4)}`;
@@ -49,10 +54,13 @@ const OPENROUTER_2 = `sk-or-v1-${"fedcba9876543210".repeat(4)}`;
 const TELEGRAM = `123456789:${"A".repeat(35)}`;
 const FIRECRAWL = "fc-0123456789abcdef";
 const CLAUDE = `sk-ant-oat01-${"x".repeat(60)}wxyz`;
+const GH = `gho_${"Q7r8S9t0".repeat(4)}wxyz`;
+const SSH_KEY = fakeOpenSshKey();
+const ENV_TEXT = "DATABASE_URL=postgres://app:made-up-password@127.0.0.1:5432/app\nAPI_KEY=made-up-api-key\n";
 
 let root: string;
 const saved: Record<string, string | undefined> = {};
-const VARS = ["KURURU_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME"];
+const VARS = ["KURURU_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "GH_CONFIG_DIR"];
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "kururu-secrets-"));
@@ -71,6 +79,8 @@ afterEach(() => {
 function as<T>(side: string, run: () => T): T {
   process.env.KURURU_CONFIG_DIR = join(root, side, "config");
   process.env.CODEX_HOME = join(root, side, "codex");
+  delete process.env.XDG_CONFIG_HOME;
+  delete process.env.GH_CONFIG_DIR;
   mkdirSync(process.env.KURURU_CONFIG_DIR, { recursive: true });
   forgetIdentity();
   return run();
@@ -318,6 +328,35 @@ describe("grants", () => {
 
 // ---------------------------------------------------------------------------
 
+describe("a project's secrets, as asked and as Kuru reads them", () => {
+  it("bounds what a client asks to lend to names that could be", () => {
+    expect(adoptLendAsk({ env: [".env.local", "../.env", ".env.example", 3, ".env.local"], ssh: ["vps", "*", "a b"], github: "-bad" })).toEqual({ env: [".env.local"], ssh: ["vps"], github: null });
+    expect(asksAnything(adoptLendAsk(null))).toBe(false);
+  });
+
+  it("says what could be lent by hint, with why, and what is lent already", () => {
+    const held = { kind: "gh:someone", on: true, state: "held" as const, hint: "someone · …wxyz", heldSince: 1, error: null, forgotAt: null, older: false };
+    const text = lendableText({
+      node: { id: "n000000000002", name: "box" },
+      workspace: { id: "w1", name: "App" },
+      from: "~/Projects/app",
+      check: { folder: "/home/me/Projects/app", shown: "~/Projects/app", problem: null, profile: "main", clash: false },
+      checkError: null,
+      env: [{ kind: "env:0123456789ab", name: ".env.local", hint: "app/.env.local · 2 variables", note: null, why: null, grant: null }],
+      ssh: [
+        { kind: "ssh:vps", name: "vps", hint: "vps · key vps_key", note: null, why: "ops/deploy.sh names it", grant: null },
+        { kind: "ssh:agent", name: "agent", hint: null, note: "its key is in an agent", why: null, grant: null },
+      ],
+      github: [{ kind: "gh:someone", name: "someone", hint: "someone", note: null, why: "it owns the checkout's origin on github.com", grant: held }],
+    });
+    expect(text).toContain("Env files would go to ~/Projects/app on box.");
+    expect(text).toContain("- .env.local: app/.env.local · 2 variables");
+    expect(text).toContain("- vps: vps · key vps_key (ops/deploy.sh names it)");
+    expect(text).toContain("- agent: cannot be lent — its key is in an agent");
+    expect(text).toContain("- someone (it owns the checkout's origin on github.com) — held by box · someone · …wxyz");
+  });
+});
+
 describe("the registry", () => {
   /**
    * Every file the server writes `0600` into its config directory, read off
@@ -444,9 +483,21 @@ describe("a parent lending to a child", () => {
     };
   }
 
+  /** Each side's home, for `~/.ssh` and gh's config; the GitHub tokens the parent's stand-in for `gh auth token` knows. */
+  const homeOf = (side: string) => join(root, side, "home");
+  let ghTokens: Map<string, string>;
+  let logged: string[];
+
   function start(side: Side, other: () => Side): void {
     side.secrets = as(side.name, () =>
-      new Secrets({ nodes: nodesOf(side, other) as never, landed: (spec) => side.landed.push(spec.id), changed: () => undefined, log: () => undefined }),
+      new Secrets({
+        nodes: nodesOf(side, other) as never,
+        landed: (spec) => side.landed.push(spec.id),
+        changed: () => undefined,
+        log: (line) => logged.push(line),
+        home: homeOf(side.name),
+        ghToken: (account) => ghTokens.get(account) ?? null,
+      }),
     );
   }
 
@@ -479,6 +530,8 @@ describe("a parent lending to a child", () => {
   beforeEach(() => {
     queue = [];
     linked = false;
+    ghTokens = new Map();
+    logged = [];
     parent = makeSide("parent", "parent", 1);
     child = makeSide("child", "child", 2);
   });
@@ -654,5 +707,175 @@ describe("a parent lending to a child", () => {
     child.role = "alone";
     start(child, () => parent);
     expect(childFile("openrouter.json")).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // A project's own secrets
+  // -------------------------------------------------------------------------
+
+  /** A checkout under a side's home, with a `.git` so it is one. */
+  const checkout = (side: string, name: string) => {
+    const dir = join(homeOf(side), "Projects", name);
+    mkdirSync(join(dir, ".git"), { recursive: true });
+    return dir;
+  };
+  const parentHome = (path: string, text: string, mode = 0o600) => {
+    const full = join(homeOf("parent"), path);
+    mkdirSync(join(full, ".."), { recursive: true });
+    writeFileSync(full, text, { mode });
+  };
+  const nothingSecretIn = (text: string) => {
+    for (const secret of [GH, "made-up-password", "made-up-api-key", SSH_KEY.split("\n")[1]!]) expect(text).not.toContain(secret);
+  };
+
+  it("lends a workspace's env file into the checkout there, follows it, and takes it back", () => {
+    const here = checkout("parent", "app");
+    const there = checkout("child", "app");
+    writeFileSync(join(here, ".env.local"), ENV_TEXT);
+    writeFileSync(join(here, ".env.example"), "DATABASE_URL=\n");
+    start(parent, () => child);
+    start(child, () => parent);
+    linkUp();
+
+    const offer = as("parent", () => parent.secrets!.offer({ node: { id: child.id, name: "child" }, workspace: { id: "w1", name: "App" }, root: here, pinned: null, check: null, checkError: null }));
+    expect(offer.env.map((c) => [c.name, c.hint])).toEqual([[".env.local", "app/.env.local · 2 variables"]]);
+    nothingSecretIn(JSON.stringify(offer));
+
+    const kind = envKind(child.id, here, ".env.local");
+    const { lent } = as("parent", () => parent.secrets!.lendProject(child.id, { root: here, to: there, workspace: "App" }, { env: [".env.local"], ssh: [], github: null }));
+    expect(lent).toEqual([".env.local"]);
+    flush();
+    expect(readFileSync(join(there, ".env.local"), "utf8")).toBe(ENV_TEXT);
+    expect(statSync(join(there, ".env.local")).mode & 0o777).toBe(0o600);
+    expect(grantView(kind)).toMatchObject({ on: true, state: "held", hint: "app/.env.local · 2 variables" });
+    const catalogue = as("parent", () => parent.secrets!.view().catalogue.find((c) => c.kind === kind));
+    expect(catalogue?.project).toEqual({ node: child.id, workspace: "App", file: ".env.local", from: "~/Projects/app", to: there });
+    nothingSecretIn(JSON.stringify(as("parent", () => parent.secrets!.view())));
+    nothingSecretIn(JSON.stringify(as("child", () => child.secrets!.view())));
+    nothingSecretIn(readFileSync(join(root, "child", "config", "secrets-held.json"), "utf8"));
+    nothingSecretIn(readFileSync(join(root, "parent", "config", "grants.json"), "utf8"));
+    nothingSecretIn(logged.join("\n"));
+
+    // The Mac's file changes: the node's follows.
+    writeFileSync(join(here, ".env.local"), `${ENV_TEXT}EXTRA=1\n`);
+    as("parent", () => parent.secrets!.lookNow());
+    flush();
+    expect(readFileSync(join(there, ".env.local"), "utf8")).toBe(`${ENV_TEXT}EXTRA=1\n`);
+
+    // Lent to this node only: another cannot be ticked for it.
+    expect(() => as("parent", () => parent.secrets!.grant("n0000000000aa", kind, true))).toThrow();
+
+    as("parent", () => parent.secrets!.grant(child.id, kind, false));
+    flush();
+    expect(existsSync(join(there, ".env.local"))).toBe(false);
+    expect(grantView(kind)).toMatchObject({ on: false, state: "off" });
+  });
+
+  it("refuses an env file over the node's own, and one for a checkout it does not have", () => {
+    const here = checkout("parent", "app");
+    const there = checkout("child", "app");
+    writeFileSync(join(here, ".env"), ENV_TEXT);
+    writeFileSync(join(there, ".env"), "MINE=1\n");
+    start(parent, () => child);
+    start(child, () => parent);
+    linkUp();
+    as("parent", () => parent.secrets!.lendProject(child.id, { root: here, to: there, workspace: "App" }, { env: [".env"], ssh: [], github: null }));
+    flush();
+    expect(readFileSync(join(there, ".env"), "utf8")).toBe("MINE=1\n");
+    expect(grantView(envKind(child.id, here, ".env"))?.error).toMatch(/of its own/);
+
+    const missing = join(homeOf("child"), "Projects", "elsewhere");
+    as("parent", () => parent.secrets!.lendProject(child.id, { root: here, to: missing, workspace: "App" }, { env: [".env"], ssh: [], github: null }));
+    flush();
+    expect(grantView(envKind(child.id, here, ".env"))?.error).toMatch(/clone the project there first/);
+    // Only what the checkout here has.
+    expect(() => as("parent", () => parent.secrets!.lendProject(child.id, { root: here, to: there, workspace: "App" }, { env: [".env.production"], ssh: [], github: null }))).toThrow(/not an env file/);
+  });
+
+  it("lends an ssh Host entry with its key and known hosts, and takes them back", () => {
+    parentHome(".ssh/config", "Host *\n  UseKeychain yes\n\nHost vps-box\n  HostName 203.0.113.7\n  User deploy\n  IdentityFile ~/.ssh/vps_key\n  UseKeychain yes\n");
+    parentHome(".ssh/vps_key", SSH_KEY);
+    parentHome(".ssh/vps_key.pub", "ssh-ed25519 AAAAC3NzaFAKE me@mac\n", 0o644);
+    parentHome(".ssh/known_hosts", "203.0.113.7 ssh-ed25519 AAAAC3NzaHOST\nother ssh-rsa AAAAB3OTHER\n");
+    start(parent, () => child);
+    start(child, () => parent);
+    linkUp();
+    // Listed by its being there, its key unread until it is lent.
+    expect(as("parent", () => parent.secrets!.view().catalogue.find((c) => c.kind === "ssh:vps-box")?.hint)).toBe("vps-box · key vps_key");
+
+    as("parent", () => parent.secrets!.lendProject(child.id, { root: null, to: null, workspace: "App" }, { env: [], ssh: ["vps-box"], github: null }));
+    flush();
+    const lentDir = join(homeOf("child"), ".ssh", "kururu");
+    expect(readFileSync(join(lentDir, "vps-box"), "utf8")).toBe(SSH_KEY);
+    expect(statSync(join(lentDir, "vps-box")).mode & 0o777).toBe(0o600);
+    expect(readFileSync(join(lentDir, "vps-box.known_hosts"), "utf8")).toBe("203.0.113.7 ssh-ed25519 AAAAC3NzaHOST\n");
+    const conf = readFileSync(join(lentDir, "vps-box.conf"), "utf8");
+    expect(conf).toContain("Host vps-box\n  HostName 203.0.113.7\n  User deploy\n  IdentityFile ~/.ssh/kururu/vps-box");
+    expect(conf).not.toContain("UseKeychain yes");
+    expect(readFileSync(join(homeOf("child"), ".ssh", "config"), "utf8")).toContain("Include ~/.ssh/kururu/*.conf");
+    expect(grantView("ssh:vps-box")).toMatchObject({ state: "held", hint: "vps-box · key vps_key (ed25519)" });
+    nothingSecretIn(JSON.stringify(as("parent", () => parent.secrets!.view())));
+
+    as("parent", () => parent.secrets!.grant(child.id, "ssh:vps-box", false));
+    flush();
+    expect(existsSync(lentDir)).toBe(false);
+    expect(existsSync(join(homeOf("child"), ".ssh", "config"))).toBe(false);
+  });
+
+  it("lends a GitHub login as gh's file and git's, which the node's terminals are pointed at", () => {
+    parentHome(".config/gh/hosts.yml", "github.com:\n    users:\n        someone:\n        other:\n    git_protocol: https\n    user: other\n");
+    ghTokens.set("someone", GH);
+    const here = checkout("parent", "app");
+    writeFileSync(join(here, ".git", "config"), '[remote "origin"]\n\turl = https://github.com/someone/app.git\n');
+    start(parent, () => child);
+    start(child, () => parent);
+    linkUp();
+    const offer = as("parent", () => parent.secrets!.offer({ node: { id: child.id, name: "child" }, workspace: { id: "w1", name: "App" }, root: here, pinned: null, check: null, checkError: null }));
+    expect(offer.github.map((c) => [c.name, c.why])).toEqual([
+      ["someone", "it owns the checkout's origin on github.com"],
+      ["other", null],
+    ]);
+
+    as("parent", () => parent.secrets!.lendProject(child.id, { root: here, to: null, workspace: "App" }, { env: [], ssh: [], github: "someone" }));
+    flush();
+    expect(grantView("gh:someone")).toMatchObject({ state: "held", hint: "someone · …wxyz" });
+    const env = as("child", () => lentGhEnv());
+    expect(env?.GH_CONFIG_DIR).toBe(join(root, "child", "config", "gh"));
+    expect(readFileSync(join(root, "child", "config", "gh", "git-credentials"), "utf8")).toBe(`https://someone:${GH}@github.com\n`);
+    expect(as("parent", () => lentGhEnv())).toBeUndefined();
+    nothingSecretIn(JSON.stringify(env));
+    nothingSecretIn(JSON.stringify(as("parent", () => parent.secrets!.view())));
+
+    // One GitHub login per node: the other replaces it.
+    ghTokens.set("other", GH.replace("wxyz", "abcd"));
+    as("parent", () => parent.secrets!.lendProject(child.id, { root: here, to: null, workspace: "App" }, { env: [], ssh: [], github: "other" }));
+    flush();
+    expect(grantView("gh:someone")?.on).toBe(false);
+    expect(readFileSync(join(root, "child", "config", "gh", "git-credentials"), "utf8")).toContain("https://other:");
+
+    as("parent", () => parent.secrets!.grant(child.id, "gh:other", false));
+    flush();
+    expect(existsSync(join(root, "child", "config", "gh"))).toBe(false);
+    expect(as("child", () => lentGhEnv())).toBeUndefined();
+  });
+
+  it("lets go of a project's secrets too when it leaves the roster", () => {
+    const here = checkout("parent", "app");
+    const there = checkout("child", "app");
+    writeFileSync(join(here, ".env"), ENV_TEXT);
+    parentHome(".ssh/config", "Host vps-box\n  HostName 203.0.113.7\n  IdentityFile ~/.ssh/vps_key\n");
+    parentHome(".ssh/vps_key", SSH_KEY);
+    parentHome(".config/gh/hosts.yml", "github.com:\n    users:\n        someone:\n    user: someone\n");
+    ghTokens.set("someone", GH);
+    start(parent, () => child);
+    start(child, () => parent);
+    linkUp();
+    as("parent", () => parent.secrets!.lendProject(child.id, { root: here, to: there, workspace: "App" }, { env: [".env"], ssh: ["vps-box"], github: "someone" }));
+    flush();
+    expect(existsSync(join(there, ".env"))).toBe(true);
+    as("child", () => child.unpair.forEach((hook) => hook()));
+    expect(existsSync(join(there, ".env"))).toBe(false);
+    expect(existsSync(join(homeOf("child"), ".ssh", "kururu"))).toBe(false);
+    expect(existsSync(join(root, "child", "config", "gh"))).toBe(false);
   });
 });
