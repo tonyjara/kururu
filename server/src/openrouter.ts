@@ -1,5 +1,5 @@
 /**
- * The OpenRouter account in the sidebar: the key that reads it, and the reading.
+ * The OpenRouter account on the bottom bar: the key that reads it, and the reading.
  *
  * `shared/openrouter.ts` argues for a management key; this is the half that
  * holds one, and holding one is most of what there is to get right.
@@ -97,7 +97,7 @@ async function ask(key: string, path: string): Promise<Asked> {
   }
 }
 
-/** A status as the sentence the sidebar and the Settings page print. */
+/** A status as the sentence the bottom bar and the Settings page print. */
 function refusal(status: number): string {
   if (status === 401) return "OpenRouter does not recognise this key.";
   if (status === 403) return `This is not a management key. Make one at ${KEYS_PAGE}.`;
@@ -176,7 +176,7 @@ export async function setOpenRouterKey(raw: unknown): Promise<OpenRouterStatus> 
   return openRouterSnapshot()!;
 }
 
-/** Forget the key: off the disk, and the section out of the sidebar. */
+/** Forget the key: off the disk, and the chip off the bottom bar. */
 export function clearOpenRouterKey(): void {
   removeConfigFile(FILE);
   generation++;

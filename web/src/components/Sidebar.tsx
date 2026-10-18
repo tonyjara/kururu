@@ -62,14 +62,6 @@ import { defaultMascot, mascotFor, workspaceUnits } from "../../../shared/model"
 import type { DevServer, GitAction, RepoGit } from "../../../shared/wire";
 import type { MachineStatus } from "../../../shared/machines";
 import type { NodeStatus } from "../../../shared/nodes";
-import {
-  balanceOf,
-  balanceSeverity,
-  formatDollars,
-  formatRunway,
-  runway,
-  type OpenRouterReading,
-} from "../../../shared/openrouter";
 import { agentItems } from "../agentmenu";
 import { AGENT_MIME, GROUP_MIME, WORKSPACE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
 import type { Action } from "../keys";
@@ -1330,14 +1322,11 @@ export function Sidebar({
 
       {/* The other kururus, under the agents: what is running on them is the
           same kind of thing as the list above, where the bottom bar's
-          machines are gauges. */}
+          machines are gauges. The Claude and Codex allowances, the machines
+          and the OpenRouter balance were sections here too and are the
+          bottom bar's since 2026-10-18 (`Usage.tsx`, `Machines.tsx`,
+          `OpenRouter.tsx`). */}
       <Nodes mascots={mascots} />
-      {/* OpenRouter's balance, in words. The Claude and Codex allowances and
-          the machines were sections here too and are the bottom bar's since
-          2026-10-18 (`Usage.tsx`, `Machines.tsx`). The balance stays: it is a
-          dollar figure, not a gauge, it is here only once a key has been
-          given, and a phone's bar has no room for a fourth chip. */}
-      <OpenRouter />
       <DevServers />
 
       {/* The foot: Settings and the phone's QR code, at the bottom left. They
@@ -1647,105 +1636,6 @@ function ContextRing({ usage }: { usage: ContextUsage }) {
 /** `189377` → `189k`. A token count is a magnitude, never an exact figure. */
 function format(tokens: number): string {
   return tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : String(tokens);
-}
-
-/**
- * The OpenRouter account: what is left, and how fast it is going.
- *
- * Words rather than a bar, which is the departure from the two sections either
- * side of it, and it is because a balance has no whole to be a share of.
- * `credits` is every dollar ever bought, so spent-over-bought is a bar that
- * creeps toward full for the life of the account and says nothing about this
- * week. A balance in dollars, coloured by how many days it lasts at the pace it
- * is going, says the thing — `balanceSeverity` has those days.
- *
- * Shut, the balance and today's spend on one line, which is the glance. Open,
- * the week and the month under it, the pace in words, and which key is asking.
- *
- * Draws nothing until a key has been given in Settings, like the machines section.
- */
-function OpenRouter() {
-  const { openrouter } = useKururu();
-  const [open, toggle] = useDisclosure("kururu.sidebar.openrouter", false);
-  if (!openrouter) return null;
-  const { reading, stale, error } = openrouter;
-
-  return (
-    <section className="side-section side-openrouter">
-      <h2>
-        <SectionToggle open={open} onToggle={toggle} label="OpenRouter">
-          {error && (
-            <span className="usage-stale" title={reading ? `${error}\nThe balance is the last one read.` : error}>
-              ·
-            </span>
-          )}
-        </SectionToggle>
-      </h2>
-      <ul className="usage-list">
-        {reading ? (
-          <OpenRouterBalance reading={reading} stale={stale} open={open} />
-        ) : (
-          <li className="usage-item">
-            <span className="usage-head">
-              <span className="usage-name">Balance</span>
-              <span className="usage-used">{error ? "unreachable" : "…"}</span>
-            </span>
-            {error && <span className="usage-reset">{error}</span>}
-          </li>
-        )}
-      </ul>
-      {open && (
-        <p className="usage-account" title="The management key reading this account">
-          {openrouter.hint}
-        </p>
-      )}
-    </section>
-  );
-}
-
-function OpenRouterBalance({ reading, stale, open }: { reading: OpenRouterReading; stale: boolean; open: boolean }) {
-  const pace = runway(reading);
-  const title = [
-    `${formatDollars(reading.used)} spent of ${formatDollars(reading.credits)} bought`,
-    pace && `${formatRunway(pace.days)} left at ${formatDollars(pace.perDay)} a day — this ${pace.basis}'s pace`,
-  ]
-    .filter(Boolean)
-    .join("\n");
-  const spend = reading.spend;
-
-  return (
-    <>
-      <li className={`usage-item ${stale ? "or-stale" : ""}`}>
-        <span className="usage-head" title={title}>
-          <span className="or-balance" data-severity={balanceSeverity(reading)}>
-            {formatDollars(balanceOf(reading))} left
-          </span>
-          {!open && spend && <span className="usage-used">{formatDollars(spend.day)} today</span>}
-        </span>
-        {open && pace && (
-          <span className="usage-reset">
-            {formatRunway(pace.days)} at this {pace.basis}'s pace
-          </span>
-        )}
-      </li>
-      {open &&
-        spend &&
-        (
-          [
-            ["Today", spend.day],
-            ["This week", spend.week],
-            ["This month", spend.month],
-          ] as const
-        ).map(([label, amount]) => (
-          <li key={label} className={`usage-item ${stale ? "or-stale" : ""}`}>
-            <span className="usage-head">
-              <span className="usage-name">{label}</span>
-              <span className="usage-used">{formatDollars(amount)}</span>
-            </span>
-          </li>
-        ))}
-    </>
-  );
 }
 
 /** "on devbox · ~/code" under a pinned workspace's name, or nothing. */

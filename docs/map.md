@@ -90,7 +90,7 @@ in this folder.
 | `src/sleep.ts` | Ends a card's agent that has sat idle, once its conversation is made sure of, through the close button's own `endTerminal`; learns Codex runs' ids. `GET /api/sleep` says why each is still awake ([layout](layout.md#idle-card-agents)) |
 | `src/made.ts` | A reply's paths found on this disk under allowed roots, and each agent's links kept in `made.json` beside `session.json` — by id *and* spawn time, since a restart must not lose them and a reused id must not inherit them |
 | `src/sessions.ts` | The CLIs' files on this disk, bounded reads only: a Codex run's rollout found, any conversation's tail by its id |
-| `src/openrouter.ts` | The sidebar's OpenRouter balance and spend, read with a management key kept owner-only in `~/.config/kururu/openrouter.json`. GETs only; the key comes in once and never goes back out (`shared/openrouter.ts`) |
+| `src/openrouter.ts` | The bottom bar's OpenRouter balance and spend, read with a management key kept owner-only in `~/.config/kururu/openrouter.json`. GETs only; the key comes in once and never goes back out (`shared/openrouter.ts`) |
 | `src/web/chain.ts` | The web chain behind `POST /mcp/web`: providers tried in Settings' order, each step skipped, served, failed, passed or stopped, answers judged, the record of recent calls, health on a timer, the launch flags ([web](web.md)) |
 | `src/web/provider.ts` | What a web provider is, and the registry each provider file puts itself on |
 | `src/web/firecrawlapi.ts` | Firecrawl's v2 API for both Firecrawl providers: one request under one base, failures as the chain reads them, crawls waited for and cancelled |

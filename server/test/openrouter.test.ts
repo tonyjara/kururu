@@ -12,6 +12,7 @@ import {
   balanceSeverity,
   creditsFrom,
   formatDollars,
+  formatDollarsShort,
   formatRunway,
   keyHint,
   keyPageFrom,
@@ -169,6 +170,26 @@ describe("formatDollars", () => {
 
   it("puts the sign outside", () => {
     expect(formatDollars(-0.52)).toBe("-$0.52");
+  });
+});
+
+describe("formatDollarsShort", () => {
+  it("prints whole dollars, rounded down", () => {
+    expect(formatDollarsShort(12.99)).toBe("$12");
+    expect(formatDollarsShort(0)).toBe("$0");
+    expect(formatDollarsShort(999.99)).toBe("$999");
+  });
+
+  it("goes to thousands with one decimal under ten, none above", () => {
+    expect(formatDollarsShort(1204.4)).toBe("$1.2k");
+    expect(formatDollarsShort(1999)).toBe("$1.9k");
+    expect(formatDollarsShort(2000)).toBe("$2k");
+    expect(formatDollarsShort(14_800)).toBe("$14k");
+  });
+
+  it("says under a dollar is not nothing, and keeps the sign outside", () => {
+    expect(formatDollarsShort(0.4)).toBe("<$1");
+    expect(formatDollarsShort(-3.5)).toBe("-$3");
   });
 });
 

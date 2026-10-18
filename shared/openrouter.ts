@@ -203,6 +203,21 @@ export function formatDollars(n: number): string {
   return `${sign}$${abs.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 }
 
+/**
+ * `$12`, `$999`, `$1.2k`, `$14k`, `<$1` — whole dollars, for the phone's bar,
+ * where the chip has to leave the workspace's name its room. Rounded down,
+ * because a balance shown as more than is there is the one wrong way for it
+ * to be wrong; the popover has the cents.
+ */
+export function formatDollarsShort(n: number): string {
+  const sign = n < 0 ? "-" : "";
+  const abs = Math.abs(n);
+  if (abs > 0 && abs < 1) return `${sign}<$1`;
+  if (abs < 1000) return `${sign}$${Math.floor(abs)}`;
+  const k = abs / 1000;
+  return `${sign}$${k < 10 ? (Math.floor(k * 10) / 10).toString() : Math.floor(k)}k`;
+}
+
 /** "about 9 days", "under a day", "over a year" — coarse, like `resetIn`, and for its reason. */
 export function formatRunway(days: number): string {
   if (days < 1) return "under a day";
