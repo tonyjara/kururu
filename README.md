@@ -229,12 +229,13 @@ it. A new tab opens where the terminal you were just in *is*, read from the pty.
 
 ### The sidebar
 
-Double-click a workspace to rename it; right-click for mascot, reorder,
-groups, new, and delete. `C-a 1`…`9` still jump to the first nine, and the row's
-tooltip says which key is its. After the name, `±3` is files not committed and
-`↑2` `↓1` commits to push and pull. Hover a row for its **⋯** — the board,
-LazyGit in the workspace's repository, its databases, and commit, merge, pull
-and push; on a touch screen the ⋯ is always there.
+Double-click a workspace to rename it. Hover a row for its **⋯**, or
+right-click it — both open the same menu: the board, LazyGit in the
+workspace's repository, its databases, commit, merge, pull and push, then
+rename, mascot, reorder, groups, new, and delete. On a touch screen the ⋯ is
+always there. `C-a 1`…`9` still jump to the first nine, and the row's tooltip
+says which key is its. After the name, `±3` is files not committed and `↑2`
+`↓1` commits to push and pull.
 
 The list below is **agents**, not terminals — the test is "has an agent ever been
 seen in here", so a row does not flicker out while claude is between things, and

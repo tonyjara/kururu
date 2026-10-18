@@ -422,7 +422,15 @@ export function ProfileBoard({
                 );
               return (
                 <section key={column} {...target}>
-                  <header className="board-col-head">
+                  {/* The column's menu off a right-click on its head too, as the
+                      cards' is off theirs — the ⋯ at its end opens the same list. */}
+                  <header
+                    className="board-col-head"
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      laneMenu(lane, { x: event.clientX, y: event.clientY });
+                    }}
+                  >
                     {grip(column)}
                     {naming === column ? (
                       <LaneName
@@ -625,6 +633,11 @@ function ProfileCard({
         }}
         onDragOver={onOver}
         onDoubleClick={onEdit}
+        /* The caret's menu, under the pointer: one list for both doors. */
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onMenu({ x: event.clientX, y: event.clientY });
+        }}
       >
         <div className="board-card-top">
           <span className="board-card-code">{code}</span>

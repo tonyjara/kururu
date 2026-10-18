@@ -42,7 +42,10 @@
  *
  * Which is also why a row has one button and not two: the git and database
  * buttons it carried are a menu behind ⋯ now, with the board and LazyGit, and
- * the ⋯ waits for the pointer to be on the row. Buttons read every time you
+ * the ⋯ waits for the pointer to be on the row. The ⋯ and the right-click open
+ * the same menu (`workspaceItems`) — until 2026-10-18 they were two, split
+ * into what is done in a workspace and what is done to one, a line nobody
+ * reaching for a verb could see. Buttons read every time you
  * look at the sidebar and pressed a few times a day are the trade the row made
  * once already, with the dev servers.
  */
@@ -277,16 +280,10 @@ export function Sidebar({
   const [overGroup, setOverGroup] = useState<string | null>(null);
   /** The workspace whose name is being typed, if any. */
   const [renaming, setRenaming] = useState<string | null>(null);
-  /** Where a context menu is open, and which row it belongs to. */
+  /** Where a workspace row's menu is open — off its ⋯ or a right-click, which are one menu — and which row it belongs to. */
   const [menu, setMenu] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
   /** Where an agent row's context menu is open, and which agent it belongs to. */
   const [agentMenu, setAgentMenu] = useState<{ agentId: string; x: number; y: number } | null>(null);
-  /**
-   * Where a row's ⋯ menu is open, and whose. Apart from the right-click menu,
-   * which is about the row as a thing in a list; this one is about the work in
-   * it — its board, its git, its databases.
-   */
-  const [options, setOptions] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
   /** The workspace whose git verb is still running — its ⋯ says so, and its git rows take no second one. */
   const [gitBusy, setGitBusy] = useState<string | null>(null);
   /**
@@ -319,10 +316,13 @@ export function Sidebar({
   const dragFrom = useRef<{ x: number; y: number } | null>(null);
   /**
    * The right-click a finger does not have. iOS never fires `contextmenu` on
-   * a long press, so an agent row times one itself — the same trick
-   * `FileTree.tsx` plays for its own rows. Held still for half a second opens
-   * the row's menu, and the click the lift would otherwise deliver is
-   * swallowed so `show()` does not also fire underneath it.
+   * a long press, so a row times one itself — the same trick `FileTree.tsx`
+   * plays for its own rows. Held still for half a second opens the row's
+   * menu, and the click the lift would otherwise deliver is swallowed so
+   * `show()` or `goTo()` does not also fire underneath it. Agent rows had it
+   * first; a workspace row took it on 2026-10-18, when its ⋯ and its
+   * right-click became one menu and a phone's way to it should be the same
+   * gesture as everywhere else, not only the ⋯.
    */
   const press = useRef<{ timer: number; x: number; y: number } | null>(null);
   const pressed = useRef(false);
@@ -330,7 +330,7 @@ export function Sidebar({
     if (press.current) window.clearTimeout(press.current.timer);
     press.current = null;
   };
-  const longPress = (agentId: string) => ({
+  const longPress = (open: (at: { x: number; y: number }) => void) => ({
     onPointerDown: (event: React.PointerEvent) => {
       if (event.pointerType !== "touch") return;
       event.stopPropagation();
@@ -342,7 +342,7 @@ export function Sidebar({
         timer: window.setTimeout(() => {
           press.current = null;
           pressed.current = true;
-          setAgentMenu({ agentId, x, y });
+          open({ x, y });
         }, LONG_PRESS_MS),
       };
     },
@@ -471,9 +471,8 @@ export function Sidebar({
    */
   const agentsFolded = groups.length > 0 && groups.every((group) => folded.has(group.id));
 
-  /** The row an open menu belongs to, and where it sits in the list. */
-  const menuAt = menu ? profile.workspaces.findIndex((w) => w.id === menu.workspaceId) : -1;
-  const menuWorkspace = menuAt === -1 ? null : profile.workspaces[menuAt]!;
+  /** The row an open menu belongs to. */
+  const menuWorkspace = menu ? (profile.workspaces.find((w) => w.id === menu.workspaceId) ?? null) : null;
 
   /**
    * A gesture in here has gone and changed what the panes are showing.
@@ -651,17 +650,20 @@ export function Sidebar({
     navigated();
   };
 
-  /** The row an open ⋯ menu belongs to. */
-  const optionsWorkspace = options ? (profile.workspaces.find((w) => w.id === options.workspaceId) ?? null) : null;
-
   /**
-   * The ⋯ menu: what is done *in* a workspace, as against the right-click
-   * menu's what is done *to* one. The two that go somewhere first, then the
-   * databases, then the main checkout's git under a line saying where it
-   * stands — which is what the git button's tooltip said, and a menu has no
-   * tooltip.
+   * A workspace row's menu, for its ⋯ and its right-click alike: one list,
+   * built here and nowhere else, so the two doors cannot drift apart again.
+   *
+   * The places first — the board, LazyGit, the databases — because a menu
+   * opened to go somewhere should not make you read past the furniture; then
+   * the main checkout's git under a line saying where it stands, which is
+   * what the git button's tooltip said and a menu has no tooltip; then the
+   * row as a thing in a list — its name, its mascot, its place, its group —
+   * and last, past a line each, a new one beside it and the one verb that
+   * cannot be taken back.
    */
-  const optionItems = (workspace: Workspace): MenuItem[] => {
+  const workspaceItems = (workspace: Workspace, at: { x: number; y: number }): MenuItem[] => {
+    const index = profile.workspaces.findIndex((w) => w.id === workspace.id);
     const git = heads.get(workspace.id)?.git ?? null;
     const dbs = dbCount.get(workspace.id) ?? 0;
     const busy = gitBusy === workspace.id;
@@ -700,6 +702,39 @@ export function Sidebar({
       // disabled for it did; the rows stay listed so the menu keeps its shape.
       items.push(...verbs.map((item) => (busy ? { ...item, disabled: true } : item)));
     }
+    items.push(
+      { label: "Rename", sep: true, run: () => setRenaming(workspace.id) },
+      { label: "Mascot…", run: () => setMascotPicker({ workspaceId: workspace.id, x: at.x, y: at.y }) },
+      /* Within its group: a step across the edge would take the neighbour's
+         group with it (`moveWorkspace`), and filing is what the rows below
+         are for. */
+      {
+        label: "Move up",
+        disabled: profile.workspaces[index - 1]?.group !== workspace.group,
+        run: () => api.moveWorkspace(workspace.id, index - 1),
+      },
+      {
+        label: "Move down",
+        disabled: profile.workspaces[index + 1]?.group !== workspace.group,
+        run: () => api.moveWorkspace(workspace.id, index + 1),
+      },
+      { label: "New group…", sep: true, run: () => newGroup(workspace.id) },
+      ...groupNames
+        .filter((name) => name !== workspace.group)
+        .map((name) => ({ label: `Move to ${name}`, run: () => api.setWorkspaceGroup(workspace.id, name) })),
+      ...(workspace.group !== null
+        ? [{ label: "Remove from group", run: () => api.setWorkspaceGroup(workspace.id, null) }]
+        : []),
+      { label: "New workspace", sep: true, run: () => onRun("new-workspace") },
+      {
+        label: "Delete",
+        sep: true,
+        danger: true,
+        // The last workspace cannot go: there would be nowhere to be.
+        disabled: profile.workspaces.length < 2,
+        run: () => onDeleteWorkspace(workspace.id),
+      },
+    );
     return items;
   };
 
@@ -839,7 +874,7 @@ export function Sidebar({
             setOverAgent(null);
             endDrag();
           }}
-          {...longPress(agent.id)}
+          {...longPress((at) => setAgentMenu({ agentId: agent.id, ...at }))}
         >
           {/* Where it lives and what it is. The two things you need to find it again, and
               nothing that changes while you read.
@@ -1033,6 +1068,7 @@ export function Sidebar({
                  gesture — which also keeps it working from the keyboard, where
                  Enter on the focused button produces exactly this click. */
               onClick={(event) => {
+                if (swallowed()) return;
                 if ((event.target as HTMLElement).closest("button:not(.ws-row), input")) return;
                 goTo(workspace.id);
               }}
@@ -1040,6 +1076,7 @@ export function Sidebar({
                 event.preventDefault();
                 setMenu({ workspaceId: workspace.id, x: event.clientX, y: event.clientY });
               }}
+              {...longPress((at) => setMenu({ workspaceId: workspace.id, ...at }))}
               /* Three things can land on a workspace row: a terminal, which moves
                  to that workspace; another workspace, which reorders the list;
                  and a group's heading, which moves the whole group to this
@@ -1141,14 +1178,14 @@ export function Sidebar({
                   <button
                     className={[
                       "ws-more",
-                      options?.workspaceId === workspace.id ? "ws-more-open" : "",
+                      menu?.workspaceId === workspace.id ? "ws-more-open" : "",
                       gitBusy === workspace.id ? "ws-more-busy" : "",
                     ]
                       .filter(Boolean)
                       .join(" ")}
                     onClick={(event) => {
                       const box = event.currentTarget.getBoundingClientRect();
-                      setOptions({ workspaceId: workspace.id, x: box.left, y: box.bottom + 4 });
+                      setMenu({ workspaceId: workspace.id, x: box.left, y: box.bottom + 4 });
                     }}
                     title="Options"
                     aria-label={`${workspace.name}: options`}
@@ -1343,52 +1380,7 @@ export function Sidebar({
       {!overlay && <Resizer onResize={onResize} onReset={onResetWidth} />}
 
       {menu && menuWorkspace && (
-        <Menu
-          at={menu}
-          onClose={() => setMenu(null)}
-          items={[
-            /* First, because it is the one row here that goes somewhere —
-               the same verb as the ⋯ menu's, which says what it does. */
-            { label: "Open the board", run: () => openRowBoard(menuWorkspace.id) },
-            { label: "Rename", sep: true, run: () => setRenaming(menuWorkspace.id) },
-            {
-              label: "Mascot…",
-              run: () => setMascotPicker({ workspaceId: menuWorkspace.id, x: menu.x, y: menu.y }),
-            },
-            /* Within its group: a step across the edge would take the
-               neighbour's group with it (`moveWorkspace`), and filing is what
-               the rows below are for. */
-            {
-              label: "Move up",
-              disabled: profile.workspaces[menuAt - 1]?.group !== menuWorkspace.group,
-              run: () => api.moveWorkspace(menuWorkspace.id, menuAt - 1),
-            },
-            {
-              label: "Move down",
-              disabled: profile.workspaces[menuAt + 1]?.group !== menuWorkspace.group,
-              run: () => api.moveWorkspace(menuWorkspace.id, menuAt + 1),
-            },
-            { label: "New group…", sep: true, run: () => newGroup(menuWorkspace.id) },
-            ...groupNames
-              .filter((name) => name !== menuWorkspace.group)
-              .map((name) => ({
-                label: `Move to ${name}`,
-                run: () => api.setWorkspaceGroup(menuWorkspace.id, name),
-              })),
-            ...(menuWorkspace.group !== null
-              ? [{ label: "Remove from group", run: () => api.setWorkspaceGroup(menuWorkspace.id, null) }]
-              : []),
-            { label: "New workspace", sep: true, run: () => onRun("new-workspace") },
-            {
-              label: "Delete",
-              sep: true,
-              danger: true,
-              // The last workspace cannot go: there would be nowhere to be.
-              disabled: profile.workspaces.length < 2,
-              run: () => onDeleteWorkspace(menuWorkspace.id),
-            },
-          ]}
-        />
+        <Menu at={menu} onClose={() => setMenu(null)} items={workspaceItems(menuWorkspace, menu)} />
       )}
 
       {groupMenu && (
@@ -1417,14 +1409,6 @@ export function Sidebar({
                so it asks nobody first, unlike deleting one. */
             { label: "Ungroup", sep: true, run: () => api.renameWorkspaceGroup(groupMenu.group, null) },
           ]}
-        />
-      )}
-
-      {options && optionsWorkspace && (
-        <Menu
-          at={options}
-          onClose={() => setOptions(null)}
-          items={optionItems(optionsWorkspace)}
         />
       )}
 

@@ -778,6 +778,15 @@ const CardView = memo(function CardView({
         }}
         onDragOver={(event) => verbs.current.over(event, column, index)}
         onDoubleClick={() => verbs.current.edit(card.id)}
+        /* The same menu the caret opens, where the pointer is — one list for
+           both doors, as a workspace row's. The robot's launchers are not in
+           it: handing the card to an agent is the robot's one job, and a
+           menu that mixed nine model rows into move, edit and delete would
+           bury the verbs a right-click comes for. */
+        onContextMenu={(event) => {
+          event.preventDefault();
+          verbs.current.menu(card, { x: event.clientX, y: event.clientY });
+        }}
       >
         <div className="board-card-top">
           <span className="board-card-code">{code}</span>

@@ -356,7 +356,16 @@ export function Timeline({
               // each placed on the one grid, which is what lines a bar up
               // with the day headings without measuring anything.
               <Fragment key={card.id}>
-                <div className="timeline-label" style={{ gridRow: index + 2 }} onDoubleClick={() => edit(card.id)}>
+                <div
+                  className="timeline-label"
+                  style={{ gridRow: index + 2 }}
+                  onDoubleClick={() => edit(card.id)}
+                  /* The caret's menu, under the pointer: one list for both doors. */
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    onMenu(card, { x: event.clientX, y: event.clientY });
+                  }}
+                >
                   <span className="board-card-code">{cardCode(profile.name, card.number)}</span>
                   <span className="timeline-title" title={card.title}>
                     {card.title}
