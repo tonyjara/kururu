@@ -142,8 +142,7 @@ async function setup(flags) {
     io.say(dim(step.why));
     let rows = await step.check(ctx);
     for (const line of table(rows, markColour)) console.log(line);
-    if (rows.every((row) => row.state !== "fail") && step.id !== "phone") continue;
-    if (step.id === "phone" && rows[0]?.state === "ok") continue;
+    if (rows.every((row) => row.state !== "fail") && !step.pending?.(ctx, rows)) continue;
     try {
       await step.repair(ctx, io, rows);
     } catch (err) {
@@ -199,7 +198,7 @@ async function doctor(flags, { heading = null } = {}) {
   for (const line of table(rows, markColour)) console.log(line);
   const events = lifecycleTail(ctx);
   console.log();
-  console.log(dim(`  lifecycle.log, the last ${events.length}:`));
+  console.log(dim(events.length ? `  lifecycle.log, the last ${events.length}:` : "  lifecycle.log: nothing yet"));
   for (const event of events) {
     const bad = event.what === "crash" || event.what === "down" || event.what === "orphaned";
     const line = `${new Date(event.at).toLocaleString()}  ${String(event.by ?? "").padEnd(7)} ${String(event.what ?? "").padEnd(9)} ${event.why}`;
