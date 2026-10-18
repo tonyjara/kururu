@@ -54,6 +54,7 @@ import type { WorktreeStatus } from "../../../shared/projects";
 import type { DevServer } from "../../../shared/wire";
 import { useCardDone } from "../cardDone";
 import { isLoopback, previewUrl, serverIn } from "../preview";
+import { revealCard } from "../reveal";
 import { sameJson } from "../same";
 import * as api from "../session";
 import { datesLabel, datesTense } from "../when";
@@ -190,11 +191,22 @@ export function BoardView({
     if (!asked || asked.workspaceId !== workspaceId) return;
     setWanted(null);
     if (!board.cards.some((c) => c.id === asked.cardId)) return;
-    root.current
-      ?.querySelector<HTMLElement>(`[data-card="${CSS.escape(asked.cardId)}"]`)
-      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (root.current) revealCard(root.current, asked.cardId);
     setShown({ id: asked.cardId, at: Date.now() });
   }, [asked, workspaceId, board]);
+  /**
+   * The card whose agent the focused pane holds, brought into sight when it
+   * changes — a click on the agent in the sidebar, a pane focused beside the
+   * board — and when the board is drawn with one already focused. Keyed on
+   * the card and not the agent, so a board re-rendering, or the card moving
+   * column under its run, does not pull the board back to it; and
+   * `revealCard` leaves a card already in view where it is.
+   */
+  const focusedCardId =
+    focusedAgentId === null ? null : (board.cards.find((c) => c.run?.agentId === focusedAgentId)?.id ?? null);
+  useEffect(() => {
+    if (focusedCardId && root.current) revealCard(root.current, focusedCardId);
+  }, [focusedCardId]);
   useEffect(() => {
     if (!shown) return;
     const timer = setTimeout(() => setShown(null), SHOWN_MS);

@@ -212,6 +212,18 @@ lights it for a moment — shown, never opened, since the edit is a
 double-click away), with the sheet closed. The server's card verbs still take any workspace of the
 profile, since the harness runs cards from anywhere.
 
+**A card that is focused or asked for is brought into sight, and nothing else
+moves.** The card of the focused pane's agent — a click on the agent in the
+sidebar, a pane focused beside the board — is revealed when it changes, and so
+is one asked for by `showCardNext` (Go to card, a need, a search hit) and one
+named on the profile's sheet. `web/src/reveal.ts` moves only the scrollers
+between the card and the board, never the pane or the page, which
+`scrollIntoView` would: the column smoothly to the card's middle, and the board
+sideways to the column's start, because the board snaps to columns and stopping
+at a column's near edge was taken back by the snap — on a phone, every time. A
+card already wholly in view does not move, or every click in the sidebar would
+shuffle the board under you.
+
 **A card has dates, and they are days.** `Card.dates` is a start and an end as
 `2026-09-28` strings — one day is a range whose ends are the same — or null,
 which is most cards. Days and not timestamps, because a timestamp is a day only

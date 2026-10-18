@@ -49,6 +49,7 @@ import {
 } from "../../../shared/board";
 import type { Profile } from "../../../shared/model";
 import { colorValue } from "../colors";
+import { revealCard } from "../reveal";
 import * as api from "../session";
 import { CardBody, CardWhen, Composer, dropDraft, showCardNext, useComposerInView } from "./Board";
 import { ColorPicker } from "./ColorPicker";
@@ -111,9 +112,7 @@ export function ProfileBoard({
   }, [show]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!shownCard) return;
-    sheet.current
-      ?.querySelector<HTMLElement>(`[data-card="${CSS.escape(shownCard.id)}"]`)
-      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (sheet.current) revealCard(sheet.current, shownCard.id);
     const timer = setTimeout(() => setShownCard(null), 1800);
     return () => clearTimeout(timer);
   }, [shownCard]);
