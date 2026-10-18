@@ -7,8 +7,9 @@ workspaces, agents and asks, the Mac's backup carries the child's boards, and
 the child's own page says when the Mac went away. This is phase 2 of
 [the plan](plans/kururu-parent-child.md#phase-2--nodes-the-roster-the-mesh-the-mirror).
 The Kurus talking to each other, phase 3, is [below](#kurus-as-peers), and so
-is moving a workspace, phase 6 ([below](#moving-a-workspace)). Lent secrets
-and one Telegram are phases 4 and 5, and this file grows with them.
+are lending secrets, phase 4 ([below](#lending-secrets)), and moving a
+workspace, phase 6 ([below](#moving-a-workspace)). One Telegram is phase 5,
+and this file grows with it.
 
 The code is `shared/nodes.ts` (the shapes and every rule, pure and tested),
 `server/src/nodekeys.ts` (the keys), `server/src/nodes.ts` (`NodeHost`) and
@@ -75,7 +76,7 @@ too. A lone parent that joins another drops its signing key.
 ## The roster
 
 The roster is a signed, versioned list: every member's id, name, public keys
-(Ed25519 to sign, X25519 for phase 4's sealed secrets), address, port and
+(Ed25519 to sign, X25519 for [the sealed secrets](#the-envelope)), address, port and
 rank. The parent signs `rosterPayload`, which is canonical JSON with sorted
 keys, so the bytes signed on one node are the bytes checked on another.
 The signature covers the object *as received*, extra fields included, so a
@@ -396,6 +397,153 @@ fields, deletion as the export says. It adds only the runs and events that
 are not already there, matched by when and what, so the history reads
 straight through both machines.
 
+## Lending secrets
+
+The parent can lend a child the keys it keeps: the self-hosted Firecrawl's
+address and key (which is what gives an agent on the child `kururu_web`), the
+cloud Firecrawl's key, the OpenRouter key, the Telegram bot's token, a Claude
+login as a token, a Codex login. This is phase 4 of
+[the plan](plans/kururu-parent-child.md#phase-4--secrets). The code is
+`shared/secrets.ts` (the kinds and every rule, pure and tested),
+`server/src/seal.ts` (the crypto) and `server/src/secrets.ts` (both halves).
+
+**A store of kururu's own.** 1Password, Bitwarden, Infisical, sops and
+Vault were weighed in the plan, and each one added a service, an account and
+a secret per child to fetch the secrets with. These are files the Mac already
+keeps at `0600` and reads per request, so the store is those files, sealed
+and pushed over the link, and kept on the child as the same file. None of the
+readers (`openrouter.ts`, the web providers, `telegram.ts`) knows a value was
+lent.
+
+### Kinds
+
+A kind is one thing that can be lent. It names the file on the parent, the
+file it lands as on the child, the part of it that is the secret, how its hint
+is read, what it unlocks, and how to end it at the source.
+
+| kind | on the parent | on the child | what travels |
+|---|---|---|---|
+| `telegram` | `telegram.json` | `telegram.json` | the token and the bot, never the switch or the allow-list |
+| `openrouter` | `openrouter.json` | the same | the management key |
+| `firecrawl-cloud` | `firecrawl.json` | the same, beside the child's own daily budget | the key |
+| `web:<id>` | `web-<id>.json` | the same | the provider's file: address and key |
+| `claude-token:<login>` | `claude-lend.json`, one per Mac login | `claude-token.json` | the token from `claude setup-token`, and whose account |
+| `codex-auth:<login>` | `auth.json` in that login's Codex home | `auth.json` in the child's default Codex home | the file |
+
+Only the secret part travels. A Telegram file carrying the Mac's switch would
+make the child a second poller of the same bot, and both would get a 409. The
+digest that decides whether a push is owed is taken over that part too, so a
+change to the Mac's settings is not a push.
+
+The share token, the nodes' keys, the roster's key and the backup's git
+credentials are not kinds. They never leave the node that made them.
+`NEVER_SHARED` lists them, and `server/test/secrets.test.ts` reads every
+`0600` write in the server and fails on a file that is in neither list. The
+next secret file is then a decision, not an accident.
+
+### Grants, pushes and take-backs
+
+A grant is one kind for one child, off until it is switched on in the
+parent's Settings → Nodes → *Secrets lent to <node>*. A child holds only what
+is switched on there. `plan` is the whole rule:
+
+- A kind switched on is pushed when the child holds none of it, or holds
+  another version.
+- A kind switched off that the child holds is taken back.
+- A kind the parent no longer has is left as the child holds it. Clearing a
+  key on the Mac is not a decision to take it away from a node; switching it
+  off is.
+
+A push happens when a kind is switched on, when a child links and says what it
+holds (`secrets-held`, on every link-up, since the parent forgets it with the
+link), and when the parent's copy changes. The parent stats each kind's file
+every two seconds, and a pasted key reaches every node that holds it in about
+two. The child acknowledges every push and take-back with its hint
+(`secrets-ack`), and the page shows each node's state: held, sending,
+waiting for it to link, refused and why, or nothing to send.
+
+**A Codex login is copied once.** Codex refreshes `auth.json` itself. Pushing
+the Mac's refreshes over the child's would leave two machines refreshing one
+login and signing each other out. So the kind does not follow its source. It
+is pushed when switched on, and again only from *Push again*. The child never
+writes over a Codex login it did not put there: that is somebody's own
+`codex login`, and the grant is refused with that reason.
+
+**Two Claude tokens are one variable**, so switching one on switches off the
+other for that node.
+
+**A node removed from the roster** lets go of everything it held as soon as it
+learns it was removed, and the parent drops its grants. Its id survives in its
+own `node.json`, so a node that joins again starts with nothing switched on. A
+server that starts holding secrets from a parent it no longer has lets go of
+them at once.
+
+### The envelope
+
+Each push is sealed to the child's X25519 key from the roster:
+
+1. An ephemeral key agreement.
+2. HKDF-SHA256, with both public keys as salt.
+3. AES-256-GCM with a random nonce. The header (the kind, the parent, the
+   child, the push's number) is the additional data, so an envelope for one
+   kind or one node does not open as another.
+
+A seal says who may open an envelope and not who made it, so the parent's
+node key signs it too. A take-back is signed the same way. The child takes a
+push only:
+
+- on the link from the roster's parent;
+- signed by that parent's key;
+- addressed to itself;
+- numbered higher than anything it has taken for that kind.
+
+It writes the value at `0600`, reads it back, and acknowledges only what is on
+the disk. Nothing in either half logs a value; the lines say the kind and the
+node.
+
+The link is already an authenticated WebSocket over WireGuard, so sealing can
+look like belt and braces. It is there because the payload passes through
+buffers and libraries and any log a later edit adds, and it is ciphertext in
+all of them. It also makes the envelope the thing that is trusted, not the
+road it came by, so a later phase can relay or hold one without weakening
+anything.
+
+### On the child
+
+- **Settings → Nodes** lists what it holds, by hint and since when.
+- **Settings → Web, OpenRouter and Channels** draw *Held from mac* in place
+  of the field: a value pasted there would be written over by the next push.
+  The server refuses those setters for a held kind with the same sentence.
+  The switch and the cloud Firecrawl's daily budget stay the child's own.
+- **A held Telegram token** cannot be switched on. The parent answers that
+  bot, and the child holds the token for phase 5's takeover while the parent
+  is away.
+- **A held Claude token** is set as `CLAUDE_CODE_OAUTH_TOKEN` on every
+  terminal the child opens (`lentClaudeEnv` in `logins.ts`, read at each
+  spawn, on a host with the `env` of protocol 2). It is the one credential
+  kururu puts into a pty's environment, because that is how Claude Code
+  takes a token, and it outranks a `/login` on the box. A terminal already
+  open keeps the environment it was started with.
+- **`kururu child doctor`** has a `secrets` row listing the held kinds by
+  hint. Its Claude row counts a held token as signed in.
+
+### Lending a Claude login
+
+The usual road is the box's own `/login`, which the wizard walks: its own
+login on the same subscription, revocable on its own. For a user who cannot
+open a browser anywhere there is a second road.
+
+1. The Mac's Settings → Agents → **Lend this login to a node** opens a tab
+   running `claude setup-token` as the profile's login.
+2. The token it prints is pasted back. It is kept in `claude-lend.json`, per
+   Mac login, and sent nowhere.
+3. It is switched on for the node like any other kind.
+
+The token only makes model requests and lasts a year. It is never a copied
+`.credentials.json`, whose refresh token rotates. The wizard asks which road
+when Claude is not signed in (`--claude=login|lent`), and with `lent` its
+`secrets` step waits for the token once the box is paired.
+
 ## Files
 
 | file | where | what |
@@ -404,6 +552,10 @@ straight through both machines.
 | `nodes.json` | config, `0600` | the newest roster, the anchor, and on the parent each child's share token. Never backed up |
 | `nodes-seen.json` | state | each node's last summary and when it was heard; rebuilt by the next summary |
 | `kuru-peers.json` | state | each node's last pushed Kuru conversation, for the drawer while it is away; rebuilt by the next push |
+| `grants.json` | config, `0600`, the parent | which child may hold which kind, and what each said it holds, by digest and hint. Never backed up |
+| `claude-lend.json` | config, `0600`, the parent | the Claude tokens made for lending, one per Mac login. Never backed up, never sent until switched on for a node |
+| `secrets-held.json` | config, `0600`, a child | what it holds from the parent: kinds, hints, digests, push numbers, never a value. The doctor reads it |
+| `claude-token.json` | config, `0600`, a child | a lent Claude token, which `logins.ts` sets as `CLAUDE_CODE_OAUTH_TOKEN` |
 
 A `node.json` the server cannot read is left as it is, and nodes are off for
 that run. A new identity would be a member nobody enrolled.

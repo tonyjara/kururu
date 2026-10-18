@@ -255,6 +255,7 @@ describe("heldRows", () => {
 
   it("lists what is held by kind and hint, a – when nothing is or the box stands alone", () => {
     expect(heldRows(null, { paired: false, parent: null, name: null, claudeLent: false })).toEqual([{ title: "secrets", state: "skip", detail: "not paired, so nothing is lent" }]);
+    expect(heldRows(null, { paired: false, parent: null, name: null, claudeLent: true, isParent: true })[0]?.detail).toContain("the parent");
     const none = heldRows({ held: {} }, { paired: true, parent: "mac", name: "omarchy", claudeLent: false });
     expect(none[0]?.state).toBe("skip");
     expect(none[0]?.detail).toContain("mac's Settings → Nodes → omarchy → Secrets");

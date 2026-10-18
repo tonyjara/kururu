@@ -373,9 +373,10 @@ export function lentClaude(held) {
  * Claude would be lent, and it has not been: then the agents have no login,
  * and that is the `✗`.
  */
-export function heldRows(held, { paired, parent, name, claudeLent }) {
+export function heldRows(held, { paired, parent, name, claudeLent, isParent = false }) {
   const from = parent ?? "the Mac";
   const where = `${from}'s Settings → Nodes → ${name ?? "this node"} → Secrets`;
+  if (isParent) return [{ title: "secrets", state: "skip", detail: "the parent: it lends secrets, and holds none from another node" }];
   if (!paired) return [{ title: "secrets", state: "skip", detail: "not paired, so nothing is lent" }];
   const entries = held && typeof held === "object" && held.held && typeof held.held === "object" ? Object.entries(held.held) : [];
   const rows = [

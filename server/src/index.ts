@@ -631,6 +631,11 @@ function secretLanded(spec: KindSpec): void {
   }
 }
 
+/** What kind of field a web provider's field is, as its Settings page draws it, or null for none by that name. */
+function webFieldKind(provider: unknown, field: unknown): string | null {
+  return web.status().providers.find((p) => p.id === provider)?.fields.find((f) => f.name === field)?.kind ?? null;
+}
+
 /** When this process started, which a node's data mark carries so a restart is a pull. */
 const STARTED_AT = Date.now();
 
@@ -4820,14 +4825,16 @@ function handleMessage(ws: WebSocket, raw: string): void {
     case "set-web-provider":
       void replyAsync(ws, msg.id, async () => {
         if (msg.enabled !== undefined) web.setEnabled(msg.provider, msg.enabled);
-        if (msg.field !== undefined && typeof msg.provider === "string") secrets.refuseIfHeld(webKind(msg.provider));
+        // A held provider's address and key are the parent's; a number — the
+        // cloud's daily budget — is this node's own spending, and stays.
+        if (msg.field !== undefined && typeof msg.provider === "string" && webFieldKind(msg.provider, msg.field) !== "number") secrets.refuseIfHeld(webKind(msg.provider));
         return msg.field !== undefined ? web.setField(msg.provider, msg.field, msg.value) : web.status();
       });
       return;
 
     case "clear-web-provider-field":
       reply(ws, msg.id, () => {
-        if (typeof msg.provider === "string") secrets.refuseIfHeld(webKind(msg.provider));
+        if (typeof msg.provider === "string" && webFieldKind(msg.provider, msg.field) !== "number") secrets.refuseIfHeld(webKind(msg.provider));
         return web.clearField(msg.provider, msg.field);
       });
       return;

@@ -936,6 +936,7 @@ export const STEPS = [
         parent: at.parent ?? null,
         name: answer.body?.nodes?.name ?? null,
         claudeLent: ctx.saved.claudeRoad === "lent",
+        isParent: at.state === "parent",
       });
     },
     async repair(ctx, io, rows, recheck) {

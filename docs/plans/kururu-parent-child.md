@@ -12,7 +12,10 @@ the Mac and awaiting its two-machine checks; and phase 3, Kurus as peers
 (`docs/nodes.md#kurus-as-peers`), checked between two throwaway nodes on
 the Mac with a stand-in Claude and awaiting its two-machine checks. Its
 marks are `[kuru@mac]` and `[user@mac]` rather than the bare `[mac]` below,
-for the reason `docs/nodes.md` gives. Phases 4 and 5 are being built. It is written so that an agent can take one phase, read the files it
+for the reason `docs/nodes.md` gives; and phase 4, lending secrets
+(`docs/nodes.md#lending-secrets`), checked between two throwaway nodes on the
+Mac with fake keys and awaiting its two-machine checks. Phase 5 is being
+built. It is written so that an agent can take one phase, read the files it
 names, and know what "done" is. Each phase is shaped as a card: its scope,
 what it depends on, what it can run beside, and how it is verified. The first
 draft had one Kuru driving every node's agents, a Telegram poller set by hand,
@@ -895,6 +898,29 @@ child uses `kururu_web`; changing the key on the Mac reaches the child within
 seconds and the page shows the ack; unticking removes the file; a child whose
 user has no browser login runs an agent on a lent token; `kururu child
 doctor` lists the held kinds.
+
+**As built**, 2026-10-18, beside the scope above:
+
+- **Only the secret part of a file travels**, and the digest is over that
+  part. The Telegram kind is the token and the bot, never the Mac's switch
+  or allow-list, which would have made the child a second poller. A child
+  holding it cannot switch it on until phase 5 makes that a takeover.
+- **A Codex login does not follow its source.** Codex refreshes `auth.json`
+  itself, so pushing the Mac's refreshes would be two machines refreshing
+  one login. It is copied once, and *Push again* sends the Mac's again. It is
+  never written over a Codex login the child made itself.
+- **Clearing a key on the Mac takes nothing away from a node**; switching it
+  off does. A node removed from the roster lets go of everything, and the
+  parent drops its grants at once, since its id survives a removal and
+  joining again should start with nothing switched on.
+- **A child reports what it holds on every link-up**, and the parent pushes
+  only against that report, so a child restarted while the Mac slept is
+  never assumed to hold what it no longer does.
+- **The envelope is signed** by the parent's node key as well as sealed, and
+  numbered, so a child takes a push only from its parent and never an older
+  one over a newer.
+- `NodeHost` gained `on(type, handler)`, link-up and link-down hooks, an
+  unpair hook and `send(peer, message)`, for this and the later phases.
 
 ### Phase 5 — one Telegram, with failover
 
