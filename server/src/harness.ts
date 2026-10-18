@@ -148,7 +148,13 @@ export interface HarnessDeps {
   /** Where a new tab in that pane would start. */
   cwdFor: (profileId: string, workspaceId: string, paneId: string) => Promise<string | undefined>;
   /** Hand a card to an agent, on a board that need not be on screen. */
-  runCard: (profileId: string, workspaceId: string, cardId: string, launcherId: string, fresh: boolean) => Promise<{ agentId: string }>;
+  runCard: (
+    profileId: string,
+    workspaceId: string,
+    cardId: string,
+    launcherId: string,
+    fresh: boolean,
+  ) => Promise<{ agentId: string; resumed: boolean; why: string | null }>;
   /** A card to Done takes its dev server with it, as the client's move does. */
   stopDev: (workspaceId: string, cardId: string) => void;
   /** Say a line aloud to the user, as this profile's harness. See `voice.ts`. */
@@ -913,15 +919,31 @@ export class Harness {
         const cardId = str(args.card);
         if (!cardId) return fail("A card id is needed.");
         const fresh = args.fresh === true;
-        // An asleep card goes back to the launcher it ran on, so that leaving
-        // the launcher out resumes it rather than starting Claude beside it.
-        const asleep = ws.findCardIn(profileId, workspaceId, cardId)?.card.run;
-        const named = str(args.launcher) || (!fresh && asleep?.state === "asleep" ? asleep.launcher : undefined);
+        const last = ws.findCardIn(profileId, workspaceId, cardId)?.card.run ?? null;
+        /*
+         * A card whose agent is still in its terminal — its turn finished and
+         * nobody closed it — is talked to, not run again: a second agent there
+         * is a new conversation beside the one that has the whole context,
+         * which is never what running the card was for.
+         */
+        if (!fresh && last?.agentId && this.deps.host.isLive(last.agentId)) {
+          return fail(`Card ${cardId}'s agent, ${this.nameOf(last.agentId)}, is still open. send_agent gives it more to do; fresh=true starts a second conversation beside it.`);
+        }
+        // The launcher it last ran on when none is named, so that leaving it
+        // out resumes on the model it had rather than on Claude's default.
+        const named = str(args.launcher) || (last && findLauncher(last.launcher) ? last.launcher : undefined);
         const launcher = this.launcher(named);
-        const { agentId } = await this.deps.runCard(profileId, workspaceId, cardId, launcher.id, fresh);
+        const { agentId, resumed, why } = await this.deps.runCard(profileId, workspaceId, cardId, launcher.id, fresh);
         follow(agentId);
-        const resumed = !fresh && asleep?.state === "asleep" && findLauncher(asleep.launcher)?.cli === launcher.cli;
-        return ok(`${resumed ? `Woke card ${cardId}'s conversation on` : `Handed card ${cardId} to`} ${launcher.label}: ${this.nameOf(agentId)}.`);
+        const name = this.nameOf(agentId);
+        if (resumed) return ok(`Resumed card ${cardId}'s conversation, with its context, on ${launcher.label}: ${name}.`);
+        if (!last) return ok(`Handed card ${cardId} to ${launcher.label}: ${name}.`);
+        // Said loudly, because a fresh start on a card with work behind it is
+        // the thing that rereads the card and redoes what is done.
+        const because = fresh ? "as asked" : `because ${why ?? "its last conversation could not be found"}`;
+        return ok(
+          `Handed card ${cardId} to ${launcher.label}: ${name}, in a NEW conversation, ${because}. Its earlier work is not in this agent's context; it was told the card has run before and to check what is done before starting.`,
+        );
       }
 
       case "send_card_to_workspace": {

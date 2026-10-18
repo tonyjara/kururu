@@ -335,12 +335,12 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "run_card",
     description:
-      "Hand an existing card on a workspace's board to an agent, the same as the robot button. Returns the agent's id. A card whose agent is still running is refused. A card whose agent was put to sleep for sitting idle (its run says asleep) is resumed — the same conversation, with its context — on the launcher it ran on unless you name another of the same CLI; fresh=true starts a new conversation instead.",
+      "Hand an existing card on a workspace's board to an agent, the same as the robot button. Returns the agent's id. A card whose agent is still open is refused — send_agent to it instead. A card whose last agent has gone (put to sleep, lost in a crash, closed) is resumed — the same conversation, with its context — on the launcher it ran on unless you name another of the same CLI; fresh=true starts a new conversation instead. The reply says whether it resumed, and why not when it could not.",
     inputSchema: obj(
       {
         workspace: WORKSPACE,
         card: str("The card id."),
-        launcher: str("A launcher id. Default: Claude on its default model, or the launcher an asleep card ran on."),
+        launcher: str("A launcher id. Default: the launcher the card last ran on, or Claude on its default model for a card that never ran."),
         fresh: bool("Start a new conversation even on a card whose agent was put to sleep. Default false."),
       },
       ["workspace", "card"],

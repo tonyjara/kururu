@@ -129,6 +129,7 @@ import { remoteAgentRun, remoteShellCommand, remoteShellOf, sessionName, validRe
 import { lazygitCommand, lazygitRun } from "../../shared/lazygit";
 import { OnScreen } from "./onscreen";
 import { Sleeper } from "./sleep";
+import { claudeTranscriptPath } from "./sessions";
 import { closeDatabasePools, dbCatalog, dbQuery, dbRows, scanDatabases, type DatabaseScanInput } from "./databases";
 import { allowedRoots, allowRoot, findDocs, listDir, listDirs, readBytes, readFile, resolveInRoot } from "./files";
 import { parseFileOp, runFileOp } from "./fileops";
@@ -231,6 +232,8 @@ import {
   addCard,
   canResume,
   cardPrompt,
+  priorRunNote,
+  wakeFor,
   editCard,
   mintCardId,
   moveCard,
@@ -248,6 +251,7 @@ import {
   setWorktree,
   startRun,
   type Card,
+  type CardRun,
   type CardWorktree,
 } from "../../shared/board";
 import { soundBytes, sounds } from "./sounds";
@@ -1733,6 +1737,17 @@ function hooksFor(launcher: Launcher, profileId: string): string {
 }
 
 /**
+ * What a card's run came to: the agent, whether it picked up the card's last
+ * conversation, and — when the card had one and it did not — why not, so the
+ * harness can say so rather than leave a fresh start to be found out.
+ */
+interface CardRunResult {
+  agentId: string;
+  resumed: boolean;
+  why: string | null;
+}
+
+/**
  * Hand a card to an agent: a terminal in the workspace's agents' pane
  * (`agentPaneIn` — the bottom one, unless the profile says otherwise),
  * running the chosen launcher with the card as its first message.
@@ -1747,7 +1762,7 @@ function hooksFor(launcher: Launcher, profileId: string): string {
  * (`giveFocusBack`): the point of handing work off is to carry on with the
  * list, not to be taken to it.
  */
-async function runCard(workspaceId: string, cardId: string, launcherId: string, fresh = false): Promise<{ agentId: string }> {
+async function runCard(workspaceId: string, cardId: string, launcherId: string, fresh = false): Promise<CardRunResult> {
   return runCardAt(workspaces.active.id, workspaceId, cardId, launcherId, true, "user", fresh);
 }
 
@@ -1770,7 +1785,7 @@ async function runCardAt(
   shown = false,
   actor: Actor = "user",
   fresh = false,
-): Promise<{ agentId: string }> {
+): Promise<CardRunResult> {
   const onScreen = profileId === workspaces.active.id && workspaceId === workspaces.activeWorkspace.id;
   // `startDev` acts on the profile on screen, which a shown card's always is.
   const seen = onScreen || (shown && profileId === workspaces.active.id);
@@ -1784,16 +1799,22 @@ async function runCardAt(
   const launcher = typeof launcherId === "string" ? findLauncher(launcherId) : undefined;
   if (!launcher) throw new Error(`no such agent: ${String(launcherId)}`);
   /*
-   * A card whose agent kururu put to sleep for sitting idle is picked back
-   * up, not started over: that run was ended on the understanding that
-   * running the card again would bring its conversation back, and the card
-   * says so. On the launcher asked for when it is the same CLI — a model can
-   * change between turns of one conversation — and fresh only when asked
-   * for in so many words, or on the other CLI, which cannot read this one's.
+   * A card whose last agent has gone is picked back up, not started over —
+   * put to sleep, lost with the host, closed by hand, alike (`wakeFor`). On
+   * the launcher asked for when it is the same CLI — a model can change
+   * between turns of one conversation — and fresh only when asked for in so
+   * many words, on the other CLI, which cannot read this one's, or when the
+   * transcript is not where `--resume` would look: a resume that finds
+   * nothing is an agent that exits on its first line.
    */
   const last = found.card.run;
-  if (!fresh && last?.state === "asleep" && canResume(last, false) && findLauncher(last.launcher)?.cli === launcher.cli) {
-    return resumeCardAt(profileId, workspaceId, cardId, launcher, actor);
+  const open = last?.agentId != null && host.agents.some((a) => a.id === last.agentId && !a.exited);
+  let wake = wakeFor(last, launcher.cli, fresh, open);
+  if (wake.resume && last && !(await conversationKept(profileId, workspaceId, last))) {
+    wake = { resume: false, why: "its conversation is no longer on this Mac's disk" };
+  }
+  if (wake.resume) {
+    return { ...(await resumeCardAt(profileId, workspaceId, cardId, launcher, actor)), resumed: true, why: null };
   }
 
   const boardPane = paneWithAgent(workspace.layout, BOARD_TAB)?.id;
@@ -1833,7 +1854,10 @@ async function runCardAt(
   const cwd = checkout?.worktree.path ?? from;
   // No hook settings on a machine: they name files on this one. See `remoteAgentRun`.
   const line = remote ? launcherCommand(launcher, launch) : agentCommandFor(launcher, profileId);
-  let command = withPrompt(line + (sessionId ? ` --session-id ${sessionId}` : ""), cardPrompt(found.card));
+  // A card that has run before says so to the new conversation, which
+  // otherwise starts from the card's words as if nothing had been done.
+  const prompt = last ? `${cardPrompt(found.card)}\n\n${priorRunNote(last, wake.why)}` : cardPrompt(found.card);
+  let command = withPrompt(line + (sessionId ? ` --session-id ${sessionId}` : ""), prompt);
   /*
    * The dev server starts with the worktree, when the project has a dev line —
    * so that the card's work can be looked at without anybody having to ask.
@@ -1895,7 +1919,7 @@ async function runCardAt(
     }),
   ));
   if (onScreen) giveFocusBack(boardPane ?? focused);
-  return { agentId: agent.id };
+  return { agentId: agent.id, resumed: false, why: wake.why };
 }
 
 // ---------------------------------------------------------------------------
@@ -2249,6 +2273,10 @@ async function resumeCardAt(
   if (!run || !canResume(run, open)) {
     throw new Error(open ? "its agent is still open" : "there is no conversation on this card to resume");
   }
+  // Said here rather than by an agent that prints "No conversation found" and exits.
+  if (run.sessionId && !(await conversationKept(profileId, workspaceId, run))) {
+    throw new Error("its conversation is no longer on this Mac's disk");
+  }
   const launcher = on ?? findLauncher(run.launcher);
   if (!launcher) throw new Error(`no such agent: ${run.launcher}`);
 
@@ -2286,6 +2314,21 @@ async function resumeCardAt(
   );
   if (onScreen) giveFocusBack(boardPane ?? focused);
   return { agentId: agent.id };
+}
+
+/**
+ * Whether a run's conversation is still where `--resume` will look for it,
+ * read at the moment of asking. Believed without a look in two cases: a run
+ * on a machine, whose transcript is there and an ssh away, as the card's own
+ * Resume row has always believed it; and Codex, whose rollouts are filed by
+ * the day they began, which a resumed run's `startedAt` no longer says — a
+ * miss there would be a guess, and `codex resume` says so itself.
+ */
+async function conversationKept(profileId: string, workspaceId: string, run: CardRun): Promise<boolean> {
+  if (!run.sessionId) return false;
+  if (run.cwd === null && pinOf(profileId, workspaceId)) return true;
+  if (!run.launcher.startsWith("claude")) return true;
+  return (await claudeTranscriptPath(claudeDirOf(profileId), run.sessionId, run.cwd, null)) !== null;
 }
 
 /**

@@ -301,9 +301,10 @@ export function BoardView({
    * agent has gone and its conversation can be found again — the way back
    * into it. A new launcher on a card that has run starts a fresh
    * conversation with the card as its prompt; resume is the one that
-   * remembers what was said. On a card whose agent was put to sleep the
-   * server would resume on a launcher row too, as it promised the card, so
-   * those rows say "new conversation" and ask for one in so many words.
+   * remembers what was said. The server resumes a card whose agent has gone
+   * on a launcher row too, the way the harness's `run_card` wants it, so
+   * when there is a conversation to go back to those rows say "new
+   * conversation" and ask for one in so many words.
    */
   const robotMenu = (card: Card, at: MenuAt) => {
     const asleep = card.run?.state === "asleep";
@@ -322,9 +323,9 @@ export function BoardView({
         ...resumeRow,
         ...launchers.map((launcher, index) => ({
           label: launcher.label,
-          hint: resumeRow.length > 0 && asleep ? "new conversation" : launcher.model ? undefined : "default model",
+          hint: resumeRow.length > 0 ? "new conversation" : launcher.model ? undefined : "default model",
           sep: (index === 0 && resumeRow.length > 0) || (index > 0 && launchers[index - 1]?.cli !== launcher.cli),
-          run: () => run(card, launcher, asleep),
+          run: () => run(card, launcher, resumeRow.length > 0),
         })),
       ],
     });

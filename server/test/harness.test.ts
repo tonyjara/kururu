@@ -649,3 +649,78 @@ describe("the harness's own run", () => {
     expect(trustAnswer("❯ Try \"how does <filepath> work?\"")).toBeNull();
   });
 });
+
+describe("run_card on a card that has run", () => {
+  const id = "0b6c2f1e-8d7a-4c3b-9e2f-1a2b3c4d5e6f";
+  const lastRun = (agentId: string | null, state: "ended" | "finished" | "asleep") => ({
+    agentId,
+    launcher: "claude:claude-opus-5-5",
+    label: "Claude Opus 5.5",
+    state,
+    startedAt: 1_000,
+    endedAt: 2_000,
+    sessionId: id,
+    cwd: "/work/site",
+  });
+
+  /** A harness whose board has card `c1` with the run given, and whose `runCard` answers as told. */
+  function rig(run: ReturnType<typeof lastRun> | null, answer: { resumed: boolean; why: string | null }, live: string[] = []) {
+    const asked: { launcherId: string; fresh: boolean }[] = [];
+    const card = { id: "c1", title: "F1 theme", body: "", run };
+    const deps = {
+      workspaces: {
+        profileOf: () => "p",
+        profile: (pid: string) => (pid === "p" ? { id: "p", harness: { agentId: "h" }, workspaces: [] } : undefined),
+        agentsInWorkspace: () => [],
+        workspaceIn: (_p: string, w: string) => (w === "w1" ? { id: "w1" } : undefined),
+        findCardIn: (_p: string, _w: string, c: string) => (c === "c1" ? { card } : undefined),
+      },
+      host: { isLive: (agentId: string) => live.includes(agentId), find: () => undefined },
+      runCard: async (_p: string, _w: string, _c: string, launcherId: string, fresh: boolean) => {
+        asked.push({ launcherId, fresh });
+        return { agentId: "a20", ...answer };
+      },
+      activity: new Map<string, string>(),
+      launch: () => ({ bypassClis: [] }),
+      madeOf: () => [],
+    } as unknown as HarnessDeps;
+    const harness = new Harness(deps);
+    const call = async (args: Record<string, unknown> = {}) =>
+      JSON.stringify(await harness.call("p", "h", "run_card", { workspace: "w1", card: "c1", ...args }));
+    return { call, asked };
+  }
+
+  it("goes back to the launcher a crash took it off, and says it resumed", async () => {
+    const { call, asked } = rig(lastRun(null, "ended"), { resumed: true, why: null });
+    const said = await call();
+    expect(asked).toEqual([{ launcherId: "claude:claude-opus-5-5", fresh: false }]);
+    expect(said).toContain("Resumed card c1's conversation");
+    expect(said).toContain("Claude Opus 5.5");
+  });
+
+  it("says so, loudly, when it had to start over", async () => {
+    const { call } = rig(lastRun(null, "finished"), { resumed: false, why: "its conversation is no longer on this Mac's disk" });
+    const said = await call();
+    expect(said).toContain("NEW conversation, because its conversation is no longer on this Mac's disk");
+    expect(said).toContain("told the card has run before");
+  });
+
+  it("refuses a card whose agent is still open, rather than start a second beside it", async () => {
+    const { call, asked } = rig(lastRun("a12", "finished"), { resumed: false, why: null }, ["a12"]);
+    const said = await call();
+    expect(asked).toEqual([]);
+    expect(said).toContain("still open");
+    expect(said).toContain("send_agent");
+    // Asked for in so many words, a second conversation is allowed.
+    await call({ fresh: true });
+    expect(asked).toEqual([{ launcherId: "claude:claude-opus-5-5", fresh: true }]);
+  });
+
+  it("hands a card that never ran to Claude without a word about earlier work", async () => {
+    const { call, asked } = rig(null, { resumed: false, why: null });
+    const said = await call();
+    expect(asked).toEqual([{ launcherId: "claude", fresh: false }]);
+    expect(said).toContain("Handed card c1 to Claude");
+    expect(said).not.toContain("NEW conversation");
+  });
+});

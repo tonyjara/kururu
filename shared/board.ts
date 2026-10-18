@@ -1013,3 +1013,48 @@ function adoptRun(value: unknown): CardRun | null {
 export function canResume(run: CardRun | null, open: boolean): boolean {
   return run !== null && !open && (run.sessionId !== null || run.launcher.startsWith("codex"));
 }
+
+/**
+ * What running a card again does with the conversation its last agent had:
+ * picks it back up, or starts a new one and says why.
+ *
+ * Any run whose agent has gone is picked up, not only one kururu put to
+ * sleep. A run the pty host took with it when it died, or one somebody's
+ * terminal was closed on, has a conversation exactly as findable as a
+ * sleeping one's, and the agent that starts over on a card with work behind
+ * it rereads the card from scratch and redoes what is already done — which is
+ * what every run was doing after the host went down on 2026-10-18, because
+ * this used to ask for `asleep` and a crash leaves `ended`.
+ *
+ * Unlike `canResume` it wants the id itself: Codex without one is resumed
+ * through its picker, which a person can answer and a harness cannot. Whether
+ * the transcript is still on disk is the caller's to look at, since that is a
+ * read; `why` is then said in the reply and to the agent (`priorRunNote`).
+ * Null `why` is nothing worth saying — a card that never ran, or a new
+ * conversation asked for in so many words.
+ */
+export type Wake = { resume: true } | { resume: false; why: string | null };
+
+export function wakeFor(run: CardRun | null, cli: string, fresh: boolean, open: boolean): Wake {
+  if (!run || fresh) return { resume: false, why: null };
+  if (open) return { resume: false, why: "its last agent's terminal is still open" };
+  if (run.sessionId === null) return { resume: false, why: "its last run kept no conversation id" };
+  const was = run.launcher.split(":")[0] ?? run.launcher;
+  if (was !== cli) return { resume: false, why: `its conversation is ${was}'s, and ${cli} cannot read it` };
+  return { resume: true };
+}
+
+/**
+ * The words a new conversation on a card that has run before is given after
+ * the card's own: that it has, and to look before it redoes anything. After
+ * rather than before, because a Codex rollout is matched to its card by the
+ * prompt's opening words (`pickCodexRollout`) and those stay the card's.
+ */
+export function priorRunNote(run: CardRun, why: string | null): string {
+  const where = run.cwd ? ` in ${run.cwd}` : "";
+  const because = why ? `, and that conversation could not be picked up (${why})` : "";
+  return (
+    `[kururu] This card has been worked on before: its last agent was ${run.label}${where}${because}. ` +
+    "This is a new conversation. Before starting, look at what is already done — the git log, the working tree, any notes — and do not redo finished work."
+  );
+}
