@@ -6,12 +6,13 @@ each draws the other: the Mac's sidebar and Needs drawer show the child's
 workspaces, agents and asks, the Mac's backup carries the child's boards, and
 the child's own page says when the Mac went away. This is phase 2 of
 [the plan](plans/kururu-parent-child.md#phase-2--nodes-the-roster-the-mesh-the-mirror).
-Kurus talking to each other, lent secrets and one Telegram are phases 3–5,
-and this file grows with them. Moving a workspace, phase 6, is
-[below](#moving-a-workspace).
+The Kurus talking to each other, phase 3, is [below](#kurus-as-peers), and so
+is moving a workspace, phase 6 ([below](#moving-a-workspace)). Lent secrets
+and one Telegram are phases 4 and 5, and this file grows with them.
 
 The code is `shared/nodes.ts` (the shapes and every rule, pure and tested),
-`server/src/nodekeys.ts` (the keys) and `server/src/nodes.ts` (`NodeHost`).
+`server/src/nodekeys.ts` (the keys), `server/src/nodes.ts` (`NodeHost`) and
+`server/src/peerkuru.ts` (the Kurus).
 
 ## Two words kept apart
 
@@ -166,12 +167,152 @@ database, and the parent's are the parent's.
   never where the next launch lands, and the floating pill stays on this
   Mac.
 - **`kururu_status`:** gives Kuru every node with its workspaces, agents and
-  needs from the summaries, never the token. The role's Nodes section says
-  they can be read and not driven. Asking another node's Kuru to act there
-  is phase 3.
+  needs from the summaries, never the token. Each agent is named the way
+  `agentName` names one here, with "on omarchy" and no id. The role's Nodes
+  section says they can be read and not driven, and how another node's Kuru
+  is asked ([below](#kurus-as-peers)).
+- **The Kuru drawer:** every node's conversation, merged
+  ([below](#one-drawer)).
 - **`/api/health`:** carries `nodes` (role, name, leader, each member's state)
   for `bun run status` and the doctor's pairing row. `/api/nodes` is the
   whole view, behind the gate.
+
+## Kurus as peers
+
+Every node has a Kuru of its own, always on for its own node, with its own
+memory in its own harness folder. The rule is **read anywhere, act locally,
+ask a peer**, and the user is the manager of colleagues, not of a chain:
+
+- **Read anywhere.** `kururu_status` lists every node's workspaces and agents
+  from the summaries, so "what is running on omarchy" needs nobody.
+- **Act locally.** Every agent tool acts on this node's agents only, and a
+  Kuru is told only about its own node's agents finishing or blocking. The
+  `[kururu]` notices about a node's agents go to that node's Kuru and to
+  nobody else's (`peerkuru.test.ts` pins it).
+- **Ask a peer.** `ask_kuru(node, message, wait)` types the message into the
+  other node's Kuru, through that node's own outbox, as `[kuru@mac] …`.
+  `wait: false` returns once that node has the message. `wait: true` also
+  waits for the reply that answered it (`timeout_s`, as `wait_agent` takes).
+  `read_kuru(node, turns)` reads another Kuru's recent conversation off what
+  that node last sent. It works while the node is away, and is used only
+  when asked: nothing is pushed into a Kuru when a node comes back.
+- **Boards are data, not agents.** `cards`, `add_card`, `edit_card` and
+  `move_card` take a `node` and act on that node's board directly, over the
+  link (`board` / `board-done`). The workspace is named by its name, since
+  ids are each node's own. The card's history says "the Kuru on mac"
+  (`peer:mac`). `add_card` with `run` and `run_card` are refused for
+  another node, because a run starts an agent.
+
+**Why words and not tool calls.** A Kuru could have been handed another
+node's MCP verbs over the link. Then two Kurus would be near Omarchy's
+agents, each acting on them with nobody saying which had. Instead a request
+is words, typed into Omarchy's Kuru the way a Telegram line is. The one Kuru
+that acts on Omarchy's agents is Omarchy's, it hears the request in its own
+context, and "delivered" means what it means for every message: that Kuru's
+own hook said it took it.
+
+### The marks
+
+Words from another node are typed behind a mark the *receiving* node writes,
+from the link's own peer. A mark off the wire would be a node saying it is
+another.
+
+| mark | from | means |
+|---|---|---|
+| `[user@mac]` | the user, in the Mac's drawer or speaking to it with `@box …` | their own words, with their authority; the reply goes back there |
+| `[user@mac] [voice]` | the same, spoken | transcribed on the Mac, so a name may be misheard |
+| `[kuru@mac]` | the Mac's Kuru, through `ask_kuru` | a colleague asking; done within what the user would plainly want, the reply goes back to it |
+
+The plan wrote a bare `[mac]`. Both halves are there because a node can be
+called anything a hostname can. One called `voice`, `telegram` or `kururu`
+would otherwise have made its Kuru's every message read as speech, a phone
+or a notice. The user's slash command goes in bare, as a phone's does in
+`channelWords`. Another Kuru's never does. The grammar is in
+`shared/channels.ts`, beside `[telegram]`.
+
+A compromised child can therefore type into the Mac's Kuru as itself. That
+was accepted in [the plan's security section](plans/kururu-parent-child.md#security):
+the mark says which node, and the role says what each mark means, as it
+does for `[telegram]`.
+
+### One drawer
+
+The drawer holds every node's conversation at once. Each node pushes its own
+Kuru's newest items (`kuru-turns`, `peerItems`, at most once a second and
+only when they changed). They arrive on every client as the `kuru` message's
+`peers`, and the drawer merges them with this node's own (`mergeNodes`):
+
+- A chip per node narrows the list to one. A node that is away is greyed,
+  says when it was last seen, and keeps its last items. Those are cached in
+  `kuru-peers.json` in the state directory, so a restart while it is away
+  still shows them.
+- Every line of another node's wears that node's name. The user's words
+  written at one node and taken at another say "from mac".
+- The composer is this node's Kuru's unless the message starts `@box`.
+  Spoken, "at box, …", "hey box …" or "box, …" does it too (`addressOf`).
+  Reply on another node's reply starts the message that way.
+- A message sent from one node to another is on the sender's outbox until
+  it arrives, and a turn on the receiver after. It is drawn once: the turn
+  once some node has it, the outbox's copy until then.
+
+What crosses is the conversation, not a copy into anybody's database. A
+reply loses its file links, which name another disk. A `[kururu]` notice
+crosses as its line, without the agent reply it quoted, for the reason the
+Telegram channel never carries one: a reply can quote a file with a secret
+in it. Another Kuru's message keeps its words.
+
+### Words for another node, through the outbox
+
+`@box start the build` is heard and queued on the sender's outbox like any
+message, in order with the rest. It is then handed to the link rather than
+to this node's Kuru (`say`). On the receiving node it goes into that node's
+outbox, marked, the way a Telegram line goes in. Every move it makes there
+is reported back (`say-state`), so the sender's drawer reads "Sent",
+"Typed", then delivered when that Kuru's hook took it. The audio of a clip
+stays on the Mac and only its words cross.
+
+A node that is away holds nothing up. The user's words wait on the sender's
+outbox ("Not sent yet: box is away"), and go the moment the link is back,
+under the same id, which the receiver keeps one copy of. A Kuru's
+`ask_kuru` to a node that is away is refused at once, so Kuru tells the user
+rather than having a question answered at three in the morning to nobody.
+
+### Who hears a reply
+
+Every node hears every linked node's Kuru's replies (`kuru-replied`), with
+what the turn answered (`TurnOrigin`). A child has no speakers, so with the
+lid open its Kuru talks through the Mac, by `peerReplySpoken`:
+
+- **Said on the Mac:** a reply to what the Mac's user said to it
+  (`user@mac`), and one about its own agents (a turn that answered nothing:
+  a notice).
+- **Not said on the Mac:** a reply to the Mac's Kuru, which hears the answer
+  in its tool call and says it in its own words; a reply to somebody at the
+  child's own page; a reply to a channel.
+
+A reply said here goes through this node's own voice, hush and missed
+rules, under a key of the other node's own on the missed list
+(`node:<id>`), as utterance `u-<node id>-<item id>`. That is how the drawer
+finds its fate again, after a restart too. This node's Kuru keeps its own
+rule (`spokenHere`): a turn that answered only another node is not said
+here either.
+
+### The messages
+
+Added to `/link` in phase 3, all ignored by a node from before them. A node
+says it speaks them with `talks` in its summary. `@` to an older node is
+refused with "update it" rather than sent into silence.
+
+| message | way | what |
+|---|---|---|
+| `kuru-turns` | each node to all | its Kuru's newest items, on change and when a link comes up |
+| `say` | sender to receiver | words for the receiver's Kuru: `who` (user or kuru), `spoken`, an outbox id |
+| `say-state` | receiver to sender | each move of one `say` on the receiver's outbox |
+| `kuru-replied` | each node to all | a reply, what its turn answered, and the outbox ids it took (how `ask_kuru` knows its answer) |
+| `board` / `board-done` | asker to node, and back | one board verb on that node's Kuru profile |
+
+A node's Kuru, to the others, is the profile its Telegram channel is pointed
+at, else the active one. On a child that is its one profile.
 
 ## Backups
 
@@ -262,6 +403,7 @@ straight through both machines.
 | `node.json` | config, `0600` | this node's id and its Ed25519 and X25519 pairs; on the parent, the roster's signing pair. Never backed up, never sent |
 | `nodes.json` | config, `0600` | the newest roster, the anchor, and on the parent each child's share token. Never backed up |
 | `nodes-seen.json` | state | each node's last summary and when it was heard; rebuilt by the next summary |
+| `kuru-peers.json` | state | each node's last pushed Kuru conversation, for the drawer while it is away; rebuilt by the next push |
 
 A `node.json` the server cannot read is left as it is, and nodes are off for
 that run. A new identity would be a member nobody enrolled.
@@ -283,3 +425,16 @@ Name each socket `ptyhost.sock`, or `kill-ptyhosts` cannot find it afterwards.
 
 `kill -STOP` on a server's pid is a lid closing (no FIN), and `kill -CONT` opens it again.
 `kill -USR2` on its runner is a restart.
+
+**For the Kurus**, give both instances `HOME=<scratch>`, `SHELL=/bin/sh`
+and a `PATH` whose first `claude` is a stand-in. The stand-in posts
+`{agentId, status: "idle"}` to `/api/report` on start. For every line typed
+into it, it posts a `working` report with the line as `message`, then a
+`done` with a `reply`. Those are the prompt hook and the Stop hook, which
+is everything the outbox, the drawer and `kuru-replied` read. Then, in
+place of the user and the Mac's Kuru:
+
+- `{"type":"kuru-say","profileId":…,"id":"drawer-msg-0001","text":"@box hello","at":…}`
+  on the first instance's socket;
+- `POST /mcp?profile=<id>&session=x` with `tools/call` for `ask_kuru`,
+  `read_kuru`, or `add_card` with `node`.

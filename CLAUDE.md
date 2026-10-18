@@ -306,7 +306,13 @@ The load-bearing invariants, one line each, with the argument behind the link:
   link into `nodes/<name>/`. A workspace moves by its board alone, never
   its code, and only with no agent running and no worktree standing. The
   source removes it only once the target has answered, and the move id
-  makes a retry the same move. → [nodes](docs/nodes.md)
+  makes a retry the same move. Each node's Kuru acts on its own node's
+  agents only and hears only their notices; another node's is asked with
+  words typed into it through its own outbox — `[kuru@mac]` from
+  `ask_kuru`, `[user@mac]` from a drawer's `@box` — the mark written by
+  the receiver, never off the wire. Board verbs with a `node` act directly,
+  never a run. A notice crosses into another drawer without the reply it
+  quoted. → [nodes](docs/nodes.md#kurus-as-peers)
 - **A shell on another machine is a command line, never a host change.** A
   machine is an ssh host the user named (Settings → Machines, `vps.json`); its
   shell is `ssh -t` in an ordinary pty, built and read back by
