@@ -874,9 +874,10 @@ function writeDraft(profileId: string, text: string) {
 
 /**
  * Typing to Kuru. Enter sends and Shift+Enter is a new line, as every chat
- * box has agreed; Escape gives the keyboard back to the panes. The send and
- * the mic are inside the box, at its foot: the mic held records, tapped
- * toggles. What is typed
+ * box has agreed; Escape gives the keyboard back to the panes. There is no
+ * send button, because Enter is one on every keyboard this box is typed on,
+ * the phone's included. The mic is inside the box, at its foot: held, it
+ * records, and tapped, it toggles. What is typed
  * and not yet sent survives closing the drawer and reloading the page — a
  * thought half-written must not vanish because the drawer did — and the field
  * grows with it up to `.kuru-field`'s `max-height`, so writing more than one
@@ -938,9 +939,6 @@ function Composer({ profileId, onEditing, talking }: { profileId: string; onEdit
             }
           }}
         />
-        <button type="submit" className="kuru-send" disabled={!text.trim()} title="Send (Enter)" aria-label="Send">
-          <Icon name="run" />
-        </button>
         <button
           type="button"
           className={`kuru-mic ${talking ? "kuru-mic-listening" : ""}`}
