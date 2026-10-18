@@ -942,8 +942,10 @@ export function Sidebar({
           strip is drawn in a browser tab too when it has them — a line that
           holds something is not thirty pixels of nothing — and stays the empty
           drag handle on a phone's full-screen sidebar, which has its close
-          button for a way out. The name leads and the toggle stands at the
-          far end, on the edge the sidebar folds towards. */}
+          button for a way out. The name leads and the toggle stands right
+          after it — where the two also stand at the head of the top-left
+          pane's strip while the sidebar is away, so folding it moves
+          neither. */}
       {toggle ? (
         <div className="sidebar-drag sidebar-top">{toggle}</div>
       ) : (

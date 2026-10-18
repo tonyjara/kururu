@@ -1395,15 +1395,14 @@ export function App() {
     />
   );
   const drawerOpen = kuruDrawer.open || (needsOpen && !!needs);
-  /* The name first and the toggle at the far end while the sidebar is up —
-     the toggle on the edge the sidebar closes towards — and the toggle first,
-     just after the traffic lights, while it is away, the way a Mac app's
-     sidebar button sits. A phone's bar has it first, under the thumb. */
+  /* The name and then the toggle, in the same place whether the sidebar is up
+     or away, so a press does not move the button it was on. A phone's bar has
+     the toggle first, under the thumb. */
   const toggle = (
     <WorkspaceToggle
       name={workspace.name}
       sidebarOpen={sidebarOpen}
-      toggleLast={sidebarOpen && !narrow}
+      toggleFirst={narrow}
       onToggle={() => run("toggle-sidebar")}
     />
   );
@@ -1415,11 +1414,11 @@ export function App() {
        decide which of those applies, which is the whole point of stating the
        breakpoint once. `app-window` says this is Electron rather than a browser
        tab, and exists for exactly one thing: the traffic lights, which float
-       over this corner and are not there on a phone. `app-band` is the desktop
-       with its sidebar up, when the top row of pane strips is the middle of
-       the window's top band — see `.app-band` in the stylesheet. */
+       over this corner and are not there on a phone. `app-band` is the desktop,
+       where the top row of pane strips is the middle of the window's top band
+       — see `.app-band` in the stylesheet. */
     <div
-      className={`app ${zen ? "app-zen" : ""} ${desktop() ? "app-window" : ""} ${sidebarOpen ? "" : "app-sidebar-hidden"} ${!sidebarOpen && !zen && !narrow ? "app-stage-top" : ""} ${sidebarOpen && !zen && !narrow ? "app-band" : ""}`}
+      className={`app ${zen ? "app-zen" : ""} ${desktop() ? "app-window" : ""} ${sidebarOpen ? "" : "app-sidebar-hidden"} ${!zen && !narrow ? "app-band" : ""}`}
       style={{ "--sidebar-w": `${sidebarWidth}px`, "--files-w": `${filesWidth}px`, "--drawer-w": `${drawerWidth}px` } as React.CSSProperties}
     >
       {/* Everything but the bottom bar, side by side: the sidebar, the panes,
@@ -1480,16 +1479,13 @@ export function App() {
             sitting on a terminal with nothing to grab the window by at all —
             which mattered little while hiding it was a keyboard gesture and
             matters rather more now that a narrow window starts that way. */}
-        {/* On a desktop it carries what the sidebar's top would have: the
-            toggle that brings the sidebar back and the workspace's name. A
-            phone has those in its bottom bar and keeps the empty strip. */}
-        {!sidebarOpen && !zen && (narrow ? (
-          <div className="stage-drag" aria-hidden="true" />
-        ) : (
-          <div className="stage-top">
-            {toggle}
-          </div>
-        ))}
+        {/* A phone keeps the empty strip, since its toggle is in the bottom
+            bar. On a desktop nothing is drawn here: the toggle that brings the
+            sidebar back and the workspace's name go to the head of the
+            top-left pane's strip (`lead`, below), so the strips stay on the
+            band's row and the sidebar folds into it rather than dropping a
+            bar over the panes. */}
+        {!sidebarOpen && !zen && narrow && <div className="stage-drag" aria-hidden="true" />}
         <main className="panes">
           <Panes
             node={workspace.layout}
@@ -1517,6 +1513,9 @@ export function App() {
             /* The drawers' chips while both drawers are shut, for the
                top-right pane's strip. See `DrawerChips.tsx`. */
             chips={narrow || drawerOpen ? null : chips}
+            /* The sidebar's toggle and the workspace's name while the sidebar
+               is away, for the top-left pane's strip. See `leadPane`. */
+            lead={!sidebarOpen && !zen && !narrow ? toggle : null}
           />
         </main>
         {/* Between the panes and the status bar, which puts it directly above

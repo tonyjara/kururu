@@ -182,10 +182,14 @@ export function StatusBar({
  * name sits where a window's title would. On a phone they are still the
  * bottom bar's left end, where a thumb is.
  *
- * `toggleLast` is the sidebar's top line: the name leads and the toggle stands
- * at the far end, on the edge the sidebar folds towards. With the sidebar away
- * the toggle comes first, just after the traffic lights, which is where a Mac
- * app keeps the button that brings its sidebar back.
+ * The name leads and the toggle stands right after it — in the sidebar's top
+ * line and at the head of the top-left pane's strip alike, both starting at
+ * the same inset — so that putting the sidebar away moves neither: the button
+ * that was under the pointer for the click is still there for the next one.
+ * It stood at the sidebar's far end for a day, on the edge the sidebar folds
+ * towards, and jumped to the other side of the name on every press.
+ * `toggleFirst` is the phone's bar, where the toggle is navigation and goes
+ * first, under the thumb.
  *
  * The name is heavier than it was. With the bar it was one quiet label among
  * several; up here it is the window's title, and it is read as one.
@@ -193,12 +197,12 @@ export function StatusBar({
 export function WorkspaceToggle({
   name,
   sidebarOpen,
-  toggleLast,
+  toggleFirst,
   onToggle,
 }: {
   name: string;
   sidebarOpen: boolean;
-  toggleLast: boolean;
+  toggleFirst: boolean;
   onToggle: () => void;
 }) {
   const button = (
@@ -213,10 +217,10 @@ export function WorkspaceToggle({
     </button>
   );
   return (
-    <span className={`ws-toggle ${toggleLast ? "ws-toggle-last" : ""}`}>
-      {!toggleLast && button}
+    <span className={`ws-toggle ${toggleFirst ? "ws-toggle-first" : ""}`}>
+      {toggleFirst && button}
       <span className="sb-workspace">{name}</span>
-      {toggleLast && button}
+      {!toggleFirst && button}
     </span>
   );
 }
