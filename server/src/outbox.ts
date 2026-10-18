@@ -554,12 +554,15 @@ export class Outbox {
   private relayTo(entry: StoredOutboxEntry, peer: { nodeId: string; name: string; rest: string }): void {
     this.handed.add(entry.id);
     const why = this.deps.relay ? this.deps.relay(peer.nodeId, { id: entry.id, at: entry.at, text: peer.rest, spoken: spokenMessage(entry) }) : "nodes are off";
+    const was = entry.note;
     if (why) {
       this.handed.delete(entry.id);
-      entry.note = `Not sent: ${why}.`;
+      entry.note = `Not sent yet: ${why}.`;
     } else if (entry.typedAt === null) entry.note = `Sent to the Kuru on ${peer.name}.`;
     this.quiet(entry.id);
-    this.changed();
+    // Tried again on every pass of the list while that node is away, and
+    // only news the first time.
+    if (entry.note !== was) this.changed();
   }
 
   private typed(entry: StoredOutboxEntry): void {
