@@ -18,7 +18,13 @@ import { join } from "node:path";
 import {
   CHUNK_MAX,
   PAIRING_MS,
+  adoptSharedTelegram,
   adoptTelegramSettings,
+  asTelegramSwitch,
+  laterSwitch,
+  switchPayload,
+  switchTime,
+  withSwitch,
   carriesCode,
   channelMessageId,
   channelOfMessage,
@@ -54,7 +60,7 @@ function message(over: Partial<IncomingMessage> = {}): IncomingMessage {
     messageId: 10,
     chatId: ME,
     chatType: "private",
-    from: { id: ME, name: "Tony", username: "tony", bot: false },
+    from: { id: ME, name: "Sam", username: "sam", bot: false },
     at: 50_000,
     text: "check the build",
     ...over,
@@ -105,8 +111,8 @@ describe("judge", () => {
 
   it("takes the pairing code from an account not yet on the list", () => {
     const ctx: JudgeContext = { ...ON, allowed: [], enabled: false, pairing: { code: "K7Q2P9", until: 70_000 } };
-    const stranger = message({ chatId: STRANGER, from: { id: STRANGER, name: "Tony", username: null, bot: false } });
-    expect(judge({ ...stranger, text: "/start K7Q2P9" }, ctx)).toEqual({ kind: "pair", user: { id: STRANGER, name: "Tony", username: null } });
+    const stranger = message({ chatId: STRANGER, from: { id: STRANGER, name: "Sam", username: null, bot: false } });
+    expect(judge({ ...stranger, text: "/start K7Q2P9" }, ctx)).toEqual({ kind: "pair", user: { id: STRANGER, name: "Sam", username: null } });
     expect(judge({ ...stranger, text: "k7q2p9" }, ctx).kind).toBe("pair");
     expect(judge({ ...stranger, text: "my code is K7Q2P9" }, ctx).kind).toBe("ignore");
     expect(judge({ ...stranger, text: "K7Q2P9" }, { ...ctx, now: 80_000 }).kind).toBe("ignore");
@@ -210,7 +216,7 @@ describe("settings and the token", () => {
   });
 
   it("names an account by what it showed", () => {
-    expect(userLabel({ id: ME, name: "Tony", username: "tony" })).toBe("Tony (@tony)");
+    expect(userLabel({ id: ME, name: "Sam", username: "sam" })).toBe("Sam (@sam)");
     expect(userLabel({ id: ME, name: null, username: null })).toBe(`id ${ME}`);
   });
 });
@@ -220,7 +226,7 @@ describe("updatesFrom", () => {
     const body = {
       ok: true,
       result: [
-        { update_id: 7, message: { message_id: 1, date: 100, chat: { id: 111, type: "private" }, from: { id: 111, is_bot: false, first_name: "To", last_name: "Ny", username: "tony" }, text: "hi" } },
+        { update_id: 7, message: { message_id: 1, date: 100, chat: { id: 111, type: "private" }, from: { id: 111, is_bot: false, first_name: "Sa", last_name: "M", username: "sam" }, text: "hi" } },
         { update_id: 9, edited_message: { message_id: 1 } },
         { update_id: 8, message: { message_id: 2, date: 101, chat: { id: 111, type: "private" }, from: { id: 111, is_bot: false }, photo: [] } },
       ],
@@ -228,7 +234,7 @@ describe("updatesFrom", () => {
     const got = updatesFrom(body)!;
     expect(got.last).toBe(9);
     expect(got.messages).toHaveLength(2);
-    expect(got.messages[0]).toMatchObject({ chatId: "111", at: 100_000, text: "hi", from: { id: "111", name: "To Ny", username: "tony", bot: false } });
+    expect(got.messages[0]).toMatchObject({ chatId: "111", at: 100_000, text: "hi", from: { id: "111", name: "Sa M", username: "sam", bot: false } });
     expect(got.messages[1]!.text).toBeNull();
     expect(updatesFrom({ ok: false })).toBeNull();
   });
@@ -290,7 +296,7 @@ function fakeTelegram() {
       const result = pending.splice(0);
       return Response.json({ ok: true, result });
     }
-    if (method === "getChat") return Response.json({ ok: true, result: { id: Number(params.chat_id), first_name: "Tony", username: "tony" } });
+    if (method === "getChat") return Response.json({ ok: true, result: { id: Number(params.chat_id), first_name: "Sam", username: "sam" } });
     return Response.json({ ok: true, result: { message_id: calls.length } });
   };
   return {
@@ -300,7 +306,7 @@ function fakeTelegram() {
     deliver(from: string, text: string | null, chat = from, extra: Record<string, unknown> = {}) {
       pending.push({
         update_id: nextUpdate++,
-        message: { message_id: nextUpdate, date: Math.floor(Date.now() / 1000) + 1, chat: { id: Number(chat), type: Number(chat) < 0 ? "group" : "private" }, from: { id: Number(from), is_bot: false, first_name: "Tony" }, ...(text === null ? { photo: [] } : { text }), ...extra },
+        message: { message_id: nextUpdate, date: Math.floor(Date.now() / 1000) + 1, chat: { id: Number(chat), type: Number(chat) < 0 ? "group" : "private" }, from: { id: Number(from), is_bot: false, first_name: "Sam" }, ...(text === null ? { photo: [] } : { text }), ...extra },
       });
       for (const wake of waiters.splice(0)) wake();
     },
@@ -619,5 +625,44 @@ describe("Channels", () => {
     channels.outboxMoved([entry("telegram-1-2", "failed")], () => "pk-main");
     expect(warned).toHaveLength(1);
     expect(warned[0]).toContain('"check the build" did not reach Kuru');
+  });
+});
+
+describe("the switch from any node", () => {
+  const allowed = [{ id: "111222333", name: "Sam", username: null, addedAt: 1 }];
+  const roster = adoptSharedTelegram({ enabled: true, enabledAt: 100, switchedAt: 100, switchedBy: "n0000000000a1", allowed, bot: null })!;
+  const flip = (enabled: boolean, at: number, by = "n0000000000b2") => ({ enabled, at, by, told: true, sig: "s" });
+
+  it("tells a roster from a parent that takes flips from one that predates them", () => {
+    expect(roster.switchedAt).toBe(100);
+    const old = adoptSharedTelegram({ enabled: true, enabledAt: 100, allowed, bot: null })!;
+    expect("switchedAt" in old).toBe(false);
+    expect(adoptSharedTelegram({ enabled: false, enabledAt: null, switchedAt: null, allowed, bot: null })!.switchedAt).toBeNull();
+  });
+
+  it("goes by the later word, a tie by node id, and on with nobody allowed is off", () => {
+    expect(withSwitch(roster, flip(false, 99))).toBe(roster);
+    expect(withSwitch(roster, flip(false, 101))).toMatchObject({ enabled: false, enabledAt: null, switchedAt: 101, switchedBy: "n0000000000b2" });
+    expect(withSwitch({ ...roster, enabled: false }, flip(true, 150))).toMatchObject({ enabled: true, enabledAt: 150 });
+    expect(withSwitch({ ...roster, allowed: [] }, flip(true, 150)).enabled).toBe(false);
+    expect(laterSwitch({ at: 5, by: "a" }, { at: 5, by: "b" })).toBe(true);
+    expect(laterSwitch({ at: 5, by: "b" }, { at: 5, by: "a" })).toBe(false);
+    expect(laterSwitch(null, { at: 1, by: null })).toBe(true);
+  });
+
+  it("stamps a new flip after the word it replaces, whatever this clock says", () => {
+    expect(switchTime(1_000, 400)).toBe(1_000);
+    expect(switchTime(1_000, 5_000)).toBe(5_001);
+    expect(switchTime(1_000, null)).toBe(1_000);
+  });
+
+  it("checks a flip off the wire, and signs every field but the signature", () => {
+    expect(asTelegramSwitch(flip(true, 5))).toEqual(flip(true, 5));
+    expect(asTelegramSwitch({ ...flip(true, 5), at: Number.NaN })).toBeNull();
+    expect(asTelegramSwitch({ ...flip(true, 5), enabled: "yes" })).toBeNull();
+    expect(asTelegramSwitch({ ...flip(true, 5), by: "../x" })).toBeNull();
+    const { sig: _sig, ...unsigned } = flip(true, 5);
+    expect(switchPayload(unsigned)).not.toBe(switchPayload({ ...unsigned, enabled: false }));
+    expect(switchPayload(unsigned)).not.toBe(switchPayload({ ...unsigned, told: false }));
   });
 });

@@ -533,16 +533,16 @@ async function refreshClaudeReady(): Promise<void> {
 /**
  * Whether this node may poll Telegram for the others (`lead.ts`), and the
  * sentence that says why not. Eligible is the plan's three things: the
- * channel is on — the parent's switch, in the roster — this node holds the
- * bot's token — its own on the parent, lent on a child — and a Kuru that
- * could answer, which is Claude signed in.
+ * channel is on — the switch as this node last heard it, from the roster or
+ * a node's flip — this node holds the bot's token — its own on the parent,
+ * lent on a child — and a Kuru that could answer, which is Claude signed in.
  */
 function leadEligibility(): { eligible: boolean; why: string | null } {
   const shared = nodes.rosterTelegram();
   const parentId = nodes.parentId();
   const parent = parentId ? (nodes.nameOf(parentId) ?? "the parent") : "the parent";
   if (!shared) return { eligible: false, why: "the roster carries no Telegram channel" };
-  if (!shared.enabled) return { eligible: false, why: `the channel is off (${nodeSubject(parent)}'s Settings → Channels)` };
+  if (!channels.telegram.switchedOn) return { eligible: false, why: "the channel is off (Settings → Channels, on any node)" };
   if (nodes.role() === "child") {
     if (!secrets.heldFrom("telegram")) return { eligible: false, why: `${nodeSubject(parent)} has not lent this node the bot's token (its Settings → Nodes → ${nodes.name()} → Secrets → Telegram)` };
   } else if (!channels.telegram.hasToken) return { eligible: false, why: "no bot token here" };
@@ -5016,13 +5016,17 @@ function handleMessage(ws: WebSocket, raw: string): void {
     case "channel-set":
       void replyAsync(ws, msg.id, async () => {
         const change: { enabled?: boolean; profileKey?: string | null; speakReplies?: boolean } = {};
-        if (typeof msg.enabled === "boolean") change.enabled = msg.enabled;
-        // A token held from the parent is the parent's bot, and its switch
-        // is the parent's: it rides in the roster, and this node polls the
-        // bot for the others only while the rank says so (`lead.ts`).
-        if (change.enabled !== undefined) {
-          const held = secrets.heldFrom("telegram");
-          if (held) throw new Error(`This bot is ${held.from}'s, and so is its switch: turn the channel on or off in ${held.from}'s Settings → Channels. This node answers the chat while ${held.from} is away.`);
+        // A shared channel's switch is every node's, and flipped for all of
+        // them at once by a signed flip (`lead.ts`); this node polls the bot
+        // for the others only while the rank says so. A token held from a
+        // parent too old to share the chat is that parent's bot alone.
+        if (typeof msg.enabled === "boolean") {
+          if (channels.telegram.isShared && lead) lead.flip(msg.enabled);
+          else {
+            const held = secrets.heldFrom("telegram");
+            if (held) throw new Error(`This bot is ${held.from}'s, and its kururu is too old to share the chat: turn the channel on or off in ${held.from}'s Settings → Channels, or update it.`);
+            change.enabled = msg.enabled;
+          }
         }
         if (typeof msg.speakReplies === "boolean") change.speakReplies = msg.speakReplies;
         if (msg.profileId === null) change.profileKey = null;
@@ -7374,6 +7378,7 @@ async function attach(port: Port): Promise<void> {
       return true;
     },
     changed: () => nodes.queueSummary(),
+    switched: syncRosterChannels,
     log: (line) => console.log(`kururu: ${line}`),
   });
   for (const agentId of workspaces.allAgents()) {

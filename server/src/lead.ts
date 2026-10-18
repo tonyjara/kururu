@@ -25,14 +25,25 @@
  * **Why not a vote.** Two nodes that both believe they lead are a split
  * tailnet, and Telegram's 409 already says so to both; rank decides who
  * backs off (`LeadGate.conflict`). No node needs to agree with another
- * about anything but the roster, which the parent signs.
+ * about anything but the roster, which the parent signs, and the switch.
+ *
+ * **The switch from any node.** The channel is turned on and off from
+ * whichever node's Settings the user has in front of them — the box's,
+ * from a phone, while the Mac is shut. A flip is signed with that node's
+ * own key and handed to every node it can reach, which hand it on; each
+ * goes by the latest word, and the parent writes it into the next roster
+ * when it hears it (`TelegramSwitch` in `shared/channels.ts` argues it).
+ * Eligibility is the switch as this node has it, so a node that hears
+ * "off" stops polling there and then, and the rule above still makes one
+ * poller of whoever is left.
  *
  * On the restartable side, with nothing near a pty.
  */
 import { randomBytes } from "node:crypto";
 
-import { backLine, tookLine, type LeadStatus } from "../../shared/channels";
-import { asLeadState, asTelegramIn, asTelegramOut, LeadGate, type LeadInput, type LeadPeer, type LinkMessage, type NodeStatus } from "../../shared/nodes";
+import { asTelegramSwitch, backLine, nodeSubject, switchPayload, switchTime, tookLine, type LeadStatus, type TelegramSwitch } from "../../shared/channels";
+import { asLeadState, asTelegramIn, asTelegramOut, LeadGate, type LeadInput, type LeadPeer, type LinkMessage, type NodeStatus, type Sign, type Verify } from "../../shared/nodes";
+import { signAsNode, verifySigned } from "./nodekeys";
 import type { NodeHost } from "./nodes";
 import type { TelegramChannel, TelegramShare } from "./telegram";
 
@@ -44,6 +55,8 @@ type Nodes = Pick<
   | "selfId"
   | "role"
   | "parentId"
+  | "name"
+  | "member"
   | "members"
   | "ownRank"
   | "statuses"
@@ -71,7 +84,12 @@ export interface LeadDeps {
   say: (id: string, at: number, text: string) => boolean;
   /** What this node says about itself — its summary — may have moved. */
   changed: () => void;
+  /** The switch moved on the parent's own file, by a flip made here or heard: the roster again. */
+  switched?: () => void;
   log: (line: string) => void;
+  /** For tests: this node's key, and the check of another's. */
+  sign?: Sign;
+  verify?: Verify;
   /** For tests: the clock the rule's times are read off. */
   now?: () => number;
 }
@@ -159,9 +177,15 @@ export class TelegramLead {
     nodes.on("telegram-out-ack", (_peer, message) => {
       if (message.type === "telegram-out-ack" && typeof message.id === "string") telegram.relayed(message.id);
     });
+    nodes.on("telegram-switch", (peer, message) => {
+      if (message.type === "telegram-switch") this.heard(peer, message.switch);
+    });
 
     nodes.onLinkUp((peer) => {
       telegram.deliverHeld(peer);
+      // A flip made while this peer was away — the Mac shut — reaches it now.
+      const pending = telegram.pendingSwitch();
+      if (pending) nodes.send(peer, { type: "telegram-switch", switch: pending });
       this.evaluate();
     });
     nodes.onLinkDown((peer) => {
@@ -343,6 +367,80 @@ export class TelegramLead {
     this.evaluate();
   }
 
+  /**
+   * Turn the shared channel on or off from this node: a flip, signed here,
+   * taken here and handed to every node this one can reach. Throws the
+   * sentence the page prints when it cannot be — the same one `status`
+   * gives it beforehand.
+   */
+  flip(enabled: boolean): void {
+    const { telegram, nodes } = this.deps;
+    const refusal = this.refusal(enabled);
+    if (refusal) throw new Error(refusal);
+    if (telegram.switchedOn === enabled) return;
+    const self = nodes.selfId();
+    const unsigned = { enabled, at: switchTime(Date.now(), telegram.switchWord()?.at ?? null), by: self, told: telegram.hasToken };
+    const change: TelegramSwitch = { ...unsigned, sig: (this.deps.sign ?? signAsNode)(switchPayload(unsigned)) };
+    telegram.takeSwitch(change);
+    this.deps.log(`lead: the Telegram channel was switched ${enabled ? "on" : "off"} here`);
+    this.spread(change, null);
+    this.afterSwitch();
+  }
+
+  /**
+   * Another node's flip, from the peer that handed it on. Checked against
+   * the roster's key for the node that made it — not the peer's, since a
+   * flip crosses the mesh by any road — and taken only when it is the later
+   * word, which is also what stops it going round for ever.
+   */
+  private heard(peer: string, raw: unknown): void {
+    const change = asTelegramSwitch(raw);
+    const maker = change ? this.deps.nodes.member(change.by) : undefined;
+    if (!change || !maker) return;
+    const { sig, ...unsigned } = change;
+    if (!(this.deps.verify ?? verifySigned)(switchPayload(unsigned), sig, maker.keys.sign)) {
+      this.deps.log(`lead: a Telegram switch said to be ${maker.name}'s, from ${this.name(peer)}, is not signed by it; ignored`);
+      return;
+    }
+    if (!this.deps.telegram.takeSwitch(change)) return;
+    this.deps.log(`lead: the Telegram channel was switched ${change.enabled ? "on" : "off"} on ${maker.name}`);
+    this.spread(change, peer);
+    this.afterSwitch();
+  }
+
+  private spread(change: TelegramSwitch, from: string | null): void {
+    for (const id of this.deps.nodes.linkedIds()) if (id !== from) this.deps.nodes.send(id, { type: "telegram-switch", switch: change });
+  }
+
+  private afterSwitch(): void {
+    if (this.deps.nodes.role() === "parent") this.deps.switched?.();
+    this.deps.changed();
+    this.evaluate();
+  }
+
+  /**
+   * Why the switch cannot be turned on — or off — from this node, or null.
+   * Off is always this node's to say, since it is the safe way to be wrong;
+   * on wants somebody on the list and a token here, because the node the
+   * user is standing at is often the only one awake to read the chat.
+   */
+  private refusal(enabled: boolean): string | null {
+    const { telegram, nodes } = this.deps;
+    if (!telegram.isShared) return null;
+    const parentId = nodes.parentId();
+    const parent = nodeSubject((parentId && nodes.nameOf(parentId)) || "the parent");
+    const child = nodes.role() === "child";
+    if (!telegram.switchable) return `${parent[0]!.toUpperCase()}${parent.slice(1)}'s kururu is from before the channel could be switched on any node: switch it there, or update it.`;
+    if (!enabled) return null;
+    if (telegram.allowedCount === 0) return child ? `Nobody is allowed to talk to Kuru yet: pair your account in ${parent}'s Settings → Channels.` : "Pair your Telegram account first: nobody is allowed to talk to Kuru yet.";
+    if (!telegram.hasToken) {
+      return child
+        ? `This node holds no bot token, so it could not read the chat. Lend it from ${parent}'s Settings → Nodes → ${nodes.name()} → Secrets → Telegram, then switch it on here.`
+        : "Give kururu a bot token first.";
+    }
+    return null;
+  }
+
   /** Where the poll stands, for Settings → Channels. */
   status(): LeadStatus | null {
     const { telegram, nodes } = this.deps;
@@ -352,6 +450,7 @@ export class TelegramLead {
     const eligible = this.deps.eligible();
     const statuses = new Map(nodes.statuses().map((s) => [s.id, s] as const));
     const holder = this.holder();
+    const word = telegram.switchWord();
     return {
       polls: telegram.polling,
       holder: holder ? this.name(holder) : null,
@@ -365,6 +464,13 @@ export class TelegramLead {
         const peer = s ? leadPeer(s, nodes.liveSummaryOf(m.id)) : null;
         return { id: m.id, name: m.name, rank: m.rank, self: false, parent: m.id === parent, up: peer?.up ?? false, since: s?.since ?? null, eligible: peer?.eligible ?? null, polls: peer?.polls ?? false };
       }),
+      switch: {
+        by: word?.by ? this.name(word.by) : null,
+        at: word?.at ?? null,
+        pending: telegram.pendingSwitch() !== null,
+        refuseOn: this.refusal(true),
+        refuseOff: this.refusal(false),
+      },
     };
   }
 
