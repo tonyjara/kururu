@@ -2248,8 +2248,8 @@ a.machine-name:hover {
 /* And no focus ring, because there is nothing for it to distinguish this pane
    from: a narrow window draws one pane, so the outline would be a hairline
    traced around the edge of the screen saying something that is always true. */
-:root[data-narrow] .pane-on {
-  outline: none;
+:root[data-narrow] .pane-on::after {
+  display: none;
 }
 :root[data-narrow] .term {
   padding: 2px 3px;
@@ -2691,38 +2691,37 @@ a.button {
 }
 
 /* The focused pane is the one the keyboard is going to, and with the borders
-   gone it has to say so some other way. Its strip used to lift to
-   `--chrome-high`, and that was most of the signal; since the top band it
-   cannot, because with one pane up — which is most of the time — the lit strip
-   was the whole middle of the band, and a title bar lit in the middle is not
-   one bar. So the lift went into the band's rule instead: under the focused
-   pane's strip the hairline is the accent, two borders thick, where under
-   every other strip it is `--line`. The rest is the ring — a hairline in the
-   accent, mixed most of the way out, on the reasoning `.agent-item-on`
-   already uses for the same job. Deliberately not grey: a grey ring here
-   would be the border this sweep just removed, reinstated on the one pane you
-   are looking at.
+   gone it has to say so some other way: a ring, a hairline in the accent mixed
+   most of the way out, on the reasoning `.agent-item-on` already uses for the
+   same job. Deliberately not grey: a grey ring here would be the border this
+   sweep just removed, reinstated on the one pane you are looking at. The ring
+   is the whole signal. The strip's rule went accent under the focused pane for
+   a while (a3226fc), and two marks for one fact was one too many.
 
-   An `outline` rather than a second `box-shadow` because `box-shadow` is the
-   skin's (`--frame-on`), and a skin whose frame is `none` cannot have anything
-   appended to it — `none` is not a shadow you can put a comma after. Inset by
-   its own width so it lands on the pane rather than in the gutter. */
+   A layer over the pane rather than an `outline` on it. The outline was inset
+   by its own width to land on the pane rather than in the gutter, and that put
+   it under `.pane-body`, which is positioned and so paints after its parent's
+   outline: a terminal's body let the edge show through and a board's columns
+   covered it, so a focused board had a ring along its strip and nowhere else.
+   Not a second `box-shadow` either, because that is the skin's (`--frame-on`)
+   and `none` is not a shadow you can put a comma after. `isolation` keeps the
+   layer's z-index inside the pane, where it only has to clear the drop zones,
+   rather than in contest with whatever lies over the stage. */
+.pane {
+  position: relative;
+  isolation: isolate;
+}
 .pane-on {
-  outline: var(--outline-on);
-  outline-offset: calc(-1 * var(--border));
   box-shadow: var(--frame-on);
 }
-.pane-on .tabstrip {
-  box-shadow: inset 0 calc(-1 * var(--border-thick)) 0 color-mix(in srgb, var(--accent) 65%, var(--chrome-low));
-}
-/* And not under the only pane there is. Focus is a choice between panes, and
-   with one on screen the accent would be a stripe across the middle of the
-   band saying something that is always true — the reasoning `.pane-switch`
-   and the phone's missing focus ring already follow. `:only-child` holds
-   because the dividers are the pane boxes' only siblings and a lone pane has
-   none. */
-.stagearea > .pane-box:only-child .pane-on .tabstrip {
-  box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--line);
+.pane-on::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border: var(--outline-on);
+  border-radius: inherit;
+  pointer-events: none;
 }
 
 /* --------------------------------------------------------------------------
@@ -4876,11 +4875,11 @@ html.pill-page #root {
   padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
   border-top: var(--border) var(--border-style) var(--line);
 }
-/* The box, with the send and the mic inside it at its foot — one field with
-   two buttons in it rather than a field and two buttons beside it. They were
-   outside until 2026-10-18 and read as notches cut into the box's edge, as
-   tall as it was. Held to the last line as the text grows, as every chat box
-   has them, so a long draft grows away from them rather than around them. */
+/* The box, with the mic inside it at its foot — one field with a button in it
+   rather than a field and a button beside it. The buttons were outside until
+   2026-10-18 and read as notches cut into the box's edge, as tall as it was.
+   Held to the last line as the text grows, as every chat box has it, so a long
+   draft grows away from it rather than around it. */
 .kuru-box {
   display: flex;
   align-items: flex-end;
@@ -4911,7 +4910,6 @@ html.pill-page #root {
 .kuru-field:focus {
   outline: none;
 }
-.kuru-send,
 .kuru-mic {
   display: inline-flex;
   align-items: center;
@@ -4925,13 +4923,9 @@ html.pill-page #root {
   -webkit-user-select: none;
   user-select: none;
 }
-.kuru-send:hover:not(:disabled),
 .kuru-mic:hover {
   color: var(--text);
   background: var(--chrome-high);
-}
-.kuru-send:disabled {
-  opacity: 0.4;
 }
 .kuru-mic-listening,
 .kuru-mic-listening:hover {
@@ -4939,7 +4933,6 @@ html.pill-page #root {
   background: var(--danger-bg);
 }
 /* A thumb's size on a phone, still inside the box. */
-:root[data-narrow] .kuru-send,
 :root[data-narrow] .kuru-mic {
   width: 32px;
   height: 32px;
