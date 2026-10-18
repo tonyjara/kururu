@@ -239,14 +239,14 @@ says which key is its. After the name, `±3` is files not committed and `↑2`
 
 The list below is **agents**, not terminals — the test is "has an agent ever been
 seen in here", so a row does not flicker out while claude is between things, and
-an exited agent stays listed with its screen and a `✕` to dismiss it. Every
+an exited agent stays listed with its screen and Dismiss in its menu. Every
 terminal is still in its tab strip, and `C-a f` finds all of them.
 
 Each row is two lines:
 
 | | |
 |---|---|
-| **top** | status dot (or the hopping mascot while working), what is running, which workspace, and a `✕` that ends it |
+| **top** | status dot (or the hopping mascot while working), what is running, and which workspace |
 | **bottom** | what it is doing, and how much of its context window is gone |
 
 "What it is doing" is reported, never guessed — it needs
@@ -254,6 +254,11 @@ Each row is two lines:
 working until then.
 
 Clicking a row reveals that terminal where it already is; dragging one moves it.
+Right-click a row or a terminal's tab — long-press either on a phone — for the
+same menu: **Rename**, Go to card, and Kill (Dismiss once it has exited), with
+Hide on the row. The name is one name: renamed from the row, the tab says it
+too. Enter keeps it, Escape leaves it, and an empty name hands the terminal
+back to what it would otherwise be called.
 The workspace's name and the sidebar's toggle are at the very top, beside the
 window's buttons; under them the profile menu and the board; the cog and phone
 button at the bottom. The Needs you and Kuru chips are in the top-right pane's

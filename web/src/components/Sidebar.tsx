@@ -69,17 +69,19 @@ import {
   runway,
   type OpenRouterReading,
 } from "../../../shared/openrouter";
+import { agentItems } from "../agentmenu";
 import { AGENT_MIME, GROUP_MIME, WORKSPACE_MIME, allowDrop, beginDrag, endDrag, useDragging } from "../drag";
 import type { Action } from "../keys";
 import { agentLabel, agentSummary, remoteHost, remoteNote, shortenPath } from "../labels";
+import { useLongPress } from "../longpress";
 import { previewLabel, previewUrl } from "../preview";
 import * as api from "../session";
 import { useKururu } from "../session";
-import { showCardNext } from "./Board";
 import { Menu, Popover, type MenuItem } from "./Menu";
 import type { DialogState } from "./Dialog";
 import { Icon } from "./Icon";
 import { MadeLinks } from "./MadeLinks";
+import { NameField } from "./NameField";
 import { Mascot, Status } from "./Status";
 
 /**
@@ -101,9 +103,6 @@ import { Mascot, Status } from "./Status";
  * next row — which is the only gesture on the other side of it.
  */
 const CLICK_SLOP = 12;
-
-/** How long a touch has to hold still on an agent row to open its menu — see `longPress`. */
-const LONG_PRESS_MS = 500;
 
 interface Props {
   profile: Profile;
@@ -283,6 +282,17 @@ export function Sidebar({
   const [menu, setMenu] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
   /** Where an agent row's context menu is open, and which agent it belongs to. */
   const [agentMenu, setAgentMenu] = useState<{ agentId: string; x: number; y: number } | null>(null);
+  /**
+   * The agent whose name is a field in its row, from Rename in that menu. It
+   * claims the keyboard itself (`NameField`), so it is not in the effect below
+   * that claims it for the workspace and group fields.
+   */
+  const [renamingAgent, setRenamingAgent] = useState<string | null>(null);
+  // An agent that ended or was dismissed mid-rename takes the rename with it,
+  // as a tab does in `Pane`, rather than leaving the field waiting to come back.
+  useEffect(() => {
+    if (renamingAgent !== null && !agents.some((a) => a.id === renamingAgent)) setRenamingAgent(null);
+  }, [renamingAgent, agents]);
   /** The workspace whose git verb is still running — its ⋯ says so, and its git rows take no second one. */
   const [gitBusy, setGitBusy] = useState<string | null>(null);
   /**
@@ -314,49 +324,14 @@ export function Sidebar({
    */
   const dragFrom = useRef<{ x: number; y: number } | null>(null);
   /**
-   * The right-click a finger does not have. iOS never fires `contextmenu` on
-   * a long press, so a row times one itself — the same trick `FileTree.tsx`
-   * plays for its own rows. Held still for half a second opens the row's
-   * menu, and the click the lift would otherwise deliver is swallowed so
-   * `show()` or `goTo()` does not also fire underneath it. Agent rows had it
-   * first; a workspace row took it on 2026-10-18, when its ⋯ and its
-   * right-click became one menu and a phone's way to it should be the same
-   * gesture as everywhere else, not only the ⋯.
+   * A long press is a row's right-click on a phone (`longpress.ts`), and the
+   * click its lift would deliver is swallowed so `show()` or `goTo()` does not
+   * also fire underneath the menu. Agent rows had it first; a workspace row
+   * took it on 2026-10-18, when its ⋯ and its right-click became one menu and
+   * a phone's way to it should be the same gesture as everywhere else, not
+   * only the ⋯.
    */
-  const press = useRef<{ timer: number; x: number; y: number } | null>(null);
-  const pressed = useRef(false);
-  const cancelPress = () => {
-    if (press.current) window.clearTimeout(press.current.timer);
-    press.current = null;
-  };
-  const longPress = (open: (at: { x: number; y: number }) => void) => ({
-    onPointerDown: (event: React.PointerEvent) => {
-      if (event.pointerType !== "touch") return;
-      event.stopPropagation();
-      cancelPress();
-      const { clientX: x, clientY: y } = event;
-      press.current = {
-        x,
-        y,
-        timer: window.setTimeout(() => {
-          press.current = null;
-          pressed.current = true;
-          open({ x, y });
-        }, LONG_PRESS_MS),
-      };
-    },
-    onPointerMove: (event: React.PointerEvent) => {
-      const at = press.current;
-      if (at && Math.hypot(event.clientX - at.x, event.clientY - at.y) > 10) cancelPress();
-    },
-    onPointerUp: cancelPress,
-    onPointerCancel: cancelPress,
-  });
-  const swallowed = () => {
-    if (!pressed.current) return false;
-    pressed.current = false;
-    return true;
-  };
+  const { longPress, swallowed } = useLongPress();
 
   useEffect(() => {
     onEditing(renaming !== null || renamingGroup !== null);
@@ -741,33 +716,18 @@ export function Sidebar({
   const menuAgent = agentMenu ? agents.find((a) => a.id === agentMenu.agentId) ?? null : null;
 
   /**
-   * An agent row's menu: the two things its corner used to carry as buttons,
-   * plus the one new way out of it, "Go to card" — reachable only by right-click
-   * or a long press now, which is what let the corner go back to just the row.
+   * An agent row's menu, which is its tab's menu with the list's own Hide —
+   * see `agentmenu.ts`. The things its corner used to carry as buttons are in
+   * it, reachable only by right-click or a long press now, which is what let
+   * the corner go back to just the row.
    */
-  const agentItems = (agent: AgentSnapshot): MenuItem[] => {
-    const hiddenHere = away.has(agent.id);
-    const card = cardFor.get(agent.id);
-    return [
-      { label: hiddenHere ? "Show" : "Hide", run: () => api.hideAgent(agent.id, !hiddenHere) },
-      {
-        label: "Go to card",
-        disabled: !card,
-        run: () => {
-          if (!card) return;
-          showCardNext(card.workspaceId, card.cardId);
-          api.openBoard(undefined, false, card.workspaceId);
-          navigated();
-        },
-      },
-      {
-        label: agent.exited ? "Dismiss" : "Kill",
-        sep: true,
-        danger: true,
-        run: () => api.closeTab(agent.id),
-      },
-    ];
-  };
+  const rowItems = (agent: AgentSnapshot): MenuItem[] =>
+    agentItems(agent, {
+      rename: () => setRenamingAgent(agent.id),
+      card: cardFor.get(agent.id),
+      hidden: away.has(agent.id),
+      navigated,
+    });
 
   /**
    * One row of the agent list, drawn the same whichever of the two lists it is
@@ -852,80 +812,99 @@ export function Sidebar({
           api.reorderAgent(dragged, insertBefore(event.clientY > box.top + box.height / 2));
         }}
         onContextMenu={(event) => {
+          // The field's own menu — paste, spelling — while the name is one.
+          if (renamingAgent === agent.id) return;
           event.preventDefault();
           setAgentMenu({ agentId: agent.id, x: event.clientX, y: event.clientY });
         }}
       >
-        <button
-          className={`agent-row ${agent.exited ? "agent-row-exited" : ""}`}
-          onClick={() => {
-            if (swallowed()) return;
-            show(agent.id);
-          }}
-          title={(remoteNote(agent) ? [agentLabel(agent), agentSummary(agent), remoteNote(agent)] : [agentLabel(agent), agentSummary(agent), agent.command, agent.cwd])
-            .filter(Boolean)
-            .join("\n")}
-          draggable
-          onDragStart={(event) => beginDrag(event, "agent", agent.id)}
-          /* `dragend` fires wherever the drag finished, including nowhere, which is why
-             the line is cleared here as well as on the drop. */
-          onDragEnd={() => {
-            setOverAgent(null);
-            endDrag();
-          }}
-          {...longPress((at) => setAgentMenu({ agentId: agent.id, ...at }))}
-        >
-          {/* Where it lives and what it is. The two things you need to find it again, and
-              nothing that changes while you read.
-
-              Where first, because that is what you are scanning for: the list spans a
-              whole profile and holds several terminals running the same program, so
-              "claude" is the word that tells you least about which row this is. The
-              program is still worth saying — the list runs more than one of them — so it
-              goes where the workspace used to be, at the end of the line and dimmer, as
-              the thing you read once you have found the row rather than the thing you
-              find it by. */}
-          <span className="agent-top">
-            {/* The agent's own workspace, not the one you are looking at: this list spans
-                the whole profile, so two rows of it can legitimately be wearing different
-                mascots. */}
+        {renamingAgent === agent.id ? (
+          /* The row's top line with the name as a field, and nothing else: not
+             the button, since a field inside a button is a click on the row
+             every time you place the cursor, and not the activity line, which
+             would go on changing under a name being typed. */
+          <span className="agent-renaming">
             <Status agent={agent} mascot={mascotFor(mascots, at?.mascotId ?? null)} />
-            {/* Under a group heading the workspace has already been said, so the program
-                takes its place and its weight. The drawer is not grouped — it is one
-                short list of things put away from anywhere — so its rows still lead with
-                where they live. */}
-            {hiddenHere ? (
-              <span className="agent-ws">{at ? at.workspace : "—"}</span>
-            ) : (
-              <span className="agent-title">{agentLabel(agent)}</span>
-            )}
-            {/* Not "new output" any more, which it was and which lit nine rows in ten:
-                this is the turn that ended, or the question that was asked, while you
-                were not looking at it. The server decides it — see its `unread`. */}
-            {/* Where it runs, when that is not here — see `remoteHost`. */}
-            {remoteHost(agent) && <span className="remote-mark">{remoteHost(agent)}</span>}
-            {agent.unread && <span className="unread" aria-label="waiting for you" />}
-            {hiddenHere && <span className="agent-name">{agentLabel(agent)}</span>}
+            <NameField
+              agentId={agent.id}
+              shown={agentLabel(agent)}
+              className="agent-edit"
+              onEditing={onEditing}
+              onDone={() => setRenamingAgent(null)}
+            />
           </span>
-          {/* What it is doing, what it is costing, and how much room it has left to do it
-              in. All three change constantly, which is why they are on their own line:
-              a row whose top half is stable is a row you can find something in without
-              re-reading it.
+        ) : (
+          <button
+            className={`agent-row ${agent.exited ? "agent-row-exited" : ""}`}
+            onClick={() => {
+              if (swallowed()) return;
+              show(agent.id);
+            }}
+            title={(remoteNote(agent) ? [agentLabel(agent), agentSummary(agent), remoteNote(agent)] : [agentLabel(agent), agentSummary(agent), agent.command, agent.cwd])
+              .filter(Boolean)
+              .join("\n")}
+            draggable
+            onDragStart={(event) => beginDrag(event, "agent", agent.id)}
+            /* `dragend` fires wherever the drag finished, including nowhere, which is why
+               the line is cleared here as well as on the drop. */
+            onDragEnd={() => {
+              setOverAgent(null);
+              endDrag();
+            }}
+            {...longPress((at) => setAgentMenu({ agentId: agent.id, ...at }))}
+          >
+            {/* Where it lives and what it is. The two things you need to find it again, and
+                nothing that changes while you read.
 
-              The cwd stands in only when nothing has said anything at all — no hook has
-              reported and the program has not named its own window. An unreported agent
-              would otherwise have a blank line under it saying nothing, and where it is
-              working is the next most useful thing we know for certain. */}
-          <span className="agent-bottom">
-            <span className="agent-activity">
-              {/* An agent on a machine has no directory here worth naming —
-                  its cwd is where the ssh was started — so the machine stands in. */}
-              {agentSummary(agent) || (remoteHost(agent) ? `on ${remoteHost(agent)}` : shortenPath(agent.cwd))}
+                Where first, because that is what you are scanning for: the list spans a
+                whole profile and holds several terminals running the same program, so
+                "claude" is the word that tells you least about which row this is. The
+                program is still worth saying — the list runs more than one of them — so it
+                goes where the workspace used to be, at the end of the line and dimmer, as
+                the thing you read once you have found the row rather than the thing you
+                find it by. */}
+            <span className="agent-top">
+              {/* The agent's own workspace, not the one you are looking at: this list spans
+                  the whole profile, so two rows of it can legitimately be wearing different
+                  mascots. */}
+              <Status agent={agent} mascot={mascotFor(mascots, at?.mascotId ?? null)} />
+              {/* Under a group heading the workspace has already been said, so the program
+                  takes its place and its weight. The drawer is not grouped — it is one
+                  short list of things put away from anywhere — so its rows still lead with
+                  where they live. */}
+              {hiddenHere ? (
+                <span className="agent-ws">{at ? at.workspace : "—"}</span>
+              ) : (
+                <span className="agent-title">{agentLabel(agent)}</span>
+              )}
+              {/* Not "new output" any more, which it was and which lit nine rows in ten:
+                  this is the turn that ended, or the question that was asked, while you
+                  were not looking at it. The server decides it — see its `unread`. */}
+              {/* Where it runs, when that is not here — see `remoteHost`. */}
+              {remoteHost(agent) && <span className="remote-mark">{remoteHost(agent)}</span>}
+              {agent.unread && <span className="unread" aria-label="waiting for you" />}
+              {hiddenHere && <span className="agent-name">{agentLabel(agent)}</span>}
             </span>
-            {agent.rss ? <Memory bytes={agent.rss} /> : null}
-            {agent.contextUsage && <ContextRing usage={agent.contextUsage} />}
-          </span>
-        </button>
+            {/* What it is doing, what it is costing, and how much room it has left to do it
+                in. All three change constantly, which is why they are on their own line:
+                a row whose top half is stable is a row you can find something in without
+                re-reading it.
+
+                The cwd stands in only when nothing has said anything at all — no hook has
+                reported and the program has not named its own window. An unreported agent
+                would otherwise have a blank line under it saying nothing, and where it is
+                working is the next most useful thing we know for certain. */}
+            <span className="agent-bottom">
+              <span className="agent-activity">
+                {/* An agent on a machine has no directory here worth naming —
+                    its cwd is where the ssh was started — so the machine stands in. */}
+                {agentSummary(agent) || (remoteHost(agent) ? `on ${remoteHost(agent)}` : shortenPath(agent.cwd))}
+              </span>
+              {agent.rss ? <Memory bytes={agent.rss} /> : null}
+              {agent.contextUsage && <ContextRing usage={agent.contextUsage} />}
+            </span>
+          </button>
+        )}
         {/* What its last turn ended in, when that was something to read: a line of its
             own under the row rather than a third line inside it, because these are
             buttons and the row is one, and because a row with nothing to read keeps
@@ -1416,7 +1395,7 @@ export function Sidebar({
         <Menu
           at={agentMenu}
           onClose={() => setAgentMenu(null)}
-          items={agentItems(menuAgent)}
+          items={rowItems(menuAgent)}
         />
       )}
 
