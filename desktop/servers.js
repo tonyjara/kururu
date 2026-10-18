@@ -24,7 +24,7 @@ const FILE = "servers.json";
 const LOCAL = `http://127.0.0.1:${Number(process.env.KURURU_PORT) || 7717}`;
 
 function configDir() {
-  return path.join(process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"), "kururu");
+  return process.env.KURURU_CONFIG_DIR || path.join(process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"), "kururu");
 }
 
 function file() {

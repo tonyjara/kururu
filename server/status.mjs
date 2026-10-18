@@ -32,7 +32,7 @@ import { socketHolders } from "./sockowner.mjs";
 const PORT = process.env.KURURU_PORT ?? 7717;
 const socket =
   process.env.KURURU_HOST_SOCK ||
-  join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu", "ptyhost.sock");
+  join(process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu"), "ptyhost.sock");
 /** Where `server/src/lifecycle.ts` and `run.mjs` write, by the same rule. */
 const lifecycle = join(
   process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu"),

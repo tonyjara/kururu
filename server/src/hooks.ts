@@ -14,9 +14,11 @@
  * thing `logins.ts` promises not to do — kururu does not decide what goes in a
  * login directory. Claude Code's `--settings` is the other door: a file layered
  * over whichever directory it is using, for one launch, touching nothing. So the
- * new-tab menu's Claude rows carry it when a profile login is in force, and only
- * then — with the machine's own directory the hand-installed hooks are already
- * there, and a second copy would report every event twice.
+ * new-tab menu's Claude rows carry it whenever the directory in use does not
+ * already run the reporter — a profile's own, and the machine's on a box where
+ * nobody installed them by hand, which is every child kururu. Where the
+ * hand-installed hooks are already there it steps aside, since a second copy
+ * would report every event twice.
  *
  * What it does not reach is a `claude` typed into a shell, which kururu never
  * sees being launched. That still wants the hooks in the profile's own settings,
@@ -118,7 +120,7 @@ export function hookSettings(runtime: string, script: string): object {
 export function hookSettingsFile(): string | null {
   const script = reportScript();
   if (!existsSync(script)) return null;
-  const dir = join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
+  const dir = process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
   const path = join(dir, "claude-hooks.json");
   try {
     mkdirSync(dir, { recursive: true });

@@ -57,9 +57,7 @@ function stateDir() {
 
 /** The pty host's socket, spelled as `server/src/hostsock.ts` spells it. */
 function hostSocket() {
-  if (process.env.KURURU_HOST_SOCK) return process.env.KURURU_HOST_SOCK;
-  const state = process.env.XDG_STATE_HOME || path.join(homedir(), ".local", "state");
-  return path.join(state, "kururu", "ptyhost.sock");
+  return process.env.KURURU_HOST_SOCK || path.join(stateDir(), "ptyhost.sock");
 }
 
 /** A command that is allowed to fail, since most of these answer by exit code. */

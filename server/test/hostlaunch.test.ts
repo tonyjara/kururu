@@ -15,6 +15,7 @@ import {
   HOST_LABEL_PREFIX,
   HOST_UNIT_PREFIX,
   cgroupUnit,
+  hostEnv,
   hostJobPlist,
   hostUnitName,
   isHostJob,
@@ -24,6 +25,7 @@ import {
   staleHostJobs,
   systemdRunArgv,
   unitEnvNames,
+  userRuntimeDir,
 } from "../src/hostlaunch";
 
 const LIST = [
@@ -271,5 +273,43 @@ describe("cgroupUnit", () => {
   test("is null for a process in no unit, or a file that says nothing", () => {
     expect(cgroupUnit("0::/\n")).toBeNull();
     expect(cgroupUnit("")).toBeNull();
+  });
+});
+
+describe("hostEnv", () => {
+  /** The host's environment is every pty's, so what is the server's alone stays out of it. */
+  test("leaves out the runner's and the server's own variables", () => {
+    const env = hostEnv({
+      PATH: "/usr/bin",
+      KURURU_SUPERVISED: "1",
+      KURURU_STARTED_BECAUSE: "the menu bar was started",
+      KURURU_BIND: "tailscale",
+      KURURU_LOOPBACK_TOKEN: "1",
+      KURURU_TOKEN: "secret",
+      KURURU_WEB_DIST: "/app/web",
+    });
+    expect(env).toEqual({ PATH: "/usr/bin" });
+  });
+
+  test("keeps what the host itself reads", () => {
+    const kept = { KURURU_PORT: "7717", KURURU_HOST_SOCK: "/s/ptyhost.sock", KURURU_STATE_DIR: "/s", KURURU_AGENT_CWD: "/w", XDG_CONFIG_HOME: "/c" };
+    expect(hostEnv(kept)).toEqual(kept);
+  });
+});
+
+describe("userRuntimeDir", () => {
+  const there = () => true;
+  test("names /run/user/<uid> for an environment with no way to the user manager", () => {
+    expect(userRuntimeDir({ PATH: "/usr/bin" }, 1000, there)).toBe("/run/user/1000");
+  });
+
+  test("leaves an environment that has one alone, either one", () => {
+    expect(userRuntimeDir({ XDG_RUNTIME_DIR: "/run/user/1000" }, 1000, there)).toBeNull();
+    expect(userRuntimeDir({ DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus" }, 1000, there)).toBeNull();
+  });
+
+  test("invents nothing when the directory is not there", () => {
+    expect(userRuntimeDir({}, 1000, () => false)).toBeNull();
+    expect(userRuntimeDir({}, null, there)).toBeNull();
   });
 });

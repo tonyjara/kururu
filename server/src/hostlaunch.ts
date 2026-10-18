@@ -93,6 +93,38 @@ const INSTALLED = ["/Applications/Kururu.app", join(homedir(), "Applications", "
  */
 const LAUNCH_ONLY = ["XPC_SERVICE_NAME", "XPC_FLAGS", "__CFBundleIdentifier"];
 
+/**
+ * Variables that are the *server's* business and nobody else's, kept out of
+ * the host because the host's environment is every pty's. The runner's
+ * `KURURU_SUPERVISED` in an agent's shell made any server that agent started
+ * believe it had a supervisor it did not have; `KURURU_BIND`, the token's
+ * switch and the server's own paths would hand a kururu started inside a tab
+ * this one's network and files. What the host itself reads stays:
+ * `KURURU_PORT`, `KURURU_HOST_SOCK`, `KURURU_STATE_DIR` and the agent
+ * defaults. `KURURU_TOKEN` is handed to each pty on its own, while it is
+ * wanted (`access.ts`), never through the host's environment.
+ */
+const SERVER_ONLY = [
+  "KURURU_SUPERVISED",
+  "KURURU_STARTED_BECAUSE",
+  "KURURU_RUNNER_LABEL",
+  "KURURU_BIND",
+  "KURURU_LOOPBACK_TOKEN",
+  "KURURU_TOKEN",
+  "KURURU_AGENT_ID",
+  "KURURU_WEB_DIST",
+  "KURURU_ASSETS",
+  "KURURU_SOUNDS",
+  "KURURU_PTYHOSTD",
+];
+
+/** The environment a host is started with: the server's, less what is the server's alone. Pure, for the test. */
+export function hostEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) if (!SERVER_ONLY.includes(key)) out[key] = value;
+  return out;
+}
+
 /** A clone is a third of a second; a minute is a disk that is not APFS doing a real copy, or a hang. */
 const CLONE_TIMEOUT_MS = 60_000;
 const LAUNCHCTL_TIMEOUT_MS = 10_000;
@@ -594,6 +626,22 @@ export function hostUnitRunning(unit: string): boolean {
 }
 
 /**
+ * The runtime directory to give `systemd-run`, when the environment names no
+ * way to the user manager. It needs `XDG_RUNTIME_DIR` or
+ * `DBUS_SESSION_BUS_ADDRESS`, and a server started by hand from a stripped
+ * environment can have neither: Tailscale SSH sets the bus and not the
+ * directory, and the spike on the Omarchy PC found that either is enough
+ * while none fails. A unit under the user manager has both. So the
+ * directory every logind machine makes for the user is named when it is
+ * there, and nothing is invented when it is not. Pure, for the test.
+ */
+export function userRuntimeDir(env: NodeJS.ProcessEnv, uid: number | null, exists: (path: string) => boolean): string | null {
+  if (env.XDG_RUNTIME_DIR || env.DBUS_SESSION_BUS_ADDRESS || uid === null) return null;
+  const dir = `/run/user/${uid}`;
+  return exists(dir) ? dir : null;
+}
+
+/**
  * Hand the host to the user manager and return once it has been started.
  *
  * Refused up front on a machine not booted with systemd, where the fallback
@@ -608,6 +656,8 @@ export async function launchHostSystemd(runtime: Runtime, options: { log: string
   // Harmless under node, and the one thing that makes the host a node rather
   // than a window when the runtime is Electron — as under launchd.
   const env: NodeJS.ProcessEnv = { ...options.env, ELECTRON_RUN_AS_NODE: "1" };
+  const runtimeDir = userRuntimeDir(env, process.getuid?.() ?? null, existsSync);
+  if (runtimeDir) env.XDG_RUNTIME_DIR = runtimeDir;
   const argv = systemdRunArgv(unit, { program: [runtime.exe, runtime.entry], envNames: unitEnvNames(env), cwd: options.cwd, log: options.log });
   const done = spawnSync("systemd-run", argv, { encoding: "utf8", env, timeout: SYSTEMCTL_TIMEOUT_MS });
   if (done.error) throw done.error;
