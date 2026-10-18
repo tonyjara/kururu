@@ -14,7 +14,7 @@
  */
 import { useMemo, useState } from "react";
 import { allSkins, partVarNames, partVars, type Skin } from "../../../shared/skin";
-import { EMPTY_LIBRARY, type InstalledStyle, type StyleLibrary } from "../../../shared/styles";
+import { BUILTIN_PACKS, EMPTY_LIBRARY, isBuiltinPack, type StyleLibrary } from "../../../shared/styles";
 import { allThemes, CURSOR_STYLES, MAX_FONT_SIZE, MIN_FONT_SIZE, type Appearance, type CursorStyle, type Theme } from "../../../shared/theme";
 import { canEnumerate, enumerate, knownFonts } from "../fonts";
 import * as api from "../session";
@@ -30,11 +30,17 @@ export function ThemePage({ appearance, styles = EMPTY_LIBRARY }: { appearance: 
   const { terminal } = appearance;
   const set = (patch: Partial<typeof terminal>) => api.setTerminalAppearance({ ...terminal, ...patch });
 
-  const packs = styles.installed.filter((record) => record.kind === "pack").sort((a, b) => a.name.localeCompare(b.name));
+  // Kururu's own first and always there, so the way back is on this page
+  // whatever has been installed. An installed pack that took its id is left
+  // out, because the server wears the built-in one for that id regardless.
+  const installed = styles.installed
+    .filter((record) => record.kind === "pack" && !isBuiltinPack(record.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const packs = [...BUILTIN_PACKS, ...installed];
 
   return (
     <>
-      {packs.length > 0 && <Packs packs={packs} />}
+      <Packs packs={packs} />
 
       <Group title="Theme">
         <Gallery size="md" label="Theme">
@@ -69,17 +75,17 @@ export function ThemePage({ appearance, styles = EMPTY_LIBRARY }: { appearance: 
 }
 
 /**
- * An installed pack, put back on: theme, skin, mascot, sound and font together,
- * with nothing downloaded. A row per pack and a button rather than a gallery,
+ * A pack, put back on: theme, skin, mascot, sound and font together, with
+ * nothing downloaded — kururu's own, or one that was installed. A row per pack and a button rather than a gallery,
  * because wearing a pack is an act and not a saved choice — the moment you
  * change the skin you are no longer quite in any of them, which is the whole
  * reason the button exists.
  */
-function Packs({ packs }: { packs: InstalledStyle[] }) {
+function Packs({ packs }: { packs: readonly { id: string; name: string }[] }) {
   const [wearing, setWearing] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
 
-  const wear = async (pack: InstalledStyle) => {
+  const wear = async (pack: { id: string; name: string }) => {
     if (wearing) return;
     setWearing(pack.id);
     setFailed(null);

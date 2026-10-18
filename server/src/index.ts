@@ -268,7 +268,16 @@ import {
   remove as removeStyle,
   stylesHome,
 } from "./styles";
-import { isStyleKind, PACK_PARTS, type InstalledStyle, type PackManifest, type StyleKind } from "../../shared/styles";
+import {
+  isBuiltinPack,
+  isStyleKind,
+  PACK_PARTS,
+  wearKururu,
+  type InstalledStyle,
+  type Look,
+  type PackManifest,
+  type StyleKind,
+} from "../../shared/styles";
 import {
   createLocalSkin,
   localDir,
@@ -865,11 +874,12 @@ async function installOne(kind: string, id: string, activate: boolean): Promise<
   return { ok: true };
 }
 
-/**
- * The three files a style can land in, gathered up so that wearing a pack writes
- * each of them at most once.
+/*
+ * `Look` is the three files a style can land in, gathered up so that wearing a
+ * pack writes each of them at most once. It lives in `shared/styles.ts` beside
+ * `wearKururu`, which builds one.
  *
- * A pack is the reason this exists. Every other style is one decision in one
+ * A pack is the reason it exists. Every other style is one decision in one
  * file and `saveAppearance` is the whole story; a pack is up to five — a theme,
  * a skin, a mascot, a sound and a face — spread across `appearance.json`,
  * `mascots.json` and `notify.json`, and doing them one saver at a time would
@@ -877,11 +887,6 @@ async function installOne(kind: string, id: string, activate: boolean): Promise<
  * way to the look somebody asked for. So the parts are folded into a `Look`
  * first and written afterwards.
  */
-interface Look {
-  appearance: Appearance;
-  mascots: MascotSet;
-  notify: NotifySettings;
-}
 
 /**
  * One installed style, folded into a look.
@@ -956,6 +961,14 @@ function saveLook(next: Look): void {
  * it means to wear one is written down once.
  */
 function wear(kind: StyleKind, id: string): { ok: true } | { ok: false; error: string } {
+  // Kururu's own pack first, and ahead of an installed pack that took its id:
+  // it is the way back from every other pack, so nothing installed may stand
+  // in front of it. Its parts are all built in, which is why it is not folded
+  // through `put` — there is no record for any of them to be found by.
+  if (kind === "pack" && isBuiltinPack(id)) {
+    saveLook(wearKururu({ appearance, mascots, notify }));
+    return { ok: true };
+  }
   const record = styles.installed.find((r) => r.kind === kind && r.id === id);
   if (!record) return { ok: false, error: "that style is not installed" };
   let look: Look = { appearance, mascots, notify };

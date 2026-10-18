@@ -479,6 +479,19 @@ export function defaultMascot(set: MascotSet): Mascot {
   return set.list.find((m) => m.id === set.default) ?? set.list[0]!;
 }
 
+/**
+ * An id nothing in the list is using.
+ *
+ * Counted from the list rather than from a counter in memory, because these
+ * outlive the process that made them: a sequence reset by a server restart would
+ * hand out `m2` to a second mascot when the file already had one, and the
+ * adopter would then have to drop one of them.
+ */
+export function freshMascotId(list: Mascot[]): string {
+  const taken = new Set(list.map((m) => m.id));
+  for (let n = 1; ; n++) if (!taken.has(`m${n}`)) return `m${n}`;
+}
+
 export const DEFAULT_MASCOT_SET: MascotSet = {
   default: "m1",
   list: [{ id: "m1", name: "Frog", ...DEFAULT_MASCOT }],

@@ -463,9 +463,10 @@ function catppuccin(id: string, name: string, p: Catppuccin, appearance: "dark" 
 // ---------------------------------------------------------------------------
 
 /**
- * The palette kururu had before it had a choice, kept so that picking it changes
- * nothing. Every value here is one that was already in `styles.css`,
- * `terminals.ts` or `colors.ts` — this theme is those three files, gathered.
+ * The palette kururu had before it had a choice, and the one it opens in again.
+ * Every value here is one that was already in `styles.css`, `terminals.ts` or
+ * `colors.ts` — this theme is those three files, gathered — and it is the
+ * theme of kururu's own pack (`KURURU_PACK` in `shared/styles.ts`).
  */
 const KURURU: Theme = {
   id: "kururu",
@@ -544,20 +545,22 @@ const KURURU: Theme = {
 };
 
 /**
- * Every theme, in the order Settings lists them. Mocha first because it is the
- * default, and the default is Catppuccin rather than kururu's own green on
- * purpose — the green was never chosen so much as arrived at, and the thing a
- * new window should open in is the one somebody designed.
+ * Every theme, in the order Settings lists them. Kururu's own first because it
+ * is the default. It was Mocha for a while, on the argument that kururu's green
+ * was arrived at rather than designed; what overturned that is that kururu now
+ * has a look of its own to go back to — the Kururu pack, which every other
+ * pack is worn over — and a fresh window that opened in a palette that pack
+ * does not name would be one somebody could never return to by pressing it.
  */
 export const THEMES: readonly Theme[] = [
+  KURURU,
   catppuccin("catppuccin-mocha", "Catppuccin Mocha", MOCHA, "dark"),
   catppuccin("catppuccin-macchiato", "Catppuccin Macchiato", MACCHIATO, "dark"),
   catppuccin("catppuccin-frappe", "Catppuccin Frappé", FRAPPE, "dark"),
   catppuccin("catppuccin-latte", "Catppuccin Latte", LATTE, "light"),
-  KURURU,
 ];
 
-export const DEFAULT_THEME_ID = "catppuccin-mocha";
+export const DEFAULT_THEME_ID = "kururu";
 
 /**
  * Every theme there is *here*, plus whatever has been installed. `allSkins`'s

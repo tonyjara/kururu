@@ -461,8 +461,14 @@ A **theme** is the palette — the chrome's tokens and the terminal's sixteen AN
 slots in one place, since the emulator paints into a canvas CSS cannot reach. A
 **skin** is the shape: radii, line weights, the type ramp, the icon glyphs.
 Neither mentions the other, so "Catppuccin in a chunkier chrome" is a real thing
-to ask for. Every theme is drawn in itself, so the list is the preview; four
-Catppuccin flavours ship plus kururu's own green, default Mocha.
+to ask for. Every theme is drawn in itself, so the list is the preview; kururu's
+own green ships, and is the default, beside four Catppuccin flavours.
+
+A **pack** is a theme, a skin, a mascot, a sound and a font chosen to go
+together, put on in one press from Settings → Theme → Packs. **Kururu** is one
+of them and is built in — its own theme, the Soft skin, the frog, the croak and
+kururu's font stack — so the way back from any pack you install is always there,
+with no network.
 
 Below that, the terminal's own **font and cursor**. The list is built on the device
 that draws, because over Tailscale the face has to exist on the phone. What you
