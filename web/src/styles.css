@@ -16,7 +16,7 @@
  * `UiTokens` and let every theme answer for it; do not reach for a hex.
  *
  * The block below is therefore a default and not the palette. It holds
- * Catppuccin Mocha, which is what kururu opens in, and it is what is on screen
+ * kururu's own theme, which is what kururu opens in, and it is what is on screen
  * for the frame between this stylesheet painting and the first snapshot
  * arriving — a first paint in some other theme's colours would be a flash of
  * the wrong application. It is also what keeps this file readable on its own.
@@ -31,31 +31,31 @@
 :root {
   color-scheme: dark;
 
-  --bg: #1e1e2e;
-  --chrome: #181825;
-  --chrome-high: #313244;
-  --line: #45475a;
-  --line-high: #585b70;
-  --text: #cdd6f4;
-  --text-strong: #cdd6f4;
-  --dim: #a6adc8;
-  --dimmer: #6c7086;
-  --accent: #a6e3a1;
-  --on-accent: #11111b;
+  --bg: #0d0f0e;
+  --chrome: #141817;
+  --chrome-high: #1b201e;
+  --line: #242b28;
+  --line-high: #33413a;
+  --text: #d7dbd8;
+  --text-strong: #eef1ef;
+  --dim: #7c857f;
+  --dimmer: #565e59;
+  --accent: #7fd6a2;
+  --on-accent: #06100b;
 
-  --idle: #7f849c;
+  --idle: #6b736e;
   /* Orange, and not the accent green it used to be: "working" was the same
      colour as every focus ring and unread mark in here, which made the one
      state worth spotting the least distinguishable thing on the row. Warm
      enough to be told apart from `--blocked` above it at a glance. */
-  --working: #fab387;
-  --blocked: #f9e2af;
-  --done: #89b4fa;
-  --exited: #585b70;
+  --working: #ff9f43;
+  --blocked: #e3c46a;
+  --done: #7aa6da;
+  --exited: #4a524d;
 
-  --danger: #f38ba8;
-  --danger-bg: #f38ba8;
-  --on-danger: #11111b;
+  --danger: #ff8a80;
+  --danger-bg: #b3453c;
+  --on-danger: #ffffff;
 
   --scrim: rgba(0, 0, 0, 0.5);
   --shadow: rgba(0, 0, 0, 0.5);
@@ -71,7 +71,7 @@
      The shape, which is the other half and comes from `shared/skin.ts`.
 
      Everything below is the Soft skin, written out, for the same reason the
-     colours above are Mocha written out: it is what is on screen for the frame
+     colours above are kururu's own theme written out: it is what is on screen for the frame
      between this stylesheet painting and the first snapshot arriving, and it is
      what keeps this file readable as a stylesheet rather than as half of one.
      `web/src/skin.ts` overwrites all of it on every snapshot.

@@ -110,7 +110,7 @@ open Settings tab in `sessionStorage` across it, or browsing themes would close
 the picker on every pick.
 
 Two traps if you touch this. The **first application is never a change** — the
-module declares Mocha and the first snapshot almost always moves it, so
+module declares the default and the first snapshot often moves it, so
 reloading for that would reload forever; `dressed` is the guard. And the reload
 must stay on the *snapshot*, not on the click: the server has already persisted
 the appearance by then, which is what makes the window come back agreeing with
@@ -443,8 +443,23 @@ a choice the pack declined to have an opinion about. The registry refuses a
 `font` containing a comma, because kururu quotes the name whole and a list would
 match nothing.
 
-**Settings → Appearance lists the installed packs as buttons, not as a
-radiogroup**, and the distinction is real: nothing records which pack you are in,
+**Kururu's own look is a pack, built in, and the way back from every other.**
+`KURURU_PACK` in `shared/styles.ts` names kururu's theme, the Soft skin (and so
+kururu's own icons), the frog and the croak, and it is what a fresh install
+already wears — `DEFAULT_THEME_ID` is `kururu`, so wearing it on a fresh
+machine changes nothing, which a test holds by identity. It is not in the
+registry because the way back has to work with no network, and it is not worn
+through `PACK_PARTS` because two of its parts mean something else: the frog is
+`DEFAULT_MASCOT`, not a registry id, so `frogIn` finds the user's own frog —
+the stock one, else any row cut from its sheet, else a fresh one — and its
+empty `font` is an opinion where a registry pack's is silence. A pack that left
+the font alone could not take another pack's face off, and taking everything
+another pack put on is the whole of what this one is for. `wear` checks for it
+before the installed records, so a registry pack that took the id `kururu`
+cannot stand in front of it, and Settings leaves such a pack out of the list.
+
+**Settings → Appearance lists the packs as buttons, Kururu's first and then the
+installed ones, not as a radiogroup**, and the distinction is real: nothing records which pack you are in,
 and the moment you change the skin you are no longer quite in any of them — which
 is the entire reason the control exists. The Styles tab says the same thing on an
 installed row, where the word *Installed* used to be a state and is now an offer.

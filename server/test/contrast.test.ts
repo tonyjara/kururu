@@ -107,7 +107,9 @@ describe("INK_FLOOR", () => {
 });
 
 describe("auditPairs", () => {
-  const ui = (over: Partial<UiTokens>): UiTokens => ({ ...themeFor(null).ui, ...over });
+  // Mocha by name rather than the default, because the ratios below are Mocha's
+  // and the default is a choice that has already moved once.
+  const ui = (over: Partial<UiTokens>): UiTokens => ({ ...themeFor("catppuccin-mocha").ui, ...over });
 
   it("reports a pair under its ink's floor and nothing else", () => {
     const pairs: Pair[] = [

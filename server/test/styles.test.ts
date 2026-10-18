@@ -36,8 +36,17 @@ import {
   cssValue,
   isAssetName,
   isVersion,
+  BUILTIN_PACKS,
+  frogIn,
+  isBuiltinPack,
+  KURURU_PACK,
+  wearKururu,
+  type Look,
 } from "../../shared/styles";
 import { ICON_NAMES, skinFor } from "../../shared/skin";
+import { DEFAULT_MASCOT, DEFAULT_MASCOT_SET } from "../../shared/model";
+import { DEFAULT_NOTIFY } from "../../shared/notify";
+import { DEFAULT_APPEARANCE } from "../../shared/theme";
 import { themeFor } from "../../shared/theme";
 
 describe("compareVersions", () => {
@@ -528,5 +537,90 @@ describe("a pack manifest", () => {
     expect(adoptPackManifest(null)).toBeNull();
     expect(adoptPackManifest({ theme: "nord" })).toBeNull();
     expect(adoptPackManifest({ id: "Not An Id" })).toBeNull();
+  });
+});
+
+/**
+ * Kururu's own pack is the way back from every other one, and the test of that
+ * is a round trip: wear a pack over it, wear it again, and nothing of the other
+ * pack is left. The registry pack below is put on by hand — the five writes
+ * `wear` makes for an installed pack — because that half reads files and this
+ * one does not.
+ */
+describe("the Kururu pack", () => {
+  const fresh = (): Look => ({ appearance: DEFAULT_APPEARANCE, mascots: DEFAULT_MASCOT_SET, notify: DEFAULT_NOTIFY });
+
+  const racer = { id: "m2", name: "Racer", ...DEFAULT_MASCOT, sheet: "racer" };
+  const grandPrix = (look: Look): Look => ({
+    appearance: {
+      ...look.appearance,
+      themeId: "pit-wall",
+      skinId: "grand-prix",
+      terminal: { ...look.appearance.terminal, fontFamily: "SF Mono" },
+    },
+    mascots: { default: racer.id, list: [...look.mascots.list.filter((m) => m.id !== racer.id), racer] },
+    notify: { ...look.notify, sound: "lights-out" },
+  });
+
+  it("is what a fresh install already wears, so wearing it there changes nothing", () => {
+    const look = fresh();
+    const worn = wearKururu(look);
+    // By identity, since `saveLook` writes only what is not the same object.
+    expect(worn.appearance).toBe(look.appearance);
+    expect(worn.mascots).toBe(look.mascots);
+    expect(worn.notify).toBe(look.notify);
+  });
+
+  it("names kururu's own theme, skin and sound", () => {
+    expect(KURURU_PACK).toMatchObject({ id: "kururu", theme: "kururu", skin: "soft", sound: "croak", font: "" });
+    expect(BUILTIN_PACKS[0]).toBe(KURURU_PACK);
+  });
+
+  it("takes another pack off completely, and that pack goes back on the same", () => {
+    const start = fresh();
+    const f1 = grandPrix(start);
+    const back = wearKururu(f1);
+    expect(back.appearance).toEqual(start.appearance);
+    expect(back.notify).toEqual(start.notify);
+    expect(back.mascots.default).toBe(start.mascots.default);
+    // The racer stays in the list, as an installed mascot does; it is only not
+    // the default any more.
+    expect(back.mascots.list.map((m) => m.id)).toEqual(["m1", "m2"]);
+    expect(grandPrix(back)).toEqual(f1);
+  });
+
+  it("leaves what a pack does not move — the size, the cursor, notifications on or off", () => {
+    const look = fresh();
+    const mine: Look = {
+      ...grandPrix(look),
+      notify: { ...look.notify, sound: "lights-out", enabled: false },
+    };
+    mine.appearance = { ...mine.appearance, terminal: { ...mine.appearance.terminal, fontSize: 15, cursorStyle: "bar" } };
+    const back = wearKururu(mine);
+    expect(back.appearance.terminal).toMatchObject({ fontFamily: "", fontSize: 15, cursorStyle: "bar" });
+    expect(back.notify.enabled).toBe(false);
+  });
+
+  it("finds the user's own frog rather than adding a second", () => {
+    const tuned = { id: "m1", name: "Frog", ...DEFAULT_MASCOT, idle: { row: 7, col: 0, count: 1, cycle: 2400 } };
+    const set = { default: racer.id, list: [tuned, racer] };
+    expect(frogIn(set)).toEqual({ default: "m1", list: set.list });
+  });
+
+  it("prefers the stock frog when there are two", () => {
+    const tuned = { id: "m1", name: "Frog", ...DEFAULT_MASCOT, motion: "never" as const };
+    const stock = { id: "m3", name: "Frog again", ...DEFAULT_MASCOT };
+    expect(frogIn({ default: racer.id, list: [tuned, racer, stock] }).default).toBe("m3");
+  });
+
+  it("puts a frog back when every one was deleted", () => {
+    const next = frogIn({ default: racer.id, list: [racer] });
+    expect(next.default).toBe("m1");
+    expect(next.list).toEqual([racer, { id: "m1", name: "Frog", ...DEFAULT_MASCOT }]);
+  });
+
+  it("is told apart from an installed pack by id", () => {
+    expect(isBuiltinPack("kururu")).toBe(true);
+    expect(isBuiltinPack("grand-prix")).toBe(false);
   });
 });

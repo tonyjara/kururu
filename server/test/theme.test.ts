@@ -26,9 +26,10 @@ import {
 } from "../../shared/theme";
 
 describe("the themes", () => {
-  it("ships Catppuccin Mocha as the default", () => {
-    expect(themeFor(DEFAULT_THEME_ID).id).toBe("catppuccin-mocha");
-    expect(DEFAULT_APPEARANCE.themeId).toBe("catppuccin-mocha");
+  it("ships kururu's own as the default, and lists it first", () => {
+    expect(themeFor(DEFAULT_THEME_ID).id).toBe("kururu");
+    expect(DEFAULT_APPEARANCE.themeId).toBe("kururu");
+    expect(THEMES[0]!.id).toBe(DEFAULT_THEME_ID);
   });
 
   it("has no two themes sharing an id", () => {

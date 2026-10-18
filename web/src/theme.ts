@@ -11,9 +11,9 @@
  * The `:root` block still exists and still holds a complete palette. It is not
  * dead: it is what is on screen for the frame or two between the page painting
  * and the first snapshot arriving, and it is what keeps the stylesheet readable
- * on its own rather than as half of something. It holds Mocha, because that is
- * the default and a first paint in some other theme's colours would be a flash
- * of the wrong app.
+ * on its own rather than as half of something. It holds kururu's own theme,
+ * because that is the default and a first paint in some other theme's colours
+ * would be a flash of the wrong app.
  *
  * Nothing here is reactive and nothing here is React. A theme is a property of
  * the document, not of a component: putting it in the tree would mean every

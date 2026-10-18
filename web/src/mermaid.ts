@@ -52,12 +52,12 @@ function token(style: CSSStyleDeclaration, name: string, fallback: string): stri
  */
 function themeVariables(): MermaidConfig["themeVariables"] {
   const style = getComputedStyle(document.documentElement);
-  const bg = token(style, "--bg", "#1e1e2e");
-  const chrome = token(style, "--chrome", "#181825");
-  const chromeHigh = token(style, "--chrome-high", "#313244");
-  const line = token(style, "--line", "#45475a");
-  const text = token(style, "--text", "#cdd6f4");
-  const dim = token(style, "--dim", "#a6adc8");
+  const bg = token(style, "--bg", "#0d0f0e");
+  const chrome = token(style, "--chrome", "#141817");
+  const chromeHigh = token(style, "--chrome-high", "#1b201e");
+  const line = token(style, "--line", "#242b28");
+  const text = token(style, "--text", "#d7dbd8");
+  const dim = token(style, "--dim", "#7c857f");
 
   return {
     background: bg,
@@ -66,7 +66,7 @@ function themeVariables(): MermaidConfig["themeVariables"] {
     // block does rather than being a second background colour.
     primaryColor: chromeHigh,
     primaryTextColor: text,
-    primaryBorderColor: token(style, "--line-high", "#585b70"),
+    primaryBorderColor: token(style, "--line-high", "#33413a"),
     secondaryColor: chrome,
     secondaryTextColor: text,
     secondaryBorderColor: line,
@@ -78,7 +78,7 @@ function themeVariables(): MermaidConfig["themeVariables"] {
     lineColor: dim,
     textColor: text,
     mainBkg: chromeHigh,
-    nodeBorder: token(style, "--line-high", "#585b70"),
+    nodeBorder: token(style, "--line-high", "#33413a"),
     clusterBkg: chrome,
     clusterBorder: line,
     titleColor: text,

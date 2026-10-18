@@ -107,9 +107,9 @@ let type: TerminalAppearance = DEFAULT_APPEARANCE.terminal;
  * default it is declared as.
  *
  * It exists to keep the reload below from being a loop. The first snapshot of a
- * session almost always moves the palette — the declaration above is Mocha and
+ * session often moves the palette — the declaration above is the default and
  * the user is on something else — and reloading for that would land on a fresh
- * window whose palette is Mocha again, which would move again, forever. The
+ * window whose palette is the default again, which would move again, forever. The
  * first application is therefore never a change; it is the window learning what
  * it was always meant to be wearing, and in practice it happens before any
  * emulator exists, since `create` builds its `Terminal` behind the wasm's

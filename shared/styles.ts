@@ -59,9 +59,11 @@
  * the window fetch from a host it did not choose, because a window that phones
  * out while it paints tells whoever answers when its owner is working.
  */
-import { adoptMascot, type MascotConfig } from "./model";
+import { adoptMascot, DEFAULT_MASCOT, freshMascotId, type MascotConfig, type MascotSet } from "./model";
+import { DEFAULT_NOTIFY, type NotifySettings } from "./notify";
 import {
   BASE_ICONS,
+  DEFAULT_SKIN_ID,
   ICON_NAMES,
   isPartName,
   isStyleId,
@@ -79,8 +81,8 @@ import {
   type SkinTokens,
 } from "./skin";
 import { skinFor } from "./skin";
-import type { Theme, TerminalTokens, UiTokens, WorkspaceColorName } from "./theme";
-import { adoptFontFamily, themeFor } from "./theme";
+import type { Appearance, Theme, TerminalTokens, UiTokens, WorkspaceColorName } from "./theme";
+import { adoptFontFamily, DEFAULT_THEME_ID, themeFor } from "./theme";
 
 /** The schema this version of kururu speaks. An index declaring another is not for us. */
 export const STYLES_SCHEMA = 1;
@@ -769,4 +771,107 @@ export function adoptPackManifest(value: unknown): PackManifest | null {
     sound: part("sound"),
     font: adoptFontFamily(raw.font),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Kururu's own pack
+// ---------------------------------------------------------------------------
+
+/**
+ * The three files a look lands in, gathered up so that wearing a pack writes
+ * each of them at most once — see `saveLook` in `server/src/index.ts`, which
+ * compares these by identity and writes only the ones that moved. That is why
+ * everything below hands back the object it was given when nothing changed.
+ */
+export interface Look {
+  appearance: Appearance;
+  mascots: MascotSet;
+  notify: NotifySettings;
+}
+
+/**
+ * Kururu's own look, as a pack: its theme, the Soft skin with kururu's own
+ * icons, the frog, the croak, and kururu's own font stack.
+ *
+ * Built in rather than published to the registry, because it has to be there
+ * on a machine that has never reached the registry — it is what a fresh
+ * install opens in, and the way back from any other pack has to work with no
+ * network. Its parts are built in for the same reason, so it cannot be
+ * installed, updated or removed, and Settings lists it ahead of the installed
+ * ones.
+ *
+ * It is not worn through `PACK_PARTS` like the others, and the difference is
+ * two parts that mean something else here. `mascot` is not a registry id —
+ * the frog is not in the registry, it is `DEFAULT_MASCOT` — so wearing it
+ * finds the frog in the user's list (`frogIn`). And `font` is empty, which in a
+ * registry pack is silence and here is an opinion: kururu's own look is
+ * kururu's own stack, and a pack that leaves the font alone would leave
+ * another pack's face behind, which is exactly the "left over" this pack
+ * exists to undo.
+ */
+export const KURURU_PACK: PackManifest = {
+  id: "kururu",
+  name: "Kururu",
+  theme: DEFAULT_THEME_ID,
+  skin: DEFAULT_SKIN_ID,
+  mascot: "frog",
+  sound: DEFAULT_NOTIFY.sound,
+  font: "",
+};
+
+/** Every pack there is without installing one, in the order Settings lists them. */
+export const BUILTIN_PACKS: readonly PackManifest[] = [KURURU_PACK];
+
+export function isBuiltinPack(id: string): boolean {
+  return BUILTIN_PACKS.some((pack) => pack.id === id);
+}
+
+/**
+ * Kururu's own pack, put on over whatever is being worn.
+ *
+ * What a pack moves is the default: the theme, the skin, the font, the
+ * mascot a workspace gets when it has not chosen, and the notification's
+ * noise. Nothing else is touched — not the font's size or the cursor, which
+ * outlive a change of mind about colour, not whether notifications are on, and
+ * not a workspace that picked its own mascot, since that was a choice about
+ * the workspace rather than the look. Which is the same set every other pack
+ * moves, so going from any pack to this one and back leaves nothing of either
+ * behind.
+ */
+export function wearKururu(look: Look): Look {
+  const pack = KURURU_PACK;
+  const { appearance, notify } = look;
+  const terminal = appearance.terminal;
+  const moved =
+    appearance.themeId !== pack.theme || appearance.skinId !== pack.skin || terminal.fontFamily !== pack.font;
+  return {
+    appearance: moved
+      ? { ...appearance, themeId: pack.theme!, skinId: pack.skin!, terminal: { ...terminal, fontFamily: pack.font } }
+      : appearance,
+    mascots: frogIn(look.mascots),
+    notify: notify.sound === pack.sound ? notify : { ...notify, sound: pack.sound! },
+  };
+}
+
+/**
+ * The set, with the frog as its default — adding one only if it has none.
+ *
+ * Found rather than added, because the list is the user's: somebody who tuned
+ * the frog's idle in Settings has *their* frog, and wearing kururu's look
+ * should put that one back rather than a second, stock frog beside it. So the
+ * stock frog first, then any row cut from the frog's sheet, and a fresh stock
+ * frog only for a list that has deleted every one — which is the case that
+ * would otherwise leave the previous pack's sprite in the badge.
+ */
+export function frogIn(set: MascotSet): MascotSet {
+  const frog = set.list.find(isStockFrog) ?? set.list.find((m) => m.sheet === DEFAULT_MASCOT.sheet);
+  if (frog) return frog.id === set.default ? set : { ...set, default: frog.id };
+  const id = freshMascotId(set.list);
+  return { default: id, list: [...set.list, { id, name: "Frog", ...DEFAULT_MASCOT }] };
+}
+
+function isStockFrog(config: MascotConfig): boolean {
+  const pick = (c: MascotConfig) =>
+    JSON.stringify([c.sheet, c.frame, c.trim, c.motion, c.working, c.idle, c.blocked, c.done]);
+  return pick(config) === pick(DEFAULT_MASCOT);
 }

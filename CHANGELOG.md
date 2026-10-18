@@ -15,6 +15,14 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **Kururu is a pack too, and the way back from any other.** Settings → Theme →
+  Packs lists **Kururu** first, always, beside the packs you installed: one
+  press puts back kururu's own theme, the Soft skin with its own icons, the
+  frog, the croak and kururu's font, and takes the other pack's font, sprite
+  and sound with it. It is built in, so it works with no network. A fresh
+  install now opens in it — kururu's own green rather than Catppuccin Mocha —
+  and so does a window that never had a theme picked; one that did keeps its
+  own.
 - **Grand Prix and Paddock, a motor-racing pack in dark and light.** Settings →
   Explore → Packs: carbon fibre or white garage walls, racing red, a kerb along
   the top of the pane you are in, a chequer at each end of the status bar, and
