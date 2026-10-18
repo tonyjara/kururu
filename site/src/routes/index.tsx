@@ -86,7 +86,7 @@ function Hero() {
         <div className="hopper" aria-hidden="true">
           <Frog pose="hop" scale={2} />
         </div>
-        <Shot {...SHOTS.hero} title="Kururu" sizes="(min-width: 1200px) 1150px, 100vw" eager />
+        <Shot shot={SHOTS.hero} title="Kururu" sizes="(min-width: 1200px) 1150px, 100vw" eager />
       </div>
     </section>
   );
@@ -165,7 +165,7 @@ function Workspaces() {
       id="workspaces"
       label="Workspaces"
       title="Many agents, many projects, one layout"
-      media={<Shot {...SHOTS.reader} title="Workspace" />}
+      media={<Shot shot={SHOTS.reader} title="Workspace" />}
     >
       <p>
         A workspace is a project. Split it into panes, stack tabs in a pane, and drag a tab or a whole pane anywhere,
@@ -218,7 +218,7 @@ function Boards() {
             <li>A profile board sits over every project, with a timeline for the cards that have dates.</li>
           </ul>
         </div>
-        <Shot {...SHOTS.board} title="Board" sizes="(min-width: 1200px) 1150px, 100vw" />
+        <Shot shot={SHOTS.board} title="Board" sizes="(min-width: 1200px) 1150px, 100vw" />
       </div>
     </section>
   );
@@ -242,7 +242,7 @@ function Kuru() {
         </div>
         <div className="kuru-grid">
           <div className="kuru-shot">
-            <Shot {...SHOTS.kuru} title="Kuru" sizes="(min-width: 1200px) 740px, (min-width: 900px) 62vw, 100vw" />
+            <Shot shot={SHOTS.kuru} title="Kuru" sizes="(min-width: 1200px) 740px, (min-width: 900px) 62vw, 100vw" />
           </div>
           <div className="cards">
             <article className="card">
@@ -289,7 +289,7 @@ function Needs() {
       id="needs"
       label="Needs you"
       title="Know which agent is waiting on you"
-      media={<Shot {...SHOTS.needs} title="Needs you" />}
+      media={<Shot shot={SHOTS.needs} title="Needs you" />}
       flip
     >
       <p>
@@ -329,8 +329,8 @@ function Phone() {
           </p>
         </div>
         <div className="phones">
-          <PhoneShot {...SHOTS.phone} />
-          <PhoneShot {...SHOTS.phone2} />
+          <PhoneShot shot={SHOTS.phone} />
+          <PhoneShot shot={SHOTS.phone2} />
         </div>
       </div>
     </section>

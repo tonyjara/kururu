@@ -301,9 +301,12 @@ p {
   position: sticky;
   top: 0;
   z-index: 10;
-  background: rgba(13, 15, 14, 0.82);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  /*
+   * Opaque, with no blur behind it: where backdrop-filter does not draw (some
+   * WebViews, reduced transparency), a see-through bar laid the hero's text
+   * over the logo, and even 96% let a ghost of it through.
+   */
+  background: var(--bg);
   border-bottom: 1px solid var(--line);
 }
 
@@ -477,6 +480,11 @@ p {
 
 .shot img {
   width: 100%;
+}
+
+.shot picture,
+.phone picture {
+  display: block;
 }
 
 .phone {
