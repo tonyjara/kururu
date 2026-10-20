@@ -95,7 +95,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cardCode } from "../../../shared/board";
 import { CHANNEL_NAMES, channelReady, isChannelKind, type TelegramStatus } from "../../../shared/channels";
-import { KURU_SEEN_MS, addressOf, clipLength, mergeNodes, splitCardCodes, type KuruItem, type KuruReply, type NodeKuruItem, type NoticeItem, type PeerKuru, type YouItem } from "../../../shared/kuru";
+import { KURU_SEEN_MS, addressMatches, addressOf, addressQuery, clipLength, mergeNodes, pickAddress, splitCardCodes, typedAddress, type KuruItem, type KuruReply, type NodeKuruItem, type NoticeItem, type PeerKuru, type YouItem } from "../../../shared/kuru";
 import { splitMentions } from "../../../shared/made";
 import type { AgentSnapshot, MascotConfig, Profile } from "../../../shared/model";
 import type { OutboxState, VoiceSettings } from "../../../shared/voice";
@@ -1020,6 +1020,18 @@ function writeDraft(profileId: string, text: string) {
  * thought half-written must not vanish because the drawer did — and the field
  * grows with it up to `.kuru-field`'s `max-height`, so writing more than one
  * line does not hide the lines above it.
+ *
+ * An `@` at the front offers the other nodes' names as it is typed, and a
+ * name that will route is drawn bold — off `typedAddress`, the grammar the
+ * server routes on, so the bold cannot promise a route the server will not
+ * take. A textarea cannot bold a range, so the bold is a mirror behind it
+ * (`.kuru-mirror`) holding only the address, its glyphs stroked to thicken
+ * the field's own drawn on top. A real `font-weight` was the obvious choice
+ * and was rejected because bold glyphs are wider: the field's text and caret
+ * would drift off the mirror's by the end of the name. A contenteditable box
+ * would bold for real and was rejected because it gives up everything the
+ * textarea does for free — the value, IME, undo, the phone's keyboard — for
+ * one word's weight.
  */
 function Composer({
   profileId,
@@ -1037,7 +1049,12 @@ function Composer({
   prefill: { text: string; n: number } | null;
 }) {
   const [text, setText] = useState(() => readDraft(profileId));
+  const [caret, setCaret] = useState<number | null>(null);
+  /** The suggestions moved through with the arrows, and the draft Escape closed them on — they open again once it changes. */
+  const [chosen, setChosen] = useState(0);
+  const [closedOn, setClosedOn] = useState<string | null>(null);
   const field = useRef<HTMLTextAreaElement>(null);
+  const mirror = useRef<HTMLDivElement>(null);
   useEffect(() => {
     setText(readDraft(profileId));
   }, [profileId]);
@@ -1058,20 +1075,42 @@ function Composer({
     }
     // Only a new ask, not a re-render, moves the cursor.
   }, [prefill?.n]); // eslint-disable-line react-hooks/exhaustive-deps
-  const to = addressOf(text, peers.map((peer) => peer.node.name), false)?.node ?? null;
-  const toPeer = to ? peers.find((peer) => peer.node.name === to) : undefined;
+  const names = peers.map((peer) => peer.node.name);
+  const address = typedAddress(text, names);
+  const toPeer = address ? peers.find((peer) => peer.node.name === address.node) : undefined;
+  const query = caret === null || closedOn === text ? null : addressQuery(text, caret);
+  const offered = query ? addressMatches(query.query, names) : [];
+  const open = offered.length > 0;
+  const active = Math.min(chosen, offered.length - 1);
   useLayoutEffect(() => {
     const el = field.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
+    if (mirror.current) mirror.current.scrollTop = el.scrollTop;
   }, [text]);
+  const edit = (next: string) => {
+    setText(next);
+    writeDraft(profileId, next);
+  };
+  const pick = (node: string) => {
+    if (!query) return;
+    const picked = pickAddress(text, query, node);
+    edit(picked.text);
+    setCaret(picked.caret);
+    const el = field.current;
+    if (el) {
+      el.focus();
+      requestAnimationFrame(() => el.setSelectionRange(picked.caret, picked.caret));
+    }
+  };
   const send = () => {
     const words = text.trim();
-    if (!words) return;
+    // An address and nothing after it goes nowhere: the server would hand
+    // `@omarchy` to this Kuru as words, which is not what the bold promised.
+    if (!words || (address && !address.rest)) return;
     api.kuruSay(profileId, words);
-    setText("");
-    writeDraft(profileId, "");
+    edit("");
   };
   // Told once each way, and told off on unmount: a drawer closed with the
   // cursor still in the box must not leave the prefix believing a field has
@@ -1091,31 +1130,88 @@ function Composer({
           {toPeer.state !== "up" ? " — away; it goes when it is back" : !toPeer.talks ? " — its kururu is too old to take it" : ""}
         </p>
       )}
+      {open && (
+        <ul className="kuru-suggest" id={`kuru-suggest-${profileId}`} role="listbox" aria-label="Nodes">
+          {offered.map((name, i) => {
+            const peer = peers.find((p) => p.node.name === name);
+            return (
+              <li
+                key={name}
+                id={`kuru-suggest-${profileId}-${i}`}
+                role="option"
+                aria-selected={i === active}
+                className={`menu-item kuru-suggest-item ${i === active ? "kuru-suggest-on" : ""}`}
+                // The field keeps the keyboard: a tap that took the focus
+                // would close the phone's keyboard under the pick.
+                onPointerDown={(event) => event.preventDefault()}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => pick(name)}
+              >
+                <span className="menu-label">@{name}</span>
+                {peer && peer.state !== "up" ? <span className="menu-hint">away</span> : peer && !peer.talks ? <span className="menu-hint">too old</span> : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
       <div className="kuru-box">
-        <textarea
-          ref={field}
-          className="kuru-field"
-          rows={1}
-          value={text}
-          placeholder={peers.length ? `Say something to Kuru, or @${peers[0]!.node.name} …` : "Say something to Kuru"}
-          aria-label="A message for Kuru"
-          onChange={(event) => {
-            setText(event.target.value);
-            writeDraft(profileId, event.target.value);
-          }}
-          onFocus={() => onEditing(true)}
-          onBlur={() => onEditing(false)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault();
-              send();
-            } else if (event.key === "Escape") {
-              event.preventDefault();
-              event.stopPropagation();
-              field.current?.blur();
-            }
-          }}
-        />
+        <div className="kuru-write">
+          {address && (
+            <div ref={mirror} className="kuru-mirror" aria-hidden="true">
+              {text.slice(0, address.from)}
+              <b>{text.slice(address.from, address.to)}</b>
+            </div>
+          )}
+          <textarea
+            ref={field}
+            className="kuru-field"
+            rows={1}
+            value={text}
+            placeholder={peers.length ? `Say something to Kuru, or @${peers[0]!.node.name} …` : "Say something to Kuru"}
+            aria-label="A message for Kuru"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={open}
+            aria-controls={open ? `kuru-suggest-${profileId}` : undefined}
+            aria-activedescendant={open ? `kuru-suggest-${profileId}-${active}` : undefined}
+            onChange={(event) => {
+              edit(event.target.value);
+              setCaret(event.target.selectionStart);
+              setChosen(0);
+            }}
+            onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
+            onScroll={(event) => {
+              if (mirror.current) mirror.current.scrollTop = event.currentTarget.scrollTop;
+            }}
+            onFocus={() => onEditing(true)}
+            onBlur={() => {
+              onEditing(false);
+              setCaret(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return;
+              if (open && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+                event.preventDefault();
+                setChosen((active + (event.key === "ArrowDown" ? 1 : offered.length - 1)) % offered.length);
+              } else if (open && (event.key === "Enter" || event.key === "Tab") && !event.shiftKey) {
+                event.preventDefault();
+                pick(offered[active]!);
+              } else if (open && event.key === "Escape") {
+                // Only the list: a second Escape gives the keyboard back.
+                event.preventDefault();
+                event.stopPropagation();
+                setClosedOn(text);
+              } else if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                send();
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                field.current?.blur();
+              }
+            }}
+          />
+        </div>
         <button
           type="button"
           className={`kuru-mic ${talking ? "kuru-mic-listening" : ""}`}

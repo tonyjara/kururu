@@ -543,18 +543,92 @@ export function splitCardCodes(text: string): TextPart[] {
  * are left are what the peer is typed.
  */
 export function addressOf(text: string, names: readonly string[], spoken: boolean): { node: string; rest: string } | null {
+  if (!spoken) {
+    const at = typedAddress(text, names);
+    return at?.rest ? { node: at.node, rest: at.rest } : null;
+  }
   const said = text.trim();
   for (const node of [...names].sort((a, b) => b.length - a.length)) {
-    const name = node.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/-/g, "[- ]?");
-    const shape = spoken ? `^(?:(?:@|at\\s+|hey\\s+)${name}(?:[,:!.]\\s*|\\s+)|${name}[,:!]\\s*)` : `^@${name}(?:[,:]\\s*|\\s+)`;
+    const shape = `^(?:(?:@|at\\s+|hey\\s+)${namePattern(node)}(?:[,:!.]\\s*|\\s+)|${namePattern(node)}[,:!]\\s*)`;
     const match = new RegExp(shape, "i").exec(said);
     if (!match) continue;
     const rest = said.slice(match[0].length).trim();
     // Spoken, a bare name with a space after it is only an address when
     // something follows it that is worth sending.
-    if (rest) return { node, rest: spoken ? rest.charAt(0).toUpperCase() + rest.slice(1) : rest };
+    if (rest) return { node, rest: rest.charAt(0).toUpperCase() + rest.slice(1) };
   }
   return null;
+}
+
+/** A node's name as the address reads it: escaped, and a dash that may be a space or nothing. */
+function namePattern(node: string): string {
+  return node.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/-/g, "[- ]?");
+}
+
+/** Where a typed address sits in a draft: the `@name` from `from` to `to`, and the words after it. */
+export interface TypedAddress {
+  node: string;
+  from: number;
+  to: number;
+  rest: string;
+}
+
+/**
+ * The typed address in a draft, where it is — which is `addressOf`'s typed
+ * grammar itself, so that the composer drawing `@omarchy` in bold and the
+ * server routing the message there are one decision and not two that agree.
+ *
+ * It also finds an address with nothing after it yet (`rest` empty), which
+ * routes nowhere on its own: that is `@omarchy` just picked, and the bold
+ * says the words that follow will go there. A name that has an address only
+ * with words after it — `@box 2` for `box-2`, when `box` is a node too and
+ * the `2` would be its words — is read the way `addressOf` reads it, the
+ * longest name with words first.
+ */
+export function typedAddress(text: string, names: readonly string[]): TypedAddress | null {
+  let bare: TypedAddress | null = null;
+  for (const node of [...names].sort((a, b) => b.length - a.length)) {
+    const match = new RegExp(`^(\\s*)(@${namePattern(node)})(?:[,:]\\s*|\\s+|$)`, "i").exec(text);
+    if (!match) continue;
+    const from = match[1]!.length;
+    const at = { node, from, to: from + match[2]!.length, rest: text.slice(match[0].length).trim() };
+    if (at.rest) return at;
+    bare ??= at;
+  }
+  return bare;
+}
+
+/**
+ * The `@` being typed at the front of a draft, while the caret is in it:
+ * what follows the `@` up to the caret, and the span the whole word covers,
+ * which a pick replaces. Only at the front, because only there is an `@` an
+ * address — offering names to "ask @om" would offer a route that is not one.
+ */
+export function addressQuery(text: string, caret: number): { query: string; from: number; to: number } | null {
+  const before = /^\s*@([\p{L}\p{N}-]*)$/u.exec(text.slice(0, caret));
+  if (!before) return null;
+  const after = /^[\p{L}\p{N}-]*/u.exec(text.slice(caret))![0];
+  return { query: before[1]!, from: text.indexOf("@"), to: caret + after.length };
+}
+
+/** The names a query offers: those that start with it first, then those that only contain it, each in roster order. */
+export function addressMatches(query: string, names: readonly string[]): string[] {
+  const q = query.toLowerCase();
+  const starts = names.filter((name) => name.toLowerCase().startsWith(q));
+  return [...starts, ...names.filter((name) => !starts.includes(name) && name.toLowerCase().includes(q))];
+}
+
+/**
+ * A draft with a name picked for the `@` being typed: the word replaced by
+ * `@name` and a space, unless a space or the address's own `,` or `:` is
+ * already there, and where the caret goes — past the space, ready for the
+ * words.
+ */
+export function pickAddress(text: string, at: { from: number; to: number }, node: string): { text: string; caret: number } {
+  const after = text.slice(at.to);
+  const head = `${text.slice(0, at.from)}@${node}`;
+  const space = /^[\s,:]/.test(after) ? "" : " ";
+  return { text: head + space + after, caret: head.length + 1 };
 }
 
 /**

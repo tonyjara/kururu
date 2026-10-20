@@ -256,6 +256,15 @@ only when they changed). They arrive on every client as the `kuru` message's
 - The composer is this node's Kuru's unless the message starts `@box`.
   Spoken, "at box, …", "hey box …" or "box, …" does it too (`addressOf`).
   Reply on another node's reply starts the message that way.
+- An `@` at the front opens a list of the other nodes, filtered as you
+  type: arrows and Enter or Tab, a click or a tap pick one, Escape closes
+  it, and Enter never sends while it is open. A name that will route is
+  bold in the field, off `typedAddress` — the typed half of `addressOf`
+  itself, so the bold and the server's routing are one decision. This node
+  is not in the list, because `@mac` on the Mac routes nowhere. An address
+  with nothing after it does not send: the server would hand `@box` to this
+  node's Kuru as words. The bold is a stroked mirror behind the textarea,
+  not a heavier weight; the reason is on `Composer`.
 - A message sent from one node to another is on the sender's outbox until
   it arrives, and a turn on the receiver after. It is drawn once: the turn
   once some node has it, the outbox's copy until then.
