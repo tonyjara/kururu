@@ -104,6 +104,31 @@ export function isPrefix(event: KeyboardEvent): boolean {
 }
 
 /**
+ * ⌘, and ⌘. — the two drawers, Kuru and what needs you, open or shut, with no
+ * prefix. The comma and the period sit side by side, the way `a` and `i` do
+ * not, so the pair of drawers is a pair of neighbouring keys.
+ *
+ * ⌘, is the key every Mac app gives its Settings, taken for Kuru because the
+ * drawer is what gets reached for and Settings is not; Settings stays on the
+ * prefix's `g`. ⌘. is a Cocoa dialog's cancel and Terminal.app's interrupt,
+ * and neither is anything here: the page has no Cocoa sheet, and ghostty-web
+ * never made it ^C — interrupt in a pane is ctrl+c. Nothing else in kururu
+ * had either key, and the Electron menu's app section is the stock role, which
+ * binds no Preferences item, so taking them moved nothing. Shift and option
+ * are refused so that ⇧⌘, and ⌥⌘. stay free for whatever wants them.
+ *
+ * Not in the rebindable table, which is what follows the prefix: a key there
+ * is one character with no modifiers, and a chord would need a grammar of its
+ * own on both halves for the sake of two entries.
+ */
+export function drawerChord(event: KeyboardEvent): "open-harness" | "open-needs" | null {
+  if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return null;
+  if (event.key === ",") return "open-harness";
+  if (event.key === ".") return "open-needs";
+  return null;
+}
+
+/**
  * What this key does, in the keymap this window is currently using. The map is
  * passed in rather than read from a module constant because it is the user's
  * now, and the user's things live in the snapshot.

@@ -71,6 +71,7 @@ import { installSpeech, installTalkKey, setSpeechVolume, setVoiceProfile, setVoi
 import { DEFAULT_VOICE } from "../../shared/voice";
 import {
   actionFor,
+  drawerChord,
   isModifier,
   isPrefix,
   keyName,
@@ -1342,7 +1343,8 @@ export function App() {
 
   /**
    * The ⌘ shortcuts, kept from before the prefix existed. A second door: ⌘W and
-   * ⌘R stay Electron's, which is why closing a pane is ⇧⌘W.
+   * ⌘R stay Electron's, which is why closing a pane is ⇧⌘W. ⌘, and ⌘. are
+   * the ones added since, for the two drawers — see `drawerChord`.
    */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -1352,7 +1354,11 @@ export function App() {
         event.preventDefault();
         event.stopPropagation();
       };
-      if (key === "d") {
+      const drawer = drawerChord(event);
+      if (drawer) {
+        take();
+        run(drawer);
+      } else if (key === "d") {
         take();
         run(event.shiftKey ? "split-down" : "split-right");
       } else if (key === "t" && !event.shiftKey) {

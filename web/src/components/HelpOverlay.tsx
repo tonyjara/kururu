@@ -41,7 +41,7 @@ export function HelpOverlay({
         </dl>
         <p className="dialog-hint">
           {PREFIX_LABEL} twice sends it to the terminal. ⌘D, ⇧⌘D, ⌘T, ⇧⌘W and ⌘[ ⌘] still work
-          without it. The keys above are yours to change, under the cog.
+          without it, and ⌘, and ⌘. open or shut the Kuru and Needs drawers. The keys above are yours to change, under the cog.
         </p>
         {/* Not in the list, because the list is what the prefix does and these
             are not prefixed. A reader has no pty to take keys from, so + − and 0
