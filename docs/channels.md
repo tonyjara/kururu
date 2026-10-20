@@ -188,7 +188,9 @@ Linked as [nodes](nodes.md), every kururu shares the parent's bot and chat:
 one node reads it at a time — the Mac while it is awake, the next by rank
 while it is away — and every Kuru speaks in it, each child's lines marked
 `[Omarchy] …`. `@omarchy` or `/omarchy` at the front of a message, or a
-reply to one of its lines, reaches that node's Kuru (`routeOf`). The
+reply to one of its lines, reaches that node's Kuru (`routeOf`). There
+is no composer of ours there to autocomplete or bold a name, as the
+drawer's does; Telegram's own `@` offers usernames, not nodes. The
 list rides in the roster, so it is set on the parent only; the switch is
 flipped on any node and reaches the others, the Mac when it is back
 ([The switch, from any node](nodes.md#the-switch-from-any-node)). A child's

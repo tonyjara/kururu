@@ -497,7 +497,9 @@ button {
   input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], [type="button"], [type="submit"], [type="reset"], [type="image"]),
   textarea,
   select,
-  [contenteditable]:not([contenteditable="false"], .term) {
+  [contenteditable]:not([contenteditable="false"], .term),
+  /* Not a field, but drawn under one glyph for glyph — see .kuru-mirror. */
+  .kuru-mirror {
     font-size: 16px !important;
   }
 }
@@ -5046,6 +5048,7 @@ html.pill-page #root {
 /* Typing to Kuru, and the mic beside it. Clear of the home indicator for the
    status bar's reason: on a phone the sheet is the bottom edge of the window. */
 .kuru-composer {
+  position: relative;
   flex: none;
   padding: 8px 10px;
   padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
@@ -5068,16 +5071,24 @@ html.pill-page #root {
 .kuru-box:focus-within {
   border-color: var(--accent);
 }
-.kuru-field {
+/* The field and the mirror behind it, which draws a routed `@node` bold. */
+.kuru-write {
+  position: relative;
   flex: 1;
   align-self: stretch;
+  min-width: 0;
+  display: flex;
+}
+.kuru-field {
+  position: relative;
+  flex: 1;
   min-width: 0;
   max-height: 120px;
   overflow-y: auto;
   padding: 4px 5px;
   resize: none;
   border: none;
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
   font: inherit;
   font-size: var(--fs-md);
@@ -5085,6 +5096,64 @@ html.pill-page #root {
 }
 .kuru-field:focus {
   outline: none;
+}
+/* Laid out exactly as the field is — same box, font, size and wrapping — so
+   that its one visible word sits under the field's own. The word is stroked
+   rather than set in a heavier weight, because a stroke thickens a glyph
+   without widening it: the field's regular text on top stays aligned to the
+   last letter, and the caret after it lands where it is drawn. On a touch
+   screen the field is 16px whatever --fs-md says, and so is this, from the
+   same floor near the top of the file. */
+.kuru-mirror {
+  position: absolute;
+  inset: 0;
+  padding: 4px 5px;
+  overflow: hidden;
+  pointer-events: none;
+  color: transparent;
+  font: inherit;
+  font-size: var(--fs-md);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.kuru-mirror b {
+  font-weight: inherit;
+  color: var(--text);
+  -webkit-text-stroke: 0.06em var(--text);
+}
+/* The nodes an `@` at the front can address, over the conversation just above
+   the composer — the menu's box and rows, since it is a menu, pinned to the
+   field rather than to a click. */
+.kuru-suggest {
+  position: absolute;
+  left: 10px;
+  bottom: 100%;
+  z-index: 3;
+  min-width: 156px;
+  max-width: calc(100% - 20px);
+  max-height: 40vh;
+  overflow-y: auto;
+  margin: 0 0 4px;
+  padding: 4px;
+  list-style: none;
+  background: var(--chrome);
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elev-menu);
+  display: flex;
+  flex-direction: column;
+}
+.kuru-suggest-item {
+  cursor: var(--cursor-pointer);
+}
+.kuru-suggest-on {
+  background: var(--chrome-high);
+  color: var(--text);
+}
+/* A thumb's row on a phone. */
+:root[data-narrow] .kuru-suggest-item {
+  padding: 10px 12px;
 }
 .kuru-mic {
   display: inline-flex;

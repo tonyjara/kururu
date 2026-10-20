@@ -14,13 +14,17 @@ import { describe, expect, it } from "bun:test";
 import { peerMark, peerReplySpoken, peerWords, readPeerMark, spokenHere } from "../../shared/channels";
 import { agentName } from "../../shared/harness";
 import {
+  addressMatches,
   addressOf,
+  addressQuery,
   mergeConversation,
   mergeNodes,
   peerItems,
+  pickAddress,
   plainWords,
   promptPeer,
   readPrompt,
+  typedAddress,
   type KuruItem,
   type KuruReply,
   type NoticeItem,
@@ -103,6 +107,49 @@ describe("the address", () => {
     expect(addressOf("box 2, run the tests", names, true)).toEqual({ node: "box-2", rest: "Run the tests" });
     expect(addressOf("Tell me about omarchy", names, true)).toBeNull();
     expect(addressOf("Omarchy is slow today", names, true)).toBeNull();
+  });
+});
+
+describe("the composer's @", () => {
+  const names = ["omarchy", "box-2", "box"];
+
+  it("is bold exactly where the server routes, and on a name with nothing after it yet", () => {
+    for (const text of ["@omarchy start the build", "  @Omarchy: start it", "@omarchy,go", "@box-2 run", "@box 2 run", "@box2 run", "@box run", "@omarchy\nhi"]) {
+      const at = typedAddress(text, names);
+      const routed = addressOf(text, names, false);
+      expect(at && { node: at.node, rest: at.rest }).toEqual(routed);
+    }
+    expect(typedAddress("  @omarchy hi", names)).toMatchObject({ from: 2, to: 10 });
+    expect(typedAddress("@omarchy", names)).toEqual({ node: "omarchy", from: 0, to: 8, rest: "" });
+    expect(typedAddress("@omarchy ", names)).toMatchObject({ node: "omarchy", rest: "" });
+    expect(addressOf("@omarchy ", names, false)).toBeNull();
+  });
+
+  it("is plain on anything that is not a known node", () => {
+    for (const text of ["@omar", "@omarchyx hi", "@omarchy.", "@mac hi", "ask @omarchy later", "omarchy, hi"]) expect(typedAddress(text, names)).toBeNull();
+  });
+
+  it("offers names only while the caret is in an @ at the front", () => {
+    expect(addressQuery("@", 1)).toEqual({ query: "", from: 0, to: 1 });
+    expect(addressQuery(" @om", 4)).toEqual({ query: "om", from: 1, to: 4 });
+    expect(addressQuery("@omXX hi", 3)).toEqual({ query: "om", from: 0, to: 5 });
+    expect(addressQuery("@om hi", 6)).toBeNull();
+    expect(addressQuery("ask @om", 7)).toBeNull();
+    expect(addressQuery("hi", 2)).toBeNull();
+  });
+
+  it("filters by the start of a name first", () => {
+    expect(addressMatches("", names)).toEqual(names);
+    expect(addressMatches("b", names)).toEqual(["box-2", "box"]);
+    expect(addressMatches("X-2", ["box-2", "x-20"])).toEqual(["x-20", "box-2"]);
+    expect(addressMatches("zz", names)).toEqual([]);
+  });
+
+  it("picks into the draft, ready for the words, and the pick is bold", () => {
+    expect(pickAddress("@om", { from: 0, to: 3 }, "omarchy")).toEqual({ text: "@omarchy ", caret: 9 });
+    expect(pickAddress("@o start it", { from: 0, to: 2 }, "omarchy")).toEqual({ text: "@omarchy start it", caret: 9 });
+    expect(pickAddress("@o: go", { from: 0, to: 2 }, "omarchy")).toEqual({ text: "@omarchy: go", caret: 9 });
+    expect(typedAddress(pickAddress("@b", { from: 0, to: 2 }, "box-2").text, names)).toMatchObject({ node: "box-2", rest: "" });
   });
 });
 
