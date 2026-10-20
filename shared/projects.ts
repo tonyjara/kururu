@@ -218,3 +218,23 @@ export function worktreeDir(root: string, name: string): string {
   const container = parent.endsWith(".worktrees") ? parent : `${parent}/${base}.worktrees`;
   return `${container}/${name}`;
 }
+
+/**
+ * A directory a terminal may start in, from one a pane remembered or an agent
+ * ran in, which can have gone since — a card's worktree is removed on merge,
+ * and every pane that ever showed a terminal in it still remembers the path.
+ * A pty spawned into a directory that is not there exits on its first
+ * instruction, before the agent has printed a word, so a gone directory is
+ * never handed on. A gone worktree is read as the repository it was cut from,
+ * `worktreeDir` backwards, because that is where the pane's next terminal was
+ * meant to be: a card without a worktree of its own runs in the main checkout.
+ * Anything else that has gone is undefined, and the caller tries its next
+ * candidate rather than a parent directory that is no project's.
+ */
+export function standingDir(dir: string, isDir: (path: string) => boolean): string | undefined {
+  if (isDir(dir)) return dir;
+  const worktree = /^(.*)\/([^/]+)\.worktrees\/[^/]+(?:\/.*)?$/.exec(dir.replace(/\/+$/, ""));
+  if (!worktree) return undefined;
+  const root = `${worktree[1]}/${worktree[2]}`;
+  return isDir(root) ? root : undefined;
+}

@@ -214,6 +214,7 @@ import {
 import {
   adoptProject,
   projectSettingsFor,
+  standingDir,
   type MergeBlock,
   type MergeReply,
   type MergeResolution,
@@ -1669,13 +1670,18 @@ function queueSave(): void {
 async function cwdForNewTab(paneId: string): Promise<string | undefined> {
   const showing = workspaces.activeAgentIn(paneId);
   if (showing) {
-    const followed = await followCwd(showing);
+    const followed = standing(await followCwd(showing));
     if (followed) return followed;
   }
-  const remembered = workspaces.cwdFor(paneId);
+  const remembered = standing(workspaces.cwdFor(paneId));
   if (remembered) return remembered;
   const newest = newestAgentHere();
-  return newest ? await followCwd(newest) : undefined;
+  return newest ? standing(await followCwd(newest)) : undefined;
+}
+
+/** A remembered directory that is still there, or the repository of a worktree that is not — see `standingDir`. */
+function standing(dir: string | undefined): string | undefined {
+  return dir === undefined ? undefined : standingDir(dir, isDirectory);
 }
 
 /**
@@ -1923,17 +1929,17 @@ function endRemote(agentId: string): void {
 async function cwdForPaneIn(profileId: string, workspaceId: string, paneId: string): Promise<string | undefined> {
   const showing = workspaces.activeAgentInW(profileId, workspaceId, paneId);
   if (showing) {
-    const followed = await followCwd(showing);
+    const followed = standing(await followCwd(showing));
     if (followed) return followed;
   }
-  const remembered = workspaces.cwdForIn(profileId, workspaceId, paneId);
+  const remembered = standing(workspaces.cwdForIn(profileId, workspaceId, paneId));
   if (remembered) return remembered;
   const newest = workspaces
     .agentsInWorkspace(profileId, workspaceId)
     .map((id) => host.find(id))
     .filter((a): a is AgentSnapshot => a !== undefined && !a.exited && !isApart(a.id))
     .sort((a, b) => b.createdAt - a.createdAt)[0];
-  return newest ? await followCwd(newest.id) : undefined;
+  return newest ? standing(await followCwd(newest.id)) : undefined;
 }
 
 /**

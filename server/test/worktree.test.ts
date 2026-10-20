@@ -33,6 +33,7 @@ import {
   adoptProject,
   adoptProjects,
   DEFAULT_PROJECT,
+  standingDir,
   worktreeBranch,
   worktreeDir,
   worktreeName,
@@ -63,6 +64,21 @@ describe("naming", () => {
     expect(worktreeDir("/Users/me/code/app.worktrees/other-9999", "fix-1234")).toBe(
       "/Users/me/code/app.worktrees/fix-1234",
     );
+  });
+
+  it("never hands on a directory that has gone, and reads a gone worktree as its repository", () => {
+    // KUR-145: two panes remembered a merged card's worktree, and every run
+    // of a card without one of its own was spawned there and exited at once.
+    const there = new Set(["/Users/me/code/app", "/Users/me/code/app.worktrees/live-1111", "/Users/me/notes"]);
+    const isDir = (path: string): boolean => there.has(path);
+    expect(standingDir("/Users/me/code/app", isDir)).toBe("/Users/me/code/app");
+    expect(standingDir("/Users/me/code/app.worktrees/live-1111", isDir)).toBe("/Users/me/code/app.worktrees/live-1111");
+    expect(standingDir("/Users/me/code/app.worktrees/gone-b822", isDir)).toBe("/Users/me/code/app");
+    expect(standingDir("/Users/me/code/app.worktrees/gone-b822/web/src", isDir)).toBe("/Users/me/code/app");
+    expect(standingDir("/Users/me/code/app.worktrees/gone-b822/", isDir)).toBe("/Users/me/code/app");
+    // No parent that is no project's, and no repository that is not there.
+    expect(standingDir("/Users/me/notes/old", isDir)).toBeUndefined();
+    expect(standingDir("/Users/me/code/lib.worktrees/gone-1234", isDir)).toBeUndefined();
   });
 });
 
