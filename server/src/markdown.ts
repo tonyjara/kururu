@@ -255,6 +255,23 @@ export async function renderMarkdown(
       : self.renderToken(tokens, idx, options);
   };
 
+  /**
+   * Each block says which line of the file it began on, as `data-line`, so
+   * the reader can say which line it was showing — what its tab's "Open in
+   * Neovim" opens at. Off markdown-it's own `map` and nothing else, and only
+   * on the blocks themselves, since an inline token's attributes are never
+   * drawn. A fence shiki highlighted keeps none, its markup being shiki's: the
+   * block above it is near enough for "roughly where you were".
+   */
+  md.core.ruler.push("source_lines", (state) => {
+    for (const token of state.tokens) {
+      if (!token.map || !token.block) continue;
+      if (token.nesting === 1 || token.type === "fence" || token.type === "code_block" || token.type === "hr") {
+        token.attrSet("data-line", String(token.map[0] + 1));
+      }
+    }
+  });
+
   const dir = posix.dirname(rel);
   const base = dir === "." ? "" : dir;
 

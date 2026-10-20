@@ -135,6 +135,16 @@ describe("mermaid", () => {
   });
 });
 
+describe("source lines", () => {
+  it("stamps each block with the line it began on, for the reader's Open in Neovim", async () => {
+    const html = await render("# Title\n\nfirst\n\n- a\n- b\n\n---\n");
+    expect(html).toContain(`<h1 data-line="1">`);
+    expect(html).toContain(`<p data-line="3">`);
+    expect(html).toContain(`<li data-line="6">`);
+    expect(html).toContain(`<hr data-line="8">`);
+  });
+});
+
 describe("the title", () => {
   it("is the first heading, and the file name when there is none", async () => {
     expect((await renderMarkdown("# Hello\n\nbody", "/p", "a.md", "kururu")).title).toBe("Hello");

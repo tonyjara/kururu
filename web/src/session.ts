@@ -1057,8 +1057,13 @@ export function findEditors(): Promise<EditorChoice[]> {
  * focused pane when `agentId` is null. Waits, because "nvim did not answer" is a real outcome and
  * the next snapshot would not explain it.
  */
-export function openInEditor(root: string, path: string, agentId: string | null): Promise<string> {
-  return request((id) => ({ type: "open-in-editor", id, root, path, agentId })).then(
+export function openInEditor(
+  root: string,
+  path: string,
+  agentId: string | null,
+  at: { paneId?: string; line?: number | null } = {},
+): Promise<string> {
+  return request((id) => ({ type: "open-in-editor", id, root, path, agentId, ...at })).then(
     (result) => (result as { agentId: string }).agentId,
   );
 }

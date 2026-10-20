@@ -3911,7 +3911,12 @@ async function editorsHere(): Promise<EditorChoice[]> {
  * alternative — the tab ending with the editor — means `:q` on the wrong buffer
  * closes a tab, which is not something `:q` does anywhere else.
  */
-async function openInEditor(root: string, path: string, agentId: string | null): Promise<{ agentId: string }> {
+async function openInEditor(
+  root: string,
+  path: string,
+  agentId: string | null,
+  at: { paneId?: string; line?: number | null } = {},
+): Promise<{ agentId: string }> {
   const full = resolveInRoot(root, path);
   if (!full) throw new Error("that file is outside the project");
   if (agentId !== null) {
@@ -3929,7 +3934,10 @@ async function openInEditor(root: string, path: string, agentId: string | null):
     }
     return { agentId };
   }
-  const agent = await openTerminal(workspaces.focusedPaneId, { cwd: root, command: nvimCommand(path), kind: "shell" });
+  // A pane named that is not in the workspace on screen is the focused one,
+  // on `openTerminal`'s reasoning for a pane closed while the host spawned.
+  const paneId = at.paneId && workspaces.hasPane(at.paneId) ? at.paneId : workspaces.focusedPaneId;
+  const agent = await openTerminal(paneId, { cwd: root, command: nvimCommand(path, at.line), kind: "shell" });
   return { agentId: agent.id };
 }
 
@@ -5554,9 +5562,13 @@ function handleMessage(ws: WebSocket, raw: string): void {
       void replyAsync(ws, msg.id, () => editorsHere());
       return;
 
-    case "open-in-editor":
-      void replyAsync(ws, msg.id, () => openInEditor(msg.root, msg.path, msg.agentId));
+    case "open-in-editor": {
+      // `open-made`'s rule for the line: a whole one or none.
+      const line = Number.isInteger(msg.line) && (msg.line as number) > 0 ? (msg.line as number) : null;
+      const paneId = typeof msg.paneId === "string" ? msg.paneId : undefined;
+      void replyAsync(ws, msg.id, () => openInEditor(msg.root, msg.path, msg.agentId, { paneId, line }));
       return;
+    }
 
     case "open-made": {
       if (typeof msg.root !== "string" || typeof msg.path !== "string") return;

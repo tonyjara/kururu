@@ -80,7 +80,7 @@ import { keyLabel, PREFIX_LABEL } from "../keys";
 import { remoteHost, remoteNote, shortenPath, tabLabel } from "../labels";
 import { useLongPress } from "../longpress";
 import * as api from "../session";
-import { ReaderView } from "./Reader";
+import { ReaderView, readingLine } from "./Reader";
 import { BoardView } from "./Board";
 import { Icon } from "./Icon";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
@@ -199,7 +199,10 @@ export function Panes({
    * menu open at once is not a state worth being able to reach.
    */
   const [menu, setMenu] = useState<
-    { at: MenuAt; paneId: string; of: "pane" | "new" } | { at: MenuAt; paneId: string; of: "tab"; agentId: string } | null
+    | { at: MenuAt; paneId: string; of: "pane" | "new" }
+    | { at: MenuAt; paneId: string; of: "tab"; agentId: string }
+    | { at: MenuAt; paneId: string; of: "doc"; root: string; path: string; line: number | null }
+    | null
   >(null);
   /**
    * The terminal tab whose name is a field, from Rename in its menu. Here
@@ -341,6 +344,11 @@ export function Panes({
                  terminal or the board, which is a choice and not a step. */
               onNew={(at) => setMenu({ at, paneId: pane.id, of: "new" })}
               onTabMenu={(at, agentId) => setMenu({ at, paneId: pane.id, of: "tab", agentId })}
+              /* The line is read as the menu opens, while the reader is still
+                 where it was being read. */
+              onDocMenu={(at, root, path) =>
+                setMenu({ at, paneId: pane.id, of: "doc", root, path, line: readingLine(pane.id, root, path) })
+              }
               renaming={renaming}
               onRenaming={setRenaming}
               keyboard={keyboard}
@@ -370,6 +378,8 @@ export function Panes({
           items={
             menu.of === "tab"
               ? tabMenu(menu.agentId)
+              : menu.of === "doc"
+              ? docMenu(menu.paneId, menu.root, menu.path, menu.line)
               : menu.of === "new"
               ? newTabMenu(menu.paneId, launchers, keymap, runsOn)
               : paneMenu({
@@ -541,6 +551,24 @@ function paneMenu({
  * through nvim. The agents are grouped by CLI with a rule between them, in
  * `LAUNCHERS` order.
  */
+/**
+ * A document tab's menu. The file in a new nvim in this tab's pane, at the
+ * line the reader was showing — the tree's "New nvim in a tab", and what
+ * `show_file` does with a file that is not Markdown; a new one rather than
+ * an nvim already running, because the reader is not an editor and does not
+ * know which of them you would mean. Open in Neovim and not just Close,
+ * because a tab's ✕ already closes it.
+ */
+function docMenu(paneId: string, root: string, path: string, line: number | null): MenuItem[] {
+  return [
+    {
+      label: "Open in Neovim",
+      hint: line ? `line ${line}` : undefined,
+      run: () => void api.openInEditor(root, path, null, { paneId, line }),
+    },
+  ];
+}
+
 function newTabMenu(paneId: string, launchers: Launcher[], keymap: Record<string, Action>, runsOn: string | null): MenuItem[] {
   const first = keysByAction(keymap)["new-tab"]?.[0];
   const boardKey = keysByAction(keymap)["open-board"]?.[0];
@@ -678,6 +706,7 @@ function Pane({
   onMenu,
   onNew,
   onTabMenu,
+  onDocMenu,
   renaming,
   onRenaming,
   keyboard,
@@ -700,6 +729,8 @@ function Pane({
   onNew: ((at: MenuAt) => void) | null;
   /** Open a terminal tab's menu, off its right-click or a long press. */
   onTabMenu: (at: MenuAt, agentId: string) => void;
+  /** Open a document tab's menu, the same two ways. */
+  onDocMenu: (at: MenuAt, root: string, path: string) => void;
   /** The terminal tab whose name is a field, in whichever pane it is. */
   renaming: string | null;
   onRenaming: (agentId: string | null) => void;
@@ -871,6 +902,7 @@ function Pane({
                   root={doc.root}
                   path={doc.path}
                   on={index === pane.activeIdx}
+                  onMenu={(at) => onDocMenu(at, doc.root, doc.path)}
                   onDragOver={(event) => overTab(event, index)}
                   onDrop={dropOnStrip}
                   onDragEnd={() => setDropAt(null)}
@@ -1247,6 +1279,7 @@ function DocTab({
   root,
   path,
   on,
+  onMenu,
   onDragOver,
   onDrop,
   onDragEnd,
@@ -1256,15 +1289,22 @@ function DocTab({
   root: string;
   path: string;
   on: boolean;
+  onMenu: (at: MenuAt) => void;
   onDragOver: (event: React.DragEvent) => void;
   onDrop: (event: React.DragEvent) => void;
   onDragEnd: () => void;
 }) {
+  const { longPress, swallowed } = useLongPress();
   return (
     <button
       className={`tab tab-doc ${on ? "tab-on" : ""}`}
-      onClick={() => !on && api.selectDoc(paneId, index)}
+      onClick={() => !swallowed() && !on && api.selectDoc(paneId, index)}
       title={`${root}/${path}`}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onMenu({ x: event.clientX, y: event.clientY });
+      }}
+      {...longPress(onMenu)}
       draggable
       onDragStart={(event) => beginDrag(event, "doc", docId(paneId, index))}
       onDragEnd={() => {
