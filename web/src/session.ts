@@ -54,7 +54,7 @@ import type { MadeFile } from "../../shared/made";
 import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "../../shared/voice";
 import type { MachineEntry, MachinePin, MachineStatus } from "../../shared/machines";
 import type { NodeStatus, NodesView } from "../../shared/nodes";
-import type { MoveDone, MovePlan } from "../../shared/move";
+import type { MoveCheck, MoveDone, MovePlan, NewWorkspaceMade } from "../../shared/move";
 import { EMPTY_SECRETS, type Lendable, type LendAsk, type SecretsView } from "../../shared/secrets";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { ReloadAsk, ReloadHold, ReloadPage } from "../../shared/reload";
@@ -766,6 +766,21 @@ export function switchWorkspace(workspaceId: string): void {
 /** Put another node's workspace on this screen, by the key its summary gives. See `server/src/nodewatch.ts`. */
 export function showNodeWorkspace(nodeId: string, workspaceKey: string): void {
   send({ type: "show-node-workspace", nodeId, workspaceKey });
+}
+
+/** A new workspace on another node: its word on the folder, its guess when null. */
+export function nodeNewCheck(nodeId: string, name: string, folder: string | null): Promise<MoveCheck> {
+  return request((id) => ({ type: "node-new-check", id, nodeId, name, folder })) as Promise<MoveCheck>;
+}
+
+/** Make it there. Rejects with the node's sentence, and then nothing was made. */
+export function nodeNewWorkspace(nodeId: string, name: string, folder: string): Promise<NewWorkspaceMade> {
+  return request((id) => ({ type: "node-new-workspace", id, nodeId, name, folder })) as Promise<NewWorkspaceMade>;
+}
+
+/** A node's card to Done, when it is still a plain move there. Rejects with the node's sentence why not. */
+export function nodeCardDone(nodeId: string, workspaceKey: string, cardId: string): Promise<unknown> {
+  return request((id) => ({ type: "node-card-done", id, nodeId, workspaceKey, cardId }));
 }
 
 export function workspaceByIndex(index: number): void {

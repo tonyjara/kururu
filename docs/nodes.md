@@ -935,8 +935,8 @@ id, with the agent it names qualified.
 
 **What is on screen.** `NodeWatches` holds which remote workspace is
 showing, by node and key, in memory. `snapshot.remote` carries it with the
-tree and its agents qualified, the child's launch settings, and the watch's
-state. A local switch by any road takes it off screen: a click, `C-a 1`, a
+tree and its agents qualified, the child's launch settings and the rows its
+`+` offers, and the watch's state. A local switch by any road takes it off screen: a click, `C-a 1`, a
 reveal, Kuru's Auto Swap. A restart of this server comes back on the last
 local workspace. Showing a workspace here also makes it the child's active
 one, and a split or a focus made here moves the child's own phone, which is
@@ -973,17 +973,60 @@ watch is open (`NodesView.watchedBy`), and its `lifecycle.log` has a
 `watch` line for each one opened and closed. `bun run status` prints
 `watching` on the parent and `watched by` on the child.
 
+**Starting work there** (phase 4). Everything the window starts on a remote
+workspace is the node's, made by the node's own code. The `+` menu and a
+card's robot offer the node's rows: its summary carries the launchers its
+own `+` shows (`NodeSummary.launchers`, its catalogue less its switched-off
+ones), and `remoteLaunchers` falls back on this node's catalogue under the
+node's settings for a node from before. The id goes back to the node and is
+looked up in its catalogue there, so a model only one side knows is still
+offered by the side that runs it. `new-tab`, `run-card` and `resume-card`
+are routed verbs, and their replies come back with the agent qualified. The
+spawn is the node's own, with its hooks, its login (`logins.ts` there, or a
+lent token) and its `kururu_web` flags pointed at its own `/mcp/web`. A
+card's agent lands in the node's agents' pane by the node's `agentPaneIn`.
+
+Two things are asked over `/link` rather than the watch, because the rows
+that ask them are drawn from the summary whether or not a watch is open:
+
+- **A Needs row's Done.** The summary marks a card's need whose move to Done
+  is plain (`SummaryNeed.plainDone`), and the node's band draws Done on just
+  those rows. The press is `card-done-ask`. The node asks its own rule again
+  at that moment (`doneRefusal` in `shared/needs.ts`, which `plainDone` is
+  drawn by too), because the summary may be seconds old. It moves the card
+  as its board's `move-card` would, or answers with the sentence why not,
+  which takes the row's second line for a few seconds. Every other move to
+  Done is a question that node's board asks.
+- **A new workspace.** The `+` beside a node's name (on the parent, for a
+  node up, watchable and new enough: `NodeSummary.drives`) opens a dialog
+  whose folder is judged on the node's disk as it is typed. That is the
+  move's own `workspace-move-check`, read by `newFolderOk`, which lets a
+  folder that is not a checkout through where a move would not. `Make` is
+  `workspace-new`. The node runs `judgeFolder` again and makes the workspace
+  in its profile on screen, one pane in that folder, named after it unless
+  it was named. It does not switch to it: the window that asked puts it on
+  screen through its watch, which moves the node's active workspace as any
+  show does.
+
+Either may be asked by any member of the roster, as a move or a peer Kuru's
+`move_card` may. The node's own rule decides, and nothing on the asking side
+is written.
+
 Not yet (later phases of the plan): the file tree, the reader and nvim's
 hand-offs on a remote workspace; the Needs drawer's node rows as doors here,
-and notifications for a remote agent; Kuru reading a remote agent; the `+`
-menu's launchers checked against what the box has; `C-a w` and workspace
-stepping across nodes.
+and notifications for a remote agent; Kuru reading a remote agent; `C-a w`
+and workspace stepping across nodes.
 
 | message | way | what |
 |---|---|---|
 | `show-node-workspace {nodeId, workspaceKey}` | page → parent | put that workspace on screen; never forwarded |
 | `stale {agentIds}` | parent → page | those remote terminals missed bytes; rebuild as after a reconnect |
 | `remote-said {node, text}` | parent → page | a verb for that node did not go, and why |
+| `node-new-check {nodeId, name, folder}` | page → parent | the node's word on a folder for a new workspace there; a `MoveCheck` |
+| `node-new-workspace {nodeId, name, folder}` | page → parent | make it there; a `NewWorkspaceMade`, then the page shows it |
+| `node-card-done {nodeId, workspaceKey, cardId}` | page → parent | a Needs row's Done, asked of the node |
+| `card-done-ask` / `card-done-said` | link | the card moved, or the node's sentence why not |
+| `workspace-new` / `workspace-made` | link | a new workspace, its folder judged there |
 
 ## Files
 

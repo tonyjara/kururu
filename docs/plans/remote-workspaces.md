@@ -5,9 +5,9 @@ A feasibility study and a plan, written 2026-10-20 from a read of the tree at
 how four other tools do the same split. Phase 0's spike ran on 2026-10-20 in
 throwaway instances and stayed out of `main`
 ([`docs/spikes/remote-workspaces-phase0.md`](../spikes/remote-workspaces-phase0.md)).
-Its answers are folded into the sections below. **Phase 1 is built**
-(2026-10-20); what it is now is in
-[`docs/nodes.md`](../nodes.md#remote-workspaces), and phases 2–5 are not. The plan is written so that an
+Its answers are folded into the sections below. **Phases 1 and 4 are built**
+(2026-10-20); what they are now is in
+[`docs/nodes.md`](../nodes.md#remote-workspaces). The plan is written so that an
 agent can take one phase, read the files it names, and know what "done" is.
 
 **The ask, in the user's words:** "Do you think it's possible to open a
@@ -683,6 +683,38 @@ Depends on 1. Runs beside 2 and 4.
   is made there in a folder the box checked.
 
 Depends on 1. Runs beside 2 and 3.
+
+**Built, 2026-10-20, and verified between two throwaway nodes on the Mac**
+(a parent on :7941 and a child on :7942, paired by the join command, from a
+scratch copy, with a stand-in `claude` and `codex` that print what they were
+started with; the user's server and host untouched). Over the protocol, from
+the parent's socket: the child's guess for a new workspace's folder
+(`~/Projects`, "not a git repository"), `/etc` refused there with its
+sentence, `~/Projects/pagos` made and put on screen; a claude and a codex
+started in it from a remote pane, each with the child's hooks and its
+`kururu_web` flags pointed at the child's own `/mcp/web` and token, and no
+config directory of the parent's; a card run there with its reply's agent
+qualified, its resume refused by the child while the agent was open; a card
+in Review with nothing open marked `plainDone` in the child's summary and
+moved by `node-card-done`, one with its agent open refused with "Its agent
+is still open…", and the same Done twice answered "It is in Done already."
+In a real page (headless Chrome over the DevTools protocol): the `+` beside
+the child's name, the dialog's guess and its check as a folder was typed,
+the new workspace on screen in the node's band, the remote pane's `+` menu
+drawing the child's rows, and the Needs drawer's Done on the child's row
+taking it away; on the child's own page, no `+` on its parent's heading.
+**Not yet:** the two real machines.
+
+Decisions taken in the building: Done and the new workspace go over `/link`,
+not the watch, because the Needs drawer and the sidebar draw them from the
+summary whether or not a watch is open; "plain" is `doneRefusal`, one rule
+the summary's mark and the node's answer both read, rather than a
+`plain-done-ask` that only asked; the folder check is the move's own
+`workspace-move-check`, with a folder that is not a checkout let through
+(`newFolderOk`); the `+` on a node's heading is drawn only on the parent,
+which is the only node that can then show what it made; the launchers ride
+in the summary (`NodeSummary.launchers`), so the robot on a remote board
+offers the box's rows before any snapshot of it has arrived.
 
 ### Phase 5 — edges and polish (3–5 days)
 

@@ -269,6 +269,56 @@ export function folderSentence(problem: FolderProblem | null, node: string, show
 }
 
 /**
+ * A new workspace made on another node from this window: its name and the
+ * folder its terminals start in there. Not a move — nothing goes with it —
+ * so its folder is judged by the same `judgeFolder` on that node's disk,
+ * and one rule is relaxed: a folder that is not a checkout will do, as a
+ * workspace here may sit anywhere (its cards simply cannot have worktrees).
+ */
+export interface NewWorkspaceAsk {
+  name: string;
+  folder: string;
+}
+
+/** What the other node made. */
+export interface NewWorkspaceMade {
+  key: string;
+  name: string;
+  /** Absolute, as that node resolved it. */
+  folder: string;
+  shown: string;
+  /** The profile on screen there, which is the one it was made in. */
+  profile: string;
+}
+
+/** A name for a workspace, as the field gave it: trimmed, bounded, and never empty when there is a folder to name it after. */
+export function workspaceName(raw: unknown, folder: string): string {
+  const name = typeof raw === "string" ? raw.trim().replace(/\s+/g, " ").slice(0, 60) : "";
+  return name || basename(folder) || "workspace";
+}
+
+/** Whether a folder the other node judged will do for a new workspace: everything a move needs but a checkout. */
+export function newFolderOk(problem: FolderProblem | null): boolean {
+  return problem === null || problem === "not-repo";
+}
+
+/** The other node's word on a folder for a new workspace, as the sentence under the field. */
+export function newFolderSentence(problem: FolderProblem | null, node: string, shown: string): string {
+  switch (problem) {
+    case null:
+      return `${shown} is a repository on ${node}.`;
+    case "not-repo":
+      return `${shown} is a folder on ${node}, not a git repository: its cards cannot have worktrees.`;
+    case "outside":
+      return `${shown} is outside the home folder on ${node}, which is the only place a workspace made from here may point at.`;
+    case "missing":
+      return `${node} has no ${shown}. Make it or clone the project there first, then check again.`;
+    default:
+      return folderSentence(problem, node, shown);
+  }
+}
+
+/**
  * Where a project probably lives on a node: the folder most of its
  * workspaces' folders sit in, else the first of the usual names that
  * exists, else home. A guess the dialog shows and the person corrects —

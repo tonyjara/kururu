@@ -346,9 +346,12 @@ The load-bearing invariants, one line each, with the argument behind the link:
   (`shared/remote.ts`, `server/src/nodewatch.ts`). The child owns the layout,
   the ptys and the size; a verb from here is forwarded, never applied here. No
   qualified id is ever written — not to `session.json`, the host's blob, the
-  database or `made.json` — and a test holds it. Kuru's rule is unchanged: the
-  user typing into a remote pane is the user; Kuru still acts locally and asks
-  a peer. → [nodes](docs/nodes.md#remote-workspaces)
+  database or `made.json` — and a test holds it. What the window starts there
+  is the node's: its launchers in the `+` and the robot, its login, its web
+  tools; a new workspace's folder is judged on its disk, and a Needs row's
+  Done is its own rule asked again (`card-done-ask`). Kuru's rule is
+  unchanged: the user typing into a remote pane is the user; Kuru still acts
+  locally and asks a peer. → [nodes](docs/nodes.md#remote-workspaces)
 - **One Telegram bot for every node, read by one node at a time.** The
   parent's allow-list rides in the roster it signs, so only the parent
   sets it; the switch rides there too, but any node may flip it — a

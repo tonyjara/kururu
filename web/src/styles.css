@@ -1924,6 +1924,15 @@ kbd {
   font-size: var(--fs-xs);
   color: var(--dimmer);
 }
+/* The head, and beside it the + that makes a workspace there. */
+.node-headrow {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.node-headrow .node-head {
+  flex: 1 1 auto;
+}
 /* A node's head carries its hue's dot, which the band and the chips match. */
 .node-head .node-chip-dot {
   background: var(--node-hue);

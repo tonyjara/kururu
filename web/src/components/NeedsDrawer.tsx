@@ -507,15 +507,43 @@ function why(need: Need): string {
   }
 }
 
+/** How long a node's "not Done, because…" stays on its row. */
+const SAID_MS = 8000;
+
 /**
  * Another node's queue, under its name: its workspaces that need you, each a
- * block like this node's own, and every row a link to the node. Nothing here
- * can act — there is no Done and no board, since both are that node's — and
- * the row says why it is there in the words `why` uses for the same kinds.
+ * block like this node's own, and every row a link to the node. The row says
+ * why it is there in the words `why` uses for the same kinds.
+ *
+ * A card's row carries **Done** where the node said the move is a plain one
+ * (`SummaryNeed.plainDone`), and only that: the press asks the node, which
+ * asks its own rule again and moves the card or says why not — a worktree
+ * grown or a terminal opened since its summary — and the sentence takes the
+ * row's second line for a few seconds. Every other move to Done is a
+ * question its board asks, there.
  */
 function NodeBand({ node, mascot }: { node: NodeStatus; mascot: ReturnType<typeof mascotFor> }) {
   const summary = node.summary!;
   const go = `Open ${node.name}'s kururu`;
+  /** The node's answer to a Done, by card, while it is the latest word on that row. */
+  const [said, setSaid] = useState<{ cardId: string; text: string } | null>(null);
+  const [asking, setAsking] = useState<string | null>(null);
+  useEffect(() => {
+    if (!said) return;
+    const timer = setTimeout(() => setSaid(null), SAID_MS);
+    return () => clearTimeout(timer);
+  }, [said]);
+  const done = (workspaceKey: string, cardId: string) => {
+    setAsking(cardId);
+    setSaid(null);
+    api.nodeCardDone(node.id, workspaceKey, cardId).then(
+      () => setAsking(null),
+      (err: unknown) => {
+        setAsking(null);
+        setSaid({ cardId, text: err instanceof Error ? err.message : String(err) });
+      },
+    );
+  };
   return (
     <>
       <li className="needs-band">{node.name}</li>
@@ -538,9 +566,20 @@ function NodeBand({ node, mascot }: { node: NodeStatus; mascot: ReturnType<typeo
                         {agent ? <Status agent={asAgent(agent)} mascot={mascot} /> : <span className="needs-mark" aria-hidden="true" />}
                         <span className="needs-what">
                           <span className="needs-title">{need.title}</span>
-                          <span className="needs-why">{nodeWhy(need, agent)}</span>
+                          <span className="needs-why">{said && said.cardId === need.cardId ? said.text : nodeWhy(need, agent)}</span>
                         </span>
                       </a>
+                      {need.cardId && need.plainDone && node.state === "up" && (
+                        <button
+                          className="kuru-head-btn needs-done"
+                          disabled={asking === need.cardId}
+                          onClick={() => done(w.key, need.cardId!)}
+                          onMouseDown={(event) => event.preventDefault()}
+                          title={`Move the card to Done on ${node.name}`}
+                        >
+                          Done
+                        </button>
+                      )}
                     </li>
                   );
                 })}

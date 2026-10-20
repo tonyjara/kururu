@@ -144,12 +144,30 @@ function cardNeed(workspaceId: string, card: Card, agents: ReadonlyMap<string, A
     workspaceId,
     agent,
     card,
-    plainDone: kind !== "asking" && card.column === "review" && card.worktree === null && agent === null,
+    plainDone: kind !== "asking" && doneRefusal(card, agent) === null,
   });
   if (agent?.status === "blocked") return need("asking");
   if (card.column === "review") return need("review");
   if (agent?.unread) return need("unseen");
   if (card.run && card.run.state === "ended") return need("stalled");
+  return null;
+}
+
+/**
+ * Why a move to Done is not a plain one, or null when it is: a card in
+ * Review with no worktree to merge and no terminal left open to end — the
+ * two questions the board's dialog asks. `Need.plainDone` is this being
+ * null, and a node asked by another to move one of its cards to Done
+ * (`card-done-ask`, `docs/nodes.md`) asks it again at that moment and says
+ * the sentence when it is not, since the card may have moved on since the
+ * summary that drew the button. `agent` is the card's live terminal, if any.
+ */
+export function doneRefusal(card: Card, agent: AgentSnapshot | null): string | null {
+  if (card.column === "done") return "It is in Done already.";
+  if (card.column !== "review") return "It is not in Review any more.";
+  if (agent?.status === "blocked") return "Its agent is asking something.";
+  if (card.worktree !== null) return "Its worktree is still standing, and its board asks whether to merge it first.";
+  if (agent !== null) return "Its agent is still open, and its board asks whether to end it first.";
   return null;
 }
 

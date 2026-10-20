@@ -34,7 +34,8 @@ import type { AgentSnapshot, Profile } from "./model";
 import type { OutboxState } from "./voice";
 import { needsOf, type Band, type NeedKind } from "./needs";
 import { panes, terminalsOf } from "./layout";
-import type { MoveCheck, MoveCheckAsk, MoveDone, MoveOffer } from "./move";
+import type { MoveCheck, MoveCheckAsk, MoveDone, MoveOffer, NewWorkspaceAsk, NewWorkspaceMade } from "./move";
+import type { Launcher } from "./launchers";
 import type { SealedSecret } from "./secrets";
 
 /**
@@ -545,6 +546,12 @@ export interface SummaryNeed {
   cardId: string | null;
   /** The card's title, or the agent's name: what the drawer's row says. */
   title: string;
+  /**
+   * `Need.plainDone`: a move to Done is all the card asks for, so the
+   * parent's drawer may draw its Done. Absent from a node from before, which
+   * draws none. The node checks again when asked (`card-done-ask`).
+   */
+  plainDone?: boolean;
 }
 
 export interface SummaryWorkspace {
@@ -599,12 +606,28 @@ export interface NodeSummary {
    * it here" in their tooltip. See `docs/plans/remote-workspaces.md`.
    */
   watchable?: number;
+  /**
+   * The rows this node's own `+` menu offers — its catalogue, less what its
+   * settings switch off — so that a remote pane and a card's robot here
+   * offer what the box will run (`adoptLaunchers`). Absent from a node from
+   * before, for which the parent falls back on its own catalogue.
+   */
+  launchers?: Launcher[];
+  /**
+   * The version of the work the parent may ask of this node beside the
+   * watch (`DRIVES`): a card's plain Done from the Needs drawer, and a new
+   * workspace in a folder it judges. Absent from a node from before, whose
+   * heading offers no new workspace.
+   */
+  drives?: number;
 }
 
 /** The version of `say`, `kuru-turns`, `kuru-replied` and the board verbs. See `NodeSummary.talks`. */
 export const PEER_TALK = 1;
 /** The version of the watch socket a node answers. See `NodeSummary.watchable`. */
 export const WATCHABLE = 1;
+/** The version of `card-done-ask` and `workspace-new`. See `NodeSummary.drives`. */
+export const DRIVES = 1;
 
 export const SUMMARY_WORKSPACES_MAX = 60;
 export const SUMMARY_AGENTS_MAX = 40;
@@ -628,6 +651,8 @@ export interface SummaryInput {
   sees: readonly string[];
   dataMark: string;
   lead?: { eligible: boolean; polls: boolean };
+  /** What this node's `+` menu offers. */
+  launchers: readonly Launcher[];
 }
 
 /**
@@ -670,6 +695,7 @@ export function summarize(input: SummaryInput): NodeSummary {
         agentId: need.agent?.id ?? null,
         cardId: need.card?.id ?? null,
         title: clipText(need.card?.title ?? nameOf(need.agent)) ?? "",
+        ...(need.card ? { plainDone: need.plainDone } : {}),
       })),
       agents,
     };
@@ -688,6 +714,8 @@ export function summarize(input: SummaryInput): NodeSummary {
     dataMark: input.dataMark,
     talks: PEER_TALK,
     watchable: WATCHABLE,
+    launchers: input.launchers.map((l) => ({ ...l })),
+    drives: DRIVES,
     ...(input.lead ? { lead: { ...input.lead } } : {}),
   };
 }
@@ -805,6 +833,14 @@ export type LinkMessage =
   | { type: "workspace-move-checked"; id: string; check: MoveCheck | null; error: string | null }
   | { type: "workspace-move"; id: string; offer: MoveOffer }
   | { type: "workspace-moved"; id: string; done: MoveDone | null; error: string | null }
+  // Remote workspaces, phase 4: work the parent's window asks of a child
+  // beside the watch, over the link because a Needs row or a node's heading
+  // is drawn whether or not a watch is open. A card's plain Done, checked
+  // again there by `doneRefusal`; a new workspace, its folder judged there.
+  | { type: "card-done-ask"; id: string; workspaceKey: string; cardId: string }
+  | { type: "card-done-said"; id: string; error: string | null }
+  | { type: "workspace-new"; id: string; ask: NewWorkspaceAsk }
+  | { type: "workspace-made"; id: string; made: NewWorkspaceMade | null; error: string | null }
   | { type: "bye"; reason: string }
   // Phase 4, the lent secrets (`shared/secrets.ts`). Put and forget go from
   // the parent only; held and ack come back from the child.
@@ -877,6 +913,10 @@ const LINK_TYPES = new Set<string>([
   "workspace-move-checked",
   "workspace-move",
   "workspace-moved",
+  "card-done-ask",
+  "card-done-said",
+  "workspace-new",
+  "workspace-made",
   "bye",
   ...PEER_TYPES,
   "secrets-put",

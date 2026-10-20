@@ -19,6 +19,7 @@ import {
   CODE_LENGTH,
   defaultNodeName,
   dialTargets,
+  DRIVES,
   formatCode,
   freeName,
   joinCommand,
@@ -49,7 +50,8 @@ import {
   watchRefusal,
 } from "../../shared/nodes";
 import { verifySigned } from "../src/nodekeys";
-import { addCard, emptyBoard, startRun } from "../../shared/board";
+import { addCard, emptyBoard, moveCard, startRun } from "../../shared/board";
+import { LAUNCHERS } from "../../shared/launchers";
 import type { AgentSnapshot, Profile, Workspace } from "../../shared/model";
 
 interface Pair {
@@ -315,6 +317,7 @@ describe("summarize", () => {
     leads: true,
     sees: ["n000000000002"],
     dataMark: "1.2.3@4",
+    launchers: LAUNCHERS.filter((l) => l.cli === "codex"),
   });
 
   it("carries each workspace with its folder, band and agents, the harness left out", () => {
@@ -335,6 +338,21 @@ describe("summarize", () => {
     expect(a1.pid).toBeUndefined();
     expect(a1.command).toBeUndefined();
     expect((a1.activity as string).length).toBeLessThanOrEqual(160);
+  });
+  it("carries its own + menu's rows and the work it may be asked for", () => {
+    expect(summary.launchers?.map((l) => l.id)).toEqual(LAUNCHERS.filter((l) => l.cli === "codex").map((l) => l.id));
+    expect(summary.drives).toBe(DRIVES);
+  });
+  it("marks a card's need whose move to Done is a plain one, and only a card's", () => {
+    const review = moveCard(addCard(emptyBoard(), { title: "Read me", column: "doing" }, "c9", 1), "c9", "review");
+    const plain = summarize({
+      ...{ at: 1, version: "x", host: { version: "x", current: true }, kuru: { unheard: 0, undelivered: 0 }, leads: false, sees: [], dataMark: "m", launchers: [] },
+      profile: { ...profile, workspaces: [workspace("w3", "docs", [], { board: review }), workspace("w1", "api", ["a1"])] } as Profile,
+      agents: [agent("a1", { status: "blocked" })],
+      folderOf: () => null,
+    });
+    expect(plain.workspaces[0]!.needs).toEqual([{ kind: "review", agentId: null, cardId: "c9", title: "Read me", plainDone: true }]);
+    expect(plain.workspaces[1]!.needs[0]).not.toHaveProperty("plainDone");
   });
   it("compares without its timestamp", () => {
     expect(summaryKey({ ...summary, at: 99 })).toBe(summaryKey(summary));

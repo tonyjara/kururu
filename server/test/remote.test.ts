@@ -26,8 +26,10 @@ import {
   qualifyReply,
   qualifyTab,
   qualifyWorkspace,
+  remoteLaunchers,
   route,
 } from "../../shared/remote";
+import { DEFAULT_LAUNCH, LAUNCHERS, visibleLaunchers } from "../../shared/launchers";
 import type { ClientMessage, ServerMessage } from "../../shared/wire";
 import { NodeWatches, type WatchClient } from "../src/nodewatch";
 import { readSnapshot, snapshotPath, writeSnapshot } from "../src/persist";
@@ -324,5 +326,26 @@ describe("a qualified id is never written", () => {
     writeSnapshot(mac.all(), mac.active.id);
     expect(containsQualified(readFileSync(snapshotPath(), "utf8"))).toBe(true);
     expect(containsQualified(JSON.stringify(mac.all()))).toBe(true);
+  });
+});
+
+describe("remoteLaunchers: what a remote pane's + offers", () => {
+  it("is the node's own rows when its summary carries them", () => {
+    const rows = [{ id: "claude:claude-next-6", cli: "claude", model: "claude-next-6", label: "Claude Next 6" }];
+    expect(remoteLaunchers(rows, { ...DEFAULT_LAUNCH, offClis: ["claude"] })).toEqual(rows as never);
+  });
+  it("is this node's catalogue under the node's settings for a node from before", () => {
+    const launch = { ...DEFAULT_LAUNCH, offClis: ["codex" as const] };
+    expect(remoteLaunchers(undefined, launch)).toEqual(visibleLaunchers(launch));
+    expect(remoteLaunchers(undefined, launch).every((l) => l.cli === "claude")).toBe(true);
+    expect(remoteLaunchers(undefined, null)).toEqual([]);
+    expect(LAUNCHERS.length).toBeGreaterThan(0);
+  });
+  it("routes a card's run and resume to the node, and names the agent its reply opened as the node's", () => {
+    const ws = qualify(OMARCHY, "w2");
+    const run = route({ type: "run-card", id: 7, workspaceId: ws, cardId: "c1", launcher: "codex" } as ClientMessage, null);
+    expect(run).toEqual({ to: "node", node: OMARCHY, message: { type: "run-card", id: 7, workspaceId: "w2", cardId: "c1", launcher: "codex" } as ClientMessage });
+    expect(route({ type: "resume-card", id: 8, workspaceId: ws, cardId: "c1" } as ClientMessage, null)).toMatchObject({ to: "node", message: { workspaceId: "w2" } });
+    expect(qualifyReply(OMARCHY, "resume-card", { agentId: "a3" })).toEqual({ agentId: qualify(OMARCHY, "a3") });
   });
 });

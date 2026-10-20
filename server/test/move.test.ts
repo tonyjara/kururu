@@ -13,7 +13,20 @@ import { join } from "node:path";
 import { addCard, editCard, emptyBoard, noteRun, removeCard, setWorktree, sleepRun, startRun, type Board } from "../../shared/board";
 import { panes } from "../../shared/layout";
 import type { AgentSnapshot, Workspace } from "../../shared/model";
-import { adoptOffer, columnCounts, folderSentence, moveRefusal, movePlan, planText, projectsFolder, tilde, type MoveInput } from "../../shared/move";
+import {
+  adoptOffer,
+  columnCounts,
+  folderSentence,
+  moveRefusal,
+  movePlan,
+  newFolderOk,
+  newFolderSentence,
+  planText,
+  projectsFolder,
+  tilde,
+  workspaceName,
+  type MoveInput,
+} from "../../shared/move";
 import type { LinkMessage } from "../../shared/nodes";
 import { judgeFolder, moveId, Mover } from "../src/move";
 import type { NodeHost } from "../src/nodes";
@@ -227,6 +240,13 @@ function makeNode(id: string, name: string, peers: Map<string, TestNode>): TestN
       // Through JSON, as the socket would carry it.
       const message = JSON.parse(JSON.stringify(build("r1"))) as LinkMessage;
       if (message.type === "workspace-move-check") return { type: "workspace-move-checked", id: "r1", check: there.mover.check(name, message.ask), error: null };
+      if (message.type === "workspace-new") {
+        try {
+          return { type: "workspace-made", id: "r1", made: there.mover.make(name, message.ask), error: null };
+        } catch (err) {
+          return { type: "workspace-made", id: "r1", made: null, error: err instanceof Error ? err.message : String(err) };
+        }
+      }
       if (message.type !== "workspace-move") throw new Error("unexpected");
       try {
         const done = await there.mover.adopt(name, message.offer);
@@ -382,5 +402,50 @@ describe("the exchange", () => {
     expect(storefrontOn(mac)?.id).toBe(wsId);
     expect(storefrontOn(box)).toBeUndefined();
     expect(box.ws.active.workspaces).toHaveLength(1);
+  });
+});
+
+describe("a new workspace on another node", () => {
+  it("lets through a folder that is not a checkout, and nothing a move would refuse besides", () => {
+    expect(newFolderOk(null)).toBe(true);
+    expect(newFolderOk("not-repo")).toBe(true);
+    for (const problem of ["relative", "outside", "missing", "not-dir"] as const) expect(newFolderOk(problem)).toBe(false);
+    expect(newFolderSentence("not-repo", "omarchy", "~/notes")).toBe("~/notes is a folder on omarchy, not a git repository: its cards cannot have worktrees.");
+    expect(newFolderSentence("missing", "omarchy", "~/x")).toContain("omarchy has no ~/x");
+    expect(newFolderSentence("relative", "omarchy", "x")).toBe(folderSentence("relative", "omarchy", "x"));
+  });
+
+  it("names it after the folder unless it was named", () => {
+    expect(workspaceName("  Pagos   web ", "/home/me/pagos")).toBe("Pagos web");
+    expect(workspaceName("", "/home/me/pagos/")).toBe("pagos");
+    expect(workspaceName(undefined, "/")).toBe("workspace");
+    expect(workspaceName("x".repeat(100), "/a")).toHaveLength(60);
+  });
+
+  it("is made there in the folder the node judged, and refused there with its sentence", async () => {
+    const peers = new Map<string, TestNode>();
+    const mac = makeNode("n000000000001", "mac", peers);
+    const box = makeNode("n000000000002", "omarchy", peers);
+    mkdirSync(join(box.home, "notes"));
+
+    // The guess, before anything is typed, is where its projects are.
+    expect(await mac.mover.newCheck(box.id, "", null)).toMatchObject({ shown: "~/Projects", problem: "not-repo" });
+    expect(await mac.mover.newCheck(box.id, "", "~/Projects/storefront")).toMatchObject({ shown: "~/Projects/storefront", problem: null });
+
+    const before = box.ws.active.workspaces.length;
+    const active = box.ws.active.activeWorkspaceId;
+    const made = await mac.mover.newOn(box.id, "", "~/notes");
+    expect(made).toMatchObject({ name: "notes", folder: join(box.home, "notes"), shown: "~/notes", profile: "main" });
+    const there = box.ws.active.workspaces.find((w) => w.key === made.key)!;
+    expect(panes(there.layout)[0]!.cwd).toBe(join(box.home, "notes"));
+    expect(box.ws.active.workspaces).toHaveLength(before + 1);
+    // Made, not switched to: the window that asked puts it on screen through its watch.
+    expect(box.ws.active.activeWorkspaceId).toBe(active);
+
+    await expect(mac.mover.newOn(box.id, "Lejos", "/etc")).rejects.toThrow("outside the home folder on omarchy");
+    await expect(mac.mover.newOn(box.id, "Nada", "~/nothing")).rejects.toThrow("omarchy has no ~/nothing");
+    expect(box.ws.active.workspaces).toHaveLength(before + 1);
+    // Nothing of it on the Mac.
+    expect(mac.ws.active.workspaces.some((w) => w.key === made.key)).toBe(false);
   });
 });

@@ -86,7 +86,7 @@ import {
   watchRefusal,
 } from "../../shared/nodes";
 import type { SharedTelegram } from "../../shared/channels";
-import type { MoveCheck, MoveDone } from "../../shared/move";
+import type { MoveCheck, MoveDone, NewWorkspaceMade } from "../../shared/move";
 import { readConfigFile, writeConfigFile } from "./config";
 import { safeMirrorPath } from "./export";
 import { becomeParent, challenge, identity, rosterSigner, signAsNode, signRoster, stopBeingParent, verifySigned, type Identity } from "./nodekeys";
@@ -141,7 +141,15 @@ export interface NodeHostDeps {
   moves?: {
     check: (peer: string, ask: unknown) => MoveCheck;
     adopt: (peer: string, offer: unknown) => Promise<MoveDone>;
+    /** A new workspace a member asked for from its window, in a folder judged here (remote workspaces, phase 4). */
+    make?: (peer: string, ask: unknown) => NewWorkspaceMade;
   };
+  /**
+   * A member asking for one of this node's cards to go to Done, from its
+   * Needs drawer: moved when the move is a plain one by this node's rule at
+   * this moment, else the sentence why not (`doneRefusal`).
+   */
+  cardDone?: (peer: string, workspaceKey: string, cardId: string) => string | null;
   /** A Kuru's message from a linked member, already past the handshake — `peerkuru.ts`'s to read. */
   peer?: (nodeId: string, message: PeerMessage) => void;
   /** A link to a member came up: what the other side should be told about this node's Kuru goes now. */
@@ -1058,8 +1066,16 @@ export class NodeHost {
       case "workspace-move":
         void this.answerMove(link, message);
         return;
+      case "card-done-ask":
+        this.answerCardDone(link, message);
+        return;
+      case "workspace-new":
+        this.answerNew(link, message);
+        return;
       case "workspace-move-checked":
       case "workspace-moved":
+      case "card-done-said":
+      case "workspace-made":
         this.onAnswer(link, message);
         return;
       case "bye":
@@ -1351,7 +1367,7 @@ export class NodeHost {
     });
   }
 
-  private onAnswer(link: Link, message: Extract<LinkMessage, { type: "workspace-move-checked" | "workspace-moved" }>): void {
+  private onAnswer(link: Link, message: Extract<LinkMessage, { type: "workspace-move-checked" | "workspace-moved" | "card-done-said" | "workspace-made" }>): void {
     const ask = typeof message.id === "string" ? this.asks.get(message.id) : undefined;
     // Only from the peer it was put to: an id is not a secret between members, and need not be.
     if (!ask || ask.peer !== link.peer) return;
@@ -1368,6 +1384,36 @@ export class NodeHost {
       link.send({ type: "workspace-move-checked", id: message.id, check: this.deps.moves.check(peer, message.ask), error: null });
     } catch (err) {
       link.send({ type: "workspace-move-checked", id: message.id, check: null, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private answerCardDone(link: Link, message: Extract<LinkMessage, { type: "card-done-ask" }>): void {
+    if (typeof message.id !== "string" || message.id.length > 64) return;
+    const peer = this.nameOf(link.peer!) ?? link.peer!;
+    let error: string | null;
+    try {
+      if (!this.deps.cardDone) throw new Error("this node moves no cards for others");
+      if (typeof message.workspaceKey !== "string" || typeof message.cardId !== "string") throw new Error("that is not a card");
+      error = this.deps.cardDone(peer, message.workspaceKey, message.cardId);
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+    }
+    if (!error) this.deps.log(`nodes: ${peer} moved card ${message.cardId} to Done`);
+    link.send({ type: "card-done-said", id: message.id, error });
+  }
+
+  private answerNew(link: Link, message: Extract<LinkMessage, { type: "workspace-new" }>): void {
+    if (typeof message.id !== "string" || message.id.length > 64) return;
+    const peer = this.nameOf(link.peer!) ?? link.peer!;
+    try {
+      if (!this.deps.moves?.make) throw new Error("this node makes no workspaces for others");
+      const made = this.deps.moves.make(peer, message.ask);
+      this.deps.log(`nodes: made workspace ${made.name} in ${made.shown} for ${peer}`);
+      link.send({ type: "workspace-made", id: message.id, made, error: null });
+    } catch (err) {
+      const said = err instanceof Error ? err.message : String(err);
+      this.deps.log(`nodes: did not make a workspace for ${peer}: ${said}`);
+      link.send({ type: "workspace-made", id: message.id, made: null, error: said });
     }
   }
 

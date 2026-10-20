@@ -1424,6 +1424,20 @@ export type ClientMessage =
    */
   | { type: "node-move"; id: number; workspaceId: string; nodeId: string; folder: string; lend?: LendAsk }
   /**
+   * A node's heading → New workspace on it: the node's word on the folder
+   * (its guess, made of the name, when null). Replied to with a `MoveCheck`,
+   * read by `newFolderOk`. Asked again as the field is edited.
+   */
+  | { type: "node-new-check"; id: number; nodeId: string; name: string; folder: string | null }
+  /** Make it there. Replied to with a `NewWorkspaceMade`; the window then puts it on screen with `show-node-workspace`. */
+  | { type: "node-new-workspace"; id: number; nodeId: string; name: string; folder: string }
+  /**
+   * A node's Needs row → Done: a card of that node's, moved there when the
+   * move is still a plain one by its own rule. Replied to with `{ok}`, or
+   * the node's sentence why not.
+   */
+  | { type: "node-card-done"; id: number; nodeId: string; workspaceKey: string; cardId: string }
+  /**
    * What a workspace could lend a node: its env files, this Mac's ssh entries
    * and GitHub logins, with the node's word on the folder (its guess when
    * null). Hints only. Replied to with a `Lendable`. The parent's alone.
