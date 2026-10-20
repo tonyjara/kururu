@@ -7398,6 +7398,7 @@ async function attach(port: Port): Promise<void> {
     changed: () => nodes.queueSummary(),
     switched: syncRosterChannels,
     log: (line) => console.log(`kururu: ${line}`),
+    moved: (line) => record("telegram", line),
   });
   for (const agentId of workspaces.allAgents()) {
     if (!live.has(agentId)) workspaces.removeTab(agentId);

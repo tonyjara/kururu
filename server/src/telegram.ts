@@ -128,8 +128,6 @@ const PAIRED = "Paired. While the Telegram channel is on in kururu, what you wri
 const START = "This chat reaches Kuru, your kururu harness. Write to it as you would in the drawer; its replies come back here.";
 const OFF = "kururu's Telegram channel is off, so this did not reach Kuru. Turn it on in Settings → Channels.";
 const UNSUPPORTED = "Only text reaches Kuru from here — not photos, voice notes, files or stickers.";
-const ON_NOTICE = "Kuru is listening here now.";
-const OFF_NOTICE = "Kuru stopped listening here. Nothing you write reaches it until the channel is turned on again in kururu.";
 const OTHER_READER = "Something else is reading this bot's messages too — another kururu, or another program with the same token. Only one can.";
 const REVOKED = "Telegram does not recognise this bot's token any more. If you revoked it in @BotFather, paste the new one.";
 const OTHER_NODE = "Another kururu polled this bot at the same moment — a split tailnet, most likely. The lower-ranked one stands down; the poll settles within a minute.";
@@ -301,8 +299,8 @@ export interface TelegramShare {
 export interface LeadHooks {
   /** The chat's words for another node's Kuru: true when they went over its link. */
   deliver: (held: LeadHeld) => boolean;
-  /** A node as the line that says a message waits for it names it. */
-  away: (nodeId: string) => { name: string; since: number | null };
+  /** A node's name, for the line that says a message waits for it. */
+  away: (nodeId: string) => string;
   /** A line of this node's, for the node that polls: true when it went. */
   relay: (line: Omit<Relay, "sentAt">) => boolean;
   /** Telegram said 409 while this node polled for the others. */
@@ -348,8 +346,6 @@ export class TelegramChannel {
   private leading = false;
   /** What was handed to the next holder and not yet acknowledged, to put back if the handshake dies half way. */
   private handed: { outgoing: Outgoing[]; held: LeadHeld[] } | null = null;
-  /** Nodes the chat was told a message waits for, since each last linked: told once per absence. */
-  private readonly told = new Set<string>();
   /** Lines other nodes handed this one, by id: one handed twice is posted once. */
   private readonly relaysSeen = new Set<string>();
   /** 409s in a row while shared (`pollFailed`). */
@@ -529,7 +525,7 @@ export class TelegramChannel {
       this.state.held = kept;
       this.saveState();
     }
-    this.rulesMoved(wasOn, false);
+    this.rulesMoved(wasOn);
     if (before === JSON.stringify(next)) return;
     this.saveState();
     this.wake();
@@ -572,9 +568,11 @@ export class TelegramChannel {
    * beside the roster until the roster says as much. True when taken, and
    * then it is this node's to hand on.
    *
-   * The chat is told once: by the node that made it, if that node holds the
-   * token, and otherwise — a node with none can only switch off — by the
-   * node reading the chat when it hears.
+   * The chat is told nothing. It used to be — "Kuru is listening here now",
+   * "Kuru stopped listening here" — and with several nodes the lines came
+   * from whichever one heard, which read as noise about machinery. The
+   * switch is in Settings, where it was flipped; a message sent while it is
+   * off is answered when it is next read.
    */
   takeSwitch(change: TelegramSwitch): boolean {
     const shared = this.shared;
@@ -587,8 +585,7 @@ export class TelegramChannel {
       this.settings = { ...this.settings, enabled, enabledAt: enabled ? change.at : null, switchedAt: change.at, switchedBy: change.by };
       this.save();
     }
-    const tell = change.by === shared.self ? change.told : !change.told && this.leading;
-    this.rulesMoved(wasOn, tell);
+    this.rulesMoved(wasOn);
     this.saveState();
     this.wake();
     this.flush();
@@ -599,19 +596,13 @@ export class TelegramChannel {
   /**
    * The switch this node goes by moved, by the roster or by a flip. Off is
    * "off" at once: nothing queued goes after it, here or on the way to the
-   * node that reads the chat; the notice, when this node is the one to send
-   * it, is the last thing sent.
+   * node that reads the chat.
    */
-  private rulesMoved(wasOn: boolean, tell: boolean): void {
-    const on = this.rules.enabled;
-    if (wasOn && !on) {
-      this.state.outgoing = [];
-      this.state.relaying = [];
-      this.typing.clear();
-      if (tell) this.noticeAll(OFF_NOTICE);
-    } else if (!wasOn && on && tell) {
-      this.noticeAll(ON_NOTICE);
-    }
+  private rulesMoved(wasOn: boolean): void {
+    if (!wasOn || this.rules.enabled) return;
+    this.state.outgoing = [];
+    this.state.relaying = [];
+    this.typing.clear();
   }
 
   /** The parent's own settings as the roster carries them: null with no bot to share. */
@@ -650,15 +641,16 @@ export class TelegramChannel {
 
   /**
    * Start or stop polling for the others. Starting, what was waiting to be
-   * handed to a holder is this node's to send, and `line` — who is in
-   * charge now — goes to the chat first.
+   * handed to a holder is this node's to send. Nothing is said to the chat
+   * either way: which node reads it is not something the user has to act
+   * on, and it moves every time a lid closes. Settings → Channels and the
+   * doctor show it, and `lifecycle.log` keeps every move (`lead.ts`).
    */
-  lead(on: boolean, line: string | null = null): void {
+  lead(on: boolean): void {
     if (on === this.leading) return;
     this.leading = on;
     this.state.holding = on;
     if (on) {
-      if (line) this.enqueue(line, this.shared?.self, false, false);
       for (const relay of this.state.relaying) this.enqueue(relay.text, this.shared?.self, relay.silent, true);
       this.state.relaying = [];
       this.failures = 0;
@@ -749,9 +741,8 @@ export class TelegramChannel {
     this.deps.changed();
   }
 
-  /** A node linked: what waits for it is handed over, and the next message that waits for it is told again. */
+  /** A node linked: what waits for it is handed over. */
   deliverHeld(nodeId: string): void {
-    this.told.delete(nodeId);
     for (const held of this.state.held) if (held.node === nodeId) this.hooks?.deliver(held);
   }
 
@@ -928,11 +919,9 @@ export class TelegramChannel {
       if (this.settings.allowed.length === 0) throw new Error("Pair your Telegram account first: nobody is allowed to talk to Kuru yet.");
       const at = switchTime(now, this.settings.switchedAt);
       this.settings = { ...this.settings, enabled: true, enabledAt: at, switchedAt: at, switchedBy: null };
-      this.noticeAll(ON_NOTICE);
     } else if (change.enabled === false && this.settings.enabled) {
-      // The notice is the last thing sent, and nothing queued goes after it.
+      // Nothing queued goes after it.
       this.state.outgoing = [];
-      this.noticeAll(OFF_NOTICE);
       this.settings = { ...this.settings, enabled: false, enabledAt: null, switchedAt: switchTime(now, this.settings.switchedAt), switchedBy: null };
       this.typing.clear();
       this.poller?.abort();
@@ -1302,20 +1291,23 @@ export class TelegramChannel {
 
   /**
    * The chat's words for another node: over its link now, or kept until it
-   * links — and then the chat is told once that they wait. Kept either way
-   * until that node says it has them (`heldDone`), so a link that drops in
-   * between loses nothing.
+   * links. Kept either way until that node says it has them (`heldDone`),
+   * so a link that drops in between loses nothing.
+   *
+   * The chat is told they wait only when nothing else was waiting for that
+   * node. That is read off the held list rather than remembered beside it,
+   * because the list is on the disk and in the handover: a server restart
+   * or the poll moving to another node used to forget it had said so, and
+   * say it again.
    */
   private hold(held: LeadHeld, chat: string): void {
+    const waiting = this.state.held.some((h) => h.node === held.node);
     this.state.held.push(held);
     if (this.hooks?.deliver(held)) {
       void this.ask("sendChatAction", { chat_id: chat, action: "typing" });
       return;
     }
-    if (this.told.has(held.node)) return;
-    this.told.add(held.node);
-    const away = this.hooks?.away(held.node) ?? { name: "that node", since: null };
-    this.notice(chat, heldLine(away.name, away.since));
+    if (!waiting) this.notice(chat, heldLine(this.hooks?.away(held.node) ?? "that node"));
   }
 
   // ---------------------------------------------------------------------------

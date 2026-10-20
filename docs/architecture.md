@@ -121,6 +121,9 @@ Anything that would make `ptyhost.ts` need editing belongs on the server side.
   out of the bottom of `ptyhost.log`. Settings → About and `bun run status` show
   the end of the file; the supervisor passes its reason in
   `KURURU_STARTED_BECAUSE` so the server can say why it is the one running.
+  With [nodes](nodes.md#who-reads-it-and-when-that-moves), the shared
+  Telegram poll moving to or from this node is a `telegram` line there too,
+  since the chat is not told.
 - **The runner replaces one server at a time and waits for the old one to be
   gone.** A save that lands mid-build becomes one more replacement after it, an
   old server gets five seconds on SIGTERM and then SIGKILL, and only the current

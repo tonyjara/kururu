@@ -35,11 +35,14 @@ export type LifeWriter = "runner" | "app" | "server";
  * will mend on its own. `orphaned` is its own word because it is the
  * quiet one: a server whose supervisor has gone away keeps on serving, and
  * nothing about it looks wrong until a save fails to restart it.
+ * `telegram` is the shared bot's poll moving to or from this node, which
+ * the chat is no longer told about (`server/src/lead.ts`): not the server
+ * coming or going, but the same question — why is a different one answering.
  */
-export type LifeWhat = "start" | "restart" | "stop" | "crash" | "down" | "orphaned" | "host";
+export type LifeWhat = "start" | "restart" | "stop" | "crash" | "down" | "orphaned" | "host" | "telegram";
 
 const WRITERS: readonly LifeWriter[] = ["runner", "app", "server"];
-const WHATS: readonly LifeWhat[] = ["start", "restart", "stop", "crash", "down", "orphaned", "host"];
+const WHATS: readonly LifeWhat[] = ["start", "restart", "stop", "crash", "down", "orphaned", "host", "telegram"];
 
 export interface LifeEvent {
   /** ISO 8601, UTC. A reader turns it into local time; the file never does. */

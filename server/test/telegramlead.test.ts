@@ -6,7 +6,8 @@
  *
  * What is being held is the plan's promise for the lid closing and
  * opening: the chat is read by exactly one node, the box takes it over
- * thirty seconds after the Mac goes quiet and says so once, a message for
+ * thirty seconds after the Mac goes quiet without a word to the chat, and
+ * writes the move where the lifecycle log would have it; a message for
  * the Mac while it sleeps is held and reaches it when it is back, the Mac
  * takes the chat back a minute after it returns — waiting while the box is
  * mid-conversation — and nothing read is lost or passed on twice across
@@ -116,6 +117,8 @@ interface Side {
   down: Array<(peer: string) => void>;
   said: { id: string; text: string }[];
   logs: string[];
+  /** What the server would write to `lifecycle.log`. */
+  moves: string[];
 }
 
 let dir: string;
@@ -186,7 +189,7 @@ function nodesOf(side: Side) {
 }
 
 function makeSide(name: string, id: string, rank: number): Side {
-  const side: Side = { name, id, rank, telegram: null as never, lead: null, handlers: new Map(), up: [], down: [], said: [], logs: [] };
+  const side: Side = { name, id, rank, telegram: null as never, lead: null, handlers: new Map(), up: [], down: [], said: [], logs: [], moves: [] };
   side.telegram = new TelegramChannel({
     say: (_key, messageId, _at, text) => void side.said.push({ id: messageId, text }),
     profileKeyFor: () => "pk-main",
@@ -219,6 +222,7 @@ function startLead(side: Side): void {
       shared = mac.telegram.ownShared()!;
     },
     log: (line) => void side.logs.push(line),
+    moved: (line) => void side.moves.push(line),
     now: () => now,
     sign: (payload) => fakeSign(side.id, payload),
     verify: (payload, signature, key) => signature === fakeSign(key, payload),
@@ -311,6 +315,9 @@ async function macLeads(): Promise<void> {
 }
 
 const texts = () => bot.sent.map((m) => m.text);
+/** Anything kururu ever said in the chat about who reads it. */
+const leaderLines = () => texts().filter((t) => /in charge|listening|took over|stood down|stands down/i.test(t));
+const HELD = "The Mac is away; this reaches its Kuru when it is back.";
 
 describe("one Telegram between two nodes", () => {
   it("is read by the Mac, and the box's Kuru speaks through it; a reply to its line reaches it", async () => {
@@ -345,7 +352,7 @@ describe("one Telegram between two nodes", () => {
     await until(() => box.telegram.status().waiting === 0);
   });
 
-  it("is taken over by the box thirty seconds after the Mac goes quiet, told once, and the Mac's messages wait for it", async () => {
+  it("is taken over by the box thirty seconds after the Mac goes quiet, in silence, and the Mac's messages wait for it", async () => {
     await macLeads();
     sleepMac();
     const asleep = now;
@@ -356,17 +363,31 @@ describe("one Telegram between two nodes", () => {
     now = asleep + LEAD_TAKEOVER_MS;
     evaluate(box);
     await until(() => box.telegram.polling);
-    await until(() => texts().some((t) => t.startsWith("Box's Kuru is in charge. The Mac has been away since")));
+    expect(box.moves).toEqual([`this node polls Telegram for the others now — away: mac since ${new Date(asleep).toISOString()}`]);
 
     bot.deliver("what is running");
     await until(() => box.said.some((m) => m.text === "what is running"));
     bot.deliver("@mac are you there");
     bot.deliver("@mac and this");
-    await until(() => texts().filter((t) => t.startsWith("The Mac is away")).length === 1);
+    await until(() => texts().includes(HELD));
     await settle();
-    expect(texts().filter((t) => t.startsWith("The Mac is away")).length).toBe(1);
-    expect(texts().filter((t) => t.startsWith("Box's Kuru is in charge")).length).toBe(1);
+    expect(texts().filter((t) => t === HELD).length).toBe(1);
     expect(mac.said.map((m) => m.text)).toEqual([]);
+
+    // The box's server restarts while they wait: it does not say so again.
+    box.lead?.close();
+    box.telegram.close();
+    box.handlers.clear();
+    box.up = [];
+    box.down = [];
+    box.telegram = makeSide("box", BOX_ID, 2).telegram;
+    startLead(box);
+    box.lead!.evaluate();
+    box.telegram.start();
+    bot.deliver("@mac and one more");
+    await until(() => box.telegram.status().waiting === 0 && bot.calls.filter((c) => c.who === "box" && c.method === "getUpdates").length > 3);
+    await settle();
+    expect(texts().filter((t) => t === HELD).length).toBe(1);
 
     // The lid opens: what waited reaches the Mac at once, before the poll moves.
     startLead(mac);
@@ -374,7 +395,7 @@ describe("one Telegram between two nodes", () => {
     now = woke;
     link();
     evaluate(mac, box);
-    await until(() => mac.said.some((m) => m.text === "are you there") && mac.said.some((m) => m.text === "and this"));
+    await until(() => ["are you there", "and this", "and one more"].every((t) => mac.said.some((m) => m.text === t)));
     expect(box.telegram.polling).toBe(true);
     expect(mac.telegram.polling).toBe(false);
 
@@ -392,7 +413,8 @@ describe("one Telegram between two nodes", () => {
     evaluate(mac);
     await until(() => mac.telegram.polling);
     await until(() => !box.telegram.polling);
-    await until(() => texts().includes("The Mac's Kuru is back in charge."));
+    expect(mac.moves).toContain("took the Telegram poll back from box");
+    expect(box.moves).toContain("handed the Telegram poll to mac");
 
     // Read from where the box got to: nothing it passed on comes again.
     const before = mac.said.length;
@@ -402,6 +424,7 @@ describe("one Telegram between two nodes", () => {
     expect(mac.said.length).toBe(before + 1);
     expect(box.said.filter((m) => m.text === "what is running").length).toBe(1);
     expect(box.said.some((m) => m.text === "thanks")).toBe(false);
+    expect(leaderLines()).toEqual([]);
   });
 
   it("settles a split by rank: one 409 on the box, which stands down, and the Mac keeps the chat", async () => {
@@ -427,6 +450,8 @@ describe("one Telegram between two nodes", () => {
     expect(box.telegram.polling).toBe(false);
     expect(box.logs.filter((l) => l.includes("Telegram said 409")).length).toBe(1);
     expect(box.logs.find((l) => l.includes("Telegram said 409"))).toContain("stands down for five minutes");
+    expect(box.moves.some((l) => l.includes("stands down for five minutes"))).toBe(true);
+    expect(leaderLines()).toEqual([]);
     bot.deliver("still there?");
     await until(() => mac.said.some((m) => m.text === "still there?"));
   }, 30_000);
@@ -439,9 +464,7 @@ describe("a restart of the node that reads the chat", () => {
     now += LEAD_TAKEOVER_MS;
     evaluate(box);
     await until(() => box.telegram.polling);
-    await until(() => texts().filter((t) => t.startsWith("Box's Kuru is in charge")).length === 1);
-    // Sent and written off the queue, so the restart has nothing of it left to send again.
-    await until(() => box.telegram.status().waiting === 0);
+    expect(box.moves.length).toBe(1);
     await settle();
     // The box's server restarts: a new channel and lead on the same state file.
     box.lead?.close();
@@ -457,7 +480,9 @@ describe("a restart of the node that reads the chat", () => {
     expect(box.telegram.polling).toBe(true);
     expect(box.logs.at(-1)).toContain("as it did before its restart");
     await settle();
-    expect(texts().filter((t) => t.startsWith("Box's Kuru is in charge")).length).toBe(1);
+    // Carried on, not moved: nothing for the lifecycle log, nothing for the chat.
+    expect(box.moves.length).toBe(1);
+    expect(leaderLines()).toEqual([]);
   });
 });
 
@@ -502,9 +527,8 @@ describe("the switch, from any node", () => {
     expect(shared.switchedBy).toBe(BOX_ID);
     evaluate(mac, box);
     expect(box.telegram.pendingSwitch()).toBeNull();
-    await until(() => notices(OFF) === 1);
     await settle();
-    expect(notices(OFF)).toBe(1);
+    expect(notices(OFF)).toBe(0);
     // Off is no request at all, on either node.
     const polls = bot.calls.filter((c) => c.method === "getUpdates").length;
     await settle();
@@ -525,7 +549,6 @@ describe("the switch, from any node", () => {
     // The Mac said last that it could not read the chat, so the box does not wait thirty seconds for it.
     evaluate(box);
     await until(() => box.telegram.polling);
-    await until(() => notices(ON) === 1);
     expect(box.telegram.status().lead?.switch).toMatchObject({ by: "box", pending: true });
     bot.deliver("anything new?");
     await until(() => box.said.some((m) => m.text === "anything new?"));
@@ -549,7 +572,8 @@ describe("the switch, from any node", () => {
     now = woke + LEAD_TAKEBACK_MS + LEAD_BUSY_MAX_MS;
     evaluate(mac);
     await until(() => mac.telegram.polling && !box.telegram.polling);
-    expect(notices(ON)).toBe(1);
+    expect(notices(ON)).toBe(0);
+    expect(leaderLines()).toEqual([]);
   });
 
   it("is the latest word: a flip on the Mac after the box's, made while they were apart, stands", async () => {
@@ -587,7 +611,7 @@ describe("the switch, from any node", () => {
     expect(mac.telegram.polling).toBe(true);
   });
 
-  it("is not turned on from a node with no token, and says to lend it; off it is, and the Mac tells the chat", async () => {
+  it("is not turned on from a node with no token, and says to lend it; off it is, and the chat is not told", async () => {
     await macLeads();
     // The box again, with nothing in its config: no token lent.
     box.lead?.close();
@@ -604,7 +628,8 @@ describe("the switch, from any node", () => {
 
     box.lead!.flip(false);
     await until(() => !mac.telegram.polling);
-    await until(() => notices(OFF) === 1);
+    await settle();
+    expect(notices(OFF)).toBe(0);
     expect(() => box.lead!.flip(true)).toThrow("This node holds no bot token, so it could not read the chat. Lend it from the Mac's Settings → Nodes → box → Secrets → Telegram, then switch it on here.");
     expect(box.telegram.status().lead?.switch.refuseOn).toContain("holds no bot token");
     expect(box.telegram.status().lead?.switch.refuseOff).toBeNull();
