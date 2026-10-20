@@ -60,7 +60,7 @@ import {
 } from "../../../shared/layout";
 import { basename } from "../../../shared/labels";
 import { emptyBoard, type Board } from "../../../shared/board";
-import { visibleLaunchers, type Launcher, type LaunchSettings } from "../../../shared/launchers";
+import type { Launcher } from "../../../shared/launchers";
 import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
 import {
   AGENT_MIME,
@@ -112,8 +112,12 @@ interface Props {
    * printed key that is not the key is worse than no key printed at all.
    */
   keymap: Record<string, Action>;
-  /** Which agents the new-tab button offers besides a terminal. */
-  launch: LaunchSettings;
+  /**
+   * Which agents the new-tab button and a card's robot offer besides a
+   * terminal: this node's catalogue under its settings, or — on another
+   * node's workspace — that node's own rows (`RemoteView.launchers`).
+   */
+  launchers: Launcher[];
   /**
    * The machine this workspace's terminals open on, by name, or null for this
    * Mac — so the new-tab menu can say where everything in it goes. See
@@ -187,7 +191,7 @@ export function Panes({
   agents,
   mascot,
   keymap,
-  launch,
+  launchers,
   runsOn,
   zen,
   solo,
@@ -231,7 +235,6 @@ export function Panes({
   useEffect(() => {
     if (renaming !== null && !panes(node).some((pane) => pane.agentIds.includes(renaming))) setRenaming(null);
   }, [renaming, node]);
-  const launchers = visibleLaunchers(launch);
   const boxes = rects(node);
   const all = panes(node);
   /** The terminal in the focused pane, whose card a board here lights — see `BoardView`. */

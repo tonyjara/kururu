@@ -37,7 +37,7 @@ import { BOARD_TAB, isBoardTab, isDocTab, type LayoutNode } from "./layout";
 import type { AgentSnapshot, Workspace } from "./model";
 import { WORKSPACE_COLORS, type WorkspaceColor } from "./model";
 import type { ClientMessage } from "./wire";
-import type { LaunchSettings } from "./launchers";
+import { adoptLaunchers, visibleLaunchers, type Launcher, type LaunchSettings } from "./launchers";
 
 const PREFIX = "n:";
 /** A node id is `n` and twelve hex digits (`shared/nodes.ts`), and the local part follows its colon. */
@@ -160,8 +160,22 @@ export interface RemoteView {
   workspace: Workspace | null;
   /** The agents of that workspace, qualified. */
   agents: AgentSnapshot[];
-  /** The child's own launch settings, so a pane's `+` offers what the box will run. */
+  /** The child's own launch settings. */
   launch: LaunchSettings | null;
+  /** What a pane's `+` and a card's robot offer there: see `remoteLaunchers`. */
+  launchers: Launcher[];
+}
+
+/**
+ * The rows a remote workspace's `+` menu and its cards' robots offer: the
+ * node's own, as its summary carries them (`NodeSummary.launchers`), since
+ * the agent runs there and the id is looked up in the box's catalogue. A
+ * node from before carries none, and gets this node's catalogue under its
+ * own settings, which is what phase 1 offered; a version apart, a row the
+ * box does not know is answered as its own phone would be answered.
+ */
+export function remoteLaunchers(summaryLaunchers: unknown, launch: LaunchSettings | null): Launcher[] {
+  return adoptLaunchers(summaryLaunchers) ?? (launch ? visibleLaunchers(launch) : []);
 }
 
 // ---------------------------------------------------------------------------

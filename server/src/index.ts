@@ -116,6 +116,7 @@ import { Secrets } from "./secrets";
 import { TelegramLead } from "./lead";
 import { adoptLendAsk, asksAnything, webKind, type KindSpec, type Lendable, type LendAsk, type SecretsView } from "../../shared/secrets";
 import { folderSentence, type MoveCheck } from "../../shared/move";
+import { doneRefusal } from "../../shared/needs";
 import { summarize, type NodeSummary } from "../../shared/nodes";
 import { hostname } from "node:os";
 import { Store, dataDir, dbPath } from "./store";
@@ -232,6 +233,7 @@ import {
   findLauncher,
   launcherCommand,
   resumeCommand,
+  visibleLaunchers,
   withPrompt,
   type AgentCli,
   type Launcher,
@@ -788,7 +790,27 @@ function nodeSummary(leads: boolean, sees: string[]): NodeSummary {
     sees,
     dataMark: `${marks.events}.${marks.turns}.${store.changes}@${STARTED_AT}`,
     ...(lead ? { lead: { eligible: leadEligibility().eligible, polls: channels.telegram.polling } } : {}),
+    launchers: visibleLaunchers(launch),
   });
+}
+
+/**
+ * A member's Needs drawer asking for one of this node's cards to go to Done
+ * (remote workspaces, phase 4). Asked again by the rule the button there
+ * was drawn by (`doneRefusal`), because the summary that drew it may be
+ * seconds old and a card that has grown a terminal since is its board's
+ * question, not a click's. Done as the board's own "move-card" does it.
+ */
+function cardDoneFor(key: string, cardId: string): string | null {
+  const workspace = workspaces.active.workspaces.find((w) => w.key === key);
+  const card = workspace?.board?.cards.find((c) => c.id === cardId);
+  if (!workspace || !card) return "That card is not on its board any more.";
+  const live = card.run?.agentId ? host.agents.find((a) => a.id === card.run?.agentId && !a.exited) : undefined;
+  const refusal = doneRefusal(card, live ? overlay(live) : null);
+  if (refusal) return refusal;
+  workspaces.editBoard(workspace.id, (board) => moveCard(board, cardId, "done"));
+  stopDev(workspace.id, cardId);
+  return null;
 }
 
 /**
@@ -4956,6 +4978,27 @@ function handleMessage(ws: WebSocket, raw: string): void {
     case "node-move-plan":
       void replyAsync(ws, msg.id, () => mover.plan(workspaces.active.id, String(msg.workspaceId), String(msg.nodeId), typeof msg.folder === "string" ? msg.folder : null));
       return;
+    case "node-new-check":
+      void replyAsync(ws, msg.id, () => mover.newCheck(String(msg.nodeId), typeof msg.name === "string" ? msg.name : "", typeof msg.folder === "string" ? msg.folder : null));
+      return;
+    case "node-new-workspace":
+      void replyAsync(ws, msg.id, () => mover.newOn(String(msg.nodeId), typeof msg.name === "string" ? msg.name : "", String(msg.folder ?? "")));
+      return;
+    case "node-card-done":
+      void replyAsync(ws, msg.id, async () => {
+        const name = nodes.nameOf(String(msg.nodeId));
+        if (!name) throw new Error("That node is not in the roster.");
+        const answer = await nodes.ask(
+          String(msg.nodeId),
+          (id) => ({ type: "card-done-ask", id, workspaceKey: String(msg.workspaceKey), cardId: String(msg.cardId) }),
+          10_000,
+          `${name} did not answer, so the card was not moved.`,
+        );
+        if (answer.type !== "card-done-said") throw new Error(`${name} answered something else.`);
+        if (answer.error) throw new Error(answer.error);
+        return { ok: true };
+      });
+      return;
     case "node-move":
       void replyAsync(ws, msg.id, () => moveAndLend(workspaces.active.id, String(msg.workspaceId), String(msg.nodeId), String(msg.folder ?? ""), msg.lend, "user"));
       return;
@@ -7455,7 +7498,8 @@ async function attach(port: Port): Promise<void> {
       pushSecrets();
     },
     log: (line) => console.log(`kururu: ${line}`),
-    moves: { check: (peer, ask) => mover.check(peer, ask), adopt: (peer, offer) => mover.adopt(peer, offer) },
+    moves: { check: (peer, ask) => mover.check(peer, ask), adopt: (peer, offer) => mover.adopt(peer, offer), make: (peer, ask) => mover.make(peer, ask) },
+    cardDone: (_peer, key, cardId) => cardDoneFor(key, cardId),
     peer: (nodeId, message) => peerKurus?.message(nodeId, message),
     // Leading is the Telegram poll, so the node that holds it leads.
     leader: () => lead?.holder() ?? null,

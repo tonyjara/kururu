@@ -67,6 +67,7 @@ import { closeNeeds, toggleNeeds, useNeedsDrawer } from "./needs";
 import { NeedsDrawer } from "./components/NeedsDrawer";
 import { needsOf, nextNeed, type Need } from "../../shared/needs";
 import { nodesNeedCount } from "../../shared/nodes";
+import { visibleLaunchers } from "../../shared/launchers";
 import { showCardNext } from "./components/Board";
 import type { VoiceGlobalState } from "./desktop";
 import { installSpeech, installTalkKey, setSpeechVolume, setVoiceProfile, setVoiceRemote, useVoiceUi } from "./voice";
@@ -1554,7 +1555,7 @@ export function App() {
             /* For the key hints in a pane's menu — the same merged map the help
                overlay prints, so the two never disagree about where a split is. */
             keymap={keymap}
-            launch={remote?.launch ?? snapshot.launch}
+            launchers={remote ? remote.launchers : visibleLaunchers(snapshot.launch)}
             runsOn={remote ? null : runsOn(workspace.machine, machines)}
             zen={zen}
             /* One pane at a time once there is no room to tile — the same

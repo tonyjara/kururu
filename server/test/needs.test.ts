@@ -8,9 +8,9 @@
  * Kuru asking in its own chip's place.
  */
 import { describe, expect, it } from "bun:test";
-import { addCard, emptyBoard, noteRun, startRun, type Board } from "../../shared/board";
+import { addCard, emptyBoard, moveCard, noteRun, startRun, type Board, type Card } from "../../shared/board";
 import type { AgentSnapshot, Profile, Workspace } from "../../shared/model";
-import { allNeeds, needsOf, nextNeed } from "../../shared/needs";
+import { allNeeds, doneRefusal, needsOf, nextNeed } from "../../shared/needs";
 
 function agent(id: string, over: Partial<AgentSnapshot> = {}): AgentSnapshot {
   return {
@@ -190,5 +190,24 @@ describe("the walk", () => {
 
   it("is nothing when nothing needs you", () => {
     expect(nextNeed(needsOf(profile([workspace("w1", [])]), []), { focusedAgentId: null, workspaceId: null, boardShowing: false })).toBeNull();
+  });
+});
+
+describe("doneRefusal: whether Done is a plain move, said as why not", () => {
+  const review = (over: Partial<Card> = {}): Card => ({ ...moveCard(addCard(emptyBoard(), { title: "t" }, "c1", 0), "c1", "review").cards[0]!, ...over });
+  it("is null for a card in Review with no worktree and no terminal open", () => {
+    expect(doneRefusal(review(), null)).toBeNull();
+  });
+  it("says why for every other card, in the order the board would ask", () => {
+    expect(doneRefusal({ ...review(), column: "done" }, null)).toBe("It is in Done already.");
+    expect(doneRefusal({ ...review(), column: "doing" }, null)).toBe("It is not in Review any more.");
+    expect(doneRefusal(review(), agent("a1", { status: "blocked" }))).toBe("Its agent is asking something.");
+    expect(doneRefusal(review({ worktree: { path: "/w/.kururu/x", branch: "kururu/x", base: "main" } as Card["worktree"] }), null)).toContain("worktree is still standing");
+    expect(doneRefusal(review(), agent("a1"))).toContain("agent is still open");
+  });
+  it("is what plainDone is drawn by", () => {
+    const board = cardOn("a1", "done", "review");
+    const plain = needsOf(profile([workspace("w1", [], board)]), [agent("a1", { exited: true })]);
+    expect(plain.workspaces[0]!.needs[0]!.plainDone).toBe(doneRefusal(board.cards[0]!, null) === null);
   });
 });

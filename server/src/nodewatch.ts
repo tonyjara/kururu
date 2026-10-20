@@ -51,6 +51,7 @@ import {
   qualifyAgent,
   qualifyReply,
   qualifyWorkspace,
+  remoteLaunchers,
   route,
   type RemoteState,
   type RemoteView,
@@ -584,6 +585,7 @@ class NodeWatch {
       workspace: workspace ? qualifyWorkspace(this.node, workspace) : null,
       agents: (snap?.agents ?? []).filter((a) => shownIds.has(a.id)).map((a) => qualifyAgent(this.node, a)),
       launch: snap?.launch ?? null,
+      launchers: remoteLaunchers(this.deps.summary(this.node)?.launchers, snap?.launch ?? null),
     };
   }
 
@@ -619,7 +621,7 @@ export class NodeWatches {
     if (!on) return null;
     const watch = this.watches.get(on.node);
     if (watch) return watch.view(on.key);
-    return { node: { id: on.node, name: this.deps.member(on.node)?.name ?? on.node }, workspaceKey: on.key, state: "opening", since: null, workspace: null, agents: [], launch: null };
+    return { node: { id: on.node, name: this.deps.member(on.node)?.name ?? on.node }, workspaceKey: on.key, state: "opening", since: null, workspace: null, agents: [], launch: null, launchers: remoteLaunchers(this.deps.summary(on.node)?.launchers, null) };
   }
 
   /**

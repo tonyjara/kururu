@@ -37,13 +37,18 @@ import {
   basename,
   folderSentence,
   movePlan,
+  newFolderOk,
+  newFolderSentence,
   projectsFolder,
   tilde,
+  workspaceName,
   type FolderProblem,
   type MoveCheck,
   type MoveCheckAsk,
   type MoveDone,
   type MovePlan,
+  type NewWorkspaceAsk,
+  type NewWorkspaceMade,
 } from "../../shared/move";
 import type { Actor } from "../../shared/store";
 import type { NodeHost } from "./nodes";
@@ -162,6 +167,29 @@ export class Mover {
     return this.askFolder(nodeId, { workspaceName: workspace.name, basename: name, folder });
   }
 
+  /**
+   * A new workspace on another node, from its heading in the sidebar: the
+   * node's word on the folder as the field is typed — its guess, made of
+   * the name, when there is none yet. The same check a move makes, read by
+   * `newFolderOk`, which lets a folder that is not a checkout through.
+   */
+  async newCheck(nodeId: string, name: string, folder: string | null): Promise<MoveCheck> {
+    this.target(nodeId);
+    const words = name.trim();
+    return this.askFolder(nodeId, { workspaceName: words, basename: words, folder });
+  }
+
+  /** Make it there. Resolves with what the node made; rejects with its sentence, and then nothing was made. */
+  async newOn(nodeId: string, name: string, folder: string): Promise<NewWorkspaceMade> {
+    const node = this.target(nodeId);
+    if (!folder.trim()) throw new Error(`Which folder on ${node.name}?`);
+    const ask: NewWorkspaceAsk = { name: name.trim(), folder: folder.trim() };
+    const answer = await this.deps.nodes.ask(nodeId, (id) => ({ type: "workspace-new", id, ask }), CHECK_MS, `${node.name} did not answer, so no workspace was made. Is its kururu up to date?`);
+    if (answer.type !== "workspace-made") throw new Error(`${node.name} answered something else.`);
+    if (!answer.made) throw new Error(answer.error ?? `${node.name} made nothing.`);
+    return answer.made;
+  }
+
   private async askFolder(nodeId: string, ask: MoveCheckAsk): Promise<MoveCheck> {
     const name = this.deps.nodes.nameOf(nodeId) ?? "That node";
     const answer = await this.deps.nodes.ask(nodeId, (id) => ({ type: "workspace-move-check", id, ask }), CHECK_MS, `${name} did not answer about the folder. Is its kururu up to date?`);
@@ -242,6 +270,28 @@ export class Mover {
     const profile = this.deps.workspaces.active;
     const name = typeof ask.workspaceName === "string" ? ask.workspaceName.trim() : "";
     return { folder: path, shown: tilde(path, home), problem, profile: profile.name, clash: profile.workspaces.some((w) => w.name === name) };
+  }
+
+  /**
+   * A new workspace a peer's window asked for: in the profile on screen,
+   * one pane in the folder, judged on this disk first. Nothing comes with
+   * it, so nothing is adopted; the window that asked puts it on screen
+   * through its watch, which also makes it the active workspace here.
+   */
+  make(_peer: string, raw: unknown): NewWorkspaceMade {
+    const ask = (raw ?? {}) as Partial<NewWorkspaceAsk>;
+    if (typeof ask.folder !== "string" || !ask.folder.trim()) throw new Error("which folder?");
+    const home = this.deps.home;
+    const { path, problem } = judgeFolder(ask.folder, home);
+    const shown = tilde(path, home);
+    if (!newFolderOk(problem)) throw new Error(newFolderSentence(problem, this.deps.nodes.name(), shown));
+    const ws = this.deps.workspaces;
+    const profile = ws.active;
+    const name = workspaceName(ask.name, path);
+    const id = ws.as("user", () => ws.newWorkspaceIn(profile.id, name, path));
+    const made = id ? ws.workspaceIn(profile.id, id) : null;
+    if (!made) throw new Error("the workspace could not be made here");
+    return { key: made.key, name: made.name, folder: path, shown, profile: profile.name };
   }
 
   /**

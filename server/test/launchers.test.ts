@@ -12,6 +12,7 @@ import {
   LAUNCHERS,
   MODEL_NAME,
   adoptLaunch,
+  adoptLaunchers,
   findLauncher,
   launcherCommand,
   visibleLaunchers,
@@ -124,5 +125,33 @@ describe("sleeping idle card agents", () => {
   it("keeps the minutes while it is switched off, so switching back gives them back", () => {
     const off = adoptLaunch({ sleepIdle: false, sleepMinutes: 45 });
     expect(adoptLaunch({ ...off, sleepIdle: true })).toMatchObject({ sleepIdle: true, sleepMinutes: 45 });
+  });
+});
+
+describe("adoptLaunchers: another node's + menu, as it arrives", () => {
+  it("keeps the rows of the right shape, in order, and drops the rest", () => {
+    const got = adoptLaunchers([
+      { id: "claude", cli: "claude", label: "Claude" },
+      { id: "claude:claude-next-6", cli: "claude", model: "claude-next-6", label: "Claude Next 6" },
+      { id: "x", cli: "gemini", label: "Gemini" },
+      { id: "claude:bad", cli: "claude", model: "a b; rm -rf ~", label: "Bad" },
+      { id: "claude", cli: "claude", label: "Twice" },
+      { id: "codex", cli: "codex", label: "  " },
+      null,
+      "codex",
+    ]);
+    expect(got).toEqual([
+      { id: "claude", cli: "claude", label: "Claude" },
+      { id: "claude:claude-next-6", cli: "claude", model: "claude-next-6", label: "Claude Next 6" },
+    ]);
+  });
+  it("is null for a node that sent none, so the caller can fall back", () => {
+    expect(adoptLaunchers(undefined)).toBeNull();
+    expect(adoptLaunchers({})).toBeNull();
+    expect(adoptLaunchers([])).toEqual([]);
+  });
+  it("is bounded", () => {
+    const many = Array.from({ length: 500 }, (_, i) => ({ id: `claude:m${i}`, cli: "claude", model: `m${i}`, label: `M${i}` }));
+    expect(adoptLaunchers(many)!.length).toBeLessThanOrEqual(64);
   });
 });

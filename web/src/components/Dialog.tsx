@@ -28,9 +28,13 @@
  * the middle of the screen and not at the foot of a row. Under the lists it
  * offers to lend the node what the project needs to run there — its env
  * files, an ssh host, a GitHub login — each a box ticked by hand.
+ *
+ * `node-new` asks the same question of a node for a workspace made there
+ * from this window: the folder is the node's to judge, on its own disk, as
+ * it is typed.
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { folderSentence, type MovePlan } from "../../../shared/move";
+import { basename, folderSentence, newFolderOk, newFolderSentence, type MoveCheck, type MovePlan } from "../../../shared/move";
 import { grantText, type LendAsk, type LendCandidate, type Lendable } from "../../../shared/secrets";
 import * as api from "../session";
 import { Icon } from "./Icon";
@@ -94,12 +98,19 @@ export type DialogState =
       hint?: string;
       workspaceId: string;
       nodeId: string;
+    }
+  | {
+      kind: "node-new";
+      title: string;
+      hint?: string;
+      nodeId: string;
+      nodeName: string;
     };
 
 export function Dialog({ state, onClose }: { state: DialogState; onClose: () => void }) {
   return (
     <div className="scrim" onPointerDown={onClose}>
-      <div className={state.kind === "move" ? "dialog dialog-move" : "dialog"} onPointerDown={(event) => event.stopPropagation()} role="dialog" aria-modal>
+      <div className={state.kind === "move" || state.kind === "node-new" ? "dialog dialog-move" : "dialog"} onPointerDown={(event) => event.stopPropagation()} role="dialog" aria-modal>
         <h2 className="dialog-title">{state.title}</h2>
         {state.hint && <p className="dialog-hint">{state.hint}</p>}
         {state.kind === "prompt" && <Prompt state={state} onClose={onClose} />}
@@ -107,6 +118,7 @@ export function Dialog({ state, onClose }: { state: DialogState; onClose: () => 
         {state.kind === "ask" && <Ask state={state} onClose={onClose} />}
         {state.kind === "pick" && <Pick state={state} onClose={onClose} />}
         {state.kind === "move" && <Move state={state} onClose={onClose} />}
+        {state.kind === "node-new" && <NodeNew state={state} onClose={onClose} />}
       </div>
     </div>
   );
@@ -586,6 +598,134 @@ function Move({ state, onClose }: { state: Extract<DialogState, { kind: "move" }
         </button>
         <button className="button" onClick={go} disabled={!ready}>
           {moving ? "Moving…" : `Move to ${node}`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A new workspace on another node. The folder comes first, because it is
+ * the thing that can be wrong: the node offers its guess (where its other
+ * projects are), and each edit is asked about there, since a path is
+ * nothing on this disk. The name follows the folder unless it is typed.
+ * Once made, the window goes to it, through the watch, as a click on its
+ * row would.
+ */
+function NodeNew({ state, onClose }: { state: Extract<DialogState, { kind: "node-new" }>; onClose: () => void }) {
+  const node = state.nodeName;
+  const [folder, setFolder] = useState("");
+  const [name, setName] = useState("");
+  const [check, setCheck] = useState<MoveCheck | null>(null);
+  const [checked, setChecked] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [making, setMaking] = useState(false);
+  const asked = useRef(0);
+
+  const ask = (value: string | null) => {
+    const n = ++asked.current;
+    api.nodeNewCheck(state.nodeId, "", value).then(
+      (next) => {
+        if (n !== asked.current) return;
+        setCheck(next);
+        setError(null);
+        const words = value ?? next.shown;
+        setChecked(words);
+        if (value === null) setFolder(words);
+      },
+      (err: unknown) => {
+        if (n === asked.current) setError(err instanceof Error ? err.message : String(err));
+      },
+    );
+  };
+
+  useEffect(() => {
+    ask(null);
+  }, [state.nodeId]);
+
+  useEffect(() => {
+    if (checked === null || folder.trim() === checked) return;
+    const timer = setTimeout(() => ask(folder.trim()), CHECK_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [folder, checked]);
+
+  const fresh = checked !== null && folder.trim() === checked;
+  const ready = check !== null && newFolderOk(check.problem) && fresh && !making;
+  const named = name.trim() || basename(check?.folder ?? folder) || "workspace";
+
+  const go = () => {
+    if (!ready || !check) return;
+    setMaking(true);
+    setError(null);
+    api.nodeNewWorkspace(state.nodeId, name.trim(), check.folder).then(
+      (made) => {
+        api.showNodeWorkspace(state.nodeId, made.key);
+        onClose();
+      },
+      (err: unknown) => {
+        setMaking(false);
+        setError(err instanceof Error ? err.message : String(err));
+      },
+    );
+  };
+
+  const enter = (event: KeyboardEvent) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (fresh) go();
+    else ask(folder.trim());
+  };
+
+  return (
+    <div
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === "Escape" && !making) onClose();
+      }}
+    >
+      {checked === null && !error && <p className="dialog-hint">Asking {node}…</p>}
+      {checked !== null && (
+        <>
+          <label className="dialog-move-label" htmlFor="node-new-folder">
+            The folder on {node}
+          </label>
+          <input
+            id="node-new-folder"
+            className="dialog-input"
+            value={folder}
+            autoFocus
+            disabled={making}
+            onChange={(event) => setFolder(event.target.value)}
+            onKeyDown={enter}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <p className={check && !newFolderOk(check.problem) ? "dialog-move-check dialog-move-bad" : "dialog-move-check"}>
+            {!fresh ? "Checking…" : check ? `${newFolderSentence(check.problem, node, check.shown)} It is made in ${node}'s profile ${check.profile}.` : ""}
+          </p>
+          <label className="dialog-move-label" htmlFor="node-new-name">
+            Its name
+          </label>
+          <input
+            id="node-new-name"
+            className="dialog-input"
+            value={name}
+            placeholder={named}
+            disabled={making}
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={enter}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </>
+      )}
+      {error && <p className="dialog-move-refused">{error}</p>}
+      <div className="dialog-actions">
+        <button className="button button-quiet" onClick={onClose} disabled={making}>
+          Cancel
+        </button>
+        <button className="button" onClick={go} disabled={!ready}>
+          {making ? "Making…" : `Make it on ${node}`}
         </button>
       </div>
     </div>

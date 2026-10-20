@@ -1348,7 +1348,7 @@ export function Sidebar({
           and the OpenRouter balance were sections here too and are the
           bottom bar's since 2026-10-18 (`Usage.tsx`, `Machines.tsx`,
           `OpenRouter.tsx`). */}
-      <Nodes mascots={mascots} remoteOn={remoteOn} onNavigated={navigated} />
+      <Nodes mascots={mascots} remoteOn={remoteOn} onNavigated={navigated} onPrompt={onPrompt} />
       <DevServers />
 
       {/* The foot: Settings and the phone's QR code, at the bottom left. They
@@ -1700,10 +1700,12 @@ function Nodes({
   mascots,
   remoteOn,
   onNavigated,
+  onPrompt,
 }: {
   mascots: MascotSet;
   remoteOn: { nodeId: string; workspaceKey: string } | null;
   onNavigated: () => void;
+  onPrompt: (state: DialogState) => void;
 }) {
   const { nodes } = useKururu();
   const [open, toggle] = useDisclosure("kururu.sidebar.nodes", true);
@@ -1729,6 +1731,13 @@ function Nodes({
               mascot={mascotFor(mascots, null)}
               on={remoteOn?.nodeId === node.id ? remoteOn.workspaceKey : null}
               onNavigated={onNavigated}
+              /* Only the parent may put a node's workspace on its screen, so
+                 only the parent offers to make one there and go to it. */
+              onNew={
+                nodes.role === "parent" && node.state === "up" && node.summary?.watchable && node.summary.drives
+                  ? () => onPrompt({ kind: "node-new", title: `New workspace on ${node.name}`, nodeId: node.id, nodeName: node.name })
+                  : null
+              }
             />
           ))}
         </ul>
@@ -1742,12 +1751,15 @@ function NodeBlock({
   mascot,
   on,
   onNavigated,
+  onNew,
 }: {
   node: NodeStatus;
   mascot: ReturnType<typeof mascotFor>;
   /** The key of this node's workspace that is on screen, or null. */
   on: string | null;
   onNavigated: () => void;
+  /** New workspace on this node, or null where that cannot be asked of it. */
+  onNew: (() => void) | null;
 }) {
   const up = node.state === "up";
   const summary = node.summary;
@@ -1756,12 +1768,19 @@ function NodeBlock({
   const old = `Update ${node.name} (kururu child update) to open its workspaces in this window.`;
   return (
     <li className={`node-item ${up ? "" : "node-stale"}`} style={hueStyle(node.id)}>
-      <a className="node-head" href={node.url} target="_blank" rel="noreferrer noopener" title={[go, node.error && !up ? node.error : null].filter(Boolean).join("\n")}>
-        <span className="node-chip-dot" aria-hidden="true" />
-        <span className="node-name">{node.name}</span>
-        {!up && <span className="node-state">{nodeState(node)}</span>}
-        {up && summary && summary.needs.count > 0 && <span className="unread" aria-label="needs you" />}
-      </a>
+      <div className="node-headrow">
+        <a className="node-head" href={node.url} target="_blank" rel="noreferrer noopener" title={[go, node.error && !up ? node.error : null].filter(Boolean).join("\n")}>
+          <span className="node-chip-dot" aria-hidden="true" />
+          <span className="node-name">{node.name}</span>
+          {!up && <span className="node-state">{nodeState(node)}</span>}
+          {up && summary && summary.needs.count > 0 && <span className="unread" aria-label="needs you" />}
+        </a>
+        {onNew && (
+          <button className="mini" onClick={onNew} title={`New workspace on ${node.name}, in a folder there`} aria-label={`New workspace on ${node.name}`}>
+            <Icon name="add" />
+          </button>
+        )}
+      </div>
       {summary ? (
         <ul className="node-workspaces">
           {summary.workspaces.map((w) =>

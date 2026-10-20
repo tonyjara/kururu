@@ -260,3 +260,33 @@ export function visibleLaunchers(settings: LaunchSettings): Launcher[] {
     (launcher) => !settings.offClis.includes(launcher.cli) && !settings.offLaunchers.includes(launcher.id),
   );
 }
+
+/** More rows than the catalogue will ever have; a bound on what another node may hand over. */
+export const LAUNCHERS_MAX = 64;
+const LABEL_MAX = 60;
+
+/**
+ * Another node's launchers, as its summary carries them: the rows its own
+ * `+` menu shows, from its own catalogue. A remote pane offers these rather
+ * than this node's, because the agent runs there and the id goes back there
+ * — a model this version knows and the box's does not would be a tab that
+ * says so after the fact. Anything that is not a row of the right shape is
+ * dropped, and a model name is held to `MODEL_NAME` though it is only ever
+ * drawn here: the box looks the id up in its own catalogue, never this one.
+ */
+export function adoptLaunchers(raw: unknown): Launcher[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: Launcher[] = [];
+  const seen = new Set<string>();
+  for (const row of raw.slice(0, LAUNCHERS_MAX)) {
+    if (!row || typeof row !== "object") continue;
+    const { id, cli, model, label } = row as Record<string, unknown>;
+    if (typeof id !== "string" || !id || id.length > 120 || seen.has(id)) continue;
+    if (typeof cli !== "string" || !(AGENT_CLIS as readonly string[]).includes(cli)) continue;
+    if (typeof label !== "string" || !label.trim()) continue;
+    if (model !== undefined && (typeof model !== "string" || !MODEL_NAME.test(model))) continue;
+    seen.add(id);
+    out.push({ id, cli: cli as AgentCli, label: label.slice(0, LABEL_MAX), ...(typeof model === "string" ? { model } : {}) });
+  }
+  return out;
+}
