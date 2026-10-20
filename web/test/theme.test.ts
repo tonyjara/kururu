@@ -163,6 +163,10 @@ const NOT_THEME = new Set([
   "--board-col-min",
   "--board-col-max",
   "--col-w",
+  // Another node's hue, set on the box it tints by `NodeChip.tsx`'s
+  // `hueStyle` as one of the board palette's own tokens (`--ws-<name>`): a
+  // pointer at a theme's colour, never a colour of its own.
+  "--node-hue",
 ]);
 
 /**

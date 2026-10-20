@@ -44,6 +44,7 @@ import { countsAsAgent, type AgentSnapshot } from "../../../shared/model";
 import { MachinesChip } from "./Machines";
 import { OpenRouterChip } from "./OpenRouter";
 import { UsageChips } from "./Usage";
+import { useKururu } from "../session";
 
 interface Props {
   agents: readonly AgentSnapshot[];
@@ -115,6 +116,7 @@ export function StatusBar({
       {prefixArmed && <span className="sb-badge sb-prefix">PREFIX</span>}
       {resizeMode && <span className="sb-badge sb-resize">RESIZE hjkl · esc</span>}
       {!connected && <span className="sb-badge sb-off">reconnecting…</span>}
+      <WatchedBy />
 
       {/* The count, the bar's one standing fact. Running is the number and
           working is the news: an agent at a prompt is still holding its
@@ -225,6 +227,25 @@ export function WorkspaceToggle({
       {toggleFirst && button}
       <span className="sb-workspace">{name}</span>
       {!toggleFirst && button}
+    </span>
+  );
+}
+
+/**
+ * "mac is watching": the parent's window has hands on this node's terminals
+ * through `/link/watch` — it can type into them, split these panes, move
+ * this focus. Said here, on the node's own page, so that the person at the
+ * box's phone knows the Mac's window is driving it too, rather than finding
+ * out from a pane that moved under them. Nothing while nobody watches.
+ */
+function WatchedBy() {
+  const { nodes } = useKururu();
+  const by = nodes?.watchedBy ?? [];
+  if (by.length === 0) return null;
+  const who = by.join(" and ");
+  return (
+    <span className="sb-badge sb-watched" title={`${who}'s window shows this node's workspaces and can type into its terminals`}>
+      {who} is watching
     </span>
   );
 }

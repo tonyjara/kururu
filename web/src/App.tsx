@@ -50,6 +50,8 @@ import { Keybar } from "./components/Keybar";
 import { Menu, type MenuAt } from "./components/Menu";
 import { resetZoom, zoomBy } from "./zoom";
 import { Panes } from "./components/Panes";
+import { hueStyle } from "./components/NodeChip";
+import { RemoteBand, RemoteWaiting, useRemoteSaid } from "./components/RemoteBand";
 import { Reach } from "./components/Reach";
 import { Settings, TAB_NAMES as SETTINGS_TABS, type Tab as SettingsTab } from "./settings/Settings";
 import { Sidebar } from "./components/Sidebar";
@@ -387,7 +389,21 @@ export function App() {
     [profile],
   );
   const agents = useMemo(() => snapshot?.agents ?? [], [snapshot]);
-  const filesOpen = narrow ? filesSheet : !!workspace && filesOpenIn.has(workspace.id);
+  /**
+   * Another node's workspace, while one is on screen instead of a local one
+   * (`shared/remote.ts`, `server/src/nodewatch.ts`). The panes, the pane
+   * verbs on the keyboard and what this window watches follow it; the
+   * sidebar, the drawers and the bar stay this node's, since they are.
+   */
+  const remote = snapshot?.remote ?? null;
+  /** The workspace the panes draw: the remote one while it is on screen — null while its watch has not said what it is — else the local one. */
+  const onScreen = remote ? remote.workspace : workspace;
+  /** The agents a pane looks its tabs up in: this node's, and the remote workspace's beside them under their qualified ids. */
+  const paneAgents = useMemo(() => (remote ? [...agents, ...remote.agents] : agents), [agents, remote]);
+  /** What the server last said it could not send there, while it is fresh enough to show. */
+  const remoteSaid = useRemoteSaid(remote?.node.id ?? null);
+  // The tree reads this disk, and a remote workspace's files are on another.
+  const filesOpen = !remote && (narrow ? filesSheet : !!workspace && filesOpenIn.has(workspace.id));
   /** Opens or shuts the tree for the workspace in front of you, and only it. */
   const setFilesOpen = useCallback(
     (next: boolean | ((open: boolean) => boolean)) => {
@@ -647,11 +663,11 @@ export function App() {
    * the whole reason `watch` carries two sets.
    */
   const visible = useMemo(() => {
-    if (!workspace) return [];
-    if (!narrow) return visibleAgents(workspace.layout);
-    const shown = activeTerminal(soloPane(workspace.layout, workspace.focusedPaneId));
+    if (!onScreen) return [];
+    if (!narrow) return visibleAgents(onScreen.layout);
+    const shown = activeTerminal(soloPane(onScreen.layout, onScreen.focusedPaneId));
     return shown ? [shown] : [];
-  }, [workspace, narrow]);
+  }, [onScreen, narrow]);
   useEffect(() => {
     api.watch(visible);
   }, [visible]);
@@ -804,7 +820,7 @@ export function App() {
    */
   const run = useCallback(
     (action: Action) => {
-      const focusedAgent = focusedAgentOf(workspace);
+      const focusedAgent = focusedAgentOf(onScreen);
 
       switch (action) {
         case "split-right":
@@ -825,7 +841,7 @@ export function App() {
           return api.closePane();
         case "rename-tab": {
           if (!focusedAgent) return;
-          const agent = agents.find((a) => a.id === focusedAgent);
+          const agent = paneAgents.find((a) => a.id === focusedAgent);
           return setDialog({
             kind: "prompt",
             title: "Rename tab",
@@ -841,7 +857,7 @@ export function App() {
           const dir = action.slice("focus-".length) as Direction;
           // Nothing to the left of the leftmost pane means the sidebar, the way
           // it does in ghosttown — the chrome is part of the layout to a keyboard.
-          if (dir === "left" && workspace && !paneInDirection(workspace.layout, workspace.focusedPaneId, "left")) {
+          if (dir === "left" && onScreen && !paneInDirection(onScreen.layout, onScreen.focusedPaneId, "left")) {
             setSidebarOpen(true);
             return;
           }
@@ -881,8 +897,11 @@ export function App() {
           return api.stepWorkspace(-1);
         case "last-workspace":
           return api.lastWorkspace();
+        // The workspace on screen is another node's, and these two are about
+        // this node's; doing them to the local one nobody is looking at
+        // would rename or end the wrong thing.
         case "rename-workspace":
-          if (!workspace) return;
+          if (!workspace || remote) return;
           return setDialog({
             kind: "prompt",
             title: "Rename workspace",
@@ -890,7 +909,7 @@ export function App() {
             onSubmit: (name) => api.renameWorkspace(workspace.id, name),
           });
         case "delete-workspace":
-          if (workspace) confirmDeleteWorkspace(workspace.id);
+          if (workspace && !remote) confirmDeleteWorkspace(workspace.id);
           return;
         case "find-workspace":
           if (!profile) return;
@@ -917,8 +936,10 @@ export function App() {
               hint: agent.cwd,
             })),
             onPick: (id) => {
-              const pane = workspace ? panes(workspace.layout).find((p) => p.agentIds.includes(id)) : null;
-              if (!pane) return;
+              const pane = onScreen ? panes(onScreen.layout).find((p) => p.agentIds.includes(id)) : null;
+              // In another workspace, or this node's while another node's is
+              // on screen: the server finds it and takes the window there.
+              if (!pane) return api.revealAgent(id);
               api.focusPane(pane.id);
               api.selectTab(pane.id, pane.agentIds.indexOf(id));
             },
@@ -930,8 +951,8 @@ export function App() {
          * prefix+w's to find.
          */
         case "find-tab": {
-          if (!workspace) return;
-          const tabs = tabsOf(workspace.layout, agents);
+          if (!onScreen) return;
+          const tabs = tabsOf(onScreen.layout, paneAgents);
           return setDialog({
             kind: "pick",
             title: "Tabs",
@@ -990,7 +1011,7 @@ export function App() {
           return setHelp((on) => !on);
       }
     },
-    [workspace, profile, agents, promptNewProfile, confirmDeleteWorkspace, narrow, goNext],
+    [workspace, onScreen, remote, profile, agents, paneAgents, promptNewProfile, confirmDeleteWorkspace, narrow, goNext],
   );
 
   /**
@@ -1263,7 +1284,7 @@ export function App() {
          * reasonable thing to want, and taking them here would make the two
          * indistinguishable from the outside.
          */
-        if (readerFocused(workspace) && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        if (readerFocused(onScreen) && !event.metaKey && !event.ctrlKey && !event.altKey) {
           const key = keyName(event);
           if (key === "+" || key === "=") {
             take();
@@ -1280,7 +1301,7 @@ export function App() {
         }
         // An empty pane has no pty to own the key, and is the button that opens one.
         if (
-          emptyPaneFocused(workspace) &&
+          emptyPaneFocused(onScreen) &&
           !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey &&
           keyName(event) === "enter"
         ) {
@@ -1298,7 +1319,7 @@ export function App() {
       // The prefix twice sends it through, which is what keeps ctrl+a usable
       // inside readline.
       if (isPrefix(event)) {
-        const focused = focusedAgentOf(workspace);
+        const focused = focusedAgentOf(onScreen);
         if (focused) api.input(focused, PREFIX_BYTE);
         return;
       }
@@ -1312,7 +1333,7 @@ export function App() {
 
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [prefixArmed, resizeMode, dialog, editing, help, settings, reach, profileMenu, profileBoard, databasesFor, kuruDrawer.open, needsOpen, workspace, keymap, run, arm, disarm]);
+  }, [prefixArmed, resizeMode, dialog, editing, help, settings, reach, profileMenu, profileBoard, databasesFor, kuruDrawer.open, needsOpen, workspace, onScreen, keymap, run, arm, disarm]);
 
   /**
    * A file dropped anywhere that is not a terminal does nothing.
@@ -1424,7 +1445,7 @@ export function App() {
      the toggle first, under the thumb. */
   const toggle = (
     <WorkspaceToggle
-      name={workspace.name}
+      name={remote ? `${remote.node.name} · ${remote.workspace?.name ?? "…"}` : workspace.name}
       sidebarOpen={sidebarOpen}
       toggleFirst={narrow}
       onToggle={() => run("toggle-sidebar")}
@@ -1459,7 +1480,8 @@ export function App() {
           /* The terminal the keyboard is pointed at. The sidebar marks it,
              because a list of six agents does not otherwise say which of them
              the next keystroke belongs to. */
-          focusedAgentId={focusedAgentOf(workspace)}
+          focusedAgentId={remote ? null : focusedAgentOf(workspace)}
+          remoteOn={remote ? { nodeId: remote.node.id, workspaceKey: remote.workspaceKey } : null}
           needsYou={needyWorkspaces}
           onRun={run}
           toggle={narrow ? null : toggle}
@@ -1510,20 +1532,30 @@ export function App() {
             band's row and the sidebar folds into it rather than dropping a
             bar over the panes. */}
         {!sidebarOpen && !zen && narrow && <div className="stage-drag" aria-hidden="true" />}
-        <main className="panes">
+        {/* Another node's workspace wears that node's hue across the band its
+            strips make, and its name at the band's left end, so the whole
+            tiled region reads as that machine's from across the room; greyed,
+            with since when, while its watch is down. */}
+        <main
+          className={`panes ${remote ? "panes-remote" : ""} ${remote && remote.state !== "up" ? "panes-away" : ""}`}
+          style={remote ? hueStyle(remote.node.id) : undefined}
+        >
+          {remote && !onScreen ? (
+            <RemoteWaiting remote={remote} />
+          ) : onScreen ? (
           <Panes
-            node={workspace.layout}
-            workspaceId={workspace.id}
-            workspaceName={workspace.name}
-            board={workspace.board}
-            focusedPaneId={workspace.focusedPaneId}
-            agents={agents}
-            mascot={mascot}
+            node={onScreen.layout}
+            workspaceId={onScreen.id}
+            workspaceName={onScreen.name}
+            board={onScreen.board}
+            focusedPaneId={onScreen.focusedPaneId}
+            agents={paneAgents}
+            mascot={remote ? mascotFor(snapshot.mascots, null) : mascot}
             /* For the key hints in a pane's menu — the same merged map the help
                overlay prints, so the two never disagree about where a split is. */
             keymap={keymap}
-            launch={snapshot.launch}
-            runsOn={runsOn(workspace.machine, machines)}
+            launch={remote?.launch ?? snapshot.launch}
+            runsOn={remote ? null : runsOn(workspace.machine, machines)}
             zen={zen}
             /* One pane at a time once there is no room to tile — the same
                number that turns the sidebar into a screen, for the same
@@ -1539,8 +1571,19 @@ export function App() {
             chips={narrow || drawerOpen ? null : chips}
             /* The sidebar's toggle and the workspace's name while the sidebar
                is away, for the top-left pane's strip. See `leadPane`. */
-            lead={!sidebarOpen && !zen && !narrow ? toggle : null}
+            lead={
+              remote ? (
+                <>
+                  {!sidebarOpen && !zen && !narrow && toggle}
+                  <RemoteBand remote={remote} said={remoteSaid} />
+                </>
+              ) : !sidebarOpen && !zen && !narrow ? (
+                toggle
+              ) : null
+            }
+            remote={remote ? { nodeId: remote.node.id, name: remote.node.name } : null}
           />
+          ) : null}
         </main>
         {/* Between the panes and the status bar, which puts it directly above
             the on-screen keyboard — `.app` is already shortened by `--keyboard`,
@@ -1555,7 +1598,7 @@ export function App() {
             sidebar toggle there is nothing here that cannot be reached another
             way, since zen is itself something you left by pressing a key. */}
         {touch && keybarOpen && !zen && (
-          <Keybar agentId={focusedAgentOf(workspace)} keyboard={paneKeyboard} />
+          <Keybar agentId={focusedAgentOf(onScreen)} keyboard={paneKeyboard} />
         )}
       </div>
 
@@ -1671,7 +1714,7 @@ export function App() {
            already in front of you, and a click on it is the jump. Null rather
            than a count on the rest, so the bar can tell "there is nothing to
            jump to" from "there is nothing to jump *from*". */
-        panes={narrow ? panes(workspace.layout).length : null}
+        panes={narrow ? panes((onScreen ?? workspace).layout).length : null}
         onLastPane={() => api.lastPane()}
       />
 

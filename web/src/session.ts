@@ -129,6 +129,12 @@ export interface KururuState {
   outbox: OutboxEntry[];
   /** The channels — Telegram — or null until the server has said. Never a token. See `shared/channels.ts`. */
   channels: ChannelsStatus | null;
+  /**
+   * The last thing the server said about a verb for another node's workspace
+   * that could not go — "omarchy is away", "that stays where it is" — and
+   * when, for the remote band to show for a moment. Null until one has.
+   */
+  remoteSaid: { node: string; text: string; at: number } | null;
 }
 
 const RETRY_MS = [200, 500, 1000, 2000, 4000];
@@ -153,6 +159,7 @@ let state: KururuState = {
   kuruPeers: [],
   outbox: [],
   channels: null,
+  remoteSaid: null,
 };
 
 const listeners = new Set<() => void>();
@@ -392,6 +399,14 @@ function connect(): void {
         }
         break;
       }
+      case "stale":
+        // Another node's terminals whose watch came back, or stopped: what
+        // `onopen` says to every sink, said to these.
+        for (const id of msg.agentIds) for (const sink of sinks.get(id) ?? []) deliver(() => sink.stale());
+        break;
+      case "remote-said":
+        set({ remoteSaid: { node: msg.node, text: msg.text, at: Date.now() } });
+        break;
       case "notify":
         // Everything has already been decided; see `shared/notify.ts`. Wrapped
         // the way output is, for the reason output is: a listener that throws
@@ -746,6 +761,11 @@ export function newWorkspace(name?: string): void {
 
 export function switchWorkspace(workspaceId: string): void {
   send({ type: "switch-workspace", workspaceId });
+}
+
+/** Put another node's workspace on this screen, by the key its summary gives. See `server/src/nodewatch.ts`. */
+export function showNodeWorkspace(nodeId: string, workspaceKey: string): void {
+  send({ type: "show-node-workspace", nodeId, workspaceKey });
 }
 
 export function workspaceByIndex(index: number): void {

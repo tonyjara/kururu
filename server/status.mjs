@@ -242,6 +242,14 @@ if (health.host && !health.host.current) {
   );
 }
 
+// The two ends of `/link/watch`: the parent's window showing a child's
+// workspace, and a child with the parent's hands on its terminals. Only while
+// one is open — most of the time neither is, and that is not worth a line.
+for (const each of health.watch?.of ?? []) {
+  row("watching", each.state === "up" ? up(each.node) : down(each.node), `${each.state}${each.onScreen ? " · on screen" : ""}`);
+}
+if (health.watch?.by?.length) row("watched by", health.watch.by.join(", "), "its window can type into this node's terminals");
+
 const listed = await ask("/api/agents");
 const agents = listed?.agents ?? [];
 const live = agents.filter((agent) => !agent.exited);

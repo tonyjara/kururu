@@ -77,6 +77,8 @@ import { Icon } from "./Icon";
 import { MadeLinks } from "./MadeLinks";
 import { NameField } from "./NameField";
 import { Mascot, Status } from "./Status";
+import { hueStyle } from "./NodeChip";
+import { qualify } from "../../../shared/remote";
 
 /**
  * How far the pointer may travel between `dragstart` and `dragend` for the
@@ -166,6 +168,12 @@ interface Props {
    */
   needsYou: ReadonlySet<string>;
   /**
+   * Another node's workspace, while it is the one on screen: its row under
+   * the node's heading is the lit one, and no local row is, since the
+   * window is not showing any of them.
+   */
+  remoteOn: { nodeId: string; workspaceKey: string } | null;
+  /**
    * Whether this is a column beside the panes or a screen in front of them.
    *
    * The second is what a narrow window gets, and it changes two things about how
@@ -199,6 +207,7 @@ export function Sidebar({
   onPrompt,
   onBoard,
   needsYou,
+  remoteOn,
   toggle,
   onSettings,
   onReach,
@@ -600,7 +609,9 @@ export function Sidebar({
   const show = (agentId: string) => {
     const at = where.get(agentId);
     if (!at) return;
-    if (at.workspaceId !== profile.activeWorkspaceId) api.switchWorkspace(at.workspaceId);
+    // With another node's workspace on screen, the active local one is not
+    // showing either, and the switch is what puts it back.
+    if (at.workspaceId !== profile.activeWorkspaceId || remoteOn) api.switchWorkspace(at.workspaceId);
     api.focusPane(at.paneId);
     api.selectTab(at.paneId, at.index);
     navigated();
@@ -1036,7 +1047,7 @@ export function Sidebar({
             {opens && groupHead(group)}
             {!tucked && (
             <li
-              className={`ws-item ${workspace.id === profile.activeWorkspaceId ? "ws-item-on" : ""} ${
+              className={`ws-item ${workspace.id === profile.activeWorkspaceId && !remoteOn ? "ws-item-on" : ""} ${
                 overWorkspace === workspace.id ? "ws-over" : ""
               } ${group !== null ? "ws-item-grouped" : ""}`}
               /* The whole row, both lines of it, and not the name's button.
@@ -1118,7 +1129,7 @@ export function Sidebar({
               ) : (
                 <>
                   <button
-                    className={`ws-row ${workspace.id === profile.activeWorkspaceId ? "ws-row-on" : ""}`}
+                    className={`ws-row ${workspace.id === profile.activeWorkspaceId && !remoteOn ? "ws-row-on" : ""}`}
                     onDoubleClick={() => setRenaming(workspace.id)}
                     title={index < 9 ? `C-a ${index + 1} \u00b7 double-click to rename` : "Double-click to rename"}
                     draggable
@@ -1337,7 +1348,7 @@ export function Sidebar({
           and the OpenRouter balance were sections here too and are the
           bottom bar's since 2026-10-18 (`Usage.tsx`, `Machines.tsx`,
           `OpenRouter.tsx`). */}
-      <Nodes mascots={mascots} />
+      <Nodes mascots={mascots} remoteOn={remoteOn} onNavigated={navigated} />
       <DevServers />
 
       {/* The foot: Settings and the phone's QR code, at the bottom left. They
@@ -1666,18 +1677,34 @@ function pinnedTo(workspace: Workspace, machines: MachineStatus[]): ReactNode {
  * a child — each under a heading of its name, drawn from the summary it last
  * pushed over its link (`shared/nodes.ts`).
  *
- * Read-only, and every row a link: the agents here are another server's, so
- * nothing on this side can type into them, and going to the node is how
- * anything there is done. A node that is away keeps its last summary,
- * greyed, with since when — which, on a child with the Mac's lid shut, is the
- * answer to "is the Mac there".
+ * A node that can be watched (`NodeSummary.watchable`) has rows like this
+ * node's own: a workspace's row puts that workspace on this screen, its
+ * agents' rows under it go to their terminals there, and nothing is a link
+ * out to the node's own page any more — the window draws the node's panes
+ * itself, relayed through this server (`server/src/nodewatch.ts`). The
+ * heading still is, since the node's own page is where its Settings are.
+ * A node from before remote workspaces keeps the old rows, each a link to
+ * its page, with a tooltip saying what updating it would give.
  *
- * A workspace is a row with its agents' marks, and the dot when something in
- * it needs you, which is the node's own `needsOf` band, not a rule redone
- * here. An agent's mark is the default mascot's: which mascot a workspace
- * wears there is that node's, and not worth a field on the wire.
+ * A node that is away keeps its last summary, greyed, with since when —
+ * which, on a child with the Mac's lid shut, is the answer to "is the Mac
+ * there" — and its rows still go: the panes come up greyed with the last
+ * screens this window holds of them, or say it cannot be reached.
+ *
+ * A workspace is a row with the dot when something in it needs you, which
+ * is the node's own `needsOf` band, not a rule redone here. An agent's mark
+ * is the default mascot's: which mascot a workspace wears there is that
+ * node's, and not worth a field on the wire.
  */
-function Nodes({ mascots }: { mascots: MascotSet }) {
+function Nodes({
+  mascots,
+  remoteOn,
+  onNavigated,
+}: {
+  mascots: MascotSet;
+  remoteOn: { nodeId: string; workspaceKey: string } | null;
+  onNavigated: () => void;
+}) {
   const { nodes } = useKururu();
   const [open, toggle] = useDisclosure("kururu.sidebar.nodes", true);
   if (!nodes || nodes.nodes.length === 0) return null;
@@ -1696,7 +1723,13 @@ function Nodes({ mascots }: { mascots: MascotSet }) {
       {open && (
         <ul className="node-list">
           {nodes.nodes.map((node) => (
-            <NodeBlock key={node.id} node={node} mascot={mascotFor(mascots, null)} />
+            <NodeBlock
+              key={node.id}
+              node={node}
+              mascot={mascotFor(mascots, null)}
+              on={remoteOn?.nodeId === node.id ? remoteOn.workspaceKey : null}
+              onNavigated={onNavigated}
+            />
           ))}
         </ul>
       )}
@@ -1704,34 +1737,89 @@ function Nodes({ mascots }: { mascots: MascotSet }) {
   );
 }
 
-function NodeBlock({ node, mascot }: { node: NodeStatus; mascot: ReturnType<typeof mascotFor> }) {
+function NodeBlock({
+  node,
+  mascot,
+  on,
+  onNavigated,
+}: {
+  node: NodeStatus;
+  mascot: ReturnType<typeof mascotFor>;
+  /** The key of this node's workspace that is on screen, or null. */
+  on: string | null;
+  onNavigated: () => void;
+}) {
   const up = node.state === "up";
   const summary = node.summary;
-  const go = `Open ${node.name}'s kururu`;
+  const watchable = !!summary?.watchable;
+  const go = watchable ? `${node.name}'s own page, for its Settings` : `Open ${node.name}'s kururu`;
+  const old = `Update ${node.name} (kururu child update) to open its workspaces in this window.`;
   return (
-    <li className={`node-item ${up ? "" : "node-stale"}`}>
+    <li className={`node-item ${up ? "" : "node-stale"}`} style={hueStyle(node.id)}>
       <a className="node-head" href={node.url} target="_blank" rel="noreferrer noopener" title={[go, node.error && !up ? node.error : null].filter(Boolean).join("\n")}>
+        <span className="node-chip-dot" aria-hidden="true" />
         <span className="node-name">{node.name}</span>
         {!up && <span className="node-state">{nodeState(node)}</span>}
         {up && summary && summary.needs.count > 0 && <span className="unread" aria-label="needs you" />}
       </a>
       {summary ? (
         <ul className="node-workspaces">
-          {summary.workspaces.map((w) => (
-            <li key={w.key}>
-              <a className="node-ws" href={node.url} target="_blank" rel="noreferrer noopener" title={[w.name, w.folder].filter(Boolean).join("\n")}>
-                <span className="node-ws-name">{w.name}</span>
-                <span className="node-marks">
-                  {w.agents.map((agent) => (
-                    <span key={agent.id} className="node-mark" title={[agentLabel(asAgent(agent)), agentSummary(asAgent(agent))].filter(Boolean).join(" · ")}>
-                      <Status agent={asAgent(agent)} mascot={mascot} />
-                    </span>
-                  ))}
-                </span>
-                {w.band === "needs" && <span className="unread" aria-label="needs you" />}
-              </a>
-            </li>
-          ))}
+          {summary.workspaces.map((w) =>
+            watchable ? (
+              <li key={w.key}>
+                <button
+                  className={`node-ws ${on === w.key ? "node-ws-on" : ""}`}
+                  onClick={() => {
+                    api.showNodeWorkspace(node.id, w.key);
+                    onNavigated();
+                  }}
+                  title={[`${w.name}, on ${node.name}`, w.folder].filter(Boolean).join("\n")}
+                >
+                  <span className="node-ws-name">{w.name}</span>
+                  {w.band === "needs" && <span className="unread" aria-label="needs you" />}
+                </button>
+                {/* Its agents, as this node's own list has them: agents and
+                    not shells, which the workspace's row is the way to. */}
+                {w.agents.some(listedAgent) && (
+                  <ul className="node-agents">
+                    {w.agents.filter(listedAgent).map((agent) => {
+                      const shaped = asAgent(agent);
+                      return (
+                        <li key={agent.id}>
+                          <button
+                            className="node-agent"
+                            onClick={() => {
+                              api.revealAgent(qualify(node.id, agent.id));
+                              onNavigated();
+                            }}
+                            title={[`${agentLabel(shaped)} on ${node.name}`, agentSummary(shaped)].filter(Boolean).join(" · ")}
+                          >
+                            <Status agent={shaped} mascot={mascot} />
+                            <span className="node-agent-name">{agentLabel(shaped)}</span>
+                            {agent.unread && <span className="unread" aria-label="waiting for you" />}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </li>
+            ) : (
+              <li key={w.key}>
+                <a className="node-ws" href={node.url} target="_blank" rel="noreferrer noopener" title={[w.name, w.folder, old].filter(Boolean).join("\n")}>
+                  <span className="node-ws-name">{w.name}</span>
+                  <span className="node-marks">
+                    {w.agents.map((agent) => (
+                      <span key={agent.id} className="node-mark" title={[agentLabel(asAgent(agent)), agentSummary(asAgent(agent))].filter(Boolean).join(" · ")}>
+                        <Status agent={asAgent(agent)} mascot={mascot} />
+                      </span>
+                    ))}
+                  </span>
+                  {w.band === "needs" && <span className="unread" aria-label="needs you" />}
+                </a>
+              </li>
+            ),
+          )}
           {summary.workspaces.length === 0 && <li className="node-empty">No workspaces.</li>}
         </ul>
       ) : (
@@ -1740,6 +1828,11 @@ function NodeBlock({ node, mascot }: { node: NodeStatus; mascot: ReturnType<type
     </li>
   );
 }
+/** The rule this node's own Agents list draws by: a terminal that has had an agent in it. */
+function listedAgent(agent: { agent: string | null; lastAgent?: string | null }): boolean {
+  return Boolean(agent.agent || agent.lastAgent);
+}
+
 /** How long a dev server's stop button keeps asking before it lets the question go. */
 const STOP_ASK_MS = 4000;
 

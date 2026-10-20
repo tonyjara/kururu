@@ -591,10 +591,20 @@ export interface NodeSummary {
    * rather than sent into silence.
    */
   talks?: number;
+  /**
+   * Whether this node lets its parent watch it — `/link/watch`, a client of
+   * its own `/ws` let in by the node handshake — at this version
+   * (`WATCHABLE`). Absent from a kururu from before remote workspaces, whose
+   * rows the parent goes on drawing as links to it, with "update it to open
+   * it here" in their tooltip. See `docs/plans/remote-workspaces.md`.
+   */
+  watchable?: number;
 }
 
 /** The version of `say`, `kuru-turns`, `kuru-replied` and the board verbs. See `NodeSummary.talks`. */
 export const PEER_TALK = 1;
+/** The version of the watch socket a node answers. See `NodeSummary.watchable`. */
+export const WATCHABLE = 1;
 
 export const SUMMARY_WORKSPACES_MAX = 60;
 export const SUMMARY_AGENTS_MAX = 40;
@@ -677,6 +687,7 @@ export function summarize(input: SummaryInput): NodeSummary {
     sees: [...input.sees],
     dataMark: input.dataMark,
     talks: PEER_TALK,
+    watchable: WATCHABLE,
     ...(input.lead ? { lead: { ...input.lead } } : {}),
   };
 }
@@ -745,6 +756,14 @@ export interface NodesView {
    * on the Mac is "turn on sharing".
    */
   reachable: string | null;
+  /**
+   * The nodes whose windows have hands on this one's terminals now — a
+   * parent watching it (`/link/watch`) — by name. The page says so in its
+   * status bar, so the person at the box's own phone can see that the Mac's
+   * window is driving these terminals too. Empty on a node nobody watches,
+   * and absent from a server from before.
+   */
+  watchedBy?: string[];
 }
 
 /**
@@ -1070,6 +1089,22 @@ export class LinkHandshake {
     }
     return this.refuse(`${message.type} before the link was up`);
   }
+}
+
+/**
+ * Whether a member that has just proved itself on `/link/watch` may watch
+ * this node: null when it may, else why not. A watch is a client with hands
+ * on every pty here, so the parent watches its children and nobody else
+ * watches anyone — not a sibling, and nothing the parent. A child's
+ * compromise is accepted in the parent-child plan as words into its peers'
+ * Kurus, marked as its own; a shell on another node is a different order of
+ * thing. A later roster field could widen it; nothing needs it yet.
+ */
+export function watchRefusal(roster: Roster | null, self: string, peer: string): string | null {
+  if (!roster || !memberOf(roster, self)) return "this node is in no roster";
+  if (roster.parent === self) return "nothing watches the parent";
+  if (peer !== roster.parent) return "only the parent may watch this node";
+  return null;
 }
 
 /** Backoff for a dial that failed, forever, as `session.ts` does: a server restart is every save under `bun run dev`. */

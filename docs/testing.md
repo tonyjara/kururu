@@ -107,6 +107,15 @@ left in the Dock is how a force quit reached a coalition on 2026-10-10.
 
 Kept short on purpose; the detail is in git history.
 
+- **Remote workspaces, phase 1** (2026-10-20), between two throwaway nodes
+  on this Mac paired by the join command: a child's `cat` shown, typed into
+  and resized through the parent's relay, a split made from the parent
+  arriving on the child's own client, the child's server stopped and
+  started with its panes greying and refilling without a reload, and the
+  same in a real page in headless Chrome. Recipe in
+  [nodes](nodes.md#testing-two-nodes-on-one-mac); record in
+  [the plan](plans/remote-workspaces.md#phase-1--a-remote-workspace-on-screen-46-days).
+  Not yet on the two real machines.
 - **The web chain and the self-hosted Firecrawl** (2026-10-15). The chain
   and the real providers run from a scratch copy against our Firecrawl
   over the tailnet, with a throwaway config directory: health and

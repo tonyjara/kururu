@@ -25,6 +25,7 @@
  * profile here is a namespace, not a process. The visible behaviour is the same
  * — and the agents in the profile you are not looking at are still running.
  */
+import type { RemoteView } from "./remote";
 import type { KeyOverrides } from "./keys";
 import type { LayoutNode } from "./layout";
 import type { Board } from "./board";
@@ -1048,6 +1049,15 @@ export interface SessionSnapshot {
    * opposite on all three counts and is a fetch.
    */
   styles: StyleLibrary;
+  /**
+   * Another node's workspace, while one is on this screen instead of a local
+   * one — its tree and agents with every id qualified (`shared/remote.ts`).
+   * Beside `profile` rather than in it, because nothing of another machine's
+   * may ever reach the Mac's own arrangement, which is the thing written to
+   * disk. Absent from a server from before remote workspaces, and null while
+   * the window shows a local workspace.
+   */
+  remote?: RemoteView | null;
 }
 
 /** What an agent (or a Claude Code hook) may tell kururu about itself. */
