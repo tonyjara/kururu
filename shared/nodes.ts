@@ -34,6 +34,7 @@ import type { AgentSnapshot, Profile } from "./model";
 import type { OutboxState } from "./voice";
 import { needsOf, type Band, type NeedKind } from "./needs";
 import { panes, terminalsOf } from "./layout";
+import { qualify } from "./remote";
 import type { MoveCheck, MoveCheckAsk, MoveDone, MoveOffer, NewWorkspaceAsk, NewWorkspaceMade } from "./move";
 import type { Launcher } from "./launchers";
 import type { SealedSecret } from "./secrets";
@@ -1159,16 +1160,35 @@ function clock(at: number): string {
 }
 
 /**
+ * Another node's agent, named for Kuru as `agentName` names one here: with
+ * its node, and with its qualified id when the node can be read through the
+ * link — an old node cannot, and no tool here takes its agents' ids.
+ */
+export function summaryAgentName(agent: SummaryAgent, workspace: string, node: Pick<NodeStatus, "id" | "name">, readable: boolean): string {
+  return agentName({
+    id: readable ? qualify(node.id, agent.id) : null,
+    name: agent.titleOverride || null,
+    doing: agent.title || null,
+    program: agent.agent ?? agent.lastAgent ?? (agent.kind === "shell" ? "shell" : "agent"),
+    workspace,
+    card: agent.card ? { code: cardCode(workspace, agent.card.number), title: agent.card.title } : null,
+    node: node.name,
+  });
+}
+
+/**
  * The other nodes, as `kururu_status` lists them to Kuru: each one's state,
  * its workspaces and its agents, from the last summary it pushed. Read
  * anywhere, act locally — the lines say the agents are another Kuru's to
  * drive, so a Kuru that sees a blocked agent on Omarchy asks that Kuru or
  * tells the user rather than reaching for a tool that cannot touch it. Each
- * agent is named the way `agentName` names one here, with its node and
- * without an id, since no tool on this node takes it.
+ * agent is named the way `agentName` names one here, with its node, and
+ * with its id qualified (`shared/remote.ts`): `read_agent` takes it, and
+ * every tool that acts refuses it by its prefix, where a bare `a7` could be
+ * this node's own `a7` and act on the wrong agent.
  */
 export function nodesText(nodes: readonly NodeStatus[]): string[] {
-  const out: string[] = ["", "nodes (other kururus; read anything here, but their agents are driven by that node's Kuru — ask_kuru asks it, and read_kuru reads what it said):"];
+  const out: string[] = ["", "nodes (other kururus; read anything here — read_agent reads one of their agents' screens by its n: id — but their agents are driven by that node's Kuru: ask_kuru asks it, and read_kuru reads what it said):"];
   if (!nodes.length) {
     out.push("  (none — this kururu is not paired with another; Settings → Nodes)");
     return out;
@@ -1186,15 +1206,7 @@ export function nodesText(nodes: readonly NodeStatus[]): string[] {
       for (const agent of workspace.agents) {
         const doing = agent.activity || agent.title;
         const ctx = agent.contextUsage ? ` · context ${Math.round((agent.contextUsage.used / agent.contextUsage.window) * 100)}%` : "";
-        const name = agentName({
-          id: null,
-          name: agent.titleOverride || null,
-          doing: agent.title || null,
-          program: agent.agent ?? agent.lastAgent ?? (agent.kind === "shell" ? "shell" : "agent"),
-          workspace: workspace.name,
-          card: agent.card ? { code: cardCode(workspace.name, agent.card.number), title: agent.card.title } : null,
-          node: node.name,
-        });
+        const name = summaryAgentName(agent, workspace.name, node, (node.summary?.watchable ?? 0) >= 1);
         out.push(`      - ${name} · ${agent.exited ? "exited" : agent.status}${ctx}${doing ? ` · ${doing}` : ""}`);
       }
       for (const need of workspace.needs) out.push(`      ! ${need.kind}: ${need.title}`);

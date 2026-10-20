@@ -192,7 +192,11 @@ memory in its own harness folder. The rule is **read anywhere, act locally,
 ask a peer**, and the user is the manager of colleagues, not of a chain:
 
 - **Read anywhere.** `kururu_status` lists every node's workspaces and agents
-  from the summaries, so "what is running on omarchy" needs nobody.
+  from the summaries, so "what is running on omarchy" needs nobody. Each
+  agent there carries its qualified id (`n:<node>:a7`), and `read_agent`
+  takes it and reads that agent's screen through the watch; every tool
+  that acts refuses it by its prefix, which a bare `a7` could not do, since
+  it might be this node's own `a7`. See [remote workspaces](#remote-workspaces).
 - **Act locally.** Every agent tool acts on this node's agents only, and a
   Kuru is told only about its own node's agents finishing or blocking. The
   `[kururu]` notices about a node's agents go to that node's Kuru and to
@@ -1012,10 +1016,41 @@ Either may be asked by any member of the roster, as a move or a peer Kuru's
 `move_card` may. The node's own rule decides, and nothing on the asking side
 is written.
 
+**What needs you there** (phase 3). The Needs drawer's band for a node
+this window can open is doors, not links: an agent's row is a `reveal-agent`
+with its qualified id, which puts the node's workspace on screen with that
+pane in front; a card with no terminal opens the node's board here with the
+card lit, once the workspace's snapshot says its qualified id; the
+workspace's head is `show-node-workspace`. A card's Done is phase 4's,
+above, and there is no row menu: every other move to Done is a question the
+node's board asks. `C-a o` walks this node's needs and then each node's
+(`nextNeedAcross` in `shared/remote.ts`), and steps on from the one under
+the keyboard, which on a remote pane is its qualified id. A node from
+before keeps its rows as links to its page. A reveal asked while the watch
+is still opening, which is the usual case for a click from the drawer or a
+notification, is kept (`NodeWatch.pending`) and sent to the child with its
+first snapshot, so the child's focus moves to the terminal and not only
+the window to the workspace.
+
+**Notifications** for a node's agent are this node's, by this node's gate:
+see [notifications](notifications.md#rules). Off the relayed snapshot while
+a watch is up, off the node's summary while none is, one source at a time.
+
+**What Kuru is told.** `kururu_status` says when another node's workspace
+is on the user's screen — whose, which, and the agent with the keyboard
+there, by its qualified id — so "what is this one doing" is heard as a
+question about that node's agent. `read_agent` with a qualified id reads
+that agent's screen: the watch is opened if it is not (and let go a minute
+after, as ever), the backlog is asked as a client here asks for one, listed
+as kept while it is out, and answered to this server instead of a page
+(`NodeWatches.screen`). The answer says it was read through the link.
+`source=reply` and `transcript` are refused, since both are on the node's
+disk and in its Kuru's hearing; every acting tool refuses a qualified id
+with "ask_kuru omarchy". Nothing in this goes near the node's `/mcp`.
+
 Not yet (later phases of the plan): the file tree, the reader and nvim's
-hand-offs on a remote workspace; the Needs drawer's node rows as doors here,
-and notifications for a remote agent; Kuru reading a remote agent; `C-a w`
-and workspace stepping across nodes.
+hand-offs on a remote workspace; `C-a w` and workspace stepping across
+nodes.
 
 | message | way | what |
 |---|---|---|

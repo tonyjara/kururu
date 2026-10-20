@@ -41,6 +41,8 @@ import { mascotFor, type AgentSnapshot, type MascotSet } from "../../../shared/m
 import { useCardDone } from "../cardDone";
 import { agentLabel, agentSummary } from "../labels";
 import { asAgent } from "../nodes";
+import { nodeNeeds, type NodeNeed } from "../../../shared/remote";
+import { hueStyle } from "./NodeChip";
 import * as api from "../session";
 import { ago } from "./Board";
 import { Dialog } from "./Dialog";
@@ -74,6 +76,7 @@ export function NeedsDrawer({
   onResize,
   onResetWidth,
   onGo,
+  onGoNode,
   onNext,
   onWorkspace,
   onBoard,
@@ -83,7 +86,7 @@ export function NeedsDrawer({
   /**
    * The other nodes, each with the summary it last pushed. A linked one with
    * something waiting gets a band of its own under this node's queue, each
-   * row a link to that node — going there is how anything there is done.
+   * row a door to the thing in this window — see `NodeBand`.
    */
   nodes: NodeStatus[];
   mascots: MascotSet;
@@ -97,6 +100,8 @@ export function NeedsDrawer({
   onResetWidth: () => void;
   /** Take me to this need: its terminal, or its board. */
   onGo: (need: Need) => void;
+  /** The same for another node's need, in this window. */
+  onGoNode: (need: NodeNeed) => void;
   /** The next thing that needs you, from wherever the keyboard is. */
   onNext: () => void;
   /** Go to a workspace, from its name. */
@@ -183,7 +188,7 @@ export function NeedsDrawer({
           className="kuru-head-btn"
           onClick={onNext}
           onMouseDown={(event) => event.preventDefault()}
-          disabled={needs.count === 0}
+          disabled={needs.count === 0 && nodeNeeds(nodes).length === 0}
           title="Go to the next thing that needs you (C-a o)"
         >
           Next
@@ -238,7 +243,16 @@ export function NeedsDrawer({
         ))}
 
         {elsewhere.map((node) => (
-          <NodeBand key={node.id} node={node} mascot={mascotFor(mascots, null)} />
+          <NodeBand
+            key={node.id}
+            node={node}
+            mascot={mascotFor(mascots, null)}
+            onGo={onGoNode}
+            onWorkspace={(nodeId, workspaceKey) => {
+              api.showNodeWorkspace(nodeId, workspaceKey);
+              if (sheet) onClose();
+            }}
+          />
         ))}
 
         {working.length > 0 && (
@@ -511,20 +525,37 @@ function why(need: Need): string {
 const SAID_MS = 8000;
 
 /**
- * Another node's queue, under its name: its workspaces that need you, each a
- * block like this node's own, and every row a link to the node. The row says
- * why it is there in the words `why` uses for the same kinds.
+ * Another node's queue, under its name in its hue: its workspaces that need
+ * you, each a block like this node's own. For a node this window can open
+ * (`NodeSummary.watchable`), every row is a door into *this* window, as a
+ * local row is: an agent's goes to its terminal — `reveal-agent` with the
+ * qualified id, which puts the node's workspace on screen and its pane in
+ * front — a card with no terminal to the card on the node's board here, and
+ * the workspace's head to the workspace. A node from before keeps rows that
+ * link to its own page, saying what updating it would give. Either way the
+ * row says why it is there in the words `why` uses for the same kinds.
  *
  * A card's row carries **Done** where the node said the move is a plain one
  * (`SummaryNeed.plainDone`), and only that: the press asks the node, which
  * asks its own rule again and moves the card or says why not — a worktree
  * grown or a terminal opened since its summary — and the sentence takes the
  * row's second line for a few seconds. Every other move to Done is a
- * question its board asks, there.
+ * question its board asks, there, and there is no row menu for it here.
  */
-function NodeBand({ node, mascot }: { node: NodeStatus; mascot: ReturnType<typeof mascotFor> }) {
+function NodeBand({
+  node,
+  mascot,
+  onGo,
+  onWorkspace,
+}: {
+  node: NodeStatus;
+  mascot: ReturnType<typeof mascotFor>;
+  onGo: (need: NodeNeed) => void;
+  onWorkspace: (nodeId: string, workspaceKey: string) => void;
+}) {
   const summary = node.summary!;
-  const go = `Open ${node.name}'s kururu`;
+  const here = !!summary.watchable;
+  const old = `Open ${node.name}'s kururu. Update it (kururu child update) to open its workspaces in this window.`;
   /** The node's answer to a Done, by card, while it is the latest word on that row. */
   const [said, setSaid] = useState<{ cardId: string; text: string } | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
@@ -546,29 +577,64 @@ function NodeBand({ node, mascot }: { node: NodeStatus; mascot: ReturnType<typeo
   };
   return (
     <>
-      <li className="needs-band">{node.name}</li>
+      <li className="needs-band" style={hueStyle(node.id)}>
+        <span className="node-chip-dot" aria-hidden="true" />
+        {node.name}
+      </li>
       {summary.workspaces
         .filter((w) => w.band === "needs")
         .map((w) => {
           const agents = new Map<string, SummaryAgent>(w.agents.map((agent) => [agent.id, agent]));
+          const head = (
+            <>
+              <span className="needs-ws-name">{w.name}</span>
+              <span className="needs-ws-n">{w.needs.length}</span>
+            </>
+          );
           return (
             <li key={w.key} className="needs-ws">
-              <a className="needs-ws-head" href={node.url} target="_blank" rel="noreferrer noopener" title={go}>
-                <span className="needs-ws-name">{w.name}</span>
-                <span className="needs-ws-n">{w.needs.length}</span>
-              </a>
+              {here ? (
+                <button
+                  className="needs-ws-head"
+                  onClick={() => onWorkspace(node.id, w.key)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  title={`Go to ${w.name}, on ${node.name}`}
+                >
+                  {head}
+                </button>
+              ) : (
+                <a className="needs-ws-head" href={node.url} target="_blank" rel="noreferrer noopener" title={old}>
+                  {head}
+                </a>
+              )}
               <ul className="needs-rows">
                 {w.needs.map((need) => {
                   const agent = need.agentId ? agents.get(need.agentId) : undefined;
+                  const what = (
+                    <>
+                      {agent ? <Status agent={asAgent(agent)} mascot={mascot} /> : <span className="needs-mark" aria-hidden="true" />}
+                      <span className="needs-what">
+                        <span className="needs-title">{need.title}</span>
+                        <span className="needs-why">{said && said.cardId === need.cardId ? said.text : nodeWhy(need, agent)}</span>
+                      </span>
+                    </>
+                  );
                   return (
                     <li key={need.cardId ? `c${need.cardId}` : `a${need.agentId ?? need.title}`} className={`needs-row needs-row-${need.kind}`}>
-                      <a className="needs-go" href={node.url} target="_blank" rel="noreferrer noopener" title={go}>
-                        {agent ? <Status agent={asAgent(agent)} mascot={mascot} /> : <span className="needs-mark" aria-hidden="true" />}
-                        <span className="needs-what">
-                          <span className="needs-title">{need.title}</span>
-                          <span className="needs-why">{said && said.cardId === need.cardId ? said.text : nodeWhy(need, agent)}</span>
-                        </span>
-                      </a>
+                      {here ? (
+                        <button
+                          className="needs-go"
+                          onClick={() => onGo({ node: node.id, workspaceKey: w.key, need })}
+                          onMouseDown={(event) => event.preventDefault()}
+                          title={need.agentId ? `Go to its terminal, on ${node.name}` : `This card, on its board on ${node.name}`}
+                        >
+                          {what}
+                        </button>
+                      ) : (
+                        <a className="needs-go" href={node.url} target="_blank" rel="noreferrer noopener" title={old}>
+                          {what}
+                        </a>
+                      )}
                       {need.cardId && need.plainDone && node.state === "up" && (
                         <button
                           className="kuru-head-btn needs-done"

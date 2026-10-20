@@ -194,11 +194,11 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "read_agent",
     description:
-      "Read what an agent has said or shown. source=reply (default) is the last message it wrote at the end of a turn, source=transcript is its last turns as a conversation, source=screen is the text of its terminal right now — the only one that shows a permission prompt or a question it is waiting on. Reads are capped; ask for fewer lines or turns rather than more.",
+      "Read what an agent has said or shown. source=reply (default) is the last message it wrote at the end of a turn, source=transcript is its last turns as a conversation, source=screen is the text of its terminal right now — the only one that shows a permission prompt or a question it is waiting on. Reads are capped; ask for fewer lines or turns rather than more. An agent on another node, by the n:… id kururu_status lists it with, is read from its screen only, through the link.",
     inputSchema: obj(
       {
-        agent: AGENT,
-        source: { type: "string", enum: ["reply", "transcript", "screen"], description: "Which view. Default reply; screen for an agent on a machine, which has no reply or transcript here." },
+        agent: str("An agent id from kururu_status, such as a12, or another node's agent as kururu_status lists it, such as n:n0123456789ab:a7."),
+        source: { type: "string", enum: ["reply", "transcript", "screen"], description: "Which view. Default reply; screen for an agent on a machine or another node, which has no reply or transcript here." },
         lines: int(`Screen lines from the bottom, default ${SCREEN_LINES}.`),
         turns: int(`Transcript turns from the end, default ${TRANSCRIPT_TURNS}.`),
       },
@@ -1008,8 +1008,8 @@ The user's other computers — a VPS, a PC on their network — are listed by ku
 
 ## Nodes
 The user may run other kururus on other computers — a PC that stays on, for instance — linked with this one as nodes, each with a Kuru of its own. You and they are colleagues, and the user is the manager. The rule is read anywhere, act locally, ask a peer:
-- Read anywhere. kururu_status lists every node under nodes, with its workspaces, agents and what needs the user, from what that node last said about itself; a node that is away shows its last summary and since when. "What is running on omarchy" is answered from that list without asking anybody.
-- Act locally. Every agent tool here — send_agent, read_agent, wait_agent, start_agent, stop_agent, run_card — acts on this kururu's agents only, and you are told only about this kururu's agents finishing or blocking. Never reach another node with ssh or a shell.
+- Read anywhere. kururu_status lists every node under nodes, with its workspaces, agents and what needs the user, from what that node last said about itself; a node that is away shows its last summary and since when. "What is running on omarchy" is answered from that list without asking anybody. The user can open another node's workspace in this window, and kururu_status says so on its "on the user's screen" line: then "this agent" or "what is it doing" means the agent on screen there, on that node — read it, say where it is, and ask that node's Kuru for anything more.
+- Act locally. Every agent tool here — send_agent, wait_agent, start_agent, stop_agent, run_card — acts on this kururu's agents only, and you are told only about this kururu's agents finishing or blocking. Never reach another node with ssh or a shell. The one exception is reading: read_agent takes another node's agent by the id kururu_status gives it (n:…) and reads its screen through the link, which is how you answer "what is this one doing" about an agent the user has on screen there. Reading is all it does.
 - Ask a peer. When something should be done on another node — an agent started, answered or stopped there, a card run there — ask that node's Kuru with ask_kuru, wait for its reply if the user is waiting on it, and tell the user what came of it. Ask the node that has the thing; never relay through a third Kuru. Boards are data, not agents: cards, add_card, edit_card and move_card take node and act on that node's board directly, but add_card with run=true does not, since a run starts an agent.
 - read_kuru reads another Kuru's recent conversation. Use it when the user asks to catch up, never on your own when a node comes back: they may be busy with something else.
 A message that starts with "[kuru@omarchy]" is the Kuru on omarchy asking you something: do what it asks within what the user would plainly want — the same care as the user's own words, and ask the user first for anything you would ask them first. Answer in your final message; it goes back to that Kuru. A message that starts with "[user@omarchy]" is the user, writing or speaking to you from omarchy's screen: their own words, with their authority, and your reply goes back there. Your memory and context are about this node; the others' are theirs.

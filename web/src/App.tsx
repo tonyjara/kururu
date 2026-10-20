@@ -65,7 +65,8 @@ import { KuruDrawer } from "./components/KuruDrawer";
 import { closeKuru, kuruLive, openKuru, toggleKuru, useKuruDrawer } from "./kuru";
 import { closeNeeds, toggleNeeds, useNeedsDrawer } from "./needs";
 import { NeedsDrawer } from "./components/NeedsDrawer";
-import { needsOf, nextNeed, type Need } from "../../shared/needs";
+import { needsOf, type Need } from "../../shared/needs";
+import { nextNeedAcross, nodeNeeds as nodeNeedsOf, qualify, type NodeNeed } from "../../shared/remote";
 import { nodesNeedCount } from "../../shared/nodes";
 import { visibleLaunchers } from "../../shared/launchers";
 import { showCardNext } from "./components/Board";
@@ -134,6 +135,9 @@ const FILES_WIDTH_KEY = "kururu.files.width";
  * workspace and has nothing to say about any particular one.
  */
 const FILES_OPEN_KEY = "kururu.files.open-in";
+
+/** How long a card of another node's waits for its workspace to be drawn here before it is let go — see `remoteCard`. */
+const REMOTE_CARD_MS = 15_000;
 
 /**
  * Kuru's drawer and the needs drawer's width — shared, because the two are one
@@ -471,17 +475,53 @@ export function App() {
     },
     [narrow],
   );
-  /** The next thing that needs you, from where the keyboard is — `nextNeed`'s walk. */
+  /**
+   * A card of another node's to light on its board once that workspace is
+   * drawn here, with the time it was asked for. A card with no terminal has
+   * its board for a door, and the board's workspace id is the node's own,
+   * qualified, which only its snapshot says — so the card waits for it, and
+   * for a few seconds only, so a slow watch never opens a board long after
+   * the user went elsewhere.
+   */
+  const [remoteCard, setRemoteCard] = useState<{ node: string; workspaceKey: string; cardId: string; at: number } | null>(null);
+  useEffect(() => {
+    if (!remoteCard) return;
+    if (Date.now() - remoteCard.at > REMOTE_CARD_MS) return setRemoteCard(null);
+    if (!remote?.workspace || remote.node.id !== remoteCard.node || remote.workspaceKey !== remoteCard.workspaceKey) return;
+    showCardNext(remote.workspace.id, remoteCard.cardId);
+    api.openBoard(undefined, false, remote.workspace.id);
+    setRemoteCard(null);
+  }, [remoteCard, remote]);
+  /**
+   * Another node's need, in this window: its terminal by the qualified id,
+   * which puts the node's workspace on screen with that pane in front, or
+   * for a card with none, the workspace and then the card on its board.
+   */
+  const goToNodeNeed = useCallback(
+    ({ node, workspaceKey, need }: NodeNeed) => {
+      if (need.agentId) api.revealAgent(qualify(node, need.agentId));
+      else {
+        api.showNodeWorkspace(node, workspaceKey);
+        if (need.cardId) setRemoteCard({ node, workspaceKey, cardId: need.cardId, at: Date.now() });
+      }
+      if (narrow) closeNeeds();
+    },
+    [narrow],
+  );
+  /** The next thing that needs you, here or on a node, from where the keyboard is — `nextNeedAcross`'s walk. */
   const goNext = useCallback(() => {
-    if (!needs || !workspace) return;
-    const pane = panes(workspace.layout).find((p) => p.id === workspace.focusedPaneId);
-    const next = nextNeed(needs, {
-      focusedAgentId: focusedAgentOf(workspace),
-      workspaceId: workspace.id,
+    if (!needs) return;
+    const pane = onScreen ? panes(onScreen.layout).find((p) => p.id === onScreen.focusedPaneId) : undefined;
+    const next = nextNeedAcross(needs, nodeNeedsOf(nodes?.nodes ?? []), {
+      focusedAgentId: focusedAgentOf(onScreen),
+      workspaceId: workspace?.id ?? null,
+      remote: remote ? { node: remote.node.id, workspaceKey: remote.workspaceKey } : null,
       boardShowing: pane ? isBoardTab(activeAgent(pane)) : false,
     });
-    if (next) goToNeed(next);
-  }, [needs, workspace, goToNeed]);
+    if (!next) return;
+    if ("here" in next) goToNeed(next.here);
+    else goToNodeNeed(next.there);
+  }, [needs, nodes, onScreen, workspace, remote, goToNeed, goToNodeNeed]);
 
   /**
    * Wear whatever the server says. The chrome's tokens go onto the root element
@@ -1661,6 +1701,7 @@ export function App() {
           onResetWidth={() => setDrawerWidth(DRAWER_DEFAULT)}
           chips={chips}
           onGo={goToNeed}
+          onGoNode={goToNodeNeed}
           onNext={goNext}
           onWorkspace={(workspaceId) => {
             api.switchWorkspace(workspaceId);

@@ -87,7 +87,8 @@ import { findLauncher, launcherCommand, visibleLaunchers, withPrompt, type Agent
 import { remoteShellOf, validRemoteDir, type MachineEntry, type MachineStatus } from "../../shared/machines";
 import { folderSentence, planText, type MoveDone, type MovePlan } from "../../shared/move";
 import { lendableText, type LendAsk, type Lendable } from "../../shared/secrets";
-import { BOARD_VERBS, nodesText, type BoardVerb, type NodeStatus } from "../../shared/nodes";
+import { BOARD_VERBS, nodesText, summaryAgentName, type BoardVerb, type NodeStatus, type SummaryAgent } from "../../shared/nodes";
+import { parseRemote } from "../../shared/remote";
 import type { MadeFile } from "../../shared/made";
 import type { AgentSnapshot, AgentStatus, HarnessState } from "../../shared/model";
 import { isNotifyEvent } from "../../shared/notify";
@@ -100,6 +101,7 @@ import type { McpResult } from "./mcp";
 import { harnessHome, prepareHarnessHome } from "./harnesshome";
 import type { HostLink } from "./hostlink";
 import type { Workspaces } from "./workspaces";
+import type { RemoteScreen } from "./nodewatch";
 
 /** A Claude session's inbox, as its hook reported it. The token is what makes a message count as the session's own. */
 export interface Inbox {
@@ -141,6 +143,15 @@ export interface HarnessDeps {
   machines: () => readonly MachineStatus[];
   /** The other kururus this one is linked with, each with the last summary it pushed. See `shared/nodes.ts`. */
   nodes?: () => readonly NodeStatus[];
+  /**
+   * Another node's workspace on the user's screen, and its terminals read
+   * through the watch — `nodewatch.ts`. Reading only: nothing here acts on
+   * another node's agent, which is that node's Kuru's to do.
+   */
+  remote?: {
+    shown: () => { node: string; name: string; workspace: string | null; focused: string | null } | null;
+    screen: (node: string, agentId: string) => Promise<RemoteScreen | null>;
+  };
   /**
    * The other nodes' Kurus and boards, over the links: `ask_kuru`,
    * `read_kuru` and the board verbs with a `node`. See `peerkuru.ts`.
@@ -676,6 +687,8 @@ export class Harness {
     };
     const agentArg = (): AgentSnapshot => {
       const id = str(args.agent);
+      const there = this.remoteId(args);
+      if (there) throw new Error(this.notHere(there.node));
       const agent = id && ws.profileOf(id) === profileId ? this.deps.host.find(id) : undefined;
       if (!agent) throw new Error(`No agent ${id || "(none)"} in this profile. Call kururu_status.`);
       follow(agent.id);
@@ -683,6 +696,8 @@ export class Harness {
     };
     const workspaceArg = (required: boolean): string | null => {
       const id = str(args.workspace);
+      const there = parseRemote(id);
+      if (there) throw new Error(this.notHere(there.node));
       if (!id) {
         if (required) throw new Error("A workspace id is needed. Call kururu_status for the list.");
         return null;
@@ -696,6 +711,7 @@ export class Harness {
         return ok(this.status(profileId, selfId));
 
       case "read_agent": {
+        if (this.remoteId(args)) return this.readRemote(args);
         const agent = agentArg();
         // An agent on a machine has no reply or transcript here — its hooks do
         // not reach kururu — so its screen is the only answer to give.
@@ -747,7 +763,11 @@ export class Harness {
       case "wait_agent": {
         const ids = Array.isArray(args.agents) ? args.agents.filter((a): a is string => typeof a === "string") : [];
         if (!ids.length) return fail("Name at least one agent.");
-        for (const id of ids) if (ws.profileOf(id) !== profileId) return fail(`No agent ${id} in this profile.`);
+        for (const id of ids) {
+          const there = parseRemote(id);
+          if (there) return fail(this.notHere(there.node));
+          if (ws.profileOf(id) !== profileId) return fail(`No agent ${id} in this profile.`);
+        }
         const wanted = new Set<WaitState>(
           (Array.isArray(args.states) ? args.states : ["done", "blocked", "exited"]).filter(
             (s): s is WaitState => s === "done" || s === "blocked" || s === "exited",
@@ -1274,6 +1294,47 @@ export class Harness {
     return clip(text || `${this.name(agent)}'s screen is blank.`);
   }
 
+  /** Another node's agent, by its qualified id: the node's and the node's own id, or null for one of this node's. */
+  private remoteId(args: Record<string, unknown>): { node: string; id: string } | null {
+    return parseRemote(str(args.agent));
+  }
+
+  /** What a tool that acts says to another node's agent or workspace: whose it is, and the road that does reach it. */
+  private notHere(nodeId: string): string {
+    const name = this.deps.nodes?.().find((n) => n.id === nodeId)?.name ?? "another node";
+    return `That is on ${name}, and only ${name}'s Kuru acts on its agents and workspaces — ask_kuru ${name} to do it. read_agent reads one of its agents' screens from here.`;
+  }
+
+  /**
+   * `read_agent` for another node's agent: its screen, off a backlog the
+   * child serializes for this server through the watch (`nodewatch.ts`),
+   * and marked as read through the link. Its reply and transcript are on
+   * the child's disk and in its Kuru's hearing, so only the screen is read.
+   */
+  private async readRemote(args: Record<string, unknown>): Promise<McpResult> {
+    const there = this.remoteId(args)!;
+    const node = this.deps.nodes?.().find((n) => n.id === there.node);
+    if (!node) return fail(`No node for ${str(args.agent)}. kururu_status lists the nodes and their agents.`);
+    const source = str(args.source);
+    if (source && source !== "screen") {
+      return fail(`Only the screen of an agent on ${node.name} can be read from here; its replies and transcript are ${node.name}'s. read_kuru ${node.name} reads what its Kuru said, and ask_kuru ${node.name} asks it.`);
+    }
+    if (node.state !== "up") return fail(`${node.name} is away, so its screens cannot be read; kururu_status shows the last it said.`);
+    if (!node.summary?.watchable || !this.deps.remote) return fail(`${node.name}'s kururu is too old to be read from here (kururu child update there). ask_kuru ${node.name} instead.`);
+    let found: { agent: SummaryAgent; workspace: string } | null = null;
+    for (const w of node.summary.workspaces) {
+      const agent = w.agents.find((a) => a.id === there.id);
+      if (agent) found = { agent, workspace: w.name };
+    }
+    if (!found) return fail(`No agent ${there.id} on ${node.name} now. kururu_status lists its agents.`);
+    const name = summaryAgentName(found.agent, found.workspace, node, true);
+    const screen = await this.deps.remote.screen(node.id, there.id);
+    if (!screen) return fail(`${name}'s screen did not come back from ${node.name}; the link to it may have dropped. Try again, or ask_kuru ${node.name}.`);
+    const lines = Math.max(1, Math.min(400, int(args.lines) ?? SCREEN_LINES));
+    const text = await screenText(screen.data, Math.max(screen.cols, 240), screen.rows, lines);
+    return ok(clip(`${name} — on ${node.name}, read through the link (${found.agent.exited ? "exited" : found.agent.status}):\n\n${text || "Its screen is blank."}`));
+  }
+
   private async transcript(agent: AgentSnapshot, turns: number): Promise<string> {
     const path = this.transcripts.get(agent.id);
     if (!path) return `${this.name(agent)} has no transcript kururu knows of — it is not a Claude Code agent with hooks installed. Try source=screen.`;
@@ -1348,8 +1409,10 @@ export class Harness {
   private status(profileId: string, selfId: string | null): string {
     const ws = this.deps.workspaces;
     const profile = ws.profile(profileId)!;
-    const out: string[] = [`profile: ${profile.name} (${profile.id})`, `you: ${selfId ? `id ${selfId}` : "(not started from kururu)"}`, ""];
-    out.push("workspaces:");
+    const out: string[] = [`profile: ${profile.name} (${profile.id})`, `you: ${selfId ? `id ${selfId}` : "(not started from kururu)"}`];
+    const remote = this.onScreenText();
+    if (remote) out.push(remote);
+    out.push("", "workspaces:");
     for (const workspace of profile.workspaces) {
       const ids = ws.agentsInWorkspace(profileId, workspace.id).filter((id) => this.deps.host.isLive(id));
       const board = workspace.board;
@@ -1357,7 +1420,8 @@ export class Harness {
       const pin = workspace.machine;
       const machine = pin ? this.deps.machines().find((m) => m.id === pin.machineId) : undefined;
       const runsOn = pin && machine ? ` · runs on ${machine.name} in ${pin.dir} (its shells, agents and card runs open there)` : "";
-      out.push(`  - ${workspace.name} (${workspace.id}) · ${ids.length} agent${ids.length === 1 ? "" : "s"} · ${counts}${runsOn}${workspace.id === profile.activeWorkspaceId ? " · on screen" : ""}`);
+      const shown = workspace.id === profile.activeWorkspaceId ? (remote ? " · on screen when the user comes back from the other node's" : " · on screen") : "";
+      out.push(`  - ${workspace.name} (${workspace.id}) · ${ids.length} agent${ids.length === 1 ? "" : "s"} · ${counts}${runsOn}${shown}`);
     }
     // By name, which is what open_shell takes and what the user says.
     const machines = this.deps.machines();
@@ -1393,6 +1457,27 @@ export class Harness {
     out.push("", "launchers:");
     for (const launcher of visibleLaunchers(this.deps.launch())) out.push(`  - ${launcher.id}: ${launcher.label}`);
     return out.join("\n");
+  }
+
+  /**
+   * The line that says another node's workspace is on the user's screen,
+   * so that "what is this one doing", said while looking at it, is heard as
+   * a question about that node's agent. Null while one of this node's is.
+   */
+  private onScreenText(): string | null {
+    const shown = this.deps.remote?.shown();
+    if (!shown) return null;
+    const node = this.deps.nodes?.().find((n) => n.id === shown.node);
+    const where = `${shown.name}'s workspace ${shown.workspace ? `"${shown.workspace}"` : "(not known yet)"}`;
+    let focused = "";
+    if (shown.focused && node?.summary) {
+      for (const w of node.summary.workspaces) {
+        const agent = w.agents.find((a) => a.id === shown.focused);
+        if (agent) focused = `; the keyboard is in ${summaryAgentName(agent, w.name, node, true)}`;
+      }
+    }
+    const away = node && node.state !== "up" ? ` ${shown.name} is away, so the screen shows what it last drew.` : "";
+    return `on the user's screen: ${where}, on another node${focused}. Its agents are ${shown.name}'s: read_agent reads them, ask_kuru ${shown.name} acts on them.${away}`;
   }
 
   private boardText(board: Board, title: string, workspaceName: string | null): string {
