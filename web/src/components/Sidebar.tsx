@@ -1765,7 +1765,8 @@ function NodeBlock({
   const summary = node.summary;
   const watchable = !!summary?.watchable;
   const go = watchable ? `${node.name}'s own page, for its Settings` : `Open ${node.name}'s kururu`;
-  const old = `Update ${node.name} (kururu child update) to open its workspaces in this window.`;
+  // The parent is never watched, and updating it would not change that.
+  const old = node.parent ? "" : `Update ${node.name} (kururu child update) to open its workspaces in this window.`;
   return (
     <li className={`node-item ${up ? "" : "node-stale"}`} style={hueStyle(node.id)}>
       <div className="node-headrow">

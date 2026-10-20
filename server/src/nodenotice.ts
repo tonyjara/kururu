@@ -65,7 +65,10 @@ export class NodeNotices {
    * last said is no longer known to be true.
    */
   summary(node: string, summary: NodeSummary | null, linked: boolean, watched: boolean): void {
-    if (watched || !linked || !summary) return;
+    // A node this window cannot open — the parent, seen from a child, or one
+    // from before — is its own clients' to tell: a card here would be a
+    // click that goes nowhere.
+    if (watched || !linked || !summary?.watchable) return;
     this.read(node, "summary", summaryAgents(summary));
   }
 
