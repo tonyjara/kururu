@@ -1,0 +1,525 @@
+--- a/server/src/index.ts
++++ b/server/src/index.ts
+@@ -331,6 +331,7 @@
+   reloaderName,
+ } from "../../shared/reload";
+ import { VERSION } from "./version";
++import { isRemoteId, SpikeRelay } from "./spikewatch";
+ import { orderAgents, Workspaces } from "./workspaces";
+ 
+ // First, so that anything below which throws leaves a line with a time on it
+@@ -493,6 +494,8 @@
+ let backup!: Backup;
+ /** This kururu among the others: pairing, the roster and the links. See `nodes.ts`. */
+ let nodes!: NodeHost;
++/** SPIKE: the remote-workspaces relay, when KURURU_SPIKE_WATCH_URL is set. */
++let spike: SpikeRelay | null = null;
+ /** A workspace moved to or from another node. See `move.ts`. */
+ let mover!: Mover;
+ /** The other nodes' Kurus: asking them, reading them, and their conversations in the drawer. Null until the links exist. See `peerkuru.ts`. */
+@@ -1269,9 +1272,34 @@
+       profile.agentOrder,
+     ).map((id, index) => [id, index] as const),
+   );
++  /**
++   * SPIKE: the relayed agent, in a hard-coded pane beside the active
++   * workspace's tree, in this snapshot only — never in `Workspaces`.
++   */
++  const remoteAgent = spike?.agentForSnapshot() ?? null;
++  const shown = remoteAgent
++    ? {
++        ...profile,
++        workspaces: profile.workspaces.map((w) =>
++          w.id !== profile.activeWorkspaceId
++            ? w
++            : {
++                ...w,
++                layout: {
++                  type: "split" as const,
++                  id: "n:spike:split",
++                  dir: "row" as const,
++                  ratio: 0.5,
++                  a: w.layout,
++                  b: { type: "pane" as const, pane: { id: "n:spike:pane", agentIds: [remoteAgent.id as string], activeIdx: 0 } },
++                },
++              },
++        ),
++      }
++    : profile;
+   return {
+     session: "kururu",
+-    profile,
++    profile: shown as typeof profile,
+     profiles: workspaces.summaries(
+       (id) => workspaces.agentsIn(id).filter((a) => host.isLive(a)).length,
+       loginDir,
+@@ -1281,7 +1309,7 @@
+     // Two fields are merged here rather than carried by the host — see `overlay`
+     // below, and the fields themselves in `shared/model.ts`, for why they live
+     // on this side of the link at all.
+-    agents: here.sort((a, b) => (at.get(a.id) ?? 0) - (at.get(b.id) ?? 0)).map(overlay),
++    agents: [...here.sort((a, b) => (at.get(a.id) ?? 0) - (at.get(b.id) ?? 0)).map(overlay), ...(remoteAgent ? [remoteAgent as unknown as AgentSnapshot] : [])],
+     mascots,
+     keys,
+     notify,
+@@ -3034,10 +3062,11 @@
+ function syncWatched(): void {
+   const watched = new Set<string>();
+   for (const st of clients.values()) {
+-    for (const id of st.watching) watched.add(id);
+-    for (const id of st.warm) watched.add(id);
++    for (const id of st.watching) if (!isRemoteId(id)) watched.add(id);
++    for (const id of st.warm) if (!isRemoteId(id)) watched.add(id);
+   }
+   host.watch(watched);
++  spike?.sync();
+ }
+ 
+ /**
+@@ -3117,6 +3146,10 @@
+  * inherited when the policy stopped being last-writer-wins. See `ClientState`.
+  */
+ function applySize(agentId: string): void {
++  if (isRemoteId(agentId)) {
++    spike?.sync();
++    return;
++  }
+   const proposals: Grid[] = [];
+   for (const st of clients.values()) {
+     if (!st.looking) continue;
+@@ -4411,6 +4444,10 @@
+   // while the user is.
+   const hands = handsOf(msg.type);
+   if (hands) harness.hands(hands, msg.type === "input" ? msg.agentId : undefined);
++
++  // SPIKE: a verb naming the relayed agent goes to the child, not the host.
++  if (spike && spike.handle(ws, st, msg as Parameters<SpikeRelay["handle"]>[2])) return;
++  if (spike && msg.type === "looking") queueMicrotask(() => spike?.sync());
+ 
+   switch (msg.type) {
+     // --- terminals ---------------------------------------------------------
+@@ -5847,6 +5884,11 @@
+     return;
+   }
+ 
++  if (url.pathname === "/api/spike/watch") {
++    res.writeHead(200, { "content-type": "application/json" });
++    res.end(JSON.stringify(spike?.status() ?? null));
++    return;
++  }
+   if (url.pathname === "/api/health") {
+     json(res, {
+       ok: true,
+@@ -6982,6 +7024,34 @@
+     linkWss.handleUpgrade(req, socket, head, (ws) => nodes.accept(ws));
+     return;
+   }
++  /**
++   * SPIKE: the watch socket. The `/link` door's refusals, then the node
++   * handshake, then — the parent only — an ordinary `/ws` client.
++   */
++  if (url.pathname === "/link/watch" && process.env.KURURU_SPIKE_WATCH === "1") {
++    if (nodeRequestRefusal(req)) {
++      socket.destroy();
++      return;
++    }
++    linkWss.handleUpgrade(req, socket, head, (ws) =>
++      nodes.watchHandshake(
++        ws,
++        null,
++        (peer) => {
++          if (peer !== nodes.parentId()) {
++            console.log(`kururu: spike watch: refused ${nodes.memberName(peer)}, which is not the parent`);
++            ws.close(1008, "only the parent may watch");
++            return;
++          }
++          console.log(`kururu: spike watch: ${nodes.memberName(peer)} is watching`);
++          ws.on("close", () => console.log(`kururu: spike watch: ${nodes.memberName(peer)} stopped watching`));
++          admitClient(ws);
++        },
++        (reason) => console.log(`kururu: spike watch: refused a watch: ${reason}`),
++      ),
++    );
++    return;
++  }
+   if (url.pathname !== "/ws") {
+     socket.destroy();
+     return;
+@@ -7002,6 +7072,16 @@
+   }
+   wss.handleUpgrade(req, socket, head, (ws) => {
+     if (!fromLoopback(req)) remoteClientAt = new Date().toISOString();
++    admitClient(ws);
++  });
++}
++
++/**
++ * SPIKE: what `/ws` does once a client is let in, lifted out so that
++ * `/link/watch` can do exactly the same after the node handshake.
++ */
++function admitClient(ws: WebSocket): void {
++  {
+     clients.set(ws, {
+       watching: new Set(),
+       warm: new Set(),
+@@ -7042,7 +7122,7 @@
+     ws.on("message", (data) => handleMessage(ws, data.toString()));
+     ws.on("close", () => dropClient(ws));
+     ws.on("error", () => dropClient(ws));
+-  });
++  }
+ }
+ 
+ for (const each of servers) {
+@@ -7342,6 +7422,19 @@
+       outbox.retry(nodeId);
+     },
+   });
++  if (process.env.KURURU_SPIKE_WATCH_URL && process.env.KURURU_SPIKE_WATCH_NODE) {
++    spike = new SpikeRelay({
++      url: process.env.KURURU_SPIKE_WATCH_URL,
++      nodeId: process.env.KURURU_SPIKE_WATCH_NODE,
++      agent: process.env.KURURU_SPIKE_WATCH_AGENT ?? null,
++      handshake: (ws, expect, up, refused) => nodes.watchHandshake(ws, expect, up, refused),
++      clients: () => clients,
++      send: (ws, msg) => send(ws, msg as ServerMessage),
++      changed: () => pushSnapshot(),
++      log: (line) => console.log(`kururu: ${line}`),
++    });
++    spike.start();
++  }
+   peerKurus = new PeerKurus({
+     nodes,
+     kuruKey,
+--- a/server/src/nodes.ts
++++ b/server/src/nodes.ts
+@@ -876,6 +876,69 @@
+     });
+   }
+ 
++  /**
++   * SPIKE (remote workspaces phase 0): the node handshake and nothing after
++   * it, on a socket that is not a link. `/link/watch` uses it on the child to
++   * let the parent in as a client of `/ws`'s; the relay uses it on the Mac to
++   * dial one. Up is called synchronously from the frame that proved the peer,
++   * so the next frame on the socket already reaches the caller's listener —
++   * a promise would let frames parsed from the same chunk fall through.
++   */
++  watchHandshake(ws: WebSocket, expect: string | null, up: (peer: string) => void, refused: (reason: string) => void): void {
++    if (this.closed || this.role() === "alone") {
++      ws.close(1008, "this node is in no roster");
++      refused("this node is in no roster");
++      return;
++    }
++    const handshake = new LinkHandshake({
++      self: this.me.id,
++      version: this.deps.version,
++      challenge: challenge(),
++      sign: signAsNode,
++      verify: verifySigned,
++      roster: () => this.saved.roster,
++      adopt: (incoming) => this.offer(incoming),
++      ...(expect ? { expect } : {}),
++    });
++    const send = (message: LinkMessage) => {
++      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
++    };
++    const timer = setTimeout(() => {
++      ws.off("message", onFrame);
++      refused("the handshake did not finish");
++      ws.terminate();
++    }, HANDSHAKE_MS);
++    timer.unref();
++    const onFrame = (data: unknown) => {
++      const message = parseLinkMessage(String(data));
++      if (!message) return;
++      for (const step of handshake.receive(message)) {
++        if (step.kind === "send") send(step.message);
++        else if (step.kind === "up") {
++          clearTimeout(timer);
++          ws.off("message", onFrame);
++          up(step.peer);
++          return;
++        } else {
++          clearTimeout(timer);
++          ws.off("message", onFrame);
++          if (step.tell) send({ type: "refuse", reason: step.reason });
++          refused(step.reason);
++          ws.close(1008, step.reason.slice(0, 120));
++          return;
++        }
++      }
++    };
++    ws.on("message", onFrame);
++    if (ws.readyState === WebSocket.OPEN) send(handshake.hello());
++    else ws.once("open", () => send(handshake.hello()));
++  }
++
++  /** SPIKE: a member's name, for the log. */
++  memberName(id: string): string {
++    return memberOf(this.roster, id)?.name ?? id;
++  }
++
+   /** A link that came in on `/link`, already past `nodeRequestRefusal`. */
+   accept(ws: WebSocket): void {
+     if (this.closed || this.role() === "alone") {
+--- a/server/src/spikewatch.ts
++++ b/server/src/spikewatch.ts
+@@ -0,0 +1,257 @@
++/**
++ * SPIKE — remote workspaces, phase 0 (docs/plans/remote-workspaces.md). Not
++ * shipped: it lives in a scratch copy and runs only when
++ * `KURURU_SPIKE_WATCH_URL` names a child's `/link/watch`.
++ *
++ * The question it answers is whether "the watch socket is a `/ws`" holds: the
++ * Mac's server dials the child, proves itself with the node handshake, and is
++ * then one more `/ws` client of the child — snapshot, output, grid, backlog —
++ * with nothing on the child's side written for it beyond the door. What the
++ * Mac does with that stream is the relay: one agent of the child's, under a
++ * qualified id, in one hard-coded pane, fed to the Mac's own clients with the
++ * same per-client backlog hold `index.ts` keeps for local terminals.
++ *
++ * Deliberately crude where phase 1 must not be: one agent, a prefix spelt
++ * here, the Mac's clients' size composed by hand.
++ */
++
++import { WebSocket } from "ws";
++import type { Grid } from "./sizing";
++import { smallestGrid } from "./sizing";
++
++export const SPIKE_PREFIX = "n:";
++
++export function isRemoteId(id: string): boolean {
++  return id.startsWith(SPIKE_PREFIX);
++}
++
++export interface SpikeClient {
++  watching: Set<string>;
++  warm: Set<string>;
++  proposals: Map<string, Grid>;
++  looking: boolean;
++  awaiting: Map<string, { inflight: number; queued: string[] }>;
++}
++
++export interface SpikeDeps {
++  url: string;
++  nodeId: string;
++  /** Which of the child's agents to relay; the first live one if unset. */
++  agent: string | null;
++  handshake: (ws: WebSocket, expect: string, up: (peer: string) => void, refused: (reason: string) => void) => void;
++  clients: () => Map<WebSocket, SpikeClient>;
++  send: (ws: WebSocket, msg: unknown) => void;
++  changed: () => void;
++  log: (line: string) => void;
++}
++
++interface ChildAgent {
++  id: string;
++  [key: string]: unknown;
++}
++
++export class SpikeRelay {
++  private ws: WebSocket | null = null;
++  private up = false;
++  /** The child's latest snapshot, whole. */
++  snapshot: { profile: { workspaces: Array<{ name: string; layout: unknown }> }; agents: ChildAgent[] } | null = null;
++  /** The child's agent id relayed here, bare. */
++  agentId: string | null = null;
++  /** Mac clients that asked for a backlog of the relayed agent, in the order they asked. */
++  private askers: WebSocket[] = [];
++  private lastWatch = "";
++  private lastProposal = "";
++  private lastLooking: boolean | null = null;
++  stats = { framesIn: 0, bytesIn: 0, framesOut: 0, upAt: 0 };
++
++  constructor(private readonly deps: SpikeDeps) {}
++
++  get qualified(): string | null {
++    return this.agentId ? `${SPIKE_PREFIX}${this.deps.nodeId}:${this.agentId}` : null;
++  }
++
++  bare(id: string): string | null {
++    const prefix = `${SPIKE_PREFIX}${this.deps.nodeId}:`;
++    return id.startsWith(prefix) ? id.slice(prefix.length) : null;
++  }
++
++  start(): void {
++    const ws = new WebSocket(this.deps.url, { handshakeTimeout: 10_000, maxPayload: 64 * 1024 * 1024 });
++    this.ws = ws;
++    ws.on("error", (err) => this.deps.log(`spike watch: ${err.message}`));
++    ws.on("close", (code) => {
++      this.deps.log(`spike watch: closed ${code}`);
++      this.up = false;
++      this.ws = null;
++      this.lastWatch = this.lastProposal = "";
++      this.lastLooking = null;
++      setTimeout(() => this.start(), 2000).unref();
++    });
++    this.deps.handshake(
++      ws,
++      this.deps.nodeId,
++      (peer) => {
++        this.up = true;
++        this.stats.upAt = Date.now();
++        this.deps.log(`spike watch: proved ${peer}; now a /ws client of it`);
++        ws.on("message", (data) => this.onChild(String(data)));
++        this.sync();
++      },
++      (reason) => this.deps.log(`spike watch: refused: ${reason}`),
++    );
++  }
++
++  private toChild(msg: unknown): void {
++    if (!this.up || this.ws?.readyState !== WebSocket.OPEN) return;
++    this.stats.framesOut++;
++    this.ws.send(JSON.stringify(msg));
++  }
++
++  private onChild(raw: string): void {
++    this.stats.framesIn++;
++    this.stats.bytesIn += raw.length;
++    let msg: { type: string; [key: string]: unknown };
++    try {
++      msg = JSON.parse(raw);
++    } catch {
++      return;
++    }
++    const q = this.qualified;
++    switch (msg.type) {
++      case "snapshot": {
++        const first = !this.snapshot;
++        this.snapshot = msg.snapshot as SpikeRelay["snapshot"];
++        if (first) this.print();
++        if (!this.agentId) {
++          const agents = this.snapshot?.agents ?? [];
++          const pick = this.deps.agent ? agents.find((a) => a.id === this.deps.agent) : agents.find((a) => !a.exited);
++          if (pick) {
++            this.agentId = pick.id;
++            this.deps.log(`spike watch: relaying ${pick.id} as ${this.qualified}`);
++          }
++        }
++        this.deps.changed();
++        return;
++      }
++      case "output": {
++        if (!q || msg.agentId !== this.agentId) return;
++        for (const [ws, st] of this.deps.clients()) {
++          if (!st.watching.has(q) && !st.warm.has(q)) continue;
++          const pending = st.awaiting.get(q);
++          if (pending) pending.queued.push(msg.data as string);
++          else this.deps.send(ws, { type: "output", agentId: q, data: msg.data });
++        }
++        return;
++      }
++      case "grid": {
++        if (!q || msg.agentId !== this.agentId) return;
++        for (const [ws, st] of this.deps.clients()) {
++          if (st.watching.has(q) || st.warm.has(q)) this.deps.send(ws, { ...msg, agentId: q });
++        }
++        return;
++      }
++      case "backlog": {
++        if (!q || msg.agentId !== this.agentId) return;
++        const ws = this.askers.shift();
++        const st = ws ? this.deps.clients().get(ws) : undefined;
++        const pending = st?.awaiting.get(q);
++        if (!ws || !st || !pending) return;
++        if (st.watching.has(q) || st.warm.has(q)) this.deps.send(ws, { ...msg, agentId: q });
++        if (--pending.inflight > 0) return;
++        st.awaiting.delete(q);
++        for (const data of pending.queued) this.deps.send(ws, { type: "output", agentId: q, data });
++        return;
++      }
++      default:
++        return;
++    }
++  }
++
++  /** What the snapshot says, in the log: the done-when of the spike's first half. */
++  private print(): void {
++    const snap = this.snapshot;
++    if (!snap) return;
++    this.deps.log(`spike watch: snapshot: ${snap.profile.workspaces.length} workspace(s), ${snap.agents.length} agent(s)`);
++    for (const w of snap.profile.workspaces) this.deps.log(`spike watch:   workspace ${w.name}: ${JSON.stringify(w.layout).length} bytes of layout`);
++    for (const a of snap.agents) this.deps.log(`spike watch:   agent ${a.id} ${String(a.kind)} ${String(a.agent ?? "")} ${a.exited ? "exited" : String(a.status)}`);
++  }
++
++  /**
++   * Handle a Mac client's verb if it names the relayed agent. `watch` and
++   * `looking` are left to `index.ts` to record, and `sync` is called after.
++   */
++  handle(ws: WebSocket, st: SpikeClient, msg: { type: string; agentId?: string; data?: string; cols?: number; rows?: number }): boolean {
++    const bare = msg.agentId ? this.bare(msg.agentId) : null;
++    if (!bare || bare !== this.agentId) return false;
++    const q = msg.agentId!;
++    switch (msg.type) {
++      case "input":
++        this.toChild({ type: "input", agentId: bare, data: msg.data });
++        return true;
++      case "propose-size":
++        if (!Number.isInteger(msg.cols) || !Number.isInteger(msg.rows) || msg.cols! < 2 || msg.rows! < 2) return true;
++        st.proposals.set(q, { cols: msg.cols!, rows: msg.rows! });
++        this.sync();
++        return true;
++      case "request-backlog": {
++        const pending = st.awaiting.get(q);
++        if (pending) pending.inflight++;
++        else st.awaiting.set(q, { inflight: 1, queued: [] });
++        this.askers.push(ws);
++        this.sync();
++        this.toChild({ type: "request-backlog", agentId: bare });
++        return true;
++      }
++      default:
++        return false;
++    }
++  }
++
++  /**
++   * Tell the child what the Mac's clients, together, are: watching, warm,
++   * looking, and the smallest grid over those looking — the Mac as one client
++   * whose opinion is the minimum of its own clients', which composes with the
++   * child's own minimum.
++   */
++  sync(): void {
++    const q = this.qualified;
++    if (!q || !this.agentId) return;
++    let watching = false;
++    let warm = false;
++    let looking = false;
++    const grids: Grid[] = [];
++    for (const st of this.deps.clients().values()) {
++      if (st.watching.has(q)) watching = true;
++      else if (st.warm.has(q)) warm = true;
++      if (st.looking) looking = true;
++      if (st.looking && st.proposals.has(q)) grids.push(st.proposals.get(q)!);
++    }
++    const watch = JSON.stringify({ a: watching ? [this.agentId] : [], w: warm ? [this.agentId] : [] });
++    if (watch !== this.lastWatch) {
++      this.lastWatch = watch;
++      this.toChild({ type: "watch", agentIds: watching ? [this.agentId] : [], warm: warm ? [this.agentId] : [] });
++    }
++    if (looking !== this.lastLooking) {
++      this.lastLooking = looking;
++      this.toChild({ type: "looking", looking });
++    }
++    const grid = smallestGrid(grids);
++    const proposal = grid ? `${grid.cols}x${grid.rows}` : "";
++    if (grid && proposal !== this.lastProposal) {
++      this.lastProposal = proposal;
++      this.toChild({ type: "propose-size", agentId: this.agentId, cols: grid.cols, rows: grid.rows });
++    }
++  }
++
++  /** The relayed agent as the Mac's snapshot lists it, id qualified. */
++  agentForSnapshot(): Record<string, unknown> | null {
++    const q = this.qualified;
++    const agent = this.snapshot?.agents.find((a) => a.id === this.agentId);
++    if (!q || !agent) return null;
++    return { ...agent, id: q, titleOverride: `${String(agent.titleOverride ?? agent.agent ?? agent.kind)} · on ${this.deps.nodeId.slice(0, 6)}` };
++  }
++
++  status(): unknown {
++    return { up: this.up, agent: this.agentId, qualified: this.qualified, stats: this.stats, snapshot: this.snapshot };
++  }
++}

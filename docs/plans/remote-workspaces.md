@@ -2,9 +2,11 @@
 
 A feasibility study and a plan, written 2026-10-20 from a read of the tree at
 `157c168`, `docs/nodes.md`, `docs/plans/kururu-parent-child.md` and a look at
-how four other tools do the same split. **Nothing in it is built.** It is
-written so that an agent can take one phase, read the files it names, and know
-what "done" is.
+how four other tools do the same split. **Nothing in it is built.** Phase 0's
+spike ran on 2026-10-20 in throwaway instances and stayed out of `main`
+([`docs/spikes/remote-workspaces-phase0.md`](../spikes/remote-workspaces-phase0.md)).
+Its answers are folded into the sections below. The plan is written so that an
+agent can take one phase, read the files it names, and know what "done" is.
 
 **The ask, in the user's words:** "Do you think it's possible to open a
 workspace from another kururu in this kururu, and have it be clearly labeled
@@ -164,7 +166,7 @@ page holds two sessions and merges them.
 
 | | A — relay | B — direct |
 |---|---|---|
-| **Latency** | child → Mac server over the tailnet, then Mac server → page over loopback. The second hop is tens of microseconds; the first is the tailnet's round trip either way. | one hop fewer, and the hop saved is loopback. No measurable gain for a keystroke's echo. |
+| **Latency** | child → Mac server over the tailnet, then Mac server → page over loopback. Measured: 0.5–0.8 ms over B on loopback; Mac to omarchy, a median of 167–170 ms and a p99 of 250–260 ms. | one hop fewer, and the hop saved is loopback. Measured: a median of 166–168 ms, the same; a p99 of 520–560 ms on a freshly opened socket. |
 | **Auth** | the node handshake, already proved by keys the roster lists. No token leaves the Mac; the page never holds a secret of the child's. | the child's share token has to reach a *page*. Cookies are per origin and `SameSite=Lax`, so a cross-site WebSocket sends none: the token rides on the socket URL on every reconnect, in page memory. The child's `Origin` check must also learn the Mac's addresses (a loopback `Origin` passes; a phone's tailnet address does not). |
 | **The phone** | nothing changes: one socket to the Mac, the Mac's cookie, remote workspaces arrive through it. `tailscale serve` for the microphone stays one origin. | the phone must reach the child directly and hold its token; an `https:` page from `tailscale serve` cannot open a `ws:` to the child at all (mixed content). |
 | **Version skew** | the relay reads the child's messages with the Mac's types and passes what it knows; an older child says what it lacks in its summary (as `talks` does today) and the Mac greys the feature with "update omarchy". | the Mac's bundle speaks to a server of another version with no translator in between. There is no wire protocol version today. |
@@ -204,6 +206,29 @@ node"* was about not having a relay; the relay is what this plan adds.
   `clients.set(ws, {watching, warm, proposals, looking, awaiting})` and the
   opening sends. It gains one line: the client is tagged with the node id it
   proved, for the log and for the "mac is watching" chip below.
+- **Confirmed by the spike, with three amendments.** The child needed the
+  door and nothing more. `/ws`'s success path, lifted out as
+  `admitClient(ws)`, served a proved parent unchanged, and the size the Mac
+  proposed came back in the child's backlog. What the spike added to the
+  design:
+  - **The hand-off is synchronous.** `ws` emits every frame parsed from one
+    chunk in one tick, so the frame that proves the peer must swap the
+    handshake's listener for the client's inside the same call. A promise
+    would drop the frames behind it: the Mac's first `watch`, or the child's
+    `snapshot`. `LinkHandshake` is reused as it stands. `NodeHost` gains
+    `watchHandshake(ws, expect, up, refused)` beside `open`, because `open`
+    ties the handshake to a `Link`.
+  - **A watcher is tagged, and the tag is read.** A watch is sent everything
+    a window is: 18 message types and about 13 kB on open, on a near-empty
+    profile. It also counts in `clients.size`, which starts the child's usage
+    poll and, for a first client, its machine and OpenRouter polls.
+    `ClientState.watcher` (the proved node id) makes the opening sends,
+    those polls and the voice's `hush` skip it. It must never set
+    `remoteClientAt`, which the setup wizard reads as the phone arriving.
+  - **The relay forwards each frame as it comes and never coalesces.** The
+    pty host already waits up to 16 ms (`OUTPUT_FLUSH_MS`) on the node that
+    holds the pty. A second batching step on the Mac would be a second frame
+    on every keystroke.
 - **Who may watch whom is the parent's to say.** A watch is a client with
   hands on every pty of that node. A child's compromise is accepted in the
   parent-child plan as *"the ability to send messages into peers' Kurus as
@@ -240,17 +265,31 @@ file and a store export containing a qualified id anywhere fail.
 
 ### Latency, and what to expect
 
-A keystroke travels page → Mac server (loopback, ~0.1 ms) → child over the
-tailnet → the pty, and the echo comes back the same way. On a tailnet where
-the Mac and the box see each other directly (the same LAN, or UDP through
-both NATs), the round trip is 1–5 ms and typing is indistinguishable from
-local. When Tailscale falls back to a DERP relay — which it does when a
-direct path cannot be found — the round trip is whatever the nearest relay
-costs, 30–150 ms, and typing feels like ssh over a bad hotel link. **Nothing
-in the relay changes which of those the user gets**; `tailscale status` on
-either side says `direct` or `relay`, and the spike below measures both. The
-machines feature's `ssh -t` shells go over the same path today, so the user
-already knows how the box feels from here.
+A keystroke travels page → Mac server (loopback) → child over the tailnet →
+the pty, and the echo comes back the same way, after up to 16 ms in the
+child's host (`OUTPUT_FLUSH_MS`, mean 8). **Measured on 2026-10-20, Mac to
+omarchy, a key's echo costs 167 ms at the median, 235 ms at p90 and 255 ms at
+p99, relayed through the Mac's server.** The direct path (B) measured the
+same at the median, and `ssh -tt omarchy` (the machines feature's road)
+measured 170 ms. ICMP ping averaged 165–173 ms. The relay itself costs
+0.5–0.8 ms, measured on loopback, where a local terminal echoes in 10 ms and
+a relayed one in 11. The full tables are in
+[the spike](../spikes/remote-workspaces-phase0.md#the-numbers).
+
+`tailscale status` said `direct` on both sides, but both endpoints were
+public addresses: the two machines are on different networks, and "direct" is
+a straight line across the internet. **That distance is the cost, not the
+relay and not DERP.** The figure written here before the spike — 1–5 ms,
+indistinguishable from local — holds only for two machines on one LAN. DERP
+was not seen and could not be forced without running more `tailscale` than
+`status`. A DERP path would add its relay's distance on top of these figures.
+
+So **a remote pane feels exactly like the ssh shells to omarchy feel today**,
+and nothing in kururu's relay changes that. Only a local echo, mosh's
+prediction, would make typing feel local, and that is a feature of its own
+(*Later*). A remote pane's backlog also arrives one round trip after it is
+asked for: 150–360 ms against 2–5 ms locally. Keeping remote emulators warm
+in the pool is worth more for them than for local ones.
 
 A pty's output is the heavier direction: an agent TUI repaints a whole screen
 on every token. The child already sends only what some client is watching
@@ -520,14 +559,31 @@ read by hand on both sides, to write down what a keystroke's echo costs
 direct and relayed. **Done** is a number in this document's latency section and the
 "watch socket is a `/ws`" idea confirmed or replaced.
 
+**Done, 2026-10-20.** The spike ran on two throwaway instances on the Mac,
+then against a throwaway child on omarchy (its own port, config and host,
+never the box's kururu). The snapshot printed, and one agent drew in a
+hard-coded pane of a real page. Keys typed there reached the box's pty.
+"The watch socket is a `/ws`" is **confirmed**, with the three amendments in
+[the watch socket](#the-watch-socket-in-detail). The number is in
+[latency](#latency-and-what-to-expect): 167 ms at the median from the Mac to
+omarchy, the same as ssh. The record, the patch and the timing scripts are
+in [`docs/spikes/remote-workspaces-phase0.md`](../spikes/remote-workspaces-phase0.md).
+The spike never tried a sibling's watch being refused; phase 1's test does.
+
 ### Phase 1 — a remote workspace on screen (4–6 days)
 
 The first useful slice, and the one that ends "two kururus open" for
 terminals.
 
 - `shared/remote.ts`: the grammar and `route()`, tested; `NodeSummary.watchable`.
-- The child: `/link/watch` → handshake → parent only → `clients.set`; the
-  watcher tagged; `lifecycle.log` lines; the "mac is watching" field.
+- The child: `/link/watch` → `watchHandshake` → parent only →
+  `admitClient` (lifted out of `/ws`); `ClientState.watcher`, which skips
+  the opening sends, the polls and the voice; `lifecycle.log` lines; the
+  "mac is watching" field. A `nodes.test.ts` case: a sibling's watch is
+  refused, and the parent's is let in. The spike's patch
+  (`docs/spikes/remote-workspaces-phase0/spike.patch`) is a starting point
+  for the door and the handshake. Its relay is not: it handles one agent, and
+  its prefix is spelt in place rather than in `shared/remote.ts`.
 - The Mac: `server/src/nodewatch.ts` — one per node, opened while anything of
   the node is on screen; snapshot held; ids qualified on the way in,
   de-qualified on the way out; `watch`/`looking`/proposals composed; a
@@ -621,8 +677,13 @@ Depends on 1–4.
   child's address, which the phone cannot reach through the Mac without a
   second relay. The row says "on omarchy" and links to the child's proxy
   for the window; the phone's road is a proxy-of-a-proxy and not worth it.
-- **The direct path (B) for the window only**, should the spike show the
-  relay's loopback hop matters, which it will not.
+- ~~**The direct path (B) for the window only**, should the spike show the
+  relay's loopback hop matters.~~ It does not: the hop costs 0.5–0.8 ms
+  against a 167 ms round trip, and B showed the worse tail.
+- **A local echo for remote panes**, mosh-style: the emulator draws a typed
+  character before the round trip confirms it. This is the only thing that
+  makes a 170 ms link feel local. It needs care with TUIs that do not echo,
+  such as Claude's input box and nvim. Days, and its own design.
 
 Total: roughly 15–21 agent-days, 0 then 1, then 2, 3 and 4 side by side,
 then 5.
@@ -670,8 +731,9 @@ side with the data owns the state; the other side is a view, and it says so.**
 
 ## Risks
 
-- **DERP.** A Mac and a box that cannot reach each other directly type over a
-  relay in another city. The spike measures it by hand. Kururu itself never
+- **Distance, and DERP on top of it.** Mac to omarchy is 167 ms per key on a
+  `direct` path, because direct here crosses the internet (the spike). A
+  pair that cannot punch through types over a DERP relay as well. Kururu itself never
   runs `tailscale` (`reach.ts` says why, and rule 4 says so), so it cannot
   draw `direct`/`relay` beside a node; the user reads `tailscale status` on
   either machine, and Settings → Nodes says that is where the answer is.
@@ -727,6 +789,9 @@ side with the data owns the state; the other side is a view, and it says so.**
 11. **Accept relayed (DERP) latency, or warn?** *Measure in the spike, and
     point at `tailscale status` in Settings → Nodes.* Kururu runs no
     `tailscale` command and cannot change which path the tailnet takes.
+    *Measured:* 167 ms at the median on a direct path to omarchy, the same
+    as ssh. Settings → Nodes should say that a remote pane types like ssh to
+    that box, which the user already knows the feel of.
 12. **Should a remote pane's `+` offer the Mac's launchers or the child's?**
     *The child's.* The agent runs there with its logins and tools; offering
     a model the box has not got would be a tab that says so after the fact.
