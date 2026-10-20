@@ -351,7 +351,9 @@ The load-bearing invariants, one line each, with the argument behind the link:
   tools; a new workspace's folder is judged on its disk, and a Needs row's
   Done is its own rule asked again (`card-done-ask`). Kuru's rule is
   unchanged: the user typing into a remote pane is the user; Kuru still acts
-  locally and asks a peer. → [nodes](docs/nodes.md#remote-workspaces)
+  locally and asks a peer, and reads a remote agent's screen by its qualified
+  id, which every acting tool refuses. A remote agent's `blocked` is noticed
+  by this node's own gate (`nodenotice.ts`). → [nodes](docs/nodes.md#remote-workspaces)
 - **One Telegram bot for every node, read by one node at a time.** The
   parent's allow-list rides in the roster it signs, so only the parent
   sets it; the switch rides there too, but any node may flip it — a

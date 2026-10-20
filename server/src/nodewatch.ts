@@ -42,7 +42,7 @@
  * reconnect for every watch, as it is for every window.
  */
 import { WebSocket } from "ws";
-import { panes, terminalsOf } from "../../shared/layout";
+import { activeTerminal, panes, terminalsOf } from "../../shared/layout";
 import type { SessionSnapshot } from "../../shared/model";
 import { dialDelay, type NodeSummary } from "../../shared/nodes";
 import {
@@ -94,6 +94,25 @@ export interface NodeWatchDeps {
   log: (line: string) => void;
   /** A watch opening or closing, for `lifecycle.log`. */
   record: (line: string) => void;
+  /** The child's snapshot, as it came: its agents' statuses are what this node's notices read while a watch is up (`nodenotice.ts`). */
+  relayed?: (node: string, snapshot: SessionSnapshot) => void;
+}
+
+/** How long Kuru's read of a remote screen waits for the watch and the backlog together. */
+const READ_MS = 10_000;
+
+/** A remote terminal's screen, as the child serialized it, for Kuru to read. */
+export interface RemoteScreen {
+  data: string;
+  cols: number;
+  rows: number;
+}
+
+/** Who a backlog the child sends is for: a client here, or a read of this server's own. */
+type Asker = WebSocket | Reader;
+
+class Reader {
+  constructor(readonly read: (screen: RemoteScreen | null) => void) {}
 }
 
 /** Verbs that put one of this node's own workspaces on screen, and so take the remote one off it. */
@@ -138,8 +157,18 @@ class NodeWatch {
   /** Not wanted since; closed once this is `LINGER_MS` old. */
   idleSince: number | null = null;
   private closing = false;
-  /** Per bare agent id, the Mac clients whose `request-backlog` went to the child, in the order they went. */
-  private readonly askers = new Map<string, WebSocket[]>();
+  /** Per bare agent id, who each `request-backlog` sent to the child was for, in the order they went. */
+  private readonly askers = new Map<string, Asker[]>();
+  /**
+   * What to do on the child once its first snapshot is here: reveal a
+   * terminal, or put a workspace in front. A reveal from a notice or the
+   * Needs drawer usually finds the watch still opening, and without this the
+   * window would show the workspace with the child's own focus, not the
+   * terminal that was asked for.
+   */
+  private pending: { reveal: string } | { show: string } | null = null;
+  /** Reads waiting for the watch to come up. */
+  private readonly upWaiters = new Set<() => void>();
   private readonly replies = new Map<number, PendingReply>();
   private nextReply = 1;
   /** What the child was last told, so the same thing is not said twice. */
@@ -207,6 +236,8 @@ class NodeWatch {
         this.cameUp();
         this.sync();
         this.refill();
+        for (const waiter of this.upWaiters) waiter();
+        this.upWaiters.clear();
       },
       (reason) => this.deps.log(`watch: ${member.name} refused the watch: ${reason}`),
     );
@@ -272,7 +303,10 @@ class NodeWatch {
   }
 
   private release(why: string): void {
-    for (const [, waiting] of this.askers) waiting.length = 0;
+    for (const [, waiting] of this.askers) {
+      for (const asker of waiting) if (!isClient(asker)) asker.read(null);
+      waiting.length = 0;
+    }
     this.askers.clear();
     for (const st of this.deps.clients().values()) {
       for (const id of [...st.awaiting.keys()]) if (parseRemote(id)?.node === this.node) st.awaiting.delete(id);
@@ -326,10 +360,16 @@ class NodeWatch {
       return;
     }
     switch (msg.type) {
-      case "snapshot":
+      case "snapshot": {
         this.snapshot = msg.snapshot;
+        const pending = this.pending;
+        this.pending = null;
+        if (pending && "reveal" in pending) this.toChild({ type: "reveal-agent", agentId: pending.reveal });
+        else if (pending) this.follow(pending.show);
+        this.deps.relayed?.(this.node, msg.snapshot);
         this.changed();
         return;
+      }
       case "output": {
         // Forwarded as it comes, frame for frame — see the module comment.
         const id = qualify(this.node, msg.agentId);
@@ -356,8 +396,14 @@ class NodeWatch {
         // each, so the asker at the head is the client this one is for.
         const id = qualify(this.node, msg.agentId);
         const waiting = this.askers.get(msg.agentId);
-        const ws = waiting?.shift();
+        const asker = waiting?.shift();
         if (waiting && !waiting.length) this.askers.delete(msg.agentId);
+        if (asker && !isClient(asker)) {
+          asker.read({ data: msg.data, cols: msg.cols, rows: msg.rows });
+          this.sync();
+          return;
+        }
+        const ws = asker;
         const st = ws ? this.deps.clients().get(ws) : undefined;
         const pending = st?.awaiting.get(id);
         if (!ws || !st || !pending) return;
@@ -510,10 +556,13 @@ class NodeWatch {
         return;
       case "switch-workspace":
       case "reveal-agent":
-        // While the watch opens there is nothing to move; the window already
-        // shows the workspace, and the first verb that needs the child's
-        // focus moves it there (`follow`).
-        if (!this.up) return;
+        // While the watch opens there is nothing to move yet; the window
+        // already shows the workspace, and the child is moved once its first
+        // snapshot is here (`pending`).
+        if (!this.up || !this.snapshot) {
+          this.pending = message.type === "reveal-agent" ? { reveal: message.agentId } : shown ? { show: shown } : this.pending;
+          return;
+        }
         // A switch is the child's active workspace becoming the one shown
         // here, which `follow` says once; a reveal moves it itself.
         if (message.type === "switch-workspace") this.follow(shown);
@@ -557,7 +606,51 @@ class NodeWatch {
 
   /** Put that workspace in front on the child too — what two clients of one server do (the plan's question 2). */
   show(workspaceKey: string): void {
-    this.follow(workspaceKey);
+    if (this.snapshot && this.up) this.follow(workspaceKey);
+    else if (!this.pending || !("reveal" in this.pending)) this.pending = { show: workspaceKey };
+  }
+
+  /**
+   * One terminal's screen, for Kuru's `read_agent`: a backlog asked of the
+   * child as a client here asks for one, and answered to this server rather
+   * than to a page. Listed as kept while it is in flight, as a page's is, so
+   * the child serves it; null when the watch did not come up or dropped
+   * before the answer.
+   */
+  async screen(bare: string): Promise<RemoteScreen | null> {
+    if (!(await this.whenUp(READ_MS))) return null;
+    return new Promise<RemoteScreen | null>((resolve) => {
+      let done = false;
+      const finish = (screen: RemoteScreen | null) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(screen);
+      };
+      const timer = setTimeout(() => finish(null), READ_MS);
+      timer.unref();
+      const waiting = this.askers.get(bare) ?? [];
+      waiting.push(new Reader(finish));
+      this.askers.set(bare, waiting);
+      this.sync();
+      if (!this.toChild({ type: "request-backlog", agentId: bare })) finish(null);
+    });
+  }
+
+  private whenUp(ms: number): Promise<boolean> {
+    if (this.up) return Promise.resolve(true);
+    return new Promise<boolean>((resolve) => {
+      const waiter = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+      const timer = setTimeout(() => {
+        this.upWaiters.delete(waiter);
+        resolve(false);
+      }, ms);
+      timer.unref();
+      this.upWaiters.add(waiter);
+    });
   }
 
   /**
@@ -589,6 +682,10 @@ class NodeWatch {
     };
   }
 
+}
+
+function isClient(asker: Asker): asker is WebSocket {
+  return !(asker instanceof Reader);
 }
 
 /**
@@ -761,6 +858,41 @@ export class NodeWatches {
     const shown = this.onScreen?.node === node ? this.onScreen.key : null;
     watch.handle(ws, st, msg, message, shown);
     return true;
+  }
+
+  /** Whether a watch of that node is up now, and so its snapshot is the freshest word on its agents. */
+  watched(node: string): boolean {
+    return this.watches.get(node)?.up ?? false;
+  }
+
+  /**
+   * A terminal of a node's, read for Kuru (`read_agent`): the watch opened if
+   * it is not, as the Mac's window would, and let go a minute after as ever.
+   */
+  screen(node: string, bare: string): Promise<RemoteScreen | null> {
+    if (!this.deps.member(node) || !this.deps.summary(node)?.watchable) return Promise.resolve(null);
+    const watch = this.watch(node);
+    return watch.screen(bare);
+  }
+
+  /**
+   * The remote workspace on screen, for `kururu_status`: whose, which, and
+   * the terminal with the keyboard there, by the node's own id. Off the
+   * watch's snapshot, else the node's summary, which knows the name.
+   */
+  shown(): { node: string; name: string; workspaceKey: string; workspace: string | null; focused: string | null } | null {
+    const on = this.onScreen;
+    if (!on) return null;
+    const workspace = this.watches.get(on.node)?.workspace({ key: on.key }) ?? null;
+    const pane = workspace ? panes(workspace.layout).find((p) => p.id === workspace.focusedPaneId) : undefined;
+    const name = workspace?.name ?? this.deps.summary(on.node)?.workspaces.find((w) => w.key === on.key)?.name ?? null;
+    return {
+      node: on.node,
+      name: this.deps.member(on.node)?.name ?? on.node,
+      workspaceKey: on.key,
+      workspace: name,
+      focused: pane ? activeTerminal(pane) : null,
+    };
   }
 
   /** For `/api/health` and `bun run status`: which nodes this server is watching. */

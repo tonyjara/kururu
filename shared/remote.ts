@@ -33,8 +33,11 @@
  * Pure, in `shared/`, because the server routes with it and the client
  * draws with it, and because every rule in it is one worth a test.
  */
-import { BOARD_TAB, isBoardTab, isDocTab, type LayoutNode } from "./layout";
-import type { AgentSnapshot, Workspace } from "./model";
+import { BOARD_TAB, isBoardTab, isDocTab, panes, terminalsOf, type LayoutNode } from "./layout";
+import type { AgentSnapshot, AgentStatus, Profile, Workspace } from "./model";
+import { allNeeds, type Need, type ProfileNeeds } from "./needs";
+import type { NodeStatus, NodeSummary, SummaryNeed } from "./nodes";
+import { isNotifyEvent, type NotifyEvent } from "./notify";
 import { WORKSPACE_COLORS, type WorkspaceColor } from "./model";
 import type { ClientMessage } from "./wire";
 import { adoptLaunchers, visibleLaunchers, type Launcher, type LaunchSettings } from "./launchers";
@@ -346,4 +349,124 @@ export function qualifyReply(node: string, type: ClientMessage["type"], result: 
   if (!field || !result || typeof result !== "object") return result;
   const value = (result as Record<string, unknown>)[field];
   return typeof value === "string" ? { ...result, [field]: qualify(node, value) } : result;
+}
+
+// ---------------------------------------------------------------------------
+// What another node's agents are doing, for this node's notices
+// ---------------------------------------------------------------------------
+
+/** An agent of a node's, with the name of the workspace it is in: what a notice is made of. */
+export interface RemoteAgent {
+  agent: Pick<AgentSnapshot, "id" | "status" | "exited" | "kind" | "agent" | "lastAgent" | "titleOverride" | "title" | "activity">;
+  workspace: string;
+}
+
+/**
+ * The agents a node's notices are about, read off the snapshot its watch
+ * relayed: the terminals in its active profile's panes, and not its Kuru's.
+ * The same set the node's summary carries (`summarize`), so that a notice
+ * read off one and then the other is about the same agents — the summary is
+ * what this node reads while no watch is open.
+ */
+export function snapshotAgents(snapshot: { profile: Profile; agents: readonly AgentSnapshot[] }): RemoteAgent[] {
+  const harness = snapshot.profile.harness?.agentId ?? null;
+  const byId = new Map(snapshot.agents.map((a) => [a.id, a] as const));
+  const out: RemoteAgent[] = [];
+  for (const workspace of snapshot.profile.workspaces) {
+    for (const pane of panes(workspace.layout)) {
+      for (const id of terminalsOf(pane.agentIds)) {
+        const agent = id === harness ? undefined : byId.get(id);
+        if (agent) out.push({ agent, workspace: workspace.name });
+      }
+    }
+  }
+  return out;
+}
+
+/** The same, off the summary a node pushes over its link. */
+export function summaryAgents(summary: Pick<NodeSummary, "workspaces">): RemoteAgent[] {
+  return summary.workspaces.flatMap((w) => w.agents.map((agent) => ({ agent, workspace: w.name })));
+}
+
+/**
+ * Which of a node's agents just started wanting a human: `noticeStatuses`'
+ * rule — a move into `blocked` or `done`, never a state first seen — over a
+ * list rather than the host's. `before` is what was last seen, by the
+ * node's own ids, and the answer carries what to remember next.
+ */
+export function statusEdges(
+  before: ReadonlyMap<string, AgentStatus>,
+  agents: readonly RemoteAgent[],
+): { seen: Map<string, AgentStatus>; edges: Array<RemoteAgent & { event: NotifyEvent }> } {
+  const seen = new Map<string, AgentStatus>();
+  const edges: Array<RemoteAgent & { event: NotifyEvent }> = [];
+  for (const one of agents) {
+    const { agent } = one;
+    seen.set(agent.id, agent.status);
+    const was = before.get(agent.id);
+    if (was === undefined || was === agent.status || agent.exited) continue;
+    if (isNotifyEvent(agent.status)) edges.push({ ...one, event: agent.status });
+  }
+  return { seen, edges };
+}
+
+// ---------------------------------------------------------------------------
+// Another node's needs, as doors into this window
+// ---------------------------------------------------------------------------
+
+/** One of another node's needs, where it is: what a row in the Needs drawer and `C-a o` go to. */
+export interface NodeNeed {
+  node: string;
+  workspaceKey: string;
+  need: SummaryNeed;
+}
+
+/**
+ * Every need of the nodes this window can open, in the drawer's order: by
+ * rank, then as each node's own `needsOf` sorted them. A node that is away
+ * has none — its last summary may list a question already answered — and
+ * one from before remote workspaces has none here either, since this window
+ * cannot go to it.
+ */
+export function nodeNeeds(nodes: readonly Pick<NodeStatus, "id" | "state" | "summary">[]): NodeNeed[] {
+  const out: NodeNeed[] = [];
+  for (const node of nodes) {
+    if (node.state !== "up" || !node.summary?.watchable) continue;
+    for (const w of node.summary.workspaces) for (const need of w.needs) out.push({ node: node.id, workspaceKey: w.key, need });
+  }
+  return out;
+}
+
+/** A need of this node's or of another's: the one walk `C-a o` takes. */
+export type AnyNeed = { here: Need } | { there: NodeNeed };
+
+/**
+ * `nextNeed`, across nodes: this node's needs first, as the drawer lists
+ * them, then each node's. Where you are is the terminal with the keyboard —
+ * qualified, while a remote workspace is on screen — or, for a card with no
+ * terminal, the workspace on screen with its board showing.
+ */
+export function nextNeedAcross(
+  needs: ProfileNeeds,
+  elsewhere: readonly NodeNeed[],
+  at: {
+    focusedAgentId: string | null;
+    workspaceId: string | null;
+    remote: { node: string; workspaceKey: string } | null;
+    boardShowing: boolean;
+  },
+): AnyNeed | null {
+  const all: AnyNeed[] = [...allNeeds(needs).map((here) => ({ here })), ...elsewhere.map((there) => ({ there }))];
+  if (all.length === 0) return null;
+  const current = all.findIndex((one) => {
+    if ("here" in one) {
+      const { agent, workspaceId } = one.here;
+      if (agent) return agent.id === at.focusedAgentId;
+      return !at.remote && workspaceId === at.workspaceId && at.boardShowing;
+    }
+    const { node, workspaceKey, need } = one.there;
+    if (need.agentId) return qualify(node, need.agentId) === at.focusedAgentId;
+    return at.remote?.node === node && at.remote.workspaceKey === workspaceKey && at.boardShowing;
+  });
+  return current === -1 ? all[0]! : all[(current + 1) % all.length]!;
 }

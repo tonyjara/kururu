@@ -60,7 +60,7 @@ in a pane of *that* workspace (`devPane(workspaceId)`), never the one on screen.
 | tool | what it does |
 |---|---|
 | `kururu_status` | the profile: workspaces, every agent with status, activity, context, card; which agent is the harness; the launchers |
-| `read_agent` | `reply` (the last message of a turn, off the `Stop` hook), `transcript` (the last turns, off the JSONL), or `screen` (the terminal as text — the only one that shows a permission prompt) |
+| `read_agent` | `reply` (the last message of a turn, off the `Stop` hook), `transcript` (the last turns, off the JSONL), or `screen` (the terminal as text — the only one that shows a permission prompt). Another node's agent, by the `n:…` id `kururu_status` lists it with, is read from its screen only, off a backlog the child serializes through the watch — the one tool that reaches another node's agent, and only to read; see [nodes](nodes.md#remote-workspaces) |
 | `send_agent` | a message typed into the agent's pty with Enter — the user's own words, slash commands included; `when` (now / next / later) is kept by kururu, and nothing is typed into a prompt or under the user's hands |
 | `press_keys` | enter, escape, arrows, ctrl-c, single characters — how a prompt is answered |
 | `wait_agent` | until one of the named agents is done, blocked or exited; returns at once for a state already reached unless `include_current=false` |

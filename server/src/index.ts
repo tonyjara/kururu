@@ -109,6 +109,7 @@ import { Backup } from "./backup";
 import { mirrorFiles } from "./export";
 import { NodeHost, nodeRequestRefusal } from "./nodes";
 import { NodeWatches } from "./nodewatch";
+import { NodeNotices } from "./nodenotice";
 import { isRemote } from "../../shared/remote";
 import { Mover } from "./move";
 import { nodeOfUtterance, PeerKurus, peerKey } from "./peerkuru";
@@ -514,6 +515,8 @@ let backup!: Backup;
 let nodes!: NodeHost;
 /** Other nodes' workspaces on this window: the watches of them, and which is on screen. See `nodewatch.ts`. */
 let watches!: NodeWatches;
+/** Another node's agents wanting a human, raised on this node's clients. See `nodenotice.ts`. */
+let nodeNotices!: NodeNotices;
 /** A workspace moved to or from another node. See `move.ts`. */
 let mover!: Mover;
 /** The other nodes' Kurus: asking them, reading them, and their conversations in the drawer. Null until the links exist. See `peerkuru.ts`. */
@@ -692,6 +695,8 @@ function pushNodes(): void {
   queueMicrotask(() => {
     nodesQueued = false;
     broadcast({ type: "nodes", nodes: nodes.view() });
+    // A summary is what a node's notices are read off while no watch of it is up.
+    for (const node of nodes.statuses()) nodeNotices?.summary(node.id, node.summary, node.state === "up", watches?.watched(node.id) ?? false);
     // A link, a roster or a summary moved, and any of them can move the
     // poll — or whether this node could take it, which its summary says.
     lead?.evaluate();
@@ -1688,8 +1693,8 @@ function announce(agent: AgentSnapshot, event: NotifyEvent): void {
   const isHarness = harness.isHarness(agent.id) !== null;
   let sent = false;
   for (const [ws, st] of clients) {
-    // The parent's window is told by the parent's own gate, in a later phase;
-    // a watch is not a window to raise a card on.
+    // The parent's window is told by the parent's own gate, off what the
+    // watch relays (`nodenotice.ts`); a watch is not a window to raise a card on.
     if (st.watcher) continue;
     const verdict = notifyGate(
       { event, visible: st.watching.has(agent.id), isAgent: countsAsAgent(full), isHarness },
@@ -7327,6 +7332,10 @@ async function attach(port: Port): Promise<void> {
     openTerminal: openTerminalAt,
     machines: machinesSnapshot,
     nodes: () => nodes.statuses(),
+    remote: {
+      shown: () => watches?.shown() ?? null,
+      screen: (node, agentId) => (watches ? watches.screen(node, agentId) : Promise.resolve(null)),
+    },
     // Through the variables: the links and the peers are built further down.
     peers: {
       self: () => nodes.name(),
@@ -7521,6 +7530,13 @@ async function attach(port: Port): Promise<void> {
     changed: () => pushSnapshot(),
     log: (line) => console.log(`kururu: ${line}`),
     record: (line) => record("watch", line),
+    relayed: (node, snapshot) => nodeNotices.snapshot(node, snapshot),
+  });
+  nodeNotices = new NodeNotices({
+    clients: () => clients,
+    send,
+    settings: () => notify,
+    name: (node) => nodes.member(node)?.name ?? node,
   });
   // A node whose link came back is worth dialling at once, rather than at
   // the end of a watch's backoff: it is the box's server back after a restart.

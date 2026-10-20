@@ -64,6 +64,20 @@ to trim exactly that source. Both come back when the source does.
   A `blocked` is a permission prompt, the user's to answer and the one thing the
   voice does not say. The unread mark is untouched: a dot on a harness you have
   walked away from is still worth having, and it makes no noise.
+- **Another node's agent is noticed here too, by this node's gate.** A
+  child's own `announce` skips the parent's watch, since a watch is not a
+  window; the parent notices the edge itself (`server/src/nodenotice.ts`)
+  and runs the same gate over its own clients, with the qualified id
+  (`n:<node>:a7`) as the card's agent, so the click is a `reveal-agent` the
+  relay turns into that node's pane on this screen. The words carry the
+  node: "claude on omarchy needs input". It reads the child's relayed
+  snapshot while a watch is up, and the summary the child pushes over
+  `/link` while none is, never both: a summary a second behind the snapshot
+  would read as the agent going back and forth. A change of source is a
+  first look, learnt and not announced. It sets no unread mark — that is
+  the child's, cleared by whoever watches — and tells this node's Kuru
+  nothing, since a node's agents are its own Kuru's to hear. See
+  [nodes](nodes.md#remote-workspaces).
 - **`status.ts` can never produce `blocked`.** Nothing in a byte stream
   distinguishes "waiting for you" from "thinking". It arrives only via
   `POST /api/report`, and one report disables the heuristic for that agent

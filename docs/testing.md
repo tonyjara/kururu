@@ -107,6 +107,13 @@ left in the Dock is how a force quit reached a coalition on 2026-10-10.
 
 Kept short on purpose; the detail is in git history.
 
+- **Remote workspaces, phase 3** (2026-10-20), between the same two
+  throwaway nodes: a remote agent's `blocked` raised on the parent's client
+  off the child's summary and its `done` off the relayed snapshot, the
+  click landing on its tab, Kuru's "on the user's screen" line and a remote
+  `read_agent` over `/mcp`, and in headless Chrome the drawer's node rows,
+  `C-a o` across nodes and a node's card lit on its board. Record in
+  [the plan](plans/remote-workspaces.md#phase-3--needs-notifications-and-what-kuru-is-told-23-days).
 - **Remote workspaces, phase 1** (2026-10-20), between two throwaway nodes
   on this Mac paired by the join command: a child's `cat` shown, typed into
   and resized through the parent's relay, a split made from the parent

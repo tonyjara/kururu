@@ -5,7 +5,7 @@ A feasibility study and a plan, written 2026-10-20 from a read of the tree at
 how four other tools do the same split. Phase 0's spike ran on 2026-10-20 in
 throwaway instances and stayed out of `main`
 ([`docs/spikes/remote-workspaces-phase0.md`](../spikes/remote-workspaces-phase0.md)).
-Its answers are folded into the sections below. **Phases 1 and 4 are built**
+Its answers are folded into the sections below. **Phases 1, 3 and 4 are built**
 (2026-10-20); what they are now is in
 [`docs/nodes.md`](../nodes.md#remote-workspaces). The plan is written so that an
 agent can take one phase, read the files it names, and know what "done" is.
@@ -669,6 +669,38 @@ Depends on 1. Runs beside 3 and 4.
   reads it and says where it is.
 
 Depends on 1. Runs beside 2 and 4.
+
+**Built, 2026-10-20, and verified between two throwaway nodes on the Mac**
+(a parent on :7871 and a child on :7872, paired by the join command, from a
+scratch copy; the user's server and host untouched). Over the protocol: a
+stand-in agent on the child reported `blocked` with no watch open, and the
+parent's client was sent "… on mac-2 needs input" under the qualified id,
+read off the summary; the click's `reveal-agent` put the child's workspace on
+screen, and once the watch was up the child's own focus moved to that tab,
+which had not been the selected one; with the watch up, a `done` was raised
+off the relayed snapshot; with the terminal on the client's screen, nothing
+was (`whenVisible` off). Over `/mcp`: `kururu_status` said which node's
+workspace was on the user's screen and the agent with the keyboard there,
+`read_agent` with the qualified id read the text typed into it "through the
+link", and `send_agent` and `source=reply` were refused with the road that
+does reach it. In a real page (headless Chrome over the DevTools protocol):
+the drawer's node band as buttons, a row landing on its pane, `C-a o` from a
+local workspace onto the node's first need and then its next, and a card in
+Review with no agent opening the node's board with the card lit.
+`server/test/remoteneeds.test.ts` holds the walk, the edges and their two
+sources, the kept reveal and the read against a stand-in child. **Not yet:**
+the two real machines.
+
+Decisions taken in the building: the notices read the relayed snapshot
+while a watch is up and the summary while none is, rather than only the
+snapshot, since the watch is open only while something of the node is on
+screen and the card is most wanted when nothing is; a change of source is a
+first look and raises nothing. Kuru names another node's agent by its
+qualified id (`kururu_status` lists it), not by a `node` argument with a
+bare id, so that an acting tool handed the id refuses it by its prefix
+instead of finding this node's own `a7`. A remote `read_agent` is the screen
+only. Done on a node's card in the drawer is phase 4's, which landed
+first; the node's band carries both.
 
 ### Phase 4 — starting work from here (2 days)
 
