@@ -22,6 +22,16 @@
  * — offset, queue, held messages, reply map, handled ids — before the new
  * holder polls, so nothing is read twice or lost between them.
  *
+ * **Why the chat is not told.** It was, once per move — "Omarchy's Kuru is
+ * in charge", "the Mac's Kuru is back in charge" — so that a reply marked
+ * `[Omarchy]` would not be a surprise. But the poll moves every time a lid
+ * closes and opens, which is several times a day, and nothing about it is
+ * the user's to act on: every Kuru answers in the chat whichever node reads
+ * it, and a message for one that is away says so (`heldLine`). So it moves
+ * silently, and where it is lives on the pages that are about it —
+ * Settings → Channels, the doctor's `leading` row — with every move in
+ * `lifecycle.log` (`moved`).
+ *
  * **Why not a vote.** Two nodes that both believe they lead are a split
  * tailnet, and Telegram's 409 already says so to both; rank decides who
  * backs off (`LeadGate.conflict`). No node needs to agree with another
@@ -41,7 +51,7 @@
  */
 import { randomBytes } from "node:crypto";
 
-import { asTelegramSwitch, backLine, nodeSubject, switchPayload, switchTime, tookLine, type LeadStatus, type TelegramSwitch } from "../../shared/channels";
+import { asTelegramSwitch, nodeSubject, switchPayload, switchTime, type LeadStatus, type TelegramSwitch } from "../../shared/channels";
 import { asLeadState, asTelegramIn, asTelegramOut, LeadGate, type LeadInput, type LeadPeer, type LinkMessage, type NodeStatus, type Sign, type Verify } from "../../shared/nodes";
 import { signAsNode, verifySigned } from "./nodekeys";
 import type { NodeHost } from "./nodes";
@@ -87,6 +97,8 @@ export interface LeadDeps {
   /** The switch moved on the parent's own file, by a flip made here or heard: the roster again. */
   switched?: () => void;
   log: (line: string) => void;
+  /** The poll moved to or from this node: the line `lifecycle.log` keeps, beside the log. */
+  moved?: (line: string) => void;
   /** For tests: this node's key, and the check of another's. */
   sign?: Sign;
   verify?: Verify;
@@ -107,7 +119,7 @@ export class TelegramLead {
   private handing: { id: string; peer: string } | null = null;
   /**
    * The next poll this node starts is the one it held before its server
-   * restarted: carried on, not taken over, so the chat is told nothing.
+   * restarted: carried on, not taken over, so it is not a move.
    */
   private carryingOn: boolean;
   /** The busy answer last logged, so a holder asked every thirty seconds is one line, not twenty. */
@@ -125,10 +137,7 @@ export class TelegramLead {
     this.carryingOn = telegram.resumes;
     telegram.connect({
       deliver: (held) => nodes.linked(held.node) && nodes.send(held.node, { type: "telegram-in", id: held.id, at: held.at, text: held.text }),
-      away: (nodeId) => {
-        const status = nodes.statuses().find((n) => n.id === nodeId);
-        return { name: nodes.nameOf(nodeId) ?? "that node", since: status ? (status.state === "up" ? null : (status.lastSeen ?? status.since)) : null };
-      },
+      away: (nodeId) => nodes.nameOf(nodeId) ?? "that node",
       relay: (line) => {
         const holder = this.holder();
         return holder !== null && holder !== nodes.selfId() && nodes.send(holder, { type: "telegram-out", ...line });
@@ -136,7 +145,7 @@ export class TelegramLead {
       conflict: () => this.conflict(),
       woke: () => {
         this.gate.woke(this.now());
-        deps.log("lead: this node was asleep while it held the Telegram poll; it stopped, and looks again once its links are back");
+        this.move("this node was asleep while it held the Telegram poll; it stopped, and looks again once its links are back");
         this.deps.changed();
         this.evaluate();
       },
@@ -262,9 +271,10 @@ export class TelegramLead {
     switch (step.do) {
       case "poll":
         if (!telegram.polling) {
-          telegram.lead(true, this.carryingOn ? null : this.takeoverLine(input));
+          telegram.lead(true);
           this.gate.took();
-          this.deps.log(`lead: this node polls Telegram for the others ${this.carryingOn ? "again, as it did before its restart" : "now"}`);
+          if (this.carryingOn) this.deps.log("lead: this node polls Telegram for the others again, as it did before its restart");
+          else this.move(`this node polls Telegram for the others now${this.awayAbove(input)}`);
         }
         this.carryingOn = false;
         break;
@@ -272,7 +282,7 @@ export class TelegramLead {
         this.carryingOn = false;
         if (telegram.polling) {
           telegram.lead(false);
-          this.deps.log(`lead: this node stopped polling Telegram (${step.why})`);
+          this.move(`this node stopped polling Telegram (${step.why})`);
         }
         break;
       case "ask": {
@@ -291,18 +301,17 @@ export class TelegramLead {
     this.schedule(wait);
   }
 
-  /**
-   * The line the chat gets when this node takes the poll because those
-   * above it went away: one line, naming them and since when. A node that
-   * takes it with nobody above it gone — the Mac starting — says nothing.
-   */
-  private takeoverLine(input: LeadInput): string | null {
+  /** Why this node took the poll, when it is because those above it went away: who, and since when. */
+  private awayAbove(input: LeadInput): string {
     const away = input.peers.filter((p) => p.rank < input.rank && !p.up && p.eligible !== false);
-    if (!away.length) return null;
-    return tookLine(
-      this.name(this.deps.nodes.selfId()),
-      away.map((p) => ({ name: this.name(p.id), since: p.since })),
-    );
+    if (!away.length) return "";
+    return ` — away: ${away.map((p) => `${this.name(p.id)}${p.since ? ` since ${new Date(p.since).toISOString()}` : ""}`).join(", ")}`;
+  }
+
+  /** A move of the poll: the server's log, and `lifecycle.log`, where "why is Omarchy answering" is looked up. */
+  private move(line: string): void {
+    this.deps.log(`lead: ${line}`);
+    this.deps.moved?.(line);
   }
 
   /** A node above asks for the poll. Handed over unless this node is mid-conversation and the ask is not forced. */
@@ -327,7 +336,7 @@ export class TelegramLead {
     const state = telegram.handOver();
     this.handing = { id: message.id, peer };
     nodes.send(peer, { type: "lead-state", id: message.id, state });
-    this.deps.log(`lead: handed the Telegram poll to ${this.name(peer)}`);
+    this.move(`handed the Telegram poll to ${this.name(peer)}`);
     this.deps.changed();
   }
 
@@ -350,8 +359,8 @@ export class TelegramLead {
     }
     if (telegram.polling) return;
     this.gate.took();
-    telegram.lead(true, state ? backLine(this.name(nodes.selfId())) : null);
-    this.deps.log(`lead: took the Telegram poll back from ${this.name(peer)}`);
+    telegram.lead(true);
+    this.move(`took the Telegram poll back from ${this.name(peer)}`);
     this.deps.changed();
     this.evaluate();
   }
@@ -359,10 +368,10 @@ export class TelegramLead {
   /** Telegram said 409: rank says whether this node stands down for five minutes or retries in thirty seconds. */
   private conflict(): void {
     const side = this.gate.conflict(this.input(), this.now());
-    this.deps.log(
+    this.move(
       side === "lower"
-        ? "lead: Telegram said 409 — another node polls this bot too; this one ranks lower and stands down for five minutes"
-        : "lead: Telegram said 409 — another node polls this bot too; this one ranks highest and tries again in thirty seconds",
+        ? "Telegram said 409 — another node polls this bot too; this one ranks lower and stands down for five minutes"
+        : "Telegram said 409 — another node polls this bot too; this one ranks highest and tries again in thirty seconds",
     );
     this.evaluate();
   }
@@ -379,7 +388,9 @@ export class TelegramLead {
     if (refusal) throw new Error(refusal);
     if (telegram.switchedOn === enabled) return;
     const self = nodes.selfId();
-    const unsigned = { enabled, at: switchTime(Date.now(), telegram.switchWord()?.at ?? null), by: self, told: telegram.hasToken };
+    // `told` always: nobody tells the chat about the switch now, and a node
+    // from before reads false as "the node reading the chat says it".
+    const unsigned = { enabled, at: switchTime(Date.now(), telegram.switchWord()?.at ?? null), by: self, told: true };
     const change: TelegramSwitch = { ...unsigned, sig: (this.deps.sign ?? signAsNode)(switchPayload(unsigned)) };
     telegram.takeSwitch(change);
     this.deps.log(`lead: the Telegram channel was switched ${enabled ? "on" : "off"} here`);

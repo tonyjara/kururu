@@ -103,8 +103,9 @@ webhook, nothing near the tailnet.
 
 **Off is nothing read and nothing sent.** The poll runs only while the
 channel is on, or while you are pairing; switching off aborts the request
-in flight rather than letting it run out, empties the queue out, and sends
-one last quiet line ("Kuru stopped listening here"). Telegram keeps what the
+in flight rather than letting it run out, and empties the queue out. Nothing
+is said in the chat either way, on or off: the switch is in Settings, where
+you flipped it. Telegram keeps what the
 bot is sent for a day, so when it comes back on, anything sent before that
 moment is dropped rather than delivered late, and the chat is told how much.
 
@@ -126,6 +127,16 @@ the page.
 | Your words from here — spoken or typed | as Kuru takes them | **silent** (`disable_notification`): "🎙 You said: …", "⌨️ You typed: …" |
 | A message from Telegram that failed in the outbox | as it fails | a line saying so, and that Resend is in the drawer |
 | "typing…" | while Kuru works on something sent from the chat | `sendChatAction`, every 4.5 s, up to ten minutes |
+| "The Mac is away; this reaches its Kuru when it is back." | linked as [nodes](nodes.md#where-a-message-goes): the first message for a node that is away, and not again while anything waits for it | a quiet line |
+
+**Nothing about the channel itself goes.** Switching it on or off, and —
+with nodes — which node reads the chat and every move of that, are not
+said in the chat: none of it is the user's to act on, and the poll moves
+every time the Mac's lid does. Settings → Channels shows who reads it, and
+`lifecycle.log` keeps every move ([One Telegram](nodes.md#who-reads-it-and-when-that-moves)).
+The lines kururu does add are answers to something the user just did — a
+pairing, a photo it cannot pass on, `@omarchy` with nothing after it,
+messages sent while it was off — or the held line above.
 
 The echo of your own words is what makes the chat read like the drawer:
 without it, a reply to something said at the Mac arrives with no question in
@@ -190,7 +201,9 @@ while it is away — and every Kuru speaks in it, each child's lines marked
 `[Omarchy] …`. `@omarchy` or `/omarchy` at the front of a message, or a
 reply to one of its lines, reaches that node's Kuru (`routeOf`). There
 is no composer of ours there to autocomplete or bold a name, as the
-drawer's does; Telegram's own `@` offers usernames, not nodes. The
+drawer's does; Telegram's own `@` offers usernames, not nodes. Which
+node reads the chat moves in silence; the chat hears only that a message
+waits, once, when the node it is for is away. The
 list rides in the roster, so it is set on the parent only; the switch is
 flipped on any node and reaches the others, the Mac when it is back
 ([The switch, from any node](nodes.md#the-switch-from-any-node)). A child's

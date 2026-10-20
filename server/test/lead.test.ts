@@ -13,7 +13,6 @@ import { describe, expect, it } from "bun:test";
 
 import {
   adoptSharedTelegram,
-  backLine,
   heldLine,
   markLine,
   mergeReplies,
@@ -23,7 +22,6 @@ import {
   repliedNode,
   REPLY_MAP_MAX,
   routeOf,
-  tookLine,
   updatesFrom,
   type ReplyMap,
 } from "../../shared/channels";
@@ -312,11 +310,8 @@ describe("the lines", () => {
     expect(markLine(null, "The build passed.")).toBe("The build passed.");
   });
 
-  it("says who is in charge, and since when the others were away", () => {
-    const at = new Date(2026, 9, 18, 23, 10).getTime();
-    expect(tookLine("omarchy", [{ name: "mac", since: at }])).toBe("Omarchy's Kuru is in charge. The Mac has been away since 23:10.");
-    expect(backLine("mac")).toBe("The Mac's Kuru is back in charge.");
-    expect(heldLine("mac", at)).toBe("The Mac is away (since 23:10), so this waits for it and reaches its Kuru when it is back.");
+  it("says a message waits for a node that is away, and nothing about who reads the chat", () => {
+    expect(heldLine("mac")).toBe("The Mac is away; this reaches its Kuru when it is back.");
     expect(nodeSubject("box-2")).toBe("Box-2");
   });
 

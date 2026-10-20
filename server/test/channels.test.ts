@@ -457,12 +457,11 @@ describe("TelegramChannel", () => {
     ]);
   });
 
-  it("sends nothing once switched off, past the one line that says so", async () => {
+  it("sends nothing once switched off, not even a line that says so", async () => {
     const fake = fakeTelegram();
     const { channel: c, said } = await ready(fake);
-    c.set({ enabled: false });
-    await until(() => fake.sent().some((m) => m.text.startsWith("Kuru stopped listening")));
     const sent = fake.sent().length;
+    c.set({ enabled: false });
     c.post("pk-main", "a reply");
     fake.deliver(ME, "are you there");
     await new Promise((resolve) => setTimeout(resolve, 80));

@@ -679,7 +679,12 @@ export interface TelegramSwitch {
   at: number;
   /** The node that made it. Its key in the roster is what checks `sig`. */
   by: string;
-  /** That node told the chat itself. One with no token could not, so the node that reads the chat does. */
+  /**
+   * That node told the chat itself, so no other node should. Nobody tells
+   * the chat about the switch any more; it is always true, which is also
+   * what keeps a node from before that quiet when it hears a flip. Kept
+   * because it is under the signature.
+   */
   told: boolean;
   /** Ed25519 by `by`'s node key over `switchPayload`, base64. */
   sig: string;
@@ -842,35 +847,16 @@ export function emptyAddress(name: string): string {
   return `Write something after @${name} for ${nodeSubject(name)}'s Kuru.`;
 }
 
-/** A time of day the way the chat says it, for "away since 23:10". */
-function clockOf(at: number): string {
-  const d = new Date(at);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
 /**
- * What the chat is told once, the first time a message waits for a node
- * that is away: that it waits, and that it is not lost. Once per absence,
- * not per message, since the second message waits the same way.
+ * The one line kururu adds to the chat about the nodes: the first message
+ * that waits for a node that is away. Something the user has to know, since
+ * no answer is coming yet — and nothing else about the nodes is, so who
+ * reads the chat, and when that moves, is never said here
+ * (`docs/nodes.md#one-telegram`). Short, and once while anything waits for
+ * that node.
  */
-export function heldLine(name: string, since: number | null): string {
-  return `${Subject(name)} is away${since ? ` (since ${clockOf(since)})` : ""}, so this waits for it and reaches its Kuru when it is back.`;
-}
-
-/**
- * The one line the chat gets when a node takes the poll over because those
- * ranked above it went away: who answers now, and since when the others
- * were gone — so a reply marked `[Omarchy]` is not a surprise.
- */
-export function tookLine(self: string, away: ReadonlyArray<{ name: string; since: number | null }>): string {
-  const gone = away.map((a) => `${nodeSubject(a.name)}${a.since ? ` since ${clockOf(a.since)}` : ""}`);
-  const said = gone.length === 0 ? "" : gone.length === 1 ? ` ${Subject(away[0]!.name)} has been away${away[0]!.since ? ` since ${clockOf(away[0]!.since)}` : ""}.` : ` Away: ${gone.join(", ")}.`;
-  return `${Subject(self)}'s Kuru is in charge.${said}`;
-}
-
-/** The line when the poll comes back up the ranks by the handshake. */
-export function backLine(self: string): string {
-  return `${Subject(self)}'s Kuru is back in charge.`;
+export function heldLine(name: string): string {
+  return `${Subject(name)} is away; this reaches its Kuru when it is back.`;
 }
 
 /**

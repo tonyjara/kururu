@@ -706,9 +706,8 @@ with the times passed in:
   was reading too (a split that healed).
 - **Taking over**: every eligible node above has been unheard for 30 s —
   counted from this server's own start too, so a node that restarts gives
-  the links that long. The chat gets one line: *"Omarchy's Kuru is in
-  charge. The Mac has been away since 23:10."* A node that read the chat
-  when its server stopped carries on at once.
+  the links that long. A node that read the chat when its server stopped
+  carries on at once.
 - **Taking back**: a node that should lead and sees a lower one reading
   waits for that link to be up for 60 s, then sends `lead-ask`. The holder
   answers `lead-busy` while the user wrote in the chat in the last two
@@ -717,15 +716,29 @@ with the times passed in:
   it stops polling and answers `lead-state` with everything it knew — the
   offset, the queue of lines going out, the messages held for nodes that
   are away, the reply map, the last hundred message ids it passed on — and
-  the asker adopts it, acknowledges with `lead-ack`, and polls. The chat
-  gets *"The Mac's Kuru is back in charge."* Until the acknowledgement the
-  old holder keeps its copy aside, and puts it back if the link drops.
+  the asker adopts it, acknowledges with `lead-ack`, and polls. Until the
+  acknowledgement the old holder keeps its copy aside, and puts it back if
+  the link drops.
 - **A pairing** on the parent while a child reads the chat asks for it back
   at once and with force: the code arrives through the poll.
 - **The 409**: two nodes that both read the chat are a split tailnet. The
   one with an eligible node above it stands down for five minutes, the
   highest retries after thirty seconds, and each says which in its log —
   one line per 409.
+
+**The chat is never told.** Not when a node takes over, not when the Mac
+takes it back, not on a 409 or a stand-down: the poll moves every time a
+lid closes and opens, the user has nothing to do about it, and every Kuru
+answers in the chat whichever node reads it. It used to say *"Omarchy's
+Kuru is in charge…"* and *"The Mac's Kuru is back in charge"*, and that was
+a message a move, several a day. Where the poll is shows in Settings →
+Channels' list and the doctor's `leading` row
+([What draws it](#what-draws-it)), and every move is a `telegram` line in
+`lifecycle.log` on the node it moved to or from — took it, with who was
+away and since when; handed it to; took it back from; stopped, and why;
+asleep while holding it; the 409 and which way it went. `bun run status`
+and Settings → About print them with the restarts. A node carrying on after
+its own restart is not a move and writes none.
 
 ### The switch, from any node
 
@@ -762,10 +775,11 @@ phone, the Mac shut, the box at home the one that could read the chat.
   shut, and nothing a child said is undone by the Mac coming back with an
   older roster. A flip on the Mac made later than the box's while the two
   were apart is the later word and stands.
-- **Told once.** The node that flips tells the chat — *"Kuru is listening
-  here now."* or *"Kuru stopped listening here…"* — if it holds the token.
-  A node with none can only switch off, and then the node reading the chat
-  says it when it hears.
+- **The chat is not told.** The switch is in Settings, where it was
+  flipped; the chat used to get *"Kuru is listening here now."* or *"Kuru
+  stopped listening here…"*, and no longer does. A flip still carries
+  `told`, always true now, because it is under the signature and because a
+  node from before reads false as its cue to say it.
 - **What a node may not do.** Turn it on without a token of its own: the
   node the user is standing at is often the only one awake to read the
   chat, so a box with nothing lent says *"This node holds no bot token, so
@@ -803,10 +817,13 @@ A message for another node crosses as `telegram-in` and goes into that
 node's outbox under the same id, so it is typed into its Kuru as
 `[telegram] …` and its reply comes back the way every line does. The reader
 keeps it until `telegram-in-ack`; for a node that is away it is **held** —
-in the state the next holder is handed — and the chat is told once per
-absence: *"The Mac is away (since 23:10), so this waits for it and reaches
-its Kuru when it is back."* It goes the moment that node links, a day at
-most.
+in the state the next holder is handed — and the chat is told, once, when
+the first message starts waiting: *"The Mac is away; this reaches its Kuru
+when it is back."* Not again while anything still waits for that node,
+which is read off the held list itself, so a server restart or the poll
+moving does not repeat it. It goes the moment that node links, a day at
+most. This is the one line about the nodes kururu ever puts in the chat,
+because it is the one the user has to know: no answer is coming yet.
 
 ### Every Kuru's lines
 
