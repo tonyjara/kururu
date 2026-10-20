@@ -1044,8 +1044,12 @@ export type ClientMessage =
    * the pane it lands in is focused, because a file opened somewhere you are not
    * looking has not been opened as far as you can tell. Replied to with the
    * agent id it went to.
+   *
+   * `paneId` and `line` are a reader tab's "Open in Neovim": a new nvim in
+   * that tab's pane rather than the focused one, at the line the reader was
+   * showing.
    */
-  | { type: "open-in-editor"; id: number; root: string; path: string; agentId: string | null }
+  | { type: "open-in-editor"; id: number; root: string; path: string; agentId: string | null; paneId?: string; line?: number | null }
   /**
    * Open what an agent made — a link under its sidebar row, on its card, or a
    * path in one of Kuru's replies (`shared/made.ts`). Markdown goes to the

@@ -23,6 +23,38 @@ import { useEffect, useRef, useState } from "react";
 import { drawDiagrams } from "../mermaid";
 import { DocPicker } from "./DocPicker";
 
+/**
+ * The line each pane's reader is showing, asked for by its tab's "Open in
+ * Neovim". A table here rather than the DOM queried from the strip, because
+ * the reader is the one that knows which document is under it and the strip
+ * should not learn its markup; one entry per pane, the one drawn now.
+ */
+const showing = new Map<string, { root: string; path: string; line: () => number | null }>();
+
+/**
+ * The line of `path` at the top of the reader in `paneId`, or null for the
+ * top of the file — a reader not scrolled, a reader showing another document,
+ * or none at all. Read off the `data-line` each block carries (`markdown.ts`):
+ * the last block whose top is at or above the reader's, which is the one the
+ * eye is in.
+ */
+export function readingLine(paneId: string, root: string, path: string): number | null {
+  const entry = showing.get(paneId);
+  return entry && entry.root === root && entry.path === path ? entry.line() : null;
+}
+
+function lineAtTop(scroller: HTMLElement): number | null {
+  if (scroller.scrollTop < 1) return null;
+  const top = scroller.getBoundingClientRect().top + 4;
+  let line: number | null = null;
+  for (const block of scroller.querySelectorAll<HTMLElement>("[data-line]")) {
+    if (block.getBoundingClientRect().top > top) break;
+    const n = Number(block.dataset.line);
+    if (Number.isInteger(n) && n > 0) line = n;
+  }
+  return line;
+}
+
 interface Rendered {
   path: string;
   title: string;
@@ -113,6 +145,15 @@ export function ReaderView({
   useEffect(() => {
     scroller.current?.scrollTo({ top: 0 });
   }, [root, path]);
+
+  useEffect(() => {
+    if (!path) return;
+    const entry = { root, path, line: () => (scroller.current ? lineAtTop(scroller.current) : null) };
+    showing.set(paneId, entry);
+    return () => {
+      if (showing.get(paneId) === entry) showing.delete(paneId);
+    };
+  }, [paneId, root, path]);
 
   /**
    * A reader with nothing in it *is* the picker, rather than a message about

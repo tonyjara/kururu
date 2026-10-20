@@ -119,6 +119,13 @@ different from the board:
   tab clicked, a file dropped or picked — pins (`switchTab`, `placeTab`), since the
   next `:w` would otherwise take it back.
 
+**A document tab's right-click, or a long press, is Open in Neovim:** a new
+nvim tab in that pane — the tree's `open-in-editor` with a `paneId` — at the
+line the reader was showing. Every block of the rendered file carries
+`data-line`, its first line in the source (`markdown.ts`), and `readingLine`
+in `Reader.tsx` takes the last one at or above the reader's top; a reader not
+scrolled, or a tab that is not the one showing, opens at the top.
+
 `persist.ts` writes a pane's view tabs as `tabs` (the board and documents in
 order) and `showing`, and reads the older `reader`/`board` shape; `adoptReaders`
 turns a host blob's `reader.docs` into tabs, which is how an old server's
