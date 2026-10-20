@@ -792,7 +792,12 @@ it opens is the caller's to say, where it goes next is not.
 
 Prefix is **ctrl+a**, ghosttown's. Press it twice to send `\x01` through. The ⌘
 shortcuts (⌘D ⇧⌘D ⌘T ⇧⌘W ⌘[ ⌘]) are a second door onto the same action table in
-`App.tsx`, not a second implementation; ⌘W and ⌘R stay Electron's.
+`App.tsx`, not a second implementation; ⌘W and ⌘R stay Electron's. ⌘, is the
+Kuru drawer (`open-harness`, beside `C-a a`) rather than Settings, which is
+`C-a g`; the menu never bound it. ⌘. beside it is the Needs drawer
+(`open-needs`, beside `C-a i`) — not interrupt, which in a pane is ctrl+c.
+Like the rest of the ⌘ row they are fixed, not in the rebindable table, which
+holds only what follows the prefix (`drawerChord` in `web/src/keys.ts`).
 
 **The prefix is a mode, so it is always labelled.** `StatusBar` — the
 window-wide bar along the bottom, which otherwise holds the count of running
