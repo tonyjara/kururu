@@ -555,7 +555,7 @@ function NodeBand({
 }) {
   const summary = node.summary!;
   const here = !!summary.watchable;
-  const old = `Open ${node.name}'s kururu. Update it (kururu child update) to open its workspaces in this window.`;
+  const old = node.parent ? `Open ${node.name}'s kururu` : `Open ${node.name}'s kururu. Update it (kururu child update) to open its workspaces in this window.`;
   /** The node's answer to a Done, by card, while it is the latest word on that row. */
   const [said, setSaid] = useState<{ cardId: string; text: string } | null>(null);
   const [asking, setAsking] = useState<string | null>(null);

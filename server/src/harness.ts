@@ -1320,7 +1320,13 @@ export class Harness {
       return fail(`Only the screen of an agent on ${node.name} can be read from here; its replies and transcript are ${node.name}'s. read_kuru ${node.name} reads what its Kuru said, and ask_kuru ${node.name} asks it.`);
     }
     if (node.state !== "up") return fail(`${node.name} is away, so its screens cannot be read; kururu_status shows the last it said.`);
-    if (!node.summary?.watchable || !this.deps.remote) return fail(`${node.name}'s kururu is too old to be read from here (kururu child update there). ask_kuru ${node.name} instead.`);
+    if (!node.summary?.watchable || !this.deps.remote) {
+      return fail(
+        node.parent
+          ? `${node.name} is the parent, and nothing reads the parent's terminals from another node. ask_kuru ${node.name} instead.`
+          : `${node.name}'s kururu is too old to be read from here (kururu child update there). ask_kuru ${node.name} instead.`,
+      );
+    }
     let found: { agent: SummaryAgent; workspace: string } | null = null;
     for (const w of node.summary.workspaces) {
       const agent = w.agents.find((a) => a.id === there.id);

@@ -604,7 +604,9 @@ export interface NodeSummary {
    * its own `/ws` let in by the node handshake — at this version
    * (`WATCHABLE`). Absent from a kururu from before remote workspaces, whose
    * rows the parent goes on drawing as links to it, with "update it to open
-   * it here" in their tooltip. See `docs/plans/remote-workspaces.md`.
+   * it here" in their tooltip — and from the parent itself, which nothing
+   * watches, so that a child's page never draws the Mac's rows as doors a
+   * watch would only be refused through. See `docs/plans/remote-workspaces.md`.
    */
   watchable?: number;
   /**
@@ -654,6 +656,8 @@ export interface SummaryInput {
   lead?: { eligible: boolean; polls: boolean };
   /** What this node's `+` menu offers. */
   launchers: readonly Launcher[];
+  /** Whether a parent may watch this node: every node but the parent itself (`watchRefusal`). */
+  watchable: boolean;
 }
 
 /**
@@ -714,7 +718,7 @@ export function summarize(input: SummaryInput): NodeSummary {
     sees: [...input.sees],
     dataMark: input.dataMark,
     talks: PEER_TALK,
-    watchable: WATCHABLE,
+    ...(input.watchable ? { watchable: WATCHABLE } : {}),
     launchers: input.launchers.map((l) => ({ ...l })),
     drives: DRIVES,
     ...(input.lead ? { lead: { ...input.lead } } : {}),

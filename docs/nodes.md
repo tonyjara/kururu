@@ -1030,7 +1030,10 @@ before keeps its rows as links to its page. A reveal asked while the watch
 is still opening, which is the usual case for a click from the drawer or a
 notification, is kept (`NodeWatch.pending`) and sent to the child with its
 first snapshot, so the child's focus moves to the terminal and not only
-the window to the workspace.
+the window to the workspace. The parent's own summary does not say `watchable`,
+since nothing watches it: a child's page draws the Mac's rows as links to
+the Mac's page, raises no card for its agents, and its Kuru reads none of
+their screens.
 
 **Notifications** for a node's agent are this node's, by this node's gate:
 see [notifications](notifications.md#rules). Off the relayed snapshot while

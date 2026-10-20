@@ -291,3 +291,19 @@ describe("what Kuru is told", () => {
     expect(text).not.toMatch(/id a7\b/);
   });
 });
+
+describe("the parent, seen from a child", () => {
+  it("is neither a door, a notice nor a screen to read, since nothing watches it", () => {
+    const need = { kind: "asking" as const, agentId: "a7", cardId: null, title: "claude" };
+    const { watchable: _w, ...parentSummary } = summaryOf("k1", [summaryAgent("a7", "blocked")], [need]);
+    const parent = { ...node(OMARCHY, "mac", parentSummary as NodeSummary), parent: true };
+    expect(nodeNeeds([parent])).toEqual([]);
+    expect(nodesText([parent]).join("\n")).not.toContain(qualify(OMARCHY, "a7"));
+    const sent: ServerMessage[] = [];
+    const notices = new NodeNotices({ clients: () => new Map([[{} as WebSocket, { watching: new Set<string>() }]]), send: (_ws, msg) => sent.push(msg), settings: () => DEFAULT_NOTIFY, name: () => "mac" });
+    // Blocked, then done: an edge a child's summary would raise a card on.
+    notices.summary(OMARCHY, parentSummary as NodeSummary, true, false);
+    notices.summary(OMARCHY, { ...(parentSummary as NodeSummary), workspaces: [{ ...parentSummary.workspaces[0]!, agents: [summaryAgent("a7", "done")] }] }, true, false);
+    expect(sent).toEqual([]);
+  });
+});

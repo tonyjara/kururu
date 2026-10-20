@@ -20,6 +20,7 @@ import {
   defaultNodeName,
   dialTargets,
   DRIVES,
+  WATCHABLE,
   formatCode,
   freeName,
   joinCommand,
@@ -318,6 +319,7 @@ describe("summarize", () => {
     sees: ["n000000000002"],
     dataMark: "1.2.3@4",
     launchers: LAUNCHERS.filter((l) => l.cli === "codex"),
+    watchable: true,
   });
 
   it("carries each workspace with its folder, band and agents, the harness left out", () => {
@@ -346,13 +348,24 @@ describe("summarize", () => {
   it("marks a card's need whose move to Done is a plain one, and only a card's", () => {
     const review = moveCard(addCard(emptyBoard(), { title: "Read me", column: "doing" }, "c9", 1), "c9", "review");
     const plain = summarize({
-      ...{ at: 1, version: "x", host: { version: "x", current: true }, kuru: { unheard: 0, undelivered: 0 }, leads: false, sees: [], dataMark: "m", launchers: [] },
+      ...{ at: 1, version: "x", host: { version: "x", current: true }, kuru: { unheard: 0, undelivered: 0 }, leads: false, sees: [], dataMark: "m", launchers: [], watchable: true },
       profile: { ...profile, workspaces: [workspace("w3", "docs", [], { board: review }), workspace("w1", "api", ["a1"])] } as Profile,
       agents: [agent("a1", { status: "blocked" })],
       folderOf: () => null,
     });
     expect(plain.workspaces[0]!.needs).toEqual([{ kind: "review", agentId: null, cardId: "c9", title: "Read me", plainDone: true }]);
     expect(plain.workspaces[1]!.needs[0]).not.toHaveProperty("plainDone");
+  });
+  it("says it can be watched, except from the parent, which nothing watches", () => {
+    expect(summary.watchable).toBe(WATCHABLE);
+    const parent = summarize({
+      ...{ at: 1, version: "x", host: { version: "x", current: true }, kuru: { unheard: 0, undelivered: 0 }, leads: false, sees: [], dataMark: "m", launchers: [] },
+      profile,
+      agents,
+      folderOf: () => null,
+      watchable: false,
+    });
+    expect(parent).not.toHaveProperty("watchable");
   });
   it("compares without its timestamp", () => {
     expect(summaryKey({ ...summary, at: 99 })).toBe(summaryKey(summary));

@@ -796,6 +796,8 @@ function nodeSummary(leads: boolean, sees: string[]): NodeSummary {
     dataMark: `${marks.events}.${marks.turns}.${store.changes}@${STARTED_AT}`,
     ...(lead ? { lead: { eligible: leadEligibility().eligible, polls: channels.telegram.polling } } : {}),
     launchers: visibleLaunchers(launch),
+    // Nothing watches the parent, so it does not say it can be watched.
+    watchable: nodes?.role() !== "parent",
   });
 }
 
