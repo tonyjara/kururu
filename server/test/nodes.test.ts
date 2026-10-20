@@ -46,6 +46,7 @@ import {
   type NodeStatus,
   type Roster,
   type SignedRoster,
+  watchRefusal,
 } from "../../shared/nodes";
 import { verifySigned } from "../src/nodekeys";
 import { addCard, emptyBoard, startRun } from "../../shared/board";
@@ -460,5 +461,39 @@ describe("the link's handshake", () => {
     expect(parseLinkMessage('{"type":"ping","at":1}')).toEqual({ type: "ping", at: 1 });
     expect(parseLinkMessage('{"type":"rm -rf"}')).toBeNull();
     expect(parseLinkMessage("not json")).toBeNull();
+  });
+});
+
+/**
+ * The watch socket (`docs/plans/remote-workspaces.md`): the node handshake
+ * as it stands, then one more rule — the parent watches its children, and
+ * nobody else watches anyone. A sibling proves itself as well as the parent
+ * does, so the handshake lets it up; what turns it away is the rule.
+ */
+describe("who may watch", () => {
+  const three = signed(roster([entry(mac, "mac", 1), entry(omarchy, "omarchy", 2), entry(laptop, "laptop", 3)]), parentKey);
+
+  it("lets the parent in, after the handshake it dialled", () => {
+    const [m, o] = wire({ me: mac, held: three, expect: omarchy.id }, { me: omarchy, held: three });
+    expect(m!.up).toBe(omarchy.id);
+    expect(o!.up).toBe(mac.id);
+    expect(watchRefusal(o!.roster!.roster, omarchy.id, o!.up!)).toBeNull();
+  });
+  it("refuses a sibling that proved itself just as well", () => {
+    const [l, o] = wire({ me: laptop, held: three, expect: omarchy.id }, { me: omarchy, held: three });
+    expect(o!.up).toBe(laptop.id);
+    expect(l!.up).toBe(omarchy.id);
+    expect(watchRefusal(o!.roster!.roster, omarchy.id, o!.up!)).toBe("only the parent may watch this node");
+  });
+  it("refuses every watch of the parent, a child's included", () => {
+    const [o, m] = wire({ me: omarchy, held: three, expect: mac.id }, { me: mac, held: three });
+    expect(m!.up).toBe(omarchy.id);
+    expect(o!.up).toBe(mac.id);
+    expect(watchRefusal(m!.roster!.roster, mac.id, m!.up!)).toBe("nothing watches the parent");
+  });
+  it("refuses on a node in no roster, or one that has left it", () => {
+    expect(watchRefusal(null, omarchy.id, mac.id)).toBe("this node is in no roster");
+    const gone = withoutMember(three.roster, omarchy.id, 2000);
+    expect(watchRefusal(gone, omarchy.id, mac.id)).toBe("this node is in no roster");
   });
 });

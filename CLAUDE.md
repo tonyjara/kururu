@@ -339,6 +339,16 @@ The load-bearing invariants, one line each, with the argument behind the link:
   the receiver, never off the wire. Board verbs with a `node` act directly,
   never a run. A notice crosses into another drawer without the reply it
   quoted. → [nodes](docs/nodes.md#kurus-as-peers)
+- **Another node's workspace on this screen is that node's, shown here.** The
+  Mac's server watches a child as one more client of it (`/link/watch`, let in
+  by the node handshake, parent to child only, open only while something of
+  the node is on screen) and relays its session under ids qualified `n:<node>:…`
+  (`shared/remote.ts`, `server/src/nodewatch.ts`). The child owns the layout,
+  the ptys and the size; a verb from here is forwarded, never applied here. No
+  qualified id is ever written — not to `session.json`, the host's blob, the
+  database or `made.json` — and a test holds it. Kuru's rule is unchanged: the
+  user typing into a remote pane is the user; Kuru still acts locally and asks
+  a peer. → [nodes](docs/nodes.md#remote-workspaces)
 - **One Telegram bot for every node, read by one node at a time.** The
   parent's allow-list rides in the roster it signs, so only the parent
   sets it; the switch rides there too, but any node may flip it — a

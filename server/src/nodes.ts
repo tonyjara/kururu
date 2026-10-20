@@ -83,6 +83,7 @@ import {
   type Roster,
   type SignedRoster,
   validHostName,
+  watchRefusal,
 } from "../../shared/nodes";
 import type { SharedTelegram } from "../../shared/channels";
 import type { MoveCheck, MoveDone } from "../../shared/move";
@@ -256,6 +257,8 @@ export class NodeHost {
   private readonly upHooks: Array<(peer: string) => void> = [];
   private readonly downHooks: Array<(peer: string) => void> = [];
   private readonly unpairHooks: Array<() => void> = [];
+  /** The members watching this node through `/link/watch` now, with how many sockets each holds. */
+  private readonly watchers = new Map<string, number>();
   private lastSummaryKey = "";
   private lastSummaryAt = 0;
   private summaryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -499,7 +502,21 @@ export class NodeHost {
       invite: this.inviteView(),
       joined: this.lastJoined,
       reachable: this.off ? `Nodes are off for this run: ${this.off}` : this.deps.unreachable(),
+      watchedBy: [...this.watchers.keys()].map((id) => memberOf(roster, id)?.name ?? id),
     };
+  }
+
+  /** Whether a member that proved itself on `/link/watch` may watch this node; see `watchRefusal`. */
+  watchRefusal(peer: string): string | null {
+    return watchRefusal(this.roster, this.me.id, peer);
+  }
+
+  /** A member's watch of this node opened or closed: what the page's "mac is watching" says. */
+  noteWatcher(peer: string, on: boolean): void {
+    const n = (this.watchers.get(peer) ?? 0) + (on ? 1 : -1);
+    if (n > 0) this.watchers.set(peer, n);
+    else this.watchers.delete(peer);
+    this.changed();
   }
 
   /** The few facts `/api/health` carries, for `bun run status` and the doctor. */
@@ -874,6 +891,81 @@ export class NodeHost {
       dialer.timer = setTimeout(() => this.dial(nodeId), wasUp ? 1000 : dialDelay(dialer.failures));
       dialer.timer.unref();
     });
+  }
+
+  /**
+   * The node handshake and nothing after it, on a socket that is not a link
+   * — the watch socket of `docs/plans/remote-workspaces.md`. On a child,
+   * `/link/watch` runs it to let its parent in as one more `/ws` client; on
+   * the parent, `nodewatch.ts` runs it on the socket it dialled. The
+   * handshake is `LinkHandshake` as it stands; what this adds is only where
+   * the frames go once it is done.
+   *
+   * `up` is called from inside the frame that proved the peer, with this
+   * listener already off the socket, and that is the point of it. `ws`
+   * emits every frame parsed from one chunk in the same tick, so a promise
+   * resolved by the proof would let the frames behind it — the parent's
+   * first `watch`, the child's `snapshot` — fall through to nobody (phase
+   * 0's finding 2). `open` cannot be reused, because it ties the handshake
+   * to a `Link` and everything a link does after.
+   */
+  watchHandshake(ws: WebSocket, expect: string | null, up: (peer: string) => void, refused: (reason: string) => void): void {
+    if (this.closed || this.role() === "alone") {
+      ws.close(1008, "this node is in no roster");
+      refused("this node is in no roster");
+      return;
+    }
+    const handshake = new LinkHandshake({
+      self: this.me.id,
+      version: this.deps.version,
+      challenge: challenge(),
+      sign: signAsNode,
+      verify: verifySigned,
+      roster: () => this.saved.roster,
+      adopt: (incoming) => this.offer(incoming),
+      ...(expect ? { expect } : {}),
+    });
+    const send = (message: LinkMessage) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+    };
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      ws.off("message", onFrame);
+      refused("the handshake did not finish");
+      ws.terminate();
+    }, HANDSHAKE_MS);
+    timer.unref();
+    const onFrame = (data: unknown) => {
+      const message = parseLinkMessage(String(data));
+      if (!message || settled) return;
+      for (const step of handshake.receive(message)) {
+        if (step.kind === "send") send(step.message);
+        else {
+          settled = true;
+          clearTimeout(timer);
+          ws.off("message", onFrame);
+          if (step.kind === "up") up(step.peer);
+          else {
+            if (step.tell) send({ type: "refuse", reason: step.reason });
+            refused(step.reason);
+            ws.close(1008, step.reason.slice(0, 120));
+          }
+          return;
+        }
+      }
+    };
+    ws.on("message", onFrame);
+    // A socket closed mid-handshake says so once, through the same door.
+    ws.once("close", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      refused("the socket closed during the handshake");
+    });
+    if (ws.readyState === WebSocket.OPEN) send(handshake.hello());
+    else ws.once("open", () => send(handshake.hello()));
   }
 
   /** A link that came in on `/link`, already past `nodeRequestRefusal`. */

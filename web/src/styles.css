@@ -1924,6 +1924,53 @@ kbd {
   font-size: var(--fs-xs);
   color: var(--dimmer);
 }
+/* A node's head carries its hue's dot, which the band and the chips match. */
+.node-head .node-chip-dot {
+  background: var(--node-hue);
+}
+/* A watchable node's rows are buttons — they put its workspace on this
+   screen — and look like the links they replaced. The one on screen is lit
+   as a local row is, with the node's hue down its edge. */
+button.node-ws,
+.node-agent {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.node-ws-on {
+  background: var(--chrome-high);
+  box-shadow: inset calc(2 * var(--border)) 0 0 var(--node-hue);
+}
+.node-ws-on .node-ws-name {
+  color: var(--text);
+}
+.node-agents {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 2px 10px;
+}
+.node-agent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 6px;
+  border-radius: var(--radius-lg);
+  color: var(--dim);
+}
+.node-agent:hover {
+  background: var(--chrome-high);
+}
+.node-agent-name {
+  min-width: 0;
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* A machine's name, in the bottom bar's machines popover — see `Machines.tsx`. */
 .machine-name,
@@ -2853,6 +2900,95 @@ a.button {
   color: var(--dim);
 }
 
+/* Another node, by name, in its own hue — see `NodeChip.tsx`. The machines'
+   chip's shape, because it says the same kind of fact; the hue is the node's
+   (`nodeHue`), set as `--node-hue` from one of the board palette's tokens on
+   the chip or on the box it tints, so every theme says what it looks like. */
+.node-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  max-width: 16ch;
+  padding: 0 0.45em;
+  border: var(--border) var(--border-style) var(--node-hue, var(--line-high));
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.node-chip-dot {
+  flex: none;
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  background: var(--node-hue, var(--dim));
+}
+.node-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.node-chip-tab {
+  max-width: 14ch;
+}
+.node-chip-band {
+  max-width: none;
+  font-size: var(--fs-sm);
+}
+.node-chip-state {
+  color: var(--dim);
+}
+
+/* The band over another node's workspace: the strips it is made of in that
+   node's hue, its name at the left end — see `RemoteBand.tsx`. Away, the
+   panes keep what their emulators hold and grey, as the sidebar's rows do,
+   and the band keeps its colour so the name and "away since" stay legible. */
+.panes-remote .tabstrip {
+  background: var(--p-tabstrip-bg), color-mix(in srgb, var(--node-hue) 18%, var(--strip));
+}
+.panes-remote .strip-lead {
+  background: color-mix(in srgb, var(--node-hue) 18%, var(--strip));
+}
+.panes-away .pane-body,
+.panes-away .tab {
+  opacity: 0.5;
+  filter: grayscale(1);
+}
+.remote-band {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+/* What could not be sent there, for a moment: in the "wants a human" ink. */
+.remote-said {
+  font-size: var(--fs-xs);
+  color: var(--blocked);
+  white-space: nowrap;
+}
+/* A document in a remote pane, said rather than read. */
+.pane-remote-doc,
+.remote-waiting {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+}
+.pane-remote-doc p,
+.remote-waiting p {
+  margin: 0;
+}
+.remote-waiting {
+  height: 100%;
+}
+
 /* A tab's name as a field, where the name was — the sidebar's rename at the
    tab's size. Wide enough for a name rather than for the one it replaced, which
    is often an agent's summary cut off at the ellipsis; the tab's own max-width
@@ -3537,6 +3673,14 @@ a.button {
   background: transparent;
   color: var(--blocked);
   font-weight: 500;
+}
+/* On a child: the parent's window has hands on these terminals. A fact, in
+   the outlined shape, not a mode in a filled one. */
+.sb-watched {
+  border: var(--border) var(--border-style) var(--line-high);
+  color: var(--dim);
+  font-weight: 500;
+  letter-spacing: 0;
 }
 
 /* The Claude and Codex allowances at the bar's left end — see `Usage.tsx`.

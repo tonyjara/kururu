@@ -159,9 +159,12 @@ database, and the parent's are the parent's.
   - On a child: the parent's roster, read-only.
   - On a node in no roster: Add a computer, and the place to paste the
     Mac's command when this is the new computer.
-- **The sidebar's Nodes section:** each node's workspaces with their agents'
-  marks and the Needs dot, greyed with "away since" when not up. Each row is
-  a link to the node.
+- **The sidebar's Nodes section:** each node's workspaces with the Needs
+  dot, greyed with "away since" when not up. On a node that can be watched
+  (`NodeSummary.watchable`), a workspace's row puts it on this screen and
+  its agents' rows go to their terminals ([below](#remote-workspaces)); the
+  heading stays a link to the node's own page, for its Settings. An older
+  node's rows are links to it, with "update it" in the tooltip.
 - **The Needs chip and drawer:** add each up node's needs and draw a band per
   node. An away node is not counted.
 - **The Share dialog:** each node's own QR code. On the parent that QR
@@ -869,6 +872,119 @@ Kuru says it in its own words.
 | `telegram-out-ack {id}` | the reader | queued |
 | `telegram-switch {switch}` | any node, and each node that takes it | a signed flip of the switch, handed on |
 
+## Remote workspaces
+
+**Another node's workspace can be on this window, drawn by this window's
+own components, with the node doing the work.** The argument and the phases
+are in [the plan](plans/remote-workspaces.md); this is what phase 1 built.
+
+**The watch socket.** The parent's server dials the child's
+`GET /link/watch`. The child refuses what `/link` refuses (an `Origin`, a
+proxy's header, an address off the tailnet and loopback), then runs the node
+handshake (`NodeHost.watchHandshake`, `LinkHandshake` as it stands), then
+`watchRefusal`: the roster's parent may watch, and nobody else may watch
+anyone. A sibling proves itself as well as the parent does and is still
+turned away; the parent refuses every watch of itself. Past that, the
+socket is an ordinary `/ws` client of the child (`admitClient`), tagged
+`ClientState.watcher` with the node it proved. The hand-off is synchronous,
+inside the frame that proved the peer, because `ws` emits every frame of one
+chunk in one tick and the parent's first `watch` may be the next one.
+
+**A watcher is a client for the terminals and nobody for anything else.**
+It is sent the snapshot and the terminals' bytes, never the usage, voice,
+nodes or backup messages a page gets. It starts none of the polls a first
+window starts and counts in none of the "is anybody connected" checks
+(`windows()`), and it never sets `remoteClientAt`, which the setup wizard
+reads as the phone arriving. The child's notifications skip it. It does
+count where the terminals count: its `watching` clears the child's unread
+mark, its proposals size the child's ptys, and its `looking` gates them.
+
+**The relay** (`server/src/nodewatch.ts`). One `NodeWatch` per node, opened
+while that node's workspace is on screen or a client has one of its
+terminals on screen, and closed a minute after neither is. It holds the
+child's latest snapshot in memory and nothing else. Toward this node's
+clients it qualifies every id as `n:<node>:<id>` (`shared/remote.ts`).
+Toward the child it is one client whose opinion is everyone's here:
+
+- **watching** is every child terminal a client here has on screen or has
+  proposed a size for; **warm** is the ones pooled, plus any with a backlog
+  in flight. The child drops a backlog request for a terminal its watcher
+  does not list, and drops a proposal for one it does not list as on
+  screen, and a pane proposes and asks before its `watch` effect runs, so
+  the relay lists them first;
+- **looking** is true while any client here is;
+- **the size** proposed is `smallestGrid` over the clients here that see the
+  terminal and are looking. The child then takes the smallest over its own
+  clients, the relay among them, which is the smallest over everybody;
+- **output** is forwarded frame for frame, the moment it arrives, behind the
+  same per-client backlog hold `index.ts` keeps for local terminals. The
+  child's host already waits up to 16 ms, so the relay never batches.
+
+**Routing** (`route` in `shared/remote.ts`). A verb whose ids are a node's
+goes to that node with its ids bare. A verb that names nothing and means the
+focused pane (a split from the keyboard, `C-a h`) goes to the node on
+screen. The board's tab and a document's tab take the side of the pane they
+are named with. A card is found by its workspace, so its id is never
+qualified. A verb that mixes two machines' ids is refused with a sentence
+("a terminal cannot move between computers"), as is a file from this disk
+into a remote pane, and any verb outside the routed list that carries a
+qualified id. Before a focused-pane verb the relay moves the child's active
+workspace to the one on screen here, so "the focused pane" means the same
+pane on both. A reply is routed back to the client that asked, under its own
+id, with the agent it names qualified.
+
+**What is on screen.** `NodeWatches` holds which remote workspace is
+showing, by node and key, in memory. `snapshot.remote` carries it with the
+tree and its agents qualified, the child's launch settings, and the watch's
+state. A local switch by any road takes it off screen: a click, `C-a 1`, a
+reveal, Kuru's Auto Swap. A restart of this server comes back on the last
+local workspace. Showing a workspace here also makes it the child's active
+one, and a split or a focus made here moves the child's own phone, which is
+what two clients of one server have always done.
+
+**The window.** The pane area draws `remote.workspace` with the agents from
+both lists. The top band takes the node's hue (`nodeHue`, a board-palette
+token set as `--node-hue`, which the Kuru drawer's chips also wear), with
+the node's name at its left end. Every tab wears the node's chip
+(`NodeChip.tsx`). A document tab in a remote pane says it is on that node
+rather than reading this disk. The file tree is closed, since it reads this
+disk. Rename and Delete workspace do nothing while a remote workspace is on
+screen, rather than act on the local one nobody is looking at.
+
+**Away.** When the watch drops, the panes keep what their emulators hold,
+greyed, and the band says "away since 23:10". Typing is refused at this
+server with "omarchy is away — that was not typed", drawn in the band for a
+moment (`remote-said`). Every pending backlog and reply for that node is let
+go. When the watch comes back (dialled at once when the node's link comes
+up, or on `dialDelay`'s backoff), each client is sent `stale` for that
+node's terminals. A pane on screen asks for its screen again, and a pooled
+one waits until it is borrowed: the same thing `onopen` does after a
+reconnect.
+
+**Nothing of a remote workspace is written here.** `Workspaces`,
+`persist.ts`, the host's blob, `made.json` and the database never see a
+qualified id. `nodewatch.ts` imports none of them, and `handleMessage`
+returns before its switch for every verb the relay takes.
+`server/test/remote.test.ts` drives a remote workspace through the relay
+and finds no `n:` in `session.json`, the host's blob or the database.
+
+**What the child shows.** Its status bar says "mac is watching" while a
+watch is open (`NodesView.watchedBy`), and its `lifecycle.log` has a
+`watch` line for each one opened and closed. `bun run status` prints
+`watching` on the parent and `watched by` on the child.
+
+Not yet (later phases of the plan): the file tree, the reader and nvim's
+hand-offs on a remote workspace; the Needs drawer's node rows as doors here,
+and notifications for a remote agent; Kuru reading a remote agent; the `+`
+menu's launchers checked against what the box has; `C-a w` and workspace
+stepping across nodes.
+
+| message | way | what |
+|---|---|---|
+| `show-node-workspace {nodeId, workspaceKey}` | page → parent | put that workspace on screen; never forwarded |
+| `stale {agentIds}` | parent → page | those remote terminals missed bytes; rebuild as after a reconnect |
+| `remote-said {node, text}` | parent → page | a verb for that node did not go, and why |
+
 ## Files
 
 | file | where | what |
@@ -906,6 +1022,14 @@ Name each socket `ptyhost.sock`, or `kill-ptyhosts` cannot find it afterwards.
 
 `kill -STOP` on a server's pid is a lid closing (no FIN), and `kill -CONT` opens it again.
 `kill -USR2` on its runner is a restart.
+
+**For a remote workspace**, a client on the parent's `/ws` sends
+`show-node-workspace` with a key from the child's summary, then does what
+a pane does: `propose-size`, `request-backlog`, `watch` for a qualified id
+off `snapshot.remote.agents`, then `input`. A `cat` on the child is the
+agent to type into. SIGTERM on the child's server (never its host) is the
+band going grey, and starting it again is the refill. The page itself can be
+driven in headless Chrome over the DevTools protocol.
 
 **For the Kurus**, give both instances `HOME=<scratch>`, `SHELL=/bin/sh`
 and a `PATH` whose first `claude` is a stand-in. The stand-in posts

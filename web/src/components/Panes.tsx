@@ -87,6 +87,13 @@ import { Menu, type MenuAt, type MenuItem } from "./Menu";
 import { NameField } from "./NameField";
 import { Status } from "./Status";
 import { TerminalView } from "./Terminal";
+import { NodeChip } from "./NodeChip";
+
+/** Whose workspace these panes are, when it is another node's: its id for the hue, its name for the words. */
+export interface RemotePanes {
+  nodeId: string;
+  name: string;
+}
 
 interface Props {
   node: LayoutNode;
@@ -151,6 +158,12 @@ interface Props {
    * or null while it is up and carries them itself. See `leadPane` below.
    */
   lead: ReactNode;
+  /**
+   * The node these panes are, while another node's workspace is on screen,
+   * or null for this one's. Every tab wears its chip, and a document — which
+   * is on that node's disk — is said rather than read.
+   */
+  remote: RemotePanes | null;
 }
 
 /** A normalized rect as the four percentages CSS wants. */
@@ -184,6 +197,7 @@ export function Panes({
   onEditing,
   chips,
   lead,
+  remote,
 }: Props) {
   const area = useRef<HTMLDivElement>(null);
   const [resizing, setResizing] = useState(false);
@@ -362,6 +376,7 @@ export function Panes({
               onEditing={onEditing}
               chips={pane.id === chipsPane ? chips : null}
               lead={pane.id === leadPane ? lead : null}
+              remote={remote}
             />
           </div>
         );
@@ -720,6 +735,7 @@ function Pane({
   onEditing,
   chips,
   lead,
+  remote,
 }: {
   pane: PaneState;
   focused: boolean;
@@ -749,6 +765,7 @@ function Pane({
   chips: ReactNode;
   /** The sidebar's toggle and the workspace's name, in the top-left strip while the sidebar is away. */
   lead: ReactNode;
+  remote: RemotePanes | null;
 }) {
   const showing = activeAgent(pane);
   const dragging = useDragging();
@@ -963,6 +980,7 @@ function Pane({
                 <Status agent={agent} mascot={mascot} />
                 <span className="tab-label">{tabLabel(agent)}</span>
                 {remoteHost(agent) && <span className="remote-mark">{remoteHost(agent)}</span>}
+                {remote && <NodeChip nodeId={remote.nodeId} name={remote.name} className="node-chip-tab" />}
                 {agent.unread && <span className="unread" aria-label="waiting for you" />}
                 <span
                   className="tab-close"
@@ -1047,6 +1065,17 @@ function Pane({
             launchers={launchers}
             focusedAgentId={focusedAgentId}
           />
+        ) : remote && (showingDoc(pane) || (!showing && pane.reader)) ? (
+          /* A document on the other node's disk. The reader renders what
+             this server's `files.ts` reads, and this server's disk has not
+             got it: drawn as what it is rather than as a file that is not
+             there, until the reader can ask that node for it. */
+          <div className="pane-remote-doc">
+            <p>
+              {showingDoc(pane)?.path ?? "A reader"} is on {remote.name}.
+            </p>
+            <p className="muted">This window cannot open another computer's documents yet. The tab is there; open it on {remote.name}'s own page.</p>
+          </div>
         ) : showingDoc(pane) || (!showing && pane.reader) ? (
           /* A document tab, or a reader with no tabs yet — which is its picker.
              One view for both and unkeyed, so moving between two documents in

@@ -38,11 +38,14 @@ export type LifeWriter = "runner" | "app" | "server";
  * `telegram` is the shared bot's poll moving to or from this node, which
  * the chat is no longer told about (`server/src/lead.ts`): not the server
  * coming or going, but the same question — why is a different one answering.
+ * `watch` is the parent's window opening or closing its watch on this
+ * node's terminals (`/link/watch`), on either end: a client that is another
+ * computer is worth a line a phone is not.
  */
-export type LifeWhat = "start" | "restart" | "stop" | "crash" | "down" | "orphaned" | "host" | "telegram";
+export type LifeWhat = "start" | "restart" | "stop" | "crash" | "down" | "orphaned" | "host" | "telegram" | "watch";
 
 const WRITERS: readonly LifeWriter[] = ["runner", "app", "server"];
-const WHATS: readonly LifeWhat[] = ["start", "restart", "stop", "crash", "down", "orphaned", "host", "telegram"];
+const WHATS: readonly LifeWhat[] = ["start", "restart", "stop", "crash", "down", "orphaned", "host", "telegram", "watch"];
 
 export interface LifeEvent {
   /** ISO 8601, UTC. A reader turns it into local time; the file never does. */

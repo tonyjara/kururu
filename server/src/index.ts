@@ -108,6 +108,8 @@ import { isChannelKind, nodeSubject, type ChannelKind } from "../../shared/chann
 import { Backup } from "./backup";
 import { mirrorFiles } from "./export";
 import { NodeHost, nodeRequestRefusal } from "./nodes";
+import { NodeWatches } from "./nodewatch";
+import { isRemote } from "../../shared/remote";
 import { Mover } from "./move";
 import { nodeOfUtterance, PeerKurus, peerKey } from "./peerkuru";
 import { Secrets } from "./secrets";
@@ -461,6 +463,21 @@ interface ClientState {
    * first.
    */
   awaiting: Map<string, { inflight: number; queued: string[] }>;
+  /**
+   * The node this client is, when it is the parent's server watching this
+   * one through `/link/watch` rather than a window — the id the node
+   * handshake proved. Null for a window, a pill or a phone.
+   *
+   * A watcher is a client in every way the terminals count one: it watches,
+   * proposes sizes, looks, asks for backlogs and types, through the same
+   * code a phone does. It is not a window in any other way, and everything
+   * that asks "is anybody here" asks without it: it is sent the snapshot and
+   * the terminals' bytes and nothing else a page is sent, it starts none of
+   * the polls a first window starts — the parent draws its own bar — it
+   * takes no part in the voice, and it is never "the phone arriving" that
+   * the setup wizard waits for. See `docs/plans/remote-workspaces.md`.
+   */
+  watcher: string | null;
 }
 
 /**
@@ -493,6 +510,8 @@ let store!: Store;
 let backup!: Backup;
 /** This kururu among the others: pairing, the roster and the links. See `nodes.ts`. */
 let nodes!: NodeHost;
+/** Other nodes' workspaces on this window: the watches of them, and which is on screen. See `nodewatch.ts`. */
+let watches!: NodeWatches;
 /** A workspace moved to or from another node. See `move.ts`. */
 let mover!: Mover;
 /** The other nodes' Kurus: asking them, reading them, and their conversations in the drawer. Null until the links exist. See `peerkuru.ts`. */
@@ -565,6 +584,27 @@ function syncRosterChannels(): void {
 }
 const clients = new Map<WebSocket, ClientState>();
 
+/**
+ * How many of the clients are windows — pages, pills, phones — and not a
+ * parent watching this node. What every "is anybody connected" asks, since
+ * a watcher is nobody to draw a bar for.
+ */
+function windows(): number {
+  let n = 0;
+  for (const st of clients.values()) if (!st.watcher) n++;
+  return n;
+}
+
+/**
+ * What a watcher is sent of what everybody is sent: the snapshot, which is
+ * the tree it relays. The rest of a page's messages — the usage, the voice,
+ * the nodes, the backup — are about this node's own window, and the parent
+ * draws its own.
+ */
+function forWatcher(msg: ServerMessage): boolean {
+  return msg.type === "snapshot";
+}
+
 const state = {
   devServers: [] as DevServer[],
   branches: [] as WorkspaceBranch[],
@@ -582,7 +622,9 @@ function send(ws: WebSocket, msg: ServerMessage): void {
 
 function broadcast(msg: ServerMessage): void {
   const payload = JSON.stringify(msg);
-  for (const ws of clients.keys()) {
+  const watchers = forWatcher(msg);
+  for (const [ws, st] of clients) {
+    if (st.watcher && !watchers) continue;
     try {
       ws.send(payload);
     } catch {
@@ -596,7 +638,7 @@ function broadcast(msg: ServerMessage): void {
  * the harness's `reload_window`. It talks to the clients and nothing else;
  * see `reload.ts`.
  */
-const reloads = new WindowReloads<WebSocket>({ send, connected: () => clients.size });
+const reloads = new WindowReloads<WebSocket>({ send, connected: () => windows() });
 
 /**
  * Who asked for a reload, as the window's notice names them: the agent the
@@ -1257,6 +1299,8 @@ function snapshot(): SessionSnapshot {
   // is the one function that is called whenever anything about an agent changes.
   rememberAgents();
   const profile = workspaces.active;
+  // A local switch, by whatever road, puts the local workspace back on screen.
+  watches?.noteLocal(`${profile.id}/${profile.activeWorkspaceId}`);
   const mine = new Set(workspaces.agentsIn(profile.id));
   // The host holds its terminals in spawn order, which is the default and is
   // only the default: the sidebar's list can be dragged into an order of its
@@ -1289,6 +1333,7 @@ function snapshot(): SessionSnapshot {
     projectSettings: projects,
     appearance,
     styles,
+    remote: watches?.view() ?? null,
   };
 }
 
@@ -1621,6 +1666,9 @@ function announce(agent: AgentSnapshot, event: NotifyEvent): void {
   const isHarness = harness.isHarness(agent.id) !== null;
   let sent = false;
   for (const [ws, st] of clients) {
+    // The parent's window is told by the parent's own gate, in a later phase;
+    // a watch is not a window to raise a card on.
+    if (st.watcher) continue;
     const verdict = notifyGate(
       { event, visible: st.watching.has(agent.id), isAgent: countsAsAgent(full), isHarness },
       notify,
@@ -3034,10 +3082,12 @@ function reapExited(): void {
 function syncWatched(): void {
   const watched = new Set<string>();
   for (const st of clients.values()) {
-    for (const id of st.watching) watched.add(id);
-    for (const id of st.warm) watched.add(id);
+    for (const id of st.watching) if (!isRemote(id)) watched.add(id);
+    for (const id of st.warm) if (!isRemote(id)) watched.add(id);
   }
   host.watch(watched);
+  // Another node's terminals are that node's to stream: the watch says so.
+  watches?.sync();
 }
 
 /**
@@ -3117,6 +3167,12 @@ function ownedGrid(agentId: string): Grid {
  * inherited when the policy stopped being last-writer-wins. See `ClientState`.
  */
 function applySize(agentId: string): void {
+  // Another node's terminal is sized there; what this node has to say about
+  // it is one proposal, composed in `nodewatch.ts`.
+  if (isRemote(agentId)) {
+    watches?.sync();
+    return;
+  }
   const proposals: Grid[] = [];
   for (const st of clients.values()) {
     if (!st.looking) continue;
@@ -3160,6 +3216,7 @@ function dropClient(ws: WebSocket): void {
   const st = clients.get(ws);
   if (!st) return;
   clients.delete(ws);
+  watches?.leave(ws);
   syncWatched();
   for (const agentId of st.proposals.keys()) applySize(agentId);
   // A phone whose socket died with its key held must not keep Kuru quiet
@@ -3171,7 +3228,7 @@ function dropClient(ws: WebSocket): void {
   reloads.leave(ws);
   // The viewer cannot be open with nobody connected, and a connection to
   // somebody's production database is not a thing to keep for the company.
-  if (clients.size === 0) void closeDatabasePools();
+  if (windows() === 0) void closeDatabasePools();
 }
 
 /**
@@ -4278,7 +4335,7 @@ async function pollAccountUsage(): Promise<void> {
   // answer the chat here, for the Telegram poll, is the same kind of look.
   await refreshLogins();
   await refreshClaudeReady();
-  if (clients.size === 0) return;
+  if (windows() === 0) return;
   // Codex's allowance on the same beat, though it is read off this disk and
   // asks nobody: the profile's Codex home when profiles keep their logins, the
   // machine's otherwise — the same rule as the Claude scope below.
@@ -4297,7 +4354,7 @@ async function pollAccountUsage(): Promise<void> {
  * for a window that is not open is not a thing to do on a timer.
  */
 async function pollServers(): Promise<void> {
-  if (clients.size === 0) return;
+  if (windows() === 0) return;
   await pollMachines();
   broadcast({ type: "machines", machines: machinesSnapshot() });
 }
@@ -4307,7 +4364,7 @@ async function pollServers(): Promise<void> {
  * poll's argument, and a no-op while no key has been given.
  */
 async function pollOpenRouterAccount(): Promise<void> {
-  if (clients.size === 0) return;
+  if (windows() === 0) return;
   if (await pollOpenRouter()) broadcast({ type: "openrouter", openrouter: openRouterSnapshot() });
 }
 
@@ -4320,7 +4377,7 @@ async function pollOpenRouterAccount(): Promise<void> {
 const web = WebChain.fromRegistry({
   store: fileStore,
   changed: () => broadcast({ type: "web", web: web.status() }),
-  clients: () => clients.size,
+  clients: () => windows(),
   port: () => PORT,
   tokenInPtys: () => tokenInPtys(),
 });
@@ -4411,6 +4468,10 @@ function handleMessage(ws: WebSocket, raw: string): void {
   // while the user is.
   const hands = handsOf(msg.type);
   if (hands) harness.hands(hands, msg.type === "input" ? msg.agentId : undefined);
+
+  // A verb about another node's workspace goes there and is never done here;
+  // see `nodewatch.ts`. A watcher's own verbs are this node's, ids bare.
+  if (!st.watcher && watches.handle(ws, st, msg)) return;
 
   switch (msg.type) {
     // --- terminals ---------------------------------------------------------
@@ -5864,7 +5925,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       // it. The frog is the one presence a Mac with no window open has.
       kuru: { profileId: workspaces.active.id, ...kuru.counts(workspaces.active.key) },
       pid: process.pid,
-      clients: { now: clients.size, remoteAt: remoteClientAt },
+      clients: { now: windows(), remoteAt: remoteClientAt },
+      // Who watches this node, and whom this node watches: the two ends of
+      // `/link/watch`, for `bun run status`.
+      watch: { by: nodes.view().watchedBy ?? [], of: watches.status() },
       // This node among the others: its role, who leads, and each member's
       // link — what `kururu child doctor` checks the pairing row against —
       // and where the Telegram poll stands, for its leading row.
@@ -6982,6 +7046,52 @@ function onUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
     linkWss.handleUpgrade(req, socket, head, (ws) => nodes.accept(ws));
     return;
   }
+  /**
+   * The parent's server, to be a client of this one: `/ws` with a different
+   * doorman. What `/link` refuses first — a page's `Origin`, a proxy's
+   * header, anything off the tailnet and loopback — then the node
+   * handshake, then the roster's parent and nobody else. A child's
+   * compromise is accepted as words into its peers' Kurus; a shell on
+   * another node is a different order of thing, so the parent watches
+   * children and nothing watches the parent (a parent's `parentId` is
+   * itself, so it refuses every peer here). Past that, it is a client like
+   * any other, tagged with the node it proved.
+   */
+  if (url.pathname === "/link/watch") {
+    if (nodeRequestRefusal(req)) {
+      socket.destroy();
+      return;
+    }
+    linkWss.handleUpgrade(req, socket, head, (ws) =>
+      nodes.watchHandshake(
+        ws,
+        null,
+        (peer) => {
+          const name = nodes.nameOf(peer) ?? peer;
+          const refusal = nodes.watchRefusal(peer);
+          if (refusal) {
+            console.log(`kururu: refused a watch from ${name}: ${refusal}`);
+            try {
+              ws.send(JSON.stringify({ type: "refuse", reason: refusal }));
+            } catch {
+              // Going anyway.
+            }
+            ws.close(1008, refusal);
+            return;
+          }
+          record("watch", `${name} is watching this node's terminals`);
+          nodes.noteWatcher(peer, true);
+          ws.on("close", () => {
+            record("watch", `${name} stopped watching`);
+            nodes.noteWatcher(peer, false);
+          });
+          admitClient(ws, peer);
+        },
+        (reason) => console.log(`kururu: refused a watch: ${reason}`),
+      ),
+    );
+    return;
+  }
   if (url.pathname !== "/ws") {
     socket.destroy();
     return;
@@ -7002,47 +7112,60 @@ function onUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
   }
   wss.handleUpgrade(req, socket, head, (ws) => {
     if (!fromLoopback(req)) remoteClientAt = new Date().toISOString();
-    clients.set(ws, {
-      watching: new Set(),
-      warm: new Set(),
-      proposals: new Map(),
-      looking: true,
-      awaiting: new Map(),
-    });
-    send(ws, { type: "snapshot", snapshot: snapshot() });
-    send(ws, { type: "dev-servers", servers: state.devServers });
-    send(ws, { type: "branches", branches: state.branches });
-    send(ws, { type: "projects", projects: state.projects });
-    send(ws, { type: "databases", databases: state.databases });
-    send(ws, { type: "usage", usage: usageSnapshot() });
-    send(ws, { type: "codex-usage", codex: codexUsageSnapshot() });
-    send(ws, { type: "machines", machines: machinesSnapshot() });
-    send(ws, { type: "nodes", nodes: nodes.view() });
-    send(ws, { type: "secrets", secrets: secrets.view() });
-    send(ws, { type: "openrouter", openrouter: openRouterSnapshot() });
-    send(ws, { type: "web", web: web.status() });
-    send(ws, { type: "voice", voice: voice.status() });
-    send(ws, voice.hush());
-    send(ws, kuru.message());
-    send(ws, outbox.message());
-    send(ws, channels.message());
-    send(ws, backup.message());
-    // The first client through the door is also what starts the usage poll: it
-    // is skipped while nothing is connected, so without this a freshly started
-    // server would draw no bar for a minute.
-    void pollAccountUsage();
-    // The machine and OpenRouter polls the same way, but only for the first: a
-    // second window would otherwise buy every machine an extra ssh round, and
-    // the account an extra request, for nothing.
-    if (clients.size === 1) {
-      void pollServers();
-      void pollOpenRouterAccount();
-    }
-
-    ws.on("message", (data) => handleMessage(ws, data.toString()));
-    ws.on("close", () => dropClient(ws));
-    ws.on("error", () => dropClient(ws));
+    admitClient(ws, null);
   });
+}
+
+/**
+ * What `/ws` does once a client is let in, and what `/link/watch` does once
+ * the parent has proved itself: the same client, with a watcher sent only
+ * what it relays and starting nothing a window starts.
+ */
+function admitClient(ws: WebSocket, watcher: string | null): void {
+  clients.set(ws, {
+    watching: new Set(),
+    warm: new Set(),
+    proposals: new Map(),
+    looking: true,
+    awaiting: new Map(),
+    watcher,
+  });
+  ws.on("message", (data) => handleMessage(ws, data.toString()));
+  ws.on("close", () => dropClient(ws));
+  ws.on("error", () => dropClient(ws));
+  send(ws, { type: "snapshot", snapshot: snapshot() });
+  // The listeners went first: a watcher is admitted from inside the frame that
+  // proved it, and the parent's first `watch` may be the next frame in the
+  // same chunk (phase 0, finding 2).
+  if (watcher) return;
+  send(ws, { type: "dev-servers", servers: state.devServers });
+  send(ws, { type: "branches", branches: state.branches });
+  send(ws, { type: "projects", projects: state.projects });
+  send(ws, { type: "databases", databases: state.databases });
+  send(ws, { type: "usage", usage: usageSnapshot() });
+  send(ws, { type: "codex-usage", codex: codexUsageSnapshot() });
+  send(ws, { type: "machines", machines: machinesSnapshot() });
+  send(ws, { type: "nodes", nodes: nodes.view() });
+  send(ws, { type: "secrets", secrets: secrets.view() });
+  send(ws, { type: "openrouter", openrouter: openRouterSnapshot() });
+  send(ws, { type: "web", web: web.status() });
+  send(ws, { type: "voice", voice: voice.status() });
+  send(ws, voice.hush());
+  send(ws, kuru.message());
+  send(ws, outbox.message());
+  send(ws, channels.message());
+  send(ws, backup.message());
+  // The first client through the door is also what starts the usage poll: it
+  // is skipped while nothing is connected, so without this a freshly started
+  // server would draw no bar for a minute.
+  void pollAccountUsage();
+  // The machine and OpenRouter polls the same way, but only for the first: a
+  // second window would otherwise buy every machine an extra ssh round, and
+  // the account an extra request, for nothing.
+  if (windows() === 1) {
+    void pollServers();
+    void pollOpenRouterAccount();
+  }
 }
 
 for (const each of servers) {
@@ -7342,6 +7465,22 @@ async function attach(port: Port): Promise<void> {
       outbox.retry(nodeId);
     },
   });
+  watches = new NodeWatches({
+    member: (nodeId) => {
+      const entry = nodes.member(nodeId);
+      return entry && nodeId !== nodes.selfId() ? { name: entry.name, address: entry.address, port: entry.port } : null;
+    },
+    summary: (nodeId) => nodes.summaryOf(nodeId),
+    handshake: (ws, expect, up, refused) => nodes.watchHandshake(ws, expect, up, refused),
+    clients: () => clients,
+    send,
+    changed: () => pushSnapshot(),
+    log: (line) => console.log(`kururu: ${line}`),
+    record: (line) => record("watch", line),
+  });
+  // A node whose link came back is worth dialling at once, rather than at
+  // the end of a watch's backoff: it is the box's server back after a restart.
+  nodes.onLinkUp((peer) => watches.linked(peer));
   peerKurus = new PeerKurus({
     nodes,
     kuruKey,
@@ -7794,6 +7933,7 @@ export function shutdown(): Promise<void> {
     backup?.close();
     secrets?.close();
     lead?.close();
+    watches?.close();
     nodes?.close();
     peerKurus?.close();
     linkWss.close();

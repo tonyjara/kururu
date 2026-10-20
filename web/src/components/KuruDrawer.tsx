@@ -107,6 +107,7 @@ import { Icon } from "./Icon";
 import { MadeInline } from "./MadeLinks";
 import { Mascot } from "./Status";
 import { MicIcon, PlaneIcon, SpeakerIcon, SpeakerOffIcon } from "./VoiceIcons";
+import { hueStyle } from "./NodeChip";
 
 /** How close to the foot the list has to be for a new item to keep it there. Reading something older must not be yanked away. */
 const STICK_PX = 48;
@@ -682,7 +683,11 @@ function NodeChips({ self, peers, filter, onPick }: { self: string; peers: PeerK
             aria-pressed={filter === peer.node.name}
             onClick={() => onPick(peer.node.name)}
             title={title}
+            /* The node's own hue, the one its band and chips wear when its
+               workspace is on screen, so the two read as one machine. */
+            style={hueStyle(peer.node.id)}
           >
+            <span className="node-chip-dot" aria-hidden="true" />
             {peer.node.name}
             {peer.unheard > 0 && <span className="kuru-node-count">{peer.unheard}</span>}
           </button>

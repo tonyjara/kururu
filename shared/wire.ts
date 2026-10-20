@@ -578,7 +578,20 @@ export type ServerMessage =
   | { type: "reload-cancel"; id: string }
   /** Answer to any client message carrying an `id`. */
   | { type: "reply"; id: number; ok: true; result: unknown }
-  | { type: "reply"; id: number; ok: false; error: string };
+  | { type: "reply"; id: number; ok: false; error: string }
+  /**
+   * These terminals missed bytes this socket could not have carried: another
+   * node's, whose watch dropped and came back. What `onopen` tells every sink
+   * after a reconnect of this socket, said for a few of them — each asks for
+   * its screen again at its own size.
+   */
+  | { type: "stale"; agentIds: string[] }
+  /**
+   * A verb for another node that could not go: the node is away, or the verb
+   * would carry something across that cannot cross. Drawn in the remote
+   * workspace's band for a moment rather than typed into nothing.
+   */
+  | { type: "remote-said"; node: string; text: string };
 
 export type ClientMessage =
   // --- terminals -----------------------------------------------------------
@@ -789,6 +802,15 @@ export type ClientMessage =
   // --- workspaces ----------------------------------------------------------
   | { type: "new-workspace"; name?: string }
   | { type: "switch-workspace"; workspaceId: string }
+  /**
+   * Put another node's workspace on this screen, by key — a row under the
+   * node's heading in the sidebar, which is drawn from the node's summary and
+   * so knows the key, not the counter id the node's own snapshot would give.
+   * Answered by this server and never forwarded as it is; see
+   * `server/src/nodewatch.ts`. A local `switch-workspace` puts this node's
+   * own workspace back.
+   */
+  | { type: "show-node-workspace"; nodeId: string; workspaceKey: string }
   /** The number the sidebar prints beside each one, zero-based on the wire. */
   | { type: "workspace-index"; index: number }
   | { type: "step-workspace"; delta: number }

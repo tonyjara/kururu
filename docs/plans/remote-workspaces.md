@@ -2,10 +2,12 @@
 
 A feasibility study and a plan, written 2026-10-20 from a read of the tree at
 `157c168`, `docs/nodes.md`, `docs/plans/kururu-parent-child.md` and a look at
-how four other tools do the same split. **Nothing in it is built.** Phase 0's
-spike ran on 2026-10-20 in throwaway instances and stayed out of `main`
+how four other tools do the same split. Phase 0's spike ran on 2026-10-20 in
+throwaway instances and stayed out of `main`
 ([`docs/spikes/remote-workspaces-phase0.md`](../spikes/remote-workspaces-phase0.md)).
-Its answers are folded into the sections below. The plan is written so that an
+Its answers are folded into the sections below. **Phase 1 is built**
+(2026-10-20); what it is now is in
+[`docs/nodes.md`](../nodes.md#remote-workspaces), and phases 2–5 are not. The plan is written so that an
 agent can take one phase, read the files it names, and know what "done" is.
 
 **The ask, in the user's words:** "Do you think it's possible to open a
@@ -606,6 +608,39 @@ terminals.
 Depends on phase 0's answer. Runs beside nothing (it touches `index.ts`'s
 `handleMessage` on both nodes).
 
+**Built, 2026-10-20, and verified between two throwaway nodes on the Mac**
+(a parent on :7871 and a child on :7872, paired by the join command, from a
+scratch copy; the user's server and host untouched). Over the protocol: a
+`cat` on the child shown, its backlog at the parent's proposed 90×24, a key's
+echo in 2 ms on loopback, the child's own client seeing the typed line and
+held to the smaller grid, a split made from the parent arriving on the child's
+own client, a `new-tab` in a remote pane answered under its qualified id and
+closed through the relay, a remote tab dropped on a local pane refused with
+its sentence, `C-a 1` putting the local workspace back, and the idle watch
+closed after its minute with both `lifecycle.log`s saying so. The child's
+server stopped with SIGTERM (its host kept): the parent's view went `away`
+within milliseconds, typing was refused with "omarchy is away — that was not
+typed", and on the restart the watch was back in under a second, the
+emulator was told it was stale, the same pty's screen refilled, and typing
+echoed again. In a real page (headless Chrome over the DevTools protocol):
+the Nodes rows as buttons, the band in the node's hue with its name, every
+tab's chip, keys typed into a stand-in `claude` on the child, the greying
+with "away since", the refusal in the band, the refill without a reload, and
+"mac is watching" on the child's own page. No file in the parent's state
+directory held a qualified id afterwards. **Not yet:** the two real
+machines, which want the Mac's server on this code and `kururu child update`
+on the box.
+
+Decisions taken in the building, beyond the text above: a card's id is not
+qualified, since every verb about a card names its workspace and the
+workspace says whose it is; the watch closes a minute after nothing of the
+node is on screen, and pooled emulators alone do not keep it open (they are
+told `stale` and rebuild when borrowed); a document tab in a remote pane says
+where it is rather than reading this disk, and the file tree stays shut;
+the `+` menu offers the child's own launch settings already, which phase 4
+was to do; `bun run status` prints `watching` and `watched by`, which phase 5
+was to do.
+
 ### Phase 2 — files, the reader, nvim's hand-offs (3–4 days)
 
 - Asks over the watch: `files-ask`/`files` (the tree), `doc-ask`/`doc` (the
@@ -655,9 +690,10 @@ Depends on 1. Runs beside 2 and 3.
   `C-a w` and workspace stepping across nodes; the `remote` field through a
   window reload; the picker's "Open omarchy" kept as the way to the child's
   Settings and nothing else, and said so in Settings → Nodes.
-- The child's chip and log; the Mac's `bun run status` saying which nodes it
-  watches.
-- Docs: `docs/nodes.md#remote-workspaces`, the CLAUDE.md invariant below.
+- ~~The child's chip and log; the Mac's `bun run status` saying which nodes it
+  watches.~~ Built with phase 1.
+- Docs: grow `docs/nodes.md#remote-workspaces` (written with phase 1, as
+  was the CLAUDE.md invariant below).
 - **Done:** the user drives omarchy for a day from the Mac's window and opens
   the child's page only for its Settings.
 
