@@ -627,8 +627,15 @@ export interface NodeSummary {
 
 /** The version of `say`, `kuru-turns`, `kuru-replied` and the board verbs. See `NodeSummary.talks`. */
 export const PEER_TALK = 1;
-/** The version of the watch socket a node answers. See `NodeSummary.watchable`. */
-export const WATCHABLE = 1;
+/**
+ * The version of the watch socket a node answers. See `NodeSummary.watchable`.
+ * 1 is phase 1's: the session and the terminals. 2 adds the reads of phase
+ * 2 — `files-ask` and `doc-ask`, and the `projects` a watcher is sent — so a
+ * child at 1 is drawn and typed into, and its tree says to update it.
+ */
+export const WATCHABLE = 2;
+/** The first `watchable` that answers the file tree's and the reader's asks. */
+export const WATCH_READS = 2;
 /** The version of `card-done-ask` and `workspace-new`. See `NodeSummary.drives`. */
 export const DRIVES = 1;
 

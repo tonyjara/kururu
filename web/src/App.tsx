@@ -67,7 +67,7 @@ import { closeNeeds, toggleNeeds, useNeedsDrawer } from "./needs";
 import { NeedsDrawer } from "./components/NeedsDrawer";
 import { needsOf, type Need } from "../../shared/needs";
 import { nextNeedAcross, nodeNeeds as nodeNeedsOf, qualify, type NodeNeed } from "../../shared/remote";
-import { nodesNeedCount } from "../../shared/nodes";
+import { nodesNeedCount, WATCH_READS, type NodesView } from "../../shared/nodes";
 import { visibleLaunchers } from "../../shared/launchers";
 import { showCardNext } from "./components/Board";
 import type { VoiceGlobalState } from "./desktop";
@@ -407,13 +407,18 @@ export function App() {
   const paneAgents = useMemo(() => (remote ? [...agents, ...remote.agents] : agents), [agents, remote]);
   /** What the server last said it could not send there, while it is fresh enough to show. */
   const remoteSaid = useRemoteSaid(remote?.node.id ?? null);
-  // The tree reads this disk, and a remote workspace's files are on another.
-  const filesOpen = !remote && (narrow ? filesSheet : !!workspace && filesOpenIn.has(workspace.id));
+  /**
+   * The tree is of the workspace on screen: a remote one's is of its node's
+   * disk, read through this server (`web/src/disk.ts`), and remembered open
+   * or shut under its qualified id like a local one under its own.
+   */
+  const treeId = onScreen?.id ?? null;
+  const filesOpen = narrow ? filesSheet : !!treeId && filesOpenIn.has(treeId);
   /** Opens or shuts the tree for the workspace in front of you, and only it. */
   const setFilesOpen = useCallback(
     (next: boolean | ((open: boolean) => boolean)) => {
       if (narrow) return setFilesSheet(next);
-      const id = workspace?.id;
+      const id = treeId;
       if (!id) return;
       setFilesOpenIn((current) => {
         const open = typeof next === "function" ? next(current.has(id)) : next;
@@ -424,7 +429,7 @@ export function App() {
         return updated;
       });
     },
-    [narrow, workspace?.id],
+    [narrow, treeId],
   );
   /**
    * The keys this window is using: ghosttown's table as the user has amended it.
@@ -1076,10 +1081,12 @@ export function App() {
         // with a reason, which is better than a click that did nothing.
       }
       const name = path.split("/").pop() ?? path;
+      // The workspace on screen, whose nvims these are: a remote one's come
+      // back qualified, and its panes and agents are the remote view's.
       const where = (paneId: string) => {
-        const all = workspace ? panes(workspace.layout) : [];
+        const all = onScreen ? panes(onScreen.layout) : [];
         const at = all.findIndex((pane) => pane.id === paneId);
-        if (workspace?.focusedPaneId === paneId) return "focused pane";
+        if (onScreen?.focusedPaneId === paneId) return "focused pane";
         return all.length > 1 && at >= 0 ? `pane ${at + 1}` : "";
       };
       setDialog({
@@ -1088,7 +1095,7 @@ export function App() {
         hint: editors.length === 0 ? "There is no nvim running in this workspace." : undefined,
         items: [
           ...editors.map((editor) => {
-            const agent = agents.find((a) => a.id === editor.agentId);
+            const agent = paneAgents.find((a) => a.id === editor.agentId);
             return {
               id: editor.agentId,
               label: `nvim in ${agent ? tabLabel(agent) : "a terminal"}`,
@@ -1115,7 +1122,7 @@ export function App() {
         },
       });
     },
-    [workspace, agents, narrow],
+    [onScreen, paneAgents, narrow],
   );
 
   /**
@@ -1715,12 +1722,14 @@ export function App() {
         />
       )}
 
-      {filesOpen && !zen && workspace && (
+      {filesOpen && !zen && onScreen && (
         <FileTree
-          workspaceId={workspace.id}
-          project={projects.find((p) => p.workspaceId === workspace.id) ?? null}
-          runsOn={runsOn(workspace.machine, machines)}
-          current={readerPathOf(workspace)}
+          workspaceId={onScreen.id}
+          project={remote ? remote.project : (projects.find((p) => p.workspaceId === onScreen.id) ?? null)}
+          runsOn={remote ? null : runsOn(onScreen.machine, machines)}
+          node={remote ? remote.node : null}
+          absent={remote && !readsOf(nodes, remote.node.id) ? `Update ${remote.node.name} (kururu child update) to read its files in this window.` : null}
+          current={readerPathOf(onScreen)}
           overlay={narrow}
           onOpen={openFromTree}
           onOpenInEditor={(root, path) => void openInNvim(root, path)}
@@ -2067,6 +2076,11 @@ function runsOn(pin: MachinePin | null, machines: readonly MachineStatus[]): str
 }
 
 /** The file a reader in this workspace is showing, for the tree to mark. */
+/** Whether a node answers the tree's and the reader's reads (`WATCH_READS`). */
+function readsOf(nodes: NodesView | null, nodeId: string): boolean {
+  return (nodes?.nodes.find((n) => n.id === nodeId)?.summary?.watchable ?? 0) >= WATCH_READS;
+}
+
 function readerPathOf(workspace: { layout: LayoutNode; focusedPaneId: string }): string | null {
   const all = panes(workspace.layout);
   const focused = all.find((p) => p.id === workspace.focusedPaneId);

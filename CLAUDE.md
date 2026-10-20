@@ -353,7 +353,11 @@ The load-bearing invariants, one line each, with the argument behind the link:
   unchanged: the user typing into a remote pane is the user; Kuru still acts
   locally and asks a peer, and reads a remote agent's screen by its qualified
   id, which every acting tool refuses. A remote agent's `blocked` is noticed
-  by this node's own gate (`nodenotice.ts`). → [nodes](docs/nodes.md#remote-workspaces)
+  by this node's own gate (`nodenotice.ts`). The node's disk is read over the
+  watch (`files-ask`, `doc-ask`, through `/api/node/<id>/…`) and checked by
+  the node's own `files.ts`; its roots reach a page qualified, so a verb
+  pairing one machine's file with the other's pane is refused, and the tree
+  only reads there. → [nodes](docs/nodes.md#remote-workspaces)
 - **One Telegram bot for every node, read by one node at a time.** The
   parent's allow-list rides in the roster it signs, so only the parent
   sets it; the switch rides there too, but any node may flip it — a

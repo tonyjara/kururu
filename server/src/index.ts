@@ -110,7 +110,7 @@ import { mirrorFiles } from "./export";
 import { NodeHost, nodeRequestRefusal } from "./nodes";
 import { NodeWatches } from "./nodewatch";
 import { NodeNotices } from "./nodenotice";
-import { isRemote } from "../../shared/remote";
+import { isRemote, qualifyRoot } from "../../shared/remote";
 import { Mover } from "./move";
 import { nodeOfUtterance, PeerKurus, peerKey } from "./peerkuru";
 import { Secrets } from "./secrets";
@@ -602,12 +602,13 @@ function windows(): number {
 
 /**
  * What a watcher is sent of what everybody is sent: the snapshot, which is
- * the tree it relays. The rest of a page's messages — the usage, the voice,
+ * the tree it relays, and where each workspace is on this disk, which its
+ * file tree opens on. The rest of a page's messages — the usage, the voice,
  * the nodes, the backup — are about this node's own window, and the parent
  * draws its own.
  */
 function forWatcher(msg: ServerMessage): boolean {
-  return msg.type === "snapshot";
+  return msg.type === "snapshot" || msg.type === "projects";
 }
 
 const state = {
@@ -3984,6 +3985,40 @@ async function editorsHere(): Promise<EditorChoice[]> {
 }
 
 /**
+ * What `/api/ls`, `/api/docs`, `/api/markdown` and `/api/file-raw` would
+ * answer, for the parent's server reading this disk through its watch
+ * (`files-ask`, `doc-ask`). The same functions and so the same refusals and
+ * the same bounds — `files.ts` holds a file to 2 MB and a listing to 500
+ * entries — with a file's bytes as base64, since the watch carries text.
+ *
+ * The markup is rendered in the asker's theme when this node has it, so the
+ * code in a document matches the Mac's panes; one this node does not know
+ * draws its fallback, as an unknown theme here always has.
+ */
+async function readForWatcher(msg: Extract<ClientMessage, { type: "files-ask" | "doc-ask" }>): Promise<unknown> {
+  const root = msg.root;
+  const path = typeof msg.path === "string" ? msg.path : "";
+  if (msg.type === "files-ask") {
+    if (msg.op === "ls") return { entries: listDir(root, path) };
+    if (msg.op === "docs") {
+      const roots = allowedRoots();
+      const at = root || (roots.length === 1 ? (roots[0] ?? "") : "");
+      return at ? { roots, root: at, docs: findDocs(at) } : { roots, root: "", docs: [] };
+    }
+    throw new Error("not a read this node answers");
+  }
+  if (msg.op === "markdown") {
+    const themeId = typeof msg.themeId === "string" ? msg.themeId : appearance.themeId;
+    return renderMarkdown(readFile(root, path).text, root, path, themeId);
+  }
+  if (msg.op === "raw") {
+    const file = readBytes(root, path);
+    return { type: file.type, data: Buffer.from(file.bytes).toString("base64") };
+  }
+  throw new Error("not a read this node answers");
+}
+
+/**
  * Open a file from the tree in nvim — one that is running, or a new one.
  *
  * The path is resolved before anything else, and it is the resolved path that
@@ -5691,6 +5726,15 @@ function handleMessage(ws: WebSocket, raw: string): void {
       return;
     }
 
+    case "files-ask":
+    case "doc-ask":
+      // The parent's reads of this disk, for its window. A page has the
+      // HTTP routes and is not answered here; the roots are this node's own,
+      // checked by `files.ts` exactly as those routes check them.
+      if (!st.watcher || typeof msg.root !== "string") return;
+      void replyAsync(ws, msg.id, () => readForWatcher(msg));
+      return;
+
     case "close-nvims":
       void replyAsync(ws, msg.id, () => closeNvims(msg.ids));
       return;
@@ -6976,18 +7020,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     const path = url.searchParams.get("path") ?? "";
     try {
       const file = readBytes(root, path);
-      res.writeHead(200, {
-        "content-type": file.type,
-        "content-length": file.bytes.length,
-        // An SVG is a document, and a browser pointed straight at this URL would
-        // treat it as one. In an `<img>` — the only way the reader asks for it —
-        // none of that runs; these say so for the case somebody opens the link.
-        "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'",
-        "x-content-type-options": "nosniff",
-        "content-disposition": "inline",
-        "cache-control": "no-cache",
-      });
-      res.end(file.bytes);
+      serveRaw(res, file.type, file.bytes);
     } catch (err) {
       json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
     }
@@ -7022,6 +7055,19 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     })();
     return;
   }
+  /**
+   * Another node's disk, for a workspace of its on this screen: the routes
+   * above, answered by that node over its watch (`NodeWatches.ask`). The
+   * query is the local routes' with the node's own roots — the page strips
+   * the qualification, and the node checks the root against what it found
+   * itself, so nothing here decides what a path means. Reads only: the
+   * tree's edits are made on the node, through nvim or its own page.
+   */
+  const onNode = /^\/api\/node\/(n[0-9a-f]{12})\/([a-z-]+)$/.exec(url.pathname);
+  if (onNode) {
+    void nodeRead(res, onNode[1]!, onNode[2]!, url.searchParams);
+    return;
+  }
   if (url.pathname === "/api/ls" || url.pathname === "/api/file") {
     const root = url.searchParams.get("root") ?? "";
     const path = url.searchParams.get("path") ?? "";
@@ -7042,6 +7088,71 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   }
 
   serveStatic(res, url.pathname === "/" ? "index.html" : url.pathname.slice(1));
+}
+
+/** A file's bytes, as `/api/file-raw` serves them, from this disk or a node's. */
+function serveRaw(res: ServerResponse, type: string, bytes: Uint8Array): void {
+  res.writeHead(200, {
+    "content-type": type,
+    "content-length": bytes.length,
+    // An SVG is a document, and a browser pointed straight at this URL would
+    // treat it as one. In an `<img>` — the only way the reader asks for it —
+    // none of that runs; these say so for the case somebody opens the link.
+    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'",
+    "x-content-type-options": "nosniff",
+    "content-disposition": "inline",
+    "cache-control": "no-cache",
+  });
+  res.end(bytes);
+}
+
+/** A media type as a node said it, or the one that makes a browser do nothing clever with it. */
+const MEDIA_TYPE = /^[a-z]+\/[a-z0-9.+-]+(; ?charset=[a-z0-9-]+)?$/i;
+
+/**
+ * `/api/node/<id>/ls`, `docs`, `markdown` and `file-raw`: what the local
+ * route of the same name answers, asked of the node. Every root the answer
+ * names is qualified on the way to the page, so the tree's and the picker's
+ * next verb says whose disk it is about; the markup's image links are
+ * pointed back through here, since `/api/file-raw` is this disk's.
+ */
+async function nodeRead(res: ServerResponse, node: string, op: string, query: URLSearchParams): Promise<void> {
+  const root = query.get("root") ?? "";
+  const path = query.get("path") ?? "";
+  try {
+    switch (op) {
+      case "ls":
+        return json(res, await watches.ask(node, { type: "files-ask", op: "ls", root, path }));
+      case "docs": {
+        const answer = (await watches.ask(node, { type: "files-ask", op: "docs", root })) as { roots?: unknown; root?: unknown; docs?: unknown };
+        const roots = Array.isArray(answer.roots) ? answer.roots.filter((r): r is string => typeof r === "string") : [];
+        return json(res, {
+          roots: roots.map((r) => qualifyRoot(node, r)),
+          root: typeof answer.root === "string" ? qualifyRoot(node, answer.root) : "",
+          docs: Array.isArray(answer.docs) ? answer.docs : [],
+        });
+      }
+      case "markdown": {
+        const answer = (await watches.ask(node, { type: "doc-ask", op: "markdown", root, path, themeId: appearance.themeId })) as Record<string, unknown>;
+        // An attribute is the only place a bare quote survives the renderer —
+        // markdown-it escapes one in text — so this finds the image links and
+        // nothing a document says.
+        const html = typeof answer.html === "string" ? answer.html.replaceAll('"/api/file-raw?', `"/api/node/${node}/file-raw?`) : "";
+        return json(res, { ...answer, html });
+      }
+      case "file-raw": {
+        const answer = (await watches.ask(node, { type: "doc-ask", op: "raw", root, path })) as { type?: unknown; data?: unknown };
+        if (typeof answer.data !== "string") throw new Error("that node sent no file");
+        const type = typeof answer.type === "string" && MEDIA_TYPE.test(answer.type) ? answer.type : "application/octet-stream";
+        return serveRaw(res, type, Buffer.from(answer.data, "base64"));
+      }
+      default:
+        return json(res, { error: "not a read of another computer's this server makes" }, 404);
+    }
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    json(res, op === "docs" ? { roots: [], root: "", docs: [], error } : { error }, 400);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -7184,13 +7295,13 @@ function admitClient(ws: WebSocket, watcher: string | null): void {
   ws.on("close", () => dropClient(ws));
   ws.on("error", () => dropClient(ws));
   send(ws, { type: "snapshot", snapshot: snapshot() });
+  send(ws, { type: "projects", projects: state.projects });
   // The listeners went first: a watcher is admitted from inside the frame that
   // proved it, and the parent's first `watch` may be the next frame in the
   // same chunk (phase 0, finding 2).
   if (watcher) return;
   send(ws, { type: "dev-servers", servers: state.devServers });
   send(ws, { type: "branches", branches: state.branches });
-  send(ws, { type: "projects", projects: state.projects });
   send(ws, { type: "databases", databases: state.databases });
   send(ws, { type: "usage", usage: usageSnapshot() });
   send(ws, { type: "codex-usage", codex: codexUsageSnapshot() });

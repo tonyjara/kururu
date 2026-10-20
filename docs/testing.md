@@ -107,6 +107,13 @@ left in the Dock is how a force quit reached a coalition on 2026-10-10.
 
 Kept short on purpose; the detail is in git history.
 
+- **Remote workspaces, phase 2** (2026-10-20), between two throwaway nodes:
+  a child's folder listed, a document rendered and its image served through
+  the parent's `/api/node/<id>/…`, a tree click opening it as a tab on the
+  child, an nvim started there at the line and reused over its RPC, a card
+  run's made link opened through the relay, and in headless Chrome the tree,
+  the reader, the nvim picker and the link with its chip. Record in
+  [the plan](plans/remote-workspaces.md#phase-2--files-the-reader-nvims-hand-offs-34-days).
 - **Remote workspaces, phase 3** (2026-10-20), between the same two
   throwaway nodes: a remote agent's `blocked` raised on the parent's client
   off the child's summary and its `done` off the relayed snapshot, the

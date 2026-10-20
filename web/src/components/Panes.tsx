@@ -1068,26 +1068,18 @@ function Pane({
             launchers={launchers}
             focusedAgentId={focusedAgentId}
           />
-        ) : remote && (showingDoc(pane) || (!showing && pane.reader)) ? (
-          /* A document on the other node's disk. The reader renders what
-             this server's `files.ts` reads, and this server's disk has not
-             got it: drawn as what it is rather than as a file that is not
-             there, until the reader can ask that node for it. */
-          <div className="pane-remote-doc">
-            <p>
-              {showingDoc(pane)?.path ?? "A reader"} is on {remote.name}.
-            </p>
-            <p className="muted">This window cannot open another computer's documents yet. The tab is there; open it on {remote.name}'s own page.</p>
-          </div>
         ) : showingDoc(pane) || (!showing && pane.reader) ? (
           /* A document tab, or a reader with no tabs yet — which is its picker.
              One view for both and unkeyed, so moving between two documents in
-             a strip keeps the last render on screen while the next arrives. */
+             a strip keeps the last render on screen while the next arrives.
+             In another node's pane the root is that node's, qualified, and
+             the reader reads it from there. */
           <ReaderView
             paneId={pane.id}
             root={showingDoc(pane)?.root ?? pane.reader?.root ?? ""}
             path={showingDoc(pane)?.path ?? ""}
             rev={pane.reader?.rev ?? 0}
+            node={remote?.nodeId ?? null}
           />
         ) : showing ? (
           /* Deliberately unkeyed. A key here would rebuild this on every tab

@@ -10,12 +10,13 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { WebSocket } from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 import { addCard, emptyBoard, startRun } from "../../shared/board";
 import { BOARD_TAB, docTab, panes, type LayoutNode } from "../../shared/layout";
 import type { AgentSnapshot, Workspace } from "../../shared/model";
 import type { NodeSummary } from "../../shared/nodes";
 import {
+  bareOf,
   containsQualified,
   isRemote,
   nodeHue,
@@ -23,7 +24,9 @@ import {
   parseRemote,
   qualify,
   qualifyAgent,
+  qualifyProject,
   qualifyReply,
+  qualifyRoot,
   qualifyTab,
   qualifyWorkspace,
   remoteLaunchers,
@@ -82,7 +85,7 @@ describe("the child's workspace, as the Mac draws it", () => {
     agentPlacement: null,
   };
 
-  it("qualifies every id that names a thing, and leaves the board's and a document's tabs as they are", () => {
+  it("qualifies every id that names a thing, a document's root among them, and leaves the board's tab as it is", () => {
     const shown = qualifyWorkspace(OMARCHY, child);
     expect(shown.id).toBe(qualify(OMARCHY, "w1"));
     expect(shown.key).toBe("kkk");
@@ -91,7 +94,7 @@ describe("the child's workspace, as the Mac draws it", () => {
     expect(panes(shown.layout).map((p) => p.id)).toEqual([qualify(OMARCHY, "n1"), qualify(OMARCHY, "n2")]);
     expect(panes(shown.layout).map((p) => p.agentIds)).toEqual([
       [qualify(OMARCHY, "a1"), BOARD_TAB],
-      [qualify(OMARCHY, "a2"), docTab("/home/o", "README.md")],
+      [qualify(OMARCHY, "a2"), docTab(qualify(OMARCHY, "/home/o"), "README.md")],
     ]);
     expect(shown.layout.type === "split" && shown.layout.id).toBe(qualify(OMARCHY, "s1"));
     expect(shown.board?.cards[0]?.run?.agentId).toBe(qualify(OMARCHY, "a2"));
@@ -102,17 +105,41 @@ describe("the child's workspace, as the Mac draws it", () => {
     // And the child's own copy is untouched.
     expect(child.id).toBe("w1");
   });
-  it("qualifies an agent and leaves off what it made, which is the child's disk's", () => {
-    const agent = { id: "a2", kind: "agent", made: [{ root: "/r", path: "x.md" }] } as unknown as AgentSnapshot;
+  it("qualifies an agent, and the root of what it made, which is the child's disk's", () => {
+    const agent = { id: "a2", kind: "agent", made: [{ root: "/r", path: "x.md", line: null }] } as unknown as AgentSnapshot;
     const shown = qualifyAgent(OMARCHY, agent);
     expect(shown.id).toBe(qualify(OMARCHY, "a2"));
-    expect("made" in shown).toBe(false);
+    expect(shown.made).toEqual([{ root: qualify(OMARCHY, "/r"), path: "x.md", line: null }]);
+    expect(agent.made?.[0]?.root).toBe("/r");
+  });
+  it("qualifies a reader's project and editor, a card's made files and a project's roots", () => {
+    const reading: Workspace = {
+      ...child,
+      layout: { type: "pane", pane: { id: "n1", agentIds: [], activeIdx: 0, reader: { root: "/home/o", follow: "a1", editor: "a1", rev: 3 } } },
+      board: { ...board, cards: board.cards.map((c) => ({ ...c, made: [{ root: "/home/o", path: "PLAN.md", line: null }] })) },
+    };
+    const shown = qualifyWorkspace(OMARCHY, reading);
+    expect(panes(shown.layout)[0]?.reader).toEqual({ root: qualify(OMARCHY, "/home/o"), follow: qualify(OMARCHY, "a1"), editor: qualify(OMARCHY, "a1"), rev: 3 });
+    expect(shown.board?.cards[0]?.made?.[0]?.root).toBe(qualify(OMARCHY, "/home/o"));
+    // A reader that will ask which project has no root to qualify.
+    expect(qualifyRoot(OMARCHY, "")).toBe("");
+    expect(qualifyProject(OMARCHY, { workspaceId: "w1", root: "/home/o", choices: ["/home/o", "/srv/x"] })).toEqual({
+      workspaceId: qualify(OMARCHY, "w1"),
+      root: qualify(OMARCHY, "/home/o"),
+      choices: [qualify(OMARCHY, "/home/o"), qualify(OMARCHY, "/srv/x")],
+    });
+    expect(bareOf(qualify(OMARCHY, "/home/o"))).toBe("/home/o");
+    expect(bareOf("/Users/me")).toBe("/Users/me");
   });
   it("qualifies the agent a reply names, by verb", () => {
     expect(qualifyReply(OMARCHY, "new-tab", { id: "a9" })).toEqual({ id: qualify(OMARCHY, "a9") });
     expect(qualifyReply(OMARCHY, "run-card", { agentId: "a9" })).toEqual({ agentId: qualify(OMARCHY, "a9") });
     expect(qualifyReply(OMARCHY, "worktree-status", { id: "x" })).toEqual({ id: "x" });
     expect(qualifyTab(OMARCHY, BOARD_TAB)).toBe(BOARD_TAB);
+    // nvim's hand-offs: the editors on screen, the one a file went to, the pane a made link opened in.
+    expect(qualifyReply(OMARCHY, "find-editors", [{ agentId: "a1", paneId: "n1" }])).toEqual([{ agentId: qualify(OMARCHY, "a1"), paneId: qualify(OMARCHY, "n1") }]);
+    expect(qualifyReply(OMARCHY, "open-in-editor", { agentId: "a3" })).toEqual({ agentId: qualify(OMARCHY, "a3") });
+    expect(qualifyReply(OMARCHY, "open-made", { paneId: "n2" })).toEqual({ paneId: qualify(OMARCHY, "n2") });
   });
 });
 
@@ -147,8 +174,46 @@ describe("which node a verb is for", () => {
     expect(route({ type: "move-tab-to-workspace", agentId: "a3", workspaceId: q("w1") }, null)).toMatchObject({ to: "nowhere" });
     expect(route({ type: "swap-panes", paneId: q("n1"), withPaneId: qualify(LAPTOP, "n1") }, null)).toMatchObject({ to: "nowhere" });
   });
-  it("refuses a file from this disk into a remote pane", () => {
+  it("refuses a file from this disk into a remote pane, and a remote file into a pane of this one's", () => {
     expect(route({ type: "open-doc", paneId: q("n1"), root: "/Users/me", path: "a.md" }, OMARCHY)).toMatchObject({ to: "nowhere", why: expect.stringContaining("file") });
+    expect(route({ type: "open-doc", paneId: "n1", root: q("/home/o"), path: "a.md" }, null)).toMatchObject({ to: "nowhere", node: OMARCHY, why: expect.stringContaining("file") });
+    expect(route({ type: "split-with-file", paneId: q("n1"), root: "/Users/me", path: "a.md", dir: "row", before: false }, OMARCHY)).toMatchObject({ to: "nowhere" });
+    expect(route({ type: "open-in-editor", id: 1, root: "/Users/me", path: "x.ts", agentId: q("a1") }, OMARCHY)).toMatchObject({ to: "nowhere" });
+  });
+  it("sends a node's file to that node, by its root, with the root bare", () => {
+    expect(route({ type: "open-doc", paneId: q("n1"), root: q("/home/o"), path: "a.md" }, OMARCHY)).toEqual({
+      to: "node",
+      node: OMARCHY,
+      message: { type: "open-doc", paneId: "n1", root: "/home/o", path: "a.md" },
+    });
+    // The tree's click names no pane: the root alone says where.
+    expect(route({ type: "show-doc", root: q("/home/o"), path: "a.md", focus: false }, OMARCHY)).toEqual({
+      to: "node",
+      node: OMARCHY,
+      message: { type: "show-doc", root: "/home/o", path: "a.md", focus: false },
+    });
+    expect(route({ type: "show-doc", root: "/Users/me", path: "a.md" }, OMARCHY)).toEqual({ to: "here" });
+    expect(route({ type: "open-in-editor", id: 4, root: q("/home/o"), path: "x.ts", agentId: null, paneId: q("n2"), line: 12 }, OMARCHY)).toMatchObject({
+      to: "node",
+      message: { root: "/home/o", paneId: "n2", agentId: null, line: 12 },
+    });
+    // A card's made link names its workspace and its root, both the node's;
+    // one with no workspace goes by its root.
+    expect(route({ type: "open-made", id: 2, root: q("/home/o"), path: "PLAN.md", line: null, workspaceId: q("w1") }, null)).toMatchObject({
+      to: "node",
+      message: { root: "/home/o", workspaceId: "w1" },
+    });
+    expect(route({ type: "open-made", id: 3, root: q("/home/o"), path: "PLAN.md", line: null, workspaceId: null }, null)).toMatchObject({ to: "node", node: OMARCHY });
+    expect(route({ type: "open-made", id: 3, root: "/Users/me", path: "PLAN.md", line: null, workspaceId: null }, OMARCHY)).toEqual({ to: "here" });
+  });
+  it("asks the node on screen for its nvims, and this one otherwise", () => {
+    expect(route({ type: "find-editors", id: 5 }, OMARCHY)).toEqual({ to: "node", node: OMARCHY, message: { type: "find-editors", id: 5 } });
+    expect(route({ type: "find-editors", id: 5 }, null)).toEqual({ to: "here" });
+  });
+  it("puts a document tab's root back as its node spells it", () => {
+    const tab = qualifyTab(OMARCHY, docTab("/home/o", "a.md"));
+    expect(tab).toBe(docTab(q("/home/o"), "a.md"));
+    expect(route({ type: "close-tab", agentId: tab }, OMARCHY)).toEqual({ to: "node", node: OMARCHY, message: { type: "close-tab", agentId: docTab("/home/o", "a.md") } });
   });
   it("refuses, rather than does here, anything else that names a remote thing", () => {
     expect(route({ type: "rename-workspace", workspaceId: q("w1"), name: "x" }, null)).toMatchObject({ to: "nowhere", node: OMARCHY });
@@ -219,6 +284,99 @@ function applyHere(workspaces: Workspaces, msg: ClientMessage): void {
   }
 }
 
+describe("reading a node's disk through its watch", () => {
+  /**
+   * A child of the shape the relay dials: a socket server that the fake
+   * handshake proves at once, answering a `files-ask` as `readForWatcher`
+   * would and remembering what it was asked.
+   */
+  async function child(answer: (msg: ClientMessage) => ServerMessage | null) {
+    const asked: ClientMessage[] = [];
+    const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    await new Promise<void>((resolve) => server.once("listening", () => resolve()));
+    server.on("connection", (ws) => {
+      ws.on("message", (data) => {
+        const msg = JSON.parse(String(data)) as ClientMessage;
+        asked.push(msg);
+        const reply = answer(msg);
+        if (reply) ws.send(JSON.stringify(reply));
+      });
+    });
+    const port = (server.address() as { port: number }).port;
+    return { asked, port, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+  }
+
+  function relay(port: number, watchable: number) {
+    const summary = { watchable, workspaces: [] } as unknown as NodeSummary;
+    return new NodeWatches({
+      member: (id) => (id === OMARCHY ? { name: "omarchy", address: "127.0.0.1", port } : null),
+      summary: (id) => (id === OMARCHY ? summary : null),
+      // The proof, stood in for: up as soon as the socket is.
+      handshake: (ws, _expect, up) => ws.once("open", () => up(OMARCHY)),
+      clients: () => new Map(),
+      send: () => undefined,
+      changed: () => undefined,
+      log: () => undefined,
+      record: () => undefined,
+    });
+  }
+
+  it("dials the watch for the read, sends it with an id of its own, and answers with the child's reply", async () => {
+    const box = await child((msg) =>
+      msg.type === "files-ask" ? { type: "reply", id: msg.id, ok: true, result: { entries: [{ name: "a.md", path: "a.md", dir: false }] } } : null,
+    );
+    const watches = relay(box.port, 2);
+    try {
+      const result = await watches.ask(OMARCHY, { type: "files-ask", op: "ls", root: "/home/o", path: "" });
+      expect(result).toEqual({ entries: [{ name: "a.md", path: "a.md", dir: false }] });
+      const ask = box.asked.find((m) => m.type === "files-ask");
+      expect(ask).toMatchObject({ type: "files-ask", op: "ls", root: "/home/o", path: "" });
+      expect(typeof (ask as { id?: unknown }).id).toBe("number");
+    } finally {
+      watches.close();
+      await box.close();
+    }
+  });
+
+  it("says why when the child refuses the read", async () => {
+    const box = await child((msg) => (msg.type === "doc-ask" ? { type: "reply", id: msg.id, ok: false, error: "that file is outside the project" } : null));
+    const watches = relay(box.port, 2);
+    try {
+      await expect(watches.ask(OMARCHY, { type: "doc-ask", op: "markdown", root: "/etc", path: "passwd" })).rejects.toThrow("outside the project");
+    } finally {
+      watches.close();
+      await box.close();
+    }
+  });
+
+  it("refuses a child too old to answer, and a computer that is no member, without dialling", async () => {
+    const box = await child(() => null);
+    const watches = relay(box.port, 1);
+    try {
+      await expect(watches.ask(OMARCHY, { type: "files-ask", op: "ls", root: "/home/o" })).rejects.toThrow("kururu child update");
+      await expect(watches.ask(LAPTOP, { type: "files-ask", op: "ls", root: "/home/o" })).rejects.toThrow("not a computer");
+      expect(box.asked).toEqual([]);
+    } finally {
+      watches.close();
+      await box.close();
+    }
+  });
+
+  it("lets go of a read in flight when the watch closes", async () => {
+    const box = await child(() => null);
+    const watches = relay(box.port, 2);
+    try {
+      const pending = watches.ask(OMARCHY, { type: "files-ask", op: "docs", root: "" });
+      // Once it has reached the child, close the watch under it.
+      for (let i = 0; i < 100 && !box.asked.some((m) => m.type === "files-ask"); i++) await new Promise((r) => setTimeout(r, 10));
+      watches.close();
+      await expect(pending).rejects.toThrow("away");
+    } finally {
+      await box.close();
+    }
+  });
+});
+
 describe("a qualified id is never written", () => {
   it("not to session.json, the host's blob or the database, however the window drives a remote workspace", () => {
     // The child: a workspace with two terminals and a board, as its own
@@ -277,6 +435,13 @@ describe("a qualified id is never written", () => {
       { type: "split-with", agentId: q("a2"), paneId: localPane, dir: "row", before: false },
       { type: "split-with", agentId: "a5", paneId: remoteA!.id, dir: "row", before: true },
       { type: "rename-workspace", workspaceId: shown.id, name: "renamed" },
+      // The tree's and the reader's hand-offs, with the child's roots.
+      { type: "show-doc", root: q("/home/o"), path: "README.md" },
+      { type: "open-doc", paneId: remoteA!.id, root: q("/home/o"), path: "PLAN.md" },
+      { type: "open-doc", paneId: remoteA!.id, root: "/Users/me", path: "PLAN.md" },
+      { type: "find-editors", id: 7 },
+      { type: "open-in-editor", id: 8, root: q("/home/o"), path: "a.ts", agentId: null },
+      { type: "open-made", id: 9, root: q("/home/o"), path: "PLAN.md", line: null, workspaceId: shown.id },
       // And this node's own, which go on as ever and put the Mac back on screen.
       { type: "switch-workspace", workspaceId: local.id },
       { type: "split", dir: "col", paneId: localPane },

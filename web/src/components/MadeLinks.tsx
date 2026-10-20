@@ -13,11 +13,18 @@
  * than in a dialog: the usual reason is a file that went a moment ago, and the
  * server takes the link away within seconds of that anyway. A dialog for a
  * link that is about to vanish would outlive the thing it was about.
+ *
+ * A link on another node's card — a remote workspace's board — names that
+ * node's disk, its root qualified (`shared/remote.ts`), and opens there
+ * through the same verb, which the server forwards. It wears the node's
+ * chip, since a click on it changes a pane on another computer.
  */
 import { useEffect, useState } from "react";
 import { madeName, readsInReader, type MadeFile } from "../../../shared/made";
+import { nodeOfId } from "../../../shared/remote";
 import * as api from "../session";
 import { Icon } from "./Icon";
+import { NodeChip } from "./NodeChip";
 
 /** How long a failed open says why, beside the links. */
 const ERROR_MS = 4000;
@@ -61,7 +68,11 @@ export function MadeLinks({
   onOpened?: () => void;
 }) {
   const { open, error } = useOpenMade(workspaceId, onOpened);
+  const { nodes } = api.useKururu();
   if (files.length === 0) return null;
+  // One agent's or one card's files are all on one disk.
+  const nodeId = nodeOfId(files[0]!.root);
+  const nodeName = nodeId ? (nodes?.nodes.find((n) => n.id === nodeId)?.name ?? "another computer") : null;
   return (
     <span
       className={`made ${className ?? ""}`}
@@ -74,7 +85,7 @@ export function MadeLinks({
           key={`${file.root}/${file.path}`}
           type="button"
           className="made-link"
-          title={madeTitle(file)}
+          title={madeTitle(file, nodeName)}
           onClick={(event) => {
             event.stopPropagation();
             open(file);
@@ -85,6 +96,7 @@ export function MadeLinks({
           {file.line ? <span className="made-line">:{file.line}</span> : null}
         </button>
       ))}
+      {nodeId && nodeName && <NodeChip nodeId={nodeId} name={nodeName} title={`These open on ${nodeName}`} />}
       {error && (
         <span className="made-error" role="status">
           {error}
@@ -115,8 +127,8 @@ export function MadeInline({ file, label, onOpened }: { file: MadeFile; label: s
   );
 }
 
-/** The whole path, and where a click takes it. */
-export function madeTitle(file: MadeFile): string {
+/** The whole path, and where a click takes it — on which computer, when it is not this one. */
+export function madeTitle(file: MadeFile, node: string | null = null): string {
   const where = readsInReader(file.path) ? "in the reader" : `in nvim, in a new tab${file.line ? `, at line ${file.line}` : ""}`;
-  return `${file.path}\nOpen ${where}`;
+  return `${file.path}\nOpen ${where}${node ? `, on ${node}` : ""}`;
 }

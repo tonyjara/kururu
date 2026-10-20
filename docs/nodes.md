@@ -930,9 +930,10 @@ focused pane (a split from the keyboard, `C-a h`) goes to the node on
 screen. The board's tab and a document's tab take the side of the pane they
 are named with. A card is found by its workspace, so its id is never
 qualified. A verb that mixes two machines' ids is refused with a sentence
-("a terminal cannot move between computers"), as is a file from this disk
-into a remote pane, and any verb outside the routed list that carries a
-qualified id. Before a focused-pane verb the relay moves the child's active
+("a terminal cannot move between computers"), and so is any verb outside
+the routed list that carries a qualified id. A path's root counts as an id
+(phase 2, below), so a file from this disk into a remote pane is refused as
+"a file opens only on the computer it is on", and so is the other way round. Before a focused-pane verb the relay moves the child's active
 workspace to the one on screen here, so "the focused pane" means the same
 pane on both. A reply is routed back to the client that asked, under its own
 id, with the agent it names qualified.
@@ -950,10 +951,10 @@ what two clients of one server have always done.
 both lists. The top band takes the node's hue (`nodeHue`, a board-palette
 token set as `--node-hue`, which the Kuru drawer's chips also wear), with
 the node's name at its left end. Every tab wears the node's chip
-(`NodeChip.tsx`). A document tab in a remote pane says it is on that node
-rather than reading this disk. The file tree is closed, since it reads this
-disk. Rename and Delete workspace do nothing while a remote workspace is on
-screen, rather than act on the local one nobody is looking at.
+(`NodeChip.tsx`). A document tab in a remote pane reads the node's file, and
+the file tree is the node's disk (phase 2, below). Rename and Delete
+workspace do nothing while a remote workspace is on screen, rather than act
+on the local one nobody is looking at.
 
 **Away.** When the watch drops, the panes keep what their emulators hold,
 greyed, and the band says "away since 23:10". Typing is refused at this
@@ -976,6 +977,47 @@ and finds no `n:` in `session.json`, the host's blob or the database.
 watch is open (`NodesView.watchedBy`), and its `lifecycle.log` has a
 `watch` line for each one opened and closed. `bun run status` prints
 `watching` on the parent and `watched by` on the child.
+
+**Files, the reader and nvim** (phase 2). A remote workspace's file tree,
+its reader tabs, its picker and its made links are the node's disk, read
+through this server and only ever checked by the node's own `files.ts`.
+
+- **Every root of the node's reaches a page qualified**, `n:<node>:<root>`:
+  a document tab's (`qualifyTab`), a reader's project, the project the tree
+  opens on (`snapshot.remote.project`, from the `projects` a watcher is now
+  sent), a card's or an agent's made files. A root is what says which disk
+  a path is on, so `route` reads it as it reads a pane id. `open-doc`,
+  `split-with-file`, `show-doc`, `open-in-editor` and `open-made` go to the
+  node whose root they carry, bare, and are refused when root and pane are
+  two machines'. `find-editors` names nothing and goes to the node on screen.
+  A document tab named in a verb has its root put back bare.
+- **Reads go over the watch, not the node's HTTP.** The page fetches
+  `/api/node/<id>/ls`, `docs`, `markdown` or `file-raw` from this server in
+  place of `/api/…` when the root it holds is qualified (`web/src/disk.ts`).
+  The handler (`nodeRead`) asks the node `files-ask` or `doc-ask` through
+  `NodeWatches.ask`, which dials the watch if nothing had it open, waits for
+  it as `read_agent` does (`whenUp`), and gives up after 20 s. The node
+  answers only a watcher, with the same functions its routes call
+  (`readForWatcher`), so the 2 MB file and 500-entry listing bounds are the
+  ones that hold. The answer comes back with every root qualified. A
+  document is rendered by the node's Shiki in this window's theme where the
+  node has it, and its image links are pointed at `/api/node/<id>/file-raw`.
+  The share token this node holds for the QR code is never used for any of
+  this: it would go on a request a later edit could log.
+- **The tree only reads there.** Read and Open in nvim work as here, and
+  Copy path copies the node's path. New, rename, move, paste and the Trash
+  are not offered, and there is no `/api/node/<id>/fs`. A delete on another
+  computer is not a thing to reach by a right-click that looks like this
+  computer's; it is the node's nvim's, or its own page's.
+- **nvim needs no ask.** It is a pty, and its hand-offs are verbs with
+  replies that the relay already carries: `find-editors` lists the node's
+  nvims with their ids qualified, and `open-in-editor` either types the file
+  into one over the node's own RPC socket or opens a new one at the line.
+  `open-made` from a card's link opens its file there, in the reader or in
+  nvim, and the link wears the node's chip (`MadeLinks.tsx`).
+- **An old node is said, not guessed at.** `watchable` is 2 from a node
+  that answers the reads (`WATCH_READS`). One at 1 is drawn and typed into
+  as before, and its tree says to update it.
 
 **Starting work there** (phase 4). Everything the window starts on a remote
 workspace is the node's, made by the node's own code. The `+` menu and a
@@ -1051,15 +1093,16 @@ as kept while it is out, and answered to this server instead of a page
 disk and in its Kuru's hearing; every acting tool refuses a qualified id
 with "ask_kuru omarchy". Nothing in this goes near the node's `/mcp`.
 
-Not yet (later phases of the plan): the file tree, the reader and nvim's
-hand-offs on a remote workspace; `C-a w` and workspace stepping across
-nodes.
+Not yet (phase 5 of the plan): `C-a w` and workspace stepping across
+nodes, and the tree's edits on a node's disk.
 
 | message | way | what |
 |---|---|---|
 | `show-node-workspace {nodeId, workspaceKey}` | page → parent | put that workspace on screen; never forwarded |
 | `stale {agentIds}` | parent → page | those remote terminals missed bytes; rebuild as after a reconnect |
 | `remote-said {node, text}` | parent → page | a verb for that node did not go, and why |
+| `GET /api/node/<id>/ls`, `docs`, `markdown`, `file-raw` | page → parent | the node's disk, as the local routes of those names answer; roots bare in the query, qualified in the answer |
+| `files-ask {id, op, root, path?}` / `doc-ask {id, op, root, path, themeId?}` | watch, parent → child | the same reads, answered by `reply` and only to a watcher |
 | `node-new-check {nodeId, name, folder}` | page → parent | the node's word on a folder for a new workspace there; a `MoveCheck` |
 | `node-new-workspace {nodeId, name, folder}` | page → parent | make it there; a `NewWorkspaceMade`, then the page shows it |
 | `node-card-done {nodeId, workspaceKey, cardId}` | page → parent | a Needs row's Done, asked of the node |
@@ -1111,6 +1154,15 @@ off `snapshot.remote.agents`, then `input`. A `cat` on the child is the
 agent to type into. SIGTERM on the child's server (never its host) is the
 band going grey, and starting it again is the refill. The page itself can be
 driven in headless Chrome over the DevTools protocol.
+
+**For its files**, start a `cat` on the child in a scratch folder with a
+markdown file in it. The child's branch walk then learns the folder as a
+root, and `snapshot.remote.project` names it. Fetch the parent's
+`/api/node/<id>/ls?root=<the child's path>&path=`. For a made link on a
+card, give the child a `PATH` whose first `claude` is a stand-in and run a
+card with `add-run-card` (the board must be open first). Post the card's
+agent a `working` report, touch a document, then post a `done` whose
+`reply` names it.
 
 **For the Kurus**, give both instances `HOME=<scratch>`, `SHELL=/bin/sh`
 and a `PATH` whose first `claude` is a stand-in. The stand-in posts

@@ -20,6 +20,7 @@
  * here, where it would be a list of tags to keep in step with.
  */
 import { useEffect, useRef, useState } from "react";
+import { readUrl } from "../disk";
 import { drawDiagrams } from "../mermaid";
 import { DocPicker } from "./DocPicker";
 
@@ -74,13 +75,20 @@ export function ReaderView({
   root,
   path,
   rev,
+  node = null,
 }: {
   paneId: string;
-  /** The document's root — or, with no `path`, the project the picker opens on. */
+  /**
+   * The document's root — or, with no `path`, the project the picker opens
+   * on. Another node's root arrives qualified and is read from that node
+   * (`disk.ts`); the markup is that node's render of its own file.
+   */
   root: string;
   /** Empty for a reader with nothing to show yet, which draws the picker. */
   path: string;
   rev: number;
+  /** The node whose pane this is, for a picker that has no root yet to say so; null for this node's. */
+  node?: string | null;
 }) {
   const [doc, setDoc] = useState<Rendered | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -94,8 +102,7 @@ export function ReaderView({
       return;
     }
     const abort = new AbortController();
-    const query = new URLSearchParams({ root, path });
-    void fetch(`/api/markdown?${query}`, { signal: abort.signal })
+    void fetch(readUrl("markdown", { root, path }), { signal: abort.signal })
       .then((response) => response.json())
       .then((body: Rendered & { error?: string }) => {
         if (abort.signal.aborted) return;
@@ -167,7 +174,7 @@ export function ReaderView({
    * the way to another one, and it opens as a tab beside this.
    */
   if (!path) {
-    return <DocPicker paneId={paneId} root={root} onClose={null} />;
+    return <DocPicker paneId={paneId} root={root} node={node} onClose={null} />;
   }
 
   return (

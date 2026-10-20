@@ -5,7 +5,7 @@ A feasibility study and a plan, written 2026-10-20 from a read of the tree at
 how four other tools do the same split. Phase 0's spike ran on 2026-10-20 in
 throwaway instances and stayed out of `main`
 ([`docs/spikes/remote-workspaces-phase0.md`](../spikes/remote-workspaces-phase0.md)).
-Its answers are folded into the sections below. **Phases 1, 3 and 4 are built**
+Its answers are folded into the sections below. **Phases 1 to 4 are built**
 (2026-10-20); what they are now is in
 [`docs/nodes.md`](../nodes.md#remote-workspaces). The plan is written so that an
 agent can take one phase, read the files it names, and know what "done" is.
@@ -655,6 +655,69 @@ was to do.
   a new nvim tab there at the line, and a made link on one of its cards opens.
 
 Depends on 1. Runs beside 3 and 4.
+
+**Built, 2026-10-20, and verified between two throwaway nodes on the Mac**
+(a parent on :7961 and a child on :7962, paired by the join command, from a
+scratch copy; the user's server and host untouched, and phases 3 and 4's
+throwaways on their own ports). Over the protocol: the child's project came
+up in `snapshot.remote.project` with its root qualified; the parent's
+`/api/node/<id>/ls` listed the child's folder and a folder under it,
+`docs` named the child's roots qualified, `markdown` was the child's render
+with its code highlighted and its image pointed back through the parent,
+and `file-raw` served that image's bytes under the reader's CSP. A root the
+child never found, a path out of its root and a node that is no member were
+each refused, and there is no `fs`. `show-doc` with a qualified root opened
+the README as a tab in the remote pane, with its root qualified on the
+parent's view and bare on the child's own client. `find-editors` was the
+child's, `open-in-editor` started an nvim on the child at `+2` in the
+project and came back with its id qualified, and a second file went into
+that same nvim over its RPC. A file of this disk's sent into the remote pane
+was refused with its sentence. A card run on the child (a stand-in claude)
+whose turn ended naming `docs/PLAN.md` gave the remote card a made link on
+the child's disk, and `open-made` of it, routed, opened PLAN.md in the
+remote workspace's reader. In a real page (headless Chrome over the
+DevTools protocol): `C-a e` opened the tree of the child's disk with the
+node's chip and the root as the child spells it, the root picker moved it
+between the child's folders, the README drew with highlighting and its
+image, a tree click read PLAN.md, a code file's click offered the child's
+nvims by their tabs' names and a new one, and the card's made link wore the
+chip and said where it opens. No file in the parent's state directory,
+database included, held a qualified id. Run again after rebasing onto
+phases 3 and 4. **Not yet:** the two real machines.
+
+Decisions taken in the building, beyond the text above:
+
+- **Roots are qualified, not only ids.** The plan had the tree choose the
+  node's routes "when the workspace on screen is remote". That holds the
+  disk in the component's head, and a verb would still be routed by its
+  pane alone. A root of a node's reaches a page as `n:<node>:<root>`
+  instead, wherever it appears: a document tab, a reader, the project, a
+  made file. The root a component already holds says which disk it is, the
+  URL is decided once (`web/src/disk.ts`), and `route` refuses a pane and a
+  root of two machines' with one sentence for both directions. Phase 1's
+  "a file from this computer cannot open on another one" is that rule.
+- **`editors-ask` and `made-ask` are the verbs that were already there.**
+  The watch is a `/ws` client of the child, and `find-editors`,
+  `open-in-editor` and `open-made` are verbs with replies there, which the
+  relay carries. A second message for each would have been a copy of the
+  first with a different name. Their replies' ids are qualified on the way
+  back, a list of them for `find-editors`. Only the HTTP reads needed new
+  asks: `files-ask` (`ls`, `docs`) and `doc-ask` (`markdown`, `raw`). The
+  raw text the plan listed (`/api/file`) is something no page fetches, so it
+  was left out.
+- **The tree only reads on a node.** Its edits — new, rename, move, the
+  Trash — are not offered there, and the parent has no `/api/node/<id>/fs`.
+  The plan's Security section names reading the node's files, not changing
+  them, and a delete on another machine should not look like a
+  right-click on this one's. If wanted, it is one more op on `files-ask`
+  and a confirmation that names the node.
+- **The child renders in the asker's theme**, sent with `doc-ask`, rather
+  than its own, so code in a document matches the Mac's panes. A theme the
+  child does not know draws the child's fallback, as an unknown theme on a
+  page there always has.
+- **`watchable` is 2** from a node that answers the reads (`WATCH_READS`).
+  One at 1 keeps phase 1's view and its tree says to update it, rather than
+  timing out.
 
 ### Phase 3 — needs, notifications, and what Kuru is told (2–3 days)
 
