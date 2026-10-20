@@ -20,6 +20,8 @@
  * on somebody's behalf.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { bareOf } from "../../../shared/remote";
+import { readUrl } from "../disk";
 import { ago, matching, rows, type Doc } from "../docs";
 import { shortenPath } from "../labels";
 import * as api from "../session";
@@ -41,10 +43,13 @@ interface Answer {
 export function DocPicker({
   paneId,
   root,
+  node = null,
   onClose,
 }: {
   paneId: string;
   root: string;
+  /** Another node's pane, whose disk the list is of; its roots come back qualified, and say so themselves. */
+  node?: string | null;
   onClose: (() => void) | null;
 }) {
   const [at, setAt] = useState(root);
@@ -55,7 +60,7 @@ export function DocPicker({
   useEffect(() => {
     const abort = new AbortController();
     setAnswer(null);
-    void fetch(`/api/docs?root=${encodeURIComponent(at)}`, { signal: abort.signal })
+    void fetch(readUrl("docs", { root: at }, node), { signal: abort.signal })
       .then((response) => response.json())
       .then((body: Answer) => {
         if (!abort.signal.aborted) setAnswer(body);
@@ -64,7 +69,7 @@ export function DocPicker({
         if (!abort.signal.aborted) setAnswer({ roots: [], root: "", docs: [], error: "could not read that project" });
       });
     return () => abort.abort();
-  }, [at]);
+  }, [at, node]);
 
   /**
    * The clock is read once per render of the list rather than per row, so every
@@ -99,7 +104,7 @@ export function DocPicker({
             className="docs-filter"
             type="search"
             value={query}
-            placeholder={answer ? `Find in ${shortenPath(answer.root)}` : "Finding documents…"}
+            placeholder={answer ? `Find in ${shortenPath(bareOf(answer.root))}` : "Finding documents…"}
             onChange={(event) => setQuery(event.target.value)}
             /* Escape is the way out of a filter before it is the way out of the
                picker, which is what somebody with a full box means by it. */
@@ -123,8 +128,8 @@ export function DocPicker({
           {projects.map((project) => (
             <li key={project}>
               <button className="docs-row" onClick={() => setAt(project)}>
-                <span className="docs-name">{project.split("/").pop()}</span>
-                <span className="docs-dir">{shortenPath(project)}</span>
+                <span className="docs-name">{bareOf(project).split("/").pop()}</span>
+                <span className="docs-dir">{shortenPath(bareOf(project))}</span>
               </button>
             </li>
           ))}

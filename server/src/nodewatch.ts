@@ -38,17 +38,30 @@
  * never batched: the child's host already waits up to 16 ms, and a second
  * wait here would be a second frame on every keystroke (phase 0, finding 1).
  *
+ * **The child's disk is read through the same socket.** The file tree and
+ * the reader of a remote workspace ask this server's `/api/node/<id>/…`,
+ * which asks the child over its watch (`files-ask`, `doc-ask`) and answers
+ * as the child's own routes would. The alternative — fetching the child's
+ * HTTP routes with the share token this server holds for its QR code — puts
+ * a token on a request a later edit could log, and works for the parent
+ * only; the watch is proved already and has an id and a timeout per ask.
+ * nvim needs nothing of the kind: it is a pty, and its hand-offs
+ * (`find-editors`, `open-in-editor`, `open-made`) are verbs with replies
+ * that the relay already carries, with the paths' roots qualified so that
+ * `route()` knows whose disk a path is on.
+ *
  * On the restartable side, with nothing near a pty: a restart is a
  * reconnect for every watch, as it is for every window.
  */
 import { WebSocket } from "ws";
 import { activeTerminal, panes, terminalsOf } from "../../shared/layout";
 import type { SessionSnapshot } from "../../shared/model";
-import { dialDelay, type NodeSummary } from "../../shared/nodes";
+import { dialDelay, WATCH_READS, type NodeSummary } from "../../shared/nodes";
 import {
   parseRemote,
   qualify,
   qualifyAgent,
+  qualifyProject,
   qualifyReply,
   qualifyWorkspace,
   remoteLaunchers,
@@ -56,7 +69,7 @@ import {
   type RemoteState,
   type RemoteView,
 } from "../../shared/remote";
-import type { ClientMessage, ServerMessage } from "../../shared/wire";
+import type { ClientMessage, ServerMessage, WorkspaceProject } from "../../shared/wire";
 import { smallestGrid, type Grid } from "./sizing";
 
 /** A watch nothing on screen wants any more is kept this long, so stepping between a local workspace and a remote one is not a reconnect each way. */
@@ -70,6 +83,12 @@ const DIAL_MS = 10_000;
 const MAX_PAYLOAD = 64 * 1024 * 1024;
 /** Above this many bytes queued on a Mac client's socket, the relay says so in the log, once a minute. */
 const BUFFER_WARN = 4 * 1024 * 1024;
+/**
+ * How long a read of the child's disk may take, the watch's dialling
+ * included. A first markdown render loads the child's highlighter, which is
+ * seconds on a cold box; a listing is a round trip.
+ */
+const ASK_MS = 20_000;
 
 /** What `index.ts` keeps per client that the relay reads and, for remote terminals, writes. */
 export interface WatchClient {
@@ -135,6 +154,18 @@ interface PendingReply {
   type: ClientMessage["type"];
 }
 
+/** A read this server asked the child for itself, for an HTTP request of one of its pages. */
+interface PendingAsk {
+  resolve: (result: unknown) => void;
+  reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+/** The two reads the child answers over its watch, without the id the relay gives each. */
+export type DiskAsk =
+  | Omit<Extract<ClientMessage, { type: "files-ask" }>, "id">
+  | Omit<Extract<ClientMessage, { type: "doc-ask" }>, "id">;
+
 /**
  * One child, watched. Its socket, the child's latest snapshot, and the
  * bookkeeping that makes the Mac's many clients one client of the child:
@@ -150,6 +181,8 @@ class NodeWatch {
   since: number | null = null;
   /** The child's latest snapshot, its ids bare, as it sent it. */
   snapshot: SessionSnapshot | null = null;
+  /** Where each of the child's workspaces is on its disk, ids and roots bare, as it sent them. */
+  private projects: WorkspaceProject[] = [];
   private failures = 0;
   private retry: ReturnType<typeof setTimeout> | null = null;
   private ping: ReturnType<typeof setInterval> | null = null;
@@ -170,6 +203,7 @@ class NodeWatch {
   /** Reads waiting for the watch to come up. */
   private readonly upWaiters = new Set<() => void>();
   private readonly replies = new Map<number, PendingReply>();
+  private readonly asks = new Map<number, PendingAsk>();
   private nextReply = 1;
   /** What the child was last told, so the same thing is not said twice. */
   private toldWatch = "";
@@ -313,6 +347,11 @@ class NodeWatch {
     }
     for (const [, reply] of this.replies) this.deps.send(reply.ws, { type: "reply", id: reply.id, ok: false, error: `${this.name} is away: ${why}.` });
     this.replies.clear();
+    for (const [, ask] of this.asks) {
+      clearTimeout(ask.timer);
+      ask.reject(new Error(`${this.name} is away: ${why}.`));
+    }
+    this.asks.clear();
     this.toldWatch = "";
     this.toldLooking = null;
     this.toldSize.clear();
@@ -370,6 +409,14 @@ class NodeWatch {
         this.changed();
         return;
       }
+      case "projects": {
+        // Sent on every change to any workspace's, and a snapshot's worth of
+        // redraw only when the one on screen moved — `NodeWatches` asks.
+        const before = JSON.stringify(this.projects);
+        this.projects = msg.projects;
+        if (JSON.stringify(msg.projects) !== before) this.changed();
+        return;
+      }
       case "output": {
         // Forwarded as it comes, frame for frame — see the module comment.
         const id = qualify(this.node, msg.agentId);
@@ -417,6 +464,14 @@ class NodeWatch {
         return;
       }
       case "reply": {
+        const ask = this.asks.get(msg.id);
+        if (ask) {
+          this.asks.delete(msg.id);
+          clearTimeout(ask.timer);
+          if (msg.ok) ask.resolve(msg.result);
+          else ask.reject(new Error(msg.error));
+          return;
+        }
         const reply = this.replies.get(msg.id);
         if (!reply) return;
         this.replies.delete(msg.id);
@@ -587,6 +642,30 @@ class NodeWatch {
     }
   }
 
+  /**
+   * One read of the child's disk, for this server's own HTTP handler: sent
+   * once the watch is up — dialled for it, if nothing had it open — and
+   * answered with the child's reply, or refused at `ASK_MS`.
+   */
+  async ask(read: DiskAsk): Promise<unknown> {
+    const deadline = Date.now() + ASK_MS;
+    if (!(await this.whenUp(ASK_MS))) throw new Error(`${this.name} could not be reached`);
+    return new Promise((resolve, reject) => {
+      const id = this.nextReply++;
+      const timer = setTimeout(() => {
+        this.asks.delete(id);
+        reject(new Error(`${this.name} did not answer in time`));
+      }, Math.max(1, deadline - Date.now()));
+      timer.unref();
+      this.asks.set(id, { resolve, reject, timer });
+      if (!this.toChild({ ...read, id } as ClientMessage)) {
+        this.asks.delete(id);
+        clearTimeout(timer);
+        reject(new Error(`${this.name} is away`));
+      }
+    });
+  }
+
   /** A workspace of the child's, by key, or by its counter id. */
   workspace(by: { key?: string; id?: string }): SessionSnapshot["profile"]["workspaces"][number] | null {
     const list = this.snapshot?.profile.workspaces ?? [];
@@ -670,6 +749,10 @@ class NodeWatch {
       if (card.run?.agentId) shownIds.add(card.run.agentId);
       if (card.dev?.agentId) shownIds.add(card.dev.agentId);
     }
+    // A child too old to answer the tree's asks has no project here, and the
+    // tree says to update it rather than listing nothing.
+    const reads = (this.deps.summary(this.node)?.watchable ?? 0) >= WATCH_READS;
+    const project = workspace && reads ? this.projects.find((p) => p.workspaceId === workspace.id) : undefined;
     return {
       node: { id: this.node, name: this.name },
       workspaceKey,
@@ -679,6 +762,7 @@ class NodeWatch {
       agents: (snap?.agents ?? []).filter((a) => shownIds.has(a.id)).map((a) => qualifyAgent(this.node, a)),
       launch: snap?.launch ?? null,
       launchers: remoteLaunchers(this.deps.summary(this.node)?.launchers, snap?.launch ?? null),
+      project: project ? qualifyProject(this.node, project) : null,
     };
   }
 
@@ -718,7 +802,7 @@ export class NodeWatches {
     if (!on) return null;
     const watch = this.watches.get(on.node);
     if (watch) return watch.view(on.key);
-    return { node: { id: on.node, name: this.deps.member(on.node)?.name ?? on.node }, workspaceKey: on.key, state: "opening", since: null, workspace: null, agents: [], launch: null, launchers: remoteLaunchers(this.deps.summary(on.node)?.launchers, null) };
+    return { node: { id: on.node, name: this.deps.member(on.node)?.name ?? on.node }, workspaceKey: on.key, state: "opening", since: null, workspace: null, agents: [], launch: null, launchers: remoteLaunchers(this.deps.summary(on.node)?.launchers, null), project: null };
   }
 
   /**
@@ -893,6 +977,21 @@ export class NodeWatches {
       workspace: name,
       focused: pane ? activeTerminal(pane) : null,
     };
+  }
+
+  /**
+   * A read of a node's disk for one of this server's pages — the file tree,
+   * the reader — through its watch, opened for it if nothing had it open; a
+   * watch opened only for this lingers its minute and goes, like any other.
+   * Refused for a node that is no member or too old to answer.
+   */
+  ask(node: string, read: DiskAsk): Promise<unknown> {
+    const member = this.deps.member(node);
+    if (!member) return Promise.reject(new Error("that is not a computer of this kururu's"));
+    if ((this.deps.summary(node)?.watchable ?? 0) < WATCH_READS) {
+      return Promise.reject(new Error(`update ${member.name} (kururu child update) to read its files here`));
+    }
+    return this.watch(node).ask(read);
   }
 
   /** For `/api/health` and `bun run status`: which nodes this server is watching. */

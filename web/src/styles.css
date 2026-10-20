@@ -2978,8 +2978,7 @@ a.button {
   color: var(--blocked);
   white-space: nowrap;
 }
-/* A document in a remote pane, said rather than read. */
-.pane-remote-doc,
+/* A remote workspace whose watch has not said what it is yet. */
 .remote-waiting {
   flex: 1;
   display: flex;
@@ -2990,7 +2989,6 @@ a.button {
   padding: 24px;
   text-align: center;
 }
-.pane-remote-doc p,
 .remote-waiting p {
   margin: 0;
 }

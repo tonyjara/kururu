@@ -23,17 +23,27 @@
  * tree then reads again, so it never believes a move happened that the disk
  * did not agree to. A drag is the desktop's way in; a phone cannot drag, so
  * a long-press opens the same menu and "Move to…" picks the folder from a list.
+ *
+ * Another node's workspace on this screen gets the same tree of the node's
+ * disk, read through this server's `/api/node/<id>/…` (`disk.ts`), and only
+ * read: reading and opening work as here, and what rearranges the box's
+ * files — new, rename, move, the Trash — is left to its nvim and its own
+ * page, since a delete on another machine is not a thing to reach by a
+ * right-click that looks like this machine's.
  */
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { basename } from "../../../shared/labels";
+import { bareOf } from "../../../shared/remote";
 import type { WorkspaceProject } from "../../../shared/wire";
 import { beginDrag, endDrag as endPaneDrag, fileId } from "../drag";
 import { desktop } from "../desktop";
+import { readUrl } from "../disk";
 import { shortenPath } from "../labels";
 import { canZoom, DEFAULT_ZOOM, resetZoom, zoomBy, zoomLabel, zoomStore } from "../zoom";
 import type { DialogState } from "./Dialog";
 import { Icon } from "./Icon";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
+import { NodeChip } from "./NodeChip";
 
 interface Entry {
   name: string;
@@ -97,6 +107,8 @@ export function FileTree({
   workspaceId,
   project,
   runsOn,
+  node,
+  absent,
   current,
   overlay,
   onOpen,
@@ -115,6 +127,10 @@ export function FileTree({
    * here has nothing to draw, and says why rather than waiting forever.
    */
   runsOn: string | null;
+  /** The node whose disk this tree reads — a remote workspace's — or null for this one's. */
+  node: { id: string; name: string } | null;
+  /** Why there is no project, when the caller knows better than "waiting": a node too old to be read. */
+  absent: string | null;
   /** The file the reader in this workspace is showing, to mark its row. */
   current: string | null;
   overlay: boolean;
@@ -173,9 +189,8 @@ export function FileTree({
   const load = useCallback(
     async (dir: string, signal?: AbortSignal) => {
       if (!root) return;
-      const query = new URLSearchParams({ root, path: dir });
       try {
-        const response = await fetch(`/api/ls?${query}`, { signal });
+        const response = await fetch(readUrl("ls", { root, path: dir }), { signal });
         const body = (await response.json()) as { entries?: Entry[]; error?: string };
         const next = body.entries ?? body.error ?? "could not list this directory";
         setListings((had) => {
@@ -295,7 +310,9 @@ export function FileTree({
     setClip((had) => (had && within(had.path, from) ? null : had));
   };
 
-  const place = (dir: string) => (dir ? `in ${dir}` : `at the top of ${root ? basename(root) : "the project"}`);
+  /** The root as its own disk spells it, for a label: a remote one's qualification is the wire's, not a person's. */
+  const shown = root ? bareOf(root) : null;
+  const place = (dir: string) => (dir ? `in ${dir}` : `at the top of ${shown ? basename(shown) : "the project"}`);
 
   const create = (dir: string, kind: "touch" | "mkdir") =>
     onPrompt({
@@ -445,7 +462,7 @@ export function FileTree({
   /** Drop handlers for a place things land in: a folder row, a file's folder, or the top. */
   const dropInto = (dir: string, row?: Entry) => ({
     onDragOver: (event: React.DragEvent) => {
-      if (!event.dataTransfer.types.includes(TREE_MIME)) return;
+      if (node || !event.dataTransfer.types.includes(TREE_MIME)) return;
       event.preventDefault();
       event.stopPropagation();
       // Option copies, as it does in Finder; a plain drag moves.
@@ -455,7 +472,7 @@ export function FileTree({
     },
     onDrop: (event: React.DragEvent) => {
       const path = event.dataTransfer.getData(TREE_MIME);
-      if (!path) return;
+      if (node || !path) return;
       event.preventDefault();
       event.stopPropagation();
       endDrag();
@@ -473,6 +490,10 @@ export function FileTree({
     if (entry && !entry.dir) {
       if (MARKDOWN.test(entry.path)) items.push({ label: "Read", run: () => onOpen(root, entry.path) });
       items.push({ label: "Open in nvim…", run: () => onOpenInEditor(root, entry.path) });
+    }
+    if (node) {
+      if (entry) items.push({ label: "Copy path", sep: items.length > 0, run: () => void navigator.clipboard?.writeText(`${shown}/${entry.path}`).catch(() => {}) });
+      return items;
     }
     items.push({ label: "New file…", sep: items.length > 0, run: () => create(dir, "touch") });
     items.push({ label: "New folder…", run: () => create(dir, "mkdir") });
@@ -500,7 +521,7 @@ export function FileTree({
     items.push({
       label: "Copy path",
       sep: true,
-      run: () => void navigator.clipboard?.writeText(`${root}/${entry.path}`).catch(() => {}),
+      run: () => void navigator.clipboard?.writeText(`${shown}/${entry.path}`).catch(() => {}),
     });
     if (reveal) items.push({ ...reveal, sep: false });
     items.push({ label: "Move to Trash", sep: true, danger: true, hint: "⌘⌫", run: () => trash(entry) });
@@ -514,6 +535,7 @@ export function FileTree({
    * what a button was sent.
    */
   const rowKeys = (event: React.KeyboardEvent, entry: Entry) => {
+    if (node) return;
     const mod = event.metaKey || event.ctrlKey;
     const key = event.key.toLowerCase();
     const act = (fn: () => void) => {
@@ -561,7 +583,7 @@ export function FileTree({
               // A markdown file can also be dropped on a pane, as a tab — so it
               // announces itself to the panes too, which light up for it.
               if (doc && root) beginDrag(event, "file", fileId(root, entry.path));
-              event.dataTransfer.setData(TREE_MIME, entry.path);
+              if (!node) event.dataTransfer.setData(TREE_MIME, entry.path);
               event.dataTransfer.effectAllowed = "copyMove";
             }}
             onDragEnd={() => {
@@ -592,22 +614,23 @@ export function FileTree({
         {choices.length > 1 ? (
           <button
             className="files-root files-root-pick"
-            title={`${root ?? ""} — pick another folder this workspace's tabs are in`}
+            title={`${shown ?? ""} — pick another folder this workspace's tabs are in`}
             aria-haspopup="menu"
             onClick={(event) => {
               const box = event.currentTarget.getBoundingClientRect();
               setRootMenu({ x: box.left, y: box.bottom + 4 });
             }}
           >
-            {root ? basename(root) : "files"}
+            {shown ? basename(shown) : "files"}
             <Icon name="caret" />
           </button>
         ) : (
-          <span className="files-root" title={root ?? undefined}>
-            {root ? basename(root) : "files"}
+          <span className="files-root" title={shown ?? undefined}>
+            {shown ? basename(shown) : "files"}
           </span>
         )}
-        {root && <span className="files-path">{shortenPath(root)}</span>}
+        {node && <NodeChip nodeId={node.id} name={node.name} title={`${node.name}'s disk, read through this window — it opens files there and changes none`} />}
+        {shown && <span className="files-path">{shortenPath(shown)}</span>}
         <Zoom />
         {/* On a wide window the tree's own way back to the edge, beside the
             status bar's; on a sheet, the way out of it, which is a close. */}
@@ -638,17 +661,20 @@ export function FileTree({
       >
         {root ? (
           rows("", 0)
+        ) : absent ? (
+          <p className="tree-note">{absent}</p>
         ) : runsOn ? (
           <p className="tree-note">
             This workspace runs on {runsOn}, and the tree only reads this Mac, so there is nothing here for it to show. Unpin
             the workspace in Settings → General → Workspaces to browse a folder on this Mac.
           </p>
         ) : (
-          <p className="tree-note">Waiting for a terminal to say where this workspace is.</p>
+          <p className="tree-note">{node ? `Waiting for ${node.name} to say where this workspace is.` : "Waiting for a terminal to say where this workspace is."}</p>
         )}
       </div>
       {!overlay && <Grip onResize={onResize} onReset={onResetWidth} />}
-      {menu && <Menu at={menu.at} items={menuItems(menu.entry)} onClose={() => setMenu(null)} />}
+      {/* A remote tree's empty space has nothing to offer — every item there makes something. */}
+      {menu && menuItems(menu.entry).length > 0 && <Menu at={menu.at} items={menuItems(menu.entry)} onClose={() => setMenu(null)} />}
       {rootMenu && project && (
         <Menu
           at={rootMenu}
@@ -658,13 +684,13 @@ export function FileTree({
             // folder would pin it, and this is the way back to not pinning.
             {
               label: "Follow the focused tab",
-              hint: basename(project.root),
+              hint: basename(bareOf(project.root)),
               mark: !picked || !choices.includes(picked),
               run: () => pick(null),
             },
             ...choices.map((dir, at) => ({
-              label: basename(dir) || dir,
-              hint: shortenPath(dir),
+              label: basename(bareOf(dir)) || bareOf(dir),
+              hint: shortenPath(bareOf(dir)),
               sep: at === 0,
               mark: picked === dir,
               run: () => pick(dir),

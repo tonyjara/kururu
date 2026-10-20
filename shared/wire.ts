@@ -1083,6 +1083,24 @@ export type ClientMessage =
    */
   | { type: "open-made"; id: number; root: string; path: string; line: number | null; workspaceId: string | null; focus?: boolean }
   /**
+   * The parent's server reading this node's disk for a window of its own —
+   * the file tree and the reader of a workspace of this node's on the
+   * parent's screen. What `/api/ls`, `/api/docs`, `/api/markdown` and
+   * `/api/file-raw` answer a page here, asked over the watch instead,
+   * because the watch is already proved and the parent holds no token of a
+   * child's that it should put on a request. Taken only from a watcher (a
+   * page has the routes) and replied to as those routes answer: the same
+   * `files.ts` checks, the same bounds, the roots this node found itself.
+   * See `docs/plans/remote-workspaces.md#phase-2--files-the-reader-nvims-hand-offs`.
+   */
+  | { type: "files-ask"; id: number; op: "ls" | "docs"; root: string; path?: string }
+  /**
+   * The same for a document: `markdown` is the rendered markup, in the
+   * asker's theme where this node knows it, and `raw` is a file's bytes as
+   * base64 — an image the markup points at.
+   */
+  | { type: "doc-ask"; id: number; op: "markdown" | "raw"; root: string; path: string; themeId?: string }
+  /**
    * Ask nvims to `:qa` — Settings → Processes' buttons, for any nvim on the
    * machine, in kururu or not.
    *
