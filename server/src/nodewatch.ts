@@ -56,7 +56,7 @@
 import { WebSocket } from "ws";
 import { activeTerminal, panes, terminalsOf } from "../../shared/layout";
 import type { SessionSnapshot } from "../../shared/model";
-import { dialDelay, WATCH_READS, type NodeSummary } from "../../shared/nodes";
+import { dialDelay, WATCH_READS, type NodeStatus, type NodeSummary } from "../../shared/nodes";
 import {
   parseRemote,
   qualify,
@@ -66,6 +66,8 @@ import {
   qualifyWorkspace,
   remoteLaunchers,
   route,
+  stepAcross,
+  workspacesAcross,
   type RemoteState,
   type RemoteView,
 } from "../../shared/remote";
@@ -115,6 +117,17 @@ export interface NodeWatchDeps {
   record: (line: string) => void;
   /** The child's snapshot, as it came: its agents' statuses are what this node's notices read while a watch is up (`nodenotice.ts`). */
   relayed?: (node: string, snapshot: SessionSnapshot) => void;
+  /**
+   * What `C-a N`, `C-a P` and `C-a z` need to step across nodes: this
+   * node's workspaces in order and which is active (`key` as `noteLocal` is
+   * told it), the nodes in the sidebar's order, and a way to switch locally.
+   * Without it those keys walk this node's list alone, as they did before.
+   */
+  across?: {
+    local: () => { ids: string[]; activeId: string; key: string };
+    nodes: () => readonly Pick<NodeStatus, "id" | "state" | "summary">[];
+    switchLocal: (workspaceId: string) => void;
+  };
 }
 
 /** How long Kuru's read of a remote screen waits for the watch and the backlog together. */
@@ -138,8 +151,6 @@ class Reader {
 const SHOWS_LOCAL = new Set<ClientMessage["type"]>([
   "switch-workspace",
   "workspace-index",
-  "step-workspace",
-  "last-workspace",
   "new-workspace",
   "switch-profile",
   "reveal-agent",
@@ -784,6 +795,13 @@ export class NodeWatches {
   private onScreen: { node: string; key: string } | null = null;
   /** The local profile and workspace that were active when the remote one went on screen. */
   private localWas = "";
+  /**
+   * The remote workspace that was last taken off screen, and the local one
+   * the window landed on when it was: `C-a z` from there goes back to it,
+   * as it goes back to the last local workspace, and from anywhere else
+   * the local `lastWorkspace` is the answer.
+   */
+  private back: { node: string; key: string; at: string | null } | null = null;
   private readonly sweep: ReturnType<typeof setInterval>;
 
   constructor(private readonly deps: NodeWatchDeps) {
@@ -826,8 +844,17 @@ export class NodeWatches {
   }
 
   private hide(): void {
-    if (!this.onScreen) return;
+    const on = this.onScreen;
+    if (!on) return;
     this.onScreen = null;
+    // Where the window lands is decided after this, by the verb that took
+    // the remote workspace off screen — `handleMessage` runs it once
+    // `handle` returns — so it is read when that is done.
+    const back = { node: on.node, key: on.key, at: null as string | null };
+    this.back = back;
+    queueMicrotask(() => {
+      back.at = this.deps.across?.local().key ?? null;
+    });
     this.deps.changed();
     this.wanted();
   }
@@ -911,6 +938,7 @@ export class NodeWatches {
       this.show(msg.nodeId, msg.workspaceKey);
       return true;
     }
+    if (msg.type === "step-workspace" || msg.type === "last-workspace") return this.step(msg);
     const routed = route(msg, this.onScreen?.node ?? null);
     if (routed.to === "here") {
       if (SHOWS_LOCAL.has(msg.type)) this.hide();
@@ -941,6 +969,48 @@ export class NodeWatches {
     }
     const shown = this.onScreen?.node === node ? this.onScreen.key : null;
     watch.handle(ws, st, msg, message, shown);
+    return true;
+  }
+
+  /**
+   * `C-a N`, `C-a P` and `C-a z`, across nodes: the walk is this node's
+   * workspaces and then each node's, in the sidebar's order
+   * (`stepAcross`), and the toggle goes back to a remote workspace as it
+   * goes back to a local one. True when it was done here; false for the
+   * local verb to do as ever, which is the whole of it when no node can be
+   * stepped onto.
+   */
+  private step(msg: Extract<ClientMessage, { type: "step-workspace" | "last-workspace" }>): boolean {
+    const across = this.deps.across;
+    if (!across) {
+      this.hide();
+      return false;
+    }
+    const local = across.local();
+    if (msg.type === "last-workspace") {
+      const on = this.onScreen;
+      // From a remote workspace, back to the local one it was put up over.
+      if (on) {
+        this.hide();
+        return true;
+      }
+      const back = this.back;
+      const there = back && back.at === local.key ? workspacesAcross([], across.nodes()) : [];
+      if (back && there.some((p) => "there" in p && p.there.node === back.node && p.there.workspaceKey === back.key)) {
+        this.show(back.node, back.key);
+        return true;
+      }
+      return false;
+    }
+    const remote = this.onScreen ? { node: this.onScreen.node, workspaceKey: this.onScreen.key } : null;
+    const to = stepAcross(workspacesAcross(local.ids, across.nodes()), { activeId: local.activeId, remote }, msg.delta);
+    if (!to) return true;
+    if ("there" in to) {
+      this.show(to.there.node, to.there.workspaceKey);
+      return true;
+    }
+    this.hide();
+    across.switchLocal(to.here);
     return true;
   }
 

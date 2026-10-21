@@ -3254,6 +3254,26 @@ a.button {
   position: absolute;
   transition: background 90ms ease;
 }
+/* Something of the other machine's over this pane: no zones, one box that
+   says where it stays (\`DropRefused\`). The pane's own hue is the band's;
+   this is the muted wash of a thing that will not happen. */
+.dz-refused {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+}
+.dz-refused-text {
+  max-width: 40ch;
+  padding: 6px 10px;
+  border: var(--border) var(--border-style) var(--line-high);
+  border-radius: var(--radius-lg);
+  background: var(--chrome-high);
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  text-align: center;
+}
 .dz-on {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
   box-shadow: inset 0 0 0 var(--border) var(--accent);
@@ -4501,6 +4521,18 @@ html.pill-page #root {
 .dialog-empty {
   padding: 8px;
   font-size: var(--fs-md);
+}
+/* A heading inside a pick list: another node's workspaces under its name,
+   in its hue, as the sidebar's Nodes section heads them. */
+.dialog-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 4px 8px 2px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--dim);
 }
 
 /* The create row is part of the list but not one of the things in it, so it is

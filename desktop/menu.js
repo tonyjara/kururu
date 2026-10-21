@@ -142,7 +142,10 @@ function menuTemplate(view) {
   if (nodes.length) {
     items.push({ id: "nodes", label: "Nodes", enabled: false });
     for (const node of nodes) {
-      items.push(node.why ? { id: `node:${node.id}`, label: `    ${node.name} — ${node.why}`, enabled: false } : { id: `node:${node.id}`, label: `    Open ${node.name}` });
+      // A node whose workspaces open in the window from its sidebar is
+      // reached here only for what the window cannot show: its Settings.
+      const label = node.settings ? `    ${node.name}'s Settings` : `    Open ${node.name}`;
+      items.push(node.why ? { id: `node:${node.id}`, label: `    ${node.name} — ${node.why}`, enabled: false } : { id: `node:${node.id}`, label });
     }
     items.push({ type: "separator" });
   }

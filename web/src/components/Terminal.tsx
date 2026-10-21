@@ -23,7 +23,8 @@
  */
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { isFileDrag, textForDrop } from "../drop";
-import { input } from "../session";
+import { finderRefusal, nodeOfId } from "../../../shared/remote";
+import { input, sayAboutNode } from "../session";
 import { borrow, release, setFocused } from "../terminals";
 
 interface Props {
@@ -73,7 +74,14 @@ export function TerminalView({ agentId, focused, keyboard }: Props) {
    * drop — the same restriction `drag.ts` exists to work around. Kururu's own
    * tab and pane drags carry custom MIME types, not `Files`, so they fall
    * straight through this to the drop zones that handle them.
+   *
+   * Not onto another node's terminal. The path is this Mac's, the pty is on
+   * the box, and a path typed there names a file that is not — or worse, a
+   * different one at the same place. So the drop is refused while the file
+   * is held over the pane, and the band says why; carrying the file across
+   * is an upload, which is another feature.
    */
+  const node = nodeOfId(agentId);
   return (
     <div
       className="term-mount"
@@ -81,11 +89,17 @@ export function TerminalView({ agentId, focused, keyboard }: Props) {
       onDragOver={(event) => {
         if (!isFileDrag(event.dataTransfer)) return;
         event.preventDefault();
+        if (node) {
+          event.dataTransfer.dropEffect = "none";
+          sayAboutNode(node, finderRefusal);
+          return;
+        }
         event.dataTransfer.dropEffect = "copy";
       }}
       onDrop={(event) => {
         if (!isFileDrag(event.dataTransfer)) return;
         event.preventDefault();
+        if (node) return;
         const text = textForDrop(event.dataTransfer);
         if (text) input(agentId, text);
       }}

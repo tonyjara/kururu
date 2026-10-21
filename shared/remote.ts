@@ -554,3 +554,108 @@ export function nextNeedAcross(
   });
   return current === -1 ? all[0]! : all[(current + 1) % all.length]!;
 }
+
+// ---------------------------------------------------------------------------
+// Every workspace this window can be on, in the sidebar's order
+// ---------------------------------------------------------------------------
+
+/** A workspace this window can show: one of this node's, by id, or one of another's, by node and key. */
+export type WorkspacePlace = { here: string } | { there: { node: string; workspaceKey: string } };
+
+/**
+ * The workspaces `C-a N` and `C-a P` walk, and `C-a w` lists: this node's
+ * in its own order, then each node's as the sidebar draws them, which is
+ * the order `nodes` arrives in. A node is in the walk on the terms its
+ * Needs are (`nodeNeeds`): up, and new enough to be watched. An away node's
+ * workspaces are its last summary's, and stepping onto one would put a
+ * grey screen up that the next key steps off again.
+ */
+export function workspacesAcross(
+  local: readonly string[],
+  nodes: readonly Pick<NodeStatus, "id" | "state" | "summary">[],
+): WorkspacePlace[] {
+  const out: WorkspacePlace[] = local.map((here) => ({ here }));
+  for (const node of nodes) {
+    if (node.state !== "up" || !node.summary?.watchable) continue;
+    for (const w of node.summary.workspaces) out.push({ there: { node: node.id, workspaceKey: w.key } });
+  }
+  return out;
+}
+
+/**
+ * Where `C-a N` (`delta` 1) or `C-a P` (-1) goes from where the window is:
+ * the next place in `workspacesAcross`, wrapping, as `stepWorkspace` wraps
+ * this node's own list. Where it is is the remote workspace on screen, if
+ * one is and it is still in the walk, and otherwise this node's active one,
+ * which is also what a remote workspace whose node went away steps from.
+ * Null when there is nowhere else to go.
+ */
+export function stepAcross(
+  places: readonly WorkspacePlace[],
+  at: { activeId: string; remote: { node: string; workspaceKey: string } | null },
+  delta: number,
+): WorkspacePlace | null {
+  if (places.length === 0 || !Number.isFinite(delta)) return null;
+  const same = (place: WorkspacePlace): boolean =>
+    "there" in place ? !!at.remote && place.there.node === at.remote.node && place.there.workspaceKey === at.remote.workspaceKey : false;
+  let current = at.remote ? places.findIndex(same) : -1;
+  if (current === -1) current = places.findIndex((place) => "here" in place && place.here === at.activeId);
+  if (current === -1) return places[0]!;
+  const step = Math.trunc(delta) % places.length;
+  const next = places[(current + step + places.length) % places.length]!;
+  // The same place again — a list of one — is nowhere to go, except from a
+  // remote workspace that dropped out of the walk, where it is the way back.
+  return next === places[current] && !at.remote ? null : next;
+}
+
+// ---------------------------------------------------------------------------
+// Drops across the boundary
+// ---------------------------------------------------------------------------
+
+/**
+ * Which machine a dragged thing is on: a node's id, null for this one's, or
+ * undefined for a thing that takes the side of wherever it is dropped (the
+ * board's tab). `kind` and `id` are `drag.ts`'s: an agent or a pane by its
+ * id, a document's tab by the pane it sits in (`docId`'s second half), a file
+ * out of the tree by its root.
+ */
+export function sideOf(kind: "agent" | "pane" | "doc" | "file", id: string): string | null | undefined {
+  if (kind === "agent" && id === BOARD_TAB) return undefined;
+  if (kind === "doc") {
+    const colon = id.indexOf(":");
+    return nodeOfId(colon < 0 ? id : id.slice(colon + 1));
+  }
+  if (kind === "file") {
+    try {
+      const parsed: unknown = JSON.parse(id);
+      return Array.isArray(parsed) ? nodeOfId(parsed[0]) : null;
+    } catch {
+      return null;
+    }
+  }
+  return nodeOfId(id);
+}
+
+/**
+ * What a drop target says to a thing from the other machine, or null when
+ * the two are on the same one and the drop is an ordinary drop. It is the
+ * sentence `route` would answer with, said before the drop rather than
+ * after it — the zone reads "stays on omarchy" while the tab is over it,
+ * so nobody lets go and watches nothing happen. `names` turns a node's id
+ * into its name, and null into this node's.
+ */
+export function dropRefusal(
+  from: string | null | undefined,
+  to: string | null | undefined,
+  kind: "agent" | "pane" | "doc" | "file",
+  names: (node: string | null) => string,
+): string | null {
+  if (from === undefined || to === undefined || from === to) return null;
+  const where = names(from);
+  return kind === "doc" || kind === "file" ? `Stays on ${where}: a file opens only on the computer it is on` : `Stays on ${where}: a terminal cannot move between computers`;
+}
+
+/** What a file dragged in from the Finder onto another node's terminal says, rather than typing a path that is not there. */
+export function finderRefusal(nodeName: string): string {
+  return `That file is on this computer, not on ${nodeName}, so its path was not typed`;
+}

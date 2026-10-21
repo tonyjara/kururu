@@ -88,6 +88,7 @@ import { NameField } from "./NameField";
 import { Status } from "./Status";
 import { TerminalView } from "./Terminal";
 import { NodeChip } from "./NodeChip";
+import { dropRefusal, sideOf } from "../../../shared/remote";
 
 /** Whose workspace these panes are, when it is another node's: its id for the hue, its name for the words. */
 export interface RemotePanes {
@@ -779,9 +780,10 @@ function Pane({
    * strip, since a pane holds whatever you put in it — and so does a markdown
    * file out of the tree, which arrives as a document.
    */
-  const takesTabs = dragging?.kind === "agent" || dragging?.kind === "doc" || dragging?.kind === "file";
+  const refused = useDropRefusal(pane.id);
+  const takesTabs = !refused && (dragging?.kind === "agent" || dragging?.kind === "doc" || dragging?.kind === "file");
   /** Another pane is in flight, and it is not this one — dropped on this strip, it pours in. */
-  const takesPane = dragging?.kind === "pane" && dragging.id !== pane.id;
+  const takesPane = !refused && dragging?.kind === "pane" && dragging.id !== pane.id;
   /** Something that can land on this pane's body: any tab, any pane. */
   const takesZones = takesPane || takesTabs;
   /** This pane is the one being dragged; show it as picked up. */
@@ -1093,6 +1095,7 @@ function Pane({
           <EmptyPane pane={pane} />
         )}
         {takesZones && <DropZones paneId={pane.id} />}
+        {refused && <DropRefused text={refused} />}
       </div>
     </section>
   );
@@ -1270,6 +1273,45 @@ function DropZones({ paneId }: { paneId: string }) {
       <div {...zone("top")} />
       <div {...zone("bottom")} />
       <div {...zone("center")} />
+    </div>
+  );
+}
+
+/**
+ * What this pane says to the thing in flight when it is the other
+ * machine's, or null when it may land here. A remote workspace and a local
+ * one are never on screen together, so the crossing is a terminal off the
+ * sidebar's list dragged onto a node's pane, or a file of one disk onto the
+ * other's panes; `route` would refuse either after the drop, and this says
+ * so before it, over the pane, in the sentence the band would have shown.
+ */
+function useDropRefusal(paneId: string): string | null {
+  const dragging = useDragging();
+  if (!dragging || dragging.kind === "workspace" || dragging.kind === "group") return null;
+  return dropRefusal(sideOf(dragging.kind, dragging.id), sideOf("pane", paneId), dragging.kind, api.nodeName);
+}
+
+/**
+ * The drop zones' place, taken by a refusal: one box over the pane saying
+ * where the thing stays, which takes the drag so that nothing under it — a
+ * terminal's own drop, the strip — is offered it, and lets nothing go.
+ */
+function DropRefused({ text }: { text: string }) {
+  return (
+    <div
+      className="dropzones dz-refused"
+      role="status"
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "none";
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+    >
+      <span className="dz-refused-text">{text}</span>
     </div>
   );
 }

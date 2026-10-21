@@ -188,4 +188,9 @@ describe("the nodes in the tray menu", () => {
     expect(byId(view, "node:n2")).toEqual({ id: "node:n2", label: "    mac — away since 23:10", enabled: false });
     expect(labels(base)).not.toContain("Nodes");
   });
+
+  it("offers a node whose workspaces open in the window only for its Settings", () => {
+    const view = { ...base, nodes: [{ id: "n1", name: "omarchy", why: null, settings: true }] };
+    expect(byId(view, "node:n1")).toEqual({ id: "node:n1", label: "    omarchy's Settings" });
+  });
 });

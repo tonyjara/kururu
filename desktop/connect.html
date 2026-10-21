@@ -151,7 +151,9 @@
           label.className = "addr";
           label.textContent = `${node.name}  ·  ${node.address.replace(/^https?:\/\//, "")}`;
           const open = document.createElement("button");
-          open.textContent = node.reachable ? "Open" : "Try";
+          // A node this window drives from its sidebar is opened only for its Settings (`nodes.js`).
+          open.textContent = !node.reachable ? "Try" : node.settings ? "Settings" : "Open";
+          if (node.settings) open.title = `${node.name}'s own page, on its Settings. Its workspaces open in the window from the sidebar.`;
           if (node.reachable) open.className = "go";
           open.onclick = async () => {
             error.textContent = "";

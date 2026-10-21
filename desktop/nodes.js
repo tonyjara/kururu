@@ -2,6 +2,14 @@
  * The other kururus, as the window's two choosers offer them: the tray's
  * "Open <node>" and the picker's list.
  *
+ * Since remote workspaces, a node this window can drive is not *opened*
+ * here any more: its workspaces come into this window from the sidebar,
+ * through the Mac's server, with the Mac's own agents still beside them.
+ * What moving the whole window to the node is still for is the node's own
+ * Settings, which no road here reaches, so that is what such a node's row
+ * says (`settings`) and where the window lands. A node from before keeps
+ * "Open", since moving the window is still its only road.
+ *
  * The local server knows every member of the roster and whether each one's
  * link is up (`server/src/nodes.ts`), so this asks it rather than keeping a
  * list of its own: `/api/nodes`, on loopback. On the parent each node's URL
@@ -74,6 +82,8 @@ function nodeChoices(view) {
       state: node.state,
       since: typeof node.since === "number" ? node.since : null,
       parent: node.parent === true,
+      // Its workspaces open in this window; moving there is for its Settings.
+      settings: Boolean(node.summary && node.summary.watchable),
     });
   }
   return out;
