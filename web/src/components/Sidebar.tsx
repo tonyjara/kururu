@@ -78,7 +78,7 @@ import { MadeLinks } from "./MadeLinks";
 import { NameField } from "./NameField";
 import { Mascot, Status } from "./Status";
 import { hueStyle } from "./NodeChip";
-import { qualify } from "../../../shared/remote";
+import { isRemote, qualify } from "../../../shared/remote";
 
 /**
  * How far the pointer may travel between `dragstart` and `dragend` for the
@@ -217,6 +217,12 @@ export function Sidebar({
   onResetWidth,
 }: Props) {
   const dragging = useDragging();
+  /**
+   * A tab of another node's workspace, in flight: every row in this list is
+   * this computer's, and a terminal cannot move between computers, so none
+   * of them lights up for it (the panes say so in words; see `Panes.tsx`).
+   */
+  const foreign = dragging?.kind === "agent" && isRemote(dragging.id);
   /**
    * What each workspace has checked out.
    *
@@ -790,7 +796,7 @@ export function Sidebar({
            rather than as a refusal. A pane or a workspace dropped here means nothing, so
            the row does not light up for one. */
         onDragOver={(event) => {
-          if (!reorderable || dragging?.kind !== "agent" || dragging.id === agent.id) return;
+          if (!reorderable || foreign || dragging?.kind !== "agent" || dragging.id === agent.id) return;
           allowDrop(event);
           const box = event.currentTarget.getBoundingClientRect();
           const after = event.clientY > box.top + box.height / 2;
@@ -1080,7 +1086,7 @@ export function Sidebar({
               onDragOver={(event) => {
                 // A whole pane is not something a workspace row knows what to do
                 // with, so it does not offer to take one.
-                if (dragging?.kind !== "agent" && dragging?.kind !== "workspace" && dragging?.kind !== "group") return;
+                if (foreign || (dragging?.kind !== "agent" && dragging?.kind !== "workspace" && dragging?.kind !== "group")) return;
                 if (dragging.kind === "workspace" && dragging.id === workspace.id) return;
                 if (dragging.kind === "group" && dragging.id === group) return;
                 allowDrop(event);
@@ -1267,7 +1273,7 @@ export function Sidebar({
                   aria-expanded={!shut}
                   title={shut ? `Show ${group.name}'s agents` : `Fold ${group.name}'s agents away`}
                   onDragOver={(event) => {
-                    if (!group.id || dragging?.kind !== "agent") return;
+                    if (!group.id || foreign || dragging?.kind !== "agent") return;
                     if (where.get(dragging.id)?.workspaceId === group.id) return;
                     allowDrop(event);
                     setOverGroup(group.id);

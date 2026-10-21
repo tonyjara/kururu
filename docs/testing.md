@@ -107,6 +107,16 @@ left in the Dock is how a force quit reached a coalition on 2026-10-10.
 
 Kept short on purpose; the detail is in git history.
 
+- **Remote workspaces, phase 5** (2026-10-21), between two throwaway nodes
+  from a scratch clone, in a real page in headless Chrome: `C-a N` and
+  `C-a P` across this node's and the child's workspaces with the wrap,
+  `C-a z` both ways, a reload keeping the child's workspace on screen with
+  its watch up, `C-a w`'s heading and filter, a sidebar agent over the
+  child's pane refused in words, the child's own tab still given zones, a
+  child's tab lighting no local row, a Finder file refused in the band, and
+  Settings → Nodes with its button opening the child on its Settings. The
+  desktop's tray and picker rows by their tests only. Record in
+  [the plan](plans/remote-workspaces.md#phase-5--edges-and-polish-35-days).
 - **Remote workspaces, phase 2** (2026-10-20), between two throwaway nodes:
   a child's folder listed, a document rendered and its image served through
   the parent's `/api/node/<id>/…`, a tree click opening it as a tab on the

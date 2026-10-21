@@ -7644,6 +7644,14 @@ async function attach(port: Port): Promise<void> {
     log: (line) => console.log(`kururu: ${line}`),
     record: (line) => record("watch", line),
     relayed: (node, snapshot) => nodeNotices.snapshot(node, snapshot),
+    across: {
+      local: () => {
+        const profile = workspaces.active;
+        return { ids: profile.workspaces.map((w) => w.id), activeId: profile.activeWorkspaceId, key: `${profile.id}/${profile.activeWorkspaceId}` };
+      },
+      nodes: () => nodes.statuses(),
+      switchLocal: (workspaceId) => workspaces.switchWorkspace(workspaceId),
+    },
   });
   nodeNotices = new NodeNotices({
     clients: () => clients,

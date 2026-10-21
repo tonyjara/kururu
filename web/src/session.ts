@@ -763,6 +763,30 @@ export function switchWorkspace(workspaceId: string): void {
   send({ type: "switch-workspace", workspaceId });
 }
 
+/**
+ * A node's name, or this one's for null, as the store has it now. Read at
+ * the moment rather than subscribed to, for the drag's refusals: a pane
+ * that subscribed to the store for a name it needs only mid-drag would
+ * render again on every message the store takes.
+ */
+export function nodeName(node: string | null): string {
+  if (node === null) return state.nodes?.self.name || "this computer";
+  return state.nodes?.nodes.find((n) => n.id === node)?.name ?? "the other computer";
+}
+
+/**
+ * A refusal this page makes itself about a node, drawn in the band where
+ * the server's `remote-said` is: a file from the Finder held over one of
+ * its terminals. `say` is handed the node's name. Said again at most once a
+ * second, since a drag repeats its `dragover` many times a second.
+ */
+export function sayAboutNode(node: string, say: (name: string) => string): void {
+  const text = say(nodeName(node));
+  const said = state.remoteSaid;
+  if (said && said.node === node && said.text === text && Date.now() - said.at < 1_000) return;
+  set({ remoteSaid: { node, text, at: Date.now() } });
+}
+
 /** Put another node's workspace on this screen, by the key its summary gives. See `server/src/nodewatch.ts`. */
 export function showNodeWorkspace(nodeId: string, workspaceKey: string): void {
   send({ type: "show-node-workspace", nodeId, workspaceKey });

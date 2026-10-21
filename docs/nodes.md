@@ -169,11 +169,14 @@ database, and the parent's are the parent's.
   node. An away node is not counted.
 - **The Share dialog:** each node's own QR code. On the parent that QR
   carries the node's token; on a child it is the bare address.
-- **The desktop:** the picker and the tray offer "Open <node>". This is the
-  window's own choice, never a served page's (`preload.js`). The node's
-  token is held in memory and never written to `servers.json`, so a node is
-  never where the next launch lands, and the floating pill stays on this
-  Mac.
+- **The desktop:** the picker and the tray offer each node. A node whose
+  workspaces open in this window ([below](#remote-workspaces)) is offered
+  as "omarchy's Settings" and the window lands on its Settings, since that
+  is the one thing of a node's this window does not draw; one from before
+  is still "Open omarchy". Moving the window is the window's own choice,
+  never a served page's (`preload.js`). The node's token is held in memory
+  and never written to `servers.json`, so a node is never where the next
+  launch lands, and the floating pill stays on this Mac.
 - **`kururu_status`:** gives Kuru every node with its workspaces, agents and
   needs from the summaries, never the token. Each agent is named the way
   `agentName` names one here, with "on omarchy" and no id. The role's Nodes
@@ -880,7 +883,7 @@ Kuru says it in its own words.
 
 **Another node's workspace can be on this window, drawn by this window's
 own components, with the node doing the work.** The argument and the phases
-are in [the plan](plans/remote-workspaces.md); this is what phase 1 built.
+are in [the plan](plans/remote-workspaces.md); this is what its five phases built.
 
 **The watch socket.** The parent's server dials the child's
 `GET /link/watch`. The child refuses what `/link` refuses (an `Origin`, a
@@ -1093,8 +1096,45 @@ as kept while it is out, and answered to this server instead of a page
 disk and in its Kuru's hearing; every acting tool refuses a qualified id
 with "ask_kuru omarchy". Nothing in this goes near the node's `/mcp`.
 
-Not yet (phase 5 of the plan): `C-a w` and workspace stepping across
-nodes, and the tree's edits on a node's disk.
+**The keyboard and the edges** (phase 5).
+
+- **`C-a N` and `C-a P` walk this node's workspaces, then each node's**, in
+  the sidebar's order, and wrap (`workspacesAcross`, `stepAcross` in
+  `shared/remote.ts`). A node is in the walk on the terms its Needs are:
+  up, and new enough to be watched. The relay takes the two verbs
+  (`NodeWatches.step`) rather than letting them through to this node's
+  `stepWorkspace`, since only it knows a remote workspace is on screen.
+  `C-a 1–9` stay this node's.
+- **`C-a z` goes back to a remote workspace as it goes back to a local
+  one.** From a remote workspace it is the local one it was put up over;
+  from the local one the window landed on when a remote one was taken off
+  screen, by any road, it is that remote one again. Anywhere else it is the
+  local toggle as ever.
+- **`C-a w` lists every node's workspaces under its name**, in its hue,
+  after this node's own, from the same walk; the node's name filters them,
+  and the one on screen says so. A pick sends `show-node-workspace`.
+- **A drop across the boundary is refused before it lands.** While a
+  thing of one machine's is dragged over the other's pane, the drop zones
+  give way to one box saying where it stays — "Stays on mac: a terminal
+  cannot move between computers", or "…a file opens only on the computer
+  it is on" (`dropRefusal`, `sideOf`) — and it takes nothing. A node's tab
+  over this node's sidebar rows lights none of them. `route` still refuses
+  the verb if one gets through.
+- **A file from the Finder over a node's terminal is not typed.** Its path
+  is this Mac's; the band says so while it is held there (`finderRefusal`).
+  Carrying the file across is an upload, which is another feature.
+- **A window reload keeps a remote workspace on screen**: which one is the
+  server's (`remoteOnScreen`), and the page draws it from the snapshot's
+  `remote` like a local one, its emulators asking for their screens again.
+  A server restart comes back on the last local workspace.
+- **The node's own page is for its Settings.** Settings → Nodes says so on
+  the parent ("In this window"), with what typing over the link costs and
+  where its path is told (`tailscale status`, never run by kururu), and the
+  roster's button for such a node is Settings, which opens its page there
+  (`#settings`, read once by `App.tsx`).
+
+Not yet: the tree's edits on a node's disk (phase 2's decision), and
+the Later list in the plan.
 
 | message | way | what |
 |---|---|---|

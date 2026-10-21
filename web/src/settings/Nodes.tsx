@@ -25,6 +25,11 @@
  * node, and what a child holds sits under its read-only roster
  * (`Secrets.tsx`).
  *
+ * On the parent, a group says what a node is to this window now that its
+ * workspaces open here (`InThisWindow`): where they are, what a pane over
+ * the tailnet feels like, and that the node's own page is for its Settings
+ * — the one thing of a node's this window does not draw.
+ *
  * It holds nothing but what is being typed; the list is the server's.
  */
 import { useEffect, useRef, useState } from "react";
@@ -221,6 +226,7 @@ function ParentRoster({ view }: { view: NodesView }) {
           )}
         </Group>
       )}
+      {parent && <InThisWindow view={view} />}
       <AddComputer view={view} />
     </>
   );
@@ -262,17 +268,60 @@ function NodeLine({ node }: { node: NodeStatus }) {
 }
 
 /**
- * Going to the node, which is how anything there is done: a browser follows
- * the link, with the node's token in it on the parent. The desktop window
- * does not follow it in place — `preload.js` lets no served page move the
- * window — so it opens in the browser, and the tray's "Open" is the window's
- * own way there.
+ * Going to the node's own page: a browser follows the link, with the
+ * node's token in it on the parent. The desktop window does not follow it
+ * in place — `preload.js` lets no served page move the window — so it
+ * opens in the browser, and the tray's row is the window's own way there.
+ * A node whose workspaces open in this window is gone to for its Settings
+ * and nothing else, so the link says so and lands there (`#settings`,
+ * which `App.tsx` reads once); one from before is still opened whole.
  */
 function OpenLink({ node }: { node: NodeStatus }) {
+  if (node.summary?.watchable) {
+    return (
+      <a className="st-btn" href={`${node.url.split("#")[0]}#settings`} target="_blank" rel="noreferrer noopener" title={`${node.name}'s own page, on its Settings`}>
+        Settings
+      </a>
+    );
+  }
   return (
     <a className="st-btn" href={node.url} target="_blank" rel="noreferrer noopener" title={`Open ${node.name}'s kururu`}>
       Open
     </a>
+  );
+}
+
+/**
+ * What a node is to this window. Its workspaces, its agents and what needs
+ * you there are on the sidebar and in the Needs drawer, and a click puts
+ * them here; the node's own page, from the tray, the picker or the roster
+ * above, is for its Settings. Typing over the link costs what ssh to the
+ * same box costs, which is the distance between the two computers and not
+ * kururu — and whether that path is direct or relayed is the tailnet's to
+ * say, which kururu never asks (`reach.ts`).
+ */
+function InThisWindow({ view }: { view: NodesView }) {
+  const shown = view.nodes.filter((node) => node.summary?.watchable);
+  const old = view.nodes.filter((node) => node.summary && !node.summary.watchable && !node.parent);
+  if (shown.length === 0 && old.length === 0) return null;
+  const names = (list: NodeStatus[]) => list.map((node) => node.name).join(", ");
+  return (
+    <Group title="In this window">
+      {shown.length > 0 && (
+        <>
+          <P>
+            {names(shown)}'s workspaces are under Nodes in the sidebar, and open here with this Mac's beside them: their panes, their boards, their files.{" "}
+            <Mono>C-a w</Mono> lists them, and <Mono>C-a N</Mono> and <Mono>C-a P</Mono> step onto them after this Mac's own.
+          </P>
+          <P>
+            A key typed into one goes to that computer and back before it shows, so a pane there feels like <Mono>ssh</Mono> to it does. Whether
+            that path is direct or relayed is in <Mono>tailscale status</Mono>, on either computer.
+          </P>
+          <P>Each one's own page — Settings above, or its row in the menu-bar frog's menu — is for its Settings. Nothing else there needs it.</P>
+        </>
+      )}
+      {old.length > 0 && <P>{names(old)} must be updated (kururu child update there) before its workspaces open here; until then, Open is its page.</P>}
+    </Group>
   );
 }
 

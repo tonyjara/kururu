@@ -10,14 +10,14 @@ describe("nodeChoices", () => {
   it("splits each node's URL into the origin and its token", () => {
     const view = {
       nodes: [
-        { id: "n1", name: "box", url: "http://100.64.0.2:7717/?k=secret-token-value", state: "up", since: 5, parent: false },
+        { id: "n1", name: "box", url: "http://100.64.0.2:7717/?k=secret-token-value", state: "up", since: 5, parent: false, summary: { watchable: 2 } },
         { id: "n2", name: "mac", url: "http://100.64.0.1:7717/", state: "away", since: null, parent: true },
         { id: "n3", name: "bad", url: "not a url", state: "up" },
       ],
     };
     expect(nodeChoices(view)).toEqual([
-      { id: "n1", name: "box", address: "http://100.64.0.2:7717", token: "secret-token-value", state: "up", since: 5, parent: false },
-      { id: "n2", name: "mac", address: "http://100.64.0.1:7717", token: null, state: "away", since: null, parent: true },
+      { id: "n1", name: "box", address: "http://100.64.0.2:7717", token: "secret-token-value", state: "up", since: 5, parent: false, settings: true },
+      { id: "n2", name: "mac", address: "http://100.64.0.1:7717", token: null, state: "away", since: null, parent: true, settings: false },
     ]);
     expect(nodeChoices(null)).toEqual([]);
   });

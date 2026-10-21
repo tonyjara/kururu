@@ -66,7 +66,7 @@ import { closeKuru, kuruLive, openKuru, toggleKuru, useKuruDrawer } from "./kuru
 import { closeNeeds, toggleNeeds, useNeedsDrawer } from "./needs";
 import { NeedsDrawer } from "./components/NeedsDrawer";
 import { needsOf, type Need } from "../../shared/needs";
-import { nextNeedAcross, nodeNeeds as nodeNeedsOf, qualify, type NodeNeed } from "../../shared/remote";
+import { nextNeedAcross, nodeNeeds as nodeNeedsOf, parseRemote, qualify, workspacesAcross, type NodeNeed } from "../../shared/remote";
 import { nodesNeedCount, WATCH_READS, type NodesView } from "../../shared/nodes";
 import { visibleLaunchers } from "../../shared/launchers";
 import { showCardNext } from "./components/Board";
@@ -231,6 +231,29 @@ function keepSettings(tab: SettingsTab | null): void {
  * same answer as never having written it.
  */
 function resumeSettings(): SettingsTab | null {
+  return askedSettings() ?? resumedSettings();
+}
+
+/**
+ * `#settings`, or `#settings=<page>`, in the address the window was sent
+ * to: the desktop's "omarchy's Settings" moves the window to a node's own
+ * page for that and nothing else (`desktop/nodes.js`), so the page opens on
+ * it. Read once and taken out of the address, so a ⌘R there is a plain
+ * reload, as the stored one is.
+ */
+function askedSettings(): SettingsTab | null {
+  const match = /^#settings(?:=([a-z-]+))?$/.exec(location.hash);
+  if (!match) return null;
+  try {
+    history.replaceState(null, "", location.pathname + location.search);
+  } catch {
+    // An address that cannot be rewritten opens Settings again on a reload; harmless.
+  }
+  const page = match[1] ?? "theme";
+  return (SETTINGS_TABS as readonly string[]).includes(page) ? (page as SettingsTab) : "theme";
+}
+
+function resumedSettings(): SettingsTab | null {
   let saved: string | null = null;
   try {
     saved = sessionStorage.getItem(SETTINGS_KEY);
@@ -957,18 +980,41 @@ export function App() {
         case "delete-workspace":
           if (workspace && !remote) confirmDeleteWorkspace(workspace.id);
           return;
-        case "find-workspace":
+        /**
+         * This computer's workspaces, then each node's under its name: the
+         * same walk `C-a N` takes (`workspacesAcross`), so the list and the
+         * stepping agree on which nodes can be gone to. A node's is picked by
+         * its key, qualified so that it cannot be read as a local id.
+         */
+        case "find-workspace": {
           if (!profile) return;
+          const byNode = new Map((nodes?.nodes ?? []).map((n) => [n.id, n] as const));
+          const there = workspacesAcross([], nodes?.nodes ?? []).flatMap((place) => {
+            if (!("there" in place)) return [];
+            const node = byNode.get(place.there.node);
+            const w = node?.summary?.workspaces.find((one) => one.key === place.there.workspaceKey);
+            if (!node || !w) return [];
+            const on = remote?.node.id === node.id && remote.workspaceKey === w.key;
+            return [{ id: qualify(node.id, w.key), label: w.name, hint: on ? "on screen" : (w.folder ?? undefined), group: { name: node.name, nodeId: node.id } }];
+          });
           return setDialog({
             kind: "pick",
             title: "Workspaces",
-            items: profile.workspaces.map((w, i) => ({
-              id: w.id,
-              label: w.name,
-              hint: `${i + 1}`,
-            })),
-            onPick: (id) => api.switchWorkspace(id),
+            items: [
+              ...profile.workspaces.map((w, i) => ({
+                id: w.id,
+                label: w.name,
+                hint: `${i + 1}`,
+              })),
+              ...there,
+            ],
+            onPick: (id) => {
+              const node = parseRemote(id);
+              if (node) return api.showNodeWorkspace(node.node, node.id);
+              api.switchWorkspace(id);
+            },
           });
+        }
         case "find-agent":
           return setDialog({
             kind: "pick",
@@ -1057,7 +1103,7 @@ export function App() {
           return setHelp((on) => !on);
       }
     },
-    [workspace, onScreen, remote, profile, agents, paneAgents, promptNewProfile, confirmDeleteWorkspace, narrow, goNext],
+    [workspace, onScreen, remote, nodes, profile, agents, paneAgents, promptNewProfile, confirmDeleteWorkspace, narrow, goNext],
   );
 
   /**

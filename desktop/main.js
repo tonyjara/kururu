@@ -371,7 +371,7 @@ void refreshNodes();
 function pushPickerState() {
   if (!win || win.isDestroyed()) return;
   // The token stays here: the picker is told a name, an address and a state.
-  const nodes = nodeList.map((node) => ({ id: node.id, name: node.name, address: node.address, reachable: nodesUp.has(node.id) }));
+  const nodes = nodeList.map((node) => ({ id: node.id, name: node.name, address: node.address, reachable: nodesUp.has(node.id), settings: node.settings }));
   win.webContents.send("picker:state", { entries, nodes, checking: sweeping });
 }
 
@@ -483,7 +483,7 @@ function stopSweeping() {
  * otherwise; `openPage` waits for vite to answer, because a failed `loadURL`
  * is not retried and the window would sit on ERR_CONNECTION_REFUSED.
  */
-async function connect(address, { node = false } = {}) {
+async function connect(address, { node = false, settings = false } = {}) {
   const base = normalize(address);
   if (!base) return { error: "That does not look like an address." };
   if (!(await reachable(base))) return { error: `Nothing answered at ${base}.` };
@@ -497,7 +497,9 @@ async function connect(address, { node = false } = {}) {
   startWatchingServer();
   pointPill();
 
-  const page = withToken(await openPage(base), base);
+  let page = withToken(await openPage(base), base);
+  // The node's page, opened on its Settings: `App.tsx` reads `#settings` once.
+  if (settings) page = `${page.split("#")[0]}#settings`;
   if (connected === base) await win?.loadURL(page);
   buildMenu();
   return { ok: true };
@@ -520,14 +522,16 @@ function withToken(page, base) {
 /**
  * The tray's "Open <node>" and the picker's node rows: the window, made if
  * there is none, pointed at that node. Refused for one whose link is down,
- * with the reason `whyNot` gives.
+ * with the reason `whyNot` gives. A node whose workspaces this window can
+ * show is opened on its Settings, which is what its row offers, since the
+ * rest of it is on the sidebar here (`nodes.js`).
  */
 async function openNode(id) {
   const node = nodeList.find((each) => each.id === id);
   if (!node) return { error: "That node is not in the roster any more." };
   if (node.token) nodeTokens.set(node.address, node.token);
   if (!win || win.isDestroyed()) createWindow();
-  const result = await connect(node.address, { node: true });
+  const result = await connect(node.address, { node: true, settings: node.settings });
   if (result.error && !connected) showPicker();
   if (win && !win.isDestroyed()) {
     win.show();
@@ -910,7 +914,7 @@ app.whenReady().then(async () => {
       openKuru: () => openKuru(null, openWindow()),
       windowOpen: () => Boolean(win && !win.isDestroyed()),
       // The other kururus, with their links' state, and the window sent to one.
-      nodes: () => nodeList.map((node) => ({ id: node.id, name: node.name, why: whyNot(node) })),
+      nodes: () => nodeList.map((node) => ({ id: node.id, name: node.name, why: whyNot(node), settings: node.settings })),
       openNode: async (id) => {
         const result = await openNode(id);
         if (result.error) dialog.showErrorBox("Kururu could not open that node", result.error);

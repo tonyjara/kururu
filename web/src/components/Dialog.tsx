@@ -38,11 +38,19 @@ import { basename, folderSentence, newFolderOk, newFolderSentence, type MoveChec
 import { grantText, type LendAsk, type LendCandidate, type Lendable } from "../../../shared/secrets";
 import * as api from "../session";
 import { Icon } from "./Icon";
+import { hueStyle } from "./NodeChip";
 
 export interface PickItem {
   id: string;
   label: string;
   hint?: string;
+  /**
+   * The heading it is listed under, for a list of two kinds of thing — `C-a
+   * w`'s workspaces of this computer and then each node's. Items with one
+   * come after the ones without, grouped as given; `nodeId` tints the
+   * heading in that node's hue, as its sidebar heading is.
+   */
+  group?: { name: string; nodeId?: string };
 }
 
 export type DialogState =
@@ -271,7 +279,10 @@ function Pick({ state, onClose }: { state: Extract<DialogState, { kind: "pick" }
     if (!needle) return state.items;
     return state.items.filter(
       (item) =>
-        item.label.toLowerCase().includes(needle) || (item.hint ?? "").toLowerCase().includes(needle),
+        item.label.toLowerCase().includes(needle) ||
+        (item.hint ?? "").toLowerCase().includes(needle) ||
+        // "omarchy" finds every workspace on omarchy.
+        (item.group?.name ?? "").toLowerCase().includes(needle),
     );
   }, [state.items, query]);
 
@@ -327,7 +338,13 @@ function Pick({ state, onClose }: { state: Extract<DialogState, { kind: "pick" }
       />
       <ul className="dialog-list">
         {items.length === 0 && <li className="muted dialog-empty">Nothing matches.</li>}
-        {items.map((item, i) => (
+        {items.map((item, i) => [
+          item.group && item.group.name !== items[i - 1]?.group?.name && (
+            <li key={`group:${item.group.name}`} className="dialog-group" style={item.group.nodeId ? hueStyle(item.group.nodeId) : undefined} aria-hidden="true">
+              {item.group.nodeId && <span className="node-chip-dot" />}
+              {item.group.name}
+            </li>
+          ),
           <li key={item.id} className={i === index ? "dialog-row dialog-row-on" : "dialog-row"}>
             <button className="dialog-pick" onClick={() => choose(item.id)}>
               <span className="dialog-label">{item.label}</span>
@@ -343,8 +360,8 @@ function Pick({ state, onClose }: { state: Extract<DialogState, { kind: "pick" }
                 <Icon name="close" />
               </button>
             )}
-          </li>
-        ))}
+          </li>,
+        ])}
         {create && (
           <li className={onCreate ? "dialog-row dialog-row-on" : "dialog-row"}>
             <button className="dialog-pick dialog-new" onClick={create.run}>

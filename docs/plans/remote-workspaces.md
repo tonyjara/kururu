@@ -5,8 +5,8 @@ A feasibility study and a plan, written 2026-10-20 from a read of the tree at
 how four other tools do the same split. Phase 0's spike ran on 2026-10-20 in
 throwaway instances and stayed out of `main`
 ([`docs/spikes/remote-workspaces-phase0.md`](../spikes/remote-workspaces-phase0.md)).
-Its answers are folded into the sections below. **Phases 1 to 4 are built**
-(2026-10-20); what they are now is in
+Its answers are folded into the sections below. **All five phases are built**
+(2026-10-20 and 21); what they are now is in
 [`docs/nodes.md`](../nodes.md#remote-workspaces). The plan is written so that an
 agent can take one phase, read the files it names, and know what "done" is.
 
@@ -825,6 +825,53 @@ offers the box's rows before any snapshot of it has arrived.
   the child's page only for its Settings.
 
 Depends on 1–4.
+
+**Built, 2026-10-21, and verified between two throwaway nodes on the Mac**
+(a parent on :7981 and a child on :7982, paired by the join command, from a
+scratch clone; the user's server and host untouched). In a real page
+(headless Chrome over the DevTools protocol): `C-a N` from the parent's
+first workspace walked its second, the child's two and back round, and
+`C-a P` from there went back onto the child's last; `C-a z` went from the
+child's workspace to the local one it was put up over and back again; a
+reload kept the child's workspace on screen, its terminal borrowed again
+and the watch up; `C-a w` listed the parent's two, then the child's under
+its name, marked the one on screen, filtered by the node's name and put the
+pick on screen; a sidebar agent dragged over the child's pane drew "Stays
+on mac: a terminal cannot move between computers" and no zones, the
+child's own tab over its pane still drew them, the child's tab over the
+parent's sidebar rows lit none, and a Finder file over the child's terminal
+was refused with its sentence in the band; Settings → Nodes said what the
+child's page is for, its button pointed at the child's page with
+`#settings`, and that page opened on Settings with the hash taken out.
+`server/test/remoteedges.test.ts` holds the walk, the stepping and the
+toggle through `NodeWatches`, and the refusals; the tray's and the
+picker's rows are held by `desktop/test`. **Not yet:** the two real
+machines, which this phase's Done is about.
+
+Decisions taken in the building:
+
+- **The window reload needed nothing.** Which remote workspace is on screen
+  was the server's from phase 1, so a page that reloads is handed it in its
+  first snapshot; the check was that nothing a fresh page sends takes it off
+  screen, and nothing does.
+- **`C-a z` was a bug, not polish.** Before, it took a remote workspace off
+  screen and then ran the local toggle, which went to the local workspace
+  *before* the one the window had been on. It now goes back to the one
+  under the remote workspace, and from there to the remote one again; the
+  local one the window landed on is read after the verb that took the
+  remote one off screen has run, so a click, a key or Auto Swap all count.
+- **A drop is refused before it lands, not after.** `route` already refused
+  the verb; what was missing was saying so while the thing was over the
+  pane, so nobody lets go and watches nothing happen. The sentence is the
+  same one, from one function (`dropRefusal`), and a node's tab over this
+  node's sidebar rows lights nothing rather than saying anything, since
+  those rows are all this machine's.
+- **The Finder's refusal is said while the file is held**, in the band, at
+  most once a second; `dropEffect` is `none`, so no drop happens to refuse.
+- **"Open omarchy" opens its Settings.** Moving the window there is kept,
+  as the plan's question 7 says, but the window lands in Settings
+  (`#settings`) and the row says "omarchy's Settings", so the gesture is
+  what it is for. A node too old to be watched keeps "Open".
 
 ### Later, each on its own, not scheduled
 
