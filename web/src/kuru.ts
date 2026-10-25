@@ -20,8 +20,9 @@
  * rather than just losing a click to it.
  */
 import { useSyncExternalStore } from "react";
-import type { KuruConversation } from "../../shared/kuru";
+import { cardReference, type CardRef, type KuruConversation } from "../../shared/kuru";
 import type { AgentSnapshot, Profile } from "../../shared/model";
+import type { MenuItem } from "./components/Menu";
 import { closeNeeds } from "./needs";
 
 /**
@@ -70,9 +71,18 @@ export interface KuruDrawerState {
    */
   focus: string | null;
   asked: number;
+  /**
+   * Words waiting to go into the composer at its cursor — a card's
+   * reference, from its menu — and a counter so the same card twice is two
+   * insertions. The composer takes them (`takeKuruWords`) as it puts them in,
+   * so a drawer closed and opened again does not put them in twice, and they
+   * wait here when the drawer was closed, for the composer it mounts.
+   */
+  words: { text: string; n: number } | null;
 }
 
-let state: KuruDrawerState = { open: false, focus: null, asked: 0 };
+let state: KuruDrawerState = { open: false, focus: null, asked: 0, words: null };
+let wordsAsked = 0;
 const listeners = new Set<() => void>();
 
 function set(next: KuruDrawerState): void {
@@ -90,16 +100,56 @@ export function useKuruDrawer(): KuruDrawerState {
   );
 }
 
+/** The drawer's state at the moment, for a caller that is not a component. */
+export function kuruDrawerNow(): KuruDrawerState {
+  return state;
+}
+
 /** Open the drawer, at a reply when one is named, at the newest otherwise. */
 export function openKuru(focus: string | null = null): void {
   // Both drawers push the stage now, so one left open behind the other
   // would double the squeeze rather than just losing a click to it.
   closeNeeds();
-  set({ open: true, focus, asked: state.asked + 1 });
+  set({ open: true, focus, asked: state.asked + 1, words: state.words });
 }
 
 export function closeKuru(): void {
-  if (state.open) set({ open: false, focus: null, asked: state.asked });
+  if (state.open) set({ open: false, focus: null, asked: state.asked, words: state.words });
+}
+
+/**
+ * Open the drawer with words put into its composer at the cursor, unsent,
+ * and the keyboard in the box — so what was pointed at is the start of a
+ * sentence the user goes on typing.
+ */
+export function insertInKuru(text: string): void {
+  closeNeeds();
+  const words = { text, n: ++wordsAsked };
+  // Open already, the list stays where it was being read: only the box changes.
+  set(state.open ? { ...state, words } : { open: true, focus: null, asked: state.asked + 1, words });
+}
+
+/** The composer has put the words in: they are not to be put in again. */
+export function takeKuruWords(n: number): void {
+  if (state.words?.n === n) set({ ...state, words: null });
+}
+
+/**
+ * The row every card's menu carries, on the profile's board, its timeline,
+ * a workspace's board and the needs drawer: one builder, so the four menus
+ * say it the same way and do the same thing. `then` is for a menu drawn
+ * over the drawer — the profile's board is a scrim over the whole window,
+ * and the composer behind it could not be typed into — to get out of the way.
+ */
+export function referItem(ref: CardRef, then?: () => void): MenuItem {
+  return {
+    label: "Reference in Kuru",
+    sep: true,
+    run: () => {
+      insertInKuru(cardReference(ref));
+      then?.();
+    },
+  };
 }
 
 /** The chip, the harness key, and the pill: one press opens, the next closes. */

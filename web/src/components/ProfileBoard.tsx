@@ -48,7 +48,9 @@ import {
   type Card,
 } from "../../../shared/board";
 import type { Profile } from "../../../shared/model";
+import { cardPlace } from "../../../shared/kuru";
 import { colorValue } from "../colors";
+import { referItem } from "../kuru";
 import { revealCard } from "../reveal";
 import * as api from "../session";
 import { CardBody, CardWhen, Composer, dropDraft, showCardNext, useComposerInView } from "./Board";
@@ -183,7 +185,10 @@ export function ProfileBoard({
             setSent(`${card.title} → ${workspace.name}`);
           },
         })),
-        { label: "Edit", sep: true, run: () => setEditing(card.id) },
+        // The board is a scrim over the window, the drawer's composer
+        // included, so pointing Kuru at a card puts the board away.
+        referItem({ code: cardCode(profile.name, card.number), title: card.title, place: cardPlace(null, api.nodeNameOf), cardId: card.id }, onClose),
+        { label: "Edit", run: () => setEditing(card.id) },
         ...(card.dates
           ? [{ label: "Take the dates off", run: () => api.editProfileCard(profile.id, card.id, { dates: null }) }]
           : []),

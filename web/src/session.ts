@@ -781,6 +781,11 @@ export function nodeName(node: string | null): string {
   return state.nodes?.nodes.find((n) => n.id === node)?.name ?? "the other computer";
 }
 
+/** A node's name as the store has it now, or null for one it does not know — for a card reference's place. */
+export function nodeNameOf(node: string): string | null {
+  return state.nodes?.nodes.find((n) => n.id === node)?.name ?? null;
+}
+
 /**
  * A refusal this page makes itself about a node, drawn in the band where
  * the server's `remote-said` is: a file from the Finder held over one of

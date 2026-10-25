@@ -49,10 +49,12 @@ import {
 } from "../../../shared/board";
 import { today, type Day } from "../../../shared/days";
 import type { Launcher } from "../../../shared/launchers";
+import { cardPlace } from "../../../shared/kuru";
 import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
 import type { WorktreeStatus } from "../../../shared/projects";
 import type { DevServer } from "../../../shared/wire";
 import { useCardDone } from "../cardDone";
+import { referItem } from "../kuru";
 import { isLoopback, previewUrl, serverIn } from "../preview";
 import { revealCard } from "../reveal";
 import { sameJson } from "../same";
@@ -438,7 +440,8 @@ export function BoardView({
         run: () => move(card, column),
       })),
       ...(card.worktree ? gitItems(card, card.worktree, status) : []),
-      { label: "Edit", sep: true, run: () => setEditing(card.id) },
+      referItem({ code: cardCode(workspaceName, card.number), title: card.title, place: cardPlace(workspaceId, api.nodeNameOf), cardId: card.id }),
+      { label: "Edit", run: () => setEditing(card.id) },
         {
           label: "Delete card",
           danger: true,

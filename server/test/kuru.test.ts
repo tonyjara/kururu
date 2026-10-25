@@ -10,8 +10,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentName, envelope } from "../../shared/harness";
-import { KURU_RECENT, clipLength, kuruCounts, mergeConversation, plainWords, readPrompt, splitCardCodes, spokenMessage, type KuruItem, type OutboxLike } from "../../shared/kuru";
+import { agentName, envelope, rolePrompt } from "../../shared/harness";
+import { CARD_REF_TITLE_MAX, KURU_RECENT, cardPlace, cardReference, clipLength, insertWords, kuruCounts, mergeConversation, plainWords, readPrompt, splitCardCodes, splitCardRefs, spokenMessage, type KuruItem, type OutboxLike } from "../../shared/kuru";
 import type { Turn } from "../../shared/store";
 import type { StoredOutboxEntry } from "../../shared/voice";
 import { Kuru } from "../src/kuru";
@@ -256,6 +256,105 @@ describe("splitCardCodes", () => {
   test("nothing is one text part, and a code alone is one code part", () => {
     expect(splitCardCodes("")).toEqual([]);
     expect(splitCardCodes("KUR-1")).toEqual([{ code: "KUR-1" }]);
+  });
+});
+
+/**
+ * A card pointed at from its menu, as the words that reach Kuru. Kuru reads
+ * the ids and the person reads the code and the title, so the title is cut
+ * and cleaned without ever taking the ids with it, and the drawer reads back
+ * exactly what was written.
+ */
+describe("card references", () => {
+  const card = { code: "ACM-16", title: "Design the checkout", place: "w8", cardId: "c3f9a1e07b2d4" };
+
+  test("are the code, the title, and where and which in brackets", () => {
+    expect(cardReference(card)).toBe('[card ACM-16 "Design the checkout" (w8/c3f9a1e07b2d4)]');
+  });
+
+  test("a long title is cut at a word near the cap, and a word too long is cut where it is", () => {
+    const long = cardReference({ ...card, title: "Design and build the onboarding flow for the phone" });
+    expect(long).toBe('[card ACM-16 "Design and build the onboarding…" (w8/c3f9a1e07b2d4)]');
+    const title = splitCardRefs(long)[0];
+    expect(title && "ref" in title && title.ref.title.length).toBeLessThanOrEqual(CARD_REF_TITLE_MAX);
+    expect(cardReference({ ...card, title: "x".repeat(50) })).toBe(`[card ACM-16 "${"x".repeat(CARD_REF_TITLE_MAX - 1)}…" (w8/c3f9a1e07b2d4)]`);
+  });
+
+  test("a quote or a line break in a title cannot end it early", () => {
+    const odd = cardReference({ ...card, title: 'The "Pay" button\nis (sometimes) [grey]' });
+    expect(odd).toBe(`[card ACM-16 "The 'Pay' button is (sometimes)…" (w8/c3f9a1e07b2d4)]`);
+    expect(splitCardRefs(odd)).toEqual([{ ref: { ...card, title: "The 'Pay' button is (sometimes)…" } }]);
+  });
+
+  test("are found among the words, and read back as written", () => {
+    const words = `what is left on ${cardReference(card)} and ${cardReference({ ...card, code: "KUR-3", place: "profile", cardId: "c000000000001" })}?`;
+    expect(splitCardRefs(words)).toEqual([
+      { text: "what is left on " },
+      { ref: card },
+      { text: " and " },
+      { ref: { ...card, code: "KUR-3", place: "profile", cardId: "c000000000001" } },
+      { text: "?" },
+    ]);
+  });
+
+  test("words that only look like one stay words", () => {
+    for (const text of ['[card ACM-16 "x" (w8/not-an-id)]', '[card ACM-16 x (w8/c3f9a1e07b2d4)]', "[card] ACM-16", ""]) {
+      expect(splitCardRefs(text).every((part) => "text" in part)).toBe(true);
+    }
+  });
+
+  test("place: a workspace id, the profile's board, or another node's workspace by name", () => {
+    const names = (id: string) => (id === "n0123456789ab" ? "omarchy" : null);
+    expect(cardPlace("w8", names)).toBe("w8");
+    expect(cardPlace(null, names)).toBe("profile");
+    expect(cardPlace("n:n0123456789ab:w3", names)).toBe("omarchy:w3");
+    // A node this page does not know is still said to be one.
+    expect(cardPlace("n:nffffffffffff:w3", names)).toBe("nffffffffffff:w3");
+    expect(splitCardRefs(cardReference({ ...card, place: cardPlace("n:n0123456789ab:w3", names) }))).toEqual([{ ref: { ...card, place: "omarchy:w3" } }]);
+  });
+
+  test("the role's own example is one", () => {
+    const role = rolePrompt({ profile: "main", workspaces: [], launchers: [] });
+    expect(role).toContain("## Cards the user points at");
+    const example = /\[card [^\]]*\)\]/.exec(role)?.[0] ?? "";
+    expect(splitCardRefs(example).some((part) => "ref" in part)).toBe(true);
+  });
+});
+
+describe("insertWords", () => {
+  const ref = "[card ACM-16]";
+
+  test("an empty draft is the words and a space to go on typing after", () => {
+    expect(insertWords("", 0, 0, ref)).toEqual({ text: `${ref} `, caret: ref.length + 1 });
+  });
+
+  test("at the end of a sentence it is spaced off the last word", () => {
+    const draft = "what about";
+    expect(insertWords(draft, draft.length, draft.length, ref)).toEqual({ text: `what about ${ref} `, caret: `what about ${ref} `.length });
+  });
+
+  test("in the middle it is spaced on both sides, using a space already there", () => {
+    expect(insertWords("look at now", 8, 8, ref)).toEqual({ text: `look at ${ref} now`, caret: `look at ${ref} `.length });
+    expect(insertWords("look atnow", 7, 7, ref)).toEqual({ text: `look at ${ref} now`, caret: `look at ${ref} `.length });
+  });
+
+  test("at the start it needs no space before", () => {
+    expect(insertWords("is done?", 0, 0, ref)).toEqual({ text: `${ref} is done?`, caret: ref.length + 1 });
+  });
+
+  test("a selection is replaced", () => {
+    expect(insertWords("move THIS to done", 5, 9, ref)).toEqual({ text: `move ${ref} to done`, caret: `move ${ref} `.length });
+  });
+
+  test("a cursor off the draft is held to it, and one that is no number is the end", () => {
+    expect(insertWords("hi", 99, 120, ref).text).toBe(`hi ${ref} `);
+    expect(insertWords("hi", -4, -1, ref).text).toBe(`${ref} hi`);
+    expect(insertWords("hi", Number.NaN, Number.NaN, ref).text).toBe(`hi ${ref} `);
+    expect(insertWords("hi there", 6, 2, ref).text).toBe(`hi the ${ref} re`);
+  });
+
+  test("a line break after the cursor stays a line break", () => {
+    expect(insertWords("one\ntwo", 3, 3, ref)).toEqual({ text: `one ${ref} \ntwo`, caret: `one ${ref} `.length });
   });
 });
 

@@ -95,11 +95,11 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cardCode } from "../../../shared/board";
 import { CHANNEL_NAMES, channelReady, isChannelKind, type TelegramStatus } from "../../../shared/channels";
-import { KURU_SEEN_MS, addressMatches, addressOf, addressQuery, clipLength, mergeNodes, pickAddress, splitCardCodes, typedAddress, type KuruItem, type KuruReply, type NodeKuruItem, type NoticeItem, type PeerKuru, type YouItem } from "../../../shared/kuru";
+import { KURU_SEEN_MS, addressMatches, addressOf, addressQuery, clipLength, insertWords, mergeNodes, pickAddress, splitCardCodes, splitCardRefs, typedAddress, type CardRef, type KuruItem, type KuruReply, type NodeKuruItem, type NoticeItem, type PeerKuru, type YouItem } from "../../../shared/kuru";
 import { splitMentions } from "../../../shared/made";
 import type { AgentSnapshot, MascotConfig, Profile } from "../../../shared/model";
 import type { OutboxState, VoiceSettings } from "../../../shared/voice";
-import { kuruLive, kuruWorking, type KuruLive } from "../kuru";
+import { kuruLive, kuruWorking, takeKuruWords, useKuruDrawer, type KuruLive } from "../kuru";
 import * as api from "../session";
 import { useKururu } from "../session";
 import { dismissVoice, talkDown, talkUp, useOutgoing, useVoiceUi, voiceIsRemote, voiceNow } from "../voice";
@@ -471,6 +471,22 @@ export function KuruDrawer({
   );
 
   /**
+   * A card a message of yours referenced, found by its id alone: the
+   * workspace id written beside it is this run's and a draft can outlive
+   * the run, but a card id is never reused. Another node's card is that
+   * node's board, which is not a door here.
+   */
+  const refOf = useCallback(
+    (ref: CardRef): { workspaceId: string | null; cardId: string } | null => {
+      if (ref.place.includes(":")) return null;
+      if (profile.board.cards.some((c) => c.id === ref.cardId)) return { workspaceId: null, cardId: ref.cardId };
+      const workspace = profile.workspaces.find((w) => w.board?.cards.some((c) => c.id === ref.cardId));
+      return workspace ? { workspaceId: workspace.id, cardId: ref.cardId } : null;
+    },
+    [profile.board, profile.workspaces],
+  );
+
+  /**
    * A path in a reply was opened. On a phone the drawer is a sheet over the
    * pane the file just landed in, so it gets out of the way, as the file tree
    * does; on the desktop it stays, beside what it opened.
@@ -518,7 +534,16 @@ export function KuruDrawer({
               <time dateTime={new Date(item.at).toISOString()}>{dayAt(item.at)}</time>
             </li>
           ) : item.kind === "you" ? (
-            <You key={item.id} item={item} state={item.state} note={item.note} node={item.node} to={item.node === null && item.text ? (addressOf(item.text, peerNames, item.via === "voice")?.node ?? null) : null} />
+            <You
+              key={item.id}
+              item={item}
+              state={item.state}
+              note={item.note}
+              node={item.node}
+              to={item.node === null && item.text ? (addressOf(item.text, peerNames, item.via === "voice")?.node ?? null) : null}
+              refOf={item.node === null ? refOf : noRefs}
+              onCard={onCard}
+            />
           ) : item.kind === "notice" ? (
             <Notice key={item.id} item={item} node={item.node} cardOf={item.node === null ? cardOf : noCards} onCard={onCard} />
           ) : (
@@ -704,6 +729,7 @@ function NodeTag({ node }: { node: string | null }) {
 
 /** A card code in another node's words names that node's board, which is not a door here. */
 const noCards: CardOf = () => null;
+const noRefs: RefOf = () => null;
 
 /**
  * The drawer's left edge, as something to take hold of — `FileTree.tsx`'s
@@ -811,7 +837,23 @@ function TelegramSwitch({ status }: { status: TelegramStatus }) {
  * conversation it is in, for another node's; `to` is the node a message of
  * this one's was addressed to with `@`, on its way there.
  */
-function You({ item, state, note, node = null, to = null }: { item: YouItem; state: RowState; note: string | null; node?: string | null; to?: string | null }) {
+function You({
+  item,
+  state,
+  note,
+  node = null,
+  to = null,
+  refOf = noRefs,
+  onCard,
+}: {
+  item: YouItem;
+  state: RowState;
+  note: string | null;
+  node?: string | null;
+  to?: string | null;
+  refOf?: RefOf;
+  onCard?: (workspaceId: string | null, cardId: string) => void;
+}) {
   const word = state === "queued" ? (item.typedAt !== null ? "Sent" : STATE_WORD.queued) : STATE_WORD[state];
   const channel = isChannelKind(item.via) ? item.via : null;
   return (
@@ -834,7 +876,13 @@ function You({ item, state, note, node = null, to = null }: { item: YouItem; sta
         {item.via === "voice" && item.ms > 0 && <span className="kuru-length">{clipLength(item.ms)}</span>}
         {word && <span className={`kuru-state kuru-state-${state}`}>{word}</span>}
       </span>
-      {item.text ? <p className="kuru-text">{item.text}</p> : <p className="kuru-text kuru-pending">Not in words yet — the audio is kept.</p>}
+      {item.text ? (
+        <p className="kuru-text">
+          <RefWords text={item.text} refOf={refOf} onCard={onCard} />
+        </p>
+      ) : (
+        <p className="kuru-text kuru-pending">Not in words yet — the audio is kept.</p>
+      )}
       {note && <p className="kuru-note">{note}</p>}
       {state === "failed" && item.outboxId && (
         <span className="kuru-actions">
@@ -930,6 +978,36 @@ function Reply({
 }
 
 type CardOf = (code: string) => { workspaceId: string | null; cardId: string } | null;
+type RefOf = (ref: CardRef) => { workspaceId: string | null; cardId: string } | null;
+
+/**
+ * Your words with each card reference drawn as what you picked — the code,
+ * a door onto the card, and the title — and not as the ids in brackets,
+ * which were written for Kuru. A reference whose card is gone, or is another
+ * node's, keeps the chip's look without being a button.
+ */
+function RefWords({ text, refOf, onCard }: { text: string; refOf: RefOf; onCard?: (workspaceId: string | null, cardId: string) => void }) {
+  return (
+    <>
+      {splitCardRefs(text).map((bit, j) => {
+        if ("text" in bit) return <Fragment key={j}>{bit.text}</Fragment>;
+        const card = onCard ? refOf(bit.ref) : null;
+        return (
+          <Fragment key={j}>
+            {card ? (
+              <button className="kuru-card" onClick={() => onCard!(card.workspaceId, card.cardId)} title="Open the board at this card">
+                {bit.ref.code}
+              </button>
+            ) : (
+              <span className="kuru-card">{bit.ref.code}</span>
+            )}{" "}
+            “{bit.ref.title}”
+          </Fragment>
+        );
+      })}
+    </>
+  );
+}
 
 /** Words with every card code in them a door onto the board — one that is not a card stays a word. */
 function CardWords({ text, cardOf, onCard }: { text: string; cardOf: CardOf; onCard: (workspaceId: string | null, cardId: string) => void }) {
@@ -997,6 +1075,15 @@ function Notice({ item, node = null, cardOf, onCard }: { item: NoticeItem; node?
 
 /** Where a draft not yet sent waits out a closed drawer, one profile at a time. */
 const DRAFT_KEY = "kururu.kuru.draft:";
+
+/**
+ * Where the cursor was in each profile's draft when the box last had it —
+ * where a card's reference goes once the box has lost the keyboard to the
+ * card's menu, or gone with a closed drawer. This page's only, and not kept
+ * past it: a reload puts a reference at the end, which is where the cursor
+ * of a draft nobody has clicked into would be anyway.
+ */
+const carets = new Map<string, { from: number; to: number }>();
 
 function readDraft(profileId: string): string {
   try {
@@ -1116,11 +1203,37 @@ function Composer({
     if (!words || (address && !address.rest)) return;
     api.kuruSay(profileId, words);
     edit("");
+    carets.delete(profileId);
   };
   // Told once each way, and told off on unmount: a drawer closed with the
   // cursor still in the box must not leave the prefix believing a field has
   // the keyboard.
   useEffect(() => () => onEditing(false), [onEditing]);
+  /**
+   * Words put in from outside — a card's reference, off its menu — at the
+   * cursor, unsent, with the keyboard back in the box to go on typing. Taken
+   * off the drawer's state as they go in, so the drawer closed and opened
+   * again does not put them in twice; `took` is the same promise against
+   * React running an effect twice in development.
+   */
+  const { words } = useKuruDrawer();
+  const took = useRef(0);
+  useEffect(() => {
+    if (!words || took.current === words.n) return;
+    took.current = words.n;
+    takeKuruWords(words.n);
+    const el = field.current;
+    const was = el?.value ?? readDraft(profileId);
+    const at = el && document.activeElement === el ? { from: el.selectionStart, to: el.selectionEnd } : (carets.get(profileId) ?? { from: was.length, to: was.length });
+    const put = insertWords(was, at.from, at.to, words.text);
+    edit(put.text);
+    carets.set(profileId, { from: put.caret, to: put.caret });
+    if (el) {
+      el.focus();
+      requestAnimationFrame(() => el.setSelectionRange(put.caret, put.caret));
+    }
+    // Only new words, not a re-render, touch the draft.
+  }, [words?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <form
       className="kuru-composer"
@@ -1184,7 +1297,11 @@ function Composer({
               setCaret(event.target.selectionStart);
               setChosen(0);
             }}
-            onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
+            onSelect={(event) => {
+              const { selectionStart: from, selectionEnd: to } = event.currentTarget;
+              setCaret(from);
+              carets.set(profileId, { from, to });
+            }}
             onScroll={(event) => {
               if (mirror.current) mirror.current.scrollTop = event.currentTarget.scrollTop;
             }}

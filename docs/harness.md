@@ -102,6 +102,34 @@ A running harness keeps the role it started with: the new section reaches it
 when it is next started or resumed (`--append-system-prompt` is passed again
 on `--resume`). The tool results change on the next server start.
 
+## A card the user points at
+
+Every card's menu — a workspace's board, the profile's board and its
+timeline, a card's row in the Needs drawer, the caret and the right-click
+alike — has **Reference in Kuru**. It opens the drawer and puts the card into
+the composer at the cursor, unsent, with the keyboard there:
+`[card ACM-16 "Design the checkout…" (w8/c3f9a1e07b2d4)]`. The profile's
+board is a scrim over the window, so it closes on the way.
+
+Words and not a chip in the box, because the box is a textarea for the
+reasons `Composer` gives, and because what reaches Kuru is what was typed
+into its terminal — whatever the box drew, Kuru would read the words. So they
+are written for both readers: the code and the title, cut at 32 characters,
+for the person; inside the parentheses, where the card is and which it is,
+for Kuru's tools. Where is a workspace id, `profile` for the profile's own
+board, or `omarchy:w3` for another node's workspace on this screen — the
+node's name and its own id, never the `n:…` spelling no tool accepts. The
+role's "Cards the user points at" says how to read it, and that the card id
+is the half to trust: a workspace id is this run's and a draft can outlive
+it, so `card_history` finds the card by its id alone. Your sent message in
+the drawer draws the reference as the card's code — a door onto it, found
+by id — and its title, without the brackets.
+
+`cardReference`, `splitCardRefs` and `insertWords` in `shared/kuru.ts` are
+the format and the insertion; `referItem` in `web/src/kuru.ts` is the one
+menu row all four menus use, and `insertInKuru` the door the composer takes
+the words from.
+
 ## Auto Swap
 
 A switch in Settings → Agents, under Harness, for the profile on screen — each

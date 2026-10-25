@@ -22,6 +22,7 @@
 import { channelOfMessage, isChannelKind, readPeerMark, withoutChannelMark, type ChannelKind } from "./channels";
 import { CROSS_SESSION_TAG, NOTICE_SENDER } from "./harness";
 import type { MadeFile } from "./made";
+import { parseRemote } from "./remote";
 import type { Turn } from "./store";
 import { VOICE_PREFIX, stripPastedContent, viaOf } from "./store";
 import type { OutboxEntry, OutboxState } from "./voice";
@@ -521,6 +522,107 @@ export function splitCardCodes(text: string): TextPart[] {
   }
   if (last < text.length) parts.push({ text: text.slice(last) });
   return parts;
+}
+
+// ---------------------------------------------------------------------------
+// Card references in a message of yours
+// ---------------------------------------------------------------------------
+
+/**
+ * A card pointed at from its menu — "Reference in Kuru" — as words in the
+ * composer: `[card ACM-16 "Design the checkout…" (w8/c3f9a1e07b2d4)]`.
+ *
+ * Text, and not a chip in the box, because the box is a textarea for the
+ * reasons `Composer` gives, and because what reaches Kuru is what was typed
+ * into its terminal: whatever the box drew, Kuru would read these words. So
+ * they are written for both readers. The code and the title are for you,
+ * the title cut short because the box is narrow and you know which card you
+ * just picked; the brackets are for Kuru, and hold the two ids its tools
+ * take — where the card is and which it is — so it goes to that card without
+ * a search, even when two boards have a card of the same name.
+ *
+ * Where is a workspace id (`w8`), `profile` for the profile's own board, or
+ * `omarchy:w3` for a workspace of another node shown here — the node's name,
+ * which its tools take, and its own id, never the `n:…` spelling this
+ * window keeps, which no tool of Kuru's accepts. A workspace id is this run's
+ * and can be stale by the time a draft is sent; the card id is minted once
+ * and never reused, which is why it is the half the role tells Kuru to trust.
+ */
+export interface CardRef {
+  code: string;
+  title: string;
+  place: string;
+  cardId: string;
+}
+
+/** How much of a card's title a reference carries, so the box shows the rest of the sentence. */
+export const CARD_REF_TITLE_MAX = 32;
+
+/**
+ * The shape `cardReference` writes, for the drawer to draw your message
+ * with the reference as a door onto the card. The title cannot hold a `"`,
+ * since `cardReference` turns one into `'`, so anything it does hold — a
+ * bracket, a slash — stays inside the quotes.
+ */
+const CARD_REF = /\[card (\S+) "([^"\n]*)" \(([^\s()/]+)\/(c[0-9a-f]{12})\)\]/g;
+
+/**
+ * Where a card is, as a reference writes it: its workspace's id, `profile`
+ * for the profile's board (null), and for a workspace of another node shown
+ * in this window that node's name and the node's own id for it — `nameOf`
+ * reads the name, and an id is the fallback for a node it does not know,
+ * which would still tell Kuru there was one.
+ */
+export function cardPlace(workspaceId: string | null, nameOf: (nodeId: string) => string | null): string {
+  if (workspaceId === null) return "profile";
+  const there = parseRemote(workspaceId);
+  return there ? `${nameOf(there.node) ?? there.node}:${there.id}` : workspaceId;
+}
+
+export function cardReference(ref: CardRef): string {
+  return `[card ${ref.code} "${shortTitle(ref.title)}" (${ref.place}/${ref.cardId})]`;
+}
+
+/** The title on one line, without a quote to end it early, and cut at a word when there is one near the cut. */
+function shortTitle(title: string): string {
+  const flat = title.replace(/\s+/g, " ").replace(/"/g, "'").trim();
+  if (flat.length <= CARD_REF_TITLE_MAX) return flat;
+  const cut = flat.slice(0, CARD_REF_TITLE_MAX - 1);
+  // Cut just before a space is a cut at a word's end already.
+  const space = flat[cut.length] === " " ? cut.length : cut.lastIndexOf(" ");
+  return `${(space > CARD_REF_TITLE_MAX / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
+
+/** A message split into its words and the card references among them, in order. */
+export function splitCardRefs(text: string): ({ text: string } | { ref: CardRef })[] {
+  const parts: ({ text: string } | { ref: CardRef })[] = [];
+  let last = 0;
+  for (const match of text.matchAll(CARD_REF)) {
+    const at = match.index ?? 0;
+    if (at > last) parts.push({ text: text.slice(last, at) });
+    parts.push({ ref: { code: match[1]!, title: match[2]!, place: match[3]!, cardId: match[4]! } });
+    last = at + match[0].length;
+  }
+  if (last < text.length) parts.push({ text: text.slice(last) });
+  return parts;
+}
+
+/**
+ * Words put into a draft over its selection, with a space either side where
+ * the draft has none, and where the cursor goes after them: past the space,
+ * so the next thing typed is the next word. A reference dropped against a
+ * word would read as part of it — `fix[card …]` — and one at the end with no
+ * space after it would have the first key typed run into its bracket.
+ */
+export function insertWords(draft: string, from: number, to: number, words: string): { text: string; caret: number } {
+  const start = Number.isFinite(from) ? Math.max(0, Math.min(draft.length, Math.trunc(from))) : draft.length;
+  const end = Number.isFinite(to) ? Math.max(start, Math.min(draft.length, Math.trunc(to))) : start;
+  const before = draft.slice(0, start);
+  const after = draft.slice(end);
+  const head = `${before}${before && !/\s$/.test(before) ? " " : ""}${words}`;
+  // A space already there is used rather than doubled.
+  if (after.startsWith(" ")) return { text: head + after, caret: head.length + 1 };
+  return { text: `${head} ${after}`, caret: head.length + 1 };
 }
 
 // ---------------------------------------------------------------------------

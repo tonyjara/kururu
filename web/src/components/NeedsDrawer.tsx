@@ -35,10 +35,12 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cardCode, type Card } from "../../../shared/board";
+import { cardPlace } from "../../../shared/kuru";
 import type { Need, NeedKind, ProfileNeeds, WorkspaceNeeds } from "../../../shared/needs";
 import type { NodeStatus, SummaryAgent, SummaryNeed } from "../../../shared/nodes";
 import { mascotFor, type AgentSnapshot, type MascotSet } from "../../../shared/model";
 import { useCardDone } from "../cardDone";
+import { referItem } from "../kuru";
 import { agentLabel, agentSummary } from "../labels";
 import { asAgent } from "../nodes";
 import { nodeNeeds, type NodeNeed } from "../../../shared/remote";
@@ -151,7 +153,7 @@ export function NeedsDrawer({
    * Separate from the inline "Done" button beside it, which only ever shows
    * for a `Need.plainDone` row and skips the question because there is none.
    */
-  const [cardMenu, setCardMenu] = useState<{ at: MenuAt; workspaceId: string; card: Card } | null>(null);
+  const [cardMenu, setCardMenu] = useState<{ at: MenuAt; workspaceId: string; workspaceName: string; card: Card } | null>(null);
   const agentOpen = (card: Card) => {
     const agentId = card.run?.agentId;
     return agentId != null && agents.some((a) => a.id === agentId && !a.exited);
@@ -163,8 +165,10 @@ export function NeedsDrawer({
   const { ask, setAsk, moveToDone } = useCardDone(agentOpen, devOpen, {
     error: (_cardId, err) => window.alert(err instanceof Error ? err.message : String(err)),
   });
-  const cardMenuItems = (workspaceId: string, card: Card): MenuItem[] => [
+  const cardMenuItems = (workspaceId: string, workspaceName: string, card: Card): MenuItem[] => [
     { label: "Move to Done", run: () => moveToDone(workspaceId, card) },
+    // Opening Kuru's drawer closes this one: the two share the slot.
+    referItem({ code: cardCode(workspaceName, card.number), title: card.title, place: cardPlace(workspaceId, api.nodeNameOf), cardId: card.id }),
   ];
 
   const waiting = needs.workspaces.filter((w) => w.band === "needs");
@@ -233,7 +237,7 @@ export function NeedsDrawer({
                   onOpened={sheet ? onClose : undefined}
                   onMenu={
                     need.card
-                      ? (x, y) => setCardMenu({ at: { x, y }, workspaceId: need.workspaceId, card: need.card! })
+                      ? (x, y) => setCardMenu({ at: { x, y }, workspaceId: need.workspaceId, workspaceName: w.workspace.name, card: need.card! })
                       : undefined
                   }
                 />
@@ -315,7 +319,7 @@ export function NeedsDrawer({
           alike — see its `Grip` for the argument. */}
       {!sheet && <Grip onResize={onResize} onReset={onResetWidth} />}
       {cardMenu && (
-        <Menu at={cardMenu.at} items={cardMenuItems(cardMenu.workspaceId, cardMenu.card)} onClose={() => setCardMenu(null)} />
+        <Menu at={cardMenu.at} items={cardMenuItems(cardMenu.workspaceId, cardMenu.workspaceName, cardMenu.card)} onClose={() => setCardMenu(null)} />
       )}
       {ask && (
         <Dialog
