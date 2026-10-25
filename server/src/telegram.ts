@@ -56,6 +56,7 @@ import { dirname, join } from "node:path";
 import {
   ALLOWED_MAX,
   PAIRING_MS,
+  answeredWords,
   emptyAddress,
   heldLine,
   laterSwitch,
@@ -1267,13 +1268,15 @@ export class TelegramChannel {
             return;
           }
           if (route.node !== shared.self) {
-            this.hold({ node: route.node, id, at: message.at || now, text: route.text }, chat);
+            this.hold({ node: route.node, id, at: message.at || now, text: answeredWords(route.text, message.answered, message.at || now) }, chat);
             this.saveState();
             this.deps.changed();
             return;
           }
           text = route.text;
         }
+        // After the routing, which reads an address only at the very front.
+        text = answeredWords(text, message.answered, message.at || now);
         const profileKey = this.profileKey();
         if (!profileKey) {
           this.notice(chat, "kururu has no profile to give this to.");

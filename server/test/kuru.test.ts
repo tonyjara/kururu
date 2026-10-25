@@ -11,7 +11,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentName, envelope, rolePrompt } from "../../shared/harness";
-import { CARD_REF_TITLE_MAX, KURU_RECENT, cardPlace, cardReference, clipLength, insertWords, kuruCounts, mergeConversation, plainWords, readPrompt, splitCardCodes, splitCardRefs, spokenMessage, type KuruItem, type OutboxLike } from "../../shared/kuru";
+import { CARD_REF_TITLE_MAX, KURU_RECENT, addressOf, cardPlace, cardReference, clipLength, insertWords, kuruCounts, mergeConversation, plainWords, quotedLine, readPrompt, replyRefOf, splitCardCodes, splitCardRefs, spokenMessage, type KuruItem, type KuruReply, type NoticeItem, type OutboxLike, type YouItem } from "../../shared/kuru";
+import { REPLY_QUOTE_MAX, readableReply, replyClock, replyReference, splitReply, withReply, type ReplyRef } from "../../shared/reply";
+import { viaOf } from "../../shared/store";
 import type { Turn } from "../../shared/store";
 import type { StoredOutboxEntry } from "../../shared/voice";
 import { Kuru } from "../src/kuru";
@@ -355,6 +357,155 @@ describe("insertWords", () => {
 
   test("a line break after the cursor stays a line break", () => {
     expect(insertWords("one\ntwo", 3, 3, ref)).toEqual({ text: `one ${ref} \ntwo`, caret: `one ${ref} `.length });
+  });
+});
+
+/**
+ * A message of yours that answers one line, as the words Kuru reads: who,
+ * when, the line's opening, and the drawer's id for it. Kuru reads the
+ * first three and the drawer all four, so the words must read back exactly
+ * as they were written, whatever the quoted line had in it, and must not be
+ * found where nobody wrote one.
+ */
+describe("replies", () => {
+  const ref: ReplyRef = { who: "Kuru", when: "18:42", quote: "Want me to tell it to go ahead?", id: "t1234" };
+
+  test("are who, when, the opening and the id, in brackets in front of the words", () => {
+    expect(replyReference(ref)).toBe('[reply to Kuru 18:42 "Want me to tell it to go ahead?" (t1234)]');
+    expect(splitReply(`${replyReference(ref)} yes, go ahead`)).toEqual({ ref, text: "yes, go ahead" });
+  });
+
+  test("without an id, as one from Telegram, and from another day", () => {
+    const telegram = { ...ref, id: null, when: "Oct 24 18:42" };
+    expect(replyReference(telegram)).toBe('[reply to Kuru Oct 24 18:42 "Want me to tell it to go ahead?"]');
+    expect(splitReply(`${replyReference(telegram)} yes`)).toEqual({ ref: telegram, text: "yes" });
+  });
+
+  test("a long line is cut near the cap, and what it holds cannot end the reference early", () => {
+    const quote = 'The "Pay" button\nis [grey] (sometimes) and the checkout agent wants to know whether to restyle it or leave it';
+    const written = replyReference({ ...ref, quote });
+    const read = splitReply(`${written} leave it`)!;
+    expect(read.text).toBe("leave it");
+    expect(read.ref.quote.length).toBeLessThanOrEqual(REPLY_QUOTE_MAX);
+    expect(read.ref.quote).toStartWith("The 'Pay' button is [grey] (sometimes)");
+    expect(read.ref.quote).toEndWith("…");
+  });
+
+  test("who is a name and nothing that could break the brackets", () => {
+    expect(splitReply(`${replyReference({ ...ref, who: 'Kuru on "box" [2]' })} hi`)?.ref.who).toBe("Kuru on box 2");
+    expect(splitReply(`${replyReference({ ...ref, who: "kururu" })} hi`)?.ref.who).toBe("kururu");
+    // An id that is not one is left off rather than written wrong.
+    expect(replyReference({ ...ref, id: "n0123/t12" })).not.toContain("(n0123/t12)");
+  });
+
+  test("go after the address that routes them, which the server reads only at the front", () => {
+    const words = "@omarchy, yes go ahead";
+    const sent = withReply(words, replyReference(ref), "@omarchy".length);
+    expect(sent).toBe('@omarchy [reply to Kuru 18:42 "Want me to tell it to go ahead?" (t1234)] yes go ahead');
+    expect(addressOf(sent, ["omarchy"], false)).toEqual({ node: "omarchy", rest: `${replyReference(ref)} yes go ahead` });
+    expect(splitReply(sent)).toEqual({ ref, text: "@omarchy yes go ahead" });
+    expect(withReply("yes", replyReference(ref))).toBe(`${replyReference(ref)} yes`);
+  });
+
+  test("are only found at the front, and words that only look like one stay words", () => {
+    expect(splitReply(`yes ${replyReference(ref)}`)).toBeNull();
+    for (const text of ["[reply to Kuru] yes", '[reply to Kuru 18:42 Want me] yes', '[reply to Kuru yesterday "x"] yes', "", "[card ACM-16]"]) {
+      expect(splitReply(text)).toBeNull();
+    }
+  });
+
+  test("the clock is the day's on the day, and the date's before it", () => {
+    const now = new Date(2026, 9, 25, 21, 5).getTime();
+    expect(replyClock(new Date(2026, 9, 25, 8, 7).getTime(), now)).toBe("08:07");
+    expect(replyClock(new Date(2026, 9, 24, 18, 42).getTime(), now)).toBe("Oct 24 18:42");
+  });
+
+  test("read as a person would where only text can show them", () => {
+    expect(readableReply(`${replyReference(ref)} yes`)).toBe('↩ Kuru 18:42: "Want me to tell it to go ahead?"\nyes');
+    expect(readableReply(`${replyReference({ ...ref, who: "me" })} and prod`)).toBe('↩ you 18:42: "Want me to tell it to go ahead?"\nand prod');
+    expect(readableReply("just words")).toBe("just words");
+  });
+
+  test("a reply's turn is still yours, typed or from Telegram, and plain words find the reference", () => {
+    const typed = `${replyReference(ref)} yes`;
+    expect(readPrompt(typed)).toEqual({ kind: "you", text: typed });
+    expect(viaOf(typed)).toBe("typed");
+    const telegram = `[telegram] ${replyReference({ ...ref, id: null })} yes`;
+    expect(viaOf(telegram)).toBe("telegram");
+    expect(splitReply(plainWords(telegram))?.text).toBe("yes");
+  });
+
+  test("the role's own example is one", () => {
+    const role = rolePrompt({ profile: "main", workspaces: [], launchers: [] });
+    expect(role).toContain("## Messages the user replies to");
+    const example = /\[reply to [^\]]*\)\]/.exec(role)?.[0] ?? "";
+    expect(splitReply(`${example} yes`)?.ref).toEqual({ who: "Kuru", when: "18:42", quote: "Want me to tell it to go ahead? …", id: "t1234" });
+  });
+});
+
+describe("replyRefOf", () => {
+  const now = new Date(2026, 9, 25, 21, 0).getTime();
+  const at = new Date(2026, 9, 25, 18, 42).getTime();
+  const kuru: KuruReply = { kind: "kuru", id: "t9", at, text: "Want me to tell it\nto go ahead?", utterance: "u9", fate: "heard", aside: false };
+  const you: YouItem = { kind: "you", id: "t8", at, text: null, via: "typed", ms: 0, state: "delivered", typedAt: null, note: null, outboxId: null };
+  const notice: NoticeItem = {
+    kind: "notice",
+    id: "t7",
+    at,
+    from: "kururu",
+    agent: { name: "Fix login", program: "claude", workspace: "Acme", card: "ACM-3" },
+    what: "finished its turn",
+    event: "done",
+    text: '"Fix login" (claude in Acme, card ACM-3; id a26) finished its turn: done',
+  };
+
+  test("Kuru's line is Kuru's, on one line", () => {
+    expect(replyRefOf(kuru, "t9", now)).toEqual({ who: "Kuru", when: "18:42", quote: "Want me to tell it to go ahead?", id: "t9" });
+  });
+
+  test("yours is yours, as the drawer drew it: no reference of its own, a card by its code and title", () => {
+    const words = `${replyReference({ who: "Kuru", when: "18:40", quote: "Which one?", id: "t5" })} the ${cardReference({ code: "ACM-16", title: "Design the checkout", place: "w8", cardId: "c3f9a1e07b2d4" })} one`;
+    expect(replyRefOf({ ...you, text: words }, "t8", now)).toEqual({ who: "me", when: "18:42", quote: "the ACM-16 Design the checkout one", id: "t8" });
+    // A clip not yet in words has nothing to quote.
+    expect(replyRefOf(you, "t8", now)).toBeNull();
+  });
+
+  test("a notice is quoted under its sender, by the line Kuru was given", () => {
+    const quoted = replyRefOf(notice, "t7", now)!;
+    expect(quoted.who).toBe("kururu");
+    expect(quoted.quote).toBe(`'Fix login' (claude in Acme, card ACM-3; id a26) finished its turn: done`);
+    // Another node's notice crossed without its text, and is quoted by its line.
+    expect(replyRefOf({ ...notice, text: "" }, "t7", now)?.quote).toBe("Fix login finished its turn");
+  });
+});
+
+describe("quotedLine", () => {
+  const reply = (id: string, at: number, text: string, utterance: string | null = null): KuruReply => ({ kind: "kuru", id, at, text, utterance, fate: null, aside: false });
+  const lines: KuruItem[] = [
+    reply("t1", 100, "Want me to tell the API agent to go ahead?"),
+    { kind: "you", id: "t2", at: 200, text: "wait", via: "typed", ms: 0, state: "delivered", typedAt: null, note: null, outboxId: "out-2" },
+    reply("t3", 300, "First, the tests pass. Second, want me to tell the UI agent to go ahead?", "u3"),
+    { kind: "session", id: "s1", at: 350, launcher: null },
+  ];
+  const ref = (over: Partial<ReplyRef>): ReplyRef => ({ who: "Kuru", when: "18:42", quote: "x", id: null, ...over });
+
+  test("by id, by the outbox id a message had before it was a turn, and by a missed reply's utterance", () => {
+    expect(quotedLine(lines, ref({ id: "t1" }), 1000)?.id).toBe("t1");
+    expect(quotedLine(lines, ref({ id: "out-2" }), 1000)?.id).toBe("t2");
+    expect(quotedLine(lines, ref({ id: "mu3" }), 1000)?.id).toBe("t3");
+  });
+
+  test("by its words when there is no id, the nearest line before the reply, a part of a long one included", () => {
+    expect(quotedLine(lines, ref({ quote: "want me to tell the UI agent to…" }), 1000)?.id).toBe("t3");
+    expect(quotedLine(lines, ref({ quote: "Want me to tell the" }), 1000)?.id).toBe("t1");
+    expect(quotedLine(lines, ref({ quote: "Want me to tell the" }), 250)?.id).toBe("t1");
+    // An id that is not loaded falls back to the words.
+    expect(quotedLine(lines, ref({ id: "t99", quote: "wait" }), 1000)?.id).toBe("t2");
+  });
+
+  test("nothing, rather than a guess, when no line holds the words", () => {
+    expect(quotedLine(lines, ref({ quote: "deploy staging" }), 1000)).toBeNull();
+    expect(quotedLine(lines, ref({ quote: "…" }), 1000)).toBeNull();
   });
 });
 

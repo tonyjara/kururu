@@ -193,6 +193,64 @@ while a copy is on its way. A message addressed to another node's Kuru
 (`@omarchy …`) carries the path of this computer's file, which that Kuru
 cannot open.
 
+## A message the user replies to
+
+Every line in Kuru's drawer — Kuru's replies, kururu's notices, your own
+messages, another node's Kuru — has a small reply arrow: at the end of its
+meta line on hover, and always, quietly, on a touch screen, where nothing
+hovers. Pressed, it puts a bar over the composer — "Replying to Kuru", the
+line's opening, ✕ — with the keyboard in the box. Enter sends the words with
+the line's reference in front, and that is what Kuru reads:
+
+```
+[reply to Kuru 18:42 "Want me to tell it to go ahead? …" (t1234)] yes
+```
+
+It is there because a conversation with Kuru is never one thread. Kuru asks
+whether to let one agent go ahead, kururu relays that two others finished,
+Kuru asks something about one of them — and "yes" answers whichever Kuru
+takes to be the last question. The role's "Messages the user replies to"
+says to answer in the context of the quoted message.
+
+Words and not a field, for the card reference's reason: what reaches Kuru is
+what is typed into its terminal, and everything that reads a turn later —
+the drawer, the search, the backup, the Telegram echo, another node's Kuru —
+reads words. Who is `Kuru`, `kururu` (or whoever a notice came from), or
+`me` for one of the user's own; the time is the clock, with the month and
+day from another day; the quote is the line's opening, on one line, cut at
+80 characters (`REPLY_QUOTE_MAX`), with a `"` turned into `'` so nothing in
+it ends the reference early. The id in parentheses is the drawer's — a
+turn's `t1234`, or the outbox's id for a message not yet taken — and no
+tool of Kuru's takes it; the role says that `search` with words from the
+quote finds a line no longer in front of it. A reply to another node's line
+starts `@omarchy`, and carries that node's own id for it, after the address,
+which the server reads only at the very front. A reply to your own message
+quotes it as the drawer drew it: without its own reference, and a card by
+its code and title.
+
+The reply goes with the next **typed** message; a clip said while the bar is
+up goes as clips always have. A reply is to one conversation's line, so if
+the address is changed to send the words somewhere else, the bar says the
+quote is left off, and it is. Escape takes the reply away first and a second
+gives the keyboard back, as with the `@` names; the bar waits out a closed
+drawer and a reload beside the draft (`kururu.kuru.reply:<profile>` in
+`localStorage`).
+
+A sent reply is drawn as a quote over its words — who, when, the opening —
+and never as the brackets. Pressed, it scrolls the list to the line it
+answers and rings it for a moment (`.kuru-flash`, a ring and not a ground,
+since the ground says who spoke). The line is found by id, then — a reply
+from Telegram has none — by the nearest line before it whose words hold
+the quote (`quotedLine`); one not among the lines loaded is only a quote.
+A Telegram reply carries the same reference; see
+[channels](channels.md#a-reply-in-the-chat).
+
+`shared/reply.ts` is the format, with nothing imported, since both
+`shared/kuru.ts` and `shared/channels.ts` write one; `replyRefOf` and
+`quotedLine` in `shared/kuru.ts` turn a drawer line into one and find it
+again. Like every role section, it reaches a running Kuru when it is next
+started or resumed.
+
 ## Auto Swap
 
 A switch in Settings → Agents, under Harness, for the profile on screen — each

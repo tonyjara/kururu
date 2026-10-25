@@ -87,6 +87,16 @@
  * A card code in another node's words is not a door here: it names that
  * node's board.
  *
+ * **Any line can be answered on its own.** Kuru asks one thing, kururu
+ * relays another, Kuru asks a third, and "yes" answers whichever Kuru takes
+ * to be the last. So every line — Kuru's, kururu's notices, your own — has a
+ * small reply arrow, on hover where there is a pointer and always on a touch
+ * screen, and the composer then says what it is replying to, above the box,
+ * until it is sent or cancelled. What is sent is the words with the line's
+ * reference in front (`shared/reply.ts`), which is what Kuru reads; a sent
+ * reply draws it as a quote that scrolls back to the line. A peer's line is
+ * answered the same way, and the message starts `@node` so it goes there.
+ *
  * What it draws is the server's `kuru` message (`shared/kuru.ts`), already
  * merged: nothing in here decides what a message's state is or whether a
  * reply was heard. What it adds is this page's own two states for a clip the
@@ -96,9 +106,10 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, ty
 import { cardCode } from "../../../shared/board";
 import { CHANNEL_NAMES, channelReady, isChannelKind, type TelegramStatus } from "../../../shared/channels";
 import { dropRefusal } from "../../../shared/drops";
-import { KURU_SEEN_MS, addressMatches, addressOf, addressQuery, clipLength, insertWords, mergeNodes, pickAddress, splitCardCodes, splitCardRefs, typedAddress, type CardRef, type KuruItem, type KuruReply, type NodeKuruItem, type NoticeItem, type PeerKuru, type YouItem } from "../../../shared/kuru";
+import { KURU_SEEN_MS, addressMatches, addressOf, addressQuery, clipLength, insertWords, mergeNodes, pickAddress, quotedLine, replyRefOf, splitCardCodes, splitCardRefs, typedAddress, type CardRef, type KuruItem, type KuruReply, type NodeKuruItem, type NoticeItem, type PeerKuru, type YouItem } from "../../../shared/kuru";
 import { splitMentions } from "../../../shared/made";
 import type { AgentSnapshot, MascotConfig, Profile } from "../../../shared/model";
+import { REPLY_ME, replyClock, replyReference, splitReply, withReply, type ReplyRef } from "../../../shared/reply";
 import type { OutboxState, VoiceSettings } from "../../../shared/voice";
 import { escapePath, handoverFrom, isFileDrag } from "../drop";
 import { kuruLive, kuruWorking, takeKuruWords, useKuruDrawer, type KuruLive } from "../kuru";
@@ -214,8 +225,16 @@ export function KuruDrawer({
     setNodeFilter(node);
     writeNodeFilter(node);
   };
-  /** Reply on a peer's bubble: the composer starts `@node `, and has the keyboard. */
-  const [prefill, setPrefill] = useState<{ text: string; n: number } | null>(null);
+  /**
+   * A line's reply arrow was pressed: the composer quotes it, and has the
+   * keyboard — and starts `@node ` for another node's line, so the reply goes
+   * to the Kuru that knows it. A counter, so the same line twice asks twice.
+   */
+  const [replyAsk, setReplyAsk] = useState<{ quoting: Quoting; n: number } | null>(null);
+  const replyTo = useCallback((item: NodeKuruItem & (YouItem | KuruReply | NoticeItem)) => {
+    const ref = replyRefOf(item, ownId(item), Date.now());
+    if (ref) setReplyAsk((was) => ({ quoting: { node: item.node, at: item.at, ref }, n: (was?.n ?? 0) + 1 }));
+  }, []);
   // The drawer is the active profile's, so Telegram is this conversation's
   // when it talks to whichever profile is active, or was pointed at this one.
   const telegram = channels?.telegram && channelReady(channels.telegram) && (channels.telegram.profileId ?? profile.id) === profile.id ? channels.telegram : null;
@@ -498,6 +517,31 @@ export function KuruDrawer({
     if (sheet) onClose();
   }, [sheet, onClose]);
 
+  /**
+   * The line a sent reply quotes, as the list draws it: looked for among the
+   * lines of the conversation the reply went to — another node's when it was
+   * written there or addressed there — under the ids that conversation knows
+   * them by. Null when it is not among the lines loaded, and then the quote
+   * is only a quote.
+   */
+  const quotedOf = (ref: ReplyRef, node: string | null, before: number): string | null => {
+    const lines = items.filter((line) => line.node === node).map((line) => ({ ...line, id: ownId(line), drawn: line.id }));
+    return quotedLine(lines, ref, before)?.drawn ?? null;
+  };
+  /** A quote was pressed: its line, in the middle of the list, lit for a moment as a reply the pill named is. */
+  const [flash, setFlash] = useState<string | null>(null);
+  const goTo = useCallback((id: string) => {
+    const row = list.current?.querySelector<HTMLElement>(`[data-item="${CSS.escape(id)}"]`);
+    if (!row) return;
+    row.scrollIntoView({ block: "center", behavior: "smooth" });
+    setFlash(id);
+  }, []);
+  useEffect(() => {
+    if (!flash) return;
+    const timer = setTimeout(() => setFlash(null), FOCUS_MS);
+    return () => clearTimeout(timer);
+  }, [flash]);
+
   // This page's own clips, before the server has them, and the one being recorded.
   const saving = outgoing.filter((clip) => clip.profileId === profile.id && !known.has(clip.id));
   const recording = ui.phase === "listening" && !voiceIsRemote();
@@ -537,18 +581,37 @@ export function KuruDrawer({
               <time dateTime={new Date(item.at).toISOString()}>{dayAt(item.at)}</time>
             </li>
           ) : item.kind === "you" ? (
-            <You
+            (() => {
+              const to = item.node === null && item.text ? (addressOf(item.text, peerNames, item.via === "voice")?.node ?? null) : null;
+              const reply = item.text ? splitReply(item.text) : null;
+              const quoted = reply ? quotedOf(reply.ref, item.node ?? to, item.at) : null;
+              return (
+                <You
+                  key={item.id}
+                  item={item}
+                  state={item.state}
+                  note={item.note}
+                  node={item.node}
+                  to={to}
+                  refOf={item.node === null ? refOf : noRefs}
+                  onCard={onCard}
+                  reply={reply}
+                  onQuote={quoted ? () => goTo(quoted) : null}
+                  onReplyTo={() => replyTo(item)}
+                  flash={flash === item.id}
+                />
+              );
+            })()
+          ) : item.kind === "notice" ? (
+            <Notice
               key={item.id}
               item={item}
-              state={item.state}
-              note={item.note}
               node={item.node}
-              to={item.node === null && item.text ? (addressOf(item.text, peerNames, item.via === "voice")?.node ?? null) : null}
-              refOf={item.node === null ? refOf : noRefs}
+              cardOf={item.node === null ? cardOf : noCards}
               onCard={onCard}
+              onReplyTo={() => replyTo(item)}
+              flash={flash === item.id}
             />
-          ) : item.kind === "notice" ? (
-            <Notice key={item.id} item={item} node={item.node} cardOf={item.node === null ? cardOf : noCards} onCard={onCard} />
           ) : (
             <Reply
               key={item.id}
@@ -558,9 +621,10 @@ export function KuruDrawer({
               // is null === null for every reply never spoken, and each of them
               // wore the accent of the one just scrolled to, for good.
               marked={marked !== null && marked === item.utterance}
+              flash={flash === item.id}
               replaying={replayingId === item.id}
               onReplay={onReplay}
-              onReplyTo={item.node === null ? null : () => setPrefill((was) => ({ text: `@${item.node} `, n: (was?.n ?? 0) + 1 }))}
+              onReplyTo={() => replyTo(item)}
               cardOf={item.node === null ? cardOf : noCards}
               onCard={onCard}
               onFile={onFile}
@@ -595,7 +659,7 @@ export function KuruDrawer({
 
       <Live live={live} working={working} profileId={profile.id} mascot={mascot} onTerminal={onTerminal} />
 
-      <Composer profileId={profile.id} onEditing={onEditing} talking={ui.phase === "listening"} peers={kuruPeers} prefill={prefill} />
+      <Composer profileId={profile.id} onEditing={onEditing} talking={ui.phase === "listening"} peers={kuruPeers} replyAsk={replyAsk} />
 
       {/* The edge you drag, on the sidebar's and the tree's terms: last in the
           tree and absolutely positioned, so it sits over the border rather
@@ -735,6 +799,29 @@ const noCards: CardOf = () => null;
 const noRefs: RefOf = () => null;
 
 /**
+ * A line's id in its own conversation: this node's as it is, another
+ * node's without the `<node id>/` the merge put in front (`mergeNodes`) —
+ * the id that node's Kuru and drawer know it by, and so the one a reply to
+ * it carries.
+ */
+function ownId(item: NodeKuruItem): string {
+  return item.node === null ? item.id : item.id.slice(item.id.indexOf("/") + 1);
+}
+
+/** What the composer is replying to: the line's reference, whose conversation it is in (null for this node's), and when it was said, for the time the reference is sent with. */
+interface Quoting {
+  node: string | null;
+  at: number;
+  ref: ReplyRef;
+}
+
+/** Who a quote is from, as the drawer says it: your own lines are yours, and another node's Kuru is that node's. */
+function quoteWho(who: string, node: string | null): string {
+  if (who === REPLY_ME) return node ? `you, on ${node}` : "you";
+  return node && who === "Kuru" ? `Kuru on ${node}` : who;
+}
+
+/**
  * The drawer's left edge, as something to take hold of — `FileTree.tsx`'s
  * `Grip` mirrored, because this column grows leftwards too, so its width is
  * measured from the right edge of the box rather than from the left. Shared
@@ -838,7 +925,10 @@ function TelegramSwitch({ status }: { status: TelegramStatus }) {
  * One of your messages. The state is passed beside the item so this page's
  * `saving` can wear the row the server's states do. `node` is whose
  * conversation it is in, for another node's; `to` is the node a message of
- * this one's was addressed to with `@`, on its way there.
+ * this one's was addressed to with `@`, on its way there. A reply draws the
+ * line it answers as a quote over the words, a door back to that line when
+ * `onQuote` found it, and the reference itself — written for Kuru — not at
+ * all.
  */
 function You({
   item,
@@ -848,6 +938,10 @@ function You({
   to = null,
   refOf = noRefs,
   onCard,
+  reply = null,
+  onQuote = null,
+  onReplyTo = null,
+  flash = false,
 }: {
   item: YouItem;
   state: RowState;
@@ -856,11 +950,17 @@ function You({
   to?: string | null;
   refOf?: RefOf;
   onCard?: (workspaceId: string | null, cardId: string) => void;
+  reply?: { ref: ReplyRef; text: string } | null;
+  onQuote?: (() => void) | null;
+  /** Reply to this message. Null for a clip still on this page, which has no words to quote. */
+  onReplyTo?: (() => void) | null;
+  flash?: boolean;
 }) {
   const word = state === "queued" ? (item.typedAt !== null ? "Sent" : STATE_WORD.queued) : STATE_WORD[state];
   const channel = isChannelKind(item.via) ? item.via : null;
+  const text = reply ? reply.text : item.text;
   return (
-    <li className={`kuru-item kuru-you kuru-you-${state}`}>
+    <li className={`kuru-item kuru-you kuru-you-${state} ${flash ? "kuru-flash" : ""}`} data-item={item.id}>
       <span className="kuru-meta">
         <NodeTag node={node} />
         {to && <span className="kuru-node" title={`For the Kuru on ${to}`}>→ {to}</span>}
@@ -878,10 +978,12 @@ function You({
         <time dateTime={new Date(item.at).toISOString()}>{saidAt(item.at)}</time>
         {item.via === "voice" && item.ms > 0 && <span className="kuru-length">{clipLength(item.ms)}</span>}
         {word && <span className={`kuru-state kuru-state-${state}`}>{word}</span>}
+        {onReplyTo && item.text && <ReplyButton onReply={onReplyTo} />}
       </span>
-      {item.text ? (
+      {reply && <Quote quote={reply.ref} node={node ?? to} onOpen={onQuote} />}
+      {text ? (
         <p className="kuru-text">
-          <RefWords text={item.text} refOf={refOf} onCard={onCard} />
+          <RefWords text={text} refOf={refOf} onCard={onCard} />
         </p>
       ) : (
         <p className="kuru-text kuru-pending">Not in words yet — the audio is kept.</p>
@@ -911,6 +1013,7 @@ function Reply({
   item,
   node,
   marked,
+  flash,
   replaying,
   onReplay,
   onReplyTo,
@@ -922,10 +1025,12 @@ function Reply({
   /** Whose Kuru said it, when that is another node's. */
   node: string | null;
   marked: boolean;
+  /** A quote of it was just pressed. */
+  flash: boolean;
   replaying: boolean;
   onReplay: (item: KuruReply) => void;
-  /** Reply to another node's Kuru: the composer starts `@node `. Null for this node's own. */
-  onReplyTo: (() => void) | null;
+  /** Reply to this one: the composer quotes it — and starts `@node ` for another node's Kuru. */
+  onReplyTo: () => void;
   cardOf: CardOf;
   onCard: (workspaceId: string | null, cardId: string) => void;
   /** A path in the reply was opened. */
@@ -934,8 +1039,9 @@ function Reply({
   const active = replaying || item.fate === "speaking";
   return (
     <li
-      className={`kuru-item kuru-reply ${item.aside ? "kuru-aside" : ""} ${item.fate ? `kuru-fate-${item.fate}` : ""} ${marked ? "kuru-marked" : ""}`}
+      className={`kuru-item kuru-reply ${item.aside ? "kuru-aside" : ""} ${item.fate ? `kuru-fate-${item.fate}` : ""} ${marked ? "kuru-marked" : ""} ${flash ? "kuru-flash" : ""}`}
       data-utterance={item.utterance ?? undefined}
+      data-item={item.id}
     >
       <span className="kuru-meta">
         {item.utterance ? (
@@ -959,11 +1065,7 @@ function Reply({
         ) : item.fate === "unheard" ? (
           <span className="kuru-state kuru-state-unheard">Unheard</span>
         ) : null}
-        {onReplyTo && (
-          <button type="button" className="kuru-reply-to" onClick={onReplyTo} title={`Reply to the Kuru on ${node}`}>
-            Reply
-          </button>
-        )}
+        <ReplyButton onReply={onReplyTo} />
       </span>
       <p className="kuru-text">
         {/* Paths first, each a link when the server found its file, then card codes in
@@ -977,6 +1079,42 @@ function Reply({
         })}
       </p>
     </li>
+  );
+}
+
+/**
+ * The arrow that answers one line: on hover where there is a pointer, and
+ * always, quietly, on a touch screen, where nothing hovers. It keeps the
+ * keyboard where it was on the way, so the composer can take it.
+ */
+function ReplyButton({ onReply }: { onReply: () => void }) {
+  return (
+    <button type="button" className="kuru-reply-btn" onMouseDown={(event) => event.preventDefault()} onClick={onReply} title="Reply to this" aria-label="Reply to this">
+      <ReplyIcon />
+    </button>
+  );
+}
+
+/**
+ * The line a sent reply answers, over its words: who and when, and the
+ * opening the reference quoted. A button back to that line when it is among
+ * the lines loaded; only a quote when it is not.
+ */
+function Quote({ quote, node, onOpen }: { quote: ReplyRef; node: string | null; onOpen: (() => void) | null }) {
+  const body = (
+    <>
+      <span className="kuru-quote-who">
+        {quoteWho(quote.who, node)} · {quote.when}
+      </span>
+      <span className="kuru-quote-text">{quote.quote}</span>
+    </>
+  );
+  return onOpen ? (
+    <button type="button" className="kuru-quote" onClick={onOpen} title="Go to the message this answers">
+      {body}
+    </button>
+  ) : (
+    <span className="kuru-quote">{body}</span>
   );
 }
 
@@ -1042,31 +1180,50 @@ function CardWords({ text, cardOf, onCard }: { text: string; cardOf: CardOf; onC
  * again; nothing about it is unread or needs clearing, so it keeps no state
  * past this row's.
  */
-function Notice({ item, node = null, cardOf, onCard }: { item: NoticeItem; node?: string | null; cardOf: CardOf; onCard: (workspaceId: string | null, cardId: string) => void }) {
+function Notice({
+  item,
+  node = null,
+  cardOf,
+  onCard,
+  onReplyTo,
+  flash = false,
+}: {
+  item: NoticeItem;
+  node?: string | null;
+  cardOf: CardOf;
+  onCard: (workspaceId: string | null, cardId: string) => void;
+  onReplyTo: () => void;
+  flash?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const agent = item.agent;
   // Another node's notice about its agents crosses without the reply it
   // quoted (`peerItems`), so there is nothing behind a tap.
   const more = item.text.trim().length > 0;
   return (
-    <li className={`kuru-notice ${item.event === "blocked" ? "kuru-notice-blocked" : ""}`}>
-      <button
-        type="button"
-        className="kuru-notice-line"
-        aria-expanded={more ? open : undefined}
-        disabled={!more}
-        onClick={() => setOpen((was) => !was)}
-        title={more ? (open ? "Hide the message" : "Show the whole message") : undefined}
-      >
-        {more && <Icon name="caret" />}
-        <NodeTag node={node} />
-        <span className="kuru-notice-from">{item.from}</span>
-        <span aria-hidden="true">·</span>
-        {agent && <span className="kuru-notice-cut">{agent.name ? `"${agent.name}"` : agent.program}</span>}
-        {agent?.workspace && <span className="kuru-notice-where">in {agent.workspace}</span>}
-        <span className={`kuru-notice-what ${agent ? "" : "kuru-notice-cut"}`}>{item.what}</span>
-        <time dateTime={new Date(item.at).toISOString()}>{saidAt(item.at)}</time>
-      </button>
+    <li className={`kuru-notice ${item.event === "blocked" ? "kuru-notice-blocked" : ""} ${flash ? "kuru-flash" : ""}`} data-item={item.id}>
+      {/* The arrow beside the line rather than in it, since the line is a
+          button already, and a button in a button is neither. */}
+      <span className="kuru-notice-row">
+        <button
+          type="button"
+          className="kuru-notice-line"
+          aria-expanded={more ? open : undefined}
+          disabled={!more}
+          onClick={() => setOpen((was) => !was)}
+          title={more ? (open ? "Hide the message" : "Show the whole message") : undefined}
+        >
+          {more && <Icon name="caret" />}
+          <NodeTag node={node} />
+          <span className="kuru-notice-from">{item.from}</span>
+          <span aria-hidden="true">·</span>
+          {agent && <span className="kuru-notice-cut">{agent.name ? `"${agent.name}"` : agent.program}</span>}
+          {agent?.workspace && <span className="kuru-notice-where">in {agent.workspace}</span>}
+          <span className={`kuru-notice-what ${agent ? "" : "kuru-notice-cut"}`}>{item.what}</span>
+          <time dateTime={new Date(item.at).toISOString()}>{saidAt(item.at)}</time>
+        </button>
+        <ReplyButton onReply={onReplyTo} />
+      </span>
       {open && more && (
         <p className="kuru-notice-text">
           <CardWords text={item.text} cardOf={cardOf} onCard={onCard} />
@@ -1105,6 +1262,31 @@ function writeDraft(profileId: string, text: string) {
   }
 }
 
+/** Where what a draft replies to waits beside it, on the draft's terms: a reply half-written is still a reply after a reload. */
+const QUOTING_KEY = "kururu.kuru.reply:";
+
+function readQuoting(profileId: string): Quoting | null {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(QUOTING_KEY + profileId) ?? "null");
+    const q = raw as Partial<Quoting> | null;
+    const ref = q?.ref as Partial<ReplyRef> | undefined;
+    if (!q || !ref || typeof q.at !== "number" || !Number.isFinite(q.at) || (q.node !== null && typeof q.node !== "string")) return null;
+    if (typeof ref.who !== "string" || typeof ref.when !== "string" || typeof ref.quote !== "string" || (ref.id !== null && typeof ref.id !== "string")) return null;
+    return { node: q.node, at: q.at, ref: { who: ref.who, when: ref.when, quote: ref.quote, id: ref.id } };
+  } catch {
+    return null;
+  }
+}
+
+function writeQuoting(profileId: string, quoting: Quoting | null) {
+  try {
+    if (quoting) localStorage.setItem(QUOTING_KEY + profileId, JSON.stringify(quoting));
+    else localStorage.removeItem(QUOTING_KEY + profileId);
+  } catch {
+    // Not remembered past this window; the reply still sends.
+  }
+}
+
 /**
  * Typing to Kuru. Enter sends and Shift+Enter is a new line, as every chat
  * box has agreed; Escape gives the keyboard back to the panes. There is no
@@ -1136,21 +1318,32 @@ function writeDraft(profileId: string, text: string) {
  * copy goes in when it is kept (`handover`, `shared/drops.ts`). A paste that
  * also carries words — a cell copied out of Numbers comes with a picture of
  * itself — is left to paste the words.
+ *
+ * A reply is a bar over the box — whose line, and its opening, and ✕ — and
+ * not words in it, where it would be a bracket of ids to type around. It is
+ * put in front of the words as they are sent (`withReply`), after an
+ * `@node`, which the server reads only at the very front. A reply is to one
+ * conversation's line, so a message whose address no longer goes there —
+ * `@omarchy` taken off a reply to Omarchy's Kuru, or put on one to this
+ * node's — goes without it, and the bar says so before Enter does it.
+ * Escape takes the reply away first, as it does the names, and a second
+ * Escape gives the keyboard back. A clip said while it is up goes as a
+ * clip always has: the reference is the typed message's.
  */
 function Composer({
   profileId,
   onEditing,
   talking,
   peers,
-  prefill,
+  replyAsk,
 }: {
   profileId: string;
   onEditing: (editing: boolean) => void;
   talking: boolean;
   /** The other nodes' Kurus, which `@name` at the start of a message is for. */
   peers: PeerKuru[];
-  /** Reply on a peer's bubble: start the message with this, and take the keyboard. */
-  prefill: { text: string; n: number } | null;
+  /** A line's reply arrow: quote it, address its node, and take the keyboard. */
+  replyAsk: { quoting: Quoting; n: number } | null;
 }) {
   const [text, setText] = useState(() => readDraft(profileId));
   const [caret, setCaret] = useState<number | null>(null);
@@ -1166,16 +1359,27 @@ function Composer({
   /** Whose box this is now, for a copy kept after the drawer moved to another profile's. */
   const shown = useRef(profileId);
   shown.current = profileId;
+  const [quoting, setQuoting] = useState<Quoting | null>(() => readQuoting(profileId));
   useEffect(() => {
     setText(readDraft(profileId));
+    setQuoting(readQuoting(profileId));
   }, [profileId]);
+  const quote = (next: Quoting | null) => {
+    setQuoting(next);
+    writeQuoting(profileId, next);
+  };
+  const names = peers.map((peer) => peer.node.name);
   useEffect(() => {
-    if (!prefill) return;
-    // Whatever was already being written stays, after the address, unless
-    // it was already addressed to somebody.
+    if (!replyAsk) return;
+    quote(replyAsk.quoting);
+    const node = replyAsk.quoting.node;
+    // Whatever was already being written stays, addressed to where the line
+    // is: another node's line puts `@node` in front, this node's takes off
+    // an address to another, which would carry the reply away from it.
     setText((was) => {
-      const rest = was.replace(/^@[a-z][a-z0-9-]*\s*/i, "");
-      const next = `${prefill.text}${rest}`;
+      const at = typedAddress(was, names);
+      const rest = at ? was.slice(at.to).replace(/^[,:]?\s*/, "") : was;
+      const next = node ? `@${node} ${rest}` : rest;
       writeDraft(profileId, next);
       return next;
     });
@@ -1185,8 +1389,7 @@ function Composer({
       requestAnimationFrame(() => el.setSelectionRange(el.value.length, el.value.length));
     }
     // Only a new ask, not a re-render, moves the cursor.
-  }, [prefill?.n]); // eslint-disable-line react-hooks/exhaustive-deps
-  const names = peers.map((peer) => peer.node.name);
+  }, [replyAsk?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   const address = typedAddress(text, names);
   const toPeer = address ? peers.find((peer) => peer.node.name === address.node) : undefined;
   const query = caret === null || closedOn === text ? null : addressQuery(text, caret);
@@ -1215,14 +1418,23 @@ function Composer({
       requestAnimationFrame(() => el.setSelectionRange(picked.caret, picked.caret));
     }
   };
+  /** Whether the reply still goes where its line is: a reply to one conversation's line means nothing in another's. */
+  const quoteGoes = quoting !== null && quoting.node === (address?.node ?? null);
   const send = () => {
     const words = text.trim();
     // An address and nothing after it goes nowhere: the server would hand
     // `@omarchy` to this Kuru as words, which is not what the bold promised.
     if (!words || (address && !address.rest)) return;
-    api.kuruSay(profileId, words);
+    if (quoting && quoteGoes) {
+      const to = typedAddress(words, names);
+      const reference = replyReference({ ...quoting.ref, when: replyClock(quoting.at, Date.now()) });
+      api.kuruSay(profileId, withReply(words, reference, to ? to.to : null));
+    } else {
+      api.kuruSay(profileId, words);
+    }
     edit("");
     carets.delete(profileId);
+    if (quoting) quote(null);
   };
   // Told once each way, and told off on unmount: a drawer closed with the
   // cursor still in the box must not leave the prefix believing a field has
@@ -1342,6 +1554,25 @@ function Composer({
           {toPeer.state !== "up" ? " — away; it goes when it is back" : !toPeer.talks ? " — its kururu is too old to take it" : ""}
         </p>
       )}
+      {quoting && (
+        <div className={`kuru-quoting ${quoteGoes ? "" : "kuru-quoting-off"}`} role="status">
+          <ReplyIcon />
+          <span className="kuru-quoting-what">
+            <span className="kuru-quote-who">Replying to {quoteWho(quoting.ref.who, quoting.node)}</span>
+            <span className="kuru-quote-text">{quoteGoes ? quoting.ref.quote : `left off: this message is for ${address ? `the Kuru on ${address.node}` : "the Kuru here"}`}</span>
+          </span>
+          <button
+            type="button"
+            className="kuru-quoting-cancel"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => quote(null)}
+            title="Cancel the reply (Esc)"
+            aria-label="Cancel the reply"
+          >
+            <Icon name="close" />
+          </button>
+        </div>
+      )}
       {open && (
         <ul className="kuru-suggest" id={`kuru-suggest-${profileId}`} role="listbox" aria-label="Nodes">
           {offered.map((name, i) => {
@@ -1428,6 +1659,11 @@ function Composer({
               } else if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
                 send();
+              } else if (event.key === "Escape" && quoting) {
+                // Only the reply, as only the list above: a second Escape gives the keyboard back.
+                event.preventDefault();
+                event.stopPropagation();
+                quote(null);
               } else if (event.key === "Escape") {
                 event.preventDefault();
                 event.stopPropagation();
@@ -1479,6 +1715,16 @@ function KeysIcon() {
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="2" y="6" width="20" height="12" rx="2" />
       <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8" />
+    </svg>
+  );
+}
+
+/** An arrow turning back, for answering one line — drawn here for `KeysIcon`'s reason. */
+function ReplyIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
     </svg>
   );
 }

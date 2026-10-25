@@ -23,6 +23,7 @@ import { channelOfMessage, isChannelKind, readPeerMark, withoutChannelMark, type
 import { CROSS_SESSION_TAG, NOTICE_SENDER } from "./harness";
 import type { MadeFile } from "./made";
 import { parseRemote } from "./remote";
+import { REPLY_ME, REPLY_QUOTE_MAX, cutQuoted, replyClock, splitReply, type ReplyRef } from "./reply";
 import type { Turn } from "./store";
 import { VOICE_PREFIX, stripPastedContent, viaOf } from "./store";
 import type { OutboxEntry, OutboxState } from "./voice";
@@ -580,17 +581,7 @@ export function cardPlace(workspaceId: string | null, nameOf: (nodeId: string) =
 }
 
 export function cardReference(ref: CardRef): string {
-  return `[card ${ref.code} "${shortTitle(ref.title)}" (${ref.place}/${ref.cardId})]`;
-}
-
-/** The title on one line, without a quote to end it early, and cut at a word when there is one near the cut. */
-function shortTitle(title: string): string {
-  const flat = title.replace(/\s+/g, " ").replace(/"/g, "'").trim();
-  if (flat.length <= CARD_REF_TITLE_MAX) return flat;
-  const cut = flat.slice(0, CARD_REF_TITLE_MAX - 1);
-  // Cut just before a space is a cut at a word's end already.
-  const space = flat[cut.length] === " " ? cut.length : cut.lastIndexOf(" ");
-  return `${(space > CARD_REF_TITLE_MAX / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
+  return `[card ${ref.code} "${cutQuoted(ref.title, CARD_REF_TITLE_MAX)}" (${ref.place}/${ref.cardId})]`;
 }
 
 /** A message split into its words and the card references among them, in order. */
@@ -623,6 +614,80 @@ export function insertWords(draft: string, from: number, to: number, words: stri
   // A space already there is used rather than doubled.
   if (after.startsWith(" ")) return { text: head + after, caret: head.length + 1 };
   return { text: `${head} ${after}`, caret: head.length + 1 };
+}
+
+// ---------------------------------------------------------------------------
+// A message replied to
+// ---------------------------------------------------------------------------
+
+/**
+ * One of the drawer's lines as a reply to it quotes it (`shared/reply.ts`):
+ * Kuru's reply as `Kuru`, a notice under the name it came from, and one of
+ * your own as `me`. `id` is the line's id in the conversation it is in —
+ * another node's line by that node's own id, which is the one its Kuru and
+ * its drawer know — and `now` the moment of the reply, which decides whether
+ * the time needs its day. Null for a line with nothing to quote: a clip not
+ * yet in words.
+ *
+ * Your message is quoted as the drawer drew it: without a reference of its
+ * own, so a reply to a reply quotes what was said rather than what that
+ * answered, and with a card reference as its code and title, not its ids.
+ * A notice from another node crossed without its text (`peerItems`), and is
+ * quoted by the line that is left.
+ */
+export function replyRefOf(item: YouItem | KuruReply | NoticeItem, id: string, now: number): ReplyRef | null {
+  let who: string;
+  let words: string;
+  if (item.kind === "kuru") {
+    who = "Kuru";
+    words = item.text;
+  } else if (item.kind === "you") {
+    if (item.text === null) return null;
+    who = REPLY_ME;
+    const own = splitReply(item.text)?.text ?? item.text;
+    words = splitCardRefs(own)
+      .map((part) => ("text" in part ? part.text : `${part.ref.code} ${part.ref.title}`))
+      .join("");
+  } else {
+    who = item.from;
+    const agent = item.agent ? (item.agent.name ?? item.agent.program) : null;
+    words = item.text.trim() || [agent, item.what].filter(Boolean).join(" ");
+  }
+  const quote = cutQuoted(words, REPLY_QUOTE_MAX);
+  return quote ? { who, when: replyClock(item.at, now), quote, id } : null;
+}
+
+/**
+ * The line a reply quotes, among the lines a drawer has: by its id first —
+ * which a message of yours changes once Kuru takes it, from the outbox's to
+ * the turn's, and a reply only the missed list remembered changes once its
+ * turn is written — and failing that, as a reply from Telegram has no id, by
+ * its words: the nearest line before the reply whose words hold the quote,
+ * since Telegram may have quoted the second part of a long reply. `lines`
+ * are one conversation's, oldest first, under the ids `ref.id` names them by.
+ */
+export function quotedLine<T extends KuruItem>(lines: readonly T[], ref: ReplyRef, before: number): T | null {
+  if (ref.id !== null) {
+    const id = ref.id;
+    const found = lines.find(
+      (line) => line.id === id || (line.kind === "you" && line.outboxId === id) || (line.kind === "kuru" && id.startsWith("m") && line.utterance === id.slice(1)),
+    );
+    if (found) return found;
+  }
+  const quote = flatWords(ref.quote.replace(/…$/, ""));
+  if (!quote) return null;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!;
+    if (line.at > before || line.kind === "session") continue;
+    const words = line.kind === "you" ? (line.text === null ? "" : (splitReply(line.text)?.text ?? line.text)) : line.text;
+    if (flatWords(words).includes(quote)) return line;
+  }
+  return null;
+}
+
+/** Words as a quote is compared: one line, and the `"` a quote cannot hold read as the `'` it became. */
+function flatWords(text: string): string {
+  return text.replace(/\s+/g, " ").replace(/"/g, "'").trim();
 }
 
 // ---------------------------------------------------------------------------

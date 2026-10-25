@@ -43,6 +43,8 @@
  * outbox and to Kuru's turns is `server/src/channels.ts`.
  */
 
+import { REPLY_ME, replyClock, replyReference } from "./reply";
+
 /** Every kind of channel kururu knows. One today. */
 export type ChannelKind = "telegram";
 export const CHANNEL_KINDS: readonly ChannelKind[] = ["telegram"];
@@ -266,6 +268,14 @@ export interface IncomingMessage {
   text: string | null;
   /** The message this one answers, when it was sent as a reply: how a reply to one of a node's lines finds that node (`routeOf`). */
   replyTo: number | null;
+  /**
+   * What that message was, as Telegram sends it along: its words, when it
+   * was sent, and whether the bot sent it — Kuru's line, or your words
+   * echoed — or you did. `quote` is the part of it picked to reply to, when
+   * Telegram's "quote" was used. How a reply reaches Kuru saying which line
+   * it answers (`answeredWords`). Absent from a message that is no reply.
+   */
+  answered?: { text: string | null; at: number; bot: boolean; quote: string | null };
 }
 
 /**
@@ -309,7 +319,18 @@ function messageFrom(updateId: number, value: unknown): IncomingMessage | null {
   const at = typeof raw.date === "number" && Number.isFinite(raw.date) ? raw.date * 1000 : 0;
   const answered = raw.reply_to_message as Record<string, unknown> | undefined;
   const replyTo = answered && typeof answered.message_id === "number" && Number.isFinite(answered.message_id) ? answered.message_id : null;
-  return { updateId, messageId: raw.message_id, chatId: String(chat.id), chatType: chat.type, from, at, text: typeof raw.text === "string" ? raw.text : null, replyTo };
+  const message: IncomingMessage = { updateId, messageId: raw.message_id, chatId: String(chat.id), chatType: chat.type, from, at, text: typeof raw.text === "string" ? raw.text : null, replyTo };
+  if (answered && replyTo !== null) {
+    const quote = (raw.quote as Record<string, unknown> | undefined)?.text;
+    message.answered = {
+      // A photo's caption is its words, for the purpose of saying which it was.
+      text: typeof answered.text === "string" ? answered.text : typeof answered.caption === "string" ? answered.caption : null,
+      at: typeof answered.date === "number" && Number.isFinite(answered.date) ? answered.date * 1000 : at,
+      bot: (answered.from as Record<string, unknown> | undefined)?.is_bot === true,
+      quote: typeof quote === "string" && quote.trim() ? quote : null,
+    };
+  }
+  return message;
 }
 
 /** The most of a message passed on. Telegram's own limit is 4096; this is that, so nothing a bot can be sent is cut. */
@@ -463,7 +484,43 @@ export function chunkText(text: string, max = CHUNK_MAX): string[] {
  * not news. A turn of yours from the channel itself is already in the chat.
  */
 export function echoLine(via: "voice" | "typed", text: string): string {
-  return `${via === "voice" ? "🎙 You said" : "⌨️ You typed"}: ${text}`;
+  return `${via === "voice" ? ECHO_SAID : ECHO_TYPED}${text}`;
+}
+
+const ECHO_SAID = "🎙 You said: ";
+const ECHO_TYPED = "⌨️ You typed: ";
+
+/**
+ * A message from the chat that was sent as a reply, with the line it
+ * answers in front of it, in the words the drawer's own reply writes
+ * (`shared/reply.ts`) — so Kuru is told which of its lines "yes" was to,
+ * which the chat shows and Kuru, until this, never heard: the reply map
+ * only ever used it to pick the node. A line the bot sent is Kuru's, or one
+ * of your words echoed (`echoLine`), which is yours again; a child's line
+ * loses the `[Omarchy]` the chat put on it, since it reaches that child's
+ * own Kuru. With Telegram's "quote", the part picked is what is quoted.
+ * Telegram's ids are its own, so it carries none, and the drawer finds the
+ * line by its words.
+ *
+ * A slash command goes as it came, since a reference in front of it would
+ * make it words (`channelWords`), and so do words that answer nothing.
+ */
+export function answeredWords(text: string, answered: IncomingMessage["answered"], now: number): string {
+  if (!answered || text.startsWith("/")) return text;
+  let words = answered.text === null ? "" : cleanText(answered.text);
+  let who = answered.bot ? "Kuru" : REPLY_ME;
+  if (answered.bot) {
+    const echo = [ECHO_SAID, ECHO_TYPED].find((prefix) => words.startsWith(prefix));
+    if (echo) {
+      who = REPLY_ME;
+      words = words.slice(echo.length);
+    } else {
+      words = words.replace(/^\[\p{Lu}[\p{L}\p{N}-]*\] /u, "");
+    }
+  }
+  const quote = answered.quote ?? words;
+  if (!quote.trim()) return text;
+  return `${replyReference({ who, when: replyClock(answered.at, now), quote, id: null })} ${text}`;
 }
 
 /**

@@ -142,6 +142,28 @@ The echo of your own words is what makes the chat read like the drawer:
 without it, a reply to something said at the Mac arrives with no question in
 front of it. Silent, because telling you what you just said is not news.
 
+A reply typed in the drawer is echoed as a person reads it rather than as
+the brackets Kuru reads (`readableReply`): `⌨️ You typed: ↩ Kuru 18:42:
+"Want me to…"` and the words on the next line.
+
+## A reply in the chat
+
+Telegram's "reply to this message" reaches Kuru saying which line it
+answers, in the drawer's own words for it (`answeredWords`,
+[harness](harness.md#a-message-the-user-replies-to)):
+`[telegram] [reply to Kuru 18:42 "Want me to tell it to go ahead?"] yes`.
+Until 2026-10-25 the reply only picked the node (`routeOf`) and Kuru got
+the bare "yes". Telegram sends the answered message along with the reply,
+so nothing is remembered for it: a line the bot sent is Kuru's — or your
+own words when it is one of the echoes above, which are yours again — a
+child's line loses its `[Omarchy]`, since it reaches that child's own Kuru,
+and with Telegram's "quote" the part picked is what is quoted. Telegram's
+message ids mean nothing to kururu, so the reference carries none, and the
+drawer finds the line by its words. A slash command goes bare, as ever,
+since a reference in front of it would make it words. kururu's own few
+lines in the chat — a pairing, a warning, the held line — are quoted as
+Kuru's: the bot sent them, and nothing on them says otherwise.
+
 **`[kururu]` notices themselves do not go**, though the drawer shows them
 (they reach Kuru's prompt hook wrapped as cross-session messages). A notice
 quotes an agent's last reply, and an agent's reply can quote a file with a

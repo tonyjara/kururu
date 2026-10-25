@@ -20,6 +20,7 @@ import {
   PAIRING_MS,
   adoptSharedTelegram,
   adoptTelegramSettings,
+  answeredWords,
   asTelegramSwitch,
   laterSwitch,
   switchPayload,
@@ -45,6 +46,7 @@ import {
   type JudgeContext,
 } from "../../shared/channels";
 import { mergeConversation, plainWords, type YouItem } from "../../shared/kuru";
+import { replyClock, splitReply } from "../../shared/reply";
 import { viaOf, type Turn } from "../../shared/store";
 import { isClipId } from "../../shared/voice";
 import { Channels } from "../src/channels";
@@ -238,6 +240,77 @@ describe("updatesFrom", () => {
     expect(got.messages[1]!.text).toBeNull();
     expect(updatesFrom({ ok: false })).toBeNull();
   });
+
+  it("keeps what a reply answers: its words, when, whether the bot said it, and the part quoted", () => {
+    const got = updatesFrom({
+      ok: true,
+      result: [
+        {
+          update_id: 1,
+          message: {
+            message_id: 9,
+            date: 200,
+            chat: { id: 111, type: "private" },
+            from: { id: 111, is_bot: false },
+            text: "yes",
+            reply_to_message: { message_id: 8, date: 100, from: { id: 5, is_bot: true }, text: "Want me to go ahead?" },
+            quote: { text: "go ahead", position: 8 },
+          },
+        },
+        { update_id: 2, message: { message_id: 10, date: 300, chat: { id: 111, type: "private" }, from: { id: 111, is_bot: false }, text: "no reply" } },
+        { update_id: 3, message: { message_id: 11, date: 300, chat: { id: 111, type: "private" }, from: { id: 111, is_bot: false }, text: "x", reply_to_message: { message_id: 4, from: { id: 111, is_bot: false }, caption: "a photo" } } },
+      ],
+    })!;
+    expect(got.messages[0]!.answered).toEqual({ text: "Want me to go ahead?", at: 100_000, bot: true, quote: "go ahead" });
+    expect(got.messages[1]!.answered).toBeUndefined();
+    // No date of its own is the reply's, and a caption is a photo's words.
+    expect(got.messages[2]!.answered).toEqual({ text: "a photo", at: 300_000, bot: false, quote: null });
+  });
+});
+
+/**
+ * A reply in the chat reaches Kuru saying which line it answers, in the
+ * drawer's own words for it, so "yes" to one of two questions is yes to that
+ * one — what the reply map, which only picks the node, never told Kuru.
+ */
+describe("answeredWords", () => {
+  const now = new Date(2026, 9, 25, 21, 0).getTime();
+  const at = new Date(2026, 9, 25, 18, 42).getTime();
+  const kuru = { text: "Want me to tell the API agent to go ahead?", at, bot: true, quote: null };
+
+  it("puts Kuru's line in front of the words, with no id, which Telegram's are not", () => {
+    const words = answeredWords("yes", kuru, now);
+    expect(words).toBe('[reply to Kuru 18:42 "Want me to tell the API agent to go ahead?"] yes');
+    expect(splitReply(words)).toEqual({ ref: { who: "Kuru", when: "18:42", quote: "Want me to tell the API agent to go ahead?", id: null }, text: "yes" });
+  });
+
+  it("quotes the part picked with Telegram's quote, rather than the whole line", () => {
+    expect(splitReply(answeredWords("yes", { ...kuru, quote: "go ahead" }, now))?.ref.quote).toBe("go ahead");
+  });
+
+  it("knows your own words, echoed by the bot or written by you, as yours", () => {
+    expect(splitReply(answeredWords("and prod", { ...kuru, text: echoLine("typed", "deploy staging") }, now))?.ref).toMatchObject({ who: "me", quote: "deploy staging" });
+    expect(splitReply(answeredWords("and prod", { ...kuru, text: echoLine("voice", "deploy staging") }, now))?.ref).toMatchObject({ who: "me", quote: "deploy staging" });
+    expect(splitReply(answeredWords("and prod", { ...kuru, text: "deploy staging", bot: false }, now))?.ref).toMatchObject({ who: "me", quote: "deploy staging" });
+  });
+
+  it("drops a child's mark, since the words reach that child's own Kuru", () => {
+    expect(splitReply(answeredWords("yes", { ...kuru, text: "[Omarchy] The build is red. Retry?" }, now))?.ref.quote).toBe("The build is red. Retry?");
+    // A bracket that is not a node's title stays.
+    expect(splitReply(answeredWords("yes", { ...kuru, text: "[voice] heard" }, now))?.ref.quote).toBe("[voice] heard");
+  });
+
+  it("leaves a slash command, a line with no words, and a message that answers nothing as they came", () => {
+    expect(answeredWords("/compact", kuru, now)).toBe("/compact");
+    expect(answeredWords("yes", { ...kuru, text: null }, now)).toBe("yes");
+    expect(answeredWords("yes", undefined, now)).toBe("yes");
+  });
+
+  it("says the day of a line from another day", () => {
+    const yesterday = new Date(2026, 9, 24, 18, 42).getTime();
+    expect(splitReply(answeredWords("yes", { ...kuru, at: yesterday }, now))?.ref.when).toBe(replyClock(yesterday, now));
+    expect(replyClock(yesterday, now)).toBe("Oct 24 18:42");
+  });
 });
 
 describe("the drawer", () => {
@@ -428,6 +501,17 @@ describe("TelegramChannel", () => {
     expect(c.status().link).toBe("listening");
   });
 
+  it("passes a reply on with the line it answers in front", async () => {
+    const fake = fakeTelegram();
+    const { said } = await ready(fake);
+    const date = Math.floor(Date.now() / 1000) - 60;
+    fake.deliver(ME, "yes", ME, { reply_to_message: { message_id: 3, date, from: { id: 123456789, is_bot: true }, text: "Want me to tell the API agent to go ahead?" } });
+    fake.deliver(ME, "/compact", ME, { reply_to_message: { message_id: 3, date, from: { id: 123456789, is_bot: true }, text: "Done." } });
+    await until(() => said.length === 2);
+    expect(said[0]!.text).toBe(`[reply to Kuru ${replyClock(date * 1000, Date.now())} "Want me to tell the API agent to go ahead?"] yes`);
+    expect(said[1]!.text).toBe("/compact");
+  });
+
   it("confirms what it read, and a new server starts from there", async () => {
     const fake = fakeTelegram();
     const { channel: c, said } = await ready(fake);
@@ -583,6 +667,10 @@ describe("Channels", () => {
     expect(channels.speaks("pk-main")).toBe(true);
     channels.replied("pk-main", "They passed too.");
 
+    // A reply typed in the drawer is echoed as a person reads it, not as the brackets Kuru reads.
+    channels.prompted("pk-main", '[reply to Kuru 18:42 "Want me to retry?" (t12)] yes');
+    channels.replied("pk-main", "Retrying.");
+
     channels.prompted("pk-main", "[telegram] and lint");
     channels.delivered("pk-main", { id: crypto.randomUUID(), ms: 4_000 });
     expect(channels.speaks("pk-main")).toBe(true);
@@ -605,6 +693,7 @@ describe("Channels", () => {
     expect(texts).toContain("The build passed.");
     expect(texts).toContain("🎙 You said: and the tests");
     expect(texts).toContain("They passed too.");
+    expect(texts).toContain('⌨️ You typed: ↩ Kuru 18:42: "Want me to retry?"\nyes');
     expect(texts).not.toContain("⌨️ You typed: [telegram] check the build");
     expect(texts.some((t) => t.includes("sk-123") || t.includes("cross-session") || t.includes("task-notification"))).toBe(false);
     channels.close();
