@@ -249,10 +249,19 @@ network Firecrawl joins).
 **The gate.** A self-hosted Firecrawl has no authentication
 (`USE_DB_AUTHENTICATION=false`; turning it on needs Supabase), so nothing
 should reach the API but an nginx that compares `Authorization: Bearer <key>`
-and answers 401 otherwise. Publish only the gate, and only on the box's
-Tailscale address, so nothing listens on its LAN address; Docker-published
-ports skip ufw's input rules, so keep them to the tailnet with route rules
-(`ufw route allow in on tailscale0`, deny on the other interfaces). A
+and answers 401 otherwise. Let nothing but the gate be reached from off the
+box, and that only from the tailnet. On a box with a LAN, ours published the
+gate on the box's Tailscale address and kept it there with ufw route rules
+too (`ufw route allow in on tailscale0`, deny on the other interfaces),
+because Docker-published ports skip ufw's input rules. On the VPS it runs on
+now, it is a Swarm stack and publishes nothing: the gate is the one service on
+the reverse proxy's network, and a Traefik router on the plain-HTTP entrypoint
+(`Host(<the box's Tailscale address>)`) lets it through behind an allowlist of
+`100.64.0.0/10`, so anything from the internet gets a 403 whatever Host header
+it sends. Plain HTTP is enough over the tailnet, which WireGuard encrypts. A
+port bound to the Tailscale address is the thing to avoid there: at boot it can
+be bound before tailscaled has brought the address up, Docker does not retry a
+start that failed, and Swarm cannot bind one address at all. A
 `/healthz` that answers `ok` without the key is enough for a load balancer;
 the provider's health check is Firecrawl's `/v0/health/readiness` through the
 gate. The key's other copy is kururu's `web-firecrawl-self.json`: to change
@@ -261,13 +270,16 @@ it, set the new value on the box, redeploy, and paste it in Settings → Web.
 **What we changed from Firecrawl's compose, each for something its logs
 showed:**
 
-- **SearXNG's engines cut to the ones that answer from a home IP**
-  (`use_default_settings.engines.keep_only`). With the defaults, DuckDuckGo
-  answered every query with a CAPTCHA, Brave with 429 and a suspension, Google
-  and Qwant with access denied, and Wikidata timed out — holding every search
-  for the full timeout. Google CSE, Bing, Yahoo and Wikipedia answer, in about
-  a second. Re-check with a query per engine (`&engines=bing`) and look at
-  `unresponsive_engines` before adding one back.
+- **SearXNG's engines cut to the ones that answer from the box's IP**
+  (`use_default_settings.engines.keep_only`). With the defaults, from a home
+  IP, DuckDuckGo answered every query with a CAPTCHA, Brave with 429 and a
+  suspension, Google and Qwant with access denied, and Wikidata timed out —
+  holding every search for the full timeout. Google CSE, Bing and Yahoo answer,
+  in about a second, from a home IP and from a VPS alike; Wikipedia answered
+  from home and is suspended for too many requests from the VPS. Which engines
+  answer depends on the address, so re-check after a move, with a query per
+  engine (`&engines=bing`), and look at `unresponsive_engines` before adding
+  one back.
 - **Redis keeps no snapshots** (`--save "" --appendonly no`). Its data is a
   throwaway cache, and without `vm.overcommit_memory=1` on the host a failed
   background save makes Redis refuse every write.
@@ -277,13 +289,20 @@ showed:**
 - **Playwright runs `node dist/api.js`**, which is all `pnpm start` does, so a
   new container does not fetch pnpm through Corepack first.
 - **Sized to share a box:** lower `cpu_shares` than whatever else runs there,
-  hard memory caps (API 4 GB, Playwright 3 GB, the rest under 1 GB each), two
-  NuQ workers instead of five (`NUQ_WORKER_COUNT`), `NUM_WORKERS_PER_QUEUE=2`.
-  Idle, the whole project takes about 2.8 GB.
+  so production wins any contest for the CPU (Swarm has no shares, so as a
+  stack it is a ceiling of 1.5 of the box's two cores on the API and on
+  Playwright instead); one NuQ worker instead of five
+  (`NUQ_WORKER_COUNT`, about 300 MB each), `NUM_WORKERS_PER_QUEUE=2`, two
+  pages at a time in the browser. Memory is left uncapped, so check the box
+  has the room before deploying: idle, the whole project takes about 2.5 GB,
+  most of it the API.
 
 **A changed inline config needs a new name.** Compose does not recreate a
 container when only the `content:` of a config changes, so version a config in
-its name (`settings-v3`) and bump it with any edit.
+its name (`settings-v3`) and bump it with any edit. As a stack the gate's and
+SearXNG's configs are files mounted beside the compose instead (Dokploy's File
+Mounts), and the gate's key reaches nginx through its own template step
+(`/etc/nginx/templates`, `NGINX_ENVSUBST_FILTER`), never written into a file.
 
 **What the logs say that is fine:** `AUTUMN_SECRET_KEY is not set` and
 `You're bypassing authentication` (cloud billing and auth; the gate is the auth
