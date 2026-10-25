@@ -24,7 +24,7 @@
  * profile, it always has at least one workspace, that workspace always has at
  * least one pane, and the focused pane always exists.
  */
-import { adoptBoard, adoptProfileBoard, emptyBoard, emptyProfileBoard, noteRun, pruneMade, setMade, setRunSession, sleepRun, transferCard, type Board, type Card, type CardRun, type CardWorktree } from "../../shared/board";
+import { adoptBoard, adoptProfileBoard, emptyBoard, emptyProfileBoard, markNeeds, noteRun, pruneMade, setMade, setRunSession, sleepRun, transferCard, type Board, type Card, type CardRun, type CardWorktree, type NeedsBy } from "../../shared/board";
 import type { MadeFile } from "../../shared/made";
 import { adoptHarness } from "../../shared/harness";
 import { adoptPin, type MachinePin } from "../../shared/machines";
@@ -255,6 +255,18 @@ export function orderAgents(ids: string[], order: string[]): string[] {
 }
 
 export type ChangeHandler = () => void;
+
+/**
+ * Who a change to the profile's board says put a card in Needs you: a client
+ * is the user, the harness and another node's Kuru are Kuru. The run
+ * automation never touches the profile's board and an import stamps nothing,
+ * since a card it brings carries the mark it had.
+ */
+export function needsByOf(actor: Actor): NeedsBy | null {
+  if (actor === "user") return "user";
+  if (actor === "harness" || actor.startsWith("peer:")) return "kuru";
+  return null;
+}
 
 /**
  * What the arrangement writes through to: `Store.syncProfile`, lent by
@@ -1223,11 +1235,15 @@ export class Workspaces {
     this.mutateWorkspace(workspaceId, (w) => ({ ...w, board: next }));
   }
 
-  /** Change a profile's own board — see `Profile.board`. */
+  /**
+   * Change a profile's own board — see `Profile.board`. A card the change put
+   * in Needs you is marked with who did it, read off the actor every change
+   * already carries for the history, so no verb has to remember to.
+   */
   editProfileBoard(profileId: string, fn: (board: Board) => Board): void {
     const profile = this.profiles.find((p) => p.id === profileId);
     if (!profile) return;
-    const next = fn(profile.board);
+    const next = markNeeds(profile.board, fn(profile.board), needsByOf(this.actor));
     if (next === profile.board) return;
     this.replaceProfile(profileId, (p) => ({ ...p, board: next }));
   }

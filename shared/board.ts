@@ -85,11 +85,33 @@ export interface BoardLane {
 }
 
 /**
- * What the three columns a profile's board starts with are coloured. Amber
- * and green are what kururu already means by working and by finished, in
- * every theme; blue is the one that is neither.
+ * The column on the profile's board whose cards are the user's to do, and
+ * which the Needs drawer draws beside the agents waiting on them
+ * (`shared/needs.ts`). Put there by the user, or by Kuru for them — and
+ * which of the two is written on the card (`Card.needsBy`).
+ *
+ * A fixed id, unlike every other column a person can make, because more
+ * than a person reads it: the drawer finds its cards by it, and Kuru's
+ * `add_card` and `move_card` name it. So it is on every profile's board, it
+ * cannot be deleted, and its name cannot be changed away from what the
+ * drawer calls the same place. Its colour, its fold, its width and where it
+ * stands among the others are the person's, as any column's are.
  */
-const LANE_COLORS: Record<string, WorkspaceColor> = { todo: "blue", doing: "amber", done: "green" };
+export const NEEDS_COLUMN = "needs";
+export const NEEDS_LABEL = "Needs you";
+
+/** Whether a column is one a person may delete or rename: every one but Needs you. */
+export function laneFixed(laneId: string): boolean {
+  return laneId === NEEDS_COLUMN;
+}
+
+/**
+ * What the columns a profile's board starts with are coloured. Amber and
+ * green are what kururu already means by working and by finished, in every
+ * theme; blue is the one that is neither, and coral the warm one that is
+ * none of them, for the column that is waiting on you.
+ */
+const LANE_COLORS: Record<string, WorkspaceColor> = { todo: "blue", doing: "amber", [NEEDS_COLUMN]: "coral", done: "green" };
 
 /**
  * The colour a new column gets: the first nobody else on the board is
@@ -125,12 +147,36 @@ export const LANE_NAME_MAX = 40;
 export const LANES_MAX = 12;
 
 /**
- * The profile's board starts with three of the four. It is a list of work that
- * has not found its workspace yet, and nothing on it is ever handed to an
- * agent — so there is no run to finish and nothing for Review to be in front of.
+ * The profile's board starts with three of the four, and Needs you before
+ * Done. It is a list of work that has not found its workspace yet, and
+ * nothing on it is ever handed to an agent — so there is no run to finish and
+ * nothing for Review to be in front of. What it has instead is work that is
+ * nobody's but the user's, which is what Needs you is for.
  */
 export function profileLanes(): BoardLane[] {
-  return (["todo", "doing", "done"] as const).map((id) => ({ id, name: COLUMN_LABELS[id], color: LANE_COLORS[id] ?? null }));
+  return withNeedsLane((["todo", "doing", "done"] as const).map((id) => ({ id, name: COLUMN_LABELS[id], color: LANE_COLORS[id] ?? null })));
+}
+
+/**
+ * A profile board's columns with Needs you among them: as they are when it
+ * is there already, wherever it was dragged to, and otherwise put in just
+ * before Done — or at the end, on a board whose Done was deleted. Its name is
+ * put back too, since a board written by hand may have called it something
+ * else, and the drawer calls it this.
+ */
+export function withNeedsLane(lanes: readonly BoardLane[]): BoardLane[] {
+  const at = lanes.findIndex((lane) => lane.id === NEEDS_COLUMN);
+  if (at >= 0) {
+    const lane = lanes[at]!;
+    return lane.name === NEEDS_LABEL ? [...lanes] : lanes.map((l, i) => (i === at ? { ...l, name: NEEDS_LABEL } : l));
+  }
+  const done = lanes.findIndex((l) => l.id === "done");
+  const before = done >= 0 ? done : lanes.length;
+  return [...lanes.slice(0, before), needsLane(), ...lanes.slice(before)];
+}
+
+function needsLane(): BoardLane {
+  return { id: NEEDS_COLUMN, name: NEEDS_LABEL, color: LANE_COLORS[NEEDS_COLUMN] ?? null };
 }
 
 /** The columns a board draws, in order: its own if it has any, else the fixed four. */
@@ -140,6 +186,17 @@ export function boardLanes(board: Board): BoardLane[] {
 
 function hasLane(board: Board, column: unknown): column is string {
   return typeof column === "string" && boardLanes(board).some((lane) => lane.id === column);
+}
+
+/**
+ * Where a card goes when nobody said which column: the first, unless that is
+ * Needs you, which a person may drag to the front and which is never a
+ * default — a card lands there only because somebody put it there, and the
+ * mark on it says who.
+ */
+function firstLane(board: Board): string {
+  const lanes = boardLanes(board);
+  return (lanes.find((lane) => lane.id !== NEEDS_COLUMN) ?? lanes[0]!).id;
 }
 
 export function mintLaneId(): string {
@@ -302,6 +359,24 @@ export interface Card {
    * file from. See `shared/made.ts`.
    */
   made?: MadeFile[];
+  /**
+   * Who put the card in Needs you: the user, or Kuru for them. Only on a card
+   * in that column — stamped as it arrives (`markNeeds`) and taken off as it
+   * leaves — and absent on one that came in some other way, an import or a
+   * hand-edited file, where nobody can say.
+   */
+  needsBy?: NeedsBy;
+}
+
+/**
+ * The two who put cards in Needs you. Kuru is every Kuru: this node's
+ * harness, and another node's acting on this board over the link — to the
+ * user both are Kuru putting something in front of them.
+ */
+export type NeedsBy = "user" | "kuru";
+
+export function isNeedsBy(value: unknown): value is NeedsBy {
+  return value === "user" || value === "kuru";
 }
 
 export interface Board {
@@ -388,7 +463,7 @@ export function addCard(
     number: board.next,
     title,
     body: text(fields.body, BODY_MAX) ?? "",
-    column: hasLane(board, fields.column) ? fields.column : boardLanes(board)[0]!.id,
+    column: hasLane(board, fields.column) ? fields.column : firstLane(board),
     createdAt: now,
     run: null,
     isolate: fields.isolate === true,
@@ -643,8 +718,9 @@ export function cardPrompt(card: Pick<Card, "title" | "body">): string {
 export function transferCard(from: Board, to: Board, cardId: string): { from: Board; to: Board } {
   const card = from.cards.find((c) => c.id === cardId);
   if (!card) return { from, to };
-  const column = hasLane(to, card.column) ? card.column : boardLanes(to)[0]!.id;
-  const moved: Card = { ...card, number: to.next, column, run: null, isolate: false, worktree: null, dev: null };
+  const column = hasLane(to, card.column) ? card.column : firstLane(to);
+  const { needsBy: _mark, ...rest } = card;
+  const moved: Card = { ...rest, number: to.next, column, run: null, isolate: false, worktree: null, dev: null };
   return {
     from: removeCard(from, cardId),
     to: moveCard({ ...to, cards: [...to.cards, moved], next: to.next + 1 }, cardId, column),
@@ -688,7 +764,7 @@ export function adoptBoard(value: unknown): Board | null {
       number,
       title,
       body: text(item.body, BODY_MAX) ?? "",
-      column: hasLane(shape, item.column) ? item.column : boardLanes(shape)[0]!.id,
+      column: hasLane(shape, item.column) ? item.column : firstLane(shape),
       createdAt: Number.isFinite(item.createdAt) ? (item.createdAt as number) : 0,
       run: adoptRun(item.run),
       // A card from before the choice was per card ran in a worktree if it has one.
@@ -697,6 +773,8 @@ export function adoptBoard(value: unknown): Board | null {
       dev: adoptDev(item.dev),
       dates: adoptDates(item.dates),
       ...madeOf(item.made),
+      // Only on a card that is in Needs you, for `Card.needsBy`'s reason.
+      ...(item.column === NEEDS_COLUMN && hasLane(shape, NEEDS_COLUMN) && isNeedsBy(item.needsBy) ? { needsBy: item.needsBy } : {}),
     });
   }
   // A card from before cards were numbered, or one whose number is a second
@@ -712,13 +790,46 @@ export function adoptBoard(value: unknown): Board | null {
 /**
  * The profile's board off the blob or the disk. A board from before its
  * columns could be made has none written down, and gets the three it drew —
- * whose ids its cards already name.
+ * whose ids its cards already name — and every board gets Needs you, empty,
+ * if it was written before there was one.
+ *
+ * The columns are settled before the cards are read, not after: `adoptBoard`
+ * sends a card whose column the board does not have to the first, and a card
+ * in Needs you must find Needs you there when it is read.
  */
 export function adoptProfileBoard(value: unknown): Board {
-  const board = adoptBoard(value);
-  if (!board) return emptyProfileBoard();
-  if (board.columns) return board;
-  return adoptBoard({ ...board, columns: profileLanes() })!;
+  if (!value || typeof value !== "object") return emptyProfileBoard();
+  const lanes = adoptLanes((value as { columns?: unknown }).columns);
+  return adoptBoard({ ...value, columns: lanes ? withNeedsLane(lanes) : profileLanes() })!;
+}
+
+/**
+ * Write on each card that has just come into Needs you who put it there, and
+ * take the mark off each that has left. A card already in the column keeps
+ * the mark it had, so dragging it up or down the column does not make it the
+ * user's. `by` null is a change nobody is answerable for — an import — and
+ * stamps nothing.
+ *
+ * Done once, over the board a change made, rather than in each verb that can
+ * put a card there: a drag, a card written in the column, Kuru's `add_card`
+ * and `move_card`, another node's Kuru through the link — and whatever verb
+ * comes next. The same board back when nothing moved in or out.
+ */
+export function markNeeds(before: Board, after: Board, by: NeedsBy | null): Board {
+  const was = new Map(before.cards.map((card) => [card.id, card.column] as const));
+  let changed = false;
+  const cards = after.cards.map((card) => {
+    if (card.column !== NEEDS_COLUMN) {
+      if (card.needsBy === undefined) return card;
+      changed = true;
+      const { needsBy: _gone, ...rest } = card;
+      return rest;
+    }
+    if (was.get(card.id) === NEEDS_COLUMN || by === null || card.needsBy === by) return card;
+    changed = true;
+    return { ...card, needsBy: by };
+  });
+  return changed ? { ...after, cards } : after;
 }
 
 /**
@@ -762,11 +873,16 @@ function adoptLanes(value: unknown): BoardLane[] | null {
       lane.color = LANE_COLORS[lane.id] ?? null;
       if (lane.color === null) uncoloured.push(lane);
     }
+    // Past the cap only Needs you still gets in: a board that was full when
+    // it arrived must not lose a column of its own to make room for it.
+    if (lanes.length >= LANES_MAX && lane.id !== NEEDS_COLUMN) continue;
     lanes.push(lane);
-    if (lanes.length === LANES_MAX) break;
   }
-  // After the rest have said theirs, so that a spare colour is one that is spare.
-  for (const lane of uncoloured) lane.color = freeColor(lanes);
+  // After the rest have said theirs, so that a spare colour is one that is
+  // spare — Needs you's among them before it is even added, since every
+  // profile's board is about to get it.
+  const worn = lanes.some((lane) => lane.id === NEEDS_COLUMN) ? lanes : [...lanes, needsLane()];
+  for (const lane of uncoloured) lane.color = freeColor(worn);
   return lanes.length ? lanes : null;
 }
 
@@ -834,9 +950,10 @@ export function resizeLane(board: Board, laneId: string, width: unknown): Board 
   return { ...board, widths: { ...board.widths, [laneId]: clampLaneWidth(width) } };
 }
 
+/** Needs you keeps its name — see `NEEDS_COLUMN`. */
 export function renameLane(board: Board, laneId: string, name: unknown): Board {
   const clean = text(name, LANE_NAME_MAX);
-  if (!board.columns || !clean || !hasLane(board, laneId)) return board;
+  if (!board.columns || !clean || !hasLane(board, laneId) || laneFixed(laneId)) return board;
   return { ...board, columns: board.columns.map((lane) => (lane.id === laneId ? { ...lane, name: clean } : lane)) };
 }
 
@@ -851,16 +968,31 @@ export function moveLane(board: Board, laneId: string, index: unknown): Board {
 }
 
 /**
+ * Where a deleted column's cards go: the nearest column to its left, or to
+ * its right for the first — never Needs you, where a card is only ever put
+ * by somebody, and whose mark would then say a person did what a delete
+ * did. Null when there is nowhere else, or the column cannot be deleted.
+ * The column's menu says the answer before the delete, so it is here once.
+ */
+export function laneInto(board: Board, laneId: string): BoardLane | null {
+  const lanes = board.columns ?? [];
+  const at = lanes.findIndex((l) => l.id === laneId);
+  if (at < 0 || laneFixed(laneId)) return null;
+  const open = (lane: BoardLane) => lane.id !== laneId && lane.id !== NEEDS_COLUMN;
+  return [...lanes.slice(0, at)].reverse().find(open) ?? lanes.slice(at + 1).find(open) ?? null;
+}
+
+/**
  * Take a column away. Its cards are not taken with it: they go to the foot of
- * the column to its left — or its right, for the first — in the order they
- * were in, because deleting a heading is not deleting the work under it. The
- * last column stays, for `adoptLanes`'s reason.
+ * the column `laneInto` names, in the order they were in, because deleting a
+ * heading is not deleting the work under it. The last column a card could go
+ * to stays, for `adoptLanes`'s reason, and so does Needs you.
  */
 export function removeLane(board: Board, laneId: string): Board {
-  if (!board.columns || board.columns.length < 2) return board;
-  const at = board.columns.findIndex((l) => l.id === laneId);
-  if (at < 0) return board;
-  const into = board.columns[at === 0 ? 1 : at - 1]!.id;
+  if (!board.columns) return board;
+  const target = laneInto(board, laneId);
+  if (!target) return board;
+  const into = target.id;
   const columns = board.columns.filter((l) => l.id !== laneId);
   const kept = board.cards.filter((c) => c.column !== laneId);
   const moved = board.cards.filter((c) => c.column === laneId).map((c) => ({ ...c, column: into }));

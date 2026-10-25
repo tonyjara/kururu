@@ -302,20 +302,20 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "cards",
     description:
-      "The board of a workspace: its cards by column (todo, doing, review, done), each with its id, number, title, body, and the run on it if an agent has been handed it. Without a workspace, the profile's own board — the inbox of cards not yet sent to a workspace. With node, another node's board, read over the link.",
+      "The board of a workspace: its cards by column (todo, doing, review, done), each with its id, number, title, body, and the run on it if an agent has been handed it. Without a workspace, the profile's own board — the inbox of cards not yet sent to a workspace, and its Needs you column (needs) of things for the user to do, each saying whether the user or Kuru put it there. With node, another node's board, read over the link.",
     inputSchema: obj({ workspace: str("A workspace id; on another node, the workspace's name. Omit for the profile's board."), node: NODE }),
   },
   {
     name: "add_card",
     description:
-      "Add a card to a workspace's board, and with run=true hand it straight to an agent in a terminal in the workspace's agents' pane — the same as the user pressing the robot. The title is the task in one sentence; the body is the detail. isolate=true gives the agent a git worktree of its own. Without a workspace, the card goes on the profile's board, where nothing runs. With node, the card goes on that node's board; run is refused there, because a run starts an agent and only that node's Kuru starts its agents — ask_kuru it to run the card.",
+      "Add a card to a workspace's board, and with run=true hand it straight to an agent in a terminal in the workspace's agents' pane — the same as the user pressing the robot. The title is the task in one sentence; the body is the detail. isolate=true gives the agent a git worktree of its own. Without a workspace, the card goes on the profile's board, where nothing runs; column=needs puts it in Needs you, for the user to do, where it also shows in their Needs drawer marked as put there by Kuru. With node, the card goes on that node's board; run is refused there, because a run starts an agent and only that node's Kuru starts its agents — ask_kuru it to run the card.",
     inputSchema: obj(
       {
         workspace: str("A workspace id; on another node, the workspace's name. Omit for the profile's board."),
         node: NODE,
         title: str("One sentence, at most 200 characters."),
         body: str("Detail, markdown, at most 20,000 characters."),
-        column: str("todo (default), doing, review or done; on the profile's board, one of its column ids from cards."),
+        column: str("todo (default), doing, review or done; on the profile's board, one of its column ids from cards — needs is Needs you, for the user to do."),
         isolate: bool("Run in a worktree of its own. Default false."),
         run: bool("Hand it to an agent now. Default false."),
         launcher: str("With run: which agent and model, a launcher id. Default: Claude on its default model."),
@@ -334,7 +334,7 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "move_card",
     description:
-      "Move a card to a column. On a workspace's board: todo, doing, review, done — moving a card to done retires its worktree, which asks the user in place if there is uncommitted work. Without a workspace: a column id of the profile's board. With node, on that node's boards.",
+      "Move a card to a column. On a workspace's board: todo, doing, review, done — moving a card to done retires its worktree, which asks the user in place if there is uncommitted work. Without a workspace: a column id of the profile's board, needs being Needs you — a card you move there is marked as put there by Kuru and shows in the user's Needs drawer. With node, on that node's boards.",
     inputSchema: obj(
       { workspace: str("A workspace id (on another node, its name), or omit for the profile's board."), card: str("The card id."), column: str("The column."), node: NODE },
       ["card", "column"],
@@ -1038,6 +1038,7 @@ With other kururus linked as nodes there is still one chat, and every node's Kur
 - Prefer a card to a bare start_agent for anything that is a task: a card is where the work is tracked, and the user reads the board.
 - Keep your own context small. Read with the defaults, ask for fewer lines or turns, never paste an agent's whole screen back to the user; summarise and say which agent and where, by name.
 - The board is your memory. Decisions, what each agent is on, and what is waiting on the user belong on cards, not in your head; a new session of you should be able to read the boards and carry on.
+- Things for the user to do go in Needs you: the profile's board's needs column, with add_card or move_card and no workspace. That is a decision only they can make, a login or a payment, something to check by hand or to try on their phone — not work an agent could do, which goes on a workspace's board. Each card there shows in their Needs drawer marked as yours, beside the agents waiting on them, so write its title as the thing to do. The user puts cards there too, marked as theirs. Leave a card in Needs you until the user says it is done or asks you to move it.
 - What you cannot remember, search: the search tool finds cards and past conversation turns by their words, and card_history says when a card moved and who moved it. Look before you ask the user when something was decided.
 - Do not do the agents' work for them. If a task needs code written, start an agent on it.
 `;

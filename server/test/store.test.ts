@@ -14,7 +14,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
-import { addCard, editCard, emptyBoard, emptyProfileBoard, moveCard, noteRun, pruneMade, removeCard, resizeLane, setMade, startRun, transferCard, type Board } from "../../shared/board";
+import { addCard, boardLanes, editCard, emptyBoard, emptyProfileBoard, markNeeds, moveCard, NEEDS_COLUMN, noteRun, pruneMade, removeCard, resizeLane, setMade, startRun, transferCard, type Board } from "../../shared/board";
 import type { Profile, Workspace } from "../../shared/model";
 import { diffBoards, exportName, ftsQuery, pairTransfers, sessionOfTranscript, stripPastedContent } from "../../shared/store";
 import { adoptBackupSettings, commitSubject, validRepoUrl } from "../../shared/backup";
@@ -278,6 +278,50 @@ describe("the store", () => {
     store.close();
   });
 
+  it("keeps who put a card in Needs you through a restart, and forgets it once the card leaves", () => {
+    const store = Store.open();
+    const plain = emptyProfileBoard();
+    const own = markNeeds(plain, addCard(plain, { title: "renew the domain", column: NEEDS_COLUMN }, "c1", 1), "kuru");
+    const p0 = profile(PK, "Work", [workspace(WK, "Kururu", emptyBoard())], own);
+    store.syncProfile(null, p0, "harness", 1);
+    store.close();
+
+    const again = Store.open();
+    expect(again.loadBoard(PK, null)!.cards[0]).toMatchObject({ column: NEEDS_COLUMN, needsBy: "kuru" });
+    const out = markNeeds(own, moveCard(own, "c1", "done"), "user");
+    again.syncProfile(p0, { ...p0, board: out }, "user", 2);
+    expect(again.loadBoard(PK, null)!.cards[0]!.needsBy).toBeUndefined();
+    // Sent to a workspace from Needs you, its row there carries no mark either.
+    const back = markNeeds(out, moveCard(out, "c1", NEEDS_COLUMN), "user");
+    again.syncProfile({ ...p0, board: out }, { ...p0, board: back }, "user", 3);
+    const { from, to } = transferCard(back, emptyBoard(), "c1");
+    again.syncProfile({ ...p0, board: back }, { ...p0, board: from, workspaces: [workspace(WK, "Kururu", to)] }, "user", 4);
+    expect(again.exportAll().boards.flatMap((b) => b.cards).find((c) => c.id === "c1")!.needsBy).toBeUndefined();
+    again.close();
+  });
+
+  it("gives a profile's board from before Needs you the column, written down, and takes a database from before it", () => {
+    const store = Store.open();
+    store.syncProfile(null, profile(PK, "Work", [], addCard(emptyProfileBoard(), { title: "inbox", column: "doing" }, "c1", 1)), "user", 1);
+    store.close();
+    // As a version-4 database left it: no needs_by, and the board's three columns.
+    const raw = new DatabaseSync(dbPath(), { enableForeignKeyConstraints: false });
+    raw.exec("delete from lanes where id = 'needs'");
+    raw.exec("alter table cards drop column needs_by");
+    raw.exec("pragma user_version = 4");
+    raw.close();
+
+    const again = Store.open();
+    const board = again.loadBoard(PK, null)!;
+    expect(boardLanes(board).map((l) => l.id)).toEqual(["todo", "doing", NEEDS_COLUMN, "done"]);
+    expect(board.cards.map((c) => c.column)).toEqual(["doing"]);
+    again.close();
+    const check = new DatabaseSync(dbPath());
+    expect((check.prepare("select id from lanes where id = 'needs'").all() as unknown[]).length).toBe(1);
+    expect((check.prepare("pragma table_info(cards)").all() as { name: string }[]).some((c) => c.name === "needs_by")).toBe(true);
+    check.close();
+  });
+
   it("sends a card between boards as one row that moved", () => {
     const store = Store.open();
     const own = addCard(emptyProfileBoard(), { title: "inbox thought" }, "c1", 1);
@@ -435,7 +479,9 @@ describe("the mirror", () => {
     const store = Store.open();
     let board = addCard(emptyBoard(), { title: "Fix the flaky test", body: "on CI", column: "doing" }, "c1", 1_000);
     board = addCard(board, { title: "gone" }, "c2", 1_001);
-    const p0 = profile(PK, "Work", [workspace(WK, "Kururu", board)], addCard(emptyProfileBoard(), { title: "inbox" }, "c3", 1_002));
+    const inbox = addCard(emptyProfileBoard(), { title: "inbox" }, "c3", 1_002);
+    const own = markNeeds(inbox, addCard(inbox, { title: "renew the domain", column: NEEDS_COLUMN }, "c4", 1_003), "kuru");
+    const p0 = profile(PK, "Work", [workspace(WK, "Kururu", board)], own);
     store.syncProfile(null, p0, "user", 1_000);
     store.syncProfile(p0, { ...p0, workspaces: [workspace(WK, "Kururu", removeCard(startRun(board, "c1", { agentId: "a1", launcher: "claude", label: "Claude", startedAt: 2_000 }), "c2"))] }, "harness", 2_000);
     store.recordTurn({ conversationId: "s1", profileKey: PK, kind: "harness", launcher: "claude", cwd: "/x", role: "you", text: "hello", at: 3_000 });
@@ -466,7 +512,7 @@ describe("the mirror", () => {
     process.env.KURURU_DATA_DIR = join(dir, "data2");
     const again = Store.open();
     const counts = again.importExport(data);
-    expect(counts.cards).toBe(3);
+    expect(counts.cards).toBe(4);
     // The same board, less the one thing an export cannot carry: a live
     // terminal. The run on it is read as ended, with no agent, on `adoptRun`'s rule.
     const here = store.loadBoard(PK, WK)!;

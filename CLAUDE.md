@@ -429,8 +429,11 @@ The load-bearing invariants, one line each, with the argument behind the link:
   reader, code to a new nvim tab at the line. → [layout](docs/layout.md#what-an-agent-made)
 - **What needs you is one rule, in `shared/needs.ts`, and three drawings of
   it.** An agent asking, a card in Review, a turn that ended unseen, a card
-  whose agent went without finishing; never a working agent, a To do, a
-  shell, or the harness. The Needs chip's tray counts it, `NeedsDrawer.tsx`
+  whose agent went without finishing, a card in the profile board's Needs
+  you; never a working agent, a To do, a shell, or the harness. Needs you
+  (`needs`) is on every profile's board and cannot be renamed or deleted,
+  and each card in it says who put it there — `Card.needsBy`, stamped off the
+  change's actor by `markNeeds`, never passed by a verb. The Needs chip's tray counts it, `NeedsDrawer.tsx`
   lists it by workspace in three bands with Next a press away (`C-a i`,
   `C-a o`), and a workspace's sidebar row wears the dot. No component
   decides it again, and nothing in it is dismissed by hand — a row leaves

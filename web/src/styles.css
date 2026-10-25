@@ -5547,6 +5547,31 @@ a.needs-go {
   border-radius: var(--radius-round);
   border: var(--border) var(--border-style) var(--done);
 }
+/* Who put a card in the profile board's Needs you, on the card and on its
+   row here: Kuru in the accent, the one the user did not do and should
+   notice, and You in the quiet ink of a count — the two pairs the count
+   pills already wear, so no new pair of inks to hold to a floor. A word in a
+   pill rather than a glyph, so it reads at a glance on a phone too. */
+.needs-by {
+  flex: none;
+  /* One width for both words, so the titles after them line up. */
+  min-width: 4em;
+  padding: 0 5px;
+  text-align: center;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.needs-by-kuru {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.needs-by-user {
+  background: var(--chrome-high);
+  color: var(--dim);
+}
 .needs-what {
   min-width: 0;
   display: flex;

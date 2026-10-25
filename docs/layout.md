@@ -194,9 +194,27 @@ is no workspace's. Its columns are its own (`Board.columns`, a `BoardLane` list
 that only this board has): it starts with To do, In progress and Done — no
 Review, since nothing on it runs — and a person can add, rename, reorder and
 delete them from the column header. A workspace's four stay fixed because the
-run automation reads them; nothing reads the profile's but a person. Deleting a
-column moves its cards to its neighbour (`removeLane`), and the last column
-cannot go. No robot, no worktree. The one thing it does that a workspace board
+run automation reads them; nothing reads the profile's but a person — except
+**Needs you**, below. Deleting a column moves its cards to its neighbour
+(`removeLane`, the neighbour `laneInto` names, which is never Needs you), and
+the last column cannot go.
+
+**Needs you is the one column every profile's board has and nobody made.**
+Id `needs`, put just before Done on a board written before it — empty, every
+card left where it was — and in a profile's first board from the start
+(`withNeedsLane`, `adoptProfileBoard`; the store writes the lane back to its
+rows on that first load). Its cards are the user's own to-dos, and the Needs
+drawer draws them too (below), so the drawer and Kuru's tools find it by its
+id: it takes no rename and no delete, and a card added without a column never
+lands in it even when it has been dragged to the front (`firstLane`). Its
+colour, its fold, its width and its place among the others are the person's,
+as any column's are. Each card in it wears who put it there — **Kuru** in the
+accent, **You** quiet — from `Card.needsBy`, stamped as the card arrives off
+the actor every change carries (`markNeeds`; see
+[harness](harness.md#things-for-the-user-to-do)) and taken off as it leaves.
+A card sent to a workspace from it goes to that workspace's To do, unmarked.
+A node's own Needs you is its own: the summary a child pushes leaves it out,
+since no other node's window can open that board. No robot, no worktree. The one thing it does that a workspace board
 does not is the card menu's **Send to *workspace***: `send-profile-card` moves
 the card onto that workspace's board in one change (`transferCard` — new number
 there, same id, and its To do if it sat in a column the workspace does not
@@ -518,8 +536,11 @@ you when it will not move without you. That is an agent asking (`blocked`,
 which only ever comes from the agent saying so, or from a remote screen read
 as one), a card in Review (the column's whole meaning), an agent that
 finished while nobody watched (the server's `unread`, which also catches the
-agents no card claims), and a card in In progress whose agent went away
-without finishing (its run `ended`; nothing will move it). Not: a working
+agents no card claims), a card in In progress whose agent went away
+without finishing (its run `ended`; nothing will move it), and a card in the
+profile board's **Needs you**, which is that sentence written down by hand —
+by the user, or by Kuru for them (`ProfileNeeds.cards`, counted in
+`count`, in no workspace). Not: a working
 agent, which will come to you and is counted apart; a card in To do, which
 is a reminder, or Done; a shell that finished a command off screen; and
 never the harness — Kuru asking is Kuru's chip, one subject per
@@ -545,7 +566,13 @@ holding the keyboard, so the terminal a row reveals is the one the next
 keystroke goes to; a full-screen sheet on a phone instead, where a click
 outside or a pick does close it, since there is still a sheet to be outside
 of. Its list is the three bands: a block per waiting
-workspace with a rule down the side and a row per need, the working
+workspace with a rule down the side and a row per need, then **Your board** —
+the Needs you cards, each row led by who put it there where an agent's mark
+would be, its dates and its first line under the title, a press opening the
+card lit on the profile's board, **Done** beside it whenever the board still
+has a Done, and the card's own menu (its moves, Send to, Reference in Kuru)
+on a right-click or a held touch — below the workspaces because an agent
+asking holds a turn up and a to-do waits; then the working
 workspaces with what is running in them, and the quiet rest folded to a line
 of names (per device, the sidebar disclosures' reason). A row goes to the
 terminal, or to the card on its board for one with no terminal; a card's row
@@ -556,7 +583,9 @@ sidebar's workspace rows wear the agent rows' dot when their workspace is in
 the `needs` band. Nothing is dismissed by hand: a row leaves when its state
 does. `C-a i` opens the drawer; `C-a o` goes to the next need from the one the
 keyboard is on, round to the first — stepping from where you are rather than
-always to the first is what lets a prompt be left for later.
+always to the first is what lets a prompt be left for later. The Needs you
+cards are not on that walk: their door is the profile's board, a sheet that
+takes the keyboard, and a walk into it would stop there.
 
 ### What an agent made
 

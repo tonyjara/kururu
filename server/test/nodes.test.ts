@@ -51,7 +51,7 @@ import {
   watchRefusal,
 } from "../../shared/nodes";
 import { verifySigned } from "../src/nodekeys";
-import { addCard, emptyBoard, moveCard, startRun } from "../../shared/board";
+import { addCard, emptyBoard, emptyProfileBoard, moveCard, startRun } from "../../shared/board";
 import { LAUNCHERS } from "../../shared/launchers";
 import type { AgentSnapshot, Profile, Workspace } from "../../shared/model";
 
@@ -303,6 +303,8 @@ describe("summarize", () => {
     key: "pk",
     name: "Work",
     workspaces: [workspace("w1", "api", ["a1", "a2", "a9"], { board }), workspace("w2", "web", ["a3"])],
+    // A card in the profile's Needs you, which this node's drawer counts and the summary does not.
+    board: addCard(emptyProfileBoard(), { title: "Renew the domain", column: "needs" }, "c9", 1),
     activeWorkspaceId: "w1",
     harness: { agentId: "a9" },
   } as unknown as Profile;
@@ -329,7 +331,7 @@ describe("summarize", () => {
     ]);
     expect(summary.workspaces[0]!.agents.map((a) => a.id)).toEqual(["a1", "a2"]);
   });
-  it("counts what needs the user by needsOf's rule, never the harness", () => {
+  it("counts what needs the user by needsOf's rule, never the harness, and never the profile board's Needs you", () => {
     expect(summary.needs).toEqual({ count: 1, inWorkspaces: 1 });
     expect(summary.workspaces[0]!.needs).toEqual([{ kind: "asking", agentId: "a1", cardId: null, title: "claude" }]);
   });

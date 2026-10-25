@@ -26,7 +26,12 @@
  *
  * Three bands. **Needs you** is the queue, one block per workspace with its
  * tag down the side, as the sidebar draws it, and a row per thing; a row
- * goes to the terminal, or to the board for a card with none. **Working**
+ * goes to the terminal, or to the board for a card with none. After the
+ * workspaces comes **Your board**: the cards in the profile board's Needs
+ * you column, the to-dos you or Kuru wrote down for you, each wearing which
+ * of you it was. Below the workspaces rather than above them, because an
+ * agent asking holds a turn up and a to-do waits as long as you let it.
+ * **Working**
  * is what is on its way to you, so a busy workspace is never mistaken for
  * a quiet one. **Quiet** is the rest, folded to a line of names — out of
  * the way, and still each a door. Nothing here is dismissed by hand: a
@@ -34,11 +39,11 @@
  * stays honest.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { cardCode, type Card } from "../../../shared/board";
+import { boardLanes, cardCode, type Card } from "../../../shared/board";
 import { cardPlace } from "../../../shared/kuru";
-import type { Need, NeedKind, ProfileNeeds, WorkspaceNeeds } from "../../../shared/needs";
+import { allNeeds, type Need, type NeedKind, type ProfileNeeds, type WorkspaceNeeds } from "../../../shared/needs";
 import type { NodeStatus, SummaryAgent, SummaryNeed } from "../../../shared/nodes";
-import { mascotFor, type AgentSnapshot, type MascotSet } from "../../../shared/model";
+import { mascotFor, type AgentSnapshot, type MascotSet, type Profile } from "../../../shared/model";
 import { useCardDone } from "../cardDone";
 import { referItem } from "../kuru";
 import { agentLabel, agentSummary } from "../labels";
@@ -51,7 +56,9 @@ import { Dialog } from "./Dialog";
 import { Icon } from "./Icon";
 import { MadeLinks } from "./MadeLinks";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
+import { NeedsByMark, profileCardMoves } from "./ProfileBoard";
 import { Status } from "./Status";
+import { datesLabel } from "../when";
 
 /**
  * Whether the quiet band is open, per device, on the sidebar disclosures'
@@ -70,6 +77,7 @@ function readQuiet(): boolean {
 
 export function NeedsDrawer({
   needs,
+  profile,
   nodes,
   mascots,
   agents,
@@ -82,9 +90,12 @@ export function NeedsDrawer({
   onNext,
   onWorkspace,
   onBoard,
+  onProfileCard,
   chips,
 }: {
   needs: ProfileNeeds;
+  /** The profile whose board `needs.cards` are on: its name for their codes, its columns and workspaces for their menu. */
+  profile: Profile;
   /**
    * The other nodes, each with the summary it last pushed. A linked one with
    * something waiting gets a band of its own under this node's queue, each
@@ -110,6 +121,8 @@ export function NeedsDrawer({
   onWorkspace: (workspaceId: string) => void;
   /** This card, on its board, in its workspace. */
   onBoard: (workspaceId: string, cardId: string) => void;
+  /** The profile's own board — the sheet, opened over everything — with this card lit on it, or none. */
+  onProfileCard: (cardId: string | null) => void;
   /**
    * The two drawers' chips, which lead this header while the drawer is open —
    * this one's lit, and Kuru's the way across. See `DrawerChips.tsx`.
@@ -154,6 +167,16 @@ export function NeedsDrawer({
    * for a `Need.plainDone` row and skips the question because there is none.
    */
   const [cardMenu, setCardMenu] = useState<{ at: MenuAt; workspaceId: string; workspaceName: string; card: Card } | null>(null);
+  /** A Needs you card's row menu: its own card menu's moves, and the door to it. */
+  const [boardMenu, setBoardMenu] = useState<{ at: MenuAt; card: Card } | null>(null);
+  const boardMenuItems = (card: Card): MenuItem[] => [
+    { label: "Open on the board", run: () => onProfileCard(card.id) },
+    ...profileCardMoves(profile, card),
+    referItem({ code: cardCode(profile.name, card.number), title: card.title, place: cardPlace(null, api.nodeNameOf), cardId: card.id }),
+  ];
+  /* Done is a plain move on the profile's board, which runs nothing — so the
+     row may offer it outright, on a board whose Done is still there. */
+  const hasDone = boardLanes(profile.board).some((lane) => lane.id === "done");
   const agentOpen = (card: Card) => {
     const agentId = card.run?.agentId;
     return agentId != null && agents.some((a) => a.id === agentId && !a.exited);
@@ -192,7 +215,7 @@ export function NeedsDrawer({
           className="kuru-head-btn"
           onClick={onNext}
           onMouseDown={(event) => event.preventDefault()}
-          disabled={needs.count === 0 && nodeNeeds(nodes).length === 0}
+          disabled={allNeeds(needs).length === 0 && nodeNeeds(nodes).length === 0}
           title="Go to the next thing that needs you (C-a o)"
         >
           Next
@@ -204,7 +227,7 @@ export function NeedsDrawer({
       </header>
 
       <ol className="kuru-list needs-list">
-        {waiting.length === 0 && elsewhere.length === 0 && (
+        {waiting.length === 0 && needs.cards.length === 0 && elsewhere.length === 0 && (
           <li className="needs-none" role="status">
             Nothing is waiting on you.
           </li>
@@ -245,6 +268,32 @@ export function NeedsDrawer({
             </ul>
           </li>
         ))}
+
+        {needs.cards.length > 0 && (
+          <li className="needs-ws needs-ws-board">
+            <button
+              className="needs-ws-head"
+              onClick={() => onProfileCard(null)}
+              onMouseDown={(event) => event.preventDefault()}
+              title="Open the profile's board"
+            >
+              <span className="needs-ws-name">Your board</span>
+              <span className="needs-ws-n">{needs.cards.length}</span>
+            </button>
+            <ul className="needs-rows">
+              {needs.cards.map((card) => (
+                <BoardRow
+                  key={card.id}
+                  card={card}
+                  code={cardCode(profile.name, card.number)}
+                  onOpen={() => onProfileCard(card.id)}
+                  onDone={hasDone ? () => api.moveProfileCard(profile.id, card.id, "done") : undefined}
+                  onMenu={(x, y) => setBoardMenu({ at: { x, y }, card })}
+                />
+              ))}
+            </ul>
+          </li>
+        )}
 
         {elsewhere.map((node) => (
           <NodeBand
@@ -321,6 +370,7 @@ export function NeedsDrawer({
       {cardMenu && (
         <Menu at={cardMenu.at} items={cardMenuItems(cardMenu.workspaceId, cardMenu.workspaceName, cardMenu.card)} onClose={() => setCardMenu(null)} />
       )}
+      {boardMenu && <Menu at={boardMenu.at} items={boardMenuItems(boardMenu.card)} onClose={() => setBoardMenu(null)} />}
       {ask && (
         <Dialog
           state={{ kind: "ask", title: ask.title, hint: ask.hint, yes: ask.yes, run: ask.run, alt: ask.alt, choices: ask.choices }}
@@ -370,6 +420,58 @@ function Grip({ onResize, onReset }: { onResize: (px: number) => void; onReset: 
 /** How long a touch must hold still to open a row's menu — `Sidebar.tsx`'s own agent row, to the number. */
 const LONG_PRESS_MS = 500;
 
+/*
+ * A row's own menu, open on a right-click or a touch held still —
+ * `Sidebar.tsx`'s agent row trick, copied rather than imported: a dozen
+ * lines of gesture code are cheaper duplicated here than factored out from
+ * under a row with no other reason to know the sidebar exists. Shared by
+ * the two kinds of row here that have a menu. `swallow` is asked by the
+ * row's button first: a long press opened the menu, and the click its lift
+ * delivers must not also go to the thing.
+ */
+function useRowMenu(onMenu: ((x: number, y: number) => void) | undefined) {
+  const press = useRef<{ timer: number; x: number; y: number } | null>(null);
+  const pressed = useRef(false);
+  const cancelPress = () => {
+    if (press.current) window.clearTimeout(press.current.timer);
+    press.current = null;
+  };
+  const handlers = onMenu
+    ? {
+        onContextMenu: (event: React.MouseEvent) => {
+          event.preventDefault();
+          onMenu(event.clientX, event.clientY);
+        },
+        onPointerDown: (event: React.PointerEvent) => {
+          if (event.pointerType !== "touch") return;
+          cancelPress();
+          const { clientX: x, clientY: y } = event;
+          press.current = {
+            x,
+            y,
+            timer: window.setTimeout(() => {
+              press.current = null;
+              pressed.current = true;
+              onMenu(x, y);
+            }, LONG_PRESS_MS),
+          };
+        },
+        onPointerMove: (event: React.PointerEvent) => {
+          const at = press.current;
+          if (at && Math.hypot(event.clientX - at.x, event.clientY - at.y) > 10) cancelPress();
+        },
+        onPointerUp: cancelPress,
+        onPointerCancel: cancelPress,
+      }
+    : {};
+  const swallow = () => {
+    if (!pressed.current) return false;
+    pressed.current = false;
+    return true;
+  };
+  return { handlers, swallow };
+}
+
 /**
  * One thing that needs you: the agent's own mark when it has a terminal,
  * what it is, and one line of why. The row goes to the terminal, or for a
@@ -407,67 +509,13 @@ function NeedRow({
      Review is a document to read before it is a card to move. The agent's own list while
      it has a terminal, being the fresher of the two; the card's once it has gone. */
   const made = agent?.made?.length ? agent.made : (card?.made ?? []);
-  /*
-   * The row's own menu, open on a right-click or a touch held still —
-   * `Sidebar.tsx`'s agent row trick, copied rather than imported: a dozen
-   * lines of gesture code are cheaper duplicated here than factored out from
-   * under a row with no other reason to know the sidebar exists. `pressed`
-   * swallows the click the lift would otherwise deliver, so opening the menu
-   * does not also run `onGo`.
-   */
-  const press = useRef<{ timer: number; x: number; y: number } | null>(null);
-  const pressed = useRef(false);
-  const cancelPress = () => {
-    if (press.current) window.clearTimeout(press.current.timer);
-    press.current = null;
-  };
+  const { handlers, swallow } = useRowMenu(onMenu);
   return (
-    <li
-      className={`needs-row needs-row-${need.kind} ${made.length ? "needs-row-made" : ""}`}
-      onContextMenu={
-        onMenu
-          ? (event: React.MouseEvent) => {
-              event.preventDefault();
-              onMenu(event.clientX, event.clientY);
-            }
-          : undefined
-      }
-      onPointerDown={
-        onMenu
-          ? (event: React.PointerEvent) => {
-              if (event.pointerType !== "touch") return;
-              cancelPress();
-              const { clientX: x, clientY: y } = event;
-              press.current = {
-                x,
-                y,
-                timer: window.setTimeout(() => {
-                  press.current = null;
-                  pressed.current = true;
-                  onMenu(x, y);
-                }, LONG_PRESS_MS),
-              };
-            }
-          : undefined
-      }
-      onPointerMove={
-        onMenu
-          ? (event: React.PointerEvent) => {
-              const at = press.current;
-              if (at && Math.hypot(event.clientX - at.x, event.clientY - at.y) > 10) cancelPress();
-            }
-          : undefined
-      }
-      onPointerUp={onMenu ? cancelPress : undefined}
-      onPointerCancel={onMenu ? cancelPress : undefined}
-    >
+    <li className={`needs-row needs-row-${need.kind} ${made.length ? "needs-row-made" : ""}`} {...handlers}>
       <button
         className="needs-go"
         onClick={() => {
-          if (pressed.current) {
-            pressed.current = false;
-            return;
-          }
+          if (swallow()) return;
           onGo(need);
         }}
         onMouseDown={(event) => event.preventDefault()}
@@ -500,6 +548,62 @@ function NeedRow({
         </button>
       )}
       {made.length > 0 && <MadeLinks className="needs-made" files={made} workspaceId={need.workspaceId} onOpened={onOpened} />}
+    </li>
+  );
+}
+
+/**
+ * One card of the profile board's Needs you: who put it there where an
+ * agent's mark would be — the thing to tell these rows apart by — then its
+ * code and title, and under them its dates and the first line of what it
+ * says. The row opens the card on the board; **Done** is drawn whenever the
+ * board has a Done, since nothing on this board runs and the move asks no
+ * question; the rest of the card's menu is the row's own, on a right-click
+ * or a held touch, as a workspace card's row has.
+ */
+function BoardRow({
+  card,
+  code,
+  onOpen,
+  onDone,
+  onMenu,
+}: {
+  card: Card;
+  code: string;
+  onOpen: () => void;
+  onDone: (() => void) | undefined;
+  onMenu: (x: number, y: number) => void;
+}) {
+  const { handlers, swallow } = useRowMenu(onMenu);
+  const first = card.body.split("\n").find((line) => line.trim())?.trim() ?? "";
+  const why = [card.dates ? datesLabel(card.dates) : "", first].filter(Boolean).join(" · ") || "on your board";
+  return (
+    <li className={`needs-row needs-row-yours needs-row-by-${card.needsBy ?? "none"}`} {...handlers}>
+      <button
+        className="needs-go"
+        onClick={() => {
+          if (swallow()) return;
+          onOpen();
+        }}
+        onMouseDown={(event) => event.preventDefault()}
+        title="This card, on the profile's board"
+      >
+        {card.needsBy ? <NeedsByMark by={card.needsBy} /> : <span className="needs-mark" aria-hidden="true" />}
+        <span className="needs-what">
+          <span className="needs-title">{`${code} ${card.title}`}</span>
+          <span className="needs-why">{why}</span>
+        </span>
+      </button>
+      {onDone && (
+        <button
+          className="kuru-head-btn needs-done"
+          onClick={onDone}
+          onMouseDown={(event) => event.preventDefault()}
+          title="Move the card to Done"
+        >
+          Done
+        </button>
+      )}
     </li>
   );
 }

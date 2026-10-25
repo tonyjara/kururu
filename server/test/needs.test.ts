@@ -8,7 +8,7 @@
  * Kuru asking in its own chip's place.
  */
 import { describe, expect, it } from "bun:test";
-import { addCard, emptyBoard, moveCard, noteRun, startRun, type Board, type Card } from "../../shared/board";
+import { addCard, emptyBoard, emptyProfileBoard, markNeeds, moveCard, NEEDS_COLUMN, noteRun, startRun, type Board, type Card } from "../../shared/board";
 import type { AgentSnapshot, Profile, Workspace } from "../../shared/model";
 import { allNeeds, doneRefusal, needsOf, nextNeed } from "../../shared/needs";
 
@@ -46,11 +46,12 @@ function workspace(id: string, agentIds: string[], board: Board | null = null): 
   } as unknown as Workspace;
 }
 
-function profile(workspaces: Workspace[], harnessId: string | null = null): Profile {
+function profile(workspaces: Workspace[], harnessId: string | null = null, board: Board = emptyProfileBoard()): Profile {
   return {
     id: "p1",
     name: "p",
     workspaces,
+    board,
     harness: harnessId ? { sessionId: "s", launcher: "claude", agentId: harnessId, startedAt: 0 } : null,
   } as unknown as Profile;
 }
@@ -168,6 +169,38 @@ describe("what needs you", () => {
       ["n", "needs"],
       ["w", "working"],
     ]);
+  });
+});
+
+describe("the profile board's Needs you", () => {
+  const yours = () => {
+    let b = addCard(emptyProfileBoard(), { title: "a reminder" }, "c0", 0);
+    b = markNeeds(b, addCard(b, { title: "renew the domain", column: NEEDS_COLUMN }, "c1", 1), "kuru");
+    return markNeeds(b, addCard(b, { title: "try it on the phone", column: NEEDS_COLUMN }, "c2", 2), "user");
+  };
+
+  it("counts every card in it, in the column's order, and no other card of the board", () => {
+    const needs = needsOf(profile([workspace("w1", ["a"])], null, yours()), [agent("a", { status: "blocked" })]);
+    expect(needs.cards.map((c) => [c.id, c.needsBy])).toEqual([
+      ["c1", "kuru"],
+      ["c2", "user"],
+    ]);
+    expect(needs.count).toBe(3);
+    // In no workspace: the count of workspaces is the agents' alone.
+    expect(needs.inWorkspaces).toBe(1);
+  });
+
+  it("is counted with nothing else waiting, and leaves no workspace looking busy", () => {
+    const needs = needsOf(profile([workspace("w1", [])], null, yours()), []);
+    expect(needs.count).toBe(2);
+    expect(needs.workspaces[0]!.band).toBe("quiet");
+    expect(needsOf(profile([workspace("w1", [])]), []).cards).toEqual([]);
+  });
+
+  it("is not a stop on the walk, whose door would be a sheet that takes the keyboard", () => {
+    const needs = needsOf(profile([workspace("w1", [])], null, yours()), []);
+    expect(allNeeds(needs)).toEqual([]);
+    expect(nextNeed(needs, { focusedAgentId: null, workspaceId: null, boardShowing: false })).toBeNull();
   });
 });
 

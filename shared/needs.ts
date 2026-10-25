@@ -14,7 +14,9 @@
  * So one rule, here, pure, over what the snapshot already carries. A thing
  * needs you when it will not move without you: an agent asking, a card in
  * Review, an agent that finished while nobody watched, a card whose agent
- * went away without finishing. A working agent is not one of those — it
+ * went away without finishing — and a card in the profile board's Needs
+ * you, which is that sentence written down by hand, by you or by Kuru for
+ * you. A working agent is not one of those — it
  * will come to you — and is counted separately, so a workspace can be seen
  * to be busy without being mistaken for one that is waiting. The harness
  * is never counted: Kuru asking is the status bar's chip, and one subject
@@ -26,7 +28,7 @@
  */
 import type { AgentSnapshot, Profile, Workspace } from "./model";
 import { panes, terminalsOf } from "./layout";
-import type { Card } from "./board";
+import { columnCards, NEEDS_COLUMN, type Card } from "./board";
 
 /**
  * Why a thing needs you. `asking` outranks the rest: a prompt is the one
@@ -68,9 +70,18 @@ export interface WorkspaceNeeds {
 export interface ProfileNeeds {
   /** Every workspace, in the sidebar's order, each with its band. */
   workspaces: WorkspaceNeeds[];
-  /** How many things need you, which is what the chip says. */
+  /**
+   * The cards in the profile board's Needs you, in the column's order —
+   * yours to do, each marked with who put it there (`Card.needsBy`). Apart
+   * from `workspaces` because they are no workspace's, and apart from
+   * `allNeeds` and so from Next, because their door is the profile's board,
+   * a sheet that takes the keyboard: a walk that went into it would stop
+   * there. Counted, since the chip says how much is waiting on you.
+   */
+  cards: Card[];
+  /** How many things need you, which is what the chip says: the workspaces' and the cards'. */
   count: number;
-  /** In how many workspaces. */
+  /** In how many workspaces — the cards are in none. */
   inWorkspaces: number;
 }
 
@@ -123,9 +134,10 @@ export function needsOf(profile: Profile, agents: readonly AgentSnapshot[]): Pro
     return { workspace, band, needs, working };
   });
 
-  const count = workspaces.reduce((n, w) => n + w.needs.length, 0);
+  const cards = columnCards(profile.board, NEEDS_COLUMN);
+  const count = workspaces.reduce((n, w) => n + w.needs.length, cards.length);
   const inWorkspaces = workspaces.filter((w) => w.band === "needs").length;
-  return { workspaces, count, inWorkspaces };
+  return { workspaces, cards, count, inWorkspaces };
 }
 
 /**

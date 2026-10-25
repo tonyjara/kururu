@@ -1529,7 +1529,12 @@ export function App() {
         mascot,
       }}
       onKuru={toggleKuru}
-      needs={{ count: (needs?.count ?? 0) + nodeNeeds.count, workspaces: (needs?.inWorkspaces ?? 0) + nodeNeeds.workspaces, open: needsOpen }}
+      needs={{
+        count: (needs?.count ?? 0) + nodeNeeds.count,
+        workspaces: (needs?.inWorkspaces ?? 0) + nodeNeeds.workspaces,
+        cards: needs?.cards.length ?? 0,
+        open: needsOpen,
+      }}
       onNeeds={toggleNeeds}
     />
   );
@@ -1745,6 +1750,7 @@ export function App() {
       {needsOpen && needs && (
         <NeedsDrawer
           needs={needs}
+          profile={profile}
           nodes={linked}
           mascots={snapshot.mascots}
           agents={agents}
@@ -1763,6 +1769,13 @@ export function App() {
           onBoard={(workspaceId, cardId) => {
             showCardNext(workspaceId, cardId);
             api.openBoard(undefined, false, workspaceId);
+            if (narrow) closeNeeds();
+          }}
+          onProfileCard={(cardId) => {
+            // The sheet goes over the drawer on a desktop, which is still there
+            // once it is closed; on a phone the drawer is a sheet too, and goes.
+            setBoardShow(cardId);
+            setProfileBoard(true);
             if (narrow) closeNeeds();
           }}
         />

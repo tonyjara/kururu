@@ -49,7 +49,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Profile, Workspace } from "../../shared/model";
-import { adoptBoard, adoptProfileBoard, emptyBoard, type Board, type BoardLane, type Card, type CardRun } from "../../shared/board";
+import { adoptBoard, adoptProfileBoard, emptyBoard, isNeedsBy, NEEDS_COLUMN, type Board, type BoardLane, type Card, type CardRun } from "../../shared/board";
 import { adoptMade } from "../../shared/made";
 import type { MoveDone } from "../../shared/move";
 import { promptCarries, type StoredMissed, type StoredOutboxEntry, type VoiceLang } from "../../shared/voice";
@@ -99,7 +99,7 @@ export function dbPath(): string {
 // ---------------------------------------------------------------------------
 
 /** Stepped by `MIGRATIONS`; `pragma user_version` holds it. */
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 const SCHEMA = `
 create table if not exists profiles (
@@ -214,8 +214,21 @@ function WIDTHS_COLUMN(db: DatabaseSync): void {
   if (!columns.some((column) => column.name === "widths")) db.exec("alter table boards add column widths text");
 }
 
+/**
+ * Who put a card in the profile board's Needs you (`Card.needsBy`): `user`,
+ * `kuru`, or null on every other card. A column rather than read back off
+ * `card_events`, which does say who moved a card where, because the board
+ * the window draws is loaded from rows and a mark worked out of the history
+ * on every load would be a query per card for one word. Added the way
+ * `MADE_COLUMN` is, so the step can run twice.
+ */
+function NEEDS_BY_COLUMN(db: DatabaseSync): void {
+  const columns = db.prepare("pragma table_info(cards)").all() as { name: string }[];
+  if (!columns.some((column) => column.name === "needs_by")) db.exec("alter table cards add column needs_by text");
+}
+
 /** Each entry takes the database from its index's version to the next. The first makes it. */
-const MIGRATIONS: readonly (string | ((db: DatabaseSync) => void))[] = [SCHEMA, unwrapPastedTurns, MADE_COLUMN, WIDTHS_COLUMN];
+const MIGRATIONS: readonly (string | ((db: DatabaseSync) => void))[] = [SCHEMA, unwrapPastedTurns, MADE_COLUMN, WIDTHS_COLUMN, NEEDS_BY_COLUMN];
 
 /**
  * Every turn of yours already on disk, reporting what Claude Code's own
@@ -265,6 +278,7 @@ interface CardRow {
   dev_port: number | null;
   dev_agent_id: string | null;
   made: string | null;
+  needs_by: string | null;
   created_at: number;
   updated_at: number;
   deleted_at: number | null;
@@ -297,6 +311,7 @@ function cardOf(row: CardRow, run: CardRun | null): Card {
     dev: row.dev_port ? { agentId: row.dev_agent_id, port: row.dev_port } : null,
     dates: row.date_start && row.date_end ? { start: row.date_start, end: row.date_end } : null,
     ...madeOf(row.made),
+    ...(isNeedsBy(row.needs_by) ? { needsBy: row.needs_by } : {}),
   };
 }
 
@@ -693,7 +708,12 @@ export class Store {
       cards.push(card);
     }
     const raw: Board = { cards, next: Number(boardRow.next) || 1, ...(columns ? { columns } : {}), ...widthsOf(boardRow.widths as string | null) };
-    return workspaceKey === null ? adoptProfileBoard(raw) : (adoptBoard(raw) ?? emptyBoard());
+    if (workspaceKey !== null) return adoptBoard(raw) ?? emptyBoard();
+    const board = adoptProfileBoard(raw);
+    // A profile's board from before Needs you gets it on the way in; written
+    // back here, once, so the rows and the backup say the board has it too.
+    if (!laneRows.some((row) => row.id === NEEDS_COLUMN)) this.writeLanes(boardId, board.columns ?? null);
+    return board;
   }
 
   private latestRun(cardId: string): CardRun | null {
@@ -762,11 +782,12 @@ export class Store {
         for (const card of diff.added) {
           const transfer = sent.get(card.id);
           if (transfer && transfer.to === boardId) {
-            this.stmt("update cards set board_id = ?, number = ?, column_id = ?, position = ?, deleted_at = null, updated_at = ? where id = ?").run(
+            this.stmt("update cards set board_id = ?, number = ?, column_id = ?, position = ?, needs_by = ?, deleted_at = null, updated_at = ? where id = ?").run(
               boardId,
               card.number,
               card.column,
               positions.get(card.id) ?? 0,
+              card.needsBy ?? null,
               at,
               card.id,
             );
@@ -797,13 +818,13 @@ export class Store {
   private insertCard(boardId: string, card: Card, position: number, createdAt: number, at: number): void {
     this.stmt(
       `insert into cards(id, board_id, number, title, body, column_id, position, isolate, date_start, date_end,
-         wt_root, wt_path, wt_branch, wt_base, dev_port, dev_agent_id, made, created_at, updated_at, deleted_at)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null)
+         wt_root, wt_path, wt_branch, wt_base, dev_port, dev_agent_id, made, needs_by, created_at, updated_at, deleted_at)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null)
        on conflict(id) do update set board_id = excluded.board_id, number = excluded.number, title = excluded.title, body = excluded.body,
          column_id = excluded.column_id, position = excluded.position, isolate = excluded.isolate, date_start = excluded.date_start,
          date_end = excluded.date_end, wt_root = excluded.wt_root, wt_path = excluded.wt_path, wt_branch = excluded.wt_branch,
          wt_base = excluded.wt_base, dev_port = excluded.dev_port, dev_agent_id = excluded.dev_agent_id, made = excluded.made,
-         updated_at = excluded.updated_at, deleted_at = null`,
+         needs_by = excluded.needs_by, updated_at = excluded.updated_at, deleted_at = null`,
     ).run(
       card.id,
       boardId,
@@ -822,6 +843,7 @@ export class Store {
       card.dev?.port ?? null,
       card.dev?.agentId ?? null,
       madeColumn(card),
+      card.needsBy ?? null,
       createdAt,
       at,
     );
@@ -831,7 +853,7 @@ export class Store {
   private updateCard(boardId: string, card: Card, position: number, at: number): void {
     this.stmt(
       `update cards set number = ?, title = ?, body = ?, column_id = ?, position = ?, isolate = ?, date_start = ?, date_end = ?,
-         wt_root = ?, wt_path = ?, wt_branch = ?, wt_base = ?, dev_port = ?, dev_agent_id = ?, made = ?, updated_at = ?
+         wt_root = ?, wt_path = ?, wt_branch = ?, wt_base = ?, dev_port = ?, dev_agent_id = ?, made = ?, needs_by = ?, updated_at = ?
        where id = ? and board_id = ?`,
     ).run(
       card.number,
@@ -849,6 +871,7 @@ export class Store {
       card.dev?.port ?? null,
       card.dev?.agentId ?? null,
       madeColumn(card),
+      card.needsBy ?? null,
       at,
       card.id,
       boardId,
@@ -1192,6 +1215,7 @@ export class Store {
       isolate: card.isolate === 1,
       dates: card.date_start && card.date_end ? { start: card.date_start, end: card.date_end } : null,
       worktree: card.wt_root && card.wt_path && card.wt_branch && card.wt_base ? { root: card.wt_root, path: card.wt_path, branch: card.wt_branch, base: card.wt_base } : null,
+      ...(isNeedsBy(card.needs_by) ? { needsBy: card.needs_by } : {}),
       createdAt: card.created_at,
       updatedAt: card.updated_at,
       deletedAt: card.deleted_at,
@@ -1280,8 +1304,8 @@ export class Store {
         for (const card of file.cards) {
           if (this.stmt("select 1 as x from cards where id = ?").get(card.id) !== undefined) continue;
           this.stmt(
-            `insert into cards(id, board_id, number, title, body, column_id, position, isolate, date_start, date_end, wt_root, wt_path, wt_branch, wt_base, dev_port, dev_agent_id, created_at, updated_at, deleted_at)
-             values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, null, ?, ?, ?)`,
+            `insert into cards(id, board_id, number, title, body, column_id, position, isolate, date_start, date_end, wt_root, wt_path, wt_branch, wt_base, dev_port, dev_agent_id, needs_by, created_at, updated_at, deleted_at)
+             values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, null, ?, ?, ?, ?)`,
           ).run(
             card.id,
             boardId,
@@ -1297,6 +1321,7 @@ export class Store {
             card.worktree?.path ?? null,
             card.worktree?.branch ?? null,
             card.worktree?.base ?? null,
+            isNeedsBy(card.needsBy) ? card.needsBy : null,
             card.createdAt,
             card.updatedAt,
             card.deletedAt,

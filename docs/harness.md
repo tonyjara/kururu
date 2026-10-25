@@ -69,7 +69,7 @@ in a pane of *that* workspace (`devPane(workspaceId)`), never the one on screen.
 | `stop_agent` | kill (and a remote shell's tmux session); refuses itself |
 | `reveal_agent`, `rename_agent` | the user's screen and the sidebar; with Auto Swap on the screen follows without being asked — see below |
 | `show_file` | a file pinned first among the links under an agent's row and on its card, found from the agent's directory; `open` also opens it, Markdown in the reader and code in nvim. kururu adds links itself from a reply that presents a file — see [layout](layout.md#what-an-agent-made) |
-| `cards`, `add_card`, `edit_card`, `move_card`, `run_card`, `send_card_to_workspace` | the boards, workspace and profile; `add_card` with `run` is the robot; `run_card` on a card whose last agent has gone (asleep, crashed, closed) resumes its conversation on its launcher unless `fresh`, refuses one whose agent is still open, and says why when it could not resume — see [layout](layout.md#idle-card-agents) |
+| `cards`, `add_card`, `edit_card`, `move_card`, `run_card`, `send_card_to_workspace` | the boards, workspace and profile; `add_card` with `run` is the robot; `run_card` on a card whose last agent has gone (asleep, crashed, closed) resumes its conversation on its launcher unless `fresh`, refuses one whose agent is still open, and says why when it could not resume — see [layout](layout.md#idle-card-agents). Without a workspace, column `needs` is the profile board's **Needs you** — see below |
 | `new_workspace` | a project, without switching the user to it |
 | `reload_window` | the user's window and the floating pill reloaded the way ⌘R does, each once it is safe; waits, and says whether each came back or what held it — for an agent that would otherwise ask the user to press ⌘R. See [architecture](architecture.md#reloading-the-window) |
 | `say`, `play_missed` | one line aloud mid-turn; every reply of its own the user never heard to the end, said again — see [voice](voice.md#what-you-missed) |
@@ -101,6 +101,34 @@ when it was not given one.
 A running harness keeps the role it started with: the new section reaches it
 when it is next started or resumed (`--append-system-prompt` is passed again
 on `--resume`). The tool results change on the next server start.
+
+## Things for the user to do
+
+The profile's board has a column no person made and none can delete or
+rename: **Needs you**, id `needs` (`NEEDS_COLUMN` in `shared/board.ts`). A
+card there is the user's own to-do — a decision only they can make, a login
+or a payment, something to check by hand or try on the phone — and it is
+drawn twice: on the board, and in the Needs drawer beside the agents waiting
+on them, where it counts toward the chip. The role's rules say so: things
+for the user to do go there, with `add_card` or `move_card` and no
+workspace, written as the thing to do, and a card stays until the user says
+it is done or asks for it to be moved. Work an agent could do goes on a
+workspace's board as before.
+
+Each card in it carries who put it there, `Card.needsBy`: `kuru` or `user`.
+It is not passed by any tool. `Workspaces.editProfileBoard` stamps it, off
+the actor the change already carries for the history (`needsByOf`): the
+harness and another node's Kuru (`peer:…`) are Kuru, a client is the user.
+`markNeeds` writes it on a card as it arrives — a drag, a card written in
+the column, `add_card`, `move_card` — keeps it while the card is moved up or
+down the column, and takes it off as the card leaves. `cards` prints it as
+`[put here by Kuru]` or `[put here by the user]`. `add_card` says which
+column a card landed in, and `move_card` on the profile's board refuses a
+column the board does not have by naming the ones it has, where it used to
+say "Moved" over a verb that had changed nothing.
+
+The role's new rule reaches a running harness when it is next started or
+resumed, as every role change does.
 
 ## A card the user points at
 

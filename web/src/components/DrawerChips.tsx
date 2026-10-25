@@ -31,10 +31,12 @@ export interface DrawerChipsProps {
   kuru: { live: KuruLive; undelivered: number; open: boolean; mascot: MascotConfig };
   onKuru: () => void;
   /**
-   * What needs you across the workspaces, in two numbers, and whether its
-   * drawer is up — the first of the two chips. See `NeedsDrawer.tsx`.
+   * What needs you across the workspaces, in numbers — everything, in how
+   * many workspaces, and how much of it is cards in the profile board's
+   * Needs you, which are in none — and whether its drawer is up: the first
+   * of the two chips. See `NeedsDrawer.tsx`.
    */
-  needs: { count: number; workspaces: number; open: boolean };
+  needs: { count: number; workspaces: number; cards: number; open: boolean };
   onNeeds: () => void;
 }
 
@@ -100,10 +102,13 @@ export function DrawerChips({ kuru, onKuru, needs, onNeeds }: DrawerChipsProps) 
 
 /** What the chip says when hovered: how many, where, and which way the click goes. */
 function needsTitle(needs: DrawerChipsProps["needs"]): string {
-  const what =
-    needs.count === 0
-      ? "Nothing needs you"
-      : `${needs.count} ${needs.count === 1 ? "thing needs" : "things need"} you in ${needs.workspaces} ${needs.workspaces === 1 ? "workspace" : "workspaces"}`;
+  const where = [
+    needs.workspaces > 0 ? `in ${needs.workspaces} ${needs.workspaces === 1 ? "workspace" : "workspaces"}` : "",
+    needs.cards > 0 ? "on your board" : "",
+  ]
+    .filter(Boolean)
+    .join(" and ");
+  const what = needs.count === 0 ? "Nothing needs you" : `${needs.count} ${needs.count === 1 ? "thing needs" : "things need"} you ${where}`.trimEnd();
   return `${what} — ${needs.open ? "close" : "open"} the list (C-a i)`;
 }
 

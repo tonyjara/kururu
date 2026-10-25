@@ -719,7 +719,10 @@ export function summarize(input: SummaryInput): NodeSummary {
     host: input.host,
     profile: { key: profile.key, name: profile.name },
     workspaces,
-    needs: { count: needs.count, inWorkspaces: needs.inWorkspaces },
+    // The workspaces' needs only: a node's Needs you cards are on its profile's
+    // board, which no other node's window can open, and a count the parent's
+    // chip adds up must be one its drawer can draw.
+    needs: { count: needs.count - needs.cards.length, inWorkspaces: needs.inWorkspaces },
     kuru: input.kuru,
     leads: input.leads,
     sees: [...input.sees],

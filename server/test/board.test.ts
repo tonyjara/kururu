@@ -40,6 +40,10 @@ import {
   transferCard,
   setWorktree,
   startRun,
+  laneInto,
+  LANES_MAX,
+  markNeeds,
+  NEEDS_COLUMN,
   type Board,
   type CardRun,
 } from "../../shared/board";
@@ -415,10 +419,10 @@ describe("the profile's columns", () => {
 
   it("adds, renames and moves a column, and cards can go in it", () => {
     let board = addLane(emptyProfileBoard(), "  Someday ", "k1");
-    expect(boardLanes(board).map((l) => l.name)).toEqual(["To do", "In progress", "Done", "Someday"]);
+    expect(boardLanes(board).map((l) => l.name)).toEqual(["To do", "In progress", "Needs you", "Done", "Someday"]);
     board = renameLane(board, "k1", "Later");
     board = moveLane(board, "k1", 0);
-    expect(boardLanes(board).map((l) => l.id)).toEqual(["k1", "todo", "doing", "done"]);
+    expect(boardLanes(board).map((l) => l.id)).toEqual(["k1", "todo", "doing", "needs", "done"]);
     board = addCard(board, { title: "x", column: "k1" }, "c1", 1);
     expect(columnCards(board, "k1").map((c) => c.id)).toEqual(["c1"]);
   });
@@ -435,7 +439,7 @@ describe("the profile's columns", () => {
 
   it("keeps a column's cards when it is deleted, moving them to its neighbour", () => {
     const board = removeLane(withCards(), "doing");
-    expect(boardLanes(board).map((l) => l.id)).toEqual(["todo", "done"]);
+    expect(boardLanes(board).map((l) => l.id)).toEqual(["todo", "needs", "done"]);
     expect(columnCards(board, "todo").map((c) => c.id)).toEqual(["c1", "c2", "c3"]);
     expect(columnCards(removeLane(withCards(), "todo"), "doing").map((c) => c.id)).toEqual(["c2", "c3", "c1"]);
   });
@@ -462,10 +466,10 @@ describe("the profile's columns", () => {
 
   it("gives a board from before columns the three it drew, and keeps made ones", () => {
     const old = adoptProfileBoard({ cards: [{ id: "c1", title: "a", column: "doing" }] });
-    expect(boardLanes(old).map((l) => l.id)).toEqual(["todo", "doing", "done"]);
+    expect(boardLanes(old).map((l) => l.id)).toEqual(["todo", "doing", "needs", "done"]);
     expect(old.cards[0]!.column).toBe("doing");
     const made = adoptProfileBoard(addLane(withCards(), "Someday", "k1"));
-    expect(boardLanes(made).map((l) => l.id)).toEqual(["todo", "doing", "done", "k1"]);
+    expect(boardLanes(made).map((l) => l.id)).toEqual(["todo", "doing", "needs", "done", "k1"]);
     const orphan = adoptProfileBoard({ columns: [{ id: "k1", name: "Only" }], cards: [{ id: "c1", title: "a", column: "gone" }] });
     expect(orphan.cards[0]!.column).toBe("k1");
   });
@@ -584,22 +588,22 @@ describe("the timeline", () => {
 describe("a column's colour", () => {
   const colors = (b: Board) => boardLanes(b).map((l) => l.color);
 
-  it("starts the profile's three on the colours kururu already means by them", () => {
-    expect(colors(emptyProfileBoard())).toEqual(["blue", "amber", "green"]);
+  it("starts the profile's columns on the colours kururu already means by them", () => {
+    expect(colors(emptyProfileBoard())).toEqual(["blue", "amber", "coral", "green"]);
     expect(colors(emptyBoard())).toEqual([null, null, null, null]);
   });
 
   it("makes a new column in a colour nobody else is wearing", () => {
     let b = addLane(emptyProfileBoard(), "Someday", "k1");
     b = addLane(b, "Bugs", "k2");
-    expect(new Set(colors(b)).size).toBe(5);
+    expect(new Set(colors(b)).size).toBe(6);
     expect(colors(b)).not.toContain(null);
   });
 
   it("takes a colour by name, and none, and refuses anything else", () => {
     const b = emptyProfileBoard();
-    expect(colors(colorLane(b, "doing", "violet"))).toEqual(["blue", "violet", "green"]);
-    expect(colors(colorLane(b, "doing", null))).toEqual(["blue", null, "green"]);
+    expect(colors(colorLane(b, "doing", "violet"))).toEqual(["blue", "violet", "coral", "green"]);
+    expect(colors(colorLane(b, "doing", null))).toEqual(["blue", null, "coral", "green"]);
     expect(colorLane(b, "doing", "#ff0000")).toBe(b);
     expect(colorLane(b, "doing", "url(x)")).toBe(b);
     expect(colorLane(b, "doing", undefined)).toBe(b);
@@ -611,7 +615,8 @@ describe("a column's colour", () => {
     const old = { columns: [{ id: "todo", name: "To do" }, { id: "k1", name: "Someday" }, { id: "doing", name: "Doing" }, { id: "k2", name: "Bugs" }], cards: [] };
     const back = adoptProfileBoard(old);
     expect(colors(back).slice(0, 3)).toEqual(["blue", colors(back)[1]!, "amber"]);
-    expect(new Set(colors(back)).size).toBe(4);
+    // Five, Needs you's coral among them and on nobody else.
+    expect(new Set(colors(back)).size).toBe(5);
     expect(colors(back)).not.toContain(null);
     expect(colors(adoptProfileBoard(old))).toEqual(colors(back));
   });
@@ -619,8 +624,8 @@ describe("a column's colour", () => {
   it("keeps a chosen colour and a chosen none to disk and back, and drops what is not one", () => {
     let b = colorLane(emptyProfileBoard(), "todo", null);
     b = colorLane(b, "done", "rose");
-    expect(colors(adoptProfileBoard(JSON.parse(JSON.stringify(b))))).toEqual([null, "amber", "rose"]);
-    expect(colors(adoptProfileBoard({ columns: [{ id: "k1", name: "Edited", color: "javascript:1" }], cards: [] }))).toEqual([null]);
+    expect(colors(adoptProfileBoard(JSON.parse(JSON.stringify(b))))).toEqual([null, "amber", "coral", "rose"]);
+    expect(colors(adoptProfileBoard({ columns: [{ id: "k1", name: "Edited", color: "javascript:1" }], cards: [] }))).toEqual([null, "coral"]);
   });
 
   it("does not hand a spare colour to one column that another has chosen", () => {
@@ -630,16 +635,116 @@ describe("a column's colour", () => {
   });
 });
 
+describe("Needs you", () => {
+  const ids = (b: Board) => boardLanes(b).map((l) => l.id);
+
+  it("is on every profile's board, before Done, and on no workspace's", () => {
+    expect(ids(emptyProfileBoard())).toEqual(["todo", "doing", NEEDS_COLUMN, "done"]);
+    expect(boardLanes(emptyProfileBoard())[2]!.name).toBe("Needs you");
+    expect(ids(emptyBoard())).not.toContain(NEEDS_COLUMN);
+    expect(moveCard(addCard(emptyBoard(), { title: "x" }, "c1", 1), "c1", NEEDS_COLUMN).cards[0]!.column).toBe("todo");
+  });
+
+  it("comes to a board written before it, empty, with every card where it was", () => {
+    const old = {
+      columns: [{ id: "todo", name: "To do" }, { id: "k1", name: "Someday" }, { id: "done", name: "Done" }],
+      cards: [{ id: "c1", title: "a", column: "k1" }, { id: "c2", title: "b", column: "done" }],
+    };
+    const back = adoptProfileBoard(old);
+    expect(ids(back)).toEqual(["todo", "k1", NEEDS_COLUMN, "done"]);
+    expect(back.cards.map((c) => c.column)).toEqual(["k1", "done"]);
+    expect(columnCards(back, NEEDS_COLUMN)).toEqual([]);
+    // A board whose Done went has it at the end; one that has it keeps it where it was dragged.
+    expect(ids(adoptProfileBoard({ columns: [{ id: "k1", name: "Only" }], cards: [] }))).toEqual(["k1", NEEDS_COLUMN]);
+    const moved = moveLane(emptyProfileBoard(), NEEDS_COLUMN, 0);
+    expect(ids(adoptProfileBoard(JSON.parse(JSON.stringify(moved))))).toEqual([NEEDS_COLUMN, "todo", "doing", "done"]);
+  });
+
+  it("keeps a card in it through the disk, which a column the board lacked would not", () => {
+    const b = markNeeds(emptyProfileBoard(), addCard(emptyProfileBoard(), { title: "renew the domain", column: NEEDS_COLUMN }, "c1", 1), "kuru");
+    const back = adoptProfileBoard(JSON.parse(JSON.stringify(b)));
+    expect(back.cards[0]!.column).toBe(NEEDS_COLUMN);
+    expect(back.cards[0]!.needsBy).toBe("kuru");
+    // A board written before Needs you had no such column, so the card was its first column's then.
+    const { columns: _gone, ...bare } = JSON.parse(JSON.stringify(b)) as Board;
+    expect(adoptProfileBoard(bare).cards[0]!.column).toBe(NEEDS_COLUMN);
+  });
+
+  it("cannot be renamed or deleted, and a deleted neighbour's cards never fall into it", () => {
+    const b = emptyProfileBoard();
+    expect(renameLane(b, NEEDS_COLUMN, "Later")).toBe(b);
+    expect(removeLane(b, NEEDS_COLUMN)).toBe(b);
+    expect(laneInto(b, NEEDS_COLUMN)).toBeNull();
+    // Done's left neighbour is Needs you; its cards go past it, to In progress.
+    const withDone = addCard(b, { title: "finished", column: "done" }, "c1", 1);
+    expect(laneInto(withDone, "done")!.id).toBe("doing");
+    const gone = removeLane(withDone, "done");
+    expect(ids(gone)).toEqual(["todo", "doing", NEEDS_COLUMN]);
+    expect(gone.cards[0]!.column).toBe("doing");
+    // And the last column a card could go to stays.
+    const last = removeLane(gone, "todo");
+    expect(ids(last)).toEqual(["doing", NEEDS_COLUMN]);
+    expect(removeLane(last, "doing")).toBe(last);
+  });
+
+  it("is never where a card lands when nobody named a column", () => {
+    const front = moveLane(emptyProfileBoard(), NEEDS_COLUMN, 0);
+    expect(addCard(front, { title: "x" }, "c1", 1).cards[0]!.column).toBe("todo");
+    expect(adoptProfileBoard({ columns: boardLanes(front), cards: [{ id: "c1", title: "x", column: "gone" }] }).cards[0]!.column).toBe("todo");
+  });
+
+  it("says who put each card in it, keeps that while it stays, and forgets it when it leaves", () => {
+    const start = addCard(emptyProfileBoard(), { title: "call the bank" }, "c1", 1);
+    const kuru = markNeeds(start, moveCard(start, "c1", NEEDS_COLUMN), "kuru");
+    expect(kuru.cards[0]!.needsBy).toBe("kuru");
+    // Written straight into the column, by the user.
+    const both = markNeeds(kuru, addCard(kuru, { title: "try it on the phone", column: NEEDS_COLUMN }, "c2", 2), "user");
+    expect(both.cards.map((c) => c.needsBy)).toEqual(["kuru", "user"]);
+    // Dragged up the column by the user, Kuru's card is still Kuru's.
+    const reordered = markNeeds(both, moveCard(both, "c2", NEEDS_COLUMN, 0), "user");
+    expect(reordered.cards.map((c) => [c.id, c.needsBy])).toEqual([
+      ["c2", "user"],
+      ["c1", "kuru"],
+    ]);
+    const out = markNeeds(reordered, moveCard(reordered, "c1", "done"), "user");
+    expect(out.cards.find((c) => c.id === "c1")!.needsBy).toBeUndefined();
+    expect("needsBy" in out.cards.find((c) => c.id === "c1")!).toBe(false);
+    // Nobody answerable stamps nothing; nothing moved is the same board.
+    expect(markNeeds(start, moveCard(start, "c1", NEEDS_COLUMN), null).cards[0]!.needsBy).toBeUndefined();
+    expect(markNeeds(both, both, "user")).toBe(both);
+  });
+
+  it("drops the mark off a card sent to a workspace, and off a card read back outside the column", () => {
+    const b = markNeeds(emptyProfileBoard(), addCard(emptyProfileBoard(), { title: "x", column: NEEDS_COLUMN }, "c1", 1), "kuru");
+    const { to } = transferCard(b, emptyBoard(), "c1");
+    expect(to.cards[0]!.column).toBe("todo");
+    expect("needsBy" in to.cards[0]!).toBe(false);
+    expect(adoptProfileBoard({ cards: [{ id: "c1", title: "x", column: "todo", needsBy: "kuru" }] }).cards[0]!.needsBy).toBeUndefined();
+    expect(adoptProfileBoard({ cards: [{ id: "c1", title: "x", column: NEEDS_COLUMN, needsBy: "someone" }] }).cards[0]!.needsBy).toBeUndefined();
+    expect(adoptBoard({ cards: [{ id: "c1", title: "x", column: NEEDS_COLUMN, needsBy: "kuru" }] })!.cards[0]!.needsBy).toBeUndefined();
+  });
+
+  it("gets in on a board that was full, and costs it no column of its own", () => {
+    const columns = Array.from({ length: LANES_MAX }, (_, i) => ({ id: `k${i}`, name: `Column ${i}` }));
+    const back = adoptProfileBoard({ columns, cards: [{ id: "c1", title: "x", column: `k${LANES_MAX - 1}` }] });
+    expect(ids(back)).toHaveLength(LANES_MAX + 1);
+    expect(ids(back)).toContain(NEEDS_COLUMN);
+    expect(back.cards[0]!.column).toBe(`k${LANES_MAX - 1}`);
+    expect(ids(adoptProfileBoard(JSON.parse(JSON.stringify(back))))).toEqual(ids(back));
+    expect(addLane(back, "One more", "kx")).toBe(back);
+  });
+});
+
 describe("a folded column", () => {
   const folded = (b: Board) => boardLanes(b).map((l) => l.collapsed === true);
 
   it("folds and opens, and leaves its cards where they were", () => {
     let b = addCard(emptyProfileBoard(), { title: "a", column: "doing" }, "c1", 0);
     b = collapseLane(b, "doing", true);
-    expect(folded(b)).toEqual([false, true, false]);
+    expect(folded(b)).toEqual([false, true, false, false]);
     expect(columnCards(b, "doing").map((c) => c.id)).toEqual(["c1"]);
     b = collapseLane(b, "doing", false);
-    expect(folded(b)).toEqual([false, false, false]);
+    expect(folded(b)).toEqual([false, false, false, false]);
     expect("collapsed" in boardLanes(b)[1]!).toBe(false);
   });
 
@@ -654,8 +759,8 @@ describe("a folded column", () => {
 
   it("stays folded to disk and back, and a hand-edited truthy is not folded", () => {
     const b = collapseLane(emptyProfileBoard(), "done", true);
-    expect(folded(adoptProfileBoard(JSON.parse(JSON.stringify(b))))).toEqual([false, false, true]);
-    expect(folded(adoptProfileBoard({ columns: [{ id: "k1", name: "Edited", collapsed: "yes" }], cards: [] }))).toEqual([false]);
+    expect(folded(adoptProfileBoard(JSON.parse(JSON.stringify(b))))).toEqual([false, false, false, true]);
+    expect(folded(adoptProfileBoard({ columns: [{ id: "k1", name: "Edited", collapsed: "yes" }], cards: [] }))).toEqual([false, false]);
   });
 });
 

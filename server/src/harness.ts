@@ -47,7 +47,7 @@ import { join } from "node:path";
 
 import { Terminal } from "@xterm/headless";
 
-import { addCard, boardLanes, cardCode, editCard, mintCardId, moveCard, runLive, type Board, type Card } from "../../shared/board";
+import { addCard, boardLanes, cardCode, editCard, mintCardId, moveCard, NEEDS_COLUMN, runLive, type Board, type Card } from "../../shared/board";
 import { CHANNEL_NAMES, isChannelKind } from "../../shared/channels";
 import {
   HARNESS_NAME,
@@ -922,7 +922,11 @@ export class Harness {
         const fields = { title, body: str(args.body), column: str(args.column) || undefined, isolate: typeof args.isolate === "boolean" ? args.isolate : undefined };
         if (!workspaceId) {
           ws.as(actor, () => ws.editProfileBoard(profileId, (board) => addCard(board, fields, id, Date.now())));
-          return ok(`Added card ${id} "${title}" to the profile's board.`);
+          const board = ws.profile(profileId)?.board;
+          const lane = board && boardLanes(board).find((l) => l.id === board.cards.find((c) => c.id === id)?.column);
+          if (!lane) return fail("The card was refused — an empty title.");
+          // The column said back, since one that is not one lands in the first.
+          return ok(`Added card ${id} "${title}" to the profile's board, in ${lane.name}${lane.id === NEEDS_COLUMN ? ", where the user sees it in their Needs drawer" : ""}.`);
         }
         ws.as(actor, () => {
           ws.ensureBoardIn(profileId, workspaceId);
@@ -959,7 +963,12 @@ export class Harness {
           ws.as(actor, () => ws.editBoardIn(profileId, workspaceId, (board) => moveCard(board, cardId, column)));
           if (column === "done") this.deps.stopDev(workspaceId, cardId);
         } else {
-          ws.as(actor, () => ws.editProfileBoard(profileId, (board) => moveCard(board, cardId, column)));
+          const board = profile.board;
+          if (!board.cards.some((c) => c.id === cardId)) return fail(`No card ${cardId} on the profile's board.`);
+          const lane = boardLanes(board).find((l) => l.id === column);
+          if (!lane) return fail(`The profile's board has no column ${column}. Its columns: ${boardLanes(board).map((l) => l.id).join(", ")}.`);
+          ws.as(actor, () => ws.editProfileBoard(profileId, (b) => moveCard(b, cardId, column)));
+          return ok(`Moved card ${cardId} to ${lane.name}${lane.id === NEEDS_COLUMN ? ", where the user sees it in their Needs drawer" : ""}.`);
         }
         return ok(`Moved card ${cardId} to ${column}.`);
       }
@@ -1500,7 +1509,8 @@ export class Harness {
     const code = workspaceName ? cardCode(workspaceName, card.number) : `#${card.number}`;
     const body = card.body ? ` — ${card.body.replace(/\s+/g, " ").slice(0, 200)}${card.body.length > 200 ? "…" : ""}` : "";
     const run = card.run ? ` [${card.run.label}: ${card.run.state}${runLive(card.run) ? `, agent ${card.run.agentId}` : ""}]` : "";
-    return `${code} ${card.id} "${card.title}"${run}${card.isolate ? " [worktree]" : ""}${madeLine(card.made ?? [])}${body}`;
+    const by = card.needsBy ? ` [put here by ${card.needsBy === "kuru" ? "Kuru" : "the user"}]` : "";
+    return `${code} ${card.id} "${card.title}"${by}${run}${card.isolate ? " [worktree]" : ""}${madeLine(card.made ?? [])}${body}`;
   }
 
   private arrived(agentId: string, state: WaitState, name: string): string {

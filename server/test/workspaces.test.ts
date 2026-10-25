@@ -11,7 +11,8 @@ import { describe, expect, it } from "bun:test";
 import { BOARD_TAB, docTab, docsOf, findPane, panes, showingDoc } from "../../shared/layout";
 import { Workspaces, nextId, orderAgents } from "../src/workspaces";
 import { LOGIN_KEY, gatherGroups, groupName, type Profile } from "../../shared/model";
-import { addCard, moveCard } from "../../shared/board";
+import { addCard, moveCard, NEEDS_COLUMN } from "../../shared/board";
+import { needsByOf } from "../src/workspaces";
 
 describe("split", () => {
   it("returns the pane it made, and it is in the tree", () => {
@@ -877,6 +878,31 @@ describe("the store behind the arrangement", () => {
     // Back to a client's verb once the harness's is over.
     ws.editBoard(workspaceId, (board) => moveCard(board, "c1", "review"));
     expect(store.calls.at(-1)!.actor).toBe("user");
+  });
+
+  it("marks a card put in the profile's Needs you with who put it there, off the same actor", () => {
+    const ws = new Workspaces();
+    ws.attachStore(fakeStore(), ws.all());
+    const profileId = ws.active.id;
+    const card = (id: string) => ws.active.board.cards.find((c) => c.id === id)!;
+    ws.editProfileBoard(profileId, (board) => addCard(board, { title: "try it on the phone", column: NEEDS_COLUMN }, "c1", 1));
+    ws.as("harness", () => ws.editProfileBoard(profileId, (board) => addCard(board, { title: "renew the domain", column: NEEDS_COLUMN }, "c2", 2)));
+    ws.editProfileBoard(profileId, (board) => addCard(board, { title: "a reminder" }, "c3", 3));
+    ws.as("peer:omarchy", () => ws.editProfileBoard(profileId, (board) => moveCard(board, "c3", NEEDS_COLUMN)));
+    expect([card("c1").needsBy, card("c2").needsBy, card("c3").needsBy]).toEqual(["user", "kuru", "kuru"]);
+    // The user dragging Kuru's card up the column leaves it Kuru's; out of it, it is nobody's.
+    ws.editProfileBoard(profileId, (board) => moveCard(board, "c2", NEEDS_COLUMN, 0));
+    expect(card("c2").needsBy).toBe("kuru");
+    ws.editProfileBoard(profileId, (board) => moveCard(board, "c2", "done"));
+    expect(card("c2").needsBy).toBeUndefined();
+  });
+
+  it("says Kuru for the harness and every peer's Kuru, the user for a client, and nobody for an import", () => {
+    expect(needsByOf("user")).toBe("user");
+    expect(needsByOf("harness")).toBe("kuru");
+    expect(needsByOf("peer:omarchy")).toBe("kuru");
+    expect(needsByOf("import")).toBeNull();
+    expect(needsByOf("automation")).toBeNull();
   });
 
   it("keeps the board it had when the store refuses, and the rename too", () => {

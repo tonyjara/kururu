@@ -35,6 +35,12 @@
  * the answer to that is the drawer of things that need you (`NeedsDrawer.tsx`).
  * What stayed of the profile-wide job is the search, whose card hits lead to
  * a workspace's board in its own pane.
+ *
+ * The one column every profile's board has and nobody made is Needs you
+ * (`NEEDS_COLUMN`): the user's own to-dos, put there by them or by Kuru, and
+ * drawn in that drawer as well as here. It takes no rename and no delete,
+ * since the drawer and Kuru find it by its id, and each card in it wears who
+ * put it there (`NeedsByMark`).
  */
 import { useEffect, useRef, useState } from "react";
 import {
@@ -42,10 +48,14 @@ import {
   cardCode,
   columnCards,
   LANE_NAME_MAX,
+  laneFixed,
+  laneInto,
   LANES_MAX,
+  NEEDS_COLUMN,
   type Board,
   type BoardLane,
   type Card,
+  type NeedsBy,
 } from "../../../shared/board";
 import type { Profile } from "../../../shared/model";
 import { cardPlace } from "../../../shared/kuru";
@@ -170,21 +180,7 @@ export function ProfileBoard({
     setMenu({
       at,
       items: [
-        ...lanes
-          .filter((lane) => lane.id !== card.column)
-          .map((lane) => ({
-            label: `Move to ${lane.name}`,
-            run: () => api.moveProfileCard(profile.id, card.id, lane.id),
-          })),
-        ...profile.workspaces.map((workspace, index) => ({
-          label: `Send to ${workspace.name}`,
-          sep: index === 0,
-          hint: workspace.board ? `${workspace.board.cards.length} on its board` : "makes its board",
-          run: () => {
-            api.sendProfileCard(profile.id, card.id, workspace.id);
-            setSent(`${card.title} → ${workspace.name}`);
-          },
-        })),
+        ...profileCardMoves(profile, card, setSent),
         // The board is a scrim over the window, the drawer's composer
         // included, so pointing Kuru at a card puts the board away.
         referItem({ code: cardCode(profile.name, card.number), title: card.title, place: cardPlace(null, api.nodeNameOf), cardId: card.id }, onClose),
@@ -203,11 +199,12 @@ export function ProfileBoard({
   const laneMenu = (lane: BoardLane, at: MenuAt) => {
     const index = lanes.indexOf(lane);
     const count = columnCards(board, lane.id).length;
-    const into = lanes[index === 0 ? 1 : index - 1];
+    const into = laneInto(board, lane.id);
+    const fixed = laneFixed(lane.id);
     setMenu({
       at,
       items: [
-        { label: "Rename", run: () => setNaming(lane.id) },
+        ...(fixed ? [] : [{ label: "Rename", run: () => setNaming(lane.id) }]),
         { label: "Colour", hint: lane.color ?? "none", run: () => setPicking({ column: lane.id, at }) },
         { label: "Collapse", run: () => api.collapseProfileColumn(profile.id, lane.id, true) },
         ...(index > 0
@@ -458,7 +455,15 @@ export function ProfileBoard({
                             setPicking({ column, at: { x: box.left, y: box.bottom + 4 } });
                           }}
                         />
-                        <span className="board-col-name" onDoubleClick={() => setNaming(column)} title="Double-click to rename">
+                        <span
+                          className="board-col-name"
+                          onDoubleClick={laneFixed(column) ? undefined : () => setNaming(column)}
+                          title={
+                            laneFixed(column)
+                              ? "Yours to do, put here by you or by Kuru — these cards are in the Needs drawer too"
+                              : "Double-click to rename"
+                          }
+                        >
                           {lane.name}
                         </span>
                         <span className="board-col-count">{cards.length}</span>
@@ -483,7 +488,7 @@ export function ProfileBoard({
                     </button>
                     <button
                       className="pane-btn"
-                      title="Rename, move or delete this column"
+                      title={laneFixed(column) ? "Colour, collapse or move this column" : "Rename, move or delete this column"}
                       aria-label="Column menu"
                       aria-haspopup="menu"
                       onClick={(event) => {
@@ -645,6 +650,7 @@ function ProfileCard({
       >
         <div className="board-card-top">
           <span className="board-card-code">{code}</span>
+          {card.column === NEEDS_COLUMN && card.needsBy && <NeedsByMark by={card.needsBy} />}
           <span className="board-card-title">{card.title}</span>
           <span className="board-card-actions">
             <button
@@ -665,6 +671,50 @@ function ProfileCard({
         {card.dates && <CardWhen dates={card.dates} />}
       </article>
     </>
+  );
+}
+
+/**
+ * The moves a profile card's menu offers wherever the card is drawn — here,
+ * and on its row in the Needs drawer: the board's other columns, then every
+ * workspace in the profile as a place to send it, the one specialised thing
+ * this board does. A workspace with no board yet says so in its hint, since
+ * sending there is also what makes one. `onSent` is told what went where,
+ * for a place that says so; the drawer needs no word, as the row goes.
+ */
+export function profileCardMoves(profile: Profile, card: Card, onSent?: (what: string) => void): MenuItem[] {
+  return [
+    ...boardLanes(profile.board)
+      .filter((lane) => lane.id !== card.column)
+      .map((lane) => ({
+        label: `Move to ${lane.name}`,
+        run: () => api.moveProfileCard(profile.id, card.id, lane.id),
+      })),
+    ...profile.workspaces.map((workspace, index) => ({
+      label: `Send to ${workspace.name}`,
+      sep: index === 0,
+      hint: workspace.board ? `${workspace.board.cards.length} on its board` : "makes its board",
+      run: () => {
+        api.sendProfileCard(profile.id, card.id, workspace.id);
+        onSent?.(`${card.title} → ${workspace.name}`);
+      },
+    })),
+  ];
+}
+
+/**
+ * Who put a card in Needs you, as a word in a pill: **Kuru** in the accent,
+ * since that is the one the user did not do themselves and should notice,
+ * and **You** in the quiet ink of a count. Words rather than a glyph, for
+ * the reason the board's view toggle is text: an icon is a cell every skin's
+ * sheet has to draw. One drawing for the card and the drawer's row.
+ */
+export function NeedsByMark({ by }: { by: NeedsBy }) {
+  const kuru = by === "kuru";
+  return (
+    <span className={`needs-by needs-by-${by}`} title={kuru ? "Kuru put this here for you" : "You put this here"}>
+      {kuru ? "Kuru" : "You"}
+    </span>
   );
 }
 

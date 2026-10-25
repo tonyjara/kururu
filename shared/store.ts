@@ -24,7 +24,7 @@
  * therefore the one place the history can be written without instrumenting
  * each verb, and the one that cannot miss a road added later. Pure, tested.
  */
-import type { Board, BoardLane, Card, CardDates, CardRun, CardWorktree } from "./board";
+import type { Board, BoardLane, Card, CardDates, CardRun, CardWorktree, NeedsBy } from "./board";
 import { channelOfPrompt, readPeerMark, type ChannelKind } from "./channels";
 import { sameMade } from "./made";
 import type { VoiceLang } from "./voice";
@@ -170,7 +170,8 @@ export function cardDiffers(before: Card, after: Card): boolean {
     before.run?.sessionId !== after.run?.sessionId ||
     before.dev?.agentId !== after.dev?.agentId ||
     before.dev?.port !== after.dev?.port ||
-    !sameMade(before.made, after.made)
+    !sameMade(before.made, after.made) ||
+    before.needsBy !== after.needsBy
   );
 }
 
@@ -405,6 +406,8 @@ export interface CardExport {
   isolate: boolean;
   dates: CardDates | null;
   worktree: CardWorktree | null;
+  /** `Card.needsBy`, on a card in Needs you that has one; absent otherwise, and in a file from before it. */
+  needsBy?: NeedsBy;
   createdAt: number;
   updatedAt: number;
   deletedAt: number | null;

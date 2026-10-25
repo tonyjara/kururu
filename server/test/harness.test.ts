@@ -52,6 +52,8 @@ import {
 } from "../../shared/harness";
 import { countsAsAgent, type AgentSnapshot } from "../../shared/model";
 import { Harness, screenText, type HarnessDeps } from "../src/harness";
+import { Workspaces } from "../src/workspaces";
+import { NEEDS_COLUMN } from "../../shared/board";
 
 describe("the tool catalogue", () => {
   it("has unique names Claude Code can prefix, and schemas that have what they require", () => {
@@ -722,5 +724,53 @@ describe("run_card on a card that has run", () => {
     expect(asked).toEqual([{ launcherId: "claude", fresh: false }]);
     expect(said).toContain("Handed card c1 to Claude");
     expect(said).not.toContain("NEW conversation");
+  });
+});
+
+/**
+ * Needs you through Kuru's own tools, on a real arrangement: a card it puts
+ * there is Kuru's, `cards` says so, and a column that is not one is refused
+ * by name rather than reported as a move.
+ */
+describe("Needs you, from the harness", () => {
+  function rig() {
+    const ws = new Workspaces();
+    const profileId = ws.active.id;
+    const deps = {
+      workspaces: ws,
+      host: { isLive: () => false, find: () => undefined },
+      activity: new Map<string, string>(),
+      launch: () => ({ bypassClis: [] }),
+      madeOf: () => [],
+    } as unknown as HarnessDeps;
+    const harness = new Harness(deps);
+    const call = async (name: string, args: Record<string, unknown>) => harness.call(profileId, null, name, args);
+    return { ws, call };
+  }
+
+  it("puts a card there as Kuru's, and says where it went", async () => {
+    const { ws, call } = rig();
+    const added = await call("add_card", { title: "Renew the domain", column: NEEDS_COLUMN });
+    expect(added.isError).toBeFalsy();
+    expect(added.text).toContain("in Needs you");
+    const card = ws.active.board.cards[0]!;
+    expect([card.column, card.needsBy]).toEqual([NEEDS_COLUMN, "kuru"]);
+    expect((await call("cards", {})).text).toContain("[put here by Kuru]");
+    // No column at all is the first, and the reply says which.
+    expect((await call("add_card", { title: "A thought" })).text).toContain("in To do");
+  });
+
+  it("moves a card in as Kuru's, and refuses a column the board does not have", async () => {
+    const { ws, call } = rig();
+    await call("add_card", { title: "Try it on the phone" });
+    const id = ws.active.board.cards[0]!.id;
+    const moved = await call("move_card", { card: id, column: NEEDS_COLUMN });
+    expect(moved.text).toContain("Needs you");
+    expect(ws.active.board.cards[0]!.needsBy).toBe("kuru");
+    const refused = await call("move_card", { card: id, column: "review" });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain(NEEDS_COLUMN);
+    expect(ws.active.board.cards[0]!.column).toBe(NEEDS_COLUMN);
+    expect((await call("move_card", { card: "nope", column: "done" })).isError).toBe(true);
   });
 });
