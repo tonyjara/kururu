@@ -43,6 +43,15 @@ export interface OpenRouterReading {
    * mid-month takes its spend with it; OpenRouter does not keep it per key.
    */
   spend: OpenRouterSpend | null;
+  /**
+   * What every key on the account spent of *other* providers' credit through
+   * OpenRouter — bring-your-own-key, where OpenRouter's own cost is nothing
+   * and the provider bills the key it was lent. Null when the key list could
+   * not be read, or when any key on it did not say: a sum with a key missing
+   * undercounts, and `shared/anthropiccredit.ts` subtracts this from a
+   * balance, where an undercount is a balance drawn as more than is there.
+   */
+  byok: OpenRouterByok | null;
 }
 
 export interface OpenRouterSpend {
@@ -50,6 +59,18 @@ export interface OpenRouterSpend {
   week: number;
   month: number;
 }
+
+/** BYOK spend over the key's life, beside the same three windows. */
+export interface OpenRouterByok extends OpenRouterSpend {
+  total: number;
+}
+
+/**
+ * The part of a reading a balance and its pace are worked out from — a
+ * reading itself, or `shared/anthropiccredit.ts`'s estimate, which is a
+ * starting balance in `credits` and what has gone since in `used`.
+ */
+export type Ledger = Pick<OpenRouterReading, "credits" | "used" | "spend">;
 
 /**
  * The account and what is known about it — what crosses the wire, and null on
@@ -124,6 +145,35 @@ export function keyPageFrom(body: unknown): OpenRouterSpend[] | null {
   return out;
 }
 
+/**
+ * One page of `/keys` as each key's BYOK totals, or null when the page is not
+ * a list or any key on it lacks one of the four. Stricter than
+ * `keyPageFrom`, which skips such a key: that figure is a breakdown, and
+ * this one is subtracted from a balance.
+ */
+export function byokPageFrom(body: unknown): OpenRouterByok[] | null {
+  const data = (body as { data?: unknown } | null)?.data;
+  if (!Array.isArray(data)) return null;
+  const out: OpenRouterByok[] = [];
+  for (const item of data) {
+    const row = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+    const total = dollars(row.byok_usage);
+    const day = dollars(row.byok_usage_daily);
+    const week = dollars(row.byok_usage_weekly);
+    const month = dollars(row.byok_usage_monthly);
+    if (total === null || day === null || week === null || month === null) return null;
+    out.push({ total, day, week, month });
+  }
+  return out;
+}
+
+export function sumByok(rows: OpenRouterByok[]): OpenRouterByok {
+  return rows.reduce(
+    (a, b) => ({ total: a.total + b.total, day: a.day + b.day, week: a.week + b.week, month: a.month + b.month }),
+    { total: 0, day: 0, week: 0, month: 0 },
+  );
+}
+
 export function sumSpend(rows: OpenRouterSpend[]): OpenRouterSpend {
   return rows.reduce((a, b) => ({ day: a.day + b.day, week: a.week + b.week, month: a.month + b.month }), {
     day: 0,
@@ -132,7 +182,7 @@ export function sumSpend(rows: OpenRouterSpend[]): OpenRouterSpend {
   });
 }
 
-export function balanceOf(reading: OpenRouterReading): number {
+export function balanceOf(reading: Ledger): number {
   return reading.credits - reading.used;
 }
 
@@ -156,7 +206,7 @@ const DAY_MS = 86_400_000;
  * last ones, which for somebody who batch-runs evals on a Friday they will not.
  */
 export function runway(
-  reading: OpenRouterReading,
+  reading: Ledger,
   now = Date.now(),
 ): { days: number; perDay: number; basis: "week" | "month" } | null {
   if (!reading.spend) return null;
@@ -182,7 +232,7 @@ export function runway(
  * worth one now. A balance at or under zero is red whatever the pace, because
  * that is the 402 itself rather than a warning of one.
  */
-export function balanceSeverity(reading: OpenRouterReading, now = Date.now()): "normal" | "warning" | "critical" {
+export function balanceSeverity(reading: Ledger, now = Date.now()): "normal" | "warning" | "critical" {
   if (balanceOf(reading) <= 0) return "critical";
   const left = runway(reading, now);
   if (!left) return "normal";

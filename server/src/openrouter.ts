@@ -26,11 +26,14 @@
  * costs a reconnect and no agents.
  */
 import {
+  byokPageFrom,
   creditsFrom,
   keyHint,
   keyPageFrom,
+  sumByok,
   sumSpend,
   validOpenRouterKey,
+  type OpenRouterByok,
   type OpenRouterReading,
   type OpenRouterSpend,
   type OpenRouterStatus,
@@ -105,24 +108,33 @@ function refusal(status: number): string {
   return `OpenRouter answered ${status}.`;
 }
 
+type Spent = { spend: OpenRouterSpend | null; byok: OpenRouterByok | null };
+
 /**
  * Every key's running totals, summed, or null when this key may not list them.
  * A 403 here is not a failure: an inference key that `/credits` answered gets
  * a balance and no breakdown, rather than nothing. Anything else that goes
  * wrong is, because a breakdown missing half its pages is a wrong one.
+ *
+ * The BYOK totals ride on the same pages, so the Anthropic credit estimate
+ * costs OpenRouter no request of its own; one page without them makes the
+ * whole BYOK sum null, and leaves the breakdown alone.
  */
-async function spendOf(key: string): Promise<{ ok: true; spend: OpenRouterSpend | null } | { ok: false; error: string }> {
+async function spendOf(key: string): Promise<({ ok: true } & Spent) | { ok: false; error: string }> {
   const rows: OpenRouterSpend[] = [];
+  let byok: OpenRouterByok[] | null = [];
   for (let page = 0; page < MAX_KEY_PAGES; page++) {
     // Disabled keys too: one turned off this afternoon still spent this morning.
     const asked = await ask(key, `/keys?include_disabled=true&offset=${rows.length}`);
-    if (!asked.ok) return asked.status === 403 ? { ok: true, spend: null } : { ok: false, error: asked.error };
+    if (!asked.ok) return asked.status === 403 ? { ok: true, spend: null, byok: null } : { ok: false, error: asked.error };
     const found = keyPageFrom(asked.body);
     if (!found) return { ok: false, error: "OpenRouter's key list was not in a shape kururu knows." };
     if (found.length === 0) break;
     rows.push(...found);
+    const external = byokPageFrom(asked.body);
+    byok = byok && external ? [...byok, ...external] : null;
   }
-  return { ok: true, spend: sumSpend(rows) };
+  return { ok: true, spend: sumSpend(rows), byok: byok && sumByok(byok) };
 }
 
 /** The balance and the spend, both or a sentence saying why not. */
@@ -132,7 +144,7 @@ async function read(key: string): Promise<{ ok: true; reading: OpenRouterReading
   const credits = creditsFrom(asked.body);
   if (!credits) return { ok: false, error: "OpenRouter's balance was not in a shape kururu knows." };
   if (!spent.ok) return spent;
-  return { ok: true, reading: { at: Date.now(), ...credits, spend: spent.spend } };
+  return { ok: true, reading: { at: Date.now(), ...credits, spend: spent.spend, byok: spent.byok } };
 }
 
 /**
@@ -215,6 +227,10 @@ function same(a: typeof known, b: typeof known): boolean {
     x.used === y.used &&
     x.spend?.day === y.spend?.day &&
     x.spend?.week === y.spend?.week &&
-    x.spend?.month === y.spend?.month
+    x.spend?.month === y.spend?.month &&
+    x.byok?.total === y.byok?.total &&
+    x.byok?.day === y.byok?.day &&
+    x.byok?.week === y.byok?.week &&
+    x.byok?.month === y.byok?.month
   );
 }

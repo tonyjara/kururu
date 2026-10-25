@@ -41,6 +41,7 @@ import { MachinesPage } from "./Machines";
 import { NodesPage } from "./Nodes";
 import { MascotPage } from "./Mascot";
 import { NotificationsPage } from "./Notifications";
+import { AnthropicCreditPage } from "./AnthropicCredit";
 import { OpenRouterPage } from "./OpenRouter";
 import { ProcessesPage } from "./Processes";
 import { ProfilesPage } from "./Profiles";
@@ -66,6 +67,7 @@ export type Tab =
   | "nodes"
   | "web"
   | "openrouter"
+  | "anthropic"
   | "backups"
   | "notify"
   | "processes"
@@ -110,6 +112,7 @@ const GROUPS: ReadonlyArray<{ label: string; pages: ReadonlyArray<readonly [Tab,
       ["machines", "Machines", "Your other computers, watched over ssh."],
       ["web", "Web", "Search and page reading for agents: who is asked, in what order."],
       ["openrouter", "OpenRouter", "Your balance on the bottom bar."],
+      ["anthropic", "Claude API", "What is left of your API credit, on the bottom bar."],
       ["backups", "Backups", "The precious things, in a private repository."],
     ],
   },
@@ -330,6 +333,8 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
       return <WebPage />;
     case "openrouter":
       return <OpenRouterPage />;
+    case "anthropic":
+      return <AnthropicCreditPage />;
     case "backups":
       return <BackupsPage />;
     case "notify":
@@ -347,7 +352,7 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
  * glance at whether Telegram is listening, and this is.
  */
 function usePill(tab: Tab): { text: string; tone: Tone } | null {
-  const { channels, web, openrouter, backup, nodes } = useKururu();
+  const { channels, web, openrouter, credit, backup, nodes } = useKururu();
   switch (tab) {
     case "nodes": {
       if (!nodes) return null;
@@ -374,6 +379,10 @@ function usePill(tab: Tab): { text: string; tone: Tone } | null {
       if (!openrouter) return null;
       if (openrouter.error) return { text: "Error", tone: "bad" };
       return openrouter.reading ? { text: "Connected", tone: "ok" } : { text: "Connecting", tone: "busy" };
+    case "anthropic":
+      if (!credit?.anchor) return credit?.adminHint || credit?.byokSeen ? { text: "Not set up", tone: "off" } : null;
+      if (credit.error) return { text: "Error", tone: "bad" };
+      return credit.reading ? { text: "Counting", tone: "ok" } : { text: "Connecting", tone: "busy" };
     case "backups":
       if (!backup?.settings.url) return null;
       if (backup.error) return { text: "Error", tone: "bad" };

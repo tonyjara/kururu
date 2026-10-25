@@ -101,6 +101,7 @@ export const CONFIG_DIRS: readonly string[] = ["styles", "sheets"];
 export const EXCLUDED: readonly { what: string; why: string }[] = [
   { what: "access.json", why: "the share token" },
   { what: "openrouter.json", why: "the OpenRouter management key" },
+  { what: "anthropic.json", why: "the Anthropic Admin key, with the API credit balance you set beside it" },
   { what: "telegram.json", why: "the Telegram bot token, with the channel's switch and allowed accounts beside it" },
   { what: "firecrawl.json", why: "the cloud Firecrawl API key, with its daily budget beside it" },
   { what: "web-*.json", why: "the web providers' keys and addresses: the self-hosted Firecrawl's, and any added later" },
@@ -161,7 +162,8 @@ To put it all back on a new Mac: clone kururu, then
 
 and onto a fresh child, on that box: \`bun run restore <URL> --node <name>\`.
 
-Then \`/login\` in each profile, paste the OpenRouter key and the web providers' keys (Settings → Web) in Settings, set
+Then \`/login\` in each profile, paste the OpenRouter key, the Anthropic Admin key
+and balance (Settings → Claude API) and the web providers' keys (Settings → Web) in Settings, set
 Telegram up again in Settings → Channels if you used it, and approve Input
 Monitoring for the talk key. A child restored this way is paired again, and
 then ticked again in the Mac's Settings → Nodes → Secrets for whatever it

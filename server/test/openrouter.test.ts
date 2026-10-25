@@ -105,7 +105,7 @@ const MID_OCTOBER = Date.UTC(2025, 9, 15, 12);
 const EARLY_OCTOBER = Date.UTC(2025, 9, 3, 12);
 
 function reading(over: Partial<OpenRouterReading> = {}): OpenRouterReading {
-  return { at: 0, credits: 50, used: 30, spend: { day: 1, week: 5, month: 29 }, ...over };
+  return { at: 0, credits: 50, used: 30, spend: { day: 1, week: 5, month: 29 }, byok: null, ...over };
 }
 
 describe("runway", () => {

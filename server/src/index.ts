@@ -67,6 +67,7 @@ import {
   DEV_SCAN_MS,
   GIT_SCAN_MS,
   OPENROUTER_POLL_MS,
+  ANTHROPIC_COST_POLL_MS,
   SAVE_DEBOUNCE_MS,
   MACHINE_POLL_MS,
   USAGE_POLL_MS,
@@ -94,6 +95,7 @@ import { readHead, repoAt } from "./git";
 import { accountEmail, claudeSignedIn, pollUsage, usageSnapshot } from "./usage";
 import { codexUsageSnapshot, pollCodexUsage } from "./codexusage";
 import { clearOpenRouterKey, openRouterSnapshot, pollOpenRouter, rereadOpenRouterKey, setOpenRouterKey } from "./openrouter";
+import { clearAdminKey, clearCreditBalance, creditSnapshot, pollCredit, setAdminKey, setCreditBalance } from "./anthropiccredit";
 // Every provider in web/providers/, each registering itself; the build makes this module from the directory.
 import "kururu:web-providers";
 import { WebChain, callerAgent, fileStore, localCaller } from "./web/chain";
@@ -728,6 +730,7 @@ function secretLanded(spec: KindSpec): void {
     case "openrouter":
       if (rereadOpenRouterKey()) {
         broadcast({ type: "openrouter", openrouter: openRouterSnapshot() });
+        broadcastCredit();
         void pollOpenRouterAccount();
       }
       return;
@@ -4429,7 +4432,22 @@ async function pollServers(): Promise<void> {
  */
 async function pollOpenRouterAccount(): Promise<void> {
   if (windows() === 0) return;
-  if (await pollOpenRouter()) broadcast({ type: "openrouter", openrouter: openRouterSnapshot() });
+  if (await pollOpenRouter()) {
+    broadcast({ type: "openrouter", openrouter: openRouterSnapshot() });
+    // The credit estimate may be counted off OpenRouter's BYOK totals.
+    broadcastCredit();
+  }
+}
+
+/** The Anthropic credit estimate, worked out afresh: see `anthropiccredit.ts`. */
+function broadcastCredit(): void {
+  broadcast({ type: "anthropic-credit", credit: creditSnapshot(openRouterSnapshot()) });
+}
+
+/** Ask Anthropic's cost report what has gone, on the OpenRouter poll's terms; a no-op without an Admin key. */
+async function pollAnthropicCredit(): Promise<void> {
+  if (windows() === 0) return;
+  if (await pollCredit()) broadcastCredit();
 }
 
 /**
@@ -4475,6 +4493,7 @@ const timers = [
   setInterval(() => void pollAccountUsage(), USAGE_POLL_MS),
   setInterval(() => void pollServers(), MACHINE_POLL_MS),
   setInterval(() => void pollOpenRouterAccount(), OPENROUTER_POLL_MS),
+  setInterval(() => void pollAnthropicCredit(), ANTHROPIC_COST_POLL_MS),
   setInterval(sweepMade, MADE_SWEEP_MS),
 ];
 
@@ -5127,6 +5146,35 @@ function handleMessage(ws: WebSocket, raw: string): void {
       if (secrets.heldFrom("openrouter")) return;
       clearOpenRouterKey();
       broadcast({ type: "openrouter", openrouter: null });
+      broadcastCredit();
+      return;
+
+    // --- the Anthropic credit estimate ----------------------------------------
+    case "set-anthropic-balance":
+      void replyAsync(ws, msg.id, async () => {
+        await setCreditBalance(msg.balance, openRouterSnapshot());
+        await pollCredit();
+        broadcastCredit();
+        return creditSnapshot(openRouterSnapshot());
+      });
+      return;
+
+    case "clear-anthropic-balance":
+      clearCreditBalance();
+      broadcastCredit();
+      return;
+
+    case "set-anthropic-admin-key":
+      void replyAsync(ws, msg.id, async () => {
+        await setAdminKey(msg.key);
+        broadcastCredit();
+        return creditSnapshot(openRouterSnapshot());
+      });
+      return;
+
+    case "clear-anthropic-admin-key":
+      clearAdminKey();
+      broadcastCredit();
       return;
 
     // --- web -------------------------------------------------------------------
@@ -7309,6 +7357,7 @@ function admitClient(ws: WebSocket, watcher: string | null): void {
   send(ws, { type: "nodes", nodes: nodes.view() });
   send(ws, { type: "secrets", secrets: secrets.view() });
   send(ws, { type: "openrouter", openrouter: openRouterSnapshot() });
+  send(ws, { type: "anthropic-credit", credit: creditSnapshot(openRouterSnapshot()) });
   send(ws, { type: "web", web: web.status() });
   send(ws, { type: "voice", voice: voice.status() });
   send(ws, voice.hush());
@@ -7326,6 +7375,7 @@ function admitClient(ws: WebSocket, watcher: string | null): void {
   if (windows() === 1) {
     void pollServers();
     void pollOpenRouterAccount();
+    void pollAnthropicCredit();
   }
 }
 

@@ -277,8 +277,9 @@ export function webKind(providerId: string): string {
 /**
  * Files in `~/.config/kururu` that are written `0600` and are *not* kinds:
  * the ones that never leave the node that made them. The share token, this
- * node's keys and the roster's, the roster, and the records of who holds
- * what — which name node ids that mean nothing once a node is paired anew.
+ * node's keys and the roster's, the roster, the records of who holds what —
+ * which name node ids that mean nothing once a node is paired anew — and an
+ * Anthropic Admin key, which reads the Mac's bar and nothing a child does.
  * `server/test/secrets.test.ts` reads every `0600` write in the server and
  * fails on a file that is in neither list, so the next secret file is a
  * decision rather than an accident.
@@ -289,6 +290,7 @@ export const NEVER_SHARED: readonly { file: string; why: string }[] = [
   { file: "nodes.json", why: "the roster, and on the parent each child's share token" },
   { file: GRANTS_FILE, why: "which node holds what: node ids that mean nothing after a new pairing" },
   { file: HELD_FILE, why: "what this child holds from the parent, by hint" },
+  { file: "anthropic.json", why: "the Anthropic Admin key, which runs the whole organisation, and the balance set beside it" },
 ];
 
 /**

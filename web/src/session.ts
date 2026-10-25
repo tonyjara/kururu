@@ -44,6 +44,7 @@ import type { NvimCloseReport } from "../../shared/footprint";
 import type { LaunchSettings } from "../../shared/launchers";
 import type { MergeReply, MergeResolution, ProjectSettings, WorktreeOutcome, WorktreeStatus } from "../../shared/projects";
 import type { NotifySettings } from "../../shared/notify";
+import type { AnthropicCreditStatus } from "../../shared/anthropiccredit";
 import type { OpenRouterStatus } from "../../shared/openrouter";
 import type { WebStatus } from "../../shared/web";
 import type { ChannelKind, ChannelsStatus, TelegramStatus } from "../../shared/channels";
@@ -105,6 +106,8 @@ export interface KururuState {
   secrets: SecretsView;
   /** The OpenRouter account, or null when no key has been given. See `shared/openrouter.ts`. */
   openrouter: OpenRouterStatus | null;
+  /** The Anthropic API credit estimate, or null before the server has said. See `shared/anthropiccredit.ts`. */
+  credit: AnthropicCreditStatus | null;
   /** The web for the agents — its providers in order — or null until the server has said. Never a key. See `shared/web.ts`. */
   web: WebStatus | null;
   /** Where the backups stand, or null until the server has said. See `shared/backup.ts`. */
@@ -151,6 +154,7 @@ let state: KururuState = {
   nodes: null,
   secrets: EMPTY_SECRETS,
   openrouter: null,
+  credit: null,
   web: null,
   backup: null,
   databases: [],
@@ -338,6 +342,9 @@ function connect(): void {
         break;
       case "openrouter":
         set({ openrouter: msg.openrouter });
+        break;
+      case "anthropic-credit":
+        set({ credit: msg.credit });
         break;
       case "web":
         set({ web: msg.web });
@@ -1338,6 +1345,24 @@ export function setOpenRouterKey(key: string): Promise<OpenRouterStatus> {
 
 export function clearOpenRouterKey(): void {
   send({ type: "clear-openrouter-key" });
+}
+
+/** The balance off the Console, in dollars. Rejects with why, in a sentence, when it cannot be counted from. */
+export function setAnthropicBalance(balance: number): Promise<AnthropicCreditStatus> {
+  return request((id) => ({ type: "set-anthropic-balance", id, balance })) as Promise<AnthropicCreditStatus>;
+}
+
+export function clearAnthropicBalance(): void {
+  send({ type: "clear-anthropic-balance" });
+}
+
+/** Hand the server an Anthropic Admin key. Rejects with Anthropic's reason when it is refused. */
+export function setAnthropicAdminKey(key: string): Promise<AnthropicCreditStatus> {
+  return request((id) => ({ type: "set-anthropic-admin-key", id, key })) as Promise<AnthropicCreditStatus>;
+}
+
+export function clearAnthropicAdminKey(): void {
+  send({ type: "clear-anthropic-admin-key" });
 }
 
 /** The chain's order, first first, or its page limit. */

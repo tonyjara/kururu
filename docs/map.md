@@ -99,6 +99,7 @@ in this folder.
 | `src/made.ts` | A reply's paths found on this disk under allowed roots, and each agent's links kept in `made.json` beside `session.json` — by id *and* spawn time, since a restart must not lose them and a reused id must not inherit them |
 | `src/sessions.ts` | The CLIs' files on this disk, bounded reads only: a Codex run's rollout found, any conversation's tail by its id |
 | `src/openrouter.ts` | The bottom bar's OpenRouter balance and spend, read with a management key kept owner-only in `~/.config/kururu/openrouter.json`. GETs only; the key comes in once and never goes back out (`shared/openrouter.ts`) |
+| `src/anthropiccredit.ts` | The bottom bar's Anthropic API credit, an estimate: a balance set in Settings less the spend since, off Anthropic's cost report (an Admin key, owner-only in `~/.config/kururu/anthropic.json`) or OpenRouter's BYOK totals. Never lent to a node (`shared/anthropiccredit.ts`) |
 | `src/web/chain.ts` | The web chain behind `POST /mcp/web`: providers tried in Settings' order, each step skipped, served, failed, passed or stopped, answers judged, the record of recent calls, health on a timer, the launch flags ([web](web.md)) |
 | `src/web/provider.ts` | What a web provider is, and the registry each provider file puts itself on |
 | `src/web/firecrawlapi.ts` | Firecrawl's v2 API for both Firecrawl providers: one request under one base, failures as the chain reads them, crawls waited for and cancelled |

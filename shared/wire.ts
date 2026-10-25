@@ -40,6 +40,7 @@ import type { Action } from "./keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
 import type { LaunchSettings } from "./launchers";
 import type { ReloadAsk, ReloadHold, ReloadPage } from "./reload";
+import type { AnthropicCreditStatus } from "./anthropiccredit";
 import type { OpenRouterStatus } from "./openrouter";
 import type { WebStatus } from "./web";
 import type { ChannelKind, ChannelsStatus } from "./channels";
@@ -435,6 +436,12 @@ export type ServerMessage =
    * nothing. Never carries the key — see `shared/openrouter.ts`.
    */
   | { type: "openrouter"; openrouter: OpenRouterStatus | null }
+  /**
+   * The Anthropic API credit estimate: on connect, after either poll it is
+   * counted from moved anything, and whenever the balance or the Admin key is
+   * set or removed. Never carries the key — see `shared/anthropiccredit.ts`.
+   */
+  | { type: "anthropic-credit"; credit: AnthropicCreditStatus }
   /**
    * The web for agents, as Settings → Web draws it: the providers in their
    * order, each with its switch, its fields (a secret only as its hint), its
@@ -1488,6 +1495,12 @@ export type ClientMessage =
    */
   | { type: "set-openrouter-key"; id: number; key: string }
   | { type: "clear-openrouter-key" }
+  /** The balance read off the Console, in dollars, taken as of now. Replied to with why, when refused. */
+  | { type: "set-anthropic-balance"; id: number; balance: number }
+  | { type: "clear-anthropic-balance" }
+  /** An Anthropic Admin key, on the OpenRouter key's terms: tried, kept 0600, answered with its hint only. */
+  | { type: "set-anthropic-admin-key"; id: number; key: string }
+  | { type: "clear-anthropic-admin-key" }
   /** The chain's order (provider ids, first first) and its page limit, either. Replied to with the status. */
   | { type: "set-web"; id: number; order?: string[]; pageLimit?: number }
   /**
@@ -1710,3 +1723,12 @@ export const MACHINE_POLL_MS = 15_000;
  * reads off it is days, so a figure a minute old is a current one.
  */
 export const OPENROUTER_POLL_MS = 60_000;
+
+/**
+ * How often Anthropic's cost report is asked for, with an Admin key. Five
+ * times OpenRouter's minute: the report lands about five minutes behind the
+ * calls in it, so a minute's poll would mostly read the same figure, and
+ * Anthropic asks for no more than a request a minute sustained while a
+ * month of it can be two pages. The OpenRouter source rides that minute.
+ */
+export const ANTHROPIC_COST_POLL_MS = 300_000;

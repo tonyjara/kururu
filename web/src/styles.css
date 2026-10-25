@@ -3882,9 +3882,10 @@ a.button {
   display: flex;
 }
 
-/* The OpenRouter chip, after the machines — see `OpenRouter.tsx`. The gray
-   mark and the balance in its colour, at the bar's size rather than the
-   sidebar's; whole dollars on a phone, so the workspace's name keeps its
+/* The OpenRouter chip, after the machines — see `OpenRouter.tsx` — and the
+   Anthropic credit's after it, which wears the same class (`AnthropicCredit.tsx`).
+   The gray mark and the balance in its colour, at the bar's size rather than
+   the sidebar's; whole dollars on a phone, so the workspace's name keeps its
    room. */
 .sb-openrouter .sb-usage-chip {
   gap: 5px;

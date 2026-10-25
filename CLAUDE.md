@@ -219,7 +219,7 @@ The load-bearing invariants, one line each, with the argument behind the link:
   private repository is an allow-list in `shared/backup.ts` — named config
   files, the boards and the harness conversation as text, the memory folders —
   and anything not named stays: the share token, the OpenRouter key, the
-  Telegram bot token, the web providers' keys, `identities/`, every login,
+  Anthropic Admin key, the Telegram bot token, the web providers' keys, `identities/`, every login,
   a node's keys and the roster (`node.json`, `nodes.json`), and the lent
   secrets' records (`grants.json`, `secrets-held.json`, `claude-lend.json`,
   `claude-token.json`, a lent GitHub login's `gh/`). Never `--force`,
@@ -250,8 +250,8 @@ The load-bearing invariants, one line each, with the argument behind the link:
 - **The usage bar reads a Claude credential and never writes one** — the
   machine's, or the active profile's when profiles keep their own logins. It is
   one of the few things in kururu that reach off the machine on the user's
-  behalf, beside OpenRouter's balance, a channel that is switched on and the
-  pages agents fetch through a web provider; it is
+  behalf, beside OpenRouter's balance, Anthropic's cost report, a channel
+  that is switched on and the pages agents fetch through a web provider; it is
   read at the moment of the fetch, never held, never logged, never on the wire —
   and no token refresh, because writing that store could log out a running agent
   to draw a bar. `server/src/usage.ts` is the only file that has seen it.
@@ -259,12 +259,21 @@ The load-bearing invariants, one line each, with the argument behind the link:
   reads the `rate_limits` Codex writes into its own rollouts, and only stats
   `auth.json` to know it is signed in.
 - **The OpenRouter key is one of the credentials kururu stores — a
-  channel's bot token and the web providers' keys, below, are the others —
+  channel's bot token, the web providers' keys and the Anthropic Admin key,
+  below, are the others —
   and it only comes in, or goes out sealed to a node it is lent to.** A
   management key, pasted once in Settings, kept 0600 in
   `~/.config/kururu/openrouter.json`, read per fetch and used for GETs only.
   A client is sent its `hint` and dollars, never the key. →
   `shared/openrouter.ts`
+- **The Anthropic API credit is an estimate, and says so.** Anthropic has no
+  balance endpoint; the chip is a balance the user read off the Console less
+  what has gone since — Anthropic's cost report with an Admin key, or else
+  OpenRouter's BYOK totals off the management key it already has — counted
+  only from baselines taken when the balance was set. The Admin key is kept
+  on the OpenRouter key's terms in `~/.config/kururu/anthropic.json`, GETs to
+  the cost report only, and is never lent to a node (`NEVER_SHARED`): it can
+  run the whole organisation. → `shared/anthropiccredit.ts`
 - **The web is lent to agents through a chain, never a key.** Every agent
   kururu starts on this Mac — the + menu, a card's robot, the harness and
   its `start_agent`, a card picked back up — gets four MCP tools served at

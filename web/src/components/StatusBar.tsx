@@ -42,6 +42,7 @@
 import type { ReactNode } from "react";
 import { countsAsAgent, type AgentSnapshot } from "../../../shared/model";
 import { MachinesChip } from "./Machines";
+import { AnthropicCreditChip } from "./AnthropicCredit";
 import { OpenRouterChip } from "./OpenRouter";
 import { UsageChips } from "./Usage";
 import { useKururu } from "../session";
@@ -82,7 +83,7 @@ interface Props {
   /** The two drawers' chips, on a phone; null where they are at the top. */
   chips: ReactNode;
   /** A page of Settings, from the foot of the machines or OpenRouter chip's popover. */
-  onSettings: (page: "machines" | "openrouter") => void;
+  onSettings: (page: "machines" | "openrouter" | "anthropic") => void;
 }
 
 export function StatusBar({
@@ -105,12 +106,14 @@ export function StatusBar({
       {toggle}
       {/* The left end on a desktop: the allowances — whose they are and a
           ring a window — the machines, a glyph in the colour of the worst
-          load and how many are connected, and the OpenRouter balance. Each
-          opens its detail on a hover or a tap. See `Usage.tsx`,
-          `Machines.tsx` and `OpenRouter.tsx`. */}
+          load and how many are connected, the OpenRouter balance and the
+          Anthropic API credit's estimate. Each opens its detail on a hover
+          or a tap. See `Usage.tsx`, `Machines.tsx`, `OpenRouter.tsx` and
+          `AnthropicCredit.tsx`. */}
       <UsageChips />
       <MachinesChip onSettings={() => onSettings("machines")} />
       <OpenRouterChip onSettings={() => onSettings("openrouter")} />
+      <AnthropicCreditChip onSettings={() => onSettings("anthropic")} />
       <span className="sb-spacer" />
 
       {prefixArmed && <span className="sb-badge sb-prefix">PREFIX</span>}
