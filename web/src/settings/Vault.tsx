@@ -81,19 +81,17 @@ export function VaultPage({ readOnly, onOpen }: { readOnly: boolean; onOpen: (pa
 
       <Lent role={view.role} readOnly={readOnly} onOpen={onOpen} />
 
-      {[...new Set(view.workspaces.map((w) => w.profile))].map((profile) => (
-        <Group
-          key={profile}
-          title={`Workspaces in ${profile}`}
-          foot="The env files in each checkout, down two folders, by the names they set; never .env.example or a backup. Lent from the workspace's row in Settings → Nodes."
-        >
-          {view.workspaces
-            .filter((w) => w.profile === profile)
-            .map((w) => (
-              <WorkspaceRows key={w.id} workspace={w} />
-            ))}
-        </Group>
-      ))}
+      <Group
+        title="Env files it can lend"
+        lead="Kururu keeps no copy. These are the env files in each workspace's checkout here, which it can lend a node the workspace moves to."
+        foot="Read for the names they set and nothing else, down two folders; never .env.example or a backup. Lent from Settings → Nodes, or with a move."
+      >
+        {view.workspaces.length === 0 ? (
+          <Empty>No workspace is in a checkout on this Mac.</Empty>
+        ) : (
+          view.workspaces.map((w) => <WorkspaceRows key={w.id} workspace={w} profiles={new Set(view.workspaces.map((x) => x.profile)).size > 1} />)
+        )}
+      </Group>
 
       <Hosts view={view} />
 
@@ -185,8 +183,8 @@ function Lent({ role, readOnly, onOpen }: { role: VaultView["role"]; readOnly: b
   );
 }
 
-/** A workspace: its checkout, what it seems to use, and each env file folded over its names. */
-function WorkspaceRows({ workspace: w }: { workspace: VaultWorkspace }) {
+/** A workspace: its checkout, what it seems to use, and each env file folded over its names. Its profile is said when there is more than one. */
+function WorkspaceRows({ workspace: w, profiles }: { workspace: VaultWorkspace; profiles: boolean }) {
   const { secrets, nodes } = useKururu();
   const uses = [
     ...w.ssh.map((s) => `ssh ${s.alias} (${s.why})`),
@@ -194,10 +192,10 @@ function WorkspaceRows({ workspace: w }: { workspace: VaultWorkspace }) {
   ];
   return (
     <>
-      <Row label={w.name} hint={[w.checkout ?? "in no checkout here", ...uses].join(" · ")} />
-      {w.checkout && w.env.length === 0 && <Row label="" hint="No env files." />}
+      <Row label={w.name} hint={[w.checkout, profiles ? w.profile : null, ...uses].filter(Boolean).join(" · ")} />
+      {w.env.length === 0 && <Row label="" hint="No env files." />}
       {w.env.map((env) => {
-        const to = w.checkout ? envLentTo(w.checkout, env.file, secrets, nodes?.nodes ?? []) : [];
+        const to = envLentTo(w.checkout, env.file, secrets, nodes?.nodes ?? []);
         const line = [env.note ?? plural(env.names.length, "variable"), env.changed ? `changed ${when(env.changed)}` : null, to.length ? `lent to ${to.join(", ")}` : null].filter(Boolean).join(" · ");
         return (
           <Details
@@ -235,7 +233,11 @@ function Hosts({ view }: { view: VaultView }) {
   };
   return (
     <>
-      <Group title="SSH hosts" foot="The Host entries in ~/.ssh/config that name one host, each with its key file's name. A key is read only once it is lent to a node.">
+      <Group
+        title="SSH hosts it can lend"
+        lead="Kururu keeps no copy. These are the Host entries in this Mac's ~/.ssh/config, which it can lend a node with their keys."
+        foot="Each with its key file's name. A key is read only once it is lent to a node."
+      >
         {view.ssh.length === 0 ? (
           <Empty>No Host entries in ~/.ssh/config.</Empty>
         ) : (
@@ -250,7 +252,11 @@ function Hosts({ view }: { view: VaultView }) {
           ))
         )}
       </Group>
-      <Group title="GitHub" foot="The accounts gh is signed in as on github.com. Their tokens stay in the Keychain; one is read only once it is lent to a node.">
+      <Group
+        title="GitHub logins it can lend"
+        lead="Kururu keeps no copy. These are the accounts gh is signed in as on github.com here, which it can lend a node."
+        foot="Their tokens stay in the Keychain; one is read only once it is lent to a node."
+      >
         {view.github.length === 0 ? (
           <Empty>gh is not signed in to github.com here.</Empty>
         ) : (

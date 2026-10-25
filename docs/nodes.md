@@ -681,9 +681,10 @@ Settings → Connections → **Vault** is the whole vault on one page, because
 there is no one place it is kept: kururu's own keys (set or not, by the hint
 their own page draws, the file, when it last changed, which nodes hold it),
 the files that never leave (`NEVER_SHARED`), what is lent to which node and
-since when, each workspace's env files by the names of their variables, this
-Mac's ssh hosts by key file name, gh's accounts, and the other logins agents
-use — Claude Code's and Codex's per profile, and Vercel's (the CLI's global
+since when, and — headed as what it *can lend*, since kururu keeps no copy of
+any of them — each workspace's env files by the names of their variables
+(a workspace in no checkout here is left out), this Mac's ssh hosts by key
+file name and gh's accounts; then the other logins agents use — Claude Code's and Codex's per profile, and Vercel's (the CLI's global
 directory and each `~/.config/vercel-<name>`, by team).
 
 The page is told names, counts, places, times and hints, never a value, not

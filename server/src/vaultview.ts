@@ -120,7 +120,12 @@ function keys(deps: VaultDeps): VaultKey[] {
   return out;
 }
 
-/** Each workspace's env files by name, and the ssh host and GitHub account it looks like it needs. A checkout two workspaces share is walked once. */
+/**
+ * Each workspace's env files by name, and the ssh host and GitHub account it
+ * looks like it needs. A checkout two workspaces share is walked once. A
+ * workspace in no checkout here is left out: it has no env file to lend, and
+ * a row that says so is a row about nothing.
+ */
 function workspaces(deps: VaultDeps): VaultWorkspace[] {
   const { home } = deps;
   const hosts = sshHosts(home);
@@ -139,21 +144,24 @@ function workspaces(deps: VaultDeps): VaultWorkspace[] {
     byRoot.set(root, found);
     return found;
   };
-  return deps.workspaces.map((w) => {
-    const found = w.root ? walk(w.root) : null;
+  return deps.workspaces.flatMap((w) => {
+    if (!w.root) return [];
+    const found = walk(w.root);
     const ssh: { alias: string; why: string }[] = [];
     if (w.pinned && aliases.includes(w.pinned)) ssh.push({ alias: w.pinned, why: "its shells are pinned to it" });
-    for (const [alias, file] of found?.mentioned ?? []) if (alias !== w.pinned) ssh.push({ alias, why: `${file} names it` });
-    const owner = found?.owner ?? null;
-    return {
-      id: w.id,
-      name: w.name,
-      profile: w.profile,
-      checkout: w.root ? tilde(w.root, home) : null,
-      env: found?.env ?? [],
-      ssh,
-      github: owner ? { account: owner, signedIn: accounts.includes(owner.toLowerCase()) } : null,
-    };
+    for (const [alias, file] of found.mentioned) if (alias !== w.pinned) ssh.push({ alias, why: `${file} names it` });
+    const owner = found.owner;
+    return [
+      {
+        id: w.id,
+        name: w.name,
+        profile: w.profile,
+        checkout: tilde(w.root, home),
+        env: found.env,
+        ssh,
+        github: owner ? { account: owner, signedIn: accounts.includes(owner.toLowerCase()) } : null,
+      },
+    ];
   });
 }
 

@@ -184,8 +184,10 @@ describe("the page, off a scratch home", () => {
     expect(keys.find((k) => k.id === "grants.json")).toBeUndefined();
   });
 
-  it("lists each workspace's env files by name, and what it seems to use", () => {
-    const [storefront, notes] = vaultView(deps()).workspaces;
+  it("lists each workspace's env files by name, and what it seems to use, and leaves out one in no checkout", () => {
+    const workspaces = vaultView(deps()).workspaces;
+    expect(workspaces.map((w) => w.name)).toEqual(["storefront"]);
+    const [storefront] = workspaces;
     expect(storefront).toMatchObject({ name: "storefront", profile: "Work", checkout: "~/code/storefront" });
     expect(storefront!.env.map((e) => [e.file, e.names])).toEqual([
       [".env.local", ["DATABASE_URL", "STRIPE_KEY"]],
@@ -193,7 +195,6 @@ describe("the page, off a scratch home", () => {
     ]);
     expect(storefront!.ssh).toEqual([{ alias: "vps-prod", why: "scripts/deploy.sh names it" }]);
     expect(storefront!.github).toEqual({ account: "someone", signedIn: true });
-    expect(notes).toMatchObject({ checkout: null, env: [], ssh: [], github: null });
   });
 
   it("puts the host a workspace is pinned to first, said once", () => {

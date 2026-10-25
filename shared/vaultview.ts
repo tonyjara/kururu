@@ -75,8 +75,8 @@ export interface VaultWorkspace {
   id: string;
   name: string;
   profile: string;
-  /** The checkout its env files are read from, as `~/…`; null for a workspace in none. */
-  checkout: string | null;
+  /** The checkout its env files are read from, as `~/…`. A workspace in none here has nothing to lend and is not listed. */
+  checkout: string;
   env: VaultEnvFile[];
   /** The ssh hosts it looks like it uses, and why: the machine its shells are pinned to, a script that names one. */
   ssh: { alias: string; why: string }[];

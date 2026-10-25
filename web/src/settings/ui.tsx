@@ -133,16 +133,21 @@ export function Banner({ tone = "warn", children, action }: { tone?: "warn" | "b
  * The only container. A heading, a card of rows, a footnote — and a page is
  * nothing but a column of these. `disabled` dims the whole card through a
  * real `<fieldset disabled>`, which is what makes the rows under a switch stop
- * taking input rather than merely look as if they had.
+ * taking input rather than merely look as if they had. `lead` is one line
+ * under the heading, in the footnote's voice, for a group whose heading alone
+ * would be read wrong: what is said before the rows is read before them, and
+ * a footnote is read after the misunderstanding.
  */
 export function Group({
   title,
+  lead,
   foot,
   disabled,
   children,
   className,
 }: {
   title?: ReactNode;
+  lead?: ReactNode;
   foot?: ReactNode;
   disabled?: boolean;
   children: ReactNode;
@@ -151,6 +156,7 @@ export function Group({
   return (
     <section className={`st-group${className ? ` ${className}` : ""}`}>
       {title && <h3 className="st-group-h">{title}</h3>}
+      {lead && <p className="st-foot">{lead}</p>}
       <fieldset className="st-card" disabled={disabled}>
         {children}
       </fieldset>
