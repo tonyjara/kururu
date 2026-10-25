@@ -87,7 +87,7 @@ export function VaultPage({ readOnly, onOpen }: { readOnly: boolean; onOpen: (pa
         foot="Read for the names they set and nothing else, down two folders; never .env.example or a backup. Lent from Settings → Nodes, or with a move."
       >
         {view.workspaces.length === 0 ? (
-          <Empty>No workspace is in a checkout on this Mac.</Empty>
+          <Empty>No workspace has an env file in its checkout on this Mac.</Empty>
         ) : (
           view.workspaces.map((w) => <WorkspaceRows key={w.id} workspace={w} profiles={new Set(view.workspaces.map((x) => x.profile)).size > 1} />)
         )}
@@ -193,7 +193,6 @@ function WorkspaceRows({ workspace: w, profiles }: { workspace: VaultWorkspace; 
   return (
     <>
       <Row label={w.name} hint={[w.checkout, profiles ? w.profile : null, ...uses].filter(Boolean).join(" · ")} />
-      {w.env.length === 0 && <Row label="" hint="No env files." />}
       {w.env.map((env) => {
         const to = envLentTo(w.checkout, env.file, secrets, nodes?.nodes ?? []);
         const line = [env.note ?? plural(env.names.length, "variable"), env.changed ? `changed ${when(env.changed)}` : null, to.length ? `lent to ${to.join(", ")}` : null].filter(Boolean).join(" · ");

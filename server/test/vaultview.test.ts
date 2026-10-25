@@ -122,6 +122,10 @@ describe("the page, off a scratch home", () => {
     write(join(repo, ".env.example"), "EXAMPLE_ONLY=\n");
     write(join(repo, "scripts", "deploy.sh"), "rsync -a dist/ vps-prod:/srv/app\n");
     write(join(repo, ".git", "config"), '[remote "origin"]\n\turl = git@github.com:someone/storefront.git\n');
+    // A checkout with nothing to lend but an example, whose host and account are in their own sections anyway.
+    write(join(home, "code", "skills", ".env.example"), "EXAMPLE_ONLY=\n");
+    write(join(home, "code", "skills", "deploy.sh"), "ssh vps-prod\n");
+    write(join(home, "code", "skills", ".git", "config"), '[remote "origin"]\n\turl = git@github.com:someone/skills.git\n');
 
     write(join(home, ".ssh", "config"), "Host vps-prod\n  HostName 203.0.113.7\n  IdentityFile ~/.ssh/vps_key\n\nHost agent-only\n  IdentityAgent ~/agent.sock\n  IdentityFile ~/.ssh/missing\n");
     write(join(home, ".ssh", "vps_key"), KEY);
@@ -152,6 +156,7 @@ describe("the page, off a scratch home", () => {
     workspaces: [
       { id: "w1", name: "storefront", profile: "Work", root: join(home, "code", "storefront"), pinned: null },
       { id: "w2", name: "notes", profile: "Work", root: null, pinned: null },
+      { id: "w3", name: "skills", profile: "Work", root: join(home, "code", "skills"), pinned: null },
     ],
     claude: [{ name: "this Mac", dir: null, profiles: ["Work"], account: "someone@example.com", signedAt: 1_700_000_000_000 }],
     codex: [{ name: "this Mac", home: join(home, ".codex"), login: "machine", profiles: ["Work"] }],
@@ -184,7 +189,7 @@ describe("the page, off a scratch home", () => {
     expect(keys.find((k) => k.id === "grants.json")).toBeUndefined();
   });
 
-  it("lists each workspace's env files by name, and what it seems to use, and leaves out one in no checkout", () => {
+  it("lists each workspace's env files by name and what it seems to use, and only a workspace with one to lend", () => {
     const workspaces = vaultView(deps()).workspaces;
     expect(workspaces.map((w) => w.name)).toEqual(["storefront"]);
     const [storefront] = workspaces;

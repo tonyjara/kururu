@@ -683,7 +683,7 @@ their own page draws, the file, when it last changed, which nodes hold it),
 the files that never leave (`NEVER_SHARED`), what is lent to which node and
 since when, and — headed as what it *can lend*, since kururu keeps no copy of
 any of them — each workspace's env files by the names of their variables
-(a workspace in no checkout here is left out), this Mac's ssh hosts by key
+(only a workspace with an env file to lend is listed), this Mac's ssh hosts by key
 file name and gh's accounts; then the other logins agents use — Claude Code's and Codex's per profile, and Vercel's (the CLI's global
 directory and each `~/.config/vercel-<name>`, by team).
 

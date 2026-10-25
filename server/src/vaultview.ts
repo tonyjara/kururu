@@ -122,9 +122,10 @@ function keys(deps: VaultDeps): VaultKey[] {
 
 /**
  * Each workspace's env files by name, and the ssh host and GitHub account it
- * looks like it needs. A checkout two workspaces share is walked once. A
- * workspace in no checkout here is left out: it has no env file to lend, and
- * a row that says so is a row about nothing.
+ * looks like it needs. A checkout two workspaces share is walked once. Only
+ * a workspace with an env file to lend is listed: one in no checkout here,
+ * or in one with none, would be a row about nothing, and its hosts and
+ * accounts are in their own sections already.
  */
 function workspaces(deps: VaultDeps): VaultWorkspace[] {
   const { home } = deps;
@@ -147,6 +148,7 @@ function workspaces(deps: VaultDeps): VaultWorkspace[] {
   return deps.workspaces.flatMap((w) => {
     if (!w.root) return [];
     const found = walk(w.root);
+    if (!found.env.length) return [];
     const ssh: { alias: string; why: string }[] = [];
     if (w.pinned && aliases.includes(w.pinned)) ssh.push({ alias: w.pinned, why: "its shells are pinned to it" });
     for (const [alias, file] of found.mentioned) if (alias !== w.pinned) ssh.push({ alias, why: `${file} names it` });
