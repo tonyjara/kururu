@@ -675,6 +675,33 @@ variables*, *vps · key vps_key (ed25519)*, *someone · …wxyz*), and
 `kururu child doctor`'s `secrets` row names them by hint too: `env …`,
 `ssh …`, `github …`.
 
+### The Vault page
+
+Settings → Connections → **Vault** is the whole vault on one page, because
+there is no one place it is kept: kururu's own keys (set or not, by the hint
+their own page draws, the file, when it last changed, which nodes hold it),
+the files that never leave (`NEVER_SHARED`), what is lent to which node and
+since when, each workspace's env files by the names of their variables, this
+Mac's ssh hosts by key file name, gh's accounts, and the other logins agents
+use — Claude Code's and Codex's per profile, and Vercel's (the CLI's global
+directory and each `~/.config/vercel-<name>`, by team).
+
+The page is told names, counts, places, times and hints, never a value, not
+even masked. Nothing is read for it that kururu would not read anyway: a
+key's hint is the one its module already holds (`openRouterSnapshot`, the
+Telegram status, the web providers' fields, the credit's `adminHint`); a
+private key, a gh token, a Codex login and a Vercel login are listed by their
+files being there; an env file is read through `readEnvSource` and only its
+names kept; Vercel's `config.json` is read for its team and `auth.json`
+never, so no Vercel account is named. It is built when the page asks
+(`vault`) and never broadcast. What is lent is the live `secrets` view, and
+*Take back* there is the Nodes page's switch turned off, asked first; on a
+phone, or any page not on this Mac, the page only reads. The code is
+`shared/vaultview.ts`, `server/src/vaultview.ts` and
+`web/src/settings/Vault.tsx`; `server/test/vaultview.test.ts` builds it over
+a scratch home of made-up secrets, with the key and login files unreadable,
+and fails if any value comes out.
+
 ## One Telegram
 
 There is one bot and one chat for every node, and every node's Kuru speaks

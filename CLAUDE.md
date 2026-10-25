@@ -247,6 +247,12 @@ The load-bearing invariants, one line each, with the argument behind the link:
   environment variable holding it. Keys and tokens are read only once lent;
   Kuru's `lend_secrets` previews first and is never handed a value. Hints only to a client, on both nodes, and no value in
   a log. → [nodes](docs/nodes.md#lending-secrets)
+- **Settings → Vault names the vault and never shows a value.** Kururu's
+  keys by the hint their own module already holds, env files by variable
+  name, ssh keys and Codex, gh and Vercel logins by their files being there —
+  nothing read that kururu would not read anyway, built when the page asks
+  and never broadcast; `server/test/vaultview.test.ts` fails on a value that
+  comes out. → [nodes](docs/nodes.md#the-vault-page)
 - **The usage bar reads a Claude credential and never writes one** — the
   machine's, or the active profile's when profiles keep their own logins. It is
   one of the few things in kururu that reach off the machine on the user's

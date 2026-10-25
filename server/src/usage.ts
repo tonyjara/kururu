@@ -161,8 +161,13 @@ async function signedInAt(login: Login): Promise<number | null> {
  * sign in cannot answer anybody.
  */
 export async function claudeSignedIn(claudeDir: string | null): Promise<boolean> {
+  return (await claudeSignedInAt(claudeDir)) !== null;
+}
+
+/** When that login was signed in, or null: the same attributes, for Settings → Vault's "since". */
+export async function claudeSignedInAt(claudeDir: string | null): Promise<number | null> {
   const login = claudeDir ? loginFor(claudeDir) : (await logins())[0];
-  return login ? (await signedInAt(login)) !== null : false;
+  return login ? signedInAt(login) : null;
 }
 
 /**

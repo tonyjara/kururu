@@ -29,6 +29,8 @@ import type { StyleLibrary } from "../../../shared/styles";
 import type { Appearance } from "../../../shared/theme";
 import type { WorkspaceProject } from "../../../shared/wire";
 import { channelReady } from "../../../shared/channels";
+import type { VaultPage as KeyPage } from "../../../shared/vaultview";
+import { isLoopback } from "../preview";
 import { Icon } from "../components/Icon";
 import { useKururu } from "../session";
 import { AboutPage } from "./About";
@@ -48,6 +50,7 @@ import { ProfilesPage } from "./Profiles";
 import { StudioPage } from "./Studio";
 import { ThemePage } from "./Theme";
 import { EditingScope, type Tone } from "./ui";
+import { VaultPage } from "./Vault";
 import { VoicePage } from "./Voice";
 import { WebPage } from "./Web";
 import { WorkspacesPage } from "./Workspaces";
@@ -65,6 +68,7 @@ export type Tab =
   | "channels"
   | "machines"
   | "nodes"
+  | "vault"
   | "web"
   | "openrouter"
   | "anthropic"
@@ -109,6 +113,7 @@ const GROUPS: ReadonlyArray<{ label: string; pages: ReadonlyArray<readonly [Tab,
     label: "Connections",
     pages: [
       ["nodes", "Nodes", "The other kururus this one is linked with, and pairing a new one."],
+      ["vault", "Vault", "Every key, env file and login kururu can see or lend, by name. Never a value."],
       ["machines", "Machines", "Your other computers, watched over ssh."],
       ["web", "Web", "Search and page reading for agents: who is asked, in what order."],
       ["openrouter", "OpenRouter", "Your balance on the bottom bar."],
@@ -245,7 +250,27 @@ export function Settings({
                 <div className="st-page">
                   <Page
                     tab={tab}
-                    props={{ appearance, styles, mascots, notify, launch, host, keys, profiles, logins, activeProfileId, autoSwap, agentPlacement, workspaces, activeWorkspaceId, projects, projectSettings, onClose }}
+                    props={{
+                      appearance,
+                      styles,
+                      mascots,
+                      notify,
+                      launch,
+                      host,
+                      keys,
+                      profiles,
+                      logins,
+                      activeProfileId,
+                      autoSwap,
+                      agentPlacement,
+                      workspaces,
+                      activeWorkspaceId,
+                      projects,
+                      projectSettings,
+                      narrow,
+                      onClose,
+                      onOpen: go,
+                    }}
                   />
                 </div>
               </EditingScope>
@@ -282,8 +307,12 @@ type PageProps = {
   activeWorkspaceId: string;
   projects: WorkspaceProject[];
   projectSettings: ProjectSettingsMap;
+  /** A phone, or a window as narrow as one. */
+  narrow: boolean;
   /** For a page whose action is somewhere else — the machines' Shell, which opens a tab. */
   onClose: () => void;
+  /** Another page of these, for a page that points at where a thing is set. */
+  onOpen: (tab: Tab) => void;
 };
 
 function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
@@ -329,6 +358,10 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
       return <NodesPage />;
     case "machines":
       return <MachinesPage onClose={p.onClose} />;
+    case "vault":
+      // Looking only, on a phone or anywhere off this Mac: taking a secret
+      // back from a node is done where the keys are.
+      return <VaultPage readOnly={p.narrow || !isLoopback(location.hostname)} onOpen={(page: KeyPage) => p.onOpen(page)} />;
     case "web":
       return <WebPage />;
     case "openrouter":
@@ -352,7 +385,7 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
  * glance at whether Telegram is listening, and this is.
  */
 function usePill(tab: Tab): { text: string; tone: Tone } | null {
-  const { channels, web, openrouter, credit, backup, nodes } = useKururu();
+  const { channels, web, openrouter, credit, backup, nodes, secrets } = useKururu();
   switch (tab) {
     case "nodes": {
       if (!nodes) return null;
@@ -360,6 +393,11 @@ function usePill(tab: Tab): { text: string; tone: Tone } | null {
       if (nodes.role === "alone" || nodes.nodes.length === 0) return null;
       const away = nodes.nodes.filter((n) => n.state !== "up").length;
       return away ? { text: `${away} away`, tone: "off" } : { text: `${nodes.nodes.length} linked`, tone: "ok" };
+    }
+    case "vault": {
+      if (nodes?.role !== "parent") return null;
+      const lent = Object.values(secrets.grants).reduce((n, grants) => n + grants.filter((g) => g.on).length, 0);
+      return lent ? { text: `${lent} lent`, tone: "ok" } : null;
     }
     case "channels": {
       const t = channels?.telegram;

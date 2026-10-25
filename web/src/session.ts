@@ -57,6 +57,7 @@ import type { MachineEntry, MachinePin, MachineStatus } from "../../shared/machi
 import type { NodeStatus, NodesView } from "../../shared/nodes";
 import type { MoveCheck, MoveDone, MovePlan, NewWorkspaceMade } from "../../shared/move";
 import { EMPTY_SECRETS, type Lendable, type LendAsk, type SecretsView } from "../../shared/secrets";
+import type { VaultView } from "../../shared/vaultview";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { ReloadAsk, ReloadHold, ReloadPage } from "../../shared/reload";
 import type { Grid } from "./grid";
@@ -1288,6 +1289,11 @@ export interface MoveResult {
  */
 export function moveWorkspaceTo(workspaceId: string, nodeId: string, folder: string, lend?: LendAsk): Promise<MoveResult> {
   return request((id) => ({ type: "node-move", id, workspaceId, nodeId, folder, ...(lend ? { lend } : {}) })) as Promise<MoveResult>;
+}
+
+/** Settings → Vault: everything this kururu can see and lend, by name and hint. Never a value. */
+export function vault(): Promise<VaultView> {
+  return request((id) => ({ type: "vault", id })) as Promise<VaultView>;
 }
 
 /** What a workspace could lend a node, by hint, and the node's word on the folder — its guess when null. The parent's alone. */

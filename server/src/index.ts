@@ -92,7 +92,7 @@ import { dump as dumpRecording, forget as forgetRecording, recordBacklog, record
 import { processCwd, processCwds } from "./cwd";
 import { scanDevServers, stopDevServer } from "./devservers";
 import { readHead, repoAt } from "./git";
-import { accountEmail, claudeSignedIn, pollUsage, usageSnapshot } from "./usage";
+import { accountEmail, claudeSignedIn, claudeSignedInAt, pollUsage, usageSnapshot } from "./usage";
 import { codexUsageSnapshot, pollCodexUsage } from "./codexusage";
 import { clearOpenRouterKey, openRouterSnapshot, pollOpenRouter, rereadOpenRouterKey, setOpenRouterKey } from "./openrouter";
 import { clearAdminKey, clearCreditBalance, creditSnapshot, pollCredit, setAdminKey, setCreditBalance } from "./anthropiccredit";
@@ -116,6 +116,8 @@ import { isRemote, qualifyRoot } from "../../shared/remote";
 import { Mover } from "./move";
 import { nodeOfUtterance, PeerKurus, peerKey } from "./peerkuru";
 import { Secrets } from "./secrets";
+import { vaultView } from "./vaultview";
+import type { VaultView } from "../../shared/vaultview";
 import { TelegramLead } from "./lead";
 import { adoptLendAsk, asksAnything, webKind, type KindSpec, type Lendable, type LendAsk, type SecretsView } from "../../shared/secrets";
 import { folderSentence, type MoveCheck } from "../../shared/move";
@@ -967,6 +969,68 @@ async function lendSecrets(profileId: string, workspaceId: string, nodeId: strin
     to = check.folder;
   }
   return { ...secrets.lendProject(nodeId, { root, to, workspace: workspace.name }, ask), to };
+}
+
+/**
+ * Settings → Vault: everything this kururu can see and lend, by name. The
+ * hints are the ones each key's own module holds for its own page; every
+ * profile's workspaces are walked for their env files' names; the logins are
+ * the ones a profile's terminals are sent to. Asked for by the page when it
+ * opens, never broadcast.
+ */
+async function vaultFor(): Promise<VaultView> {
+  const home = homedir();
+  const profiles = workspaces.all();
+  const perProfile = loginsActive();
+  const names = (key: string | null) => profiles.filter((p) => (key === null ? !perProfile : p.loginKey === key)).map((p) => p.name);
+  const keys = perProfile ? [...new Set(profiles.map((p) => p.loginKey))] : [];
+
+  const machineDir = process.env.CLAUDE_CONFIG_DIR || null;
+  const claude = [
+    {
+      name: "this Mac",
+      dir: machineDir,
+      profiles: names(null),
+      account: await accountEmail(machineDir ? join(machineDir, ".claude.json") : join(home, ".claude.json")),
+      signedAt: await claudeSignedInAt(machineDir),
+    },
+  ];
+  for (const key of keys) {
+    const dir = claudeDirFor(key);
+    claude.push({ name: `login ${key}`, dir, profiles: names(key), account: await accountEmail(join(dir, ".claude.json")), signedAt: await claudeSignedInAt(dir) });
+  }
+  const codex = [
+    { name: "this Mac", home: process.env.CODEX_HOME || join(home, ".codex"), login: "machine", profiles: names(null) },
+    ...keys.map((key) => ({ name: `login ${key}`, home: codexDirFor(key), login: key, profiles: names(key) })),
+  ];
+
+  const found = [];
+  for (const profile of profiles) {
+    for (const workspace of profile.workspaces) {
+      const pinned = workspace.machine ? (findMachine(workspace.machine.machineId)?.host ?? null) : null;
+      found.push({ id: workspace.id, name: workspace.name, profile: profile.name, root: await checkoutOf(workspace), pinned });
+    }
+  }
+
+  const telegram = channels.status().telegram;
+  return vaultView({
+    home,
+    configDir: configDir(),
+    role: nodes.role(),
+    hints: {
+      openrouter: openRouterSnapshot()?.hint ?? null,
+      telegram: telegram.hint && telegram.bot ? `@${telegram.bot.username} ${telegram.hint}` : telegram.hint,
+      anthropic: creditSnapshot(openRouterSnapshot()).adminHint,
+      web: web
+        .status()
+        .providers.filter((p) => p.fields.some((f) => f.kind === "secret"))
+        .map((p) => ({ id: p.id, label: p.label, hint: p.fields.flatMap((f) => (f.kind === "secret" && f.held ? [f.held] : [])).join(" · ") || null })),
+    },
+    secrets: secrets.view(),
+    workspaces: found,
+    claude,
+    codex,
+  });
 }
 
 /**
@@ -5062,6 +5126,9 @@ function handleMessage(ws: WebSocket, raw: string): void {
       return;
     case "node-move":
       void replyAsync(ws, msg.id, () => moveAndLend(workspaces.active.id, String(msg.workspaceId), String(msg.nodeId), String(msg.folder ?? ""), msg.lend, "user"));
+      return;
+    case "vault":
+      void replyAsync(ws, msg.id, () => vaultFor());
       return;
     case "secrets-offer":
       void replyAsync(ws, msg.id, () => lendOffer(workspaces.active.id, String(msg.workspaceId), String(msg.nodeId), typeof msg.folder === "string" ? msg.folder : null));

@@ -1463,6 +1463,13 @@ export type ClientMessage =
    */
   | { type: "node-card-done"; id: number; nodeId: string; workspaceKey: string; cardId: string }
   /**
+   * Settings → Vault: everything this kururu can see and lend, by name —
+   * its keys by hint, each workspace's env files by variable name, ssh
+   * hosts by key file name, the logins agents use. Never a value. Replied
+   * to with a `VaultView`.
+   */
+  | { type: "vault"; id: number }
+  /**
    * What a workspace could lend a node: its env files, this Mac's ssh entries
    * and GitHub logins, with the node's word on the folder (its guess when
    * null). Hints only. Replied to with a `Lendable`. The parent's alone.
