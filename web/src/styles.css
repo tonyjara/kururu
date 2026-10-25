@@ -4889,8 +4889,11 @@ html.pill-page #root {
    meta line's ink: there on hover, and quietly there all the time on a touch
    screen, where nothing hovers. Hidden by opacity rather than taken out, so a
    row does not change width as the pointer crosses it. On a phone it is a
-   thumb's size and borrows the line's height rather than adding to it. */
-.kuru-reply-btn {
+   thumb's size and borrows the line's height rather than adding to it. The
+   fold beside it is drawn on the same terms, after it, since the arrow has
+   already taken the free space. */
+.kuru-reply-btn,
+.kuru-fold-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4904,23 +4907,31 @@ html.pill-page #root {
   opacity: 0;
 }
 .kuru-item:hover .kuru-reply-btn,
+.kuru-item:hover .kuru-fold-btn,
 .kuru-notice:hover .kuru-reply-btn,
-.kuru-reply-btn:focus-visible {
+.kuru-reply-btn:focus-visible,
+.kuru-fold-btn:focus-visible {
   opacity: 1;
 }
-.kuru-reply-btn:hover {
+.kuru-reply-btn:hover,
+.kuru-fold-btn:hover {
   color: var(--text);
   background: var(--chrome-high);
 }
 @media (hover: none) {
-  .kuru-reply-btn {
+  .kuru-reply-btn,
+  .kuru-fold-btn {
     opacity: 0.7;
   }
 }
-:root[data-narrow] .kuru-reply-btn {
+:root[data-narrow] .kuru-reply-btn,
+:root[data-narrow] .kuru-fold-btn {
   width: 28px;
   height: 28px;
   margin-block: -6px;
+}
+.kuru-fold-btn {
+  margin-left: 0;
 }
 .kuru-to {
   margin: 0 0 4px;
@@ -5188,6 +5199,37 @@ html.pill-page #root {
 .kuru-pending {
   color: var(--dimmer);
   font-style: italic;
+}
+/* A folded line: one row — who, when, and the first of its words, cut
+   where the bubble ends — on the ground that says who, so a column of
+   folded lines still reads as two people. A click anywhere on it opens it,
+   so it wears the pointer; the words are the text's ink and size, a step
+   above the meta line's, because they are what the row is for. */
+.kuru-folded {
+  cursor: pointer;
+}
+/* Only the words give way: the clock, the state and the arrows keep their
+   width, or a narrow drawer wraps "09:41 AM" onto two lines of a row that
+   is meant to be one. */
+.kuru-folded .kuru-meta > * {
+  flex: none;
+}
+.kuru-folded .kuru-meta > .kuru-fold-line {
+  flex: 1 1 auto;
+}
+.kuru-fold-who {
+  flex: none;
+  font-weight: 700;
+  color: var(--dim);
+}
+.kuru-fold-line {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--fs-base);
+  color: var(--text);
 }
 /* The line a reply answers, over its words: a rule down its edge in the
    accent, as a quote is drawn in every chat, whose and when in the meta

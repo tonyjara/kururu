@@ -14,10 +14,17 @@
  * The page also says what is installed: the ears and the Spanish phonemes are
  * Homebrew programs and the model is a download, and a key that does nothing
  * because a program is missing is the worst kind of broken.
+ *
+ * **One switch is about reading rather than hearing:** whether a long
+ * message starts folded in Kuru's drawer. It is here because Voice is the
+ * Kuru group's page for this conversation as you take it in, and a page of
+ * its own for one switch would be a door nobody looks behind. It is this
+ * device's, as the folds it starts are (`kurufold.ts`), so it says so.
  */
 import { useEffect, useState } from "react";
 import { KOKORO_SIZE_MB, LANG_NAMES, LOCALES, VOICE_LANGS, keyCodeLabel, type VoiceChoice, type VoiceLang, type VoiceSettings } from "../../../shared/voice";
 import { desktop, type VoiceGlobalState } from "../desktop";
+import { setFoldLong, useFoldLong } from "../kurufold";
 import { audioOutput } from "../notify";
 import * as api from "../session";
 import { useKururu } from "../session";
@@ -51,6 +58,7 @@ export function VoicePage() {
   const bridge = desktop()?.voice ?? null;
   const [global, setGlobal] = useState<VoiceGlobalState | null>(null);
   const tell = useEditing();
+  const foldLong = useFoldLong();
 
   useEffect(() => {
     if (!bridge) return;
@@ -215,6 +223,10 @@ export function VoicePage() {
           </Group>
         );
       })}
+
+      <Group title="Reading" foot="On this device only, as the folds themselves are: the phone and the Mac each keep their own.">
+        <Toggle label="Fold long messages" hint="A message longer than about fifteen lines starts as one row in Kuru's drawer. Unfolding one keeps it open." on={foldLong} onChange={setFoldLong} />
+      </Group>
 
       <Group
         title="On this Mac"

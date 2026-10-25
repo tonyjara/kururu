@@ -174,6 +174,7 @@ in this folder.
 | `src/voice.ts` | The talk key (hold or tap), the microphone as PCM off a worklet, and the player for what the harness says. Module state, like `session.ts` |
 | `src/reload.ts` | When this page may reload for an agent — the voice, the hands, what is open over it — and the notice carried across the reload |
 | `src/kuru.ts` | Whether the Kuru drawer is open and at which reply, for every door that opens it; what Kuru is doing in one word, for the chip and the drawer |
+| `src/kurufold.ts` | Which lines of Kuru's drawer are folded to one row, on this device: the name a fold is kept under, what a folded line shows, and "Fold long messages". Pure, tested. See [harness](harness.md#a-line-folded-to-one-row) |
 | `src/needs.ts` | Whether the drawer of things that need you is open, for the tray and the key; one drawer at a time with Kuru's |
 | `src/mascot.ts` | Loads a sheet once per URL and reports its size |
 | `src/mermaid.ts` | The one thing the reader draws itself — a diagram needs a DOM |

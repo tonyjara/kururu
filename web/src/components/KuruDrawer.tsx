@@ -97,6 +97,15 @@
  * reply draws it as a quote that scrolls back to the line. A peer's line is
  * answered the same way, and the message starts `@node` so it goes there.
  *
+ * **Any line folds to one row.** Beside the arrow, a fold leaves a message
+ * of yours or a reply of Kuru's as who said it, when, and its first line,
+ * and a click anywhere on that row opens it again; the header folds or
+ * opens every line at once. What is folded is this device's, kept by
+ * `kurufold.ts`, and so is the switch that starts long ones folded. A
+ * quote's line and the reply the pill was showing open on the way to being
+ * shown, and a folded reply is not seen by being in view, since its first
+ * line is not the reply.
+ *
  * What it draws is the server's `kuru` message (`shared/kuru.ts`), already
  * merged: nothing in here decides what a message's state is or whether a
  * reply was heard. What it adds is this page's own two states for a clip the
@@ -113,6 +122,7 @@ import { REPLY_ME, replyClock, replyReference, splitReply, withReply, type Reply
 import type { OutboxState, VoiceSettings } from "../../../shared/voice";
 import { escapePath, handoverFrom, isFileDrag } from "../drop";
 import { kuruLive, kuruWorking, takeKuruWords, useKuruDrawer, type KuruLive } from "../kuru";
+import { firstLine, foldKeys, foldText, isFolded, isLong, readFolds, useFoldLong, withFold, withFolds, writeFolds, type Folds } from "../kurufold";
 import { isLoopback } from "../preview";
 import * as api from "../session";
 import { useKururu } from "../session";
@@ -338,6 +348,74 @@ export function KuruDrawer({
   const items = filter === null ? merged : merged.filter((item) => (item.node ?? selfName) === filter);
   const away = filter !== null ? kuruPeers.find((peer) => peer.node.name === filter && peer.state !== "up") : undefined;
 
+  /**
+   * Which lines are folded to one row (`kurufold.ts`): open by default, or
+   * folded when long while "Fold long messages" is on on this device.
+   */
+  const [folds, setFolds] = useState<Folds>(readFolds);
+  const foldLong = useFoldLong();
+  const foldDefault = (item: NodeKuruItem): boolean => {
+    const text = foldText(item);
+    return foldLong && text !== null && isLong(text);
+  };
+  /** Null for a line with nothing to fold. */
+  const foldedOf = (item: NodeKuruItem): boolean | null => (foldText(item) === null ? null : isFolded(folds, foldKeys(item), foldDefault(item)));
+  const keepFolds = (next: Folds) => {
+    setFolds(next);
+    writeFolds(next);
+  };
+  const foldable = items.filter((item) => foldText(item) !== null);
+  const anyOpen = foldable.some((item) => !foldedOf(item));
+
+  /**
+   * Where a fold leaves the eye. Folding or opening one line keeps its top
+   * where it was, and the rest of it comes and goes below; one folded while
+   * its top was above the list's comes to the top, or it would fold out of
+   * sight. Folding or opening all of them keeps the first line in view where
+   * it was — or the foot, when the list was at the foot.
+   */
+  const keep = useRef<{ id: string; top: number } | "foot" | null>(null);
+  useLayoutEffect(() => {
+    const el = list.current;
+    const kept = keep.current;
+    keep.current = null;
+    if (!el || !kept) return;
+    if (kept === "foot") {
+      el.scrollTop = el.scrollHeight;
+      return;
+    }
+    const row = el.querySelector(`[data-item="${CSS.escape(kept.id)}"]`);
+    if (row) el.scrollTop += row.getBoundingClientRect().top - el.getBoundingClientRect().top - kept.top;
+  }, [folds]);
+  const toggleFold = (item: NodeKuruItem) => {
+    const el = list.current;
+    const row = el?.querySelector(`[data-item="${CSS.escape(item.id)}"]`);
+    if (el && row) keep.current = { id: item.id, top: Math.max(0, row.getBoundingClientRect().top - el.getBoundingClientRect().top) };
+    keepFolds(withFold(folds, foldKeys(item), !foldedOf(item), foldDefault(item)));
+  };
+  const foldAll = () => {
+    const el = list.current;
+    if (el) keep.current = stuck.current ? "foot" : firstInView(el);
+    keepFolds(withFolds(folds, foldable.map((item) => ({ keys: foldKeys(item), byDefault: foldDefault(item) })), anyOpen));
+  };
+
+  /**
+   * A line to bring into view — a quote's, the reply the pill was showing —
+   * opened first when it is folded, and scrolled to once it has its height:
+   * to the middle, or to its top when it is taller than the list can show.
+   */
+  const [goal, setGoal] = useState<{ id: string; smooth: boolean; n: number } | null>(null);
+  const reveal = (item: NodeKuruItem, smooth: boolean) => {
+    if (foldedOf(item)) keepFolds(withFold(folds, foldKeys(item), false, foldDefault(item)));
+    setGoal((was) => ({ id: item.id, smooth, n: (was?.n ?? 0) + 1 }));
+  };
+  useLayoutEffect(() => {
+    const el = list.current;
+    const row = goal ? el?.querySelector<HTMLElement>(`[data-item="${CSS.escape(goal.id)}"]`) : null;
+    if (!el || !row || !goal) return;
+    row.scrollIntoView({ block: row.offsetHeight > el.clientHeight * 0.8 ? "start" : "center", behavior: goal.smooth ? "smooth" : "auto" });
+  }, [goal]);
+
   const earlier = () => {
     if (loading) return;
     setLoading(true);
@@ -370,8 +448,9 @@ export function KuruDrawer({
     if (!el) return;
     if (focus) {
       const row = el.querySelector<HTMLElement>(`[data-utterance="${CSS.escape(focus)}"]`);
-      if (row) {
-        row.scrollIntoView({ block: "center" });
+      const item = row ? items.find((line) => line.id === row.dataset.item) : undefined;
+      if (item) {
+        reveal(item, false);
         setMarked(focus);
         const timer = setTimeout(() => setMarked(null), FOCUS_MS);
         return () => clearTimeout(timer);
@@ -400,9 +479,13 @@ export function KuruDrawer({
    * Seen: a reply in view for `KURU_SEEN_MS` while the page is visible stops
    * counting as unheard. Observed rather than assumed from the drawer being
    * open, because the whole point is that a glance at the drawer is not
-   * reading the reply at the top of a long list.
+   * reading the reply at the top of a long list. Nor is a folded reply in
+   * view read: its first line is not the reply, and it is folded unread when
+   * it was long on its way in, or folded with all the rest.
    */
-  const unheard = items.filter((item): item is NodeKuruItem & KuruReply => item.kind === "kuru" && item.fate === "unheard" && item.utterance !== null).map((item) => item.utterance!);
+  const unheard = items
+    .filter((item): item is NodeKuruItem & KuruReply => item.kind === "kuru" && item.fate === "unheard" && item.utterance !== null && !foldedOf(item))
+    .map((item) => item.utterance!);
   const unheardKey = unheard.join("\n");
   useEffect(() => {
     const el = list.current;
@@ -528,14 +611,14 @@ export function KuruDrawer({
     const lines = items.filter((line) => line.node === node).map((line) => ({ ...line, id: ownId(line), drawn: line.id }));
     return quotedLine(lines, ref, before)?.drawn ?? null;
   };
-  /** A quote was pressed: its line, in the middle of the list, lit for a moment as a reply the pill named is. */
+  /** A quote was pressed: its line, opened when it is folded and in the middle of the list, lit for a moment as a reply the pill named is. */
   const [flash, setFlash] = useState<string | null>(null);
-  const goTo = useCallback((id: string) => {
-    const row = list.current?.querySelector<HTMLElement>(`[data-item="${CSS.escape(id)}"]`);
-    if (!row) return;
-    row.scrollIntoView({ block: "center", behavior: "smooth" });
+  const goTo = (id: string) => {
+    const item = items.find((line) => line.id === id);
+    if (!item) return;
+    reveal(item, true);
     setFlash(id);
-  }, []);
+  };
   useEffect(() => {
     if (!flash) return;
     const timer = setTimeout(() => setFlash(null), FOCUS_MS);
@@ -557,6 +640,7 @@ export function KuruDrawer({
       <header className="kuru-head">
         {chips}
         <span className="kuru-head-spacer" />
+        {foldable.length > 0 && <FoldAll open={anyOpen} onFold={foldAll} />}
         {voice && <SpeakSwitch settings={voice.settings} />}
         {telegram && <TelegramSwitch status={telegram} />}
         <button className="sidebar-close kuru-close" onClick={onClose} aria-label="Close" title="Close (Esc)">
@@ -599,6 +683,8 @@ export function KuruDrawer({
                   onQuote={quoted ? () => goTo(quoted) : null}
                   onReplyTo={() => replyTo(item)}
                   flash={flash === item.id}
+                  folded={foldedOf(item) === true}
+                  onFold={item.text ? () => toggleFold(item) : null}
                 />
               );
             })()
@@ -625,6 +711,8 @@ export function KuruDrawer({
               replaying={replayingId === item.id}
               onReplay={onReplay}
               onReplyTo={() => replyTo(item)}
+              folded={foldedOf(item) === true}
+              onFold={() => toggleFold(item)}
               cardOf={item.node === null ? cardOf : noCards}
               onCard={onCard}
               onFile={onFile}
@@ -928,7 +1016,8 @@ function TelegramSwitch({ status }: { status: TelegramStatus }) {
  * this one's was addressed to with `@`, on its way there. A reply draws the
  * line it answers as a quote over the words, a door back to that line when
  * `onQuote` found it, and the reference itself — written for Kuru — not at
- * all.
+ * all. Folded, it is the meta line with the first of its words in it, and
+ * the quote is behind the fold with the rest.
  */
 function You({
   item,
@@ -942,6 +1031,8 @@ function You({
   onQuote = null,
   onReplyTo = null,
   flash = false,
+  folded = false,
+  onFold = null,
 }: {
   item: YouItem;
   state: RowState;
@@ -955,14 +1046,22 @@ function You({
   /** Reply to this message. Null for a clip still on this page, which has no words to quote. */
   onReplyTo?: (() => void) | null;
   flash?: boolean;
+  folded?: boolean;
+  /** Fold it to one row, or open it. Null for a message with no words to fold. */
+  onFold?: (() => void) | null;
 }) {
   const word = state === "queued" ? (item.typedAt !== null ? "Sent" : STATE_WORD.queued) : STATE_WORD[state];
   const channel = isChannelKind(item.via) ? item.via : null;
   const text = reply ? reply.text : item.text;
+  const line = folded && onFold && text ? firstLine(text) : null;
   return (
-    <li className={`kuru-item kuru-you kuru-you-${state} ${flash ? "kuru-flash" : ""}`} data-item={item.id}>
+    <li
+      className={`kuru-item kuru-you kuru-you-${state} ${line ? "kuru-folded" : ""} ${flash ? "kuru-flash" : ""}`}
+      data-item={item.id}
+      onClick={line && onFold ? opensOnClick(onFold) : undefined}
+    >
       <span className="kuru-meta">
-        <NodeTag node={node} />
+        {line ? <span className="kuru-fold-who">{foldWho("you", node)}</span> : <NodeTag node={node} />}
         {to && <span className="kuru-node" title={`For the Kuru on ${to}`}>→ {to}</span>}
         {item.through && <span className="kuru-via" title={`Written or said at ${item.through}`}>from {item.through}</span>}
         {item.via === "voice" ? (
@@ -978,18 +1077,24 @@ function You({
         <time dateTime={new Date(item.at).toISOString()}>{saidAt(item.at)}</time>
         {item.via === "voice" && item.ms > 0 && <span className="kuru-length">{clipLength(item.ms)}</span>}
         {word && <span className={`kuru-state kuru-state-${state}`}>{word}</span>}
+        {line && (
+          <FoldLine more={line.more}>
+            <RefWords text={line.line} refOf={refOf} onCard={onCard} />
+          </FoldLine>
+        )}
         {onReplyTo && item.text && <ReplyButton onReply={onReplyTo} />}
+        {onFold && <FoldButton folded={line !== null} onFold={onFold} />}
       </span>
-      {reply && <Quote quote={reply.ref} node={node ?? to} onOpen={onQuote} />}
-      {text ? (
+      {!line && reply && <Quote quote={reply.ref} node={node ?? to} onOpen={onQuote} />}
+      {line ? null : text ? (
         <p className="kuru-text">
           <RefWords text={text} refOf={refOf} onCard={onCard} />
         </p>
       ) : (
         <p className="kuru-text kuru-pending">Not in words yet — the audio is kept.</p>
       )}
-      {note && <p className="kuru-note">{note}</p>}
-      {state === "failed" && item.outboxId && (
+      {!line && note && <p className="kuru-note">{note}</p>}
+      {!line && state === "failed" && item.outboxId && (
         <span className="kuru-actions">
           <button className="kuru-head-btn" onClick={() => api.resendVoice(item.outboxId!)}>
             {item.text ? "Resend" : "Listen again"}
@@ -1007,7 +1112,8 @@ function You({
  * One of Kuru's replies, with its fate beside it and a door onto every card
  * it names. The speaker is the one control for Play and Stop both: it plays
  * this reply again while idle, and stops whatever is audible — this replay,
- * or Kuru saying it for the first time — while `active`.
+ * or Kuru saying it for the first time — while `active`. Folded, the meta
+ * line holds its first line, still with every door in it.
  */
 function Reply({
   item,
@@ -1017,6 +1123,8 @@ function Reply({
   replaying,
   onReplay,
   onReplyTo,
+  folded,
+  onFold,
   cardOf,
   onCard,
   onFile,
@@ -1031,17 +1139,22 @@ function Reply({
   onReplay: (item: KuruReply) => void;
   /** Reply to this one: the composer quotes it — and starts `@node ` for another node's Kuru. */
   onReplyTo: () => void;
+  folded: boolean;
+  /** Fold it to one row, or open it. */
+  onFold: () => void;
   cardOf: CardOf;
   onCard: (workspaceId: string | null, cardId: string) => void;
   /** A path in the reply was opened. */
   onFile: () => void;
 }) {
   const active = replaying || item.fate === "speaking";
+  const line = folded ? firstLine(item.text) : null;
   return (
     <li
-      className={`kuru-item kuru-reply ${item.aside ? "kuru-aside" : ""} ${item.fate ? `kuru-fate-${item.fate}` : ""} ${marked ? "kuru-marked" : ""} ${flash ? "kuru-flash" : ""}`}
+      className={`kuru-item kuru-reply ${item.aside ? "kuru-aside" : ""} ${item.fate ? `kuru-fate-${item.fate}` : ""} ${line ? "kuru-folded" : ""} ${marked ? "kuru-marked" : ""} ${flash ? "kuru-flash" : ""}`}
       data-utterance={item.utterance ?? undefined}
       data-item={item.id}
+      onClick={line ? opensOnClick(onFold) : undefined}
     >
       <span className="kuru-meta">
         {item.utterance ? (
@@ -1058,28 +1171,123 @@ function Reply({
         ) : (
           <SpeakerIcon />
         )}
-        <NodeTag node={node} />
+        {line ? <span className="kuru-fold-who">{foldWho("kuru", node)}</span> : <NodeTag node={node} />}
         <time dateTime={new Date(item.at).toISOString()}>{saidAt(item.at)}</time>
         {active ? (
           <span className="kuru-state kuru-state-speaking">Speaking</span>
         ) : item.fate === "unheard" ? (
           <span className="kuru-state kuru-state-unheard">Unheard</span>
         ) : null}
+        {line && (
+          <FoldLine more={line.more}>
+            <ReplyWords text={line.line} files={item.files} cardOf={cardOf} onCard={onCard} onFile={onFile} />
+          </FoldLine>
+        )}
         <ReplyButton onReply={onReplyTo} />
+        <FoldButton folded={line !== null} onFold={onFold} />
       </span>
-      <p className="kuru-text">
-        {/* Paths first, each a link when the server found its file, then card codes in
-            the words between: a path such as docs/KUR-12.md is a file, not a card. */}
-        {(item.files?.length ? splitMentions(item.text) : [{ text: item.text }]).map((part, i) => {
-          if ("mention" in part) {
-            const file = item.files?.find((f) => f.text === part.mention.text);
-            if (file) return <MadeInline key={i} file={file} label={part.mention.text} onOpened={onFile} />;
-          }
-          return <CardWords key={i} text={"mention" in part ? part.mention.text : part.text} cardOf={cardOf} onCard={onCard} />;
-        })}
-      </p>
+      {!line && (
+        <p className="kuru-text">
+          <ReplyWords text={item.text} files={item.files} cardOf={cardOf} onCard={onCard} onFile={onFile} />
+        </p>
+      )}
     </li>
   );
+}
+
+/**
+ * Kuru's words with their doors in: paths first, each a link when the server
+ * found its file, then card codes in the words between — a path such as
+ * docs/KUR-12.md is a file, not a card.
+ */
+function ReplyWords({ text, files, cardOf, onCard, onFile }: { text: string; files: KuruReply["files"]; cardOf: CardOf; onCard: (workspaceId: string | null, cardId: string) => void; onFile: () => void }) {
+  return (
+    <>
+      {(files?.length ? splitMentions(text) : [{ text }]).map((part, i) => {
+        if ("mention" in part) {
+          const file = files?.find((f) => f.text === part.mention.text);
+          if (file) return <MadeInline key={i} file={file} label={part.mention.text} onOpened={onFile} />;
+        }
+        return <CardWords key={i} text={"mention" in part ? part.mention.text : part.text} cardOf={cardOf} onCard={onCard} />;
+      })}
+    </>
+  );
+}
+
+/** Who a folded line is from, in words: one row has no room for the side and the ground to say it alone. */
+function foldWho(kind: "you" | "kuru", node: string | null): string {
+  if (kind === "kuru") return node ? `Kuru on ${node}` : "Kuru";
+  return node ? `You, on ${node}` : "You";
+}
+
+/** The first of a folded line's words, cut where the bubble ends, and an ellipsis of its own when there is more below a line that fits. */
+function FoldLine({ more, children }: { more: boolean; children: ReactNode }) {
+  return (
+    <span className="kuru-fold-line">
+      {children}
+      {more && " …"}
+    </span>
+  );
+}
+
+/**
+ * A folded line opens wherever it is clicked, except on what is a door of
+ * its own — the speaker, the arrows, a card, a file — and except at the end
+ * of a drag that was selecting some of its words.
+ */
+function opensOnClick(open: () => void) {
+  return (event: React.MouseEvent) => {
+    if (event.target instanceof Element && event.target.closest("button, a")) return;
+    if (window.getSelection()?.toString()) return;
+    open();
+  };
+}
+
+/**
+ * The fold, beside the reply arrow and on its terms: on hover where there is
+ * a pointer, quietly always on a touch screen. The glyph is what a press
+ * does — chevrons closing on a line that is open, opening on one that is
+ * folded — and the name stays the same both ways, with `aria-pressed` saying
+ * which, as the speaker switch's does.
+ */
+function FoldButton({ folded, onFold }: { folded: boolean; onFold: () => void }) {
+  return (
+    <button
+      type="button"
+      className="kuru-fold-btn"
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onFold}
+      title={folded ? "Unfold this message" : "Fold this message to one row"}
+      aria-label="Fold this message to one row"
+      aria-pressed={folded}
+    >
+      <FoldIcon folded={folded} />
+    </button>
+  );
+}
+
+/**
+ * Every line folded at once, or every line opened — the lines the list is
+ * drawing, narrowed to one node or not, and none it has still to load. It
+ * folds while any of them is open, and opens them once none is, and its
+ * glyph says which.
+ */
+function FoldAll({ open, onFold }: { open: boolean; onFold: () => void }) {
+  return (
+    <button type="button" className="kuru-head-btn kuru-head-icon" onClick={onFold} title={open ? "Fold every message to one row" : "Unfold every message"} aria-label={open ? "Fold every message" : "Unfold every message"}>
+      <FoldIcon folded={!open} />
+    </button>
+  );
+}
+
+/** The first line in view in the list, and how far below the list's top it is — what folding them all keeps in place. */
+function firstInView(el: HTMLElement): { id: string; top: number } | null {
+  const top = el.getBoundingClientRect().top;
+  for (const row of el.querySelectorAll<HTMLElement>("[data-item]")) {
+    const box = row.getBoundingClientRect();
+    if (box.bottom > top && row.dataset.item) return { id: row.dataset.item, top: Math.max(0, box.top - top) };
+  }
+  return null;
 }
 
 /**
@@ -1715,6 +1923,15 @@ function KeysIcon() {
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="2" y="6" width="20" height="12" rx="2" />
       <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8" />
+    </svg>
+  );
+}
+
+/** Two chevrons opening away from a line, to unfold it, or closing on it, to fold it — drawn here for `KeysIcon`'s reason. */
+function FoldIcon({ folded }: { folded: boolean }) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={folded ? "m7 15 5 5 5-5M7 9l5-5 5 5" : "m7 20 5-5 5 5M7 4l5 5 5-5"} />
     </svg>
   );
 }

@@ -251,6 +251,41 @@ A Telegram reply carries the same reference; see
 again. Like every role section, it reaches a running Kuru when it is next
 started or resumed.
 
+## A line folded to one row
+
+Beside the reply arrow, on the arrow's terms — on hover, and quietly always
+on a touch screen — every message of yours and every reply of Kuru's has a
+fold. Folded, the line is one row: who said it, when, and its first line,
+cut where the bubble ends, with an ellipsis of its own when more lines
+follow one that fits. The ground and the side stay, so a column of folded
+lines still reads as two people; the speaker, the state word, the arrows
+and any card or file in that first line keep working, and a click anywhere
+else on the row opens it again. The header's own fold folds every line the
+list is drawing — narrowed to one node or not — while any is open, and opens
+them all once none is. kururu's notices are left alone: they are one line
+already, with the message behind a tap.
+
+Nothing a line is for is lost behind a fold. A reply of yours folds to its
+words, never to the reference's brackets, and its quote comes back with the
+rest. A quote pressed for a folded line opens that line on the way to it,
+and so does the reply the pill was showing when the drawer is opened at it;
+a line taller than the list is brought in from its top rather than its
+middle. A folded reply is not *seen* by being in view, since its first line
+is not the reply, so it stays unheard until it is opened or played.
+
+The folds are this device's, in `localStorage` (`kururu.kuru.folds`) on the
+draft's terms: how a screen is read is the screen's, and the phone and the
+Mac want different lines open. A line is kept by a name it keeps — a spoken
+reply by its utterance, which outlives its `m…` id becoming a turn's; your
+message by its turn's id, with the outbox id it waited under looked up as
+well, since the outbox forgets it — and only what differs from the default
+is written, the newest 2000 of them (`web/src/kurufold.ts`).
+
+Settings → Voice has the one switch, **Fold long messages**, off unless it
+is put on, and also this device's: a line of about fifteen rows or more — a
+paragraph counted as the rows it wraps to — starts folded, and one opened
+stays open.
+
 ## Auto Swap
 
 A switch in Settings → Agents, under Harness, for the profile on screen — each
