@@ -5653,6 +5653,31 @@ button.kuru-quote:hover {
 .needs-ws-head:hover {
   background: var(--chrome-high);
 }
+/* A waiting group's name line: the caret that folds the group, by its name,
+   and the name, which is the door and the handle a mouse drags. */
+.needs-ws-top {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.needs-ws-top .needs-ws-head {
+  flex: 1;
+  min-width: 0;
+}
+.needs-ws-fold {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 24px;
+  border-radius: var(--radius-md);
+  color: var(--dimmer);
+}
+.needs-ws-fold:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
 .needs-ws-name {
   min-width: 0;
   overflow: hidden;
@@ -5672,7 +5697,7 @@ button.kuru-quote:hover {
   font-variant-numeric: tabular-nums;
   line-height: 16px;
 }
-.needs-ws:not(.needs-ws-working) > .needs-ws-head .needs-ws-n {
+.needs-ws:not(.needs-ws-working) > .needs-ws-top .needs-ws-n {
   background: var(--accent);
   color: var(--on-accent);
 }
@@ -5829,7 +5854,48 @@ a.needs-go {
   border-color: var(--line-high);
   background: var(--chrome-high);
 }
+/* Sorting with a mouse (`useSort`): the thing carried fades where it was,
+   and a rule in the accent is drawn where it would land — between two
+   groups, in the middle of the gap the list leaves, and between two rows on
+   the seam. The Settings roster's line, for the same gesture. */
+.needs-sorting,
+.needs-sorting * {
+  cursor: grabbing;
+}
+.needs-ws,
+.needs-row {
+  position: relative;
+}
+.needs-sorting-this {
+  opacity: 0.5;
+}
+.needs-drop-before::before,
+.needs-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--border-thick);
+  background: var(--accent);
+  pointer-events: none;
+}
+.needs-row.needs-drop-before::before {
+  top: 0;
+}
+.needs-row.needs-drop-after::after {
+  bottom: 0;
+}
+.needs-ws.needs-drop-before::before {
+  top: -7px;
+}
+.needs-ws.needs-drop-after::after {
+  bottom: -7px;
+}
 /* A thumb's height on a phone. */
+:root[data-narrow] .needs-ws-fold {
+  width: 32px;
+  height: 36px;
+}
 :root[data-narrow] .needs-go {
   padding: 8px 6px;
 }

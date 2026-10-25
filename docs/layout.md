@@ -587,6 +587,33 @@ always to the first is what lets a prompt be left for later. The Needs you
 cards are not on that walk: their door is the profile's board, a sheet that
 takes the keyboard, and a walk into it would stop there.
 
+**A group folds, and the queue sorts — per device.** Every group in the
+drawer — a waiting workspace, Your board, another node's workspace — has a
+caret by its name that folds it to that line and its count, kept in a set of
+the folded (`kururu.needs.shut`) so a group nobody touched arrives open. The
+waiting groups and the cards in them can be put in the order they will be
+taken: a mouse drags a group by its name and a card by its row, and the
+menu on a right-click or a held touch has Move up, down, to the top and to
+the bottom, which is the phone's way, since a finger's press there is a
+scroll or that menu. The drag is pointer events, not the platform's drag and
+drop: every press in the drawer cancels its `mousedown` to keep the keyboard
+on the terminal, and a `draggable` needs that `mousedown`. What is kept is
+`web/src/needsorder.ts`'s: per profile, a list of workspace keys and one of
+card ids per workspace, in `localStorage`, so a phone's order is the phone's.
+A group or card the list does not name goes at the foot of its group; a key
+out of the drawer for now keeps its place, and one whose workspace or card is
+gone is dropped on the next write. Two things do not move that way. An agent
+row with no card keeps the place the rule gave it — asking at the top,
+finished-unseen at the foot — and the cards are sorted around it: its need
+lasts until it is looked at, its id is reassigned on a host restart, and a
+question holds a turn up. And Your board's cards are sorted by
+`move-profile-card` into the Needs you column itself, so the board and the
+drawer never disagree about the to-dos. `App` arranges the needs once
+(`arrangedNeeds`) and hands the same order to the drawer and to `C-a o`, so
+Next walks what is drawn; a folded group is still counted and still walked.
+"Sort groups as the sidebar does" and "Sort its cards as the board does",
+on a group's menu, forget the order.
+
 ### What an agent made
 
 **A link to the file a turn ended in, under the agent's row, on its card, and

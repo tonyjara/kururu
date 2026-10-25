@@ -64,6 +64,7 @@ import { isLoopback } from "./preview";
 import { KuruDrawer } from "./components/KuruDrawer";
 import { closeKuru, kuruLive, openKuru, toggleKuru, useKuruDrawer } from "./kuru";
 import { closeNeeds, toggleNeeds, useNeedsDrawer } from "./needs";
+import { arrangedNeeds, useNeedsView } from "./needsorder";
 import { NeedsDrawer } from "./components/NeedsDrawer";
 import { needsOf, type Need } from "../../shared/needs";
 import { nextNeedAcross, nodeNeeds as nodeNeedsOf, parseRemote, qualify, workspacesAcross, type NodeNeed } from "../../shared/remote";
@@ -478,6 +479,14 @@ export function App() {
    * tray, the drawer behind it, and the dot on a workspace's row.
    */
   const needs = useMemo(() => (profile ? needsOf(profile, agents) : null), [profile, agents]);
+  /**
+   * The same, in the order this device's drawer was sorted into
+   * (`needsorder.ts`) — what the drawer draws and so what Next walks, since
+   * a key that went somewhere other than the next row down would be a key
+   * nobody could predict. The counts are the same either way.
+   */
+  const { order: needsOrder } = useNeedsView(profile?.key ?? null);
+  const queue = useMemo(() => (needs ? arrangedNeeds(needs, needsOrder) : null), [needs, needsOrder]);
   const needyWorkspaces = useMemo(
     () => new Set(needs?.workspaces.filter((w) => w.band === "needs").map((w) => w.workspace.id) ?? []),
     [needs],
@@ -538,9 +547,9 @@ export function App() {
   );
   /** The next thing that needs you, here or on a node, from where the keyboard is — `nextNeedAcross`'s walk. */
   const goNext = useCallback(() => {
-    if (!needs) return;
+    if (!queue) return;
     const pane = onScreen ? panes(onScreen.layout).find((p) => p.id === onScreen.focusedPaneId) : undefined;
-    const next = nextNeedAcross(needs, nodeNeedsOf(nodes?.nodes ?? []), {
+    const next = nextNeedAcross(queue, nodeNeedsOf(nodes?.nodes ?? []), {
       focusedAgentId: focusedAgentOf(onScreen),
       workspaceId: workspace?.id ?? null,
       remote: remote ? { node: remote.node.id, workspaceKey: remote.workspaceKey } : null,
@@ -549,7 +558,7 @@ export function App() {
     if (!next) return;
     if ("here" in next) goToNeed(next.here);
     else goToNodeNeed(next.there);
-  }, [needs, nodes, onScreen, workspace, remote, goToNeed, goToNodeNeed]);
+  }, [queue, nodes, onScreen, workspace, remote, goToNeed, goToNodeNeed]);
 
   /**
    * Wear whatever the server says. The chrome's tokens go onto the root element
@@ -1747,9 +1756,9 @@ export function App() {
           of the two at a time. Not dimmed behind, for Kuru's reason — you deal
           with a thing in its pane with the list of what is left beside it.
           See `NeedsDrawer.tsx`. */}
-      {needsOpen && needs && (
+      {needsOpen && queue && (
         <NeedsDrawer
-          needs={needs}
+          needs={queue}
           profile={profile}
           nodes={linked}
           mascots={snapshot.mascots}

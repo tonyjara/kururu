@@ -443,7 +443,9 @@ The load-bearing invariants, one line each, with the argument behind the link:
   lists it by workspace in three bands with Next a press away (`C-a i`,
   `C-a o`), and a workspace's sidebar row wears the dot. No component
   decides it again, and nothing in it is dismissed by hand — a row leaves
-  when its state does. The profile board is the profile's own board and
+  when its state does. Its groups fold and its queue sorts per device
+  (`web/src/needsorder.ts`), which changes what is drawn first and what
+  Next walks to, never what is counted. The profile board is the profile's own board and
   draws no workspace's; a card asked for by name goes to its board in its
   pane through `showCardNext`. → [layout](docs/layout.md#what-needs-you)
 - **A channel is another door into the one conversation, and only the

@@ -176,6 +176,7 @@ in this folder.
 | `src/kuru.ts` | Whether the Kuru drawer is open and at which reply, for every door that opens it; what Kuru is doing in one word, for the chip and the drawer |
 | `src/kurufold.ts` | Which lines of Kuru's drawer are folded to one row, on this device: the name a fold is kept under, what a folded line shows, and "Fold long messages". Pure, tested. See [harness](harness.md#a-line-folded-to-one-row) |
 | `src/needs.ts` | Whether the drawer of things that need you is open, for the tray and the key; one drawer at a time with Kuru's |
+| `src/needsorder.ts` | The Needs drawer's folds and the order its groups and cards were sorted into, per device and per profile; what Next walks. Pure but for the store, tested |
 | `src/mascot.ts` | Loads a sheet once per URL and reports its size |
 | `src/mermaid.ts` | The one thing the reader draws itself — a diagram needs a DOM |
 | `src/labels.ts` | How the window draws the answers `shared/labels.ts` decides |
@@ -201,7 +202,7 @@ for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` (the windo
 `Search.tsx` (the search over every board and the conversations, and the deleted cards, in the profile board's sheet; a card hit is a door to the card) ·
 `ProfileBoard.tsx` (the profile's own cards, in a sheet over the window; its own and no other's) ·
 `ColorPicker.tsx` (a column's colour, from the profile board) ·
-`NeedsDrawer.tsx` (what needs you across the workspaces, in three bands, with the next one a press away; opened by the tray in `DrawerChips.tsx`) ·
+`NeedsDrawer.tsx` (what needs you across the workspaces, in three bands, with the next one a press away, its groups folding and sorting; opened by the tray in `DrawerChips.tsx`) ·
 `NodeChip.tsx` (another node's name in its own hue, on every remote thing) · `RemoteBand.tsx` (the band over another node's workspace: whose, away since when, what could not be sent) ·
 `Timeline.tsx` (that board by when its cards are for; holds only which weeks it is showing) ·
 `FileTree.tsx` (markdown to the reader, the rest to nvim; holds the reader's zoom) · `DocPicker.tsx` (an empty reader only) ·

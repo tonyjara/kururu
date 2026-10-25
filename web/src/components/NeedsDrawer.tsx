@@ -37,9 +37,19 @@
  * the way, and still each a door. Nothing here is dismissed by hand: a
  * row leaves when its state does, which is the only way a list of needs
  * stays honest.
+ *
+ * **A group folds, and the queue sorts.** Ten cards under one workspace
+ * are a wall the rest of the queue is behind, so every group — a
+ * workspace's, Your board, another node's — has a caret by its name that
+ * folds it to that one line and its count, and the groups and the cards in
+ * them can be put in the order they will be taken: dragged with a mouse, or
+ * moved from the menu a right-click or a held touch opens, which is the
+ * phone's way. Folded is not dismissed — the tray still counts what is in
+ * there, and Next still goes to it. What is kept and why, and what does not
+ * move, is `needsorder.ts`; this draws it.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { boardLanes, cardCode, type Card } from "../../../shared/board";
+import { boardLanes, cardCode, NEEDS_COLUMN, type Card } from "../../../shared/board";
 import { cardPlace } from "../../../shared/kuru";
 import { allNeeds, type Need, type NeedKind, type ProfileNeeds, type WorkspaceNeeds } from "../../../shared/needs";
 import type { NodeStatus, SummaryAgent, SummaryNeed } from "../../../shared/nodes";
@@ -48,7 +58,7 @@ import { useCardDone } from "../cardDone";
 import { referItem } from "../kuru";
 import { agentLabel, agentSummary } from "../labels";
 import { asAgent } from "../nodes";
-import { nodeNeeds, type NodeNeed } from "../../../shared/remote";
+import { nodeNeeds, qualify, type NodeNeed } from "../../../shared/remote";
 import { hueStyle } from "./NodeChip";
 import * as api from "../session";
 import { ago } from "./Board";
@@ -59,6 +69,18 @@ import { Menu, type MenuAt, type MenuItem } from "./Menu";
 import { NeedsByMark, profileCardMoves } from "./ProfileBoard";
 import { Status } from "./Status";
 import { datesLabel } from "../when";
+import {
+  arrange,
+  BOARD_GROUP,
+  dropIndex,
+  moveTo,
+  movesFrom,
+  setOrder,
+  toggleShut,
+  useNeedsView,
+  withCards,
+  withGroups,
+} from "../needsorder";
 
 /**
  * Whether the quiet band is open, per device, on the sidebar disclosures'
@@ -166,14 +188,97 @@ export function NeedsDrawer({
    * Separate from the inline "Done" button beside it, which only ever shows
    * for a `Need.plainDone` row and skips the question because there is none.
    */
-  const [cardMenu, setCardMenu] = useState<{ at: MenuAt; workspaceId: string; workspaceName: string; card: Card } | null>(null);
+  const [cardMenu, setCardMenu] = useState<{ at: MenuAt; workspaceKey: string; card: Card } | null>(null);
   /** A Needs you card's row menu: its own card menu's moves, and the door to it. */
   const [boardMenu, setBoardMenu] = useState<{ at: MenuAt; card: Card } | null>(null);
-  const boardMenuItems = (card: Card): MenuItem[] => [
-    { label: "Open on the board", run: () => onProfileCard(card.id) },
-    ...profileCardMoves(profile, card),
-    referItem({ code: cardCode(profile.name, card.number), title: card.title, place: cardPlace(null, api.nodeNameOf), cardId: card.id }),
-  ];
+  /** A group's menu, off its name: the fold, and where the group goes. */
+  const [groupMenu, setGroupMenu] = useState<{ at: MenuAt; key: string } | null>(null);
+  const { order, shut } = useNeedsView(profile.key);
+
+  const waiting = needs.workspaces.filter((w) => w.band === "needs");
+  const working = needs.workspaces.filter((w) => w.band === "working");
+  const quiet = needs.workspaces.filter((w) => w.band === "quiet");
+  /* The waiting workspaces come already in the person's order, so that Next
+     walks what is drawn (`arrangedNeeds`, in `App`); this places Your board
+     among them, which is no workspace and so not in that walk. */
+  type Group = { key: string; w: WorkspaceNeeds | null };
+  const groups = arrange<Group>(
+    [...waiting.map((w) => ({ key: w.workspace.key, w })), ...(needs.cards.length ? [{ key: BOARD_GROUP, w: null }] : [])],
+    (group) => group.key,
+    order.groups,
+  );
+  const groupKeys = groups.map((group) => group.key);
+  /** The key a group is folded by, which has to be unique past this profile — see `needsorder.ts`'s `SHUT_KEY`. */
+  const shutKey = (key: string) => (key === BOARD_GROUP ? `board:${profile.key}` : key);
+  const moveGroup = (key: string, index: number) =>
+    setOrder(profile.key, withGroups(order, profile, groupKeys, moveTo(groupKeys, key, index)));
+  /** A workspace group's cards, as drawn: what its moves count, since its agent rows stay put. */
+  const cardKeys = (w: WorkspaceNeeds) => w.needs.flatMap((need) => (need.card ? [need.card.id] : []));
+  const moveWorkspaceCard = (w: WorkspaceNeeds, cardId: string, index: number) => {
+    const drawn = cardKeys(w);
+    setOrder(profile.key, withCards(order, profile, w.workspace.key, drawn, moveTo(drawn, cardId, index)));
+  };
+  /* Your board's cards are its column's, so a move is the board's own, by the
+     index `moveCard` counts — the column's cards with this one taken out,
+     which is what `moveTo` counts too. */
+  const moveBoardCard = (cardId: string, index: number) => api.moveProfileCard(profile.id, cardId, NEEDS_COLUMN, index);
+
+  /* A drop is a move to an index, and one that lands where the thing already
+     is sends nothing — on Your board that would be a write to the database
+     for no change. Rows are keyed `c<card>` and `a<agent>`, as React keys
+     them, and only the `c`s count, since the agent rows stay put. */
+  const sort = useSort(root, (what, over) => {
+    if (what.kind === "group") {
+      const index = dropIndex(groupKeys, what.key, over.key, over.after);
+      if (index !== groupKeys.indexOf(what.key)) moveGroup(what.key, index);
+      return;
+    }
+    const board = what.group === BOARD_GROUP;
+    const w = board ? null : waiting.find((one) => one.workspace.key === what.group);
+    const rows = board ? needs.cards.map((card) => `c${card.id}`) : w?.needs.map(needKey);
+    if (!rows) return;
+    const isCard = (key: string) => key.startsWith("c");
+    const index = dropIndex(rows, what.key, over.key, over.after, isCard);
+    if (index === rows.filter(isCard).indexOf(what.key)) return;
+    const cardId = what.key.slice(1);
+    if (w) moveWorkspaceCard(w, cardId, index);
+    else moveBoardCard(cardId, index);
+  });
+
+  const boardMenuItems = (card: Card): MenuItem[] => {
+    const [first, ...rest] = profileCardMoves(profile, card);
+    return [
+      { label: "Open on the board", run: () => onProfileCard(card.id) },
+      ...placeMoves(
+        needs.cards.map((c) => c.id),
+        card.id,
+        (index) => moveBoardCard(card.id, index),
+      ),
+      ...(first ? [{ ...first, sep: true }, ...rest] : []),
+      referItem({ code: cardCode(profile.name, card.number), title: card.title, place: cardPlace(null, api.nodeNameOf), cardId: card.id }),
+    ];
+  };
+  const groupMenuItems = (key: string): MenuItem[] => {
+    const group = groups.find((one) => one.key === key);
+    if (!group) return [];
+    return [
+      { label: shut.has(shutKey(key)) ? "Show" : "Fold away", run: () => toggleShut(shutKey(key)) },
+      ...placeMoves(groupKeys, key, (index) => moveGroup(key, index), "group"),
+      ...(order.groups.length ? [{ label: "Sort groups as the sidebar does", sep: true, run: () => setOrder(profile.key, { ...order, groups: [] }) }] : []),
+      ...(group.w && order.cards[key]?.length
+        ? [
+            {
+              label: "Sort its cards as the board does",
+              sep: !order.groups.length,
+              run: () => {
+                const { [key]: _dropped, ...cards } = order.cards;
+                setOrder(profile.key, { ...order, cards });
+              },
+            },
+          ]
+        : []),
+    ];
+  };
   /* Done is a plain move on the profile's board, which runs nothing — so the
      row may offer it outright, on a board whose Done is still there. */
   const hasDone = boardLanes(profile.board).some((lane) => lane.id === "done");
@@ -188,22 +293,30 @@ export function NeedsDrawer({
   const { ask, setAsk, moveToDone } = useCardDone(agentOpen, devOpen, {
     error: (_cardId, err) => window.alert(err instanceof Error ? err.message : String(err)),
   });
-  const cardMenuItems = (workspaceId: string, workspaceName: string, card: Card): MenuItem[] => [
-    { label: "Move to Done", run: () => moveToDone(workspaceId, card) },
-    // Opening Kuru's drawer closes this one: the two share the slot.
-    referItem({ code: cardCode(workspaceName, card.number), title: card.title, place: cardPlace(workspaceId, api.nodeNameOf), cardId: card.id }),
-  ];
+  const cardMenuItems = (workspaceKey: string, card: Card): MenuItem[] => {
+    const w = waiting.find((one) => one.workspace.key === workspaceKey);
+    if (!w) return [];
+    const { id: workspaceId, name: workspaceName } = w.workspace;
+    return [
+      { label: "Move to Done", run: () => moveToDone(workspaceId, card) },
+      ...placeMoves(cardKeys(w), card.id, (index) => moveWorkspaceCard(w, card.id, index)),
+      // Opening Kuru's drawer closes this one: the two share the slot.
+      referItem({ code: cardCode(workspaceName, card.number), title: card.title, place: cardPlace(workspaceId, api.nodeNameOf), cardId: card.id }),
+    ];
+  };
 
-  const waiting = needs.workspaces.filter((w) => w.band === "needs");
-  const working = needs.workspaces.filter((w) => w.band === "working");
-  const quiet = needs.workspaces.filter((w) => w.band === "quiet");
   /* A node that is away is left out, not drawn stale: its last summary may
      list a question already answered, and this is a queue to act on. */
   const elsewhere = nodes.filter((node) => node.state === "up" && (node.summary?.needs.count ?? 0) > 0);
   const mascot = (w: WorkspaceNeeds) => mascotFor(mascots, w.workspace.mascotId);
 
   return (
-    <aside className={`kuru-drawer needs-drawer ${sheet ? "kuru-sheet" : ""}`} ref={root} role="dialog" aria-label="Needs you">
+    <aside
+      className={`kuru-drawer needs-drawer ${sheet ? "kuru-sheet" : ""} ${sort.active ? "needs-sorting" : ""}`}
+      ref={root}
+      role="dialog"
+      aria-label="Needs you"
+    >
       {/* The chips where the tray and the title were — the lit tray is this
           drawer's name, as Kuru's chip is Kuru's. The count in words after
           them went on 2026-10-18: the chip already counts, and the list under
@@ -232,74 +345,79 @@ export function NeedsDrawer({
             Nothing is waiting on you.
           </li>
         )}
-        {waiting.map((w) => (
-          <li key={w.workspace.id} className="needs-ws">
-            <button
-              className="needs-ws-head"
-              onClick={() => onWorkspace(w.workspace.id)}
-              onMouseDown={(event) => event.preventDefault()}
-              title={`Go to ${w.workspace.name}`}
+        {groups.map(({ key, w }) => {
+          const folded = shut.has(shutKey(key));
+          const name = w ? w.workspace.name : "Your board";
+          const count = w ? w.needs.length : needs.cards.length;
+          return (
+            <li
+              key={key}
+              className={`needs-ws ${w ? "" : "needs-ws-board"} ${sort.classOf("group", key)}`}
+              data-sort-group={key}
             >
-              <span className="needs-ws-name">{w.workspace.name}</span>
-              <span className="needs-ws-n">{w.needs.length}</span>
-              {w.working.length > 0 && (
-                <span className="needs-ws-also">
-                  · {w.working.length} working
-                </span>
+              <GroupHead
+                name={name}
+                folded={folded}
+                onFold={() => toggleShut(shutKey(key))}
+                onMenu={(x, y) => setGroupMenu({ at: { x, y }, key })}
+                onSortStart={sort.begin({ kind: "group", key })}
+                onGo={() => (w ? onWorkspace(w.workspace.id) : onProfileCard(null))}
+                title={w ? `Go to ${name}` : "Open the profile's board"}
+              >
+                <span className="needs-ws-name">{name}</span>
+                <span className="needs-ws-n">{count}</span>
+                {w && w.working.length > 0 && (
+                  <span className="needs-ws-also">
+                    · {w.working.length} working
+                  </span>
+                )}
+              </GroupHead>
+              {!folded && w && (
+                <ul className="needs-rows">
+                  {w.needs.map((need) => (
+                    <NeedRow
+                      key={needKey(need)}
+                      need={need}
+                      workspaceName={w.workspace.name}
+                      mascot={mascot(w)}
+                      group={key}
+                      sortClass={sort.classOf("row", needKey(need))}
+                      onSortStart={need.card ? sort.begin({ kind: "row", group: key, key: needKey(need) }) : undefined}
+                      onGo={onGo}
+                      onBoard={onBoard}
+                      onOpened={sheet ? onClose : undefined}
+                      onMenu={need.card ? (x, y) => setCardMenu({ at: { x, y }, workspaceKey: key, card: need.card! }) : undefined}
+                    />
+                  ))}
+                </ul>
               )}
-            </button>
-            <ul className="needs-rows">
-              {w.needs.map((need) => (
-                <NeedRow
-                  key={need.card ? `c${need.card.id}` : `a${need.agent!.id}`}
-                  need={need}
-                  workspaceName={w.workspace.name}
-                  mascot={mascot(w)}
-                  onGo={onGo}
-                  onBoard={onBoard}
-                  onOpened={sheet ? onClose : undefined}
-                  onMenu={
-                    need.card
-                      ? (x, y) => setCardMenu({ at: { x, y }, workspaceId: need.workspaceId, workspaceName: w.workspace.name, card: need.card! })
-                      : undefined
-                  }
-                />
-              ))}
-            </ul>
-          </li>
-        ))}
-
-        {needs.cards.length > 0 && (
-          <li className="needs-ws needs-ws-board">
-            <button
-              className="needs-ws-head"
-              onClick={() => onProfileCard(null)}
-              onMouseDown={(event) => event.preventDefault()}
-              title="Open the profile's board"
-            >
-              <span className="needs-ws-name">Your board</span>
-              <span className="needs-ws-n">{needs.cards.length}</span>
-            </button>
-            <ul className="needs-rows">
-              {needs.cards.map((card) => (
-                <BoardRow
-                  key={card.id}
-                  card={card}
-                  code={cardCode(profile.name, card.number)}
-                  onOpen={() => onProfileCard(card.id)}
-                  onDone={hasDone ? () => api.moveProfileCard(profile.id, card.id, "done") : undefined}
-                  onMenu={(x, y) => setBoardMenu({ at: { x, y }, card })}
-                />
-              ))}
-            </ul>
-          </li>
-        )}
+              {!folded && !w && (
+                <ul className="needs-rows">
+                  {needs.cards.map((card) => (
+                    <BoardRow
+                      key={card.id}
+                      card={card}
+                      code={cardCode(profile.name, card.number)}
+                      group={key}
+                      sortClass={sort.classOf("row", `c${card.id}`)}
+                      onSortStart={sort.begin({ kind: "row", group: key, key: `c${card.id}` })}
+                      onOpen={() => onProfileCard(card.id)}
+                      onDone={hasDone ? () => api.moveProfileCard(profile.id, card.id, "done") : undefined}
+                      onMenu={(x, y) => setBoardMenu({ at: { x, y }, card })}
+                    />
+                  ))}
+                </ul>
+              )}
+            </li>
+          );
+        })}
 
         {elsewhere.map((node) => (
           <NodeBand
             key={node.id}
             node={node}
             mascot={mascotFor(mascots, null)}
+            shut={shut}
             onGo={onGoNode}
             onWorkspace={(nodeId, workspaceKey) => {
               api.showNodeWorkspace(nodeId, workspaceKey);
@@ -367,10 +485,9 @@ export function NeedsDrawer({
       {/* The edge you drag, `KuruDrawer.tsx`'s to the line, so the two behave
           alike — see its `Grip` for the argument. */}
       {!sheet && <Grip onResize={onResize} onReset={onResetWidth} />}
-      {cardMenu && (
-        <Menu at={cardMenu.at} items={cardMenuItems(cardMenu.workspaceId, cardMenu.workspaceName, cardMenu.card)} onClose={() => setCardMenu(null)} />
-      )}
+      {cardMenu && <Menu at={cardMenu.at} items={cardMenuItems(cardMenu.workspaceKey, cardMenu.card)} onClose={() => setCardMenu(null)} />}
       {boardMenu && <Menu at={boardMenu.at} items={boardMenuItems(boardMenu.card)} onClose={() => setBoardMenu(null)} />}
+      {groupMenu && <Menu at={groupMenu.at} items={groupMenuItems(groupMenu.key)} onClose={() => setGroupMenu(null)} />}
       {ask && (
         <Dialog
           state={{ kind: "ask", title: ask.title, hint: ask.hint, yes: ask.yes, run: ask.run, alt: ask.alt, choices: ask.choices }}
@@ -414,6 +531,216 @@ function Grip({ onResize, onReset }: { onResize: (px: number) => void; onReset: 
       onPointerCancel={release}
       onDoubleClick={onReset}
     />
+  );
+}
+
+/** A row's key in its group, as React keys it: `c` and the card, or `a` and the agent for a row with no card. */
+function needKey(need: Need): string {
+  return need.card ? `c${need.card.id}` : `a${need.agent!.id}`;
+}
+
+/** What a mouse is carrying: a group by its key, or a card's row by its key, within its group. */
+type Sorting = { kind: "group"; key: string } | { kind: "row"; group: string; key: string };
+/** Where it would land: before or after this group or row. */
+type SortOver = { key: string; after: boolean };
+
+/** How far a held mouse goes before the press is a drag. Under it the press is still the click it began as. */
+const SORT_SLOP = 5;
+
+/**
+ * Sorting by dragging, with pointer events rather than the platform's drag
+ * and drop — which is the decision to defend, since the sidebar and the
+ * boards use the platform's. Two things it does are wrong here. A
+ * `draggable` element only starts a drag when its `mousedown` goes
+ * through, and every press in this drawer cancels its `mousedown`, because
+ * that is what keeps the keyboard on the terminal a row reveals; and once
+ * a drag has started no click is dispatched at all, so a press that wobbled
+ * three pixels does nothing (`Sidebar.tsx`'s `CLICK_SLOP` is the patch for
+ * that). Done by hand, the press stays a press until the mouse has really
+ * gone somewhere, and only a mouse: a finger's press here is a scroll or,
+ * held, the row's menu, which is where a phone moves things.
+ *
+ * The target is read off the document under the pointer — `data-sort-group`
+ * on a group, `data-sort-row` and `data-sort-in` on a row — so a row only
+ * lands among its own group's, and a release outside the drawer is a drag
+ * put back.
+ */
+function useSort(root: React.RefObject<HTMLElement | null>, onDrop: (what: Sorting, over: SortOver) => void) {
+  const [sorting, setSorting] = useState<Sorting | null>(null);
+  const [over, setOver] = useState<SortOver | null>(null);
+  const drop = useRef(onDrop);
+  drop.current = onDrop;
+  /** The listeners of a press in progress, taken off if the drawer goes mid-drag. */
+  const stop = useRef<(() => void) | null>(null);
+  useEffect(() => () => stop.current?.(), []);
+
+  /** Under the pointer: a target, null for nowhere to land, undefined for keep the last one — a gap between rows. */
+  const targetAt = (what: Sorting, x: number, y: number): SortOver | null | undefined => {
+    const el = document.elementFromPoint(x, y);
+    if (!el || !root.current?.contains(el)) return null;
+    const half = (box: Element, key: string): SortOver | null => {
+      if (key === what.key) return null;
+      const rect = box.getBoundingClientRect();
+      return { key, after: y > rect.top + rect.height / 2 };
+    };
+    if (what.kind === "group") {
+      const group = el.closest<HTMLElement>("[data-sort-group]");
+      return group?.dataset.sortGroup === undefined ? undefined : half(group, group.dataset.sortGroup);
+    }
+    const row = el.closest<HTMLElement>("[data-sort-row]");
+    if (row?.dataset.sortRow !== undefined && row.dataset.sortIn === what.group) return half(row, row.dataset.sortRow);
+    return el.closest<HTMLElement>("[data-sort-group]")?.dataset.sortGroup === what.group ? undefined : null;
+  };
+
+  const begin = (what: Sorting) => (event: React.PointerEvent) => {
+    if (event.pointerType !== "mouse" || event.button !== 0) return;
+    stop.current?.();
+    const from = { x: event.clientX, y: event.clientY };
+    let started = false;
+    let target: SortOver | null = null;
+    const move = (e: PointerEvent) => {
+      if (!started) {
+        if (Math.hypot(e.clientX - from.x, e.clientY - from.y) < SORT_SLOP) return;
+        started = true;
+        setSorting(what);
+      }
+      const next = targetAt(what, e.clientX, e.clientY);
+      if (next === undefined) return;
+      target = next;
+      setOver((was) => (was?.key === next?.key && was?.after === next?.after ? was : next));
+    };
+    const finish = (commit: boolean) => {
+      stop.current?.();
+      if (!started) return;
+      setSorting(null);
+      setOver(null);
+      swallowClick();
+      if (commit && target) drop.current(what, target);
+    };
+    const up = () => finish(true);
+    const cancel = () => finish(false);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+    stop.current = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      stop.current = null;
+    };
+  };
+
+  /** The class a group or row wears while something is carried: faded if it is the thing, a line where it would land. */
+  const classOf = (kind: Sorting["kind"], key: string): string => {
+    if (!sorting || sorting.kind !== kind) return "";
+    if (sorting.key === key) return "needs-sorting-this";
+    if (over?.key === key) return over.after ? "needs-drop-after" : "needs-drop-before";
+    return "";
+  };
+  return { begin, classOf, active: sorting !== null };
+}
+
+/**
+ * The click a release delivers to whatever it was over, which after a drag
+ * is not a press of that thing. Taken once, in the capture phase, and let go
+ * of on the next turn if none came — a release over nothing clickable
+ * delivers none.
+ */
+function swallowClick(): void {
+  const swallow = (event: MouseEvent) => {
+    event.stopPropagation();
+    event.preventDefault();
+  };
+  window.addEventListener("click", swallow, { capture: true, once: true });
+  window.setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 0);
+}
+
+/**
+ * The moves a menu offers for a thing's place in its list, which is how a
+ * phone sorts: a finger's press is a scroll or a menu, never a drag. The two
+ * ends as well as a step, because ten rows is nine steps. Nothing when there
+ * is nothing to put it beside; a move that would go nowhere is drawn and
+ * disabled, as the sidebar's group menu draws them.
+ */
+function placeMoves(keys: readonly string[], key: string, move: (index: number) => void, noun?: string): MenuItem[] {
+  if (keys.length < 2) return [];
+  const moves = movesFrom(keys.indexOf(key), keys.length);
+  const what = noun ? `Move ${noun}` : "Move";
+  const step = (label: string, index: number | undefined, sep = false): MenuItem => ({
+    label: `${what} ${label}`,
+    sep,
+    disabled: index === undefined,
+    run: () => {
+      if (index !== undefined) move(index);
+    },
+  });
+  return [step("up", moves.up, true), step("down", moves.down), step("to the top", moves.top), step("to the bottom", moves.bottom)];
+}
+
+/**
+ * A group's name line: the caret that folds it, then the name, which goes to
+ * the workspace — or, for another node's from before, links to its page.
+ * Folded, the line is all there is of the group, and its count pill still
+ * says how many are in there. The rest of the line is the group's handle: a
+ * mouse drags it, and a right-click or a held touch opens its menu.
+ */
+function GroupHead({
+  name,
+  folded,
+  title,
+  onFold,
+  onGo,
+  href,
+  onMenu,
+  onSortStart,
+  children,
+}: {
+  name: string;
+  folded: boolean;
+  title: string;
+  onFold: () => void;
+  onGo?: () => void;
+  /** Instead of `onGo`: a link, for another node's workspace this window cannot open. */
+  href?: string;
+  onMenu?: (x: number, y: number) => void;
+  onSortStart?: (event: React.PointerEvent) => void;
+  children: ReactNode;
+}) {
+  const { handlers, swallow } = useRowMenu(onMenu);
+  return (
+    <div className="needs-ws-top" {...handlers}>
+      <button
+        className="needs-ws-fold"
+        onClick={() => {
+          if (swallow()) return;
+          onFold();
+        }}
+        onMouseDown={(event) => event.preventDefault()}
+        aria-expanded={!folded}
+        aria-label={folded ? `Show ${name}` : `Fold ${name} away`}
+        title={folded ? `Show ${name}` : `Fold ${name} away`}
+      >
+        <Icon name="caret" className={folded ? "drawer-caret-shut" : ""} />
+      </button>
+      {href ? (
+        <a className="needs-ws-head" href={href} target="_blank" rel="noreferrer noopener" title={title}>
+          {children}
+        </a>
+      ) : (
+        <button
+          className="needs-ws-head"
+          onClick={() => {
+            if (swallow()) return;
+            onGo?.();
+          }}
+          onMouseDown={(event) => event.preventDefault()}
+          onPointerDown={onSortStart}
+          title={onSortStart ? `${title} · drag to move the group` : title}
+        >
+          {children}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -481,13 +808,19 @@ function useRowMenu(onMenu: ((x: number, y: number) => void) | undefined) {
  * — see `Need.plainDone` — because every other move to Done is a question
  * asked in a dialog of its own, about a merge or an agent. That question is
  * not the board's alone: a card's row carries the same right-click/long-press
- * menu the sidebar's agent rows do (`Sidebar.tsx`, KUR-99), and its one row
- * so far, "Move to Done", asks it here too, through `useCardDone`.
+ * menu the sidebar's agent rows do (`Sidebar.tsx`, KUR-99), and its first
+ * row, "Move to Done", asks it here too, through `useCardDone`; the moves
+ * under it are its place in the group. A card's row is dragged by its
+ * door; an agent's with no card is not, and keeps the rule's place
+ * (`needsorder.ts`), though a card may be dropped beside it.
  */
 function NeedRow({
   need,
   workspaceName,
   mascot,
+  group,
+  sortClass,
+  onSortStart,
   onGo,
   onBoard,
   onOpened,
@@ -496,6 +829,11 @@ function NeedRow({
   need: Need;
   workspaceName: string;
   mascot: ReturnType<typeof mascotFor>;
+  /** The group it is drawn in, which is the only one it may be dropped in. */
+  group: string;
+  sortClass: string;
+  /** Pick the row up, for a card's; undefined for an agent's, which stays where the rule put it. */
+  onSortStart: ((event: React.PointerEvent) => void) | undefined;
   onGo: (need: Need) => void;
   onBoard: (workspaceId: string, cardId: string) => void;
   /** A link was opened: on a phone the sheet is over the file, so it goes. */
@@ -511,7 +849,12 @@ function NeedRow({
   const made = agent?.made?.length ? agent.made : (card?.made ?? []);
   const { handlers, swallow } = useRowMenu(onMenu);
   return (
-    <li className={`needs-row needs-row-${need.kind} ${made.length ? "needs-row-made" : ""}`} {...handlers}>
+    <li
+      className={`needs-row needs-row-${need.kind} ${made.length ? "needs-row-made" : ""} ${sortClass}`}
+      data-sort-row={needKey(need)}
+      data-sort-in={group}
+      {...handlers}
+    >
       <button
         className="needs-go"
         onClick={() => {
@@ -519,7 +862,8 @@ function NeedRow({
           onGo(need);
         }}
         onMouseDown={(event) => event.preventDefault()}
-        title={agent ? "Go to its terminal" : "This card, on its board"}
+        onPointerDown={onSortStart}
+        title={`${agent ? "Go to its terminal" : "This card, on its board"}${onSortStart ? " · drag to move it" : ""}`}
       >
         {agent ? <Status agent={agent} mascot={mascot} /> : <span className="needs-mark" aria-hidden="true" />}
         <span className="needs-what">
@@ -559,17 +903,25 @@ function NeedRow({
  * says. The row opens the card on the board; **Done** is drawn whenever the
  * board has a Done, since nothing on this board runs and the move asks no
  * question; the rest of the card's menu is the row's own, on a right-click
- * or a held touch, as a workspace card's row has.
+ * or a held touch, as a workspace card's row has. Dragging one, or moving
+ * it from that menu, moves it in the board's Needs you column, which is
+ * the order these are drawn in.
  */
 function BoardRow({
   card,
   code,
+  group,
+  sortClass,
+  onSortStart,
   onOpen,
   onDone,
   onMenu,
 }: {
   card: Card;
   code: string;
+  group: string;
+  sortClass: string;
+  onSortStart: (event: React.PointerEvent) => void;
   onOpen: () => void;
   onDone: (() => void) | undefined;
   onMenu: (x: number, y: number) => void;
@@ -578,7 +930,12 @@ function BoardRow({
   const first = card.body.split("\n").find((line) => line.trim())?.trim() ?? "";
   const why = [card.dates ? datesLabel(card.dates) : "", first].filter(Boolean).join(" · ") || "on your board";
   return (
-    <li className={`needs-row needs-row-yours needs-row-by-${card.needsBy ?? "none"}`} {...handlers}>
+    <li
+      className={`needs-row needs-row-yours needs-row-by-${card.needsBy ?? "none"} ${sortClass}`}
+      data-sort-row={`c${card.id}`}
+      data-sort-in={group}
+      {...handlers}
+    >
       <button
         className="needs-go"
         onClick={() => {
@@ -586,7 +943,8 @@ function BoardRow({
           onOpen();
         }}
         onMouseDown={(event) => event.preventDefault()}
-        title="This card, on the profile's board"
+        onPointerDown={onSortStart}
+        title="This card, on the profile's board · drag to move it"
       >
         {card.needsBy ? <NeedsByMark by={card.needsBy} /> : <span className="needs-mark" aria-hidden="true" />}
         <span className="needs-what">
@@ -649,15 +1007,22 @@ const SAID_MS = 8000;
  * grown or a terminal opened since its summary — and the sentence takes the
  * row's second line for a few seconds. Every other move to Done is a
  * question its board asks, there, and there is no row menu for it here.
+ *
+ * Each workspace folds as this node's do, by its qualified id. It does not
+ * sort: its order and its cards' are the node's summary's, and a row with
+ * no menu has nowhere for a phone's moves to live.
  */
 function NodeBand({
   node,
   mascot,
+  shut,
   onGo,
   onWorkspace,
 }: {
   node: NodeStatus;
   mascot: ReturnType<typeof mascotFor>;
+  /** The folded groups' keys — `needsorder.ts`'s set, read once by the drawer. */
+  shut: ReadonlySet<string>;
   onGo: (need: NodeNeed) => void;
   onWorkspace: (nodeId: string, workspaceKey: string) => void;
 }) {
@@ -693,29 +1058,21 @@ function NodeBand({
         .filter((w) => w.band === "needs")
         .map((w) => {
           const agents = new Map<string, SummaryAgent>(w.agents.map((agent) => [agent.id, agent]));
-          const head = (
-            <>
-              <span className="needs-ws-name">{w.name}</span>
-              <span className="needs-ws-n">{w.needs.length}</span>
-            </>
-          );
+          const fold = qualify(node.id, w.key);
+          const folded = shut.has(fold);
           return (
             <li key={w.key} className="needs-ws">
-              {here ? (
-                <button
-                  className="needs-ws-head"
-                  onClick={() => onWorkspace(node.id, w.key)}
-                  onMouseDown={(event) => event.preventDefault()}
-                  title={`Go to ${w.name}, on ${node.name}`}
-                >
-                  {head}
-                </button>
-              ) : (
-                <a className="needs-ws-head" href={node.url} target="_blank" rel="noreferrer noopener" title={old}>
-                  {head}
-                </a>
-              )}
-              <ul className="needs-rows">
+              <GroupHead
+                name={w.name}
+                folded={folded}
+                onFold={() => toggleShut(fold)}
+                {...(here ? { onGo: () => onWorkspace(node.id, w.key) } : { href: node.url })}
+                title={here ? `Go to ${w.name}, on ${node.name}` : old}
+              >
+                <span className="needs-ws-name">{w.name}</span>
+                <span className="needs-ws-n">{w.needs.length}</span>
+              </GroupHead>
+              {!folded && <ul className="needs-rows">
                 {w.needs.map((need) => {
                   const agent = need.agentId ? agents.get(need.agentId) : undefined;
                   const what = (
@@ -757,7 +1114,7 @@ function NodeBand({
                     </li>
                   );
                 })}
-              </ul>
+              </ul>}
             </li>
           );
         })}
