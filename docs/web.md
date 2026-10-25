@@ -15,15 +15,26 @@ the web is now a chain (`server/src/web/chain.ts`) of providers that each say
 what they can do (`server/src/web/provider.ts`), and the vocabulary they share is
 `shared/web.ts`.
 
+**Ours is gone again, since 2026-10-25.** It ran on a VPS whose production
+shares the memory, and about 2.3 GB of it was more than the user wanted to
+give a fetcher with a fallback behind it. So here the chain is
+the hand-back and then the cloud — the order it began with — and the
+self-hosted provider stays in the code, switched off and with no address, for
+anyone who runs one of their own (below).
+
 ## The order
 
-By default, and as Settings → Web lists it:
+As Settings → Web lists it here:
 
 | # | provider | file | costs |
 |---|---|---|---|
-| 1 | **Self-hosted Firecrawl** — ours, on the tailnet | `providers/firecrawl-self.ts` | nothing |
-| 2 | **The agent's own web tools** — Claude's WebSearch and WebFetch, Codex's search | `providers/handback.ts` | nothing |
-| 3 | **Cloud Firecrawl** — firecrawl.dev | `providers/firecrawl-cloud.ts` | credits |
+| 1 | **The agent's own web tools** — Claude's WebSearch and WebFetch, Codex's search | `providers/handback.ts` | nothing |
+| 2 | **Cloud Firecrawl** — firecrawl.dev, only with `ownToolsFailed` | `providers/firecrawl-cloud.ts` | credits |
+| — | **Self-hosted Firecrawl** — off, no address | `providers/firecrawl-self.ts` | nothing |
+
+The default for a first start puts a self-hosted Firecrawl first, because a
+free provider that is set up should be: it is skipped until it has an
+address, so a fresh kururu behaves like the two rows above.
 
 A call goes down the list until something brings back the page. Each step is
 **skipped** (switched off, not set up, cannot do this tool, resting after it
@@ -68,9 +79,10 @@ A 404 is not one: the site answered, and every provider would hear the same.
 ## What every answer says
 
 The first line is `UNTRUSTED`, the second who served it and what was tried
-first: `Served by Cloud Firecrawl. Before it: Self-hosted Firecrawl failed
-(blocked: …); The agent's own web tools passed (the agent said its own tools had
-failed).` Steps the user switched off are left out of the model's line — they
+first: `Served by Cloud Firecrawl. Before it: The agent's own web tools passed
+(the agent said its own tools had failed).` With a self-hosted Firecrawl in
+front, its failure leads the list: `Self-hosted Firecrawl failed (blocked: …);`.
+Steps the user switched off are left out of the model's line — they
 are a choice, not news — and kept in the record. Settings → Web keeps the last
 twenty calls with every step, how long each took, what it cost and which agent
 asked (`<state>/web-usage.json`); a refusal repeated in a loop is one row with a
@@ -81,12 +93,16 @@ count, written once a second at most.
 The order is said **in each tool's description**, written from the chain as it
 stands (`routeWords`), because a model that searched its way to one tool
 (Codex's `tool_search`, Claude Code's deferred tools) reads that description and
-no other. With ours first: *use this first, before your own web fetch… if kururu
-cannot get it, the result says so: then use your own… if that fails too, call
-again with `ownToolsFailed: true`, which goes on to Cloud Firecrawl (paid, on the
-user's credits)*. With nothing free first, it reads as the fallback it was before
-the chain. Every tool has the `ownToolsFailed` argument, described as the way
-past the hand-back and what it may cost.
+no other. With the hand-back first, as here, it reads as the fallback it was
+before the chain: *a fallback, not your way onto the web: use your own web fetch
+first, and call this only when that fails, with `ownToolsFailed: true`. It goes
+to Cloud Firecrawl (paid, on the user's credits)*. With a free provider first:
+*use this first, before your own web fetch… if kururu cannot get it, the result
+says so: then use your own… if that fails too, call again with
+`ownToolsFailed: true`*. An agent started before the order changed keeps the
+description it was given; its calls meet the new order all the same. Every
+tool has the `ownToolsFailed` argument, described as the way past the
+hand-back and what it may cost.
 
 It is said once more as the server's MCP `instructions`, which Claude Code puts
 in the system prompt beside the tools, and in the harness's role
@@ -157,7 +173,7 @@ as its hint.
 
 **The page limit is the chain's**, not a provider's (default 25, 1–500): a crawl's
 pages and a PDF's, whoever does it — the cloud's credits are one reason and the
-load on a box another project's production shares is the other.
+load on a self-hosted box is the other.
 
 ## The keys
 
@@ -219,110 +235,47 @@ result in `<web_result>`, and a closing tag inside a page is defused
 
 The URL of every page an agent asks for, or the words of its search:
 
-- to **our Firecrawl**, over the tailnet, which fetches the page from the
-  internet from that box's own connection and searches through SearXNG, which
-  asks Google and the other engines it is set up with;
-- to **firecrawl.dev**, with the key, only when the chain reaches the cloud,
-  which caches pages for up to two days.
+- to **firecrawl.dev**, with the key, only when the chain reaches the cloud —
+  here, only after the agent says its own tools failed — which caches pages
+  for up to two days;
+- to **a self-hosted Firecrawl**, when one is set up (none is here since
+  2026-10-25), over the tailnet, which fetches the page from that box's own
+  connection and searches through whatever it is set up with.
 
 Nothing else of the agent's goes. Addresses on this Mac, the local network or
 the tailnet (`localhost`, private and CGNAT ranges, `.local`, `.ts.net`, a name
 with no dot) are refused before anything is sent, for every provider — the
-cloud could not reach them, and ours could, which is worse: a page an agent read
-could ask it to fetch a dashboard on the tailnet or the router. The cloud's credit figures are read
+cloud could not reach them, and a self-hosted one could, which is worse: a page
+an agent read could ask it to fetch a dashboard on the tailnet or the router. The cloud's credit figures are read
 every five minutes while a window is open and after calls.
 
 ## Running your own Firecrawl
 
 The self-hosted provider wants a Firecrawl reachable from this Mac and a key in
-front of it. Ours is Firecrawl's own `docker-compose.yaml` on a Linux box on
-the tailnet, with SearXNG beside it for search
-(`SEARXNG_ENDPOINT=http://searxng:8080`; deploy SearXNG first if it creates the
-network Firecrawl joins).
-
-```
- Mac (kururu) ── tailnet ── <box>:3002 ── gate (nginx: bearer key) ── api ──┬── playwright-service
-                                                                            ├── redis, rabbitmq, nuq-postgres
-                                                                            └── searxng
-```
+front of it: an address and a key in Settings → Web, and it goes first, free.
+None runs here since 2026-10-25.
 
 **The gate.** A self-hosted Firecrawl has no authentication
 (`USE_DB_AUTHENTICATION=false`; turning it on needs Supabase), so nothing
 should reach the API but an nginx that compares `Authorization: Bearer <key>`
-and answers 401 otherwise. Let nothing but the gate be reached from off the
-box, and that only from the tailnet. On a box with a LAN, ours published the
-gate on the box's Tailscale address and kept it there with ufw route rules
-too (`ufw route allow in on tailscale0`, deny on the other interfaces),
-because Docker-published ports skip ufw's input rules. On the VPS it runs on
-now, it is a Swarm stack and publishes nothing: the gate is the one service on
-the reverse proxy's network, and a Traefik router on the plain-HTTP entrypoint
-(`Host(<the box's Tailscale address>)`) lets it through behind an allowlist of
-`100.64.0.0/10`, so anything from the internet gets a 403 whatever Host header
-it sends. Plain HTTP is enough over the tailnet, which WireGuard encrypts. A
-port bound to the Tailscale address is the thing to avoid there: at boot it can
-be bound before tailscaled has brought the address up, Docker does not retry a
-start that failed, and Swarm cannot bind one address at all. A
-`/healthz` that answers `ok` without the key is enough for a load balancer;
-the provider's health check is Firecrawl's `/v0/health/readiness` through the
-gate. The key's other copy is kururu's `web-firecrawl-self.json`: to change
-it, set the new value on the box, redeploy, and paste it in Settings → Web.
+and answers 401 otherwise, and nothing but the gate should be reached from off
+the box, and that only from the tailnet. On a box behind a reverse proxy that
+is one router with an allowlist of `100.64.0.0/10` rather than a port bound to
+the Tailscale address, which at boot can be bound before tailscaled has
+brought the address up. A `/healthz` that answers `ok` without the key is
+enough for a load balancer; the provider's health check is Firecrawl's
+`/v0/health/readiness` through the gate.
 
-**What we changed from Firecrawl's compose, each for something its logs
-showed:**
+**Size it before deploying.** Idle, Firecrawl's own compose with SearXNG beside
+it for search took about 2.5 GB, most of it the API, and the browser more
+under load. That is what retired ours.
 
-- **SearXNG's engines cut to the ones that answer from the box's IP**
-  (`use_default_settings.engines.keep_only`). With the defaults, from a home
-  IP, DuckDuckGo answered every query with a CAPTCHA, Brave with 429 and a
-  suspension, Google and Qwant with access denied, and Wikidata timed out —
-  holding every search for the full timeout. Google CSE, Bing and Yahoo answer,
-  in about a second, from a home IP and from a VPS alike; Wikipedia answered
-  from home and is suspended for too many requests from the VPS. Which engines
-  answer depends on the address, so re-check after a move, with a query per
-  engine (`&engines=bing`), and look at `unresponsive_engines` before adding
-  one back.
-- **Redis keeps no snapshots** (`--save "" --appendonly no`). Its data is a
-  throwaway cache, and without `vm.overcommit_memory=1` on the host a failed
-  background save makes Redis refuse every write.
-- **pg_cron is quiet** (`-c cron.log_run=off -c cron.log_statement=off`). It
-  runs about forty queue jobs, several every few seconds, and otherwise logs
-  every statement.
-- **Playwright runs `node dist/api.js`**, which is all `pnpm start` does, so a
-  new container does not fetch pnpm through Corepack first.
-- **Sized to share a box:** lower `cpu_shares` than whatever else runs there,
-  so production wins any contest for the CPU (Swarm has no shares, so as a
-  stack it is a ceiling of 1.5 of the box's two cores on the API and on
-  Playwright instead); one NuQ worker instead of five
-  (`NUQ_WORKER_COUNT`, about 300 MB each), `NUM_WORKERS_PER_QUEUE=2`, two
-  pages at a time in the browser. Memory is left uncapped, so check the box
-  has the room before deploying: idle, the whole project takes about 2.5 GB,
-  most of it the API.
-
-**A changed inline config needs a new name.** Compose does not recreate a
-container when only the `content:` of a config changes, so version a config in
-its name (`settings-v3`) and bump it with any edit. As a stack the gate's and
-SearXNG's configs are files mounted beside the compose instead (Dokploy's File
-Mounts), and the gate's key reaches nginx through its own template step
-(`/etc/nginx/templates`, `NGINX_ENVSUBST_FILTER`), never written into a file.
-
-**What the logs say that is fine:** `AUTUMN_SECRET_KEY is not set` and
-`You're bypassing authentication` (cloud billing and auth; the gate is the auth
-here); `Credits billed unknown`; `All scraping engines failed` for a page
-behind a bot check (the chain's `blocked`); `SCRAPE_SITEMAP_ERROR` 404 for a
-site with no sitemap; Playwright's `No proxy server provided`; SearXNG's missing
-`limiter.toml`. When Postgres or Redis is recreated, Firecrawl's supervisor
-restarts the API container — about ten seconds, by itself.
-
-**What it handles**, measured on 2026-10-15 through the chain:
-
-| page | result |
-|---|---|
-| a static page (gnu.org) | served, 1.7 s |
-| a page drawn by JavaScript (quotes.toscrape.com/js) | served, 1.9 s |
-| a Cloudflare challenge (scrapingcourse.com's test page), G2 behind Cloudflare | **failed** — Playwright gets the 403, and the stealth proxy Firecrawl would retry with is a cloud feature; the chain reads `blocked` and hands back |
-| an Instagram profile (`/natgeo/`) | served, with the recent posts' captions |
-| a search (through SearXNG) | served, 1.5 s (4 s before the engines were cut to the ones that answer) |
-| a crawl of three or four pages | served, 12–23 s; only pages under the starting path unless `entireDomain` |
-| a map | served from a sitemap; a site without one comes back with nothing, which fails over |
+The one we ran — Firecrawl's compose on a Linux box from 2026-10-15, then as a
+Swarm stack behind Traefik on a VPS from 2026-10-24 — is written up in full,
+with what we changed from Firecrawl's compose and why (SearXNG's engines, Redis
+without snapshots, a quiet pg_cron, one NuQ worker) and what it could and could
+not read, in this file as it stood at `d219788`:
+`git show d219788:docs/web.md`.
 
 ## Adding a provider
 
@@ -391,9 +344,9 @@ Making it work is not small: each ssh link would need a reverse forward
 (`ssh -R`) to a listener that serves `/mcp/web` and nothing else — forwarding
 the server's port would hand every process on the machine the harness's verbs
 too — on a port that cannot collide between links, and the tunnel dies with the
-link while the agent lives on in tmux. (An agent on the Firecrawl box itself could reach
-our Firecrawl directly, but would need the key, which is the thing this is built
-not to lend.)
+link while the agent lives on in tmux. (An agent on a self-hosted Firecrawl's own
+box could reach it directly, but would need the key, which is the thing this is
+built not to lend.)
 
 ## Testing
 

@@ -272,11 +272,11 @@ The load-bearing invariants, one line each, with the argument behind the link:
   through flags on its command line, `--mcp-config=` for Claude (spelt with
   `=` so a card's prompt is not read as a second config) and `-c` overrides
   for Codex, and kururu makes the request. Behind them is an ordered chain
-  of providers set in Settings → Web (`server/src/web/chain.ts`): our
-  self-hosted Firecrawl on a box on the tailnet first, then the **hand-back** — a
-  provider like the others that tells the agent to use its own WebSearch /
-  WebFetch — then cloud Firecrawl, reached only when the agent calls again
-  with `ownToolsFailed`. A challenge page, a wall or nothing is a failure
+  of providers set in Settings → Web (`server/src/web/chain.ts`): the
+  **hand-back** first — a provider like the others that tells the agent to
+  use its own WebSearch / WebFetch — then cloud Firecrawl, reached only when
+  the agent calls again with `ownToolsFailed`. A self-hosted Firecrawl goes
+  first when one is set up; ours was retired on 2026-10-25, for its memory. A challenge page, a wall or nothing is a failure
   like an error or a timeout, and every answer says who served it. A
   provider is one file in `server/src/web/providers/` that registers itself;
   the build imports the directory and the page draws its fields, so nothing
@@ -285,9 +285,9 @@ The load-bearing invariants, one line each, with the argument behind the link:
   address, never logged, never in a pty's environment, a client sent its
   hint, never backed up. The cloud reserves credits against a daily budget,
   a crawl is held to the page limit, and what comes back is wrapped and
-  introduced as untrusted data. **The URL or search words of every call go
-  to our Firecrawl over the tailnet, and to Firecrawl's servers when the
-  chain reaches the cloud.** An agent on a machine does not get the tools;
+  introduced as untrusted data. **The URL or search words of a call go to
+  Firecrawl's servers when the chain reaches the cloud, and to a
+  self-hosted Firecrawl over the tailnet when one is set up.** An agent on a machine does not get the tools;
   the endpoint answers only a program on this Mac. → [web](docs/web.md)
 - **A database is whatever `DATABASE_URL` says, read when asked and never
   held.** The scan reads a workspace's `.env*` files under the roots the branch
