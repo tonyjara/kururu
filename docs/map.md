@@ -30,6 +30,7 @@ in this folder.
 | `vaultview.ts` | Settings → Vault: what the page is told (kururu's keys by hint, env files by variable name, ssh hosts by key file name, gh accounts, the other logins agents use), an env file's names, a Vercel config's team, and what is lent to which node. Names, never values. See [nodes](nodes.md#the-vault-page) |
 | `backup.ts` | What leaves the machine and what never does: the allow-list, the settings, the commit subject. See [data](data.md#backups) |
 | `days.ts` | Calendar days as strings, and the arithmetic over them. Why a card's date is not a timestamp |
+| `drops.ts` | A file for Kuru's box that the page cannot name by path: what the bytes are (pictures Claude reads, UTF-8 text, nothing else), the size cap, the copy's name. Pure, tested. See [harness](harness.md#a-file-the-user-hands-it) |
 | `projects.ts` | What a repository has been told about itself, and how a card's worktree is named |
 | `machines.ts` | A machine, one sample of it, a workspace's pin to one, and the command line of a shell or an agent on it — built and read back, with the install-and-login check typed ahead of an agent. See [machines](machines.md) |
 | `onscreen.ts` | What a remote agent is doing, read off its screen: working, asking, missing, quiet — and the edges a hook would have reported. See [machines](machines.md#status-read-off-the-screen) |
@@ -119,6 +120,7 @@ in this folder.
 | `src/reload.ts` | Agents' reload asks: sent to every page on this Mac, timed, answered with what each page did. Reloads nothing itself |
 | `src/kokoro.ts` | Kokoro in a process of its own (`dist/kokoro.mjs`), forked by `voice.ts` and talked to over IPC. Never exits the ordinary way: its ONNX runtime aborts on exit, so it ends by SIGKILL |
 | `src/devservers.ts` | lsof + ps discovery of what is listening, and what started it — and stopping one: the named command's tree, never a terminal's (`stopTargets`). Never kururu itself (`isKururu`) |
+| `src/drops.ts` | `POST /api/drop`'s write: a pasted picture or a phone's file kept `0600` in `drops/` under the data directory, never over another, never backed up |
 | `src/proxy.ts` | Per-dev-server reverse proxy (HTTP + WS) for phone access |
 | `src/files.ts` | Traversal-safe file listing and reading |
 | `src/fileops.ts` | The file tree's edits: new, rename, move, copy, Trash — the only writer |
@@ -166,7 +168,7 @@ in this folder.
 | `src/frames.ts` | When an emulator paints: in a pane, and only when something changed |
 | `src/keybar.ts` | The keys a soft keyboard has not got, as events |
 | `src/drag.ts` | What is in flight, because `dataTransfer` can't be read on `dragover` |
-| `src/drop.ts` | A file dropped on a terminal → the path to type. Pure |
+| `src/drop.ts` | A file dropped on a terminal → the path to type; on Kuru's box, the path or the file to send (`handover`). Pure |
 | `src/notify.ts` | Making the noise and drawing the card. No policy |
 | `src/voice.ts` | The talk key (hold or tap), the microphone as PCM off a worklet, and the player for what the harness says. Module state, like `session.ts` |
 | `src/reload.ts` | When this page may reload for an agent — the voice, the hands, what is open over it — and the notice carried across the reload |

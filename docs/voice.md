@@ -177,7 +177,9 @@ prompt hook, and is typed again once or failed on the same rules. No clip, so
 nothing to hear and `ms` is zero, which is how the two are told apart
 (`spokenMessage`); it is typed without the `[voice]` prefix, since nothing in
 it was misheard. This is how the phone talks to Kuru today: playback works
-over plain http, and only the microphone needs the secure context.
+over plain http, and only the microphone needs the secure context. A file
+dropped on the composer, or a picture pasted into it, puts a path in the
+draft for Kuru to Read — see [the harness](harness.md#a-file-the-user-hands-it).
 
 ## What you missed
 

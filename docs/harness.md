@@ -158,6 +158,41 @@ the format and the insertion; `referItem` in `web/src/kuru.ts` is the one
 menu row all four menus use, and `insertInKuru` the door the composer takes
 the words from.
 
+## A file the user hands it
+
+**A path in the user's message is a file on this computer for Kuru to Read,
+pictures included.** The role's "Files the user hands you" says so, because
+the composer's words are *typed* into Kuru's terminal, never pasted, and
+Claude Code only turns a path into an attached picture when one is pasted
+into it. Typed, the path is words, and the role is what makes Kuru open it.
+
+A file dropped from the Finder on the composer — the box or anything around
+it, which rings while a file is held over it — puts its path in at the
+cursor, unsent, escaped as a terminal writes it
+(`/Users/me/Desktop/Screenshot\ 2026-10-25\ at\ 1.55.16\ PM.png`), several
+separated by spaces. That is `pathForFile` on the bridge, which the window
+already had for the terminal's drop, so it needs no desktop rebuild.
+
+What has no path is sent to the server and kept, and the path of the copy
+goes in once it is: a picture pasted off the clipboard (⌃⇧⌘4), anything
+dropped or pasted on the phone or in a browser, and anything in a window
+whose server is another node's — a Finder path there names a file on the
+wrong computer. `POST /api/drop` writes it to `drops/` in the data
+directory (`~/.local/share/kururu/drops/`, `0700`, each file `0600`), named
+by when and what it was called, and never backed up. Only pictures Claude
+reads — PNG, JPEG, GIF, WebP — and UTF-8 text, judged by the bytes and
+not by what the page said, up to 20 MB; anything else is refused over the
+box in a sentence, HEIC with how to get a JPEG instead. A paste that also
+carries words is left to paste them. Nothing deletes a drop: a path can sit
+in a draft or on a card for a week, and the folder is yours to empty.
+
+`shared/drops.ts` is the judging and the name, `server/src/drops.ts` the
+write, `handover` in `web/src/drop.ts` the choice of path or upload, and
+`Composer` in `KuruDrawer.tsx` the drop, the paste and the line over the box
+while a copy is on its way. A message addressed to another node's Kuru
+(`@omarchy …`) carries the path of this computer's file, which that Kuru
+cannot open.
+
 ## Auto Swap
 
 A switch in Settings → Agents, under Harness, for the profile on screen — each

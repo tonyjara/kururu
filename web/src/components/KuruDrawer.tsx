@@ -95,11 +95,14 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cardCode } from "../../../shared/board";
 import { CHANNEL_NAMES, channelReady, isChannelKind, type TelegramStatus } from "../../../shared/channels";
+import { dropRefusal } from "../../../shared/drops";
 import { KURU_SEEN_MS, addressMatches, addressOf, addressQuery, clipLength, insertWords, mergeNodes, pickAddress, splitCardCodes, splitCardRefs, typedAddress, type CardRef, type KuruItem, type KuruReply, type NodeKuruItem, type NoticeItem, type PeerKuru, type YouItem } from "../../../shared/kuru";
 import { splitMentions } from "../../../shared/made";
 import type { AgentSnapshot, MascotConfig, Profile } from "../../../shared/model";
 import type { OutboxState, VoiceSettings } from "../../../shared/voice";
+import { escapePath, handoverFrom, isFileDrag } from "../drop";
 import { kuruLive, kuruWorking, takeKuruWords, useKuruDrawer, type KuruLive } from "../kuru";
+import { isLoopback } from "../preview";
 import * as api from "../session";
 import { useKururu } from "../session";
 import { dismissVoice, talkDown, talkUp, useOutgoing, useVoiceUi, voiceIsRemote, voiceNow } from "../voice";
@@ -1124,6 +1127,15 @@ function writeDraft(profileId: string, text: string) {
  * would bold for real and was rejected because it gives up everything the
  * textarea does for free — the value, IME, undo, the phone's keyboard — for
  * one word's weight.
+ *
+ * A file dropped on the box puts its path in at the cursor, escaped as a
+ * terminal writes it, unsent — Claude Code's own box does the same, and the
+ * role tells Kuru a path is a file to Read. A picture pasted from the
+ * clipboard has no path, nor has anything from a phone or from a window on
+ * another node's server, so those go to the server first and the path of its
+ * copy goes in when it is kept (`handover`, `shared/drops.ts`). A paste that
+ * also carries words — a cell copied out of Numbers comes with a picture of
+ * itself — is left to paste the words.
  */
 function Composer({
   profileId,
@@ -1147,6 +1159,13 @@ function Composer({
   const [closedOn, setClosedOn] = useState<string | null>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
+  /** A file held over the box. */
+  const [over, setOver] = useState(false);
+  /** How many dropped or pasted files are on their way to the server, and why the last one was not taken. */
+  const [handing, setHanding] = useState<{ waiting: number; refused: string | null }>({ waiting: 0, refused: null });
+  /** Whose box this is now, for a copy kept after the drawer moved to another profile's. */
+  const shown = useRef(profileId);
+  shown.current = profileId;
   useEffect(() => {
     setText(readDraft(profileId));
   }, [profileId]);
@@ -1218,22 +1237,70 @@ function Composer({
    */
   const { words } = useKuruDrawer();
   const took = useRef(0);
-  useEffect(() => {
-    if (!words || took.current === words.n) return;
-    took.current = words.n;
-    takeKuruWords(words.n);
+  const putIn = (words: string) => {
     const el = field.current;
     const was = el?.value ?? readDraft(profileId);
     const at = el && document.activeElement === el ? { from: el.selectionStart, to: el.selectionEnd } : (carets.get(profileId) ?? { from: was.length, to: was.length });
-    const put = insertWords(was, at.from, at.to, words.text);
+    const put = insertWords(was, at.from, at.to, words);
     edit(put.text);
     carets.set(profileId, { from: put.caret, to: put.caret });
     if (el) {
       el.focus();
       requestAnimationFrame(() => el.setSelectionRange(put.caret, put.caret));
     }
+  };
+  useEffect(() => {
+    if (!words || took.current === words.n) return;
+    took.current = words.n;
+    takeKuruWords(words.n);
+    putIn(words.text);
     // Only new words, not a re-render, touch the draft.
   }, [words?.n]); // eslint-disable-line react-hooks/exhaustive-deps
+  /**
+   * What a drop or a paste handed over, into the draft in the order given:
+   * the paths at once, and a file to be sent once its copy is kept, at the
+   * cursor as it is by then — the hands went on typing meanwhile. A refusal
+   * is said over the box, the first one with a count of the rest. A copy
+   * kept after the drawer moved to another profile goes on the end of the
+   * draft it was dropped into.
+   */
+  const take = (items: ({ path: string } | { file: File })[]) => {
+    if (items.length === 0) return;
+    const refused: string[] = [];
+    const sends = items.map((item) => {
+      if ("path" in item) return item.path;
+      const why = dropRefusal(item.file);
+      if (why) {
+        refused.push(why);
+        return null;
+      }
+      return api.sendDrop(item.file).catch((err: unknown) => {
+        refused.push(`${item.file.name || "That file"} was not kept: ${err instanceof Error ? err.message : String(err)}`);
+        return null;
+      });
+    });
+    const waiting = sends.filter((send) => send instanceof Promise).length;
+    const said = () => (refused.length > 1 ? `${refused[0]} (and ${refused.length - 1} more)` : (refused[0] ?? null));
+    const finish = (paths: (string | null)[]) => {
+      const words = paths.filter((path): path is string => !!path).map(escapePath).join(" ");
+      if (!words) return;
+      if (shown.current === profileId) putIn(words);
+      else {
+        const was = readDraft(profileId);
+        writeDraft(profileId, insertWords(was, was.length, was.length, words).text);
+      }
+    };
+    if (waiting === 0) {
+      setHanding((was) => ({ waiting: was.waiting, refused: said() }));
+      finish(sends as (string | null)[]);
+      return;
+    }
+    setHanding((was) => ({ waiting: was.waiting + waiting, refused: null }));
+    void Promise.all(sends).then((paths) => {
+      setHanding((was) => ({ waiting: was.waiting - waiting, refused: said() }));
+      finish(paths);
+    });
+  };
   return (
     <form
       className="kuru-composer"
@@ -1241,7 +1308,34 @@ function Composer({
         event.preventDefault();
         send();
       }}
+      // The whole composer takes the drop, so a file let go a little above
+      // the box is not a miss; `App.tsx` swallows the misses anyway.
+      onDragOver={(event) => {
+        if (!isFileDrag(event.dataTransfer)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        setOver(true);
+      }}
+      onDragLeave={(event) => {
+        if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) setOver(false);
+      }}
+      onDrop={(event) => {
+        if (!isFileDrag(event.dataTransfer)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setOver(false);
+        take(handoverFrom(event.dataTransfer, isLoopback(window.location.hostname)));
+      }}
     >
+      {(handing.waiting > 0 || handing.refused) && (
+        <p
+          className={`kuru-handing ${handing.waiting > 0 ? "" : "kuru-handing-refused"}`}
+          role="status"
+          onClick={() => setHanding((was) => ({ ...was, refused: null }))}
+        >
+          {handing.waiting > 0 ? `Keeping ${handing.waiting === 1 ? "a file" : `${handing.waiting} files`} for Kuru…` : handing.refused}
+        </p>
+      )}
       {toPeer && (
         <p className="kuru-to" role="status">
           To the Kuru on {toPeer.node.name}
@@ -1272,7 +1366,7 @@ function Composer({
           })}
         </ul>
       )}
-      <div className="kuru-box">
+      <div className={`kuru-box ${over ? "kuru-box-drop" : ""}`}>
         <div className="kuru-write">
           {address && (
             <div ref={mirror} className="kuru-mirror" aria-hidden="true">
@@ -1296,6 +1390,14 @@ function Composer({
               edit(event.target.value);
               setCaret(event.target.selectionStart);
               setChosen(0);
+              if (handing.refused) setHanding((was) => ({ ...was, refused: null }));
+            }}
+            onPaste={(event) => {
+              if (event.clipboardData.files.length === 0) return;
+              const items = handoverFrom(event.clipboardData, isLoopback(window.location.hostname));
+              if (items.some((item) => "file" in item) && event.clipboardData.getData("text/plain")) return;
+              event.preventDefault();
+              take(items);
             }}
             onSelect={(event) => {
               const { selectionStart: from, selectionEnd: to } = event.currentTarget;

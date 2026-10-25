@@ -63,6 +63,7 @@ import type {
 } from "../../shared/wire";
 import { COMMIT_MESSAGE_MAX, GIT_ACTIONS, GIT_STATUS_MS } from "../../shared/wire";
 import { DB_ROW_CAP, DB_SQL_MAX, type WorkspaceDatabase } from "../../shared/databases";
+import { DROP_MAX_BYTES } from "../../shared/drops";
 import {
   DEV_SCAN_MS,
   GIT_SCAN_MS,
@@ -91,6 +92,7 @@ import { parseReport } from "./agents/report";
 import { dump as dumpRecording, forget as forgetRecording, recordBacklog, recordInput, recordNote, recordOutput } from "./record";
 import { processCwd, processCwds } from "./cwd";
 import { scanDevServers, stopDevServer } from "./devservers";
+import { DropRefused, keepDrop } from "./drops";
 import { readHead, repoAt } from "./git";
 import { accountEmail, claudeSignedIn, claudeSignedInAt, pollUsage, usageSnapshot } from "./usage";
 import { codexUsageSnapshot, pollCodexUsage } from "./codexusage";
@@ -6673,6 +6675,39 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     } catch (err) {
       // Not on the disk is not taken: the window keeps it and sends again.
       json(res, { error: `the clip could not be kept: ${err instanceof Error ? err.message : String(err)}` }, 500);
+    }
+    return;
+  }
+  /**
+   * A file for Kuru's box that the page cannot name by its path — a picture
+   * off the clipboard, a phone's photo — kept in `drops/` and answered with
+   * the path of the copy. `?name=` is what the page called it, which is only
+   * ever a hint for the copy's name: the bytes decide what it is (see
+   * `shared/drops.ts`). The page checks the size before it sends; the
+   * declared length is checked here so a body past the cap is answered
+   * rather than read, and `readBody` is the backstop for one that lied.
+   */
+  if (url.pathname === "/api/drop") {
+    if (req.method !== "POST") {
+      text(res, "POST only", 405);
+      return;
+    }
+    const declared = Number(req.headers["content-length"]);
+    if (Number.isFinite(declared) && declared > DROP_MAX_BYTES) {
+      json(res, { error: `that file is over ${DROP_MAX_BYTES / 1024 / 1024} MB` }, 413);
+      return;
+    }
+    let bytes: Buffer;
+    try {
+      bytes = await readBody(req, DROP_MAX_BYTES);
+    } catch (err) {
+      json(res, { error: err instanceof Error ? err.message : String(err) }, 413);
+      return;
+    }
+    try {
+      json(res, keepDrop(bytes, (url.searchParams.get("name") ?? "").slice(0, 255)));
+    } catch (err) {
+      json(res, { error: err instanceof Error ? err.message : String(err) }, err instanceof DropRefused ? 415 : 500);
     }
     return;
   }

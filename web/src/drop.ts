@@ -10,6 +10,8 @@
  * Kururu had to be told, because a web page's default answer to a dropped file
  * is to *navigate to it*, which would replace the whole app with a picture. So
  * the terminal claims file drags, and `App.tsx` swallows the ones that miss.
+ * Kuru's box claims them too, as Claude Code's own box does, and takes a
+ * pasted picture the same way: see `handover`.
  *
  * Backslashes rather than quotes, because that is what Terminal.app, iTerm and
  * ghostty all do and the point of this gesture is that your hands already know
@@ -89,4 +91,42 @@ export function pathsFrom(transfer: DataTransfer | null): string[] {
 export function textForDrop(transfer: DataTransfer | null): string {
   const paths = pathsFrom(transfer);
   return paths.length === 0 ? "" : `${paths.map(escapePath).join(" ")} `;
+}
+
+/**
+ * What a drop or a paste on Kuru's box hands over, file by file and in the
+ * order given: a path where this page can name one Kuru can open, and
+ * otherwise the file itself, to be sent to the server and named by its copy
+ * (`shared/drops.ts`).
+ *
+ * `local` is whether the server — and so Kuru — is on the computer holding
+ * this page. The window shows another node's server too, and there a Finder
+ * path is the live wrong answer `pathForFile`'s note warns of: real here,
+ * nothing on the box. So off this computer every file is sent, as it is from
+ * a phone, which has no bridge to ask.
+ */
+export function handover(
+  files: readonly File[],
+  local: boolean,
+  pathFor: ((file: File) => string | null) | null,
+): ({ path: string } | { file: File })[] {
+  return files.map((file) => {
+    const path = local && pathFor ? pathFor(file) : null;
+    return path ? { path } : { file };
+  });
+}
+
+/**
+ * A drop's handover. A drop with no files in it and a `file://` list — a
+ * file dragged out of another page in this window — is the list's paths, on
+ * this computer only, for the reason `handover` gives.
+ */
+export function handoverFrom(transfer: DataTransfer | null, local: boolean): ({ path: string } | { file: File })[] {
+  if (!transfer) return [];
+  const files = Array.from(transfer.files);
+  if (files.length > 0) {
+    const bridge = desktop();
+    return handover(files, local, bridge ? (file) => bridge.pathForFile(file) : null);
+  }
+  return local ? pathsFrom(transfer).map((path) => ({ path })) : [];
 }

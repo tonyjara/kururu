@@ -1716,6 +1716,24 @@ export async function sendClip(clip: { id: string; profileId: string; at: number
   return body.entry;
 }
 
+/**
+ * A file for Kuru's box that this page cannot name by its path, kept by the
+ * server in its `drops/` folder. Resolves with the path of the copy, on the
+ * server's computer, which is Kuru's; rejects with why it was not kept. A
+ * fetch rather than the socket for `sendClip`'s reason: a picture is a binary
+ * body of megabytes.
+ */
+export async function sendDrop(file: File): Promise<string> {
+  const res = await fetch(`/api/drop?${new URLSearchParams({ name: file.name })}`, {
+    method: "POST",
+    headers: { "content-type": file.type || "application/octet-stream" },
+    body: file,
+  });
+  const body = (await res.json().catch(() => ({ error: `the server said ${res.status}` }))) as { path?: unknown; error?: string };
+  if (!res.ok || typeof body.path !== "string") throw new Error(body.error ?? `the server said ${res.status}`);
+  return body.path;
+}
+
 /** Where one sentence of an utterance is fetched from. */
 export function speechUrl(utterance: string, seq: number): string {
   return `/api/speech?u=${encodeURIComponent(utterance)}&seq=${seq}`;

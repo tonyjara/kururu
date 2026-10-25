@@ -5,13 +5,13 @@
  * "Screenshot 2026-09-14 at 11.02.33.png" is what a Mac calls a screenshot.
  */
 import { describe, expect, it } from "bun:test";
-import { escapePath, isFileDrag, pathsFrom, textForDrop } from "../src/drop";
+import { escapePath, handover, handoverFrom, isFileDrag, pathsFrom, textForDrop } from "../src/drop";
 
-/** Enough of a DataTransfer for the two things the code reads off one. */
-function transfer(opts: { types?: string[]; uriList?: string } = {}): DataTransfer {
+/** Enough of a DataTransfer for the things the code reads off one. */
+function transfer(opts: { types?: string[]; uriList?: string; files?: File[] } = {}): DataTransfer {
   return {
     types: opts.types ?? [],
-    files: [],
+    files: opts.files ?? [],
     getData: (type: string) => (type === "text/uri-list" ? (opts.uriList ?? "") : ""),
   } as unknown as DataTransfer;
 }
@@ -86,5 +86,42 @@ describe("textForDrop", () => {
 
   it("types nothing at all when there is no path to type", () => {
     expect(textForDrop(transfer({ types: ["Files"] }))).toBe("");
+  });
+});
+
+describe("handover", () => {
+  const shot = new File([new Uint8Array([1])], "Screenshot 1.png", { type: "image/png" });
+  const pasted = new File([new Uint8Array([2])], "image.png", { type: "image/png" });
+  /** The bridge's answer: a Finder file has a path, a clipboard picture has none. */
+  const pathFor = (file: File) => (file === shot ? "/Users/me/Desktop/Screenshot 1.png" : null);
+
+  it("names a Finder file by its path when Kuru is on this computer", () => {
+    expect(handover([shot], true, pathFor)).toEqual([{ path: "/Users/me/Desktop/Screenshot 1.png" }]);
+  });
+
+  it("sends a file nobody can name — a pasted picture — in its place, in the order given", () => {
+    expect(handover([pasted, shot], true, pathFor)).toEqual([{ file: pasted }, { path: "/Users/me/Desktop/Screenshot 1.png" }]);
+  });
+
+  it("sends every file from a page whose server is on another computer, path or not", () => {
+    expect(handover([shot], false, pathFor)).toEqual([{ file: shot }]);
+  });
+
+  it("sends every file from a phone or a browser, which have no bridge to ask", () => {
+    expect(handover([shot, pasted], true, null)).toEqual([{ file: shot }, { file: pasted }]);
+  });
+});
+
+describe("handoverFrom", () => {
+  it("is the uri-list's paths for a drop with no files, on this computer only", () => {
+    const drag = transfer({ types: ["Files"], uriList: "file:///Users/me/a%20b.md" });
+    expect(handoverFrom(drag, true)).toEqual([{ path: "/Users/me/a b.md" }]);
+    expect(handoverFrom(drag, false)).toEqual([]);
+  });
+
+  it("sends the files of a drop when there is no bridge", () => {
+    const file = new File(["# hi"], "notes.md", { type: "text/markdown" });
+    expect(handoverFrom(transfer({ types: ["Files"], files: [file] }), true)).toEqual([{ file }]);
+    expect(handoverFrom(null, true)).toEqual([]);
   });
 });

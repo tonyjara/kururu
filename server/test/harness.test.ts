@@ -87,6 +87,14 @@ describe("the tool catalogue", () => {
     expect(prompt).toContain("the Acme migration agent");
     expect(prompt).toMatch(/never say or write one to the user unless they ask/);
   });
+
+  it("tells the session a path the user dropped is a file to Read, escaped as a terminal writes it", () => {
+    const prompt = rolePrompt({ profile: "main", workspaces: [], launchers: [] });
+    expect(prompt).toContain("## Files the user hands you");
+    expect(prompt).toContain("Screenshot\\ 2026-10-25\\ at\\ 1.55.16\\ PM.png");
+    expect(prompt).toMatch(/Read it — a picture too/);
+    expect(prompt).toMatch(/leave the backslashes out when you Read/);
+  });
 });
 
 describe("what an agent is called", () => {

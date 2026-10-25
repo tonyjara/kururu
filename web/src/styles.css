@@ -5255,6 +5255,23 @@ html.pill-page #root {
 .kuru-box:focus-within {
   border-color: var(--accent);
 }
+/* A file held over the composer: the box it will land in, ringed as the file
+   tree rings a folder a drag would land in. */
+.kuru-box-drop {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 var(--border) color-mix(in srgb, var(--accent) 60%, transparent);
+}
+/* A dropped or pasted file on its way to the server, and why one was not taken.
+   A tap dismisses the refusal; the next keystroke does too. */
+.kuru-handing {
+  margin: 0 0 4px;
+  font-size: var(--fs-sm);
+  color: var(--dimmer);
+}
+.kuru-handing-refused {
+  color: var(--danger);
+  cursor: pointer;
+}
 /* The field and the mirror behind it, which draws a routed `@node` bold. */
 .kuru-write {
   position: relative;
