@@ -43,6 +43,7 @@
  * outbox and to Kuru's turns is `server/src/channels.ts`.
  */
 
+import { pictureOf, type TelegramPicture } from "./pictures";
 import { REPLY_ME, replyClock, replyReference } from "./reply";
 
 /** Every kind of channel kururu knows. One today. */
@@ -266,6 +267,12 @@ export interface IncomingMessage {
   at: number;
   /** The words; null for a photo, a sticker, a voice note — anything without them. */
   text: string | null;
+  /** A picture's words, which Telegram keeps apart from a message's (`shared/pictures.ts`). */
+  caption?: string | null;
+  /** The picture it carries — a photo, or an image sent as a file. Absent from a message with none. */
+  picture?: TelegramPicture;
+  /** The album it is one picture of: every picture in one has the same. */
+  album?: string;
   /** The message this one answers, when it was sent as a reply: how a reply to one of a node's lines finds that node (`routeOf`). */
   replyTo: number | null;
   /**
@@ -320,11 +327,18 @@ function messageFrom(updateId: number, value: unknown): IncomingMessage | null {
   const answered = raw.reply_to_message as Record<string, unknown> | undefined;
   const replyTo = answered && typeof answered.message_id === "number" && Number.isFinite(answered.message_id) ? answered.message_id : null;
   const message: IncomingMessage = { updateId, messageId: raw.message_id, chatId: String(chat.id), chatType: chat.type, from, at, text: typeof raw.text === "string" ? raw.text : null, replyTo };
+  const picture = pictureOf(raw);
+  if (picture) {
+    message.picture = picture;
+    message.caption = typeof raw.caption === "string" ? raw.caption : null;
+    if (typeof raw.media_group_id === "string" && raw.media_group_id) message.album = raw.media_group_id.slice(0, 64);
+  }
   if (answered && replyTo !== null) {
     const quote = (raw.quote as Record<string, unknown> | undefined)?.text;
     message.answered = {
-      // A photo's caption is its words, for the purpose of saying which it was.
-      text: typeof answered.text === "string" ? answered.text : typeof answered.caption === "string" ? answered.caption : null,
+      // A photo's caption is its words, for the purpose of saying which it
+      // was; a photo with none is still something to say it answered.
+      text: typeof answered.text === "string" ? answered.text : typeof answered.caption === "string" ? answered.caption : pictureOf(answered) ? "[picture]" : null,
       at: typeof answered.date === "number" && Number.isFinite(answered.date) ? answered.date * 1000 : at,
       bot: (answered.from as Record<string, unknown> | undefined)?.is_bot === true,
       quote: typeof quote === "string" && quote.trim() ? quote : null,
@@ -353,8 +367,8 @@ export function cleanText(text: string): string {
 
 /** What became of one message, and so what the bot does with it. */
 export type Verdict =
-  /** To Kuru, through the outbox, as these words. */
-  | { kind: "pass"; text: string }
+  /** To Kuru, through the outbox, as these words — with a picture to fetch first, when it carries one; its words are then its caption, and may be none. */
+  | { kind: "pass"; text: string; picture?: TelegramPicture }
   /** `/start` from an allowed account: what a Telegram app sends the first time the bot is opened. A greeting, and nothing to Kuru. */
   | { kind: "start" }
   /** It carried the pairing code: this account is shown on the Mac, to be allowed or not. */
@@ -397,6 +411,7 @@ export function judge(message: IncomingMessage, ctx: JudgeContext): Verdict {
   // Telegram's clock says whole seconds, so a message sent in the second the
   // switch went on is let through rather than dropped for a rounding.
   if (ctx.enabledAt !== null && message.at + 1000 < ctx.enabledAt) return { kind: "stale" };
+  if (message.picture) return { kind: "pass", text: cleanText(message.caption ?? ""), picture: message.picture };
   if (!text) return { kind: "unsupported" };
   if (/^\/start(@\w+)?(\s|$)/.test(text)) return { kind: "start" };
   return { kind: "pass", text };

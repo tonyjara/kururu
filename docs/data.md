@@ -30,9 +30,12 @@ again. The first start makes it, and there is no other place a board is
 kept. `KURURU_DATA_DIR` moves it for the isolated instance
 ([testing](testing.md#the-isolated-instance)). Beside it: `db-copies/`, one
 copy of the file a day made with SQLite's online backup, the newest seven
-kept; `backup/`, the mirror and its `.git`; and `drops/`, the pictures and
+kept; `backup/`, the mirror and its `.git`; `drops/`, the pictures and
 files pasted or sent from a phone into Kuru's box, kept so Kuru can Read
-them and never backed up ([harness](harness.md#a-file-the-user-hands-it)).
+them and never backed up ([harness](harness.md#a-file-the-user-hands-it));
+and `telegram/`, the pictures sent from the Telegram chat (`inbox/`) and
+copies of the ones on their way to it (`outbox/`), never backed up either
+([channels](channels.md#pictures)).
 Settings → About shows the file and its size.
 
 ## Keys, not ids
@@ -198,7 +201,7 @@ Never: `access.json`, `openrouter.json`, `anthropic.json`, `telegram.json`, `nod
 (`grants.json`, `secrets-held.json`, `claude-lend.json`, `claude-token.json`), `identities/`, `.claude.json`,
 `history.jsonl`, the transcripts, every cache, the database binary (git
 keeps a whole copy per change; the text rebuilds it), agents' replies, and
-`drops/`, since a screenshot holds whatever was on the screen.
+`drops/` and `telegram/`, since a screenshot holds whatever was on the screen.
 Secrets are left out rather than encrypted: an encrypted blob on GitHub is a
 ciphertext to attack for ever behind a passphrase that is one more thing to
 lose, and restoring them is one `/login` per profile and one paste of a key.

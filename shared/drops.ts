@@ -75,6 +75,18 @@ function heicRefusal(name: string): string {
 const startsWith = (bytes: Uint8Array, sig: readonly number[], at = 0) => sig.every((b, i) => bytes[at + i] === b);
 const ascii = (s: string) => Array.from(s, (c) => c.charCodeAt(0));
 
+/** What a picture's bytes are, by their magic numbers: the four Claude reads, and HEIC, which it does not. Null for anything else. */
+export type ImageKind = "png" | "jpg" | "gif" | "webp" | "heic";
+
+export function imageKindOf(bytes: Uint8Array): ImageKind | null {
+  if (startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "png";
+  if (startsWith(bytes, [0xff, 0xd8, 0xff])) return "jpg";
+  if (startsWith(bytes, ascii("GIF87a")) || startsWith(bytes, ascii("GIF89a"))) return "gif";
+  if (startsWith(bytes, ascii("RIFF")) && startsWith(bytes, ascii("WEBP"), 8)) return "webp";
+  if (startsWith(bytes, ascii("ftyp"), 4) && /^(heic|heix|hevc|heim|heis|mif1|msf1)$/.test(String.fromCharCode(...bytes.slice(8, 12)))) return "heic";
+  return null;
+}
+
 /**
  * What a drop's bytes are, or why it is refused.
  *
@@ -87,13 +99,9 @@ const ascii = (s: string) => Array.from(s, (c) => c.charCodeAt(0));
 export function judgeDrop(bytes: Uint8Array, name: string): DropKind | { refused: string } {
   if (bytes.length === 0) return { refused: "That file is empty." };
   if (bytes.length > DROP_MAX_BYTES) return { refused: `That file is over ${DROP_MAX_BYTES / 1024 / 1024} MB.` };
-  if (startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return { kind: "image", ext: "png" };
-  if (startsWith(bytes, [0xff, 0xd8, 0xff])) return { kind: "image", ext: "jpg" };
-  if (startsWith(bytes, ascii("GIF87a")) || startsWith(bytes, ascii("GIF89a"))) return { kind: "image", ext: "gif" };
-  if (startsWith(bytes, ascii("RIFF")) && startsWith(bytes, ascii("WEBP"), 8)) return { kind: "image", ext: "webp" };
-  if (startsWith(bytes, ascii("ftyp"), 4) && /^(heic|heix|hevc|heim|heis|mif1|msf1)$/.test(String.fromCharCode(...bytes.slice(8, 12)))) {
-    return { refused: heicRefusal(name) };
-  }
+  const image = imageKindOf(bytes);
+  if (image === "heic") return { refused: heicRefusal(name) };
+  if (image) return { kind: "image", ext: image };
   if (!bytes.includes(0)) {
     try {
       new TextDecoder("utf-8", { fatal: true }).decode(bytes);

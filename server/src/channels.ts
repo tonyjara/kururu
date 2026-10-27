@@ -148,6 +148,15 @@ export class Channels {
     };
   }
 
+  /**
+   * Whether the turn Kuru is in answers a channel's message: the user is on
+   * their phone, where a link on the Mac's sidebar is no use and a picture
+   * `show_file` names goes to the chat too.
+   */
+  answers(profileKey: string, kind: ChannelKind): boolean {
+    return this.origin(profileKey).channels.includes(kind);
+  }
+
   /** Whether what Kuru says now, at the end of this turn or mid-way through it, is said aloud on the Mac. See `spokenHere`. */
   speaks(profileKey: string): boolean {
     return spokenHere(this.origin(profileKey), this.telegram.speakReplies);

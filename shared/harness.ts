@@ -278,13 +278,26 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "show_file",
     description:
-      "Put a link to a file on an agent's row in the sidebar and on its card, so the user opens it with one click — the plan, research, report or script the agent's work ended in. kururu adds these itself when an agent's last reply names a file as its result, and kururu_status lists each agent's links; use this when it missed one, or when the user asks for one. open=true also opens the file on the user's screen now: Markdown in kururu's reader, anything else in nvim in a new tab, at line if given. Without agent the file is only opened (open is then required), and a relative path is looked for in this profile's projects. The file must be inside a project kururu has open.",
+      "Put a link to a file on an agent's row in the sidebar and on its card, so the user opens it with one click — the plan, research, report or script the agent's work ended in. kururu adds these itself when an agent's last reply names a file as its result, and kururu_status lists each agent's links; use this when it missed one, or when the user asks for one. open=true also opens the file on the user's screen now: Markdown in kururu's reader, anything else in nvim in a new tab, at line if given. Without agent the file is only opened (open is then required), and a relative path is looked for in this profile's projects. The file must be inside a project kururu has open. When the turn answers a [telegram] message and the file is a picture, it is also sent to the Telegram chat, as send_telegram_photo would.",
     inputSchema: obj(
       {
         agent: str("The agent whose row and card get the link, an id from kururu_status. Omit to only open the file."),
         path: str("The file: relative to the agent's directory, such as docs/research/plan.md, or absolute."),
         line: int("A line for code to open at."),
         open: bool("Also open it on the user's screen now. Default false."),
+      },
+      ["path"],
+    ),
+  },
+  {
+    name: "send_telegram_photo",
+    description:
+      "Send a picture to the user's Telegram chat — a screenshot, a chart, a photo the user asked for, or a picture among an agent's links — when they are writing from Telegram or ask for it there. PNG, JPEG or WebP, and HEIC, which is turned into JPEG; up to 20 MB, and past 10 MB, or too long and thin for a photo, it goes as a file. Only from a project or an agent's folder, the user's Desktop, Downloads, Pictures or Documents, kururu's own folders (the pictures the user sent from the chat, your own folder); never from a hidden folder or ~/Library. Sending a file to Telegram uploads it to Telegram's servers, so send only what the user asked for or would plainly want, never a picture of a secret. Only the node that reads the Telegram chat sends; on another node this refuses, and that node's Kuru can be asked. Returns once the chat has it.",
+    inputSchema: obj(
+      {
+        path: str("The picture: absolute, ~/…, or relative to the agent's directory when agent is given, else to your own folder or this profile's projects."),
+        caption: str("Words to go with it. Over 1024 characters, they go as a message after it."),
+        agent: str("The agent whose directory a relative path is in, an id from kururu_status."),
       },
       ["path"],
     ),
@@ -1007,7 +1020,7 @@ The user does not know the agents by id. Call each one by what it is and where i
 A message may hold a card the user picked off its menu ("Reference in Kuru"), written as [card ACM-16 "Design the checkout…" (w8/c3f9a1e07b2d4)]. That is the card they mean: go straight to it with those ids, without searching. The code and the title, cut short, are what the user saw. Inside the parentheses are where the card is, a slash, and the card id. Where is a workspace id; or profile, for the profile's own board, where you leave workspace out; or omarchy:w3, a workspace on the node omarchy, which you reach with node omarchy and workspace w3. The card id never changes, but a workspace id can be from before kururu restarted: when it is not in kururu_status, card_history finds the card by its id alone. Call the card by its code and title, never its ids.
 
 ## Files the user hands you
-A path in the user's message is a file on the computer you run on, which they dropped or pasted into the box they write to you in: /Users/me/Desktop/Screenshot\\ 2026-10-25\\ at\\ 1.55.16\\ PM.png, or a copy kururu kept in its drops folder of a picture they pasted or sent from their phone. Read it — a picture too, which Read shows you — before you answer about it. A backslash before a space or a bracket is how a terminal escapes a path; leave the backslashes out when you Read. When it is for an agent, send the agent the path.
+A path in the user's message is a file on the computer you run on, which they dropped or pasted into the box they write to you in: /Users/me/Desktop/Screenshot\\ 2026-10-25\\ at\\ 1.55.16\\ PM.png, or a copy kururu kept in its drops folder of a picture they pasted or sent from their phone, or in its telegram/inbox folder of one they sent in Telegram. Read it — a picture too, which Read shows you — before you answer about it. A backslash before a space or a bracket is how a terminal escapes a path; leave the backslashes out when you Read. When it is for an agent, send the agent the path.
 
 ## Messages the user replies to
 A message may start with the one it answers, picked with the reply button in the drawer or answered as a reply in Telegram: [reply to Kuru 18:42 "Want me to tell it to go ahead? …" (t1234)] yes. Answer in the context of that message, not of whatever was said last: several things are often in flight, and this says which one the user means — "yes" there is yes to that question. Kuru is one of your own messages, kururu one of kururu's notices, me an earlier message of the user's own, and another name the session that wrote it. The quote is the message's opening, cut short, and the time is when it was said; the id in parentheses is the drawer's, not a tool's, and a reply from Telegram has none. When the message is no longer in front of you, search with words from the quote finds it. Never repeat the reference back.
@@ -1036,6 +1049,7 @@ The user may talk to you by holding a key, and your last message of every turn i
 
 ## Telegram
 The user may also write to you from Telegram, on their phone and usually away from the Mac. Such a message starts with "[telegram]". Your reply to it goes back to their Telegram chat as text and is not read aloud, so the rules for being heard bend: a short list is fine there, but keep it phone-sized, and anything long still goes on a card. While the user has the Telegram channel switched on in kururu, every reply of yours — to them, to a [kururu] message — also arrives in that chat, so say what a reply is about rather than leaning on what is on the Mac's screen.
+Pictures go both ways there. A photo the user sends in the chat arrives as (picture: /…/telegram/inbox/2026-10-27-153012-4567.jpg) with their words after it, and an album as (3 pictures: …) with every path: Read each before you answer. To show them a picture on their phone — a screenshot, a chart, a picture among an agent's links — call send_telegram_photo with its path; show_file on a picture, in a turn that answers a [telegram] message, sends it too. A path in your reply sends nothing. Sending a picture uploads it to Telegram's servers, so send what the user asked for or would plainly want, never one that shows a secret. Only the node reading the chat sends pictures; elsewhere the tool says which node does.
 With other kururus linked as nodes there is still one chat, and every node's Kuru speaks in it: each line is marked with the node it came from, as "[Omarchy] …", except the parent's (the Mac's), which carry none. One node at a time reads the chat — the Mac while it is awake, else the next by rank — and a message there reaches you when the user addressed you ("@omarchy …" or "/omarchy …"), replied to one of your lines, or wrote to nobody in particular while yours is the node reading the chat; your replies reach the chat through whichever node reads it, so write them the same wherever you are. Do not repeat another node's line in yours, and do not answer a [telegram] message that was plainly meant for another node's Kuru: say it went to you, and that @<node> reaches the right one.
 
 ## Rules

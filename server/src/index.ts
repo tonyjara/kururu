@@ -64,6 +64,7 @@ import type {
 import { COMMIT_MESSAGE_MAX, GIT_ACTIONS, GIT_STATUS_MS } from "../../shared/wire";
 import { DB_ROW_CAP, DB_SQL_MAX, type WorkspaceDatabase } from "../../shared/databases";
 import { DROP_MAX_BYTES } from "../../shared/drops";
+import { isPictureName } from "../../shared/pictures";
 import {
   DEV_SCAN_MS,
   GIT_SCAN_MS,
@@ -93,6 +94,8 @@ import { dump as dumpRecording, forget as forgetRecording, recordBacklog, record
 import { processCwd, processCwds } from "./cwd";
 import { scanDevServers, stopDevServer } from "./devservers";
 import { DropRefused, keepDrop } from "./drops";
+import { harnessHome } from "./harnesshome";
+import { PictureRefused, stageOutgoing, wholePath } from "./pictures";
 import { readHead, repoAt } from "./git";
 import { accountEmail, claudeSignedIn, claudeSignedInAt, pollUsage, usageSnapshot } from "./usage";
 import { codexUsageSnapshot, pollCodexUsage } from "./codexusage";
@@ -2598,7 +2601,46 @@ async function showFileFor(profileId: string, agentId: string | null, path: stri
       said.push(`Opened it on the user's screen, in ${readsInReader(found.file.path) ? "the reader" : "nvim"}.`);
     }
   }
+  // The user wrote from Telegram, so they are on their phone, where a link
+  // on the Mac's sidebar is no use: a picture goes to the chat as well.
+  const key = workspaces.profile(profileId)?.key;
+  if (key && isPictureName(found.file.path) && channels.answers(key, "telegram")) {
+    try {
+      said.push(await sendPicture(key, join(found.file.root, found.file.path), null));
+    } catch (err) {
+      said.push(`Not sent to the Telegram chat: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
   return said.join(" ");
+}
+
+/**
+ * Kuru's `send_telegram_photo`: a picture found where Kuru said — a whole
+ * path, `~/…`, or one relative to the agent named or to Kuru's own folder
+ * and the profile's projects — checked and copied by `stageOutgoing`, and
+ * sent to the chat by the node that reads it. Says what happened, or throws
+ * why not, in words for Kuru.
+ */
+async function sendPictureFor(profileId: string, agentId: string | null, path: string, caption: string | null): Promise<string> {
+  const profile = workspaces.profile(profileId);
+  if (!profile) throw new Error("That profile is gone.");
+  const agent = agentId ? host.find(agentId) : undefined;
+  if (agent && remoteShellOf(agent.command)) throw new Error("That agent runs on a machine, and its files are not on this computer.");
+  const refused = channels.telegram.pictureRefusal(profile.key);
+  if (refused) throw new Error(refused);
+  const bases = agent ? [agent.cwd] : [harnessHome(profile.key), ...projectDirsOf(profileId)];
+  const full = wholePath(path, bases);
+  if (!full) throw new Error(`${path} is not a file kururu can find${agent ? ` from ${agent.cwd}` : ""}. Give its whole path.`);
+  return sendPicture(profile.key, full, caption);
+}
+
+async function sendPicture(profileKey: string, full: string, caption: string | null): Promise<string> {
+  try {
+    return await channels.telegram.sendPicture(profileKey, await stageOutgoing(full), caption);
+  } catch (err) {
+    if (err instanceof PictureRefused) throw new Error(err.message);
+    throw err;
+  }
 }
 
 /** Whether a root, as a client spelt it, is one the server allows — realpath'd first, as `files.ts` stores them. */
@@ -7629,6 +7671,7 @@ async function attach(port: Port): Promise<void> {
     reloadWindow: (why, timeoutMs) => reloads.ask(why, "Kuru", timeoutMs),
     madeOf: (agentId) => madeFiles.of(agentId),
     showFile: showFileFor,
+    sendPicture: sendPictureFor,
     movePlan: (profileId, workspaceId, nodeId, folder) => mover.plan(profileId, workspaceId, nodeId, folder),
     moveWorkspace: (profileId, workspaceId, nodeId, folder) => mover.move(profileId, workspaceId, nodeId, folder, "harness"),
     lendOffer: (profileId, workspaceId, nodeId, folder) => lendOffer(profileId, workspaceId, nodeId, folder),

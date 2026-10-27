@@ -11,7 +11,7 @@
  * queue, the file's mode — without a request ever leaving the process.
  */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -343,10 +343,22 @@ function fakeTelegram() {
   const pending: unknown[] = [];
   let nextUpdate = 100;
   const replies = new Map<string, () => { status: number; body: unknown }>();
+  /** Files the bot may fetch, by `file_id`: where Telegram says they are, and their bytes. */
+  const files = new Map<string, { path: string; bytes: Uint8Array }>();
   let waiters: (() => void)[] = [];
   const fetch: Fetch = async (url, init) => {
+    const download = /\/file\/bot[^/]+\/(.+)$/.exec(url);
+    if (download) {
+      calls.push({ method: "download", params: { path: download[1] }, url });
+      const file = [...files.values()].find((f) => f.path === download[1]);
+      return file ? new Response(file.bytes) : new Response("not found", { status: 404 });
+    }
     const method = url.slice(url.lastIndexOf("/") + 1);
-    const params = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+    // An upload is a form; its file is recorded by name and size.
+    const params =
+      init.body instanceof FormData
+        ? Object.fromEntries([...init.body.entries()].map(([key, value]) => [key, typeof value === "string" ? value : { name: (value as File).name, size: value.size }]))
+        : (JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>);
     calls.push({ method, params, url });
     const scripted = replies.get(method);
     if (scripted) {
@@ -370,12 +382,17 @@ function fakeTelegram() {
       return Response.json({ ok: true, result });
     }
     if (method === "getChat") return Response.json({ ok: true, result: { id: Number(params.chat_id), first_name: "Sam", username: "sam" } });
+    if (method === "getFile") {
+      const file = files.get(String(params.file_id));
+      return file ? Response.json({ ok: true, result: { file_id: params.file_id, file_path: file.path } }) : Response.json({ ok: false, error_code: 400, description: "Bad Request: invalid file_id" }, { status: 400 });
+    }
     return Response.json({ ok: true, result: { message_id: calls.length } });
   };
   return {
     fetch,
     calls,
     replies,
+    files,
     deliver(from: string, text: string | null, chat = from, extra: Record<string, unknown> = {}) {
       pending.push({
         update_id: nextUpdate++,
@@ -393,8 +410,9 @@ let open: TelegramChannel[] = [];
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "kururu-channels-"));
-  for (const name of ["KURURU_STATE_DIR", "XDG_CONFIG_HOME", "KURURU_TELEGRAM_API"]) was[name] = process.env[name];
+  for (const name of ["KURURU_STATE_DIR", "KURURU_DATA_DIR", "XDG_CONFIG_HOME", "KURURU_TELEGRAM_API"]) was[name] = process.env[name];
   process.env.KURURU_STATE_DIR = join(dir, "state");
+  process.env.KURURU_DATA_DIR = join(dir, "data");
   process.env.XDG_CONFIG_HOME = join(dir, "config");
   process.env.KURURU_TELEGRAM_API = "http://telegram.invalid";
 });
@@ -640,6 +658,115 @@ describe("TelegramChannel", () => {
   });
 });
 
+describe("pictures", () => {
+  const JPEG = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70]);
+  const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+  const photo = (id: string, size = JPEG.length) => [
+    { file_id: `${id}-thumb`, width: 90, height: 60, file_size: 100 },
+    { file_id: id, width: 1280, height: 960, file_size: size },
+  ];
+
+  it("fetches a photo, keeps it, and hands Kuru its path with the caption", async () => {
+    const fake = fakeTelegram();
+    fake.files.set("ph1", { path: "photos/file_1.jpg", bytes: JPEG });
+    const { said } = await ready(fake);
+    fake.deliver(ME, null, ME, { photo: photo("ph1"), caption: "what is this?" });
+    await until(() => said.length === 1);
+    const match = /^\(picture: (\S+\.jpg)\) what is this\?$/.exec(said[0]!.text);
+    expect(match).not.toBeNull();
+    const path = match![1]!;
+    expect(path.startsWith(join(dir, "data", "telegram", "inbox"))).toBe(true);
+    expect(readFileSync(path)).toEqual(Buffer.from(JPEG));
+    // The largest size, never the thumbnail.
+    expect(fake.calls.find((c) => c.method === "getFile")?.params.file_id).toBe("ph1");
+    // The token went in the download's URL and into no file kururu wrote.
+    expect(readFileSync(join(dir, "state", "telegram.json"), "utf8")).not.toContain(TOKEN);
+  });
+
+  it("gathers an album sent across two polls into one message", async () => {
+    const fake = fakeTelegram();
+    for (const n of [1, 2, 3]) fake.files.set(`al${n}`, { path: `photos/al_${n}.jpg`, bytes: JPEG });
+    const { said } = await ready(fake);
+    fake.deliver(ME, null, ME, { photo: photo("al1"), caption: "the three screens", media_group_id: "g7" });
+    fake.deliver(ME, null, ME, { photo: photo("al2"), media_group_id: "g7" });
+    await until(() => fake.calls.filter((c) => c.method === "download").length === 2);
+    fake.deliver(ME, null, ME, { photo: photo("al3"), media_group_id: "g7" });
+    await until(() => said.length === 1, 4000);
+    expect(said[0]!.text).toMatch(/^\(3 pictures: \S+\.jpg \S+\.jpg \S+\.jpg\) the three screens$/);
+    // While it gathered, the poll was a short one.
+    expect(fake.calls.some((c) => c.method === "getUpdates" && c.params.timeout === 1)).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(said).toHaveLength(1);
+  });
+
+  it("says in the chat when a picture is too big to fetch, and passes nothing on", async () => {
+    const fake = fakeTelegram();
+    const { said } = await ready(fake);
+    fake.deliver(ME, null, ME, { document: { file_id: "big", file_name: "huge.png", mime_type: "image/png", file_size: 25 * 1024 * 1024 } });
+    await until(() => fake.sent().some((m) => m.text.includes("did not reach Kuru")));
+    expect(fake.sent().at(-1)!.text).toContain("over 20 MB");
+    expect(fake.calls.some((c) => c.method === "getFile")).toBe(false);
+    expect(said).toEqual([]);
+  });
+
+  it("still tells a voice note it cannot be passed on", async () => {
+    const fake = fakeTelegram();
+    await ready(fake);
+    fake.deliver(ME, null, ME, { voice: { file_id: "v1" } });
+    await until(() => fake.sent().some((m) => m.text.startsWith("Only text and pictures")));
+  });
+
+  function staged(name = "shot.png") {
+    const folder = join(dir, "data", "telegram", "outbox");
+    mkdirSync(folder, { recursive: true });
+    const file = join(folder, `${name}.copy.png`);
+    writeFileSync(file, PNG);
+    return { file, as: "photo" as const, name };
+  }
+
+  it("sends a picture with its caption, says so once the chat has it, and lets the copy go", async () => {
+    const fake = fakeTelegram();
+    const { channel: c } = await ready(fake);
+    const picture = staged();
+    const said = await c.sendPicture("pk-main", picture, "the build is green");
+    expect(said).toBe("Sent shot.png to the Telegram chat.");
+    const call = fake.calls.find((x) => x.method === "sendPhoto")!;
+    expect(call.params).toMatchObject({ chat_id: ME, caption: "the build is green", photo: { name: "shot.png.copy.png", size: PNG.length } });
+    expect(existsSync(picture.file)).toBe(false);
+  });
+
+  it("sends again as a file what Telegram will not make a photo of", async () => {
+    const fake = fakeTelegram();
+    fake.replies.set("sendPhoto", () => ({ status: 400, body: { ok: false, error_code: 400, description: "Bad Request: PHOTO_INVALID_DIMENSIONS" } }));
+    const { channel: c } = await ready(fake);
+    const said = await c.sendPicture("pk-main", staged("tall.png"), null);
+    expect(said).toContain("as a file");
+    expect(fake.calls.find((x) => x.method === "sendDocument")?.params.document).toMatchObject({ size: PNG.length });
+  });
+
+  it("puts a long caption after the picture rather than cutting it", async () => {
+    const fake = fakeTelegram();
+    const { channel: c } = await ready(fake);
+    const long = "word ".repeat(300).trim();
+    await c.sendPicture("pk-main", staged(), long);
+    expect(fake.calls.find((x) => x.method === "sendPhoto")?.params.caption).toBeUndefined();
+    await until(() => fake.sent().some((m) => m.text === long));
+  });
+
+  it("refuses while the channel is off, and for another profile, and keeps no copy", async () => {
+    const fake = fakeTelegram();
+    const { channel: c } = await ready(fake);
+    const other = staged("a.png");
+    await expect(c.sendPicture("pk-other", other, null)).rejects.toThrow(/another profile/);
+    expect(existsSync(other.file)).toBe(false);
+    c.set({ enabled: false });
+    const off = staged("b.png");
+    await expect(c.sendPicture("pk-main", off, null)).rejects.toThrow(/off/);
+    expect(existsSync(off.file)).toBe(false);
+    expect(fake.calls.some((x) => x.method === "sendPhoto")).toBe(false);
+  });
+});
+
 describe("Channels", () => {
   it("keeps quiet for a reply to Telegram alone, and sends every reply to the chat", async () => {
     const fake = fakeTelegram();
@@ -659,7 +786,10 @@ describe("Channels", () => {
 
     channels.prompted("pk-main", "[telegram] check the build");
     expect(channels.speaks("pk-main")).toBe(false);
+    // The user is on their phone for this turn: a picture `show_file` names goes to the chat too.
+    expect(channels.answers("pk-main", "telegram")).toBe(true);
     channels.replied("pk-main", "The build passed.");
+    expect(channels.answers("pk-main", "telegram")).toBe(false);
     // A notice's turn has no prompt in it, and is spoken.
     expect(channels.speaks("pk-main")).toBe(true);
 

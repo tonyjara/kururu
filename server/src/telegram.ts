@@ -34,6 +34,13 @@
  * and leaves the queue when Telegram has it, so a Mac whose Wi-Fi dropped
  * sends Kuru's answer when it is back rather than never.
  *
+ * **Pictures** come in through `getFile` and a download — the token in the
+ * download's URL, as in every request's — and are kept by `pictures.ts` and
+ * named in the words Kuru is typed (`shared/pictures.ts`), an album gathered
+ * into one message. They go out when Kuru asks (`sendPicture`), as a form
+ * upload of a copy, in the same queue as its words, so a picture and the
+ * reply after it arrive in that order.
+ *
  * **Among several nodes** (`docs/nodes.md`, "One Telegram") the bot is one
  * bot and only one node may poll it, so this channel has a second way of
  * being: *shared*, when the roster carries the parent's settings. Then the
@@ -49,7 +56,7 @@
  * On the restartable side: it holds no pty, and a restart costs a poll.
  */
 import { randomBytes, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -62,6 +69,7 @@ import {
   laterSwitch,
   markLine,
   mergeReplies,
+  nodeSubject,
   rememberSent,
   routeOf,
   rosterSwitch,
@@ -99,7 +107,9 @@ import {
   type TelegramSwitch,
 } from "../../shared/channels";
 import { LEAD_BUSY_MS, LEAD_HANDLED_MAX, isNodeId, type LeadHeld, type LeadState } from "../../shared/nodes";
+import { ALBUM_MAX, ALBUM_QUIET_MS, PICTURE_IN_MAX, photoRefusedForShape, pictureWords, splitCaption, type SendAs, type TelegramPicture } from "../../shared/pictures";
 import { readConfigFile, removeConfigFile, writeConfigFile } from "./config";
+import { PictureRefused, dropStaged, keepIncoming, type StagedPicture } from "./pictures";
 
 const FILE = "telegram.json";
 
@@ -116,6 +126,10 @@ function apiBase(): string {
 const POLL_S = 50;
 /** Any other request. A send that takes longer than this is retried, which is better than a queue stuck behind it. */
 const REQUEST_MS = 15_000;
+/** A picture, either way: ten megabytes up a slow uplink is not a request that failed. */
+const PICTURE_MS = 90_000;
+/** How long `sendPicture` waits to say the chat has it; past this it says the picture is queued. */
+const PICTURE_WAIT_MS = 60_000;
 /** Telegram shows "typing…" for five seconds after each ask. */
 const TYPING_EVERY_MS = 4_500;
 /** How long "typing…" is kept up for one message, if Kuru never answers it. */
@@ -128,7 +142,7 @@ const HELD_ANSWERED_MS = 60 * 60_000;
 const PAIRED = "Paired. While the Telegram channel is on in kururu, what you write here goes to Kuru, and Kuru's replies come back here.";
 const START = "This chat reaches Kuru, your kururu harness. Write to it as you would in the drawer; its replies come back here.";
 const OFF = "kururu's Telegram channel is off, so this did not reach Kuru. Turn it on in Settings → Channels.";
-const UNSUPPORTED = "Only text reaches Kuru from here — not photos, voice notes, files or stickers.";
+const UNSUPPORTED = "Only text and pictures reach Kuru from here — not voice notes, videos, stickers or other files.";
 const OTHER_READER = "Something else is reading this bot's messages too — another kururu, or another program with the same token. Only one can.";
 const REVOKED = "Telegram does not recognise this bot's token any more. If you revoked it in @BotFather, paste the new one.";
 const OTHER_NODE = "Another kururu polled this bot at the same moment — a split tailnet, most likely. The lower-ranked one stands down; the poll settles within a minute.";
@@ -159,6 +173,38 @@ interface Outgoing {
   nextAt: number;
   /** The node whose line it is, when the channel is shared: what the reply map remembers it by. */
   origin?: string;
+  /**
+   * A picture to upload, with `text` empty: its copy in `telegram/outbox/`
+   * (`server/src/pictures.ts`), how it goes, and its caption. Never handed
+   * to another node, whose disk the copy is not on.
+   */
+  picture?: { file: string; as: SendAs; caption: string | null };
+}
+
+/**
+ * An album from the chat, gathered while its pictures arrive one message at
+ * a time (`ALBUM_QUIET_MS`). On the disk with the rest of the state, so a
+ * restart in the middle passes on what had arrived rather than losing it:
+ * the poll that brought it is already confirmed.
+ */
+interface Album {
+  chat: string;
+  /** Telegram's `media_group_id`. */
+  group: string;
+  /** The outbox id: its first picture's message. */
+  id: string;
+  at: number;
+  /** Whatever was written with it: the caption, which one of its pictures carries. */
+  caption: string;
+  /** The line its first picture answered, when it was sent as a reply. */
+  answered: IncomingMessage["answered"] | null;
+  paths: string[];
+  /** Pictures that could not be fetched; the chat was told each one. */
+  missed: number;
+  /** When its last picture arrived. */
+  lastAt: number;
+  /** Its first was for another node's Kuru, which a picture does not reach: the rest follow it nowhere. */
+  refused: boolean;
 }
 
 /** A line of this node's on its way to the node that polls, kept until that node says it has it. */
@@ -193,6 +239,8 @@ interface ChannelState {
   holding: boolean;
   /** Shared, on a child: the newest flip of the switch it has heard that the roster does not carry yet. */
   switch: TelegramSwitch | null;
+  /** An album still arriving. */
+  album: Album | null;
 }
 
 const EMPTY_STATE: ChannelState = {
@@ -208,6 +256,7 @@ const EMPTY_STATE: ChannelState = {
   relaying: [],
   holding: false,
   switch: null,
+  album: null,
 };
 
 function statePath(): string {
@@ -235,7 +284,16 @@ function readState(path: string): ChannelState {
     return {
       botId: typeof raw.botId === "string" ? raw.botId : null,
       offset: typeof raw.offset === "number" && Number.isFinite(raw.offset) && raw.offset > 0 ? raw.offset : 0,
-      outgoing: outgoing.map((o) => ({ ...o, id: typeof o.id === "string" ? o.id : randomUUID(), silent: o.silent === true, attempts: Number(o.attempts) || 0, nextAt: 0 })),
+      outgoing: outgoing.map(({ picture, ...o }) => ({
+        ...o,
+        id: typeof o.id === "string" ? o.id : randomUUID(),
+        silent: o.silent === true,
+        attempts: Number(o.attempts) || 0,
+        nextAt: 0,
+        ...(picture && typeof picture.file === "string" && (picture.as === "photo" || picture.as === "document")
+          ? { picture: { file: picture.file, as: picture.as, caption: typeof picture.caption === "string" ? picture.caption : null } }
+          : {}),
+      })),
       ignored: {
         count: Number(raw.ignored?.count) || 0,
         lastAt: typeof raw.ignored?.lastAt === "number" ? raw.ignored.lastAt : null,
@@ -255,10 +313,30 @@ function readState(path: string): ChannelState {
         : [],
       holding: raw.holding === true,
       switch: asTelegramSwitch(raw.switch),
+      album: adoptAlbum(raw.album),
     };
   } catch {
     return structuredClone(EMPTY_STATE);
   }
+}
+
+/** An album off the disk, checked to the field; anything a hand edit broke is nothing. */
+function adoptAlbum(raw: unknown): Album | null {
+  if (!raw || typeof raw !== "object") return null;
+  const a = raw as Partial<Album>;
+  if (typeof a.chat !== "string" || typeof a.group !== "string" || typeof a.id !== "string" || typeof a.at !== "number" || !Array.isArray(a.paths)) return null;
+  return {
+    chat: a.chat,
+    group: a.group,
+    id: a.id,
+    at: a.at,
+    caption: typeof a.caption === "string" ? a.caption : "",
+    answered: a.answered && typeof a.answered === "object" ? a.answered : null,
+    paths: a.paths.filter((p): p is string => typeof p === "string").slice(0, ALBUM_MAX),
+    missed: Number(a.missed) || 0,
+    lastAt: typeof a.lastAt === "number" ? a.lastAt : a.at,
+    refused: a.refused === true,
+  };
 }
 
 type Asked =
@@ -353,6 +431,8 @@ export class TelegramChannel {
   private conflicts = 0;
   /** When the freeze tick last ran (`FROZEN_MS`). */
   private tick = Date.now();
+  /** Who waits on each message still queued, by id: `sendPicture`, which says when the chat has it, and whether as a photo. */
+  private readonly waiting = new Map<string, (outcome: { why: string | null; as: SendAs | null }) => void>();
   private ticker: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly deps: TelegramDeps) {
@@ -396,6 +476,8 @@ export class TelegramChannel {
 
   /** Start polling, if there is anything to poll for, and send whatever was waiting when the last server went. */
   start(): void {
+    // An album the last server was gathering when it went is passed on as it stands.
+    this.flushAlbum();
     if (!this.looping) void this.loop();
     this.flush();
   }
@@ -601,7 +683,7 @@ export class TelegramChannel {
    */
   private rulesMoved(wasOn: boolean): void {
     if (!wasOn || this.rules.enabled) return;
-    this.state.outgoing = [];
+    this.discard(() => true, "the Telegram channel was switched off");
     this.state.relaying = [];
     this.typing.clear();
   }
@@ -683,6 +765,10 @@ export class TelegramChannel {
    */
   handOver(): LeadState {
     const self = this.shared?.self ?? "";
+    // What arrived here goes to this node's Kuru before the poll moves; a
+    // picture on its way out is a file on this disk, and stays with it.
+    this.flushAlbum();
+    this.discard((o) => o.picture !== undefined, "the node reading the Telegram chat changed before it went");
     const state: LeadState = {
       botId: this.state.botId,
       offset: this.state.offset,
@@ -900,6 +986,7 @@ export class TelegramChannel {
     this.typing.clear();
     this.leading = false;
     this.handed = null;
+    this.discard(() => true, "the Telegram bot was forgotten");
     this.state = structuredClone(EMPTY_STATE);
     this.saveState();
     this.wake();
@@ -922,7 +1009,7 @@ export class TelegramChannel {
       this.settings = { ...this.settings, enabled: true, enabledAt: at, switchedAt: at, switchedBy: null };
     } else if (change.enabled === false && this.settings.enabled) {
       // Nothing queued goes after it.
-      this.state.outgoing = [];
+      this.discard(() => true, "the Telegram channel was switched off");
       this.settings = { ...this.settings, enabled: false, enabledAt: null, switchedAt: switchTime(now, this.settings.switchedAt), switchedBy: null };
       this.typing.clear();
       this.poller?.abort();
@@ -1002,7 +1089,7 @@ export class TelegramChannel {
     this.parentsOnly("The list of accounts");
     const allowed = this.settings.allowed.filter((u) => u.id !== userId);
     this.settings = adoptTelegramSettings({ ...this.settings, allowed });
-    this.state.outgoing = this.state.outgoing.filter((o) => o.chat !== userId);
+    this.discard((o) => o.chat === userId, "that account was taken off the list");
     this.save();
     this.saveState();
     this.wake();
@@ -1112,6 +1199,8 @@ export class TelegramChannel {
     try {
       while (!this.closed) {
         if (!this.shouldPoll()) {
+          // What had arrived of an album came while the poll ran, and goes.
+          this.flushAlbum();
           if (!this.parked) this.setLink("off", null);
           await this.pause(null);
           continue;
@@ -1124,10 +1213,13 @@ export class TelegramChannel {
         const controller = new AbortController();
         this.poller = controller;
         if (this.link === "off") this.setLink("connecting", null);
+        // While an album gathers, the poll is a short one, so a second with
+        // no more of it is noticed and the album passed on.
+        const wait = this.state.album ? 1 : POLL_S;
         const asked = await this.ask(
           "getUpdates",
-          { offset: this.state.offset || undefined, timeout: POLL_S, allowed_updates: ["message"] },
-          { signal: controller.signal, timeoutMs: (POLL_S + 15) * 1000 },
+          { offset: this.state.offset || undefined, timeout: wait, allowed_updates: ["message"] },
+          { signal: controller.signal, timeoutMs: (wait + 15) * 1000 },
         );
         this.poller = null;
         if (this.closed) break;
@@ -1154,7 +1246,10 @@ export class TelegramChannel {
         this.conflicts = 0;
         this.setLink("listening", null);
         const held = { stale: new Map<string, number>(), off: new Map<string, number>() };
-        for (const message of updates.messages) this.take(message, held);
+        // One at a time, and a picture fetched before the next is looked at,
+        // so what Kuru is typed keeps the order it was sent in.
+        for (const message of updates.messages) await this.take(message, held);
+        if (this.state.album && Date.now() - this.state.album.lastAt >= ALBUM_QUIET_MS) this.flushAlbum();
         for (const [chat, n] of held.stale) {
           this.notice(chat, `${n === 1 ? "A message" : `${n} messages`} sent while the Telegram channel was off ${n === 1 ? "was" : "were"} not passed on to Kuru. Send it again if you still mean it.`);
         }
@@ -1214,7 +1309,7 @@ export class TelegramChannel {
    * twenty "this did not reach Kuru" in a row is noise. Older than an hour,
    * and it is not answered at all.
    */
-  private take(message: IncomingMessage, held: { stale: Map<string, number>; off: Map<string, number> }): void {
+  private async take(message: IncomingMessage, held: { stale: Map<string, number>; off: Map<string, number> }): Promise<void> {
     const now = Date.now();
     const rules = this.rules;
     const verdict = judge(message, {
@@ -1255,6 +1350,18 @@ export class TelegramChannel {
         const id = channelMessageId("telegram", chat, message.messageId);
         let text = verdict.text;
         const shared = this.shared;
+        // An album's later pictures follow its first, wherever that went.
+        const album = this.state.album;
+        if (verdict.picture && message.album && album?.chat === chat && album.group === message.album) {
+          if (shared) {
+            if (this.state.handled.includes(id)) return;
+            this.state.handled = [...this.state.handled, id].slice(-LEAD_HANDLED_MAX);
+          }
+          await this.addToAlbum(album, verdict.picture, message, text);
+          return;
+        }
+        // Anything else ends one, so it reaches Kuru ahead of what came after.
+        this.flushAlbum();
         if (shared) {
           // Read again — by a holder that took it and stopped before the
           // poll after confirmed it — and passed on once.
@@ -1262,9 +1369,18 @@ export class TelegramChannel {
           this.state.handled = [...this.state.handled, id].slice(-LEAD_HANDLED_MAX);
           const route = routeOf({ text, chat, replyTo: message.replyTo, map: this.state.replies, nodes: shared.nodes, leader: shared.self });
           this.state.lastInAt = now;
-          if (!route.text) {
+          if (!route.text && !verdict.picture) {
             this.saveState();
             this.notice(chat, emptyAddress(shared.nodes.find((n) => n.id === route.node)?.name ?? "it"));
+            return;
+          }
+          if (route.node !== shared.self && verdict.picture) {
+            // The picture would be fetched here, onto this node's disk, and
+            // the Kuru it is for could not open the path. Said rather than
+            // passed on without it.
+            this.saveState();
+            if (message.album) this.startAlbum(message, id, chat, "", true);
+            this.notice(chat, pictureElsewhere(shared.nodes.find((n) => n.id === route.node)?.name ?? "that node", shared.nodes.find((n) => n.id === shared.self)?.name ?? "this node"));
             return;
           }
           if (route.node !== shared.self) {
@@ -1275,13 +1391,26 @@ export class TelegramChannel {
           }
           text = route.text;
         }
-        // After the routing, which reads an address only at the very front.
-        text = answeredWords(text, message.answered, message.at || now);
         const profileKey = this.profileKey();
         if (!profileKey) {
           this.notice(chat, "kururu has no profile to give this to.");
           return;
         }
+        if (verdict.picture) {
+          if (message.album) {
+            const started = this.startAlbum(message, id, chat, text, false);
+            await this.addToAlbum(started, verdict.picture, message, "");
+            return;
+          }
+          const got = await this.fetchPicture(verdict.picture, message);
+          if ("refused" in got) {
+            this.notice(chat, `That picture did not reach Kuru: ${got.refused}.`);
+            return;
+          }
+          text = pictureWords([got.path], text);
+        }
+        // After the routing, which reads an address only at the very front.
+        text = answeredWords(text, message.answered, message.at || now);
         this.state.lastInAt = now;
         this.saveState();
         this.deps.say(profileKey, id, message.at || now, text);
@@ -1311,6 +1440,183 @@ export class TelegramChannel {
       return;
     }
     if (!waiting) this.notice(chat, heldLine(this.hooks?.away(held.node) ?? "that node"));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Pictures in (`shared/pictures.ts`)
+  // ---------------------------------------------------------------------------
+
+  private startAlbum(message: IncomingMessage, id: string, chat: string, caption: string, refused: boolean): Album {
+    const now = Date.now();
+    const album: Album = { chat, group: message.album!, id, at: message.at || now, caption, answered: message.answered ?? null, paths: [], missed: 0, lastAt: now, refused };
+    this.state.album = album;
+    this.saveState();
+    return album;
+  }
+
+  /** One more picture of the album that is gathering, fetched now. */
+  private async addToAlbum(album: Album, picture: TelegramPicture, message: IncomingMessage, caption: string): Promise<void> {
+    album.lastAt = Date.now();
+    if (!album.caption && caption) album.caption = caption;
+    if (album.refused || album.paths.length + album.missed >= ALBUM_MAX) {
+      this.saveState();
+      return;
+    }
+    const got = await this.fetchPicture(picture, message);
+    if ("refused" in got) this.notice(album.chat, `One of those pictures did not reach Kuru: ${got.refused}.`);
+    if (this.state.album !== album) {
+      // Passed on while this one was fetched — the poll handed over, say:
+      // this one goes on its own rather than into a list nobody reads again.
+      if (!("refused" in got)) this.passAlbum({ ...album, id: channelMessageId("telegram", album.chat, message.messageId), caption: "", answered: null, paths: [got.path], missed: 0 });
+      return;
+    }
+    if ("refused" in got) album.missed++;
+    else album.paths.push(got.path);
+    album.lastAt = Date.now();
+    this.saveState();
+  }
+
+  /** The album that was gathering, to Kuru as one message, now. */
+  private flushAlbum(): void {
+    const album = this.state.album;
+    if (!album) return;
+    this.state.album = null;
+    this.saveState();
+    this.passAlbum(album);
+  }
+
+  private passAlbum(album: Album): void {
+    if (album.refused || album.paths.length === 0) return;
+    const profileKey = this.profileKey();
+    if (!profileKey) {
+      this.notice(album.chat, "kururu has no profile to give this to.");
+      return;
+    }
+    const text = answeredWords(pictureWords(album.paths, album.caption, album.missed), album.answered ?? undefined, album.at);
+    this.state.lastInAt = Date.now();
+    this.saveState();
+    this.deps.say(profileKey, album.id, album.at, text);
+    this.startTyping(album.chat, profileKey);
+    this.deps.changed();
+  }
+
+  /**
+   * A picture from the chat, fetched and kept: `getFile` says where
+   * Telegram has it, and the file is read from there with the token in the
+   * URL, as every request carries it. The path it was kept at, or why not
+   * in words for the chat.
+   */
+  private async fetchPicture(picture: TelegramPicture, message: IncomingMessage): Promise<{ path: string } | { refused: string }> {
+    const tooBig = `it is over ${PICTURE_IN_MAX / 1024 / 1024} MB, the most a bot may fetch from Telegram`;
+    if (picture.size !== null && picture.size > PICTURE_IN_MAX) return { refused: tooBig };
+    const asked = await this.ask("getFile", { file_id: picture.fileId });
+    if (!asked.ok) return { refused: /too big/i.test(asked.description) ? tooBig : `Telegram would not hand it over (${refusal(asked)})` };
+    const where = (asked.body as { result?: { file_path?: unknown } } | null)?.result?.file_path;
+    if (typeof where !== "string" || !/^[\w./-]{1,200}$/.test(where) || where.includes("..")) return { refused: "Telegram did not say where it is" };
+    const token = storedToken();
+    if (!token) return { refused: "no bot token is saved" };
+    let bytes: Uint8Array;
+    try {
+      const res = await this.fetch(`${apiBase()}/file/bot${token}/${where}`, { method: "GET", signal: AbortSignal.timeout(PICTURE_MS) });
+      if (!res.ok) return { refused: `Telegram answered ${res.status}` };
+      if (Number(res.headers.get("content-length")) > PICTURE_IN_MAX) return { refused: tooBig };
+      bytes = new Uint8Array(await res.arrayBuffer());
+    } catch (err) {
+      return { refused: err instanceof Error && err.name === "TimeoutError" ? "Telegram did not send it in time" : "kururu could not reach Telegram for it" };
+    }
+    try {
+      return { path: await keepIncoming(bytes, new Date(message.at || Date.now()), message.messageId) };
+    } catch (err) {
+      if (err instanceof PictureRefused) return { refused: err.message };
+      console.error(`kururu: a picture from Telegram could not be kept: ${err instanceof Error ? err.message : String(err)}`);
+      return { refused: "kururu could not save it" };
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Pictures out
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Why a picture from a profile's Kuru cannot go to the chat now, or null
+   * when it can: the channel carries the profile, this node has a token,
+   * and — shared among nodes — this node is the one reading the chat. A
+   * node that is not hands its lines to the one that is (`relayLine`), but
+   * a picture is a file on this node's disk, and only the reader sends.
+   */
+  pictureRefusal(profileKey: string): string | null {
+    const rules = this.rules;
+    if (!this.hint && !this.shared) return "There is no Telegram bot set up here (Settings → Channels).";
+    if (!rules.enabled) return "The Telegram channel is off, so nothing goes to the chat.";
+    if (rules.allowed.length === 0) return "Nobody is paired with the Telegram bot yet.";
+    if (profileKey !== this.profileKey()) return "The Telegram channel talks to another profile's Kuru.";
+    if (this.shared && !this.leading) {
+      const holder = this.hooks?.status()?.holder;
+      return `Only the node reading the Telegram chat sends pictures to it, and that is ${holder ? nodeSubject(holder) : "another node"} now, not this one.`;
+    }
+    if (!this.hint) return "This node holds no token for the Telegram bot.";
+    if (this.parked) return REVOKED;
+    return null;
+  }
+
+  /**
+   * A picture from a profile's Kuru to everybody on the list, queued in
+   * order with its words, and the outcome once the chat has it — or that it
+   * is still on its way, past `PICTURE_WAIT_MS`. `picture` is a copy
+   * `stageOutgoing` made, which this now owns and removes once it has gone.
+   */
+  async sendPicture(profileKey: string, picture: StagedPicture, caption: string | null): Promise<string> {
+    const refused = this.pictureRefusal(profileKey);
+    if (refused) {
+      dropStaged(picture.file);
+      throw new Error(refused);
+    }
+    const origin = this.shared?.self;
+    const mark = this.markOf(origin);
+    const split = splitCaption(caption);
+    const said = mark ? markLine(mark, split.caption ?? "").trim() : split.caption;
+    const now = Date.now();
+    const ids: string[] = [];
+    for (const user of this.rules.allowed) {
+      const id = randomUUID();
+      ids.push(id);
+      this.state.outgoing.push({ id, chat: user.id, text: "", silent: false, at: now, attempts: 0, nextAt: 0, picture: { file: picture.file, as: picture.as, caption: said }, ...(origin ? { origin } : {}) });
+    }
+    if (split.after) this.enqueue(split.after, origin, true, true);
+    const outcomes = ids.map((id) => new Promise<{ why: string | null; as: SendAs | null }>((resolve) => this.waiting.set(id, resolve)));
+    this.saveState();
+    this.deps.changed();
+    this.flush();
+    const timeout = new Promise<"later">((resolve) => setTimeout(() => resolve("later"), PICTURE_WAIT_MS).unref());
+    const done = await Promise.race([Promise.all(outcomes), timeout]);
+    for (const id of ids) this.waiting.delete(id);
+    if (done === "later") return `${picture.name} is queued for the Telegram chat and has not gone yet; Telegram is slow or unreachable, and kururu keeps trying.`;
+    const failed = done.find((outcome) => outcome.why !== null);
+    if (failed) throw new Error(`${picture.name} did not reach the Telegram chat: ${failed.why}`);
+    const asFile = done.some((outcome) => outcome.as === "document");
+    return `Sent ${picture.name} to the Telegram chat${asFile ? " as a file, since it is too large or too long and thin for a photo" : ""}.`;
+  }
+
+  /**
+   * Messages off the queue that will not be sent, or have been: whoever
+   * waits on one is told, and a picture's copy goes once no message still
+   * needs it.
+   */
+  private settle(items: readonly Outgoing[], why: string | null): void {
+    for (const item of items) {
+      this.waiting.get(item.id)?.({ why, as: item.picture?.as ?? null });
+      this.waiting.delete(item.id);
+    }
+    const files = new Set(items.flatMap((item) => (item.picture ? [item.picture.file] : [])));
+    for (const file of files) if (!this.state.outgoing.some((o) => o.picture?.file === file)) dropStaged(file);
+  }
+
+  /** Take off the queue what matches, as `settle` says. */
+  private discard(which: (item: Outgoing) => boolean, why: string): void {
+    const gone = this.state.outgoing.filter(which);
+    if (gone.length === 0) return;
+    this.state.outgoing = this.state.outgoing.filter((item) => !which(item));
+    this.settle(gone, why);
   }
 
   // ---------------------------------------------------------------------------
@@ -1361,16 +1667,37 @@ export class TelegramChannel {
   }
 
   private async send(item: Outgoing): Promise<void> {
-    const asked = await this.ask("sendMessage", {
-      chat_id: item.chat,
-      text: item.text,
-      disable_notification: item.silent || undefined,
-      link_preview_options: { is_disabled: true },
-    });
-    const drop = (ids: (o: Outgoing) => boolean) => {
+    const picture = item.picture;
+    if (picture && !existsSync(picture.file)) {
+      this.discard((o) => o.id === item.id, "its copy in kururu's outbox folder is gone");
+      this.saveState();
+      return;
+    }
+    const asked = picture
+      ? await this.ask(
+          picture.as === "photo" ? "sendPhoto" : "sendDocument",
+          { chat_id: item.chat, caption: picture.caption ?? undefined, disable_notification: item.silent || undefined },
+          { file: { field: picture.as, path: picture.file }, timeoutMs: PICTURE_MS },
+        )
+      : await this.ask("sendMessage", {
+          chat_id: item.chat,
+          text: item.text,
+          disable_notification: item.silent || undefined,
+          link_preview_options: { is_disabled: true },
+        });
+    const drop = (ids: (o: Outgoing) => boolean, why: string | null = null) => {
+      const gone = this.state.outgoing.filter(ids);
       this.state.outgoing = this.state.outgoing.filter((o) => !ids(o));
+      this.settle(gone, why);
     };
     const now = Date.now();
+    if (!asked.ok && !asked.aborted && picture?.as === "photo" && asked.code === 400 && photoRefusedForShape(asked.description)) {
+      // Too long and thin, or too large on a side, to be a photo: a file
+      // keeps it whole, and goes at once in the photo's place.
+      picture.as = "document";
+      this.saveState();
+      return;
+    }
     if (asked.ok) {
       drop((o) => o.id === item.id);
       this.state.lastOutAt = now;
@@ -1389,13 +1716,13 @@ export class TelegramChannel {
       // Not this message's fault, and not going to change on a retry: every
       // message to that account goes, and the page says what to do.
       const user = this.settings.allowed.find((u) => u.id === item.chat) ?? { id: item.chat, name: null, username: null };
-      drop((o) => o.chat === item.chat);
       this.sendError = sendRefusal(asked, user, this.bot);
+      drop((o) => o.chat === item.chat, this.sendError);
     } else if (asked.code !== null && asked.code >= 400 && asked.code < 500) {
-      drop((o) => o.id === item.id);
-      this.sendError = `Telegram refused a reply: ${asked.description}`;
+      this.sendError = `Telegram refused a ${picture ? "picture" : "reply"}: ${asked.description}`;
+      drop((o) => o.id === item.id, this.sendError);
     } else if (now - item.at > SEND_GIVE_UP_MS) {
-      drop((o) => o.id === item.id);
+      drop((o) => o.id === item.id, "Telegram could not be reached for twelve hours");
     } else {
       item.attempts++;
       item.nextAt = now + sendRetryMs(item.attempts);
@@ -1432,16 +1759,30 @@ export class TelegramChannel {
    * being tried is passed in; it goes into the URL and nowhere else, and no
    * error from here carries the URL or anything from the network stack.
    */
-  private async ask(method: string, params: Record<string, unknown>, options: { token?: string; signal?: AbortSignal; timeoutMs?: number } = {}): Promise<Asked> {
+  private async ask(
+    method: string,
+    params: Record<string, unknown>,
+    options: { token?: string; signal?: AbortSignal; timeoutMs?: number; file?: { field: string; path: string } } = {},
+  ): Promise<Asked> {
     const token = options.token ?? storedToken();
     if (!token) return { ok: false, aborted: false, code: null, description: "No bot token is saved.", retryAfter: null };
     const signals = [AbortSignal.timeout(options.timeoutMs ?? REQUEST_MS)];
     if (options.signal) signals.push(options.signal);
     try {
+      // A file goes as a form, which is the only way the Bot API takes an
+      // upload; `fetch` writes the boundary into the content type itself.
+      let payload: string | FormData = JSON.stringify(params);
+      if (options.file) {
+        const form = new FormData();
+        for (const [key, value] of Object.entries(params)) if (value !== undefined) form.set(key, typeof value === "string" ? value : JSON.stringify(value));
+        const name = options.file.path.slice(options.file.path.lastIndexOf("/") + 1);
+        form.set(options.file.field, new Blob([readFileSync(options.file.path)]), name);
+        payload = form;
+      }
       const res = await this.fetch(`${apiBase()}/bot${token}/${method}`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(params),
+        ...(options.file ? {} : { headers: { "content-type": "application/json" } }),
+        body: payload,
         signal: AbortSignal.any(signals),
       });
       let body: unknown = null;
@@ -1502,6 +1843,11 @@ export class TelegramChannel {
       // See above.
     }
   }
+}
+
+/** Why a picture sent for another node's Kuru went nowhere, and what to do. */
+function pictureElsewhere(node: string, self: string): string {
+  return `A picture reaches only the Kuru of the node reading this chat, ${nodeSubject(self)}, so this one did not go to ${nodeSubject(node)}'s. Send it again as a new message, without @${node}.`;
 }
 
 /** A sentence for a refusal, with the token out of it. */

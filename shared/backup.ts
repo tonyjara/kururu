@@ -120,6 +120,7 @@ export const EXCLUDED: readonly { what: string; why: string }[] = [
   { what: "the database file", why: "git keeps a whole copy per change; the text export rebuilds it" },
   { what: "agents' replies", why: "in the database and searchable, but an agent's reply can quote a file that holds a secret" },
   { what: "drops/", why: "the pictures and files pasted or sent from a phone into Kuru's box: a screenshot holds whatever was on the screen" },
+  { what: "telegram/", why: "the pictures sent from the Telegram chat, and copies of those on their way to it" },
 ];
 
 /** The keys of a profile's Claude `settings.json` that are not copied: where a key would be put. */

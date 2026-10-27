@@ -19,6 +19,7 @@ its home.
 | piece | where | what |
 |---|---|---|
 | The rules | `shared/channels.ts` | Pure: the kinds, the settings, `judge` (what one message is allowed to do), the pairing code, splitting a reply under Telegram's limit, the echo line, `replySpoken`, the status a window draws. |
+| Pictures | `shared/pictures.ts`, `server/src/pictures.ts` | What a message's picture is, the words Kuru is handed for it, and which files may go out; the inbox and outbox folders and the HEIC conversion. See [Pictures](#pictures). |
 | The bot | `server/src/telegram.ts` | The token on disk, the long poll, the queue out, pairing, the test message, "typing…". `KURURU_TELEGRAM_API` points it somewhere other than `api.telegram.org`, which is how a test reaches a stand-in. |
 | The router | `server/src/channels.ts` | Told what Kuru took in (`prompted`, `delivered`) and said (`replied`, `aside`); decides whether a reply is spoken and what each channel gets; tells a chat when one of its messages failed. A second kind of channel is a second field beside `telegram` here. |
 | The way in | `Outbox.say` | A channel's message joins the outbox under an id the server mints, `telegram-<chat>-<message>`, so a message read twice is one message. Typed into Kuru's terminal as `[telegram] <words>`; a slash command goes in bare, as it would from the drawer. |
@@ -46,8 +47,9 @@ a name, which anybody can set to anything.
    since nothing polls otherwise).
 5. **Sent after the switch went on?** If not: dropped, with one line per
    batch saying how many.
-6. `/start` gets a greeting; a photo, voice note or sticker gets "only text
-   reaches Kuru"; anything else goes to Kuru.
+6. A picture goes to Kuru with its caption ([Pictures](#pictures)); `/start`
+   gets a greeting; a voice note, video or sticker gets "only text and
+   pictures reach Kuru"; anything else goes to Kuru.
 
 **Pairing** is how the list is filled without anybody knowing their numeric
 id, which Telegram's app does not show. Settings shows a six-character code
@@ -126,6 +128,7 @@ the page.
 | A line Kuru says mid-turn (`say`) | as it says it | a normal message |
 | Your words from here — spoken or typed | as Kuru takes them | **silent** (`disable_notification`): "🎙 You said: …", "⌨️ You typed: …" |
 | A message from Telegram that failed in the outbox | as it fails | a line saying so, and that Resend is in the drawer |
+| A picture Kuru sends | when it calls `send_telegram_photo`, or `show_file` on a picture in a turn that answers the chat | a photo, or a file past 10 MB or too long and thin for one, in order with its words |
 | "typing…" | while Kuru works on something sent from the chat | `sendChatAction`, every 4.5 s, up to ten minutes |
 | "The Mac is away; this reaches its Kuru when it is back." | linked as [nodes](nodes.md#where-a-message-goes): the first message for a node that is away, and not again while anything waits for it | a quiet line |
 
@@ -135,7 +138,8 @@ said in the chat: none of it is the user's to act on, and the poll moves
 every time the Mac's lid does. Settings → Channels shows who reads it, and
 `lifecycle.log` keeps every move ([One Telegram](nodes.md#who-reads-it-and-when-that-moves)).
 The lines kururu does add are answers to something the user just did — a
-pairing, a photo it cannot pass on, `@omarchy` with nothing after it,
+pairing, a picture it could not fetch, a voice note it cannot pass on,
+`@omarchy` with nothing after it,
 messages sent while it was off — or the held line above.
 
 The echo of your own words is what makes the chat read like the drawer:
@@ -170,6 +174,68 @@ quotes an agent's last reply, and an agent's reply can quote a file with a
 secret in it — the reason the backup leaves agents' replies out. Kuru's
 answer to a notice is Kuru's own summary, and goes like any reply.
 
+## Pictures
+
+**Both ways, and Kuru gets a path, never bytes.** Kuru is a Claude Code
+session on this computer, and Read shows it a picture by its path — the way
+a picture pasted into the drawer's box reaches it ([harness](harness.md#a-file-the-user-hands-it)).
+
+**In.** A photo, a picture sent as a file, or an album: the largest size of
+a photo, never a thumbnail, through `getFile` and a download (the token in
+the download's URL, as in every request's; up to 20 MB, Telegram's limit for
+a bot). The bytes decide what it is, not its name; HEIC — an iPhone's own,
+sent as a file — becomes a JPEG (`sips` on a Mac, `heif-convert` or
+ImageMagick elsewhere), since Claude cannot read HEIC. It is kept in
+`~/.local/share/kururu/telegram/inbox/` as `2026-10-27-153012-4567.jpg` —
+when it came, then the message's id — `0700` and `0600`, never swept and
+never backed up, and Kuru is typed:
+
+```
+[telegram] (picture: /Users/you/.local/share/kururu/telegram/inbox/2026-10-27-153012-4567.jpg) what is this?
+[telegram] (3 pictures: …/…-4568.jpg …/…-4569.jpg …/…-4570.jpg) the three screens
+```
+
+**An album is one message.** Telegram sends its pictures as separate
+messages and a long poll is answered at the first, so the rest come a poll
+or two later: while one gathers, the poll is a one-second one, and a second
+and a half with nothing more of it passes it on (`ALBUM_QUIET_MS`), its
+caption — whichever picture carried it — after the paths. It is on the disk
+with the poll's state, so a restart in the middle passes on what had
+arrived. A picture that cannot be fetched is said in the chat, with why;
+the rest of its album still goes, and Kuru is told one is missing. Each is
+fetched before the next message is looked at, so the order holds.
+
+**Out is a tool, `send_telegram_photo`, not a rule over the reply.** Kuru
+names paths all the time, and a sentence about a screenshot is not a wish
+to publish it; uploading puts the file on Telegram's servers, so it happens
+on a call, one per picture, which returns once the chat has it. `show_file`
+on a picture in a turn that answers a `[telegram]` message sends it too,
+since a link on the Mac's sidebar is no use on a phone. What may go:
+
+- **Pictures only**, by their bytes: PNG, JPEG, WebP, and HEIC converted to
+  JPEG. A GIF is refused (Telegram makes it a video). Up to 10 MB as a
+  photo, to 20 MB as a file; a photo Telegram refuses for its shape — a
+  full-page screenshot — goes again at once as a file.
+- **From the user's own places**: a root `files.ts` holds (a project, an
+  agent's or a terminal's directory — but not one, like `/`, that holds the
+  home folder), `~/Desktop`, `~/Downloads`, `~/Pictures`, `~/Documents`,
+  and kururu's own picture folders (the inbox, `drops/`, Kuru's own folder).
+  Realpath'd first, so a link out of a project is judged by where it
+  points.
+- **Never** below a hidden folder (`.ssh`, `.config`, a project's dot-folders)
+  or in `~/Library`, Messages' attachments among it.
+- **A copy is what goes.** `stageOutgoing` reads the file once, into
+  `telegram/outbox/`, and the queue uploads that copy, so a file swapped
+  between the check and the send is not the one that leaves; the copy goes
+  once the chat has it. A long caption (past 1024) is sent after the
+  picture rather than cut.
+- **Only the node reading the chat sends.** A line from another node is
+  handed to the reader to post, but a picture is a file on its own disk, so
+  the tool refuses there and names the node that reads. The same way in: a
+  picture addressed to another node's Kuru (`@omarchy`, or a reply to its
+  line) is not passed on, and the chat is told to send it again without
+  the address.
+
 ## Is the reply spoken on the Mac?
 
 **Not when the turn answered only Telegram** (`replySpoken`). Somebody
@@ -200,7 +266,10 @@ replies go to the chat, and the drawer only draws the switch for it.
 The role prompt (`rolePrompt` in `shared/harness.ts`) says what `[telegram]`
 means: the user is on their phone, the reply goes back as text and is not
 read aloud, so a short list is fine but it stays phone-sized; and while the
-channel is on every reply goes to the chat. **A running harness has the role
+channel is on every reply goes to the chat. It says what `(picture: …)` is
+(Read it), that `send_telegram_photo` is how a picture reaches the phone and
+a path in a reply sends nothing, and that a picture uploaded is on
+Telegram's servers. **A running harness has the role
 it was started with** — the new section arrives the next time Kuru is
 started or resumed.
 
@@ -208,7 +277,9 @@ started or resumed.
 
 With the channel on, the text of the conversation with Kuru goes through
 Telegram's servers: what you write there, every reply of Kuru's, the quiet
-copies of what you say or type here, and kururu's own short notices. Kuru's
+copies of what you say or type here, and kururu's own short notices — and
+every picture Kuru sends you, which is uploaded there and kept there as any
+photo in a Telegram chat is. Kuru's
 replies are its own words, but they can repeat what an agent said — that is
 what a summary is — so anything you would not put in a Telegram chat, do not
 ask Kuru to read back to you while it is on. Bot

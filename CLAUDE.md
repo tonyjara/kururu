@@ -463,7 +463,13 @@ The load-bearing invariants, one line each, with the argument behind the link:
   key's terms: 0600 in `~/.config/kururu/telegram.json`, read per request,
   put only in the request URL, never logged, a client sent its `hint`, never
   backed up. Long polling and never a webhook: nothing listens, and off is
-  no request at all. **This is the one road off the machine for the
+  no request at all. Pictures cross both ways as files, never bytes in a
+  prompt: one sent in is fetched into `telegram/inbox/` and Kuru is typed
+  its path; one goes out only when Kuru calls `send_telegram_photo` (or
+  `show_file` in a Telegram turn), only a picture by its bytes, only from a
+  project, an agent's folder, the user's own folders or kururu's — never a
+  hidden folder or `~/Library` — and only from the node reading the chat
+  (`shared/pictures.ts`). **This is the one road off the machine for the
   conversation itself** — its text goes through Telegram's servers, which do
   not encrypt bot chats end to end — and the page says so above the switch.
   → [channels](docs/channels.md)

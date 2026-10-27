@@ -241,6 +241,22 @@ Kept short on purpose; the detail is in git history.
   pin's folder — brought the conversation back, the transcript was read "over
   ssh", and `endSession` took the session and the process down. No real
   machine was reachable with a CLI on it.
+- **Telegram pictures** (2026-10-27), in an isolated instance on :7817 from a
+  scratch copy, with a stand-in `claude` as Kuru and a loopback Bot API that
+  faked `getUpdates` — so the live server kept the real poll — and swallowed
+  text, while `sendPhoto`, `getFile` and the download went to the real
+  Telegram with the real bot. A `[telegram]` request started Kuru; through
+  the MCP endpoint on Kuru's own command line, `send_telegram_photo` refused
+  `/etc/hosts`, a PNG in a hidden folder and a text file with no upload, then
+  sent a test card that reached the real chat, and its copy left the outbox.
+  That photo, sent back as the user with a caption, came through the real
+  `getFile` and download at its largest size, was kept `0600` in
+  `telegram/inbox/`, typed as `[telegram] (picture: …) what is in this
+  picture?` and opened with Read; an album of three over two polls became
+  one message with three paths and its caption. All three delivered, and the
+  token in no log, state or data file. Not tried: a photo sent by hand from
+  the phone, a real iPhone's HEIC (`sips` on a made one only), `show_file`'s
+  send (its turn check is unit-tested), the drawer in a real window, nodes.
 - **Telegram** (2026-10-12), in an isolated instance on :7817 run from a
   scratch copy with `KURURU_TELEGRAM_API` pointed at a stand-in Bot API on
   loopback and a stand-in `claude` as the harness — a Python script that

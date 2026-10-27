@@ -34,6 +34,15 @@ shows, so it is written once and read in three places — see
   registry may carry its own animation for those two states; every other mascot
   wears its idle one as before.
 
+- **Pictures both ways with Kuru on Telegram.** Send Kuru a photo, a picture
+  as a file, or an album in the chat, with or without words, and it looks at
+  it: kururu fetches it, turns an iPhone's HEIC into a JPEG, keeps it in
+  `~/.local/share/kururu/telegram/inbox/`, and hands Kuru the path. Ask Kuru
+  for a screenshot or a chart and it sends the picture back to the chat.
+  It only sends pictures, only from your projects, agents' folders, Desktop,
+  Downloads, Pictures and Documents, never from a hidden folder or
+  `~/Library`, and a picture it sends is uploaded to Telegram like any photo
+  in a chat. Kuru learns this the next time it starts or is resumed.
 - **Stop Kuru from its drawer.** While Kuru works on a turn, a "Thinking…" line sits
   just above the chat box, in view however far up you have scrolled, with a
   **Stop** button that interrupts the turn as Esc in its terminal would. The line

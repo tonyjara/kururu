@@ -198,6 +198,12 @@ export interface HarnessDeps {
    * the user's screen when asked. Says what it did, or throws why not.
    */
   showFile: (profileId: string, agentId: string | null, path: string, line: number | null, open: boolean) => Promise<string>;
+  /**
+   * `send_telegram_photo`: a picture to the Telegram chat, found as
+   * `show_file` finds a file, checked, and sent by the node that reads the
+   * chat. Says what happened, or throws why not. See `shared/pictures.ts`.
+   */
+  sendPicture: (profileId: string, agentId: string | null, path: string, caption: string | null) => Promise<string>;
   /** `move_workspace`: what moving a workspace to a node would do, and doing it. See `move.ts`. */
   movePlan?: (profileId: string, workspaceId: string, nodeId: string, folder: string | null) => Promise<MovePlan>;
   moveWorkspace?: (profileId: string, workspaceId: string, nodeId: string, folder: string) => Promise<{ done: MoveDone; node: string }>;
@@ -896,6 +902,13 @@ export class Harness {
         if (!agent && !open) return fail("Name the agent whose row the link goes on, or pass open=true to only open the file.");
         const line = int(args.line);
         return ok(await this.deps.showFile(profileId, agent?.id ?? null, path, line !== undefined && line > 0 ? line : null, open));
+      }
+
+      case "send_telegram_photo": {
+        const path = str(args.path);
+        if (!path) return fail("A path is needed.");
+        const agent = str(args.agent) ? agentArg() : null;
+        return ok(await this.deps.sendPicture(profileId, agent?.id ?? null, path, str(args.caption) || null));
       }
 
       case "rename_agent": {

@@ -20,6 +20,7 @@ in this folder.
 | `made.ts` | What an agent made: the paths in a reply, which of them are the deliverable (a document presented or changed alone, code presented and few), and the drawer's split of a reply into words and paths. Pure, tested. See [layout](layout.md#what-an-agent-made) |
 | `needs.ts` | What needs you across a profile's workspaces — an agent asking, a card in Review, a turn ended unseen, a card whose agent went — and the walk to the next. Pure, tested |
 | `channels.ts` | Other doors into that conversation — Telegram. The kinds and their marks, the settings, `judge` (the allow-list decision for one message), pairing codes, splitting a reply, `replySpoken`, the status a window draws; among nodes, the roster's copy of the settings, `routeOf`, the marks and the reply map. Pure, tested. See [channels](channels.md) |
+| `pictures.ts` | Pictures through a channel, both ways: a message's picture (the largest size), the words Kuru is handed for it, and the rule for what may go out — where it is, what its bytes are, photo or file, a long caption after it. Pure, tested. See [channels](channels.md#pictures) |
 | `board.ts` | A workspace's cards, and what an agent's status does to the one it was handed. Also the profile's board, a card's dates, and the timeline's layout |
 | `store.ts` | The database's pure half: the keys a profile and a workspace are known by, a board change as events (`diffBoards`), a typed query as one FTS5 takes, the export's rows. See [data](data.md) |
 | `web.ts` | The web for agents, whatever provider answers: the chain's settings, what may be fetched, the calls checked, the one result shape, what counts as a failure (`resultVerdict`), pages wrapped as untrusted, the four tools' descriptions written from the chain's order, the launch flags, what a window is told. Pure, tested. See [web](web.md) |
@@ -122,6 +123,7 @@ in this folder.
 | `src/kokoro.ts` | Kokoro in a process of its own (`dist/kokoro.mjs`), forked by `voice.ts` and talked to over IPC. Never exits the ordinary way: its ONNX runtime aborts on exit, so it ends by SIGKILL |
 | `src/devservers.ts` | lsof + ps discovery of what is listening, and what started it — and stopping one: the named command's tree, never a terminal's (`stopTargets`). Never kururu itself (`isKururu`) |
 | `src/drops.ts` | `POST /api/drop`'s write: a pasted picture or a phone's file kept `0600` in `drops/` under the data directory, never over another, never backed up |
+| `src/pictures.ts` | the Telegram chat's pictures on disk: `telegram/inbox/` for what came in, a checked copy in `telegram/outbox/` for what goes out, HEIC to JPEG, and which folders a picture may go out from |
 | `src/proxy.ts` | Per-dev-server reverse proxy (HTTP + WS) for phone access |
 | `src/files.ts` | Traversal-safe file listing and reading |
 | `src/fileops.ts` | The file tree's edits: new, rename, move, copy, Trash — the only writer |
