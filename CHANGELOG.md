@@ -13,26 +13,128 @@ shows, so it is written once and read in three places — see
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-28
+
+Nothing in this release needs the pty host restarted: the host speaks the same
+protocol as before, so your agents carry on through the upgrade, and Settings →
+About showing the host as 0.4.0 until it next restarts is expected. The wire
+between window and server changed — other computers, Kuru's drawer, the bottom
+bar — so a window and a server want to be on the same version. The database
+moves to a new version on its first start, for the Needs you column, and an
+older kururu will refuse to open it after that. Kuru learns its new tools the
+next time it starts or is resumed.
+
 ### Added
 
-- **Kururu is a pack too, and the way back from any other.** Settings → Theme →
-  Packs lists **Kururu** first, always, beside the packs you installed: one
-  press puts back kururu's own theme, the Soft skin with its own icons, the
-  frog, the croak and kururu's font, and takes the other pack's font, sprite
-  and sound with it. It is built in, so it works with no network. A fresh
-  install now opens in it — kururu's own green rather than Catppuccin Mocha —
-  and so does a window that never had a theme picked; one that did keeps its
-  own.
-- **Grand Prix and Paddock, a motor-racing pack in dark and light.** Settings →
-  Explore → Packs: carbon fibre or white garage walls, racing red, a kerb along
-  the top of the pane you are in, a chequer at each end of the status bar, and
-  a timing screen's colours for the agents — green while one works, purple when
-  it is done, flag yellow when it wants you. Its helmet mascot holds up a BOX
-  board when an agent is asking and waves a chequered flag when it has
-  finished, and its sound is five lights and a car going past.
-- **A mascot can draw a picture for "asking" and "done".** A mascot from the
-  registry may carry its own animation for those two states; every other mascot
-  wears its idle one as before.
+- **Kururu on a Linux box, as a child of your Mac.** A child is kururu's server
+  on another computer, with no window: it runs as a systemd user service, keeps
+  its agents working while the Mac's lid is shut, and a phone reaches it over
+  your tailnet. On the box, `node tools/kururu.mjs child setup` from a clone
+  walks you through it — or ask an agent there to "use the kururu skill to set
+  up a child" — and after the first run `kururu child doctor` says what is
+  wrong, `kururu child update` pulls and restarts only when the pull brought
+  something, and `kururu child restart-host` is the one command that ends its
+  agents, and asks first. See `docs/linux.md`.
+
+- **Your computers as one kururu.** Settings → Nodes → **Add a computer** shows
+  one command to run on the new one, `kururu child join <address> <code>`, and
+  the page says when it has joined. From then on the sidebar draws each
+  computer's workspaces with their agents' marks, greyed "away since" while it
+  cannot be reached; the Needs you chip and drawer count and list what is
+  waiting on every one of them; the phone dialog has a QR code per computer;
+  the menu bar opens any computer's own Settings; and the Mac keeps a
+  copy of each one's backup beside its own. Drag the list to rank them.
+
+- **Another computer's workspace, in this window.** Open a workspace of a
+  linked computer from the sidebar and it draws here, in that computer's hue,
+  with its panes, tabs and board: type into its terminals, split its panes,
+  read its files in the tree and the reader, open them in its Neovim, and
+  start agents from its own + menu and card robot, which run on that computer
+  with its logins. A Needs row for it takes you to its terminal or its card,
+  `C-a o` walks every computer's needs, and `C-a N`, `C-a P` and `C-a w` go
+  through every computer's workspaces. It greys out while the link is down
+  and fills back in by itself. A tab or a file dragged from one computer onto
+  the other's pane is refused in words before it lands.
+
+- **Move a workspace to another computer.** **Move to …** on a workspace row's
+  menu opens a dialog that checks the project's folder on the other computer
+  as you type it and says what moves — the name and the board, with every
+  card and its history — and what stays: the code, env files, databases and
+  terminals. It is refused while an agent is running in the workspace or a
+  card's worktree is standing. Kuru can do it too.
+
+- **Each computer's Kuru, talking to the others.** Every computer has its own
+  Kuru, acting on its own agents, and the Mac's drawer shows all of their
+  conversations in one place. Start a message with `@` and the other
+  computers' names are offered, and a name that will reach its Kuru is drawn
+  in bold; Kuru can ask another computer's Kuru for something in words, and
+  can add and move cards on another computer's boards directly.
+
+- **Lend your keys to a computer, one at a time.** Settings → Nodes has a
+  switch per kind of secret for each computer, all off: the Telegram bot, the
+  OpenRouter and Firecrawl keys, a web provider's key, a Claude login, a Codex
+  login, and from a workspace its env files, the ssh hosts it uses and a
+  GitHub login. Each one says whether it is held, on its way or refused, and
+  **Take back** ends it. Settings → Agents → **Lend this login to a node**
+  makes a Claude token to lend, so your own sign-in is never copied. The move
+  dialog offers what the workspace needs, and Kuru can preview a lending by
+  name before you agree. See Security for how they travel.
+
+- **One Telegram bot for every computer.** The bot is read by one computer at
+  a time — the highest-ranked one that can — and if it goes quiet another
+  takes over within about half a minute, carrying on the conversation where
+  it was. Every Kuru answers in the one chat, each line marked with the
+  computer it came from; `@name`, `/name` or a reply to that computer's line
+  reaches its Kuru. The channel can be switched off from any computer, and on
+  from any that holds the bot's token.
+
+- **Settings → Vault, everything kururu could lend, by name and never by
+  value.** Kururu's own keys by their last characters and when they changed,
+  what never leaves this computer, what is lent to which computer and since
+  when, each workspace's env files by variable name, ssh hosts by key file,
+  GitHub accounts, and the logins agents use. Nothing on the page is a value,
+  and kururu keeps no copy of any of it.
+
+- **Claude and Codex usage on the bottom bar.** The plan-usage rings moved out
+  of the sidebar into a chip with Claude's mark; hover it, or tap it on a
+  phone, for the bars, the resets and the account. Codex gets a chip of its
+  own while you are signed in to it, read from what Codex writes on this Mac —
+  no request is made — so it is as fresh as your last Codex turn.
+
+- **An estimate of your Claude API credit.** Settings → Claude API takes the
+  balance you read off Anthropic's Console, and the bottom bar shows "≈" what
+  is left of it: less what Anthropic's cost report says has gone since, if you
+  give it an Admin key, or what OpenRouter's totals say for your Anthropic key
+  through OpenRouter. Anthropic has no balance to ask for, which is why it is
+  an estimate.
+
+- **Needs you, a column on every profile's board.** Put a card there and it
+  counts on the Needs you chip and has its own block in the drawer, with Done
+  and its menu; each card says whether you or Kuru put it there. The column
+  cannot be renamed or deleted, and Kuru puts things for you to do in it.
+
+- **Fold and order the Needs drawer.** Every group has a caret that folds it to
+  its name and count, and the waiting groups and their cards can be put in the
+  order you will take them — dragged, or moved from the menu a right-click or
+  a long press opens. Next walks the order you set. It is kept on each device.
+
+- **Reply to one line in Kuru's drawer.** Every line has a reply arrow;
+  pressed, the composer says "Replying to Kuru" and your message goes with
+  that line quoted, so Kuru answers in its context. A reply in Telegram reaches
+  Kuru the same way.
+
+- **Fold long lines in Kuru's drawer.** A fold beside the reply arrow shrinks a
+  line to one row, the header folds or opens every line at once, and Settings
+  → Voice → **Fold long messages** starts long ones folded on this device.
+
+- **Reference a card in Kuru.** Every card's menu has **Reference in Kuru**,
+  which opens the drawer with the card put in your message, so Kuru goes
+  straight to it.
+
+- **Drop or paste a file on Kuru's box.** A file or folder from the Finder puts
+  its path in your message, as Claude Code does. A picture pasted from the
+  clipboard, or anything dropped from the phone or a browser, is kept on this
+  computer and its path goes in, so Kuru can open it.
 
 - **Pictures both ways with Kuru on Telegram.** Send Kuru a photo, a picture
   as a file, or an album in the chat, with or without words, and it looks at
@@ -42,17 +144,160 @@ shows, so it is written once and read in three places — see
   It only sends pictures, only from your projects, agents' folders, Desktop,
   Downloads, Pictures and Documents, never from a hidden folder or
   `~/Library`, and a picture it sends is uploaded to Telegram like any photo
-  in a chat. Kuru learns this the next time it starts or is resumed.
+  in a chat.
+
 - **Stop Kuru from its drawer.** While Kuru works on a turn, a "Thinking…" line sits
   just above the chat box, in view however far up you have scrolled, with a
   **Stop** button that interrupts the turn as Esc in its terminal would. The line
   goes once the turn has really ended, and anything you were typing stays in the
   box. Works on the phone too.
 
+- **Kururu is a pack too, and the way back from any other.** Settings → Theme →
+  Packs lists **Kururu** first, always, beside the packs you installed: one
+  press puts back kururu's own theme, the Soft skin with its own icons, the
+  frog, the croak and kururu's font, and takes the other pack's font, sprite
+  and sound with it. It is built in, so it works with no network. A fresh
+  install now opens in it — kururu's own green rather than Catppuccin Mocha —
+  and so does a window that never had a theme picked; one that did keeps its
+  own.
+
+- **Grand Prix and Paddock, a motor-racing pack in dark and light.** Settings →
+  Explore → Packs: carbon fibre or white garage walls, racing red, a kerb along
+  the top of the pane you are in, a chequer at each end of the status bar, and
+  a timing screen's colours for the agents — green while one works, purple when
+  it is done, flag yellow when it wants you. Its helmet mascot holds up a BOX
+  board when an agent is asking and waves a chequered flag when it has
+  finished, and its sound is five lights and a car going past.
+
+- **A mascot can draw a picture for "asking" and "done".** A mascot from the
+  registry may carry its own animation for those two states; every other mascot
+  wears its idle one as before.
+
+- **`⌘,` opens Kuru's drawer and `⌘.` the Needs drawer**, with no prefix, and
+  shuts them again.
+
+- **Open a document in Neovim from its tab.** A right-click on a reader tab, or
+  a long press on a phone, opens the document in a new Neovim tab in the same
+  pane, at the line you were reading.
+
+- **`bun run share`** prints the phone's link and its QR code in the terminal,
+  for a computer with no window to show them.
+
+### Changed
+
+- **A bottom bar across the whole window.** The bar under the panes is gone. The
+  new one holds, on the left, the Claude and Codex usage, the machines and the
+  OpenRouter balance, and on the right the count of running agents and the
+  prefix and resize badges. The Needs you and Kuru chips sit in the top-right
+  pane's strip while both drawers are shut, and in the open drawer's header
+  while one is open. The workspace's name and the sidebar toggle are at the
+  top, the name first so the toggle does not move under your pointer, and
+  Settings and the QR code are at the foot of the sidebar.
+
+- **One band across the top of the window.** The sidebar's top, the panes' tab
+  strips and the drawers' heads are one height and one tone with one line
+  under them, and the pane the keyboard is in is shown by a ring around it
+  alone.
+
+- **The machines live on the bottom bar.** The sidebar's Machines section is a
+  server glyph with the number connected, coloured amber or red when a
+  machine's CPU, memory or disk runs high, and its title names which one; hover
+  or tap for each machine's rings and a Shell. A row's shell button moved to
+  Settings → Machines. The OpenRouter balance is a chip beside it, with the
+  detail on hover, and on a phone it is the first thing to shrink.
+
+- **One menu per thing.** A workspace row's ⋯ and its right-click open the same
+  menu, a long press opens it on a phone, and cards and board columns take a
+  right-click too. A terminal's tab opens its menu on a right-click or a long
+  press — Rename, Go to card, Kill — rather than a rename field.
+
+- **A card you go to is scrolled into view.** Clicking an agent in the sidebar,
+  Go to card, Needs you and a search hit bring its card into sight on a long
+  board.
+
+- **Kuru's box sends on Enter.** The send button is gone and the microphone
+  sits inside the box. The drawer's Terminal button went too: Kuru's terminal
+  is a press away on the line over the box while Kuru is asking or not running.
+
+- **The sidebar's headings carry no counts.** The bottom bar counts the agents
+  running, and a folded heading's dot says when something is waiting.
+
 ### Fixed
+
+- **A card picked back up started over instead of resuming.** After the pty host
+  went down, or once a card had finished, running it again began a new
+  conversation that reread the card and redid its work. It now resumes any card
+  whose agent has gone, as long as the conversation is still on disk, and says
+  when it cannot.
+
+- **A card could start its agent in a folder that was gone.** A pane that had
+  shown a merged card's removed worktree kept it as its folder, and the next
+  card run there ended at once. It now starts in the repository the worktree
+  came from.
+
+- **A merged card's branch could refuse to go.** An agent that pushed with `-u`
+  and then rebased left the branch tracking a stale upstream, and deleting it
+  said "not yet merged" with all its work on main. The merge now points the
+  branch at its base first.
+
+- **Tapping a text field on an iPhone zoomed the window in and left it there.**
+  Every field a finger can focus is now at least 16px, which is where iOS stops
+  zooming.
+
+- **The web tools' instructions to agents began mid-sentence** when the agent's
+  own search was first in the chain, and Kuru made one wasted call per lookup.
+  Both read the chain as it is now.
+
+- **On a phone, a picture skin's tab titles showed through the + button.**
 
 - **Putting on a pack or a theme from your phone keeps you on the Theme page.**
   It dropped you back to the list of Settings pages after every press.
+
+### Removed
+
+- **The bar under the panes, and the sidebar's Usage, Machines and OpenRouter
+  sections**, all on the bottom bar now. The file tree's toggle went with them;
+  the tree is `C-a e` and every pane's menu.
+
+### Security
+
+- **A computer is let in by a signed roster, never by a token.** The Mac signs
+  the list of its computers' public keys, and two computers link only by each
+  proving it holds a key on that list. The join code is eight characters, good
+  once and for ten minutes, and five wrong guesses burn it. The two routes that
+  take a link or a join are the only ones ahead of the token check, and they
+  refuse a browser's `Origin`, anything a proxy forwarded and anything off the
+  tailnet and loopback.
+
+- **A child listens on its tailnet address.** With `KURURU_BIND=tailscale` the
+  server listens on the box's Tailscale address as well as loopback, and a
+  child also asks every program on the box for the token, loopback included
+  (`loopbackToken`). The Mac's own posture is unchanged: loopback, with the
+  token to go further.
+
+- **The Mac can watch a child; a child cannot watch the Mac.** Another
+  computer's workspace on your screen is the Mac's server watching that one,
+  let in by the same key handshake, and what you type there reaches that
+  computer's terminals. Nothing on a child reaches a terminal on the Mac.
+
+- **A secret leaves the Mac only sealed to the computer it was lent to.** Each
+  one is encrypted to that computer's key and signed by the Mac's, and only
+  once you switch it on for that computer. A lent Claude login reaches agents
+  there as a token in their environment, never as a copy of your sign-in; env
+  files, ssh entries and a GitHub login never write over the computer's own;
+  and the computer lets go of all of it when it leaves the list. The Anthropic
+  Admin key is never lent.
+
+- **The Anthropic Admin key** is kept readable only by you in
+  `~/.config/kururu/anthropic.json`, used only to read the cost report, shown
+  back only by its last characters, and never backed up. It can run your whole
+  Anthropic organisation, which is why it goes nowhere else.
+
+- **A picture Kuru sends to Telegram is uploaded to Telegram's servers.** It only
+  ever sends a picture you could have sent yourself from your projects and
+  everyday folders, never a hidden folder or `~/Library`. Pictures sent in, and
+  files dropped on Kuru's box, are kept readable only by you and never backed
+  up.
 
 ## [0.4.0] - 2026-10-17
 
@@ -810,7 +1055,8 @@ same version.
   release's notes — which are this file.
 - **Installs from a DMG**, signed and notarized, or from the Homebrew tap.
 
-[Unreleased]: https://github.com/tonyjara/kururu/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/tonyjara/kururu/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/tonyjara/kururu/releases/tag/v0.5.0
 [0.4.0]: https://github.com/tonyjara/kururu/releases/tag/v0.4.0
 [0.3.0]: https://github.com/tonyjara/kururu/releases/tag/v0.3.0
 [0.2.0]: https://github.com/tonyjara/kururu/releases/tag/v0.2.0
