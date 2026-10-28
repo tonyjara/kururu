@@ -80,3 +80,41 @@ cached views. The repository has no forks and no pull requests holding them.
 The 0.1.0–0.3.0 DMGs and zips, which carried the old source maps, were rebuilt
 from the rewritten tags by the release workflow (dispatched from `main`, which
 now replaces the files of a release that exists) and replaced in place.
+
+## Before 0.5.0
+
+Done on 2026-10-28 over everything since `v0.4.0`: the 100 commits, their
+messages, authors and committers, the app the release builds, and kururu.dev.
+The same things were looked for, and every card title, card body and Kuru
+turn in the user's database was checked against the commits again. As
+before, nothing found is repeated here.
+
+**Secrets: none.** Every key-shaped string is a test fixture, and none of the
+values kururu actually holds in `~/.config/kururu` appears in any commit.
+
+| what | where | severity |
+|---|---|---|
+| The user's personal email as author and committer of six commits, made from a clone that did not carry this repository's noreply address | commit metadata | medium |
+| The child's real tailnet address | `docs/spikes/child-phase0.md`, a test | medium |
+| The child's hostname | `docs/plans/remote-workspaces.md`, tests and a comment | low |
+| An ssh host alias and key name | a comment in `shared/vault.ts` | low |
+| A project of the user's as the workspace in the move, vault and doctor tests and vault comments, with a card code from it; another project named in passing | tests, `shared/`, two docs | low |
+| The owner's first name as the Telegram account in fixtures (already in 0.4.0) | three tests | low |
+| The child's node name as the example node in Kuru's role and tool descriptions — the only one of these that shipped inside the app | `shared/harness.ts`, two comments esbuild keeps | low |
+
+Each is the audit's neutral example in the tree — `storefront`, `devbox`,
+`100.101.102.103`, `vps`, Sam — and nothing in the built bundles names any of
+them. "Omarchy" is left where it names the Linux distribution the child runs
+on, in docs, comments and tests, since the spikes' findings depend on it.
+
+**The history since `v0.4.0` was rewritten** on the user's yes, in a fresh
+repository so that no worktree or branch of the user's was touched: the six
+commits' email replaced by GitHub's noreply address, the strings above
+replaced in every commit and message after `v0.4.0`, and `main` force-pushed
+against the hash it was expected to have. `v0.1.0`–`v0.4.0` and their
+releases are unchanged; `v0.5.0` was tagged on the rewritten `main`. The
+newest tree came out byte-identical to the one tested. As in October, GitHub
+keeps serving the old commits by their full hash until Support purges them.
+
+The site is unchanged since 0.4.0 but for `robots.txt` and the download
+links; its images carry no metadata.
