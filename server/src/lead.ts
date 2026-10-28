@@ -308,7 +308,7 @@ export class TelegramLead {
     return ` — away: ${away.map((p) => `${this.name(p.id)}${p.since ? ` since ${new Date(p.since).toISOString()}` : ""}`).join(", ")}`;
   }
 
-  /** A move of the poll: the server's log, and `lifecycle.log`, where "why is Omarchy answering" is looked up. */
+  /** A move of the poll: the server's log, and `lifecycle.log`, where "why is that node answering" is looked up. */
   private move(line: string): void {
     this.deps.log(`lead: ${line}`);
     this.deps.moved?.(line);

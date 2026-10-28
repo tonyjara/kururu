@@ -7745,7 +7745,7 @@ async function attach(port: Port): Promise<void> {
     },
     talk: (who, on) => voice.talk(who, on),
     delivered: (entry) => channels.delivered(entry.profileKey, entry),
-    // `@omarchy …`, for another node's Kuru, goes over the link. See `peerkuru.ts`.
+    // `@devbox …`, for another node's Kuru, goes over the link. See `peerkuru.ts`.
     addressed: (text, spoken) => peerKurus?.addressed(text, spoken) ?? null,
     relay: (nodeId, words) => (peerKurus ? peerKurus.relay(nodeId, words) : "nodes are not up yet"),
   });

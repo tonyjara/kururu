@@ -935,7 +935,7 @@ doctor` lists the held kinds.
 
 **Scope.** Moving a workspace (phase 6) left behind what the project needs
 to run on the node, and the dialog said "copy what it needs by hand". The
-first real use is Storefront to the Omarchy PC (STO-58). Three more families of
+first real use was a project moved to the Omarchy PC. Three more families of
 kind on phase 4's road: a workspace's env files (`.env`, `.env.local`,
 `.env.production` and the like, detected and picked), into the matching
 checkout on the node at `0600`, following the Mac's file and removed when
@@ -954,7 +954,7 @@ preambles, gh's `hosts.yml`, the `Include` line in and out); each family
 round-tripped between a parent and a child `Secrets` with fake keys in
 `secrets.test.ts`, with no value in any view, record or log line; two
 throwaway nodes on the Mac on free ports with a scratch home. On the two
-machines: Storefront's `.env.local` lent with its move lands in its checkout on
+machines: a project's `.env.local` lent with its move lands in its checkout on
 the box and follows an edit on the Mac; the VPS's entry lets an agent there
 `ssh` it; a lent gh login clones a private repository there; switching each
 off removes it.

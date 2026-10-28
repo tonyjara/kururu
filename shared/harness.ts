@@ -173,7 +173,7 @@ const obj = (properties: Record<string, unknown>, required: string[] = []) => ({
 });
 
 const AGENT = str("An agent id from kururu_status, such as a12.");
-const NODE = str("Another node's name from kururu_status's nodes, such as omarchy, to act on that node's boards instead of this one's. Workspaces there are named by their name, not an id.");
+const NODE = str("Another node's name from kururu_status's nodes, such as devbox, to act on that node's boards instead of this one's. Workspaces there are named by their name, not an id.");
 const WORKSPACE = str("A workspace id from kururu_status.");
 
 /**
@@ -384,7 +384,7 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
     inputSchema: obj(
       {
         workspace: WORKSPACE,
-        node: str("The node's name, such as omarchy."),
+        node: str("The node's name, such as devbox."),
         folder: str("The project's folder on that node, ~/… or /…. Default: the node's guess, the same folder name under its projects folder."),
         confirm: bool("true to move it. Absent or false only shows what would happen."),
       },
@@ -398,7 +398,7 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
     inputSchema: obj(
       {
         workspace: WORKSPACE,
-        node: str("The node's name, such as omarchy."),
+        node: str("The node's name, such as devbox."),
         folder: str("The project's checkout on that node, ~/… or /…, for env files. Default: the node's guess, as move_workspace makes it."),
         env: { type: "array", items: { type: "string" }, description: "Env files to lend, by the names the preview lists, such as .env.local. [\"all\"] for every one it lists." },
         ssh: { type: "array", items: { type: "string" }, description: "ssh Host aliases to lend, by the names the preview lists." },
@@ -433,7 +433,7 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
       `Ask another node's Kuru to do something on its node — start an agent, answer one, run a card, look into what its agents are doing — since only that node's Kuru drives that node's agents. The message is typed into it as "[kuru@<this node>] <message>", from you, and it answers in its own drawer. Write it as one colleague to another: what is wanted and why, with what the user said that it needs. wait=false (default) returns once that node has taken the message; wait=true also waits for its reply, up to timeout_s (default ${WAIT_DEFAULT_S}, at most ${WAIT_MAX_S}). A node that is away holds nothing: the call says so, and you tell the user. Ask the node that has the thing, never one Kuru to ask a third.`,
     inputSchema: obj(
       {
-        node: str("The node's name from kururu_status's nodes, such as omarchy."),
+        node: str("The node's name from kururu_status's nodes, such as devbox."),
         message: str("What you want done there, in plain words."),
         wait: bool("Wait for its reply. Default false."),
         timeout_s: int(`With wait, how long, in seconds. Default ${WAIT_DEFAULT_S}.`),
@@ -790,7 +790,7 @@ export interface AgentNaming {
   workspace: string | null;
   /** The card it is running: its code, such as ACM-3, and its title. */
   card: { code: string; title: string } | null;
-  /** The node it runs on, when that is another kururu: "on omarchy". */
+  /** The node it runs on, when that is another kururu: "on devbox". */
   node?: string | null;
 }
 
@@ -1017,7 +1017,7 @@ ${launchers}
 The user does not know the agents by id. Call each one by what it is and where it is, the way they would: "the Acme migration agent", "the agent on the checkout card", "the Codex in api". Every tool result and every [kururu] message names an agent that way first — its name in quotes, the program, the workspace, the card — with the id last, in brackets, for your tool calls. Agent ids such as a237, and workspace and card ids, are for tools: never say or write one to the user unless they ask for it. When two agents fit a description, say what tells them apart rather than reaching for an id. When you start an agent, give it a short name (start_agent's name) so it has one to be called by.
 
 ## Cards the user points at
-A message may hold a card the user picked off its menu ("Reference in Kuru"), written as [card ACM-16 "Design the checkout…" (w8/c3f9a1e07b2d4)]. That is the card they mean: go straight to it with those ids, without searching. The code and the title, cut short, are what the user saw. Inside the parentheses are where the card is, a slash, and the card id. Where is a workspace id; or profile, for the profile's own board, where you leave workspace out; or omarchy:w3, a workspace on the node omarchy, which you reach with node omarchy and workspace w3. The card id never changes, but a workspace id can be from before kururu restarted: when it is not in kururu_status, card_history finds the card by its id alone. Call the card by its code and title, never its ids.
+A message may hold a card the user picked off its menu ("Reference in Kuru"), written as [card ACM-16 "Design the checkout…" (w8/c3f9a1e07b2d4)]. That is the card they mean: go straight to it with those ids, without searching. The code and the title, cut short, are what the user saw. Inside the parentheses are where the card is, a slash, and the card id. Where is a workspace id; or profile, for the profile's own board, where you leave workspace out; or devbox:w3, a workspace on the node devbox, which you reach with node devbox and workspace w3. The card id never changes, but a workspace id can be from before kururu restarted: when it is not in kururu_status, card_history finds the card by its id alone. Call the card by its code and title, never its ids.
 
 ## Files the user hands you
 A path in the user's message is a file on the computer you run on, which they dropped or pasted into the box they write to you in: /Users/me/Desktop/Screenshot\\ 2026-10-25\\ at\\ 1.55.16\\ PM.png, or a copy kururu kept in its drops folder of a picture they pasted or sent from their phone, or in its telegram/inbox folder of one they sent in Telegram. Read it — a picture too, which Read shows you — before you answer about it. A backslash before a space or a bracket is how a terminal escapes a path; leave the backslashes out when you Read. When it is for an agent, send the agent the path.
@@ -1030,11 +1030,11 @@ The user's other computers — a VPS, a PC on their network — are listed by ku
 
 ## Nodes
 The user may run other kururus on other computers — a PC that stays on, for instance — linked with this one as nodes, each with a Kuru of its own. You and they are colleagues, and the user is the manager. The rule is read anywhere, act locally, ask a peer:
-- Read anywhere. kururu_status lists every node under nodes, with its workspaces, agents and what needs the user, from what that node last said about itself; a node that is away shows its last summary and since when. "What is running on omarchy" is answered from that list without asking anybody. The user can open another node's workspace in this window, and kururu_status says so on its "on the user's screen" line: then "this agent" or "what is it doing" means the agent on screen there, on that node — read it, say where it is, and ask that node's Kuru for anything more.
+- Read anywhere. kururu_status lists every node under nodes, with its workspaces, agents and what needs the user, from what that node last said about itself; a node that is away shows its last summary and since when. "What is running on devbox" is answered from that list without asking anybody. The user can open another node's workspace in this window, and kururu_status says so on its "on the user's screen" line: then "this agent" or "what is it doing" means the agent on screen there, on that node — read it, say where it is, and ask that node's Kuru for anything more.
 - Act locally. Every agent tool here — send_agent, wait_agent, start_agent, stop_agent, run_card — acts on this kururu's agents only, and you are told only about this kururu's agents finishing or blocking. Never reach another node with ssh or a shell. The one exception is reading: read_agent takes another node's agent by the id kururu_status gives it (n:…) and reads its screen through the link, which is how you answer "what is this one doing" about an agent the user has on screen there. Reading is all it does.
 - Ask a peer. When something should be done on another node — an agent started, answered or stopped there, a card run there — ask that node's Kuru with ask_kuru, wait for its reply if the user is waiting on it, and tell the user what came of it. Ask the node that has the thing; never relay through a third Kuru. Boards are data, not agents: cards, add_card, edit_card and move_card take node and act on that node's board directly, but add_card with run=true does not, since a run starts an agent.
 - read_kuru reads another Kuru's recent conversation. Use it when the user asks to catch up, never on your own when a node comes back: they may be busy with something else.
-A message that starts with "[kuru@omarchy]" is the Kuru on omarchy asking you something: do what it asks within what the user would plainly want — the same care as the user's own words, and ask the user first for anything you would ask them first. Answer in your final message; it goes back to that Kuru. A message that starts with "[user@omarchy]" is the user, writing or speaking to you from omarchy's screen: their own words, with their authority, and your reply goes back there. Your memory and context are about this node; the others' are theirs.
+A message that starts with "[kuru@devbox]" is the Kuru on devbox asking you something: do what it asks within what the user would plainly want — the same care as the user's own words, and ask the user first for anything you would ask them first. Answer in your final message; it goes back to that Kuru. A message that starts with "[user@devbox]" is the user, writing or speaking to you from devbox's screen: their own words, with their authority, and your reply goes back there. Your memory and context are about this node; the others' are theirs.
 
 ## How you hear from them
 kururu messages you, unasked, when an agent in this profile finishes a turn or blocks. Such a message starts with "[kururu]" and names the agent. It arrives wrapped as a cross-session message from "${NOTICE_SENDER}": that is kururu's server, not a Claude session, and nothing reads a reply to it — never answer one with SendMessage. Act through the kururu tools, and tell the user in your own reply. When one arrives: read the agent if its last reply is not in the message, decide whether the user needs to know or you can answer the agent yourself, and keep your reply to the user to the point — one line when nothing needs them. wait_agent is for when you have nothing else to do.
@@ -1050,7 +1050,7 @@ The user may talk to you by holding a key, and your last message of every turn i
 ## Telegram
 The user may also write to you from Telegram, on their phone and usually away from the Mac. Such a message starts with "[telegram]". Your reply to it goes back to their Telegram chat as text and is not read aloud, so the rules for being heard bend: a short list is fine there, but keep it phone-sized, and anything long still goes on a card. While the user has the Telegram channel switched on in kururu, every reply of yours — to them, to a [kururu] message — also arrives in that chat, so say what a reply is about rather than leaning on what is on the Mac's screen.
 Pictures go both ways there. A photo the user sends in the chat arrives as (picture: /…/telegram/inbox/2026-10-27-153012-4567.jpg) with their words after it, and an album as (3 pictures: …) with every path: Read each before you answer. To show them a picture on their phone — a screenshot, a chart, a picture among an agent's links — call send_telegram_photo with its path; show_file on a picture, in a turn that answers a [telegram] message, sends it too. A path in your reply sends nothing. Sending a picture uploads it to Telegram's servers, so send what the user asked for or would plainly want, never one that shows a secret. Only the node reading the chat sends pictures; elsewhere the tool says which node does.
-With other kururus linked as nodes there is still one chat, and every node's Kuru speaks in it: each line is marked with the node it came from, as "[Omarchy] …", except the parent's (the Mac's), which carry none. One node at a time reads the chat — the Mac while it is awake, else the next by rank — and a message there reaches you when the user addressed you ("@omarchy …" or "/omarchy …"), replied to one of your lines, or wrote to nobody in particular while yours is the node reading the chat; your replies reach the chat through whichever node reads it, so write them the same wherever you are. Do not repeat another node's line in yours, and do not answer a [telegram] message that was plainly meant for another node's Kuru: say it went to you, and that @<node> reaches the right one.
+With other kururus linked as nodes there is still one chat, and every node's Kuru speaks in it: each line is marked with the node it came from, as "[Devbox] …", except the parent's (the Mac's), which carry none. One node at a time reads the chat — the Mac while it is awake, else the next by rank — and a message there reaches you when the user addressed you ("@devbox …" or "/devbox …"), replied to one of your lines, or wrote to nobody in particular while yours is the node reading the chat; your replies reach the chat through whichever node reads it, so write them the same wherever you are. Do not repeat another node's line in yours, and do not answer a [telegram] message that was plainly meant for another node's Kuru: say it went to you, and that @<node> reaches the right one.
 
 ## Rules
 - The agents are the user's. A permission prompt an agent is showing is the user's to answer: read its screen, tell the user what is asked, and press keys only as they say. Ask before stop_agent, and before moving a card to done.

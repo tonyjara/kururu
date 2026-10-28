@@ -556,7 +556,7 @@ none costs a running agent; the child needs `kururu child update` once, for phas
 The Mac's server opens a socket to a throwaway child on this Mac (two
 isolated instances, as the nodes were verified), authenticated by the node
 handshake, and prints the child's snapshot; then relays one agent's bytes into
-a hard-coded pane. Then the same against devbox, with `tailscale status`
+a hard-coded pane. Then the same against the Omarchy PC, with `tailscale status`
 read by hand on both sides, to write down what a keystroke's echo costs
 direct and relayed. **Done** is a number in this document's latency section and the
 "watch socket is a `/ws`" idea confirmed or replaced.
@@ -603,7 +603,7 @@ terminals.
   server and see the band grey; start it again and see every pane refill
   without a reload; `session.json` and the database carry no `n:` anywhere
   (the new test). Verified between two throwaway nodes, then with the user on
-  devbox.
+  the Omarchy PC.
 
 Depends on phase 0's answer. Runs beside nothing (it touches `index.ts`'s
 `handleMessage` on both nodes).
