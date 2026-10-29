@@ -376,14 +376,22 @@ function Machines() {
   );
 }
 
-function Terminal({ lines }: { lines: [kind: "prompt" | "ok" | "dim", text: string][] }) {
+function Terminal({
+  lines,
+  title = "build-box",
+  label = "A terminal on a remote machine",
+}: {
+  lines: [kind: "prompt" | "ok" | "dim", text: string][];
+  title?: string;
+  label?: string;
+}) {
   return (
-    <figure className="term" aria-label="A terminal on a remote machine">
+    <figure className="term" aria-label={label}>
       <div className="shot-bar" aria-hidden="true">
         <span />
         <span />
         <span />
-        <em>build-box</em>
+        <em>{title}</em>
       </div>
       <pre>
         {lines.map(([kind, text], i) => (
@@ -464,8 +472,7 @@ function Download() {
         <Frog pose="croak" scale={4} className="download-frog" />
         <h2>Get Kururu</h2>
         <p className="lede">
-          A signed Mac app. Open it and a frog appears in the menu bar; it starts everything else. Bring your own Claude
-          Code or Codex.
+          A signed Mac app for macOS 13 or later. Open it and a frog appears in the menu bar; it starts everything else.
         </p>
         <div className="cta-row center">
           <a className="btn" href={RELEASE.appleSilicon}>
@@ -481,6 +488,27 @@ function Download() {
           Version {RELEASE.version}, {RELEASE.date} · <a href={RELEASE.page}>Release notes</a> ·{" "}
           <a href={SITE.github}>Build it from source</a>
         </p>
+        <div className="before">
+          <h3>Before you open it</h3>
+          <p>
+            Kururu runs Claude Code or Codex; it does not include them. Install one and sign in once, in Terminal.
+            Claude Code needs a paid Claude plan, and Kuru runs on it.
+          </p>
+          <Terminal
+            title="Terminal"
+            label="Installing Claude Code"
+            lines={[
+              ["prompt", "curl -fsSL https://claude.ai/install.sh | bash"],
+              ["prompt", "claude"],
+              ["dim", "signs you in through the browser"],
+            ]}
+          />
+          <p className="fine">
+            Then drag Kururu into Applications and open it. If macOS asks whether Kururu may use your Desktop or
+            Documents folder, allow it. Codex and the rest:{" "}
+            <a href={`${SITE.github}#before-you-install`}>what Kururu needs</a>.
+          </p>
+        </div>
         <p className="fine muted">
           Talking to Kuru needs macOS 26 and <code>brew install yap</code>.
         </p>

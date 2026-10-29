@@ -49,11 +49,56 @@ building. Kururu is the other half.
 
 ## Running it
 
+### Before you install
+
+**Kururu runs your agents; it does not bring one.** It is a Mac app, for macOS
+13 or later, and it starts the agent command-line tools you already have. Have
+at least one of these installed and signed in first:
+
+- **Claude Code**, which is also what Kuru, the harness, runs on. It needs a
+  Claude Pro, Max, Team or Enterprise plan, or an Anthropic Console account;
+  the free plan does not include it. In Terminal:
+
+  ```sh
+  curl -fsSL https://claude.ai/install.sh | bash   # or: brew install --cask claude-code
+  claude                                          # once, to sign in in the browser
+  ```
+
+  The other ways to install it are on
+  [Anthropic's setup page](https://code.claude.com/docs/en/setup).
+
+- **Codex**, with a ChatGPT plan that includes it or an OpenAI API key:
+
+  ```sh
+  curl -fsSL https://chatgpt.com/codex/install.sh | sh
+  codex                                           # once, to sign in
+  ```
+
+Kururu starts them through your login shell, so if `claude --version` works in
+a new Terminal window, it works in kururu. One it cannot find is a tab that
+stops at `command not found`. You do not need Bun, Node or a copy of this
+repository to use the app.
+
+Everything else is optional: `brew install yap` to talk to Kuru (macOS 26 or
+later, and Settings → Voice says whether it is found), Neovim for opening code
+from the file tree, and git for a card's own worktree.
+
 ### From the app
+
+Download the DMG for your Mac from [kururu.dev](https://kururu.dev) or the
+[latest release](https://github.com/tonyjara/kururu/releases/latest) —
+**Apple silicon** for an M-series Mac, **Intel** for an older one — open it, and
+drag **Kururu** into Applications. It is signed and notarized, so macOS only
+asks once whether to open an app from the internet. Later versions install
+from inside the app, in Settings → About.
 
 Open **Kururu.app**. That is the whole of it: a frog appears in the menu bar,
 the app starts the pty host if none is running and a server in front of it, and
 a window opens onto them. No terminal is involved.
+
+The first time an agent works in a project under your Desktop, Documents or
+Downloads folder, macOS asks whether Kururu may use that folder. Allow it, or
+the agents there cannot read their own project.
 
 The frog is where the three processes live from then on. Click it:
 
@@ -336,7 +381,10 @@ stream separates *waiting for you* from *thinking*) or **how full the context
 window is**. Both arrive through a hook, which replaces the guess permanently, per
 agent.
 
-In `~/.claude/settings.json`:
+**A Claude that kururu starts already has them** — from the + menu, a card or
+Kuru, it is handed kururu's hooks for that launch, so there is nothing to
+install. The block below is for a `claude` you type into a shell yourself, and
+it needs a checkout of kururu for the path. In `~/.claude/settings.json`:
 
 ```json
 {

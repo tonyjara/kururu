@@ -961,6 +961,27 @@ p {
   margin-top: 8px;
 }
 
+/* What has to be on the Mac first, left-aligned because a command centred is
+   a command misread. */
+.before {
+  width: min(100%, 560px);
+  margin: 44px auto 36px;
+  text-align: left;
+}
+
+.before h3 {
+  margin-bottom: 10px;
+}
+
+.before > p:not(.fine) {
+  margin: 0 0 18px;
+  color: var(--text);
+}
+
+.before .term {
+  margin-bottom: 16px;
+}
+
 /* ---------------------------------------------------------------- footer */
 
 .footer {
