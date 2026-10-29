@@ -9914,6 +9914,39 @@ a.st-btn {
   height: 24px;
 }
 
+/* A note as a window of its own, over every application (`NotePage.tsx`).
+   The page is the note, so it fills the window and leaves the edge, the
+   corners and the shadow to the desktop, which draws them. The title bar is
+   what the window is dragged by — Electron's app-region, which swallows
+   every pointer event in it, so the buttons are carved out as `no-drag` or
+   none could be pressed. While the window does not have the keys its
+   buttons stand back until the pointer comes over it: less chrome on a note
+   that is being read past, and the same note the moment it is reached for. */
+html.note-page,
+html.note-page body,
+html.note-page #root {
+  height: 100%;
+  overflow: hidden;
+}
+.note.note-window {
+  position: fixed;
+  inset: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.note-window .note-head {
+  cursor: default;
+  -webkit-app-region: drag;
+}
+.note-window .note-actions {
+  -webkit-app-region: no-drag;
+  transition: opacity 120ms;
+}
+.note-window:not(.note-focused):not(:hover) .note-actions {
+  opacity: 0;
+}
+
 /* --------------------------------------------------------------------------
    The timeline
 

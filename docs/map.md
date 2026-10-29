@@ -19,6 +19,7 @@ in this folder.
 | `reply.ts` | A message that answers one line, as the words Kuru reads: `[reply to Kuru 18:42 "…" (t1234)]` written, read back, put after an `@node`, and cut. No imports, since `kuru.ts` and `channels.ts` both write one. Pure, tested. See [harness](harness.md#a-message-the-user-replies-to) |
 | `made.ts` | What an agent made: the paths in a reply, which of them are the deliverable (a document presented or changed alone, code presented and few), and the drawer's split of a reply into words and paths. Pure, tested. See [layout](layout.md#what-an-agent-made) |
 | `needs.ts` | What needs you across a profile's workspaces — an agent asking, a card in Review, a turn ended unseen, a card whose agent went — and the walk to the next. Pure, tested |
+| `notecards.ts` | The cards the menu bar offers to pop out as note windows: what needs you, by `needs.ts`, then the profile's board a column at a time. Pure, tested |
 | `channels.ts` | Other doors into that conversation — Telegram. The kinds and their marks, the settings, `judge` (the allow-list decision for one message), pairing codes, splitting a reply, `replySpoken`, the status a window draws; among nodes, the roster's copy of the settings, `routeOf`, the marks and the reply map. Pure, tested. See [channels](channels.md) |
 | `pictures.ts` | Pictures through a channel, both ways: a message's picture (the largest size), the words Kuru is handed for it, and the rule for what may go out — where it is, what its bytes are, photo or file, a long caption after it. Pure, tested. See [channels](channels.md#pictures) |
 | `board.ts` | A workspace's cards, and what an agent's status does to the one it was handed. Also the profile's board, a card's dates, and the timeline's layout |
@@ -179,7 +180,7 @@ in this folder.
 | `src/kurufold.ts` | Which lines of Kuru's drawer are folded to one row, on this device: the name a fold is kept under, what a folded line shows, and "Fold long messages". Pure, tested. See [harness](harness.md#a-line-folded-to-one-row) |
 | `src/needs.ts` | Whether the drawer of things that need you is open, for the tray and the key; one drawer at a time with Kuru's |
 | `src/needsorder.ts` | The Needs drawer's folds and the order its groups and cards were sorted into, per device and per profile; what Next walks. Pure but for the store, tested |
-| `src/notes.ts` | Cards popped out as notes: each note's box, fold and whether it is open, per device and per profile; fitting a box into the window, a drag and a resize held to the edges and the floor; finding a note's card wherever in the profile it went. Pure but for the store, tested. See [layout](layout.md#notes) |
+| `src/notes.ts` | Cards popped out as notes: each note's box, fold and whether it is open, per device and per profile; fitting a box into the window, a drag and a resize held to the edges and the floor; finding a note's card wherever in the profile it went; in the desktop app, sending a card to the bridge to be a window of its own. Pure but for the store, tested. See [layout](layout.md#notes) |
 | `src/mascot.ts` | Loads a sheet once per URL and reports its size |
 | `src/mermaid.ts` | The one thing the reader draws itself — a diagram needs a DOM |
 | `src/labels.ts` | How the window draws the answers `shared/labels.ts` decides |
@@ -205,7 +206,8 @@ for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` (the windo
 `Search.tsx` (the search over every board and the conversations, and the deleted cards, in the profile board's sheet; a card hit is a door to the card) ·
 `ProfileBoard.tsx` (the profile's own cards, in a sheet over the window; its own and no other's) ·
 `ColorPicker.tsx` (a column's colour, from the profile board) ·
-`Notes.tsx` (cards popped out as notes over the window, dragged, resized, folded, edited in place; the card is the snapshot's) ·
+`Notes.tsx` (cards popped out as notes over the window, dragged, resized, folded, edited in place; the card is the snapshot's; `NoteInside` is a note's inside, also a note window's) ·
+`NotePage.tsx` (`/?note=`: a card popped out as a desktop window of its own, over every app) ·
 `NeedsDrawer.tsx` (what needs you across the workspaces, in three bands, with the next one a press away, its groups folding and sorting; opened by the tray in `DrawerChips.tsx`) ·
 `NodeChip.tsx` (another node's name in its own hue, on every remote thing) · `RemoteBand.tsx` (the band over another node's workspace: whose, away since when, what could not be sent) ·
 `Timeline.tsx` (that board by when its cards are for; holds only which weeks it is showing) ·
@@ -227,10 +229,11 @@ open, and this is how loud the room is; dragged anywhere, ✕ or Esc to stop Kur
 | `tray.js` · `menu.js` | The frog in the menu bar and its clicks; the menu as data, with no Electron in it, so its sentences are tested |
 | `editmenu.js` | The right-click menu of a text field — Cut, Copy, Paste, spelling — as data; `main.js` pops it, the preload keeps it off terminals |
 | `talkkey.js` · `talkkey/talkkey.swift` | The talk key in every app: the native listen-only event tap, its router, and the floating pill's panel window |
-| `desktop.js` | `desktop.json`: where the server runs from, whether the hook is on, where the pill was left |
+| `notes.js` · `notelist.js` | Cards popped out as windows over every app: the panel windows and their verbs; their records off `desktop.json` and where a box goes on the screen, as data, tested |
+| `desktop.js` | `desktop.json`: where the server runs from, whether the hook is on, where the pill was left, which cards are note windows and where |
 | `connect.html` | The one page kururu draws itself — the address picker |
 | `servers.js` | Addresses you have connected to, and what a typed one means |
-| `preload.js` | Two bridges in one file, split on `file:`; `voice` is the hook's half |
+| `preload.js` | Two bridges in one file, split on `file:`; `voice` is the hook's half, `notes` the note windows' |
 | `build.mjs` | `server/src` → `dist/{server,ptyhostd,report,kokoro}.mjs`; stamps the version. `talkkey/build.mjs` compiles the hook beside them |
 | `brand.mjs` | postinstall: stamps and re-signs the Electron copy in `node_modules` |
 | `electron-builder.yml` · `entitlements.mac.plist` · `notarize.mjs` | see [packaging](packaging.md) |

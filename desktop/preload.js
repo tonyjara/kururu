@@ -70,6 +70,11 @@ if (isPicker) {
   ipcRenderer.on("kururu:pill-locate", () => {
     if (ipcRenderer.listenerCount("kururu:pill-locate") === 1) pendingLocate = true;
   });
+  /** A note's "show it on its board", landed on a window still loading — one made for the purpose. */
+  let pendingCard;
+  ipcRenderer.on("kururu:show-card", (_event, cardId) => {
+    if (ipcRenderer.listenerCount("kururu:show-card") === 1 && typeof cardId === "string") pendingCard = cardId;
+  });
   contextBridge.exposeInMainWorld("kururu", {
     /** True in the Electron window, absent in a browser or on the phone. */
     desktop: true,
@@ -197,6 +202,56 @@ if (isPicker) {
         }
         return () => ipcRenderer.removeListener("kururu:pill-locate", relay);
       },
+    },
+    /**
+     * Cards popped out as windows of their own, over every application.
+     *
+     * Two kinds of page use this, as with the voice. The window pops a card
+     * out, is told which cards are up so its menus can say "bring it
+     * forward", and is asked to show a card on its board. A note window's
+     * page — `?note=` — asks which card it is, says what it is showing, and
+     * folds, closes or leaves itself. `main.js` checks the sender of each:
+     * only the main window pops a card out, and a note's verbs act on the
+     * note whose page sent them and no other, so the most a served page can
+     * do here is put a card of its own server over the screen, which its
+     * menu already does.
+     */
+    notes: {
+      popOut: (ask) => ipcRenderer.invoke("kururu:note-pop", ask && typeof ask === "object" ? ask : {}),
+      list: () => ipcRenderer.invoke("kururu:note-list"),
+      onList: (listener) => {
+        const relay = (_event, list) => listener(Array.isArray(list) ? list : []);
+        ipcRenderer.on("kururu:note-list", relay);
+        return () => ipcRenderer.removeListener("kururu:note-list", relay);
+      },
+      onShowCard: (listener) => {
+        const relay = (_event, cardId) => {
+          if (typeof cardId === "string") listener(cardId);
+        };
+        ipcRenderer.on("kururu:show-card", relay);
+        if (pendingCard !== undefined) {
+          const cardId = pendingCard;
+          pendingCard = undefined;
+          listener(cardId);
+        }
+        return () => ipcRenderer.removeListener("kururu:show-card", relay);
+      },
+      self: () => ipcRenderer.invoke("kururu:note-self"),
+      onSelf: (listener) => {
+        const relay = (_event, self) => listener(self);
+        ipcRenderer.on("kururu:note-self", relay);
+        return () => ipcRenderer.removeListener("kururu:note-self", relay);
+      },
+      onFocus: (listener) => {
+        const relay = (_event, focused) => listener(focused === true);
+        ipcRenderer.on("kururu:note-focus", relay);
+        return () => ipcRenderer.removeListener("kururu:note-focus", relay);
+      },
+      report: (state) => ipcRenderer.send("kururu:note-report", state && typeof state === "object" ? state : {}),
+      fold: (collapsed) => ipcRenderer.send("kururu:note-fold", collapsed === true),
+      close: () => ipcRenderer.send("kururu:note-close"),
+      toBoard: () => ipcRenderer.send("kururu:note-board"),
+      raiseMain: () => ipcRenderer.send("kururu:note-raise"),
     },
   });
 }

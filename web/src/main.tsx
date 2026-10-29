@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { Crash } from "./components/Crash";
+import { NotePage } from "./components/NotePage";
 import { Pill } from "./components/Pill";
 import { isLoopback } from "./preview";
 import "./styles.css";
@@ -12,7 +13,14 @@ import "./styles.css";
  * else — see `components/Pill.tsx`. A query rather than a path so the server
  * and vite serve it with no route of their own.
  */
-const pill = new URLSearchParams(location.search).has("pill");
+const query = new URLSearchParams(location.search);
+const pill = query.has("pill");
+/**
+ * A card popped out as a window of its own is the same again: `/?note=<card>`,
+ * the note and nothing else — see `components/NotePage.tsx`. Which card it is
+ * the desktop says over the bridge; the address only picks the root.
+ */
+const note = !pill && query.has("note");
 
 /**
  * Vite's dev client reads a dropped socket as vite restarting: it polls until
@@ -40,6 +48,6 @@ if (import.meta.hot && !isLoopback(location.hostname)) {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Crash>{pill ? <Pill /> : <App />}</Crash>
+    <Crash>{pill ? <Pill /> : note ? <NotePage /> : <App />}</Crash>
   </StrictMode>,
 );

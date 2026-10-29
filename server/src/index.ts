@@ -127,6 +127,7 @@ import { TelegramLead } from "./lead";
 import { adoptLendAsk, asksAnything, webKind, type KindSpec, type Lendable, type LendAsk, type SecretsView } from "../../shared/secrets";
 import { folderSentence, type MoveCheck } from "../../shared/move";
 import { doneRefusal } from "../../shared/needs";
+import { noteCards } from "../../shared/notecards";
 import { summarize, type NodeSummary } from "../../shared/nodes";
 import { hostname } from "node:os";
 import { Store, dataDir, dbPath } from "./store";
@@ -7216,6 +7217,18 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    * a relative image in a card is a fetch `files.ts` refuses rather than a
    * file read from wherever it pointed.
    */
+  /**
+   * The active profile's cards as the menu bar pops them out as notes —
+   * what needs you, then the profile's board (`shared/notecards.ts`). A GET
+   * for a caller with no socket, like `/api/kuru/play`; it says no more than
+   * the snapshot every client is sent.
+   */
+  if (url.pathname === "/api/notes/cards") {
+    const profile = workspaces.active;
+    const mine = new Set(workspaces.agentsIn(profile.id));
+    json(res, noteCards(profile, host.agents.filter((agent) => mine.has(agent.id)).map(overlay)));
+    return;
+  }
   if (url.pathname === "/api/card-markdown") {
     const cardId = url.searchParams.get("card") ?? "";
     const profile = workspaces.active;

@@ -6,7 +6,8 @@
  * exception for the same reason: it is about *this Mac* and this app, and a
  * page served from a box in a cupboard has no business deciding it. Where the
  * server runs from. Whether a key hook is listening to every application on
- * this machine. Where a floating window was last left on this screen.
+ * this machine. Where a floating window was last left on this screen, and
+ * which cards are popped out as windows over it.
  *
  * Beside `servers.json`, in XDG's config directory and for its reason: these
  * are decisions, and a decision wiped between versions is somebody's checkout
@@ -16,6 +17,7 @@
 const { mkdirSync, readFileSync, renameSync, writeFileSync } = require("node:fs");
 const { homedir } = require("node:os");
 const path = require("node:path");
+const { adoptNotes } = require("./notelist");
 
 const FILE = "desktop.json";
 
@@ -34,6 +36,13 @@ const DEFAULTS = {
   pill: null,
   /** The talk key the pill last reported, so the hook starts on it before a server has said. */
   talkKey: "ControlRight",
+  /**
+   * The cards popped out as windows of their own (`notes.js`), each with its
+   * box on the screen and whether it is up, put away or closed. This Mac's
+   * and not the server's, for the reason the window's notes are a browser's:
+   * where a note sits is a fact about one screen.
+   */
+  notes: [],
 };
 
 function configDir() {
@@ -70,6 +79,7 @@ function adopt(raw) {
     altSpace: r.altSpace === true,
     pill,
     talkKey: typeof r.talkKey === "string" && /^[A-Za-z0-9]{1,32}$/.test(r.talkKey) ? r.talkKey : DEFAULTS.talkKey,
+    notes: adoptNotes(r.notes),
   };
 }
 

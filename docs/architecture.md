@@ -342,6 +342,16 @@ no save coming to mend it.
   (`requestSingleInstanceLock`). The dev shell gets the tray too, defaulting to
   its own checkout and starting a server only when asked; `KURURU_AUTOSTART=1`
   makes it start as the app does, for an isolated instance.
+- **The notes are the tray's too.** A card popped out in the desktop app is a
+  window of its own over every application (`desktop/notes.js`), and the
+  menu lists them: each ticked while it is up, Show All and Hide All, Close
+  a Note, and Pop Out a Card — what needs you, then the profile's board —
+  from `GET /api/notes/cards`, asked at the click with a short wait so a
+  closed window is no reason not to have one. Their pages come from where
+  the pill's does (`pointPill`). A note window is a window, so
+  `window-all-closed` never comes while one is up; the main window's own
+  `closed` is what sends the app back to the menu bar. See
+  [layout](layout.md#notes).
 - **Open at login** is `app.setLoginItemSettings`, offered only to the installed
   app. Opened that way there is no window: macOS says so in
   `wasOpenedAtLogin`, and when it does not — SMAppService has not always — a

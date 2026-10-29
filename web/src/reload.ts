@@ -178,14 +178,15 @@ async function go(ids: string[]): Promise<void> {
 /**
  * Make this page one an agent can ask to reload. Called once by whatever
  * owns the page — `App` for the window and a tab on this Mac, `Pill` for
- * the pill — and never for a phone, which is never asked. The pill reloads
- * but shows no notice: it is hidden while it is idle, and idle is the only
- * time it reloads.
+ * the pill, `NotePage` for a note window — and never for a phone, which is
+ * never asked. The pill reloads but shows no notice: it is hidden while it
+ * is idle, and idle is the only time it reloads. A note shows none either,
+ * having no room for one; the window that asked says what happened.
  */
 export function installReload(page: ReloadPage): () => void {
   if (came === undefined) {
     came = takeKept();
-    if (came && came.asks.length && page !== "pill") setNotice(came.asks);
+    if (came && came.asks.length && page !== "pill" && page !== "note") setNotice(came.asks);
   }
   api.reloadable(page, came && !carried ? came.ids : []);
   carried = true;

@@ -25,14 +25,15 @@
 
 /**
  * The pages that can take a reload. `window` is the desktop app's, `pill` the
- * floating panel's (`/?pill`), and `tab` a browser on this Mac pointed at a
- * loopback address. A page that is none of these — a phone — never says it can
- * be reloaded, and so is never asked.
+ * floating panel's (`/?pill`), `note` a card popped out as a window of its
+ * own (`/?note=`), and `tab` a browser on this Mac pointed at a loopback
+ * address. A page that is none of these — a phone — never says it can be
+ * reloaded, and so is never asked.
  */
-export type ReloadPage = "window" | "pill" | "tab";
+export type ReloadPage = "window" | "pill" | "note" | "tab";
 
 export function isReloadPage(value: unknown): value is ReloadPage {
-  return value === "window" || value === "pill" || value === "tab";
+  return value === "window" || value === "pill" || value === "note" || value === "tab";
 }
 
 /**
@@ -149,6 +150,8 @@ export function pageWords(page: ReloadPage): string {
       return "the Kururu window";
     case "pill":
       return "the floating pill";
+    case "note":
+      return "a card's note window";
     case "tab":
       return "a browser tab on this Mac";
   }

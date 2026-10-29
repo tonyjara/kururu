@@ -57,6 +57,7 @@ function undelivered(count) {
  * @param view  the runner's `view()` plus the app's own facts:
  *   `appVersion`, `packaged`, `windowOpen`, `talk` ({ on, status, altSpace }),
  *   `nodes` ([{ id, name, why }], `why` null when it can be opened),
+ *   `notes` — see `notesSection`,
  *   `openAtLogin` ({ on, available, status })
  */
 function menuTemplate(view) {
@@ -150,6 +151,9 @@ function menuTemplate(view) {
     items.push({ type: "separator" });
   }
 
+  // --- the notes ------------------------------------------------------------------
+  items.push(...notesSection(view.notes));
+
   // --- actions ------------------------------------------------------------------
   items.push(view.windowOpen ? { id: "close-window", label: "Close Window" } : { id: "open-window", label: "Open Window" });
   items.push({ id: "restart-server", label: "Restart Server", enabled: server.up || server.starting || view.canStart.ok });
@@ -232,6 +236,92 @@ function menuTemplate(view) {
   return items;
 }
 
+/** How many cards a list in "Pop Out a Card" shows before it says how many more there are. */
+const CARDS_SHOWN = 20;
+
+/** A card as a menu row: its code and its title, cut to what a menu can hold. */
+function cardLabel(card) {
+  const title = trim(card.title || "Untitled", 56);
+  return card.code ? `${card.code}  ${title}` : title;
+}
+
+/**
+ * The notes: every card popped out as a window, each ticked while it is up
+ * and a click to put away or bring back; all of them at once; closing one;
+ * and popping a card out from here, for a Mac with no window open.
+ *
+ * @param notes  `list` — [{ cardId, code, title, state, away, waiting, profileName }] as `notes.js` lists them;
+ *   `cards` — the active profile's cards as `GET /api/notes/cards` answers, or null;
+ *   `why` — why there are no cards to offer, when `cards` is null
+ */
+function notesSection(notes) {
+  const items = [];
+  const list = notes?.list ?? [];
+  if (list.length) {
+    items.push({ id: "notes", label: "Notes", enabled: false });
+    for (const note of list) {
+      const waits = note.away
+        ? ` — waits for ${note.profileName || "its profile"}`
+        : note.waiting
+          ? " — opening…"
+          : "";
+      items.push({
+        id: `note-toggle:${note.cardId}`,
+        label: `    ${cardLabel(note)}${waits}`,
+        type: "checkbox",
+        checked: note.state === "shown",
+      });
+    }
+    // Only the one that would do something: a grey "Show All" beside notes
+    // that are all up is a grey item with no reason.
+    if (list.some((note) => note.state === "hidden")) items.push({ id: "notes-show-all", label: "    Show All Notes" });
+    if (list.some((note) => note.state === "shown")) items.push({ id: "notes-hide-all", label: "    Hide All Notes" });
+    items.push({
+      id: "notes-close",
+      label: "    Close a Note",
+      submenu: list.map((note) => ({ id: `note-close:${note.cardId}`, label: cardLabel(note) })),
+    });
+  }
+  items.push(popOutItem(notes, new Set(list.filter((note) => note.state === "shown").map((note) => note.cardId))));
+  items.push({ type: "separator" });
+  return items;
+}
+
+/**
+ * "Pop Out a Card": what needs you first — the Needs drawer's cards, a click
+ * from a note — and then the profile's board a column at a time. A card that
+ * is a note already is ticked, and a click brings it forward.
+ */
+function popOutItem(notes, up) {
+  const cards = notes?.cards ?? null;
+  if (!cards) return { id: "note-pop", label: `Pop Out a Card — ${notes?.why ?? "needs the server up"}`, enabled: false };
+  const row = (card) => ({
+    id: `note-pop:${card.id}`,
+    label: card.where ? `${cardLabel(card)} · ${trim(card.where, 24)}` : cardLabel(card),
+    type: "checkbox",
+    checked: up.has(card.id),
+  });
+  const more = (count, where) => ({ id: "note-pop-more", label: `${count} more — pop them out from ${where}`, enabled: false });
+  const submenu = [];
+  if (cards.needs.length) {
+    submenu.push({ id: "note-pop-needs", label: "Needs you", enabled: false });
+    submenu.push(...cards.needs.slice(0, CARDS_SHOWN).map(row));
+    if (cards.needs.length > CARDS_SHOWN) submenu.push(more(cards.needs.length - CARDS_SHOWN, "the Needs drawer"));
+  }
+  const columns = cards.columns.filter((column) => column.cards.length);
+  if (columns.length) {
+    if (submenu.length) submenu.push({ type: "separator" });
+    submenu.push({ id: "note-pop-board", label: `${cards.profileName}'s board`, enabled: false });
+    for (const column of columns) {
+      const rows = column.cards.slice(0, CARDS_SHOWN).map(row);
+      if (column.cards.length > CARDS_SHOWN) rows.push(more(column.cards.length - CARDS_SHOWN, "the board"));
+      submenu.push({ id: `note-pop-column:${column.id}`, label: `${column.name} (${column.cards.length})`, submenu: rows });
+    }
+  }
+  if (submenu.length === 0) return { id: "note-pop", label: "Pop Out a Card — nothing needs you and the board is empty", enabled: false };
+  return { id: "note-pop", label: "Pop Out a Card", submenu };
+}
+
 /**
  * The checkout's vite in one line. It is what the window and the pill are
  * showing, so the line says that — and when it is not serving, what they show
@@ -268,4 +358,4 @@ function trayTitle(view) {
   return "";
 }
 
-module.exports = { menuTemplate, trayTitle, unheard, undelivered, uptimeWords, when };
+module.exports = { menuTemplate, notesSection, trayTitle, unheard, undelivered, uptimeWords, when };

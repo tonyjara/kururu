@@ -5,7 +5,7 @@
  * both bugs that look like a menu.
  */
 import { describe, expect, it } from "bun:test";
-import { menuTemplate, trayTitle, uptimeWords } from "../menu.js";
+import { menuTemplate, notesSection, trayTitle, uptimeWords } from "../menu.js";
 
 const base = {
   appVersion: "0.2.0",
@@ -192,5 +192,95 @@ describe("the nodes in the tray menu", () => {
   it("offers a node whose workspaces open in the window only for its Settings", () => {
     const view = { ...base, nodes: [{ id: "n1", name: "omarchy", why: null, settings: true }] };
     expect(byId(view, "node:n1")).toEqual({ id: "node:n1", label: "    omarchy's Settings" });
+  });
+});
+
+describe("the notes in the tray menu", () => {
+  const cards = {
+    profileKey: "abc123",
+    profileName: "Work",
+    needs: [{ id: "w1", code: "API-4", title: "Review the migration", where: "api" }],
+    columns: [
+      { id: "todo", name: "To do", cards: [{ id: "p1", code: "WOR-1", title: "The plan", where: null }] },
+      { id: "done", name: "Done", cards: [] },
+    ],
+  };
+  const listed = (cardId, extra = {}) => ({
+    cardId,
+    code: "WOR-1",
+    title: "The plan",
+    profileName: "Work",
+    state: "shown",
+    away: false,
+    waiting: false,
+    ...extra,
+  });
+  const find = (items, id) => {
+    for (const item of items) {
+      if (item.id === id) return item;
+      const inside = item.submenu ? find(item.submenu, id) : undefined;
+      if (inside) return inside;
+    }
+    return undefined;
+  };
+
+  it("offers only Pop Out a Card while nothing is popped out", () => {
+    const items = notesSection({ list: [], cards, why: null });
+    expect(items.map((item) => item.id ?? item.type)).toEqual(["note-pop", "separator"]);
+  });
+
+  it("ticks each note that is up and says why one is not drawn", () => {
+    const items = notesSection({
+      list: [listed("p1"), listed("p2", { state: "hidden", title: "Hidden" }), listed("p3", { away: true, profileName: "Home" })],
+      cards,
+      why: null,
+    });
+    expect(find(items, "note-toggle:p1")).toMatchObject({ type: "checkbox", checked: true, label: "    WOR-1  The plan" });
+    expect(find(items, "note-toggle:p2").checked).toBe(false);
+    expect(find(items, "note-toggle:p3").label).toContain("waits for Home");
+    expect(find(items, "notes-show-all")).toBeDefined();
+    expect(find(items, "notes-hide-all")).toBeDefined();
+    expect(find(items, "note-close:p2").label).toBe("WOR-1  Hidden");
+  });
+
+  it("offers only the one of Show All and Hide All that would do something", () => {
+    const allUp = notesSection({ list: [listed("p1")], cards, why: null });
+    expect(find(allUp, "notes-show-all")).toBeUndefined();
+    expect(find(allUp, "notes-hide-all")).toBeDefined();
+    const allAway = notesSection({ list: [listed("p1", { state: "hidden" })], cards, why: null });
+    expect(find(allAway, "notes-hide-all")).toBeUndefined();
+  });
+
+  it("lists what needs you first, then the board a column at a time, ticking a card that is a note", () => {
+    const pop = find(notesSection({ list: [listed("p1")], cards, why: null }), "note-pop");
+    expect(pop.submenu.map((item) => item.label ?? item.type)).toEqual([
+      "Needs you",
+      "API-4  Review the migration · api",
+      "separator",
+      "Work's board",
+      "To do (1)",
+    ]);
+    expect(find(pop.submenu, "note-pop:p1").checked).toBe(true);
+    expect(find(pop.submenu, "note-pop:w1").checked).toBe(false);
+  });
+
+  it("says how many more a long column has", () => {
+    const many = Array.from({ length: 23 }, (_, i) => ({ id: `c${i}`, code: `WOR-${i}`, title: `Card ${i}`, where: null }));
+    const pop = find(notesSection({ list: [], cards: { ...cards, needs: [], columns: [{ id: "todo", name: "To do", cards: many }] }, why: null }), "note-pop");
+    const column = find(pop.submenu, "note-pop-column:todo");
+    expect(column.submenu.length).toBe(21);
+    expect(column.submenu.at(-1)).toMatchObject({ enabled: false, label: "3 more — pop them out from the board" });
+  });
+
+  it("greys Pop Out a Card with the reason when there is nothing to list", () => {
+    const down = find(notesSection({ list: [], cards: null, why: "needs the server up" }), "note-pop");
+    expect(down).toMatchObject({ enabled: false, label: "Pop Out a Card — needs the server up" });
+    const empty = find(notesSection({ list: [], cards: { ...cards, needs: [], columns: [] }, why: null }), "note-pop");
+    expect(empty.enabled).toBe(false);
+    expect(empty.label).toContain("the board is empty");
+  });
+
+  it("puts the section in the menu", () => {
+    expect(byId({ ...base, notes: { list: [], cards, why: null } }, "note-pop")).toBeDefined();
   });
 });

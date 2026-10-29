@@ -67,6 +67,7 @@ import { closeNeeds, toggleNeeds, useNeedsDrawer } from "./needs";
 import { arrangedNeeds, useNeedsView } from "./needsorder";
 import { NeedsDrawer } from "./components/NeedsDrawer";
 import { Notes } from "./components/Notes";
+import { locateCard } from "./notes";
 import { needsOf, type Need } from "../../shared/needs";
 import { nextNeedAcross, nodeNeeds as nodeNeedsOf, parseRemote, qualify, workspacesAcross, type NodeNeed } from "../../shared/remote";
 import { nodesNeedCount, WATCH_READS, type NodesView } from "../../shared/nodes";
@@ -683,6 +684,29 @@ export function App() {
    * on it.
    */
   useEffect(() => desktop()?.onOpenKuru?.((focus, toggle) => (toggle ? toggleKuru(focus) : openKuru(focus))), []);
+
+  /**
+   * A note window asking for its card on its board: a workspace's in its
+   * pane, the profile's on its sheet, lit there — what the note's own button
+   * does in this window. Held until there is a profile to find the card in,
+   * because a window made for the ask is handed it before its first
+   * snapshot; in an object, so the same card asked for twice is two asks.
+   */
+  const [cardAsked, setCardAsked] = useState<{ cardId: string } | null>(null);
+  useEffect(() => desktop()?.notes?.onShowCard((cardId) => setCardAsked({ cardId })), []);
+  useEffect(() => {
+    if (!cardAsked || !profile) return;
+    setCardAsked(null);
+    const where = locateCard(profile, cardAsked.cardId);
+    if (!where) return;
+    if (where.workspace) {
+      showCardNext(where.workspace.id, cardAsked.cardId);
+      api.openBoard(undefined, false, where.workspace.id);
+    } else {
+      setBoardShow(cardAsked.cardId);
+      setProfileBoard(true);
+    }
+  }, [cardAsked, profile]);
 
   const resizeFiles = useCallback((px: number) => {
     setFilesWidth(Math.round(Math.min(FILES_MAX, Math.max(FILES_MIN, px))));

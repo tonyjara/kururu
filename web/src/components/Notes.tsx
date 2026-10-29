@@ -33,19 +33,36 @@
  * takes no focus, as in the drawers, so a terminal being typed into is still
  * being typed into after a note is moved; the editor says it has the keys
  * (`onEditing`) while a field in it is focused, as Kuru's composer does.
+ *
+ * **In the desktop app a note is a window,** over every application
+ * (`desktop/notes.js`), and this layer draws only the notes the bridge did
+ * not take. What is inside a note — its bar, its body, its editor, its foot —
+ * is `NoteInside`, drawn here and by `NotePage` in a note window, so the two
+ * are one drawing of the card and cannot drift.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { boardLanes, canResume, cardCode, COLUMN_LABELS, NEEDS_COLUMN, type BoardColumn, type Card } from "../../../shared/board";
+import {
+  boardLanes,
+  canResume,
+  cardCode,
+  COLUMN_LABELS,
+  NEEDS_COLUMN,
+  type BoardColumn,
+  type BoardLane,
+  type Card,
+} from "../../../shared/board";
 import { mascotFor, type AgentSnapshot, type MascotSet, type Profile, type Workspace } from "../../../shared/model";
 import { colorValue } from "../colors";
 import { drawDiagrams } from "../mermaid";
 import {
   change,
+  desktopNotes,
   EDGES,
   fitNote,
   locateCard,
   moveBox,
   notesProfile,
+  popOutAsk,
   raise,
   resizeBox,
   updateNotes,
@@ -91,12 +108,14 @@ export function Notes({
 }) {
   const notes = useNotes(profile.key);
   // So a card's menu, which knows its board and not whose it is, pops the
-  // note out for the profile on screen.
+  // note out for the profile on screen — with its card's title, which the
+  // desktop's list of note windows says.
   useEffect(() => {
-    notesProfile(profile.key);
-    return () => notesProfile(null);
-  }, [profile.key]);
+    notesProfile(profile);
+  }, [profile]);
+  useEffect(() => () => notesProfile(null), []);
   const room = useRoom();
+  useHandOver(profile, notes, room);
   const open = notes.filter((note) => note.open);
   if (open.length === 0) return null;
   // Drawn in one fixed order and stacked by `z-index`, so that bringing one
@@ -120,6 +139,32 @@ export function Notes({
       ))}
     </div>
   );
+}
+
+/**
+ * The notes this page kept before it had a desktop to send them to, handed
+ * over once: each goes up as a window exactly where it was drawn, and is
+ * closed here once the desktop has taken it. One it refuses — this window
+ * is on another server than the notes come from — stays here, and is not
+ * asked about again until the page is loaded again.
+ */
+function useHandOver(profile: Profile, notes: readonly Note[], room: Room): void {
+  const tried = useRef(new Set<string>());
+  useEffect(() => {
+    const bridge = desktopNotes();
+    if (!bridge) return;
+    for (const note of notes) {
+      if (!note.open || tried.current.has(note.cardId) || !locateCard(profile, note.cardId)) continue;
+      tried.current.add(note.cardId);
+      const box = fitNote(note, room, false);
+      void bridge.popOut(popOutAsk(profile, note.cardId, { x: box.x, y: box.y, w: box.w, h: box.h })).then(
+        (taken) => {
+          if (taken) updateNotes(profile.key, (all) => change(all, note.cardId, (was) => ({ ...was, open: false })));
+        },
+        () => {},
+      );
+    }
+  }, [profile, notes, room]);
 }
 
 /**
@@ -175,10 +220,7 @@ function NoteView({
   onProfileCard: (cardId: string) => void;
 }) {
   const update = (fn: (note: Note) => Note) => updateNotes(profile.key, (notes) => change(notes, note.cardId, fn));
-  const close = () => {
-    dropDraft(draftKey(note.cardId));
-    update((was) => ({ ...was, open: false }));
-  };
+  const close = () => update((was) => ({ ...was, open: false }));
   const fold = () => update((was) => ({ ...was, collapsed: !was.collapsed }));
 
   /**
@@ -225,35 +267,11 @@ function NoteView({
   };
   const drag = { onPointerMove: follow, onPointerUp: end, onPointerCancel: end };
 
-  const located = locateCard(profile, note.cardId);
-  const [editing, setEditing] = useState(false);
-  const stopEditing = () => {
-    dropDraft(draftKey(note.cardId));
-    setEditing(false);
-    onEditing(false);
-  };
-  // An editor taken away with the keyboard in it — the note closed, the card
-  // gone — must not leave the prefix believing a field still has the keys.
-  useEffect(() => {
-    if (!editing) return;
-    return () => onEditing(false);
-  }, [editing, onEditing]);
-  const card = located?.card ?? null;
-  const workspace = located?.workspace ?? null;
-  const gone = card === null;
-  useEffect(() => {
-    if (gone) setEditing(false);
-  }, [gone]);
-
-  const lane = card && !workspace ? boardLanes(profile.board).find((one) => one.id === card.column) : undefined;
-  const tag = lane?.color ? colorValue(lane.color) : null;
-  const agent = card?.run?.agentId ? agents.find((a) => a.id === card.run?.agentId) : undefined;
-  const mascot = mascotFor(mascots, workspace?.mascotId ?? null);
-  const code = card ? cardCode(workspace ? workspace.name : profile.name, card.number) : "";
+  const seen = readNote(profile, note.cardId, agents, mascots);
+  const { card, tag } = seen;
 
   /** The card on its board: a workspace's in its pane, the profile's on its sheet — lit there, as a search hit is. */
-  const showOnBoard = () => {
-    if (!card) return;
+  const showOnBoard = (card: Card, workspace: Workspace | null) => {
     if (workspace) {
       showCardNext(workspace.id, card.id);
       api.openBoard(undefined, false, workspace.id);
@@ -287,16 +305,131 @@ function NoteView({
       data-note={note.cardId}
       onPointerDownCapture={() => updateNotes(profile.key, (notes) => raise(notes, note.cardId))}
     >
-      <header
-        className="note-head"
-        onPointerDown={begin(null)}
-        {...drag}
-        onMouseDown={keepFocus}
-        onDoubleClick={(event) => {
-          if (!(event.target as Element).closest("button")) fold();
+      <NoteInside
+        cardId={note.cardId}
+        seen={seen}
+        collapsed={note.collapsed}
+        profile={profile}
+        agents={agents}
+        head={{
+          onPointerDown: begin(null),
+          ...drag,
+          onMouseDown: keepFocus,
+          onDoubleClick: (event) => {
+            if (!(event.target as Element).closest("button")) fold();
+          },
+          title: "Drag to move · double-click to fold",
         }}
-        title="Drag to move · double-click to fold"
-      >
+        onFold={fold}
+        onClose={close}
+        onShowBoard={showOnBoard}
+        onEditing={onEditing}
+      />
+
+      {!note.collapsed &&
+        EDGES.map((edge) => (
+          <span
+            key={edge}
+            className={`note-edge note-edge-${edge}`}
+            aria-hidden="true"
+            title={`Resize from the ${EDGE_NAMES[edge]}`}
+            onPointerDown={begin(edge)}
+            {...drag}
+            onMouseDown={keepFocus}
+          />
+        ))}
+    </section>
+  );
+}
+
+/** What a note draws from its card: the card and its board, the column's colour, its run's agent and mascot, its code. */
+export interface NoteSeen {
+  card: Card | null;
+  workspace: Workspace | null;
+  lane: BoardLane | undefined;
+  tag: string | null;
+  agent: AgentSnapshot | undefined;
+  mascot: ReturnType<typeof mascotFor>;
+  code: string;
+}
+
+/** The card a note is of, looked up again on every render — see the header. */
+export function readNote(profile: Profile, cardId: string, agents: readonly AgentSnapshot[], mascots: MascotSet): NoteSeen {
+  const located = locateCard(profile, cardId);
+  const card = located?.card ?? null;
+  const workspace = located?.workspace ?? null;
+  const lane = card && !workspace ? boardLanes(profile.board).find((one) => one.id === card.column) : undefined;
+  return {
+    card,
+    workspace,
+    lane,
+    tag: lane?.color ? colorValue(lane.color) : null,
+    agent: card?.run?.agentId ? agents.find((a) => a.id === card.run?.agentId) : undefined,
+    mascot: mascotFor(mascots, workspace?.mascotId ?? null),
+    code: card ? cardCode(workspace ? workspace.name : profile.name, card.number) : "",
+  };
+}
+
+/**
+ * Everything of a note but where it is: its title bar, the card's place, its
+ * body or its editor, and its foot. The layer here draws it inside a box it
+ * moves; a note window (`NotePage`) draws it filling the window, which the
+ * desktop moves. `head` is what the bar takes from whichever that is — the
+ * pointer handlers that drag it, or nothing, the window's own bar being the
+ * drag.
+ */
+export function NoteInside({
+  cardId,
+  seen,
+  collapsed,
+  profile,
+  agents,
+  head,
+  onFold,
+  onClose,
+  onShowBoard,
+  onEditing,
+  onLeave,
+}: {
+  cardId: string;
+  seen: NoteSeen;
+  collapsed: boolean;
+  profile: Profile;
+  agents: AgentSnapshot[];
+  head?: React.HTMLAttributes<HTMLElement>;
+  onFold: () => void;
+  /** Closed: the card stays on its board. Its editor's draft goes with the note. */
+  onClose: () => void;
+  onShowBoard: (card: Card, workspace: Workspace | null) => void;
+  onEditing: (editing: boolean) => void;
+  /** A button in the foot acted in the window — went to the agent, opened a file, resumed a run — for a note that is not in it. */
+  onLeave?: () => void;
+}) {
+  const { card, workspace, lane, agent, mascot, code } = seen;
+  const [editing, setEditing] = useState(false);
+  const stopEditing = () => {
+    dropDraft(draftKey(cardId));
+    setEditing(false);
+    onEditing(false);
+  };
+  // An editor taken away with the keyboard in it — the note closed, the card
+  // gone — must not leave the prefix believing a field still has the keys.
+  useEffect(() => {
+    if (!editing) return;
+    return () => onEditing(false);
+  }, [editing, onEditing]);
+  const gone = card === null;
+  useEffect(() => {
+    if (gone) setEditing(false);
+  }, [gone]);
+  const close = () => {
+    dropDraft(draftKey(cardId));
+    onClose();
+  };
+
+  return (
+    <>
+      <header className="note-head" {...head}>
         {card ? (
           <>
             {agent && <Status agent={agent} mascot={mascot} />}
@@ -307,7 +440,7 @@ function NoteView({
           <span className="note-title note-title-gone">Card gone</span>
         )}
         <span className="note-actions">
-          {card && !note.collapsed && !editing && (
+          {card && !collapsed && !editing && (
             <button className="board-icon-btn" title="Edit this card" aria-label="Edit" onClick={() => setEditing(true)}>
               <Icon name="edit" />
             </button>
@@ -317,19 +450,19 @@ function NoteView({
               className="board-icon-btn"
               title={workspace ? `Show it on ${workspace.name}'s board` : "Show it on your board"}
               aria-label="Show on its board"
-              onClick={showOnBoard}
+              onClick={() => onShowBoard(card, workspace)}
             >
               <Icon name="board" />
             </button>
           )}
           <button
             className="board-icon-btn"
-            title={note.collapsed ? "Unfold" : "Fold to the title bar"}
-            aria-label={note.collapsed ? "Unfold" : "Fold"}
-            aria-expanded={!note.collapsed}
-            onClick={fold}
+            title={collapsed ? "Unfold" : "Fold to the title bar"}
+            aria-label={collapsed ? "Unfold" : "Fold"}
+            aria-expanded={!collapsed}
+            onClick={onFold}
           >
-            <Icon name={note.collapsed ? "unfold" : "fold"} />
+            <Icon name={collapsed ? "unfold" : "fold"} />
           </button>
           <button className="board-icon-btn" title="Close the note — the card stays on its board" aria-label="Close" onClick={close}>
             <Icon name="close" />
@@ -337,7 +470,7 @@ function NoteView({
         </span>
       </header>
 
-      {!note.collapsed &&
+      {!collapsed &&
         (card ? (
           <>
             <div className="note-meta">
@@ -366,7 +499,14 @@ function NoteView({
             ) : (
               <NoteBody card={card} onEdit={() => setEditing(true)} />
             )}
-            <NoteFoot card={card} workspace={workspace} agent={agent} mascot={mascot} agents={agents} />
+            <NoteFoot
+              card={card}
+              workspace={workspace}
+              agent={agent}
+              mascot={mascot}
+              agents={agents}
+              onLeave={onLeave}
+            />
           </>
         ) : (
           <div className="note-body">
@@ -376,20 +516,7 @@ function NoteView({
             </p>
           </div>
         ))}
-
-      {!note.collapsed &&
-        EDGES.map((edge) => (
-          <span
-            key={edge}
-            className={`note-edge note-edge-${edge}`}
-            aria-hidden="true"
-            title={`Resize from the ${EDGE_NAMES[edge]}`}
-            onPointerDown={begin(edge)}
-            {...drag}
-            onMouseDown={keepFocus}
-          />
-        ))}
-    </section>
+    </>
   );
 }
 
@@ -511,12 +638,14 @@ function NoteFoot({
   agent,
   mascot,
   agents,
+  onLeave,
 }: {
   card: Card;
   workspace: Workspace | null;
   agent: AgentSnapshot | undefined;
   mascot: ReturnType<typeof mascotFor>;
   agents: AgentSnapshot[];
+  onLeave?: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   if (!card.worktree && !card.run && !card.made?.length && !error) return null;
@@ -529,7 +658,12 @@ function NoteFoot({
         }
       : undefined;
   return (
-    <div className="note-foot">
+    <div
+      className="note-foot"
+      onClickCapture={(event) => {
+        if (onLeave && (event.target as Element).closest("button")) onLeave();
+      }}
+    >
       {card.worktree && <TreeLine worktree={card.worktree} />}
       {card.run && (
         <RunLine

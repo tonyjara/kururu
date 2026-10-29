@@ -45,6 +45,8 @@ files:
   - editmenu.js
   - tray.js
   - talkkey.js
+  - notes.js
+  - notelist.js
   - icon/icon-1024.png
   - icon/trayTemplate.png
   - icon/trayTemplate@2x.png

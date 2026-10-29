@@ -63,6 +63,86 @@ export interface DesktopBridge {
    * this bridge keeps the key it has, which works while it is focused.
    */
   voice?: DesktopVoice;
+  /**
+   * Cards popped out as windows of their own, over every application.
+   * Optional: a window from before them keeps its notes in the page, which
+   * is what a browser and the phone do anyway.
+   */
+  notes?: DesktopNotes;
+}
+
+/** What the window asks for when it pops a card out as a window. */
+export interface NotePopOut {
+  cardId: string;
+  /** Whose card it is — a note is kept under its profile's key, as the page's are. */
+  profileKey: string;
+  profileName: string;
+  title: string;
+  code: string;
+  /** The page's own note of the card being handed over, in this window's CSS pixels: it goes up exactly there. */
+  box?: { x: number; y: number; w: number; h: number };
+}
+
+/** A note window as the main process lists it. `away` is a note of a profile that is not the active one. */
+export interface NoteWindowView {
+  cardId: string;
+  title: string;
+  code: string;
+  profileName: string;
+  state: "shown" | "hidden";
+  away: boolean;
+  waiting: boolean;
+}
+
+/** What a note window's page is told it is. */
+export interface NoteSelf {
+  cardId: string;
+  profileKey: string;
+  collapsed: boolean;
+}
+
+/**
+ * What a note window's page tells the main process: whether it is drawing
+ * its card (`here`), nothing because the card's profile is not the active
+ * one (`away`, and the window is hidden), or that the card is gone; the
+ * card's title and code for the menu bar; the ground it is drawn on, for the
+ * window behind it; and its title bar's height, which a folded note is.
+ */
+export interface NoteReport {
+  present: "here" | "away" | "gone";
+  title: string;
+  code: string;
+  profileName?: string;
+  background?: string;
+  head?: number;
+}
+
+export interface DesktopNotes {
+  /**
+   * The window: pop a card out as a window. Resolves false when this
+   * window cannot — it is showing another server than the one the notes
+   * come from — and the page keeps the card as a note of its own instead.
+   */
+  popOut(ask: NotePopOut): Promise<boolean>;
+  /** The notes there are, for the menus' "bring it forward". */
+  list(): Promise<NoteWindowView[]>;
+  /** Told on every change. Returns the unsubscribe. */
+  onList(listener: (notes: NoteWindowView[]) => void): () => void;
+  /** The window: a note asked for its card on its board. An ask before the page listened is handed to the first listener. */
+  onShowCard(listener: (cardId: string) => void): () => void;
+  /** A note window's page only, here and below: which card it is, or null for any other page. */
+  self(): Promise<NoteSelf | null>;
+  onSelf(listener: (self: NoteSelf) => void): () => void;
+  /** Whether the note's window has the keys — it draws less while it does not. */
+  onFocus(listener: (focused: boolean) => void): () => void;
+  report(state: NoteReport): void;
+  fold(collapsed: boolean): void;
+  /** The note closed: the card stays where it is. */
+  close(): void;
+  /** The card shown on its board, in the window. */
+  toBoard(): void;
+  /** The window brought up, for something the note did there — an agent revealed, a file opened. */
+  raiseMain(): void;
 }
 
 /**

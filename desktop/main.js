@@ -27,9 +27,10 @@
  *
  * The other thing only this process can do is hear a key with the window
  * unfocused, and show something over another application. `talkkey.js` is
- * that: the native hook and the floating pill. Anything that knows what an
- * agent is still belongs on the other side of the HTTP boundary, because that
- * side is also what the phone talks to.
+ * that: the native hook and the floating pill. `notes.js` is the other thing
+ * shown over everything: cards popped out as windows of their own. Anything
+ * that knows what an agent is still belongs on the other side of the HTTP
+ * boundary, because that side is also what the phone talks to.
  */
 const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = require("electron");
 const { execFileSync } = require("node:child_process");
@@ -38,6 +39,8 @@ const path = require("node:path");
 const { readDesktop, writeDesktop } = require("./desktop");
 const { Runner, hostSocket } = require("./runner");
 const { candidates, forget, normalize, remember } = require("./servers");
+const { boxOnScreen } = require("./notelist");
+const { NoteWindows } = require("./notes");
 const { fetchNodes, nodeChoices, whyNot } = require("./nodes");
 const { TalkKey } = require("./talkkey");
 const { createTray } = require("./tray");
@@ -167,6 +170,18 @@ const talk = new TalkKey({
 });
 
 /**
+ * The cards popped out as windows over every application. Their pages come
+ * from where the pill's does, and what is kept of them — where, how big,
+ * which — is `desktop.json`'s.
+ */
+const notes = new NoteWindows({
+  preloadPath: PRELOAD,
+  debug: !PACKAGED,
+  saved: readDesktop().notes,
+  save: (list) => writeDesktop({ notes: list }),
+});
+
+/**
  * The checkout whose web app is shown for a server, or null for the server's
  * own page.
  *
@@ -206,23 +221,29 @@ async function openPage(base) {
 }
 
 /**
- * The pill follows the window's server, or the local one when there is no
- * window — and is the reason a checkout's vite starts with no window open:
- * the moment a checkout's server answers, it gets one in front of it.
+ * The pill and the notes follow the window's server, or the local one when
+ * there is no window — and are the reason a checkout's vite starts with no
+ * window open: the moment a checkout's server answers, they get one in front
+ * of it.
  */
 function pointPill() {
   // The pill is this Mac's ears and mouth, and a node has neither: with the
-  // window on a child it stays on the local server.
+  // window on a child it stays on the local server. The notes stay with it,
+  // since the cards they are of are this Mac's.
   const onNode = connected !== null && nodeList.some((node) => node.address === connected);
   const base = (onNode ? null : connected) ?? (runner.health ? LOCAL : null);
   if (!base) {
     talk.setPage(null);
+    notes.setPage(null);
     return;
   }
   const checkout = uiCheckout(base);
   if (checkout && base === LOCAL && runner.health) void runner.vite.ensure(checkout, base);
   const page = pageFor(base);
-  if (page) talk.setPage(page);
+  if (page) {
+    talk.setPage(page);
+    notes.setPage(page);
+  }
 }
 
 /**
@@ -729,8 +750,16 @@ function createWindow() {
     }
   });
 
+  /**
+   * The window going is the app going back to the menu bar, which
+   * `window-all-closed` cannot be relied on to say: a note or the pill is a
+   * window too, and while one is up that event never comes.
+   */
   win.on("closed", () => {
     win = null;
+    stopSweeping();
+    stopWatchingServer();
+    app.dock?.hide();
   });
 
   return win;
@@ -770,10 +799,24 @@ function openWindow() {
  * process's to know.
  */
 function openKuru(focus, fresh, toggle = false) {
+  tellWindow(fresh, "kururu:open-kuru", typeof focus === "string" ? focus : null, toggle);
+}
+
+/**
+ * A note's "show it on its board": the window up, made if there is none,
+ * and told which card — its page knows which board that is and how to light
+ * it there, as a search hit is.
+ */
+function showCard(cardId) {
+  tellWindow(openWindow(), "kururu:show-card", cardId);
+}
+
+/** Send the window a message once its page is there to hear it — see `openKuru`. */
+function tellWindow(fresh, channel, ...args) {
   const target = win;
   if (!target || target.isDestroyed()) return;
   const tell = () => {
-    if (!target.isDestroyed()) target.webContents.send("kururu:open-kuru", typeof focus === "string" ? focus : null, toggle);
+    if (!target.isDestroyed()) target.webContents.send(channel, ...args);
   };
   if (fresh || target.webContents.isLoading()) target.webContents.once("did-finish-load", tell);
   else tell();
@@ -866,6 +909,59 @@ talk.on("change", (state) => {
 });
 
 /**
+ * The notes, across the bridge. Only the main window pops a card out, and
+ * only a card of the server the notes come from, since that is the page a
+ * note loads — the window on another server keeps its notes in the page,
+ * which is what `false` tells it. Every other verb is a note's own, about
+ * the note whose page sent it: `cardOf` is the check.
+ */
+ipcMain.handle("kururu:note-pop", (event, ask) => {
+  if (!win || win.isDestroyed() || event.sender.id !== win.webContents.id) return false;
+  if (!notes.page || originOf(event.sender.getURL()) !== originOf(notes.page)) return false;
+  if (!ask || typeof ask !== "object") return false;
+  const content = win.getContentBounds();
+  return notes.popOut({
+    cardId: ask.cardId,
+    profileKey: ask.profileKey,
+    profileName: ask.profileName,
+    title: ask.title,
+    code: ask.code,
+    bounds: boxOnScreen(ask.box, content) ?? undefined,
+    anchor: content,
+    fromWindow: true,
+  });
+});
+ipcMain.handle("kururu:note-list", () => notes.list());
+ipcMain.handle("kururu:note-self", (event) => {
+  const cardId = notes.cardOf(event.sender);
+  return cardId ? notes.self(cardId) : null;
+});
+ipcMain.on("kururu:note-report", (event, state) => {
+  const cardId = notes.cardOf(event.sender);
+  if (cardId) notes.report(cardId, state);
+});
+ipcMain.on("kururu:note-fold", (event, collapsed) => {
+  const cardId = notes.cardOf(event.sender);
+  if (cardId) notes.fold(cardId, collapsed === true);
+});
+ipcMain.on("kururu:note-close", (event) => {
+  const cardId = notes.cardOf(event.sender);
+  if (cardId) notes.close(cardId);
+});
+ipcMain.on("kururu:note-board", (event) => {
+  const cardId = notes.cardOf(event.sender);
+  if (cardId) showCard(cardId);
+});
+// A note's run line or made link acted in the window — an agent revealed, a
+// file opened — so the window is what comes up.
+ipcMain.on("kururu:note-raise", (event) => {
+  if (notes.cardOf(event.sender)) openWindow();
+});
+notes.on("change", (list) => {
+  if (win && !win.isDestroyed()) win.webContents.send("kururu:note-list", list);
+});
+
+/**
  * Whether this launch should open a window at all.
  *
  * Opened at login, the app is the tray and nothing else: the Mac just came
@@ -907,6 +1003,7 @@ app.whenReady().then(async () => {
     talk,
     version: app.getVersion(),
     packaged: PACKAGED,
+    notes,
     actions: {
       openWindow,
       closeWindow,
@@ -928,6 +1025,7 @@ app.whenReady().then(async () => {
       // vite's pages have the change already.
       webRebuilt: () => {
         if (talk.page === LOCAL) talk.reloadPanel();
+        if (notes.page === LOCAL) notes.reloadAll();
       },
     },
   });
@@ -1040,6 +1138,7 @@ async function confirmQuit() {
 function finishQuit(alsoAgents) {
   quitting = true;
   talk.dispose();
+  notes.dispose();
   tray?.destroy();
   tray = null;
   if (alsoAgents) endAgents();
@@ -1048,6 +1147,7 @@ function finishQuit(alsoAgents) {
 
 app.on("will-quit", () => {
   talk.dispose();
+  notes.dispose();
 });
 
 // ---------------------------------------------------------------------------
@@ -1182,6 +1282,7 @@ function installUpdate() {
   stopSweeping();
   stopWatchingServer();
   talk.dispose();
+  notes.dispose();
   tray?.destroy();
   tray = null;
   void runner.stop("the app is restarting into an update").finally(() => loadUpdater().quitAndInstall());
@@ -1196,6 +1297,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
     // A signal is not somebody choosing, so it is not asked a question.
     quitting = true;
     talk.dispose();
+    notes.dispose();
     void runner.stop(`the app was stopped by ${signal}`).finally(() => app.quit());
   });
 }

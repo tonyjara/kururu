@@ -23,19 +23,44 @@ const { menuTemplate, trayTitle } = require("./menu");
 const { hostSocket, stateDir } = require("./runner");
 const { pillLog } = require("./talkkey");
 
+/** How long a click on the frog waits for the server's list of cards before drawing the menu without a fresh one. */
+const CARDS_WAIT_MS = 350;
+
 /**
  * @param {object} options
  * @param {import("./runner").Runner} options.runner
  * @param {import("./talkkey").TalkKey} options.talk
+ * @param {import("./notes").NoteWindows} options.notes
  * @param {string} options.version
  * @param {boolean} options.packaged
  * @param {object} options.actions  `openWindow`, `closeWindow`, `windowOpen`, `nodes`, `openNode`, `quit`, `serverChanged`, `webRebuilt`
  */
-function createTray({ runner, talk, version, packaged, actions }) {
+function createTray({ runner, talk, notes, version, packaged, actions }) {
   const image = nativeImage.createFromPath(path.join(__dirname, "icon", "trayTemplate.png"));
   image.setTemplateImage(true);
   const tray = new Tray(image);
   tray.setToolTip("Kururu");
+
+  /**
+   * The active profile's cards, for "Pop Out a Card": asked of the server at
+   * the click, with a short wait, since the menu is built then and a list
+   * kept up to date on a timer would be a poll for a menu nobody opened. The
+   * last answer stands in for one that is late, and a server that is down is
+   * said in the label.
+   */
+  let cards = null;
+  const fetchCards = async () => {
+    if (!runner.health) {
+      cards = null;
+      return;
+    }
+    try {
+      const res = await fetch(`${runner.local}/api/notes/cards`, { signal: AbortSignal.timeout(CARDS_WAIT_MS) });
+      cards = res.ok ? await res.json() : cards;
+    } catch {
+      // Late or refused: the last answer, if there was one.
+    }
+  };
 
   const view = () => {
     const config = readDesktop();
@@ -50,6 +75,11 @@ function createTray({ runner, talk, version, packaged, actions }) {
       source: config.source,
       savedCheckout: config.checkout,
       talk: talk.state(),
+      notes: {
+        list: notes.list(),
+        cards: runner.health ? cards : null,
+        why: runner.health ? "the server did not answer" : "needs the server up",
+      },
       openAtLogin: { on: login.openAtLogin, available: packaged, status: login.status },
     };
   };
@@ -68,11 +98,30 @@ function createTray({ runner, talk, version, packaged, actions }) {
       ...(item.id && clicks[item.id] ? { click: () => void clicks[item.id]() } : {}),
       // One item per node, by id, so the click names the node and not a menu position.
       ...(item.id?.startsWith("node:") ? { click: () => void actions.openNode(item.id.slice("node:".length)) } : {}),
+      // And per note and per card, likewise.
+      ...(noteClick(item) ? { click: noteClick(item) } : {}),
     }));
+
+  const noteClick = (item) => {
+    const [verb, cardId] = splitId(item.id);
+    if (!cardId) return null;
+    if (verb === "note-toggle") return () => notes.setShown(cardId, !item.checked);
+    if (verb === "note-close") return () => notes.close(cardId);
+    if (verb === "note-pop") {
+      const card = cardsById().get(cardId);
+      if (!card || !cards) return null;
+      return () => notes.popOut({ cardId, profileKey: cards.profileKey, profileName: cards.profileName, title: card.title, code: card.code });
+    }
+    return null;
+  };
+  const cardsById = () => new Map([...(cards?.needs ?? []), ...(cards?.columns ?? []).flatMap((column) => column.cards)].map((card) => [card.id, card]));
 
   // Built fresh on every click, so the record is read off the disk at that
   // moment rather than kept in step by a timer.
-  const show = () => tray.popUpContextMenu(Menu.buildFromTemplate(attach(menuTemplate(view()))));
+  const show = async () => {
+    await fetchCards();
+    tray.popUpContextMenu(Menu.buildFromTemplate(attach(menuTemplate(view()))));
+  };
   tray.on("click", show);
   tray.on("right-click", show);
 
@@ -149,6 +198,8 @@ function createTray({ runner, talk, version, packaged, actions }) {
     "talk-permission": () => talk.openInputMonitoring(),
     "talk-altspace": () => talk.setAltSpace(!talk.altSpace),
     "reset-pill": () => talk.resetPlace(),
+    "notes-show-all": () => notes.showAll(),
+    "notes-hide-all": () => notes.hideAll(),
     "source-app": () => switchSource({ source: "app", checkout: readDesktop().checkout }),
     "source-checkout": () => {
       const { checkout } = readDesktop();
@@ -200,6 +251,13 @@ function createTray({ runner, talk, version, packaged, actions }) {
       tray.destroy();
     },
   };
+}
+
+/** `note-pop:<card>` as its verb and its card, or a verb alone for an id with no card in it. */
+function splitId(id) {
+  if (typeof id !== "string") return [null, null];
+  const at = id.indexOf(":");
+  return at < 0 ? [id, null] : [id.slice(0, at), id.slice(at + 1)];
 }
 
 module.exports = { createTray };

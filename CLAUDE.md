@@ -431,7 +431,14 @@ The load-bearing invariants, one line each, with the argument behind the link:
   each note is lives in `web/src/notes.ts`, per device and per profile key,
   in `localStorage`. Menus and dialogs are drawn into `document.body`,
   because a pane is a stacking context and one opened in it was under the
-  notes and the drawers. → [layout](docs/layout.md#notes)
+  notes and the drawers. **In the desktop app a note is a window of its
+  own over every application** (`desktop/notes.js`, a `panel` on every
+  Space, loading `/?note=` — `NotePage.tsx`, which draws the same
+  `NoteInside`); where each one is, its size, fold and whether it is up are
+  `desktop.json`'s, the tray lists them and pops a card out
+  (`GET /api/notes/cards`), and only the main window may pop one out and
+  only a note's own page may move, fold or close it. A browser and the
+  phone keep the in-page note. → [layout](docs/layout.md#notes)
 - **A link to what an agent made is read off its last reply, never off
   everything it touched.** `shared/made.ts` finds the paths a reply names and
   keeps the deliverable — a document presented as the result or changed in a

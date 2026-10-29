@@ -39,11 +39,21 @@
  * **A closed note is remembered too,** so the same card popped out again
  * comes back where it was — up to `NOTES_MAX` a profile, closed ones going
  * first. The list's order is the stacking order, the front last.
+ *
+ * **In the desktop app a note is a window of its own,** over every
+ * application and not only this one (`desktop/notes.js`), and that is where
+ * `popOutNote` sends a card when the bridge can take it. Where those windows
+ * are is the app's, in `desktop.json`, for this file's own reason: it is a
+ * fact about one screen. What stays here is the browser's and the phone's
+ * note, and a window showing another server than the one the notes come
+ * from; a note the window had kept here before is handed over once
+ * (`Notes.tsx`).
  */
 import { useSyncExternalStore } from "react";
-import type { Card } from "../../shared/board";
+import { cardCode, type Card } from "../../shared/board";
 import type { Profile, Workspace } from "../../shared/model";
 import type { MenuItem } from "./components/Menu";
+import { desktop, type DesktopNotes, type NotePopOut } from "./desktop";
 
 /** A note's place and size in CSS pixels: its left and top edges in the window, and its width and height. */
 export interface Box {
@@ -334,13 +344,49 @@ export function updateNotes(profileKey: string, fn: (notes: readonly Note[]) => 
 
 /**
  * The profile whose notes are on screen — set by the layer that draws them
- * (`Notes.tsx`), so a card's menu can pop one out without being handed the
- * profile: a workspace's board is drawn in a pane, which knows its
- * workspace and not whose it is.
+ * (`Notes.tsx`) on every snapshot, so a card's menu can pop one out without
+ * being handed the profile: a workspace's board is drawn in a pane, which
+ * knows its workspace and not whose it is.
  */
-let here: string | null = null;
-export function notesProfile(profileKey: string | null): void {
-  here = profileKey;
+let here: Profile | null = null;
+export function notesProfile(profile: Profile | null): void {
+  here = profile;
+  if (profile) followWindows();
+}
+
+/** The bridge's notes, in the desktop app, or null where a note is the page's. */
+export function desktopNotes(): DesktopNotes | null {
+  return desktop()?.notes ?? null;
+}
+
+/**
+ * Which cards are up as windows, as the main process last said — kept here
+ * for the menus, which are built when opened and ask `noteOpen` then.
+ */
+let windowsUp: ReadonlySet<string> = new Set();
+let following = false;
+function followWindows(): void {
+  const bridge = desktopNotes();
+  if (following || !bridge) return;
+  following = true;
+  const take = (list: readonly { cardId: string; state: string }[]) => {
+    windowsUp = new Set(list.filter((note) => note.state === "shown").map((note) => note.cardId));
+  };
+  bridge.onList(take);
+  void bridge.list().then(take, () => {});
+}
+
+/** What the desktop is asked for to pop a card of `profile` out as a window — its title and code are for the menu bar's list. */
+export function popOutAsk(profile: Profile, cardId: string, box?: NotePopOut["box"]): NotePopOut {
+  const found = locateCard(profile, cardId);
+  return {
+    cardId,
+    profileKey: profile.key,
+    profileName: profile.name,
+    title: found?.card.title ?? "",
+    code: found ? cardCode(found.workspace ? found.workspace.name : profile.name, found.card.number) : "",
+    ...(box ? { box } : {}),
+  };
 }
 
 /** The window's size, which a new note is placed in. */
@@ -348,16 +394,36 @@ export function windowRoom(): Room {
   return { w: window.innerWidth, h: window.innerHeight };
 }
 
-/** Pop a card out as a note of the profile on screen — see `popOut`. */
+/**
+ * Pop a card out as a note of the profile on screen: a window of its own in
+ * the desktop app, and a note over this page where there is no bridge, or
+ * the bridge says this window cannot — see `popOut` for which place it goes.
+ */
 export function popOutNote(cardId: string): void {
-  if (here === null) return;
-  const room = windowRoom();
-  updateNotes(here, (notes) => popOut(notes, cardId, room));
+  const profile = here;
+  if (profile === null) return;
+  const inPage = () => {
+    const room = windowRoom();
+    updateNotes(profile.key, (notes) => popOut(notes, cardId, room));
+  };
+  const bridge = desktopNotes();
+  if (!bridge) {
+    inPage();
+    return;
+  }
+  void bridge.popOut(popOutAsk(profile, cardId)).then(
+    (taken) => {
+      if (!taken) inPage();
+    },
+    inPage,
+  );
 }
 
-/** Whether a card of the profile on screen is a note that is open now — which its menu says. */
+/** Whether a card of the profile on screen is a note that is open now, as a window or over the page — which its menu says. */
 export function noteOpen(cardId: string): boolean {
-  return here !== null && (read()[here] ?? NONE).some((note) => note.cardId === cardId && note.open);
+  if (here === null) return false;
+  if (windowsUp.has(cardId)) return true;
+  return (read()[here.key] ?? NONE).some((note) => note.cardId === cardId && note.open);
 }
 
 /**

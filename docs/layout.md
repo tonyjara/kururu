@@ -723,6 +723,43 @@ takes no focus, as in the drawers, so a terminal being typed into is still
 being typed into after a note is moved. Its editor tells `App` it has the
 keys (`onEditing`) while a field in it is focused, as Kuru's composer does.
 
+**In the desktop app a note is a window of its own, over every
+application.** A note over the panes is behind the editor the moment
+somebody turns to it, which is when a card is wanted in sight; only the
+Electron process can put anything over another application, so there
+`popOutNote` sends the card to the bridge (`notes.popOut`) and
+`desktop/notes.js` opens a window for it — a frameless `panel` (what macOS
+floats over a full-screen app, and what never activates kururu, so typing
+in a note leaves the app in front where it was), always on top at the
+`floating` level, on every Space (`setVisibleOnAllWorkspaces` with the
+process transform skipped, which would otherwise hide the Dock icon of an
+open window), kept out of the Dock and ⌘-Tab. It loads the same build as
+`/?note=<card>`: `NotePage.tsx`, a client of the server like the pill, which
+draws `NoteInside` — the very bar, body, editor and foot the window's notes
+draw — filling the window. The window is moved by the title bar
+(`-webkit-app-region`, its buttons carved out) and resized from its edges,
+folding it makes the window as short as its bar, its ✕ closes it, and "show
+it on its board" brings the main window up (made if there is none) with the
+card lit, as is a button in its foot that acts there. Unfocused it is a
+little see-through and its buttons stand back until the pointer comes over.
+
+**Where each window is, is the app's,** in `desktop.json` (`notes`, read by
+`desktop/notelist.js`): its box in screen points, its fold, whether it is up,
+put away or closed, and the card's title for the tray. A restart puts every
+note back; a display that went moves a note onto the one it overlaps most,
+whole. Which card a window is, is the main process's word to its page
+(`notes.self`), and every note verb is checked against the window whose
+page sent it; only the main window may pop a card out, and only of the
+server the notes come from — a window on another server keeps the in-page
+note, and so do a browser and the phone. A note of a profile that is not the
+active one is hidden, its page kept, and comes back with the profile. A
+note the window had kept in the page before is handed over once, going up
+at the same place on the screen. The tray lists the notes, each ticked while
+it is up and a click to put away or bring back, Show All, Hide All and Close
+a Note, and **Pop Out a Card** from `GET /api/notes/cards`
+(`shared/notecards.ts`): the Needs drawer's cards by its own rule, then the
+profile's board a column at a time.
+
 Not done: a note in a window of its own, always on top of other
 applications. It would be a second page mode (as `?pill` is), a window type
 in `desktop/main.js` with its own saved bounds, and a bridge in the preload,
