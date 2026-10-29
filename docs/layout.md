@@ -215,7 +215,10 @@ the actor every change carries (`markNeeds`; see
 A card sent to a workspace from it goes to that workspace's To do, unmarked.
 A node's own Needs you is its own: the summary a child pushes leaves it out,
 since no other node's window can open that board. No robot, no worktree. The one thing it does that a workspace board
-does not is the card menu's **Send to *workspace***: `send-profile-card` moves
+does not is the card menu's **Send to**, one row whose list is every
+workspace in the profile in the sidebar's order — beside the menu, on the side
+with room, or in the menu's place on a phone; it was a row per workspace until
+twenty of them buried the card's own verbs. `send-profile-card` moves
 the card onto that workspace's board in one change (`transferCard` — new number
 there, same id, and its To do if it sat in a column the workspace does not
 have), making the board if the workspace had none. It rides the blob

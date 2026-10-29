@@ -27,6 +27,19 @@ shows, so it is written once and read in three places — see
   whether it is folded are kept on this device, through reloads and
   restarts, and a card popped out again comes back where you left its note.
 
+### Changed
+
+- **Send to is one row.** A card on your board — and on its timeline and in
+  the Needs drawer — had a "Send to" row for every workspace in its menu.
+  Now there is one **Send to** row, and its list of workspaces opens beside
+  the menu when you point at it or click it, on whichever side has room, and
+  scrolls when there are more than fit. On a phone it opens in the menu's
+  place, with the way back at the top.
+- **Menus work from the keyboard.** The arrow keys walk a menu's rows, Enter
+  picks one, Right or Enter opens a row's list and Left or Escape backs out
+  of it. Escape on a menu over your board closes the menu and leaves the
+  board open, and when a menu closes the keys go back to where they were.
+
 ### Fixed
 
 - A menu or a question opened on a board in a pane — a card's menu, the

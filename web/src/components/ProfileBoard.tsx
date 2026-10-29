@@ -172,10 +172,8 @@ export function ProfileBoard({
   };
 
   /**
-   * The card's menu: the other columns, then every workspace in the profile as
-   * a place to send it — the one specialised thing this board does. A
-   * workspace with no board yet says so in its hint, since sending there is
-   * also what makes one.
+   * The card's menu: its moves (`profileCardMoves` — the other columns, then
+   * Send to and the profile's workspaces), then the verbs every card has.
    */
   const cardMenu = (card: Card, at: MenuAt) =>
     setMenu({
@@ -681,11 +679,13 @@ function ProfileCard({
 
 /**
  * The moves a profile card's menu offers wherever the card is drawn — here,
- * and on its row in the Needs drawer: the board's other columns, then every
- * workspace in the profile as a place to send it, the one specialised thing
- * this board does. A workspace with no board yet says so in its hint, since
- * sending there is also what makes one. `onSent` is told what went where,
- * for a place that says so; the drawer needs no word, as the row goes.
+ * its timeline, and its row in the Needs drawer: the board's other columns,
+ * then Send to, the one specialised thing this board does. Send to is one row
+ * whose list is every workspace in the profile, in the sidebar's order; it
+ * was a row per workspace, which with twenty of them buried the card's own
+ * verbs. A workspace with no board yet says so in its hint, since sending
+ * there is also what makes one. `onSent` is told what went where, for a place
+ * that says so; the drawer needs no word, as the row goes.
  */
 export function profileCardMoves(profile: Profile, card: Card, onSent?: (what: string) => void): MenuItem[] {
   return [
@@ -695,15 +695,22 @@ export function profileCardMoves(profile: Profile, card: Card, onSent?: (what: s
         label: `Move to ${lane.name}`,
         run: () => api.moveProfileCard(profile.id, card.id, lane.id),
       })),
-    ...profile.workspaces.map((workspace, index) => ({
-      label: `Send to ${workspace.name}`,
-      sep: index === 0,
-      hint: workspace.board ? `${workspace.board.cards.length} on its board` : "makes its board",
-      run: () => {
-        api.sendProfileCard(profile.id, card.id, workspace.id);
-        onSent?.(`${card.title} → ${workspace.name}`);
-      },
-    })),
+    ...(profile.workspaces.length
+      ? [
+          {
+            label: "Send to",
+            sep: true,
+            items: profile.workspaces.map((workspace) => ({
+              label: workspace.name,
+              hint: workspace.board ? `${workspace.board.cards.length} on its board` : "makes its board",
+              run: () => {
+                api.sendProfileCard(profile.id, card.id, workspace.id);
+                onSent?.(`${card.title} → ${workspace.name}`);
+              },
+            })),
+          },
+        ]
+      : []),
   ];
 }
 

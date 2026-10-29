@@ -4561,6 +4561,8 @@ html.pill-page #root {
 .menu {
   position: fixed;
   min-width: 156px;
+  max-height: calc(100vh - 8px);
+  max-height: calc(100dvh - 8px);
   padding: 4px;
   background: var(--chrome);
   border: var(--border) var(--border-style) var(--line);
@@ -4568,6 +4570,35 @@ html.pill-page #root {
   box-shadow: var(--elev-menu);
   display: flex;
   flex-direction: column;
+}
+/* It takes the keyboard on opening and holds it on the box until a key picks
+   a row (`Menu`); a ring round the whole menu would say only that it is open. */
+.menu:focus {
+  outline: none;
+}
+
+/* A row's list beside the menu, and the same list in the menu's place on a
+   screen with no room beside it. A profile can have twenty workspaces, so
+   either one scrolls inside the window rather than running off it — and does
+   not hand the wheel's end on to the page behind. */
+.menu-side {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.menu-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* The way back out of a list drawn in the menu's place: the row it came
+   from, with a rule under it, since everything after it is the list. */
+.menu-back {
+  flex: none;
+  margin-bottom: 5px;
+  border-bottom: var(--border) var(--border-style) var(--line);
+  padding-bottom: 7px;
 }
 
 /* The picker borrows the menu's box so the two read as the same kind of thing
@@ -4667,15 +4698,28 @@ html.pill-page #root {
 .menu-item .unread {
   align-self: center;
 }
-.menu-item:hover:not(:disabled) {
+/* A row the keys are on looks like a row the pointer is on, and so does the
+   row whose list is open, so you can see which row the list belongs to while
+   the pointer is in it. */
+.menu-item:hover:not(:disabled),
+.menu-item:focus-visible,
+.menu-item-open {
   background: var(--chrome-high);
   color: var(--text);
+  outline: none;
+}
+/* The mark that a row opens a list rather than doing something. */
+.menu-more {
+  flex: none;
+  padding-left: 10px;
+  color: var(--dimmer);
 }
 .menu-item:disabled {
   opacity: 0.35;
   cursor: var(--cursor);
 }
-.menu-danger:hover:not(:disabled) {
+.menu-danger:hover:not(:disabled),
+.menu-danger:focus-visible {
   color: var(--danger);
 }
 /* A rule above, not below: it separates what follows from what came before. */

@@ -200,7 +200,7 @@ in this folder.
 for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` (the window-wide bottom bar, and `WorkspaceToggle`) · `Usage.tsx` (the Claude and Codex allowances on that bar, and their bars on hover or tap) · `BarChip.tsx` (a bar chip's hover-and-pin popover, which the allowances and the machines share) · `Machines.tsx` (the machines on that bar: a glyph in the worst load's colour, the connected count, each machine's rings and Shell in the popover) · `DrawerChips.tsx` ·
 `Status.tsx` (a dot, or the mascot) · `Icon.tsx` (a class name and an
 `aria-hidden` span) · `Dialog.tsx` (while one is up, no key reaches a pty) ·
-`Menu.tsx` (it and `Dialog.tsx` are drawn into `document.body`, so one opened in a pane is over everything) · `Reader.tsx` (**the thing kururu was built for**; one draggable tab per document) ·
+`Menu.tsx` (it and `Dialog.tsx` are drawn into `document.body`, so one opened in a pane is over everything; a row may open a list, one level deep, and the menu holds the keyboard while it is open) · `Reader.tsx` (**the thing kururu was built for**; one draggable tab per document) ·
 `Board.tsx` (a workspace's cards; the robot hands one to an agent) ·
 `Search.tsx` (the search over every board and the conversations, and the deleted cards, in the profile board's sheet; a card hit is a door to the card) ·
 `ProfileBoard.tsx` (the profile's own cards, in a sheet over the window; its own and no other's) ·

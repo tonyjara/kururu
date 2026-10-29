@@ -1252,6 +1252,15 @@ export function App() {
        */
       if (event.target instanceof HTMLInputElement && keyName(event) !== "escape") return;
 
+      /**
+       * A menu with the keyboard in it is the menu's, Escape included. `Menu`
+       * focuses itself on opening and walks its rows on the arrows, and its
+       * Escape is a step back — out of a row's list, then shut — where the
+       * profile board's, below, would take the whole sheet away from under a
+       * list the user only meant to leave.
+       */
+      if (event.target instanceof Element && event.target.closest(".menu-backdrop")) return;
+
       // A dialog is modal over everything, including the prefix: while one is
       // open every key is text or an answer, and the component owns them. A name
       // being typed in the sidebar — or in Settings, or a key being captured
