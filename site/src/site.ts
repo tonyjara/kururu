@@ -13,9 +13,9 @@ export const SITE = {
 };
 
 export const RELEASE = {
-  version: "0.5.0",
+  version: "0.6.0",
   date: "October 2026",
   page: "https://github.com/tonyjara/kururu/releases/latest",
-  appleSilicon: "https://github.com/tonyjara/kururu/releases/download/v0.5.0/Kururu-0.5.0-arm64.dmg",
-  intel: "https://github.com/tonyjara/kururu/releases/download/v0.5.0/Kururu-0.5.0.dmg",
+  appleSilicon: "https://github.com/tonyjara/kururu/releases/download/v0.6.0/Kururu-0.6.0-arm64.dmg",
+  intel: "https://github.com/tonyjara/kururu/releases/download/v0.6.0/Kururu-0.6.0.dmg",
 };
