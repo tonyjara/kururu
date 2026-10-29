@@ -179,6 +179,24 @@ somebody dragged back out of Review is not dragged back in by an agent that is
 still sitting at `done`. A finished turn goes to **Review**, never Done: nothing
 in a byte stream tells "finished" from "asking you a question".
 
+**One click opens a card in place, two open its editor.** Every card is
+clamped to two lines of title and two of body, and a click anywhere on it
+that is not one of its controls reads it in full — title and body, the same
+state its "More" sets, held by the card (`useCardOpen` in `Board.tsx`) for
+both of them. The double-click was there first, and a browser delivers both
+clicks of a double before the `dblclick`, so the first click waits
+`CLICK_WAIT_MS` (250 ms) to see whether a second follows: the browser's own
+count (`detail`) says which click is the second, a `dblclick` cancels the
+wait for a touch screen that does not count, and so a double never opens and
+shuts the card under the editor (`web/src/cardclick.ts`). A button, a link, a
+field, the run and dev lines, the made links and the git note keep their own
+clicks; a click with the card's text selected, a modified click and a drag
+do nothing. A card with nothing cut off has nothing to open. Cards are not
+focusable, so the keyboard's way in is the "More" button and the menu's
+Edit, as it was. The profile's board draws its cards the same way; its
+timeline's bars and the Needs drawer's rows have nothing to open, and keep
+their clicks.
+
 **Deleting a card never ends its agent.** The card is a note about the work;
 the terminal is the work and has its own ✕. Nor does it remove the card's
 worktree, for the same reason and one more: taking a checkout down is the Done

@@ -8611,8 +8611,9 @@ a.st-btn {
 
 /* Cards got long enough, in every column, that a board stopped being
    something you could scan. So every card keeps two lines of title and two
-   of body and the rest waits behind the edit, which still holds all of
-   it — this is paint, and nothing is cut from the card. */
+   of body and the rest waits behind a click on the card, or its "More", and
+   behind the edit, which still holds all of it — this is paint, and nothing
+   is cut from the card. */
 .board-card-body {
   margin: 0;
   font-size: var(--fs-base);
@@ -8631,17 +8632,19 @@ a.st-btn {
 
 /* The body and its toggle, as one column: a card whose text does not clamp
    never grows this wrapper's gap, because the toggle is absent entirely
-   rather than hidden. */
+   rather than hidden. A card with no body and a clamped title has the
+   wrapper for its toggle alone. */
 .board-card-body-wrap {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: var(--radius-sm);
 }
-/* Read in full, in place — the same paint as the clamped paragraph, just not
-   cut off. `display: block` is what drops the clamp: `-webkit-line-clamp`
-   only does anything inside `display: -webkit-box`. */
-.board-card-body.board-card-body-open {
+/* Read in full, in place — the same paint as the clamped title and
+   paragraph, just not cut off. `display: block` is what drops the clamp:
+   `-webkit-line-clamp` only does anything inside `display: -webkit-box`. */
+.board-card-open .board-card-title,
+.board-card-open .board-card-body {
   display: block;
   overflow: visible;
 }

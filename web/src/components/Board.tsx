@@ -54,6 +54,7 @@ import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
 import type { WorktreeStatus } from "../../../shared/projects";
 import { isRemote } from "../../../shared/remote";
 import type { DevServer } from "../../../shared/wire";
+import { useCardClick } from "../cardclick";
 import { useCardDone } from "../cardDone";
 import { referItem } from "../kuru";
 import { noteItem, popOutNote } from "../notes";
@@ -70,6 +71,14 @@ import { Menu, type MenuAt, type MenuItem } from "./Menu";
 import { Status } from "./Status";
 
 const CARD_MIME = "application/x-kururu-card";
+
+/**
+ * The parts of a card whose clicks are their own and do not open or close it,
+ * beside its buttons and links, which `ownClick` knows already: the run and
+ * dev lines, read and pressed as a unit; the links to what its agent made;
+ * the note a git action left, which a click dismisses.
+ */
+export const CARD_KEEP = ["board-run", "board-made", "board-card-note"];
 
 /** What each recorded state says in words, when there is no live dot to say it. */
 const RUN_WORDS: Record<CardRun["state"], string> = {
@@ -780,6 +789,8 @@ const CardView = memo(function CardView({
     return { x: box.left, y: box.bottom + 4 };
   };
   const reveal = (agentId: string) => verbs.current.reveal(agentId);
+  const opening = useCardOpen(card.title, card.body);
+  const click = useCardClick(opening.toggle, () => verbs.current.edit(card.id), CARD_KEEP);
   return (
     <>
       {insertBefore && <span className="board-insert" aria-hidden="true" />}
@@ -789,17 +800,20 @@ const CardView = memo(function CardView({
           card.run ? `board-card-${card.run.state}` : "",
           focused ? "board-card-on" : "",
           shown ? "board-card-shown" : "",
+          opening.open ? "board-card-open" : "",
         ]
           .filter(Boolean)
           .join(" ")}
         data-card={card.id}
         draggable
         onDragStart={(event) => {
+          click.cancel();
           event.dataTransfer.setData(CARD_MIME, card.id);
           event.dataTransfer.effectAllowed = "move";
         }}
         onDragOver={(event) => verbs.current.over(event, column, index)}
-        onDoubleClick={() => verbs.current.edit(card.id)}
+        onClick={click.onClick}
+        onDoubleClick={click.onDoubleClick}
         /* The same menu the caret opens, where the pointer is — one list for
            both doors, as a workspace row's. The robot's launchers are not in
            it: handing the card to an agent is the robot's one job, and a
@@ -812,7 +826,9 @@ const CardView = memo(function CardView({
       >
         <div className="board-card-top">
           <span className="board-card-code">{code}</span>
-          <span className="board-card-title">{card.title}</span>
+          <span ref={opening.titleRef} className="board-card-title">
+            {card.title}
+          </span>
           <span className="board-card-actions">
             <button
               className="board-icon-btn board-robot"
@@ -841,7 +857,7 @@ const CardView = memo(function CardView({
             </button>
           </span>
         </div>
-        {card.body && <CardBody text={card.body} />}
+        <CardBody text={card.body} opening={opening} />
         {card.dates && <CardWhen dates={card.dates} now={day} />}
         {card.worktree ? (
           <TreeLine worktree={card.worktree} />
@@ -1068,46 +1084,79 @@ export function CardWhen({ dates, now }: { dates: CardDates; now?: Day }) {
 }
 
 /**
- * A card's message, clamped to two lines until a "More" opens it in place.
- * The toggle only appears on a card whose text is actually cut off — a
- * `ResizeObserver` on the clamped paragraph is what knows that, since the
- * same text clamps or doesn't depending on the column's width. Clicks on the
- * toggle stop there: the card underneath it is still draggable and still
- * opens its editor on a double-click, so the toggle must not pass either
- * gesture up to it.
+ * Whether a card is read in full, and whether there is more of it to read.
+ *
+ * Held by the card rather than by its body, because a click anywhere on the
+ * card opens it now (`cardclick.ts`), and the "More" under the body is the
+ * same switch. Open is the whole card: the title is clamped to two lines as
+ * the body is, and a card opened to read it that still cut its own title
+ * short would not be open. Whether anything is cut off is measured — a
+ * `ResizeObserver` on each clamped part, since the same words clamp or don't
+ * depending on the column's width — and a card with nothing cut off has
+ * nothing to open, so `toggle` leaves it alone rather than putting a "Less"
+ * on a card that shows everything already.
  */
-export function CardBody({ text }: { text: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const [clamped, setClamped] = useState(false);
-  const body = useRef<HTMLParagraphElement | null>(null);
+export interface CardOpen {
+  open: boolean;
+  /** Something is cut off while the card is closed, which is when a click or "More" opens it. */
+  cut: boolean;
+  toggle: () => void;
+  titleRef: React.RefObject<HTMLSpanElement | null>;
+  bodyRef: React.RefObject<HTMLParagraphElement | null>;
+}
+
+export function useCardOpen(title: string, body: string): CardOpen {
+  const [open, setOpen] = useState(false);
+  const [cut, setCut] = useState(false);
+  const titleRef = useRef<HTMLSpanElement | null>(null);
+  const bodyRef = useRef<HTMLParagraphElement | null>(null);
 
   useLayoutEffect(() => {
-    const node = body.current;
-    if (!node || expanded) return;
-    const check = () => setClamped(node.scrollHeight - node.clientHeight > 1);
+    if (open) return;
+    const parts = [titleRef.current, bodyRef.current].filter((node): node is HTMLSpanElement | HTMLParagraphElement => node !== null);
+    const check = () => setCut(parts.some((node) => node.scrollHeight - node.clientHeight > 1));
     check();
     const observer = new ResizeObserver(check);
-    observer.observe(node);
+    for (const node of parts) observer.observe(node);
     return () => observer.disconnect();
-  }, [text, expanded]);
+  }, [title, body, open]);
 
+  const toggle = () => {
+    if (cut || open) setOpen(!open);
+  };
+  return { open, cut, toggle, titleRef, bodyRef };
+}
+
+/**
+ * A card's message, clamped to two lines until the card is opened, and the
+ * "More" that opens it — drawn whenever something on the card is cut off,
+ * the title included, so a card with no body and a long title has one too.
+ * Clicks on the toggle stop there: the card underneath it is still draggable
+ * and still opens its editor on a double-click, so the toggle must not pass
+ * either gesture up to it.
+ */
+export function CardBody({ text, opening }: { text: string; opening: CardOpen }) {
+  const { open, cut, toggle, bodyRef } = opening;
+  if (!text && !cut && !open) return null;
   return (
     <div className="board-card-body-wrap">
-      <p ref={body} className={`board-card-body ${expanded ? "board-card-body-open" : ""}`}>
-        {text}
-      </p>
-      {(clamped || expanded) && (
+      {text && (
+        <p ref={bodyRef} className="board-card-body">
+          {text}
+        </p>
+      )}
+      {(cut || open) && (
         <button
           type="button"
           className="board-card-more"
           draggable={false}
           onClick={(event) => {
             event.stopPropagation();
-            setExpanded((was) => !was);
+            toggle();
           }}
           onDoubleClick={(event) => event.stopPropagation()}
         >
-          {expanded ? "Less" : "More"}
+          {open ? "Less" : "More"}
         </button>
       )}
     </div>

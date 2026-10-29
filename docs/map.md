@@ -192,6 +192,7 @@ in this folder.
 | `src/zoom.ts` | How big the reader's type is, per device |
 | `src/place.ts` | Where the voice pill was dragged to, as a share of the window rather than pixels. Pure |
 | `src/when.ts` | What a card's dates are called here: month names, and which day a week starts on |
+| `src/cardclick.ts` | A card's click and double-click on one surface: the short wait that keeps a double from opening the card under the editor, and which clicks inside a card are its own. Pure but for the hook, tested. See [layout](layout.md#the-board) |
 | `src/desktop.ts` | The preload bridge, typed. Null in a browser — that's the contract |
 | `src/styles.css` | No hex, no px. See [styles](styles.md) |
 

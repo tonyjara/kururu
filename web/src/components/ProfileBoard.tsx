@@ -59,12 +59,13 @@ import {
 } from "../../../shared/board";
 import type { Profile } from "../../../shared/model";
 import { cardPlace } from "../../../shared/kuru";
+import { useCardClick } from "../cardclick";
 import { colorValue } from "../colors";
 import { referItem } from "../kuru";
 import { noteItem, popOutNote } from "../notes";
 import { revealCard } from "../reveal";
 import * as api from "../session";
-import { CardBody, CardWhen, Composer, dropDraft, showCardNext, useComposerInView } from "./Board";
+import { CARD_KEEP, CardBody, CardWhen, Composer, dropDraft, showCardNext, useCardOpen, useComposerInView } from "./Board";
 import { ColorPicker } from "./ColorPicker";
 import { ColumnResizeHandle } from "./ColumnResize";
 import { Icon } from "./Icon";
@@ -632,19 +633,23 @@ function ProfileCard({
   onEdit: () => void;
   onOver: (event: React.DragEvent) => void;
 }) {
+  const opening = useCardOpen(card.title, card.body);
+  const click = useCardClick(opening.toggle, onEdit, CARD_KEEP);
   return (
     <>
       {insertBefore && <span className="board-insert" aria-hidden="true" />}
       <article
-        className={`board-card ${shown ? "board-card-shown" : ""}`}
+        className={`board-card ${shown ? "board-card-shown" : ""} ${opening.open ? "board-card-open" : ""}`}
         data-card={card.id}
         draggable
         onDragStart={(event) => {
+          click.cancel();
           event.dataTransfer.setData(CARD_MIME, card.id);
           event.dataTransfer.effectAllowed = "move";
         }}
         onDragOver={onOver}
-        onDoubleClick={onEdit}
+        onClick={click.onClick}
+        onDoubleClick={click.onDoubleClick}
         /* The caret's menu, under the pointer: one list for both doors. */
         onContextMenu={(event) => {
           event.preventDefault();
@@ -654,7 +659,9 @@ function ProfileCard({
         <div className="board-card-top">
           <span className="board-card-code">{code}</span>
           {card.column === NEEDS_COLUMN && card.needsBy && <NeedsByMark by={card.needsBy} />}
-          <span className="board-card-title">{card.title}</span>
+          <span ref={opening.titleRef} className="board-card-title">
+            {card.title}
+          </span>
           <span className="board-card-actions">
             <button
               className="board-icon-btn"
@@ -670,7 +677,7 @@ function ProfileCard({
             </button>
           </span>
         </div>
-        {card.body && <CardBody text={card.body} />}
+        <CardBody text={card.body} opening={opening} />
         {card.dates && <CardWhen dates={card.dates} />}
       </article>
     </>

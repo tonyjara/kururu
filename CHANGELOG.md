@@ -44,6 +44,14 @@ shows, so it is written once and read in three places — see
 
 ### Changed
 
+- **One click on a card opens it.** On your board and every workspace's
+  board, clicking a card shows it in full — its whole title and its whole
+  message — and clicking it again folds it back, the same as its **More**
+  and **Less**. Double-clicking still opens the card to edit, and it no
+  longer flickers open first: a single click waits a quarter of a second to
+  be sure it is one. Clicks on the card's buttons, links, run line and files
+  do what they did, and dragging a card still moves it. On a phone, one tap
+  opens a card the same way.
 - **Send to is one row.** A card on your board — and on its timeline and in
   the Needs drawer — had a "Send to" row for every workspace in its menu.
   Now there is one **Send to** row, and its list of workspaces opens beside
