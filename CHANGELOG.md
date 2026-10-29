@@ -13,6 +13,13 @@ shows, so it is written once and read in three places — see
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-29
+
+Nothing in this release needs the pty host restarted, and the database, the
+wire between window and server and Kuru's tools are as 0.5.0 left them. So
+updating costs the app a restart, which ends no agent: they carry on through
+it.
+
 ### Added
 
 - **Pop a card out as a note.** "Pop out as a note" is on every card's menu —
@@ -41,11 +48,11 @@ shows, so it is written once and read in three places — see
   are not using is a little see-through, with its buttons out of the way
   until you reach for it.
   The menu-bar frog lists your notes — tick one to show or hide it, Show
-  All, Hide All, Close a Note — and **Pop Out a Card** pops one out with
-  no window open: what needs you first, then your board a column at a
-  time. Notes the window was already holding move into windows of their
-  own, where they were. In a browser and on the phone a note stays inside
-  the page.
+  All Notes, Hide All Notes, Close a Note — and **Pop Out a Card** pops one
+  out with no window open: what needs you first, then your board a column
+  at a time. Notes the window was already holding move into windows of
+  their own, where they were. In a browser and on the phone a note stays
+  inside the page.
 
 ### Changed
 
@@ -1116,7 +1123,8 @@ same version.
   release's notes — which are this file.
 - **Installs from a DMG**, signed and notarized, or from the Homebrew tap.
 
-[Unreleased]: https://github.com/tonyjara/kururu/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/tonyjara/kururu/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/tonyjara/kururu/releases/tag/v0.6.0
 [0.5.0]: https://github.com/tonyjara/kururu/releases/tag/v0.5.0
 [0.4.0]: https://github.com/tonyjara/kururu/releases/tag/v0.4.0
 [0.3.0]: https://github.com/tonyjara/kururu/releases/tag/v0.3.0

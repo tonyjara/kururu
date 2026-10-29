@@ -1,6 +1,6 @@
 {
   "name": "kururu",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "description": "A GUI for the agents it runs \u2014 on the desktop and on your phone.",
   "license": "Apache-2.0",
