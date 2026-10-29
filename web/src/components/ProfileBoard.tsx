@@ -61,6 +61,7 @@ import type { Profile } from "../../../shared/model";
 import { cardPlace } from "../../../shared/kuru";
 import { colorValue } from "../colors";
 import { referItem } from "../kuru";
+import { noteItem, popOutNote } from "../notes";
 import { revealCard } from "../reveal";
 import * as api from "../session";
 import { CardBody, CardWhen, Composer, dropDraft, showCardNext, useComposerInView } from "./Board";
@@ -184,6 +185,9 @@ export function ProfileBoard({
         // The board is a scrim over the window, the drawer's composer
         // included, so pointing Kuru at a card puts the board away.
         referItem({ code: cardCode(profile.name, card.number), title: card.title, place: cardPlace(null, api.nodeNameOf), cardId: card.id }, onClose),
+        // The board stays: a note floats over this sheet as over everything,
+        // and cards are often popped out several at a time.
+        noteItem(card.id),
         { label: "Edit", run: () => setEditing(card.id) },
         ...(card.dates
           ? [{ label: "Take the dates off", run: () => api.editProfileCard(profile.id, card.id, { dates: null }) }]
@@ -523,6 +527,7 @@ export function ProfileBoard({
                             setEditing(null);
                           }}
                           onCancel={() => setEditing(null)}
+                          onPopOut={() => popOutNote(card.id)}
                         />
                       ) : (
                         <ProfileCard

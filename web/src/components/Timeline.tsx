@@ -36,6 +36,7 @@ import { boardLanes, cardCode, shiftDates, timeline, type Card, type CardDates, 
 import { dayAt, dayNumber, today, weekday, weekStart, type Day } from "../../../shared/days";
 import type { Profile } from "../../../shared/model";
 import { colorValue } from "../colors";
+import { popOutNote } from "../notes";
 import * as api from "../session";
 import { datesLabel, datesTense, dayInFull, dayLabel, dayOfMonth, firstWeekday, monthLabel, weekdayLetter } from "../when";
 import { Composer, dropDraft } from "./Board";
@@ -261,6 +262,7 @@ export function Timeline({
               onEdit(null);
             }}
             onCancel={() => onEdit(null)}
+            onPopOut={() => popOutNote(edited.id)}
           />
         </div>
       ) : (

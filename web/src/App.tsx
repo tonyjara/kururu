@@ -66,6 +66,7 @@ import { closeKuru, kuruLive, openKuru, toggleKuru, useKuruDrawer } from "./kuru
 import { closeNeeds, toggleNeeds, useNeedsDrawer } from "./needs";
 import { arrangedNeeds, useNeedsView } from "./needsorder";
 import { NeedsDrawer } from "./components/NeedsDrawer";
+import { Notes } from "./components/Notes";
 import { needsOf, type Need } from "../../shared/needs";
 import { nextNeedAcross, nodeNeeds as nodeNeedsOf, parseRemote, qualify, workspacesAcross, type NodeNeed } from "../../shared/remote";
 import { nodesNeedCount, WATCH_READS, type NodesView } from "../../shared/nodes";
@@ -1848,6 +1849,20 @@ export function App() {
           }}
         />
       )}
+      {/* Cards popped out as notes. After the profile's board and before
+          every other sheet, at the scrims' height, so a card popped out of
+          the board is in front of it and a dialog is never under a note —
+          see `Notes.tsx`. Kept in zen: a note is one the person put there. */}
+      <Notes
+        profile={profile}
+        agents={agents}
+        mascots={snapshot.mascots}
+        onEditing={setEditing}
+        onProfileCard={(cardId) => {
+          setBoardShow(cardId);
+          setProfileBoard(true);
+        }}
+      />
       {databasesFor && (
         <Databases
           workspaceId={databasesFor}

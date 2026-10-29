@@ -13,6 +13,26 @@ shows, so it is written once and read in three places — see
 
 ## [Unreleased]
 
+### Added
+
+- **Pop a card out as a note.** "Pop out as a note" is on every card's menu —
+  your board, its timeline, a workspace's board and the Needs drawer — and a
+  pin beside the ✕ does it from a card you are editing. The note floats over
+  the window and stays while you switch workspaces, boards and panes: drag it
+  by its title bar, resize it from any edge or corner, fold it to the bar,
+  and click it to bring it in front of the others. It is the card itself, so
+  an edit from the board, Kuru or an agent shows up in it at once, with the
+  body drawn as Markdown and the agent's run, branch and files underneath;
+  the pencil edits the card right there. Where each note sits, its size and
+  whether it is folded are kept on this device, through reloads and
+  restarts, and a card popped out again comes back where you left its note.
+
+### Fixed
+
+- A menu or a question opened on a board in a pane — a card's menu, the
+  move-to-Done question — could be drawn under an open drawer. Menus and
+  dialogs now always come up on top.
+
 ## [0.5.0] - 2026-10-28
 
 Nothing in this release needs the pty host restarted: the host speaks the same

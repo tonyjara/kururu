@@ -241,6 +241,20 @@ Kept short on purpose; the detail is in git history.
   pin's folder — brought the conversation back, the transcript was read "over
   ssh", and `endSession` took the session and the process down. No real
   machine was reachable with a CLI on it.
+- **Notes** (2026-10-28), in an isolated instance on :7817 from a scratch
+  copy, its data seeded through the socket and a finished run, a branch and a
+  made link written into its database, driven in a hidden Electron window on
+  the real preload with real mouse events, screenshots kept. A card popped
+  out of the profile's board over the sheet, which still closed; a workspace
+  card's note with its run, branch and link; dragged by the bar, resized from
+  the corner, held at the window's edge and at the floor; a press on the note
+  behind brought it forward; folded; an edit sent over the socket was in the
+  note within a second, and one saved from the note's own editor reached the
+  card, its Save in sight; a reload, a window made small and big again, and
+  an app restart each left every note where it was; a closed note stayed
+  closed and came back where it had been when popped out again; the light
+  theme and a phone's width. Not pressed: a finger on a real phone, and the
+  user's own window.
 - **Telegram pictures** (2026-10-27), in an isolated instance on :7817 from a
   scratch copy, with a stand-in `claude` as Kuru and a loopback Bot API that
   faked `getUpdates` — so the live server kept the real poll — and swallowed

@@ -179,6 +179,7 @@ in this folder.
 | `src/kurufold.ts` | Which lines of Kuru's drawer are folded to one row, on this device: the name a fold is kept under, what a folded line shows, and "Fold long messages". Pure, tested. See [harness](harness.md#a-line-folded-to-one-row) |
 | `src/needs.ts` | Whether the drawer of things that need you is open, for the tray and the key; one drawer at a time with Kuru's |
 | `src/needsorder.ts` | The Needs drawer's folds and the order its groups and cards were sorted into, per device and per profile; what Next walks. Pure but for the store, tested |
+| `src/notes.ts` | Cards popped out as notes: each note's box, fold and whether it is open, per device and per profile; fitting a box into the window, a drag and a resize held to the edges and the floor; finding a note's card wherever in the profile it went. Pure but for the store, tested. See [layout](layout.md#notes) |
 | `src/mascot.ts` | Loads a sheet once per URL and reports its size |
 | `src/mermaid.ts` | The one thing the reader draws itself — a diagram needs a DOM |
 | `src/labels.ts` | How the window draws the answers `shared/labels.ts` decides |
@@ -199,11 +200,12 @@ in this folder.
 for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` (the window-wide bottom bar, and `WorkspaceToggle`) · `Usage.tsx` (the Claude and Codex allowances on that bar, and their bars on hover or tap) · `BarChip.tsx` (a bar chip's hover-and-pin popover, which the allowances and the machines share) · `Machines.tsx` (the machines on that bar: a glyph in the worst load's colour, the connected count, each machine's rings and Shell in the popover) · `DrawerChips.tsx` ·
 `Status.tsx` (a dot, or the mascot) · `Icon.tsx` (a class name and an
 `aria-hidden` span) · `Dialog.tsx` (while one is up, no key reaches a pty) ·
-`Menu.tsx` · `Reader.tsx` (**the thing kururu was built for**; one draggable tab per document) ·
+`Menu.tsx` (it and `Dialog.tsx` are drawn into `document.body`, so one opened in a pane is over everything) · `Reader.tsx` (**the thing kururu was built for**; one draggable tab per document) ·
 `Board.tsx` (a workspace's cards; the robot hands one to an agent) ·
 `Search.tsx` (the search over every board and the conversations, and the deleted cards, in the profile board's sheet; a card hit is a door to the card) ·
 `ProfileBoard.tsx` (the profile's own cards, in a sheet over the window; its own and no other's) ·
 `ColorPicker.tsx` (a column's colour, from the profile board) ·
+`Notes.tsx` (cards popped out as notes over the window, dragged, resized, folded, edited in place; the card is the snapshot's) ·
 `NeedsDrawer.tsx` (what needs you across the workspaces, in three bands, with the next one a press away, its groups folding and sorting; opened by the tray in `DrawerChips.tsx`) ·
 `NodeChip.tsx` (another node's name in its own hue, on every remote thing) · `RemoteBand.tsx` (the band over another node's workspace: whose, away since when, what could not be sent) ·
 `Timeline.tsx` (that board by when its cards are for; holds only which weeks it is showing) ·

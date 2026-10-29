@@ -423,6 +423,15 @@ The load-bearing invariants, one line each, with the argument behind the link:
   a window only posts a WAV and plays one. `web/src/voice.ts` holds the
   microphone and installs the talk key once, through refs, never per render.
   → [voice](docs/voice.md)
+- **A note is a card kept in sight, never a copy of one.** "Pop out as a
+  note" floats a card over the window (`Notes.tsx`); it is looked up by id
+  in the snapshot on every render, so it follows the card from the profile's
+  board to a workspace and shows every edit at once, and its body is the
+  reader's renderer on the card's own text (`/api/card-markdown`). Where
+  each note is lives in `web/src/notes.ts`, per device and per profile key,
+  in `localStorage`. Menus and dialogs are drawn into `document.body`,
+  because a pane is a stacking context and one opened in it was under the
+  notes and the drawers. → [layout](docs/layout.md#notes)
 - **A link to what an agent made is read off its last reply, never off
   everything it touched.** `shared/made.ts` finds the paths a reply names and
   keeps the deliverable — a document presented as the result or changed in a

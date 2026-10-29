@@ -34,6 +34,7 @@
  * it is typed.
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import { basename, folderSentence, newFolderOk, newFolderSentence, type MoveCheck, type MovePlan } from "../../../shared/move";
 import { grantText, type LendAsk, type LendCandidate, type Lendable } from "../../../shared/secrets";
 import * as api from "../session";
@@ -115,8 +116,15 @@ export type DialogState =
       nodeName: string;
     };
 
+/**
+ * Drawn into `document.body` rather than where it is asked from, for the
+ * menus' reason (`Popover`): a board in a pane asks the Done question, and a
+ * pane is a stacking context of its own, so a dialog left inside one was
+ * under the drawers and the notes — and a question has to be over
+ * everything it is about.
+ */
 export function Dialog({ state, onClose }: { state: DialogState; onClose: () => void }) {
-  return (
+  return createPortal(
     <div className="scrim" onPointerDown={onClose}>
       <div className={state.kind === "move" || state.kind === "node-new" ? "dialog dialog-move" : "dialog"} onPointerDown={(event) => event.stopPropagation()} role="dialog" aria-modal>
         <h2 className="dialog-title">{state.title}</h2>
@@ -128,7 +136,8 @@ export function Dialog({ state, onClose }: { state: DialogState; onClose: () => 
         {state.kind === "move" && <Move state={state} onClose={onClose} />}
         {state.kind === "node-new" && <NodeNew state={state} onClose={onClose} />}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

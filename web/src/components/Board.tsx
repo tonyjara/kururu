@@ -52,9 +52,11 @@ import type { Launcher } from "../../../shared/launchers";
 import { cardPlace } from "../../../shared/kuru";
 import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
 import type { WorktreeStatus } from "../../../shared/projects";
+import { isRemote } from "../../../shared/remote";
 import type { DevServer } from "../../../shared/wire";
 import { useCardDone } from "../cardDone";
 import { referItem } from "../kuru";
+import { noteItem, popOutNote } from "../notes";
 import { isLoopback, previewUrl, serverIn } from "../preview";
 import { revealCard } from "../reveal";
 import { sameJson } from "../same";
@@ -441,6 +443,9 @@ export function BoardView({
       })),
       ...(card.worktree ? gitItems(card, card.worktree, status) : []),
       referItem({ code: cardCode(workspaceName, card.number), title: card.title, place: cardPlace(workspaceId, api.nodeNameOf), cardId: card.id }),
+      // Not on another node's board: a note is drawn from this node's
+      // snapshot, which has that board only while its workspace is on screen.
+      ...(isRemote(workspaceId) ? [] : [noteItem(card.id)]),
       { label: "Edit", run: () => setEditing(card.id) },
         {
           label: "Delete card",
@@ -572,6 +577,7 @@ export function BoardView({
                       setEditing(null);
                     }}
                     onCancel={() => setEditing(null)}
+                    onPopOut={isRemote(workspaceId) ? undefined : () => popOutNote(card.id)}
                   />
                 ) : (
                   <CardView
@@ -696,7 +702,7 @@ interface CardVerbs {
  * something else about the card changed, where handed in it is a prop that
  * changes when the words do, on whatever render of the board is next.
  */
-function endedAgo(run: CardRun | null): string | null {
+export function endedAgo(run: CardRun | null): string | null {
   return run?.endedAt && (run.state === "finished" || run.state === "ended" || run.state === "asleep")
     ? ago(run.endedAt)
     : null;
@@ -900,7 +906,7 @@ const CardView = memo(function CardView({
  * A run kururu put to sleep says so, and carries its way back on the line
  * itself: one press, the same conversation, rather than a menu to find it in.
  */
-function RunLine({
+export function RunLine({
   run,
   agent,
   mascot,
@@ -956,7 +962,7 @@ function RunLine({
  * path is a hover rather than a line, being long and the same for every card
  * but its last segment.
  */
-function TreeLine({ worktree }: { worktree: CardWorktree }) {
+export function TreeLine({ worktree }: { worktree: CardWorktree }) {
   return (
     <div className="board-tree" title={`${worktree.path}\ncut from ${worktree.base}`}>
       <Icon name="git" />
@@ -1120,7 +1126,9 @@ export function Composer({
   onSubmit,
   onRun,
   onCancel,
+  onPopOut,
   keepOpen,
+  fill = false,
   bodyHint = "Details — the agent is handed the title and all of this",
 }: {
   /** Where in `drafts` this composer's text is kept while the board is away. */
@@ -1138,8 +1146,21 @@ export function Composer({
   /** Add the card and hand it straight to an agent; the robot beside the submit button. */
   onRun?: (title: string, body: string, isolate: boolean, at: MenuAt) => void;
   onCancel: () => void;
+  /**
+   * Pop the card being edited out as a note (`notes.ts`), drawn as a pin
+   * beside the close. The editor stays as it is: the note is the card kept
+   * in sight, and what is half-typed here is still this editor's.
+   */
+  onPopOut?: () => void;
   /** Clear and stay open after saving, for adding several in a row. */
   keepOpen?: boolean;
+  /**
+   * Fill the box it is drawn in rather than grow with its text: a note's
+   * editor, whose size is the person's, where a body grown past the note's
+   * foot put Save out of sight. The body takes the room the rest leaves and
+   * scrolls itself.
+   */
+  fill?: boolean;
   /** What the empty body says it is for. The profile's board hands nothing to an agent. */
   bodyHint?: string;
 }) {
@@ -1193,10 +1214,10 @@ export function Composer({
   };
   useLayoutEffect(() => {
     const node = area.current;
-    if (!node) return;
+    if (!node || fill) return;
     node.style.height = "auto";
     node.style.height = `${node.scrollHeight + node.offsetHeight - node.clientHeight}px`;
-  }, [body]);
+  }, [body, fill]);
   const keys = (event: React.KeyboardEvent, enterSaves: boolean) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -1209,7 +1230,7 @@ export function Composer({
 
   return (
     <form
-      className="board-composer"
+      className={`board-composer ${fill ? "board-composer-fill" : ""}`}
       onSubmit={(event) => {
         event.preventDefault();
         save();
@@ -1226,6 +1247,17 @@ export function Composer({
           onChange={(event) => setTitle(event.target.value)}
           onKeyDown={(event) => keys(event, true)}
         />
+        {onPopOut && (
+          <button
+            type="button"
+            className="board-icon-btn"
+            title="Pop out as a note, over the window"
+            aria-label="Pop out as a note"
+            onClick={onPopOut}
+          >
+            <Icon name="pin" />
+          </button>
+        )}
         <button
           type="button"
           className="board-icon-btn"

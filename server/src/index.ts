@@ -7207,6 +7207,31 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     })();
     return;
   }
+  /**
+   * A card's body as markup, for a card popped out as a note
+   * (`web/src/components/Notes.tsx`). Through the reader's renderer, for its
+   * reason — the phone is sent markup, not a parser — and found by the
+   * card's id in the active profile, never handed the text: what is
+   * rendered is what the card says. No root, as release notes have none, so
+   * a relative image in a card is a fetch `files.ts` refuses rather than a
+   * file read from wherever it pointed.
+   */
+  if (url.pathname === "/api/card-markdown") {
+    const cardId = url.searchParams.get("card") ?? "";
+    const profile = workspaces.active;
+    const card =
+      profile.board.cards.find((c) => c.id === cardId) ??
+      profile.workspaces.flatMap((w) => w.board?.cards ?? []).find((c) => c.id === cardId);
+    if (!card) {
+      json(res, { error: "no such card" }, 404);
+      return;
+    }
+    void renderMarkdown(card.body, "", "card.md", appearance.themeId).then(
+      (rendered) => json(res, { html: rendered.html }),
+      (err: unknown) => json(res, { error: err instanceof Error ? err.message : String(err) }, 400),
+    );
+    return;
+  }
   if (url.pathname === "/api/file-raw") {
     const root = url.searchParams.get("root") ?? "";
     const path = url.searchParams.get("path") ?? "";

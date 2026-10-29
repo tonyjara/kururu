@@ -56,6 +56,7 @@ import type { NodeStatus, SummaryAgent, SummaryNeed } from "../../../shared/node
 import { mascotFor, type AgentSnapshot, type MascotSet, type Profile } from "../../../shared/model";
 import { useCardDone } from "../cardDone";
 import { referItem } from "../kuru";
+import { noteItem } from "../notes";
 import { agentLabel, agentSummary } from "../labels";
 import { asAgent } from "../nodes";
 import { nodeNeeds, qualify, type NodeNeed } from "../../../shared/remote";
@@ -256,6 +257,7 @@ export function NeedsDrawer({
       ),
       ...(first ? [{ ...first, sep: true }, ...rest] : []),
       referItem({ code: cardCode(profile.name, card.number), title: card.title, place: cardPlace(null, api.nodeNameOf), cardId: card.id }),
+      noteItem(card.id),
     ];
   };
   const groupMenuItems = (key: string): MenuItem[] => {
@@ -302,6 +304,7 @@ export function NeedsDrawer({
       ...placeMoves(cardKeys(w), card.id, (index) => moveWorkspaceCard(w, card.id, index)),
       // Opening Kuru's drawer closes this one: the two share the slot.
       referItem({ code: cardCode(workspaceName, card.number), title: card.title, place: cardPlace(workspaceId, api.nodeNameOf), cardId: card.id }),
+      noteItem(card.id),
     ];
   };
 

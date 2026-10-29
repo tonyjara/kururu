@@ -660,6 +660,71 @@ terminals' directories and every allowed root (the most recently written match
 wins), and the drawer draws each path the server found as a link, opened the
 same way in the workspace whose project holds it.
 
+### Notes
+
+**A card popped out of its board, kept in sight over the window.** "Pop out
+as a note" is on every card's menu — the profile's board, its timeline, a
+workspace's board, a row of the Needs drawer — and a pin beside the ✕ of a
+card being edited does the same. The note floats over the panes, the
+drawers and the profile's sheet, and stays through every switch of
+workspace, board or pane: it is dragged by its title bar, resized from any
+edge or corner (no smaller than 220×140, no bigger than the window), folded
+to the bar by its button or a double-click on the bar, and closed by its ✕,
+which leaves the card where it is. A press anywhere on a note brings it in
+front of the others. Another node's board does not offer it: its cards are
+in this window only while its workspace is on screen.
+
+**The card is drawn from the snapshot, never copied.** `Notes.tsx` looks
+the card up by id across the active profile on every render (`locateCard` in
+`web/src/notes.ts`), so an edit from the board, from Kuru or from an agent's
+run is in the note on the next message; the run line, the branch and the
+made links are the board's own components, so "open" and "resume" go where
+they go from the card. A card sent from the profile's board to a workspace
+keeps its id, and its note follows it there; a card deleted or moved away
+with its workspace leaves a note that says so and can be closed. The body is
+rendered markdown from `/api/card-markdown?card=<id>`, the reader's renderer
+on the card's own text — found by id in the active profile, never handed the
+text — with no root, so a relative image in a card is a fetch `files.ts`
+refuses. The pencil opens the board's own composer inside the note, filling
+it (`Composer`'s `fill`) so Save stays in sight, through the same verbs as a
+double-click on the card.
+
+**Where each note is, is this device's.** `web/src/notes.ts` keeps, per
+profile key, every note's box in pixels, whether it is folded and whether it
+is open, in `localStorage` — the Needs drawer's argument: the phone and the
+Mac want different notes in different places, and a box on the server would
+be every client moving the others'. A closed note keeps its box, so the same
+card popped out again comes back where it was; forty a profile, the closed
+ones furthest back going first. The stored box is the one last left, and is
+fitted into the window when drawn and never written back, so a window
+narrowed and widened again finds its notes where they were. A new note goes
+to the right, just under the profile board's header, each one a step down
+and left of the last. A `storage` event carries a change to every other page
+of the origin.
+
+**One layer, at the scrims' height, drawn after the profile's sheet.** So
+document order puts the notes over that sheet — a card popped out of it is in
+front at once — and under Settings, the databases and every dialog. Inside
+the layer each note's `z-index` is its place in the stack, and the notes are
+drawn in a fixed order, so bringing one forward moves no element: a node
+moved mid-press loses the pointer it captured and the field it had focused.
+That is also why menus and dialogs are drawn into `document.body` now
+(`Popover` and `Dialog`, through a portal): a pane is a stacking context of
+its own (`.pane`'s `isolation`), and a card's menu or the Done question
+opened on a board in one could climb no higher than the pane — under the
+notes, the drawers and a phone's sidebar, whatever their `z-index`. React
+still bubbles their events up the tree they were written in.
+
+**The keyboard stays where it was.** A press on a note's bar or its buttons
+takes no focus, as in the drawers, so a terminal being typed into is still
+being typed into after a note is moved. Its editor tells `App` it has the
+keys (`onEditing`) while a field in it is focused, as Kuru's composer does.
+
+Not done: a note in a window of its own, always on top of other
+applications. It would be a second page mode (as `?pill` is), a window type
+in `desktop/main.js` with its own saved bounds, and a bridge in the preload,
+and it reaches nobody until the app is rebuilt.
+
 ## The agents' pane
 
 **The agents kururu starts itself go to one pane, along one edge — the

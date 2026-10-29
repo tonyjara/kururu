@@ -9610,6 +9610,267 @@ a.st-btn {
 }
 
 /* --------------------------------------------------------------------------
+   Notes
+
+   Cards popped out of their boards to float over the window — see
+   `Notes.tsx`. A card's own ground and edge, lifted the way a menu is, with
+   its title bar washed in the accent (or its profile column's colour) so a
+   note reads as something put on top of the work rather than as one more
+   pane: a sticky note's one idea, and none of its paper.
+   -------------------------------------------------------------------------- */
+
+/* The layer, at the scrims' height and drawn after the profile's board, so
+   document order puts it over that sheet and under every later one. Takes
+   no pointer itself — only its notes do — so nothing behind it misses a
+   click or a drag between them. */
+.notes {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+}
+.note {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  pointer-events: auto;
+  background: color-mix(in srgb, var(--tag, var(--accent)) 4%, var(--chrome));
+  border: var(--border) var(--border-style) var(--line-high);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-menu);
+  overflow: hidden;
+}
+/* The one in front, a little more lifted: where several overlap, which one a
+   key or a click goes to should not take reading. */
+.note-front {
+  box-shadow: var(--elev-dialog);
+}
+.note-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 4px 0 10px;
+  background: color-mix(in srgb, var(--tag, var(--accent)) 14%, var(--chrome));
+  border-bottom: var(--border) var(--border-style) color-mix(in srgb, var(--tag, var(--accent)) 28%, var(--line));
+  cursor: grab;
+  /* A finger on the bar moves the note rather than the page under it. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.note-moving .note-head {
+  cursor: grabbing;
+}
+.note-shut .note-head {
+  border-bottom-color: transparent;
+}
+.note-code {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--dimmer);
+  font-variant-numeric: tabular-nums;
+}
+.note-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.note-title-gone {
+  font-weight: 400;
+  color: var(--dim);
+}
+.note-actions {
+  flex: none;
+  display: inline-flex;
+  gap: 1px;
+}
+/* Its column, its board, its dates: the card's place, which the title bar has
+   no room for and a note on its own would otherwise not say. */
+.note-meta {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  padding: 7px 12px 0;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.note-where {
+  color: var(--dimmer);
+}
+.note-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 12px 10px;
+  font-size: var(--fs-md);
+}
+/* The reader's document, at a card's scale: no measure and no gutter of its
+   own, since the note is the measure, and headings a step or two down so a
+   card's "## Done when" is a heading and not a banner. */
+.note-md {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+.note-md h1,
+.note-md h2,
+.note-md h3,
+.note-md h4 {
+  margin: 0.9em 0 0.35em;
+}
+.note-md h1 {
+  font-size: 1.3em;
+}
+.note-md h2 {
+  font-size: 1.15em;
+}
+.note-md h3 {
+  font-size: 1.05em;
+}
+.note-md p,
+.note-md ul,
+.note-md ol,
+.note-md blockquote,
+.note-md table,
+.note-md pre {
+  margin-bottom: 0.7em;
+}
+.note-plain {
+  margin: 0;
+  white-space: pre-wrap;
+}
+.note-empty {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.note-empty-btn {
+  padding: 0;
+  text-align: left;
+  cursor: var(--cursor-pointer);
+}
+.note-empty-btn:hover {
+  color: var(--text);
+}
+.note-error {
+  margin: 6px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--danger);
+}
+/* The board's composer filling the note, its body taking what the title,
+   the dates and the foot leave and scrolling itself, so Save stays in sight
+   at any size the note is left at. */
+.note-editing {
+  display: flex;
+  flex-direction: column;
+  padding-top: 8px;
+}
+.board-composer-fill {
+  flex: 1;
+  min-height: 0;
+}
+.board-composer-fill .board-composer-body {
+  flex: 1;
+  min-height: 3lh;
+  max-height: none;
+}
+/* The branch, the run and what it made, under a rule, as on the card. */
+.note-foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 12px 8px;
+  border-top: var(--border) var(--border-style) var(--line);
+}
+
+/* The handles: a strip along each edge and a square at each corner, inside
+   the note so its rounded clip does not cut them off. Nothing is drawn but
+   the bottom right's grip, which is where a resize is looked for. */
+.note-edge {
+  position: absolute;
+  z-index: 2;
+  touch-action: none;
+}
+.note-edge-n,
+.note-edge-s {
+  left: 12px;
+  right: 12px;
+  height: 6px;
+  cursor: ns-resize;
+}
+.note-edge-n {
+  top: 0;
+}
+.note-edge-s {
+  bottom: 0;
+}
+.note-edge-e,
+.note-edge-w {
+  top: 12px;
+  bottom: 12px;
+  width: 6px;
+  cursor: ew-resize;
+}
+.note-edge-e {
+  right: 0;
+}
+.note-edge-w {
+  left: 0;
+}
+.note-edge-ne,
+.note-edge-nw,
+.note-edge-se,
+.note-edge-sw {
+  width: 14px;
+  height: 14px;
+}
+.note-edge-ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+.note-edge-nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+.note-edge-sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+.note-edge-se {
+  bottom: 0;
+  right: 0;
+  cursor: nwse-resize;
+  background: linear-gradient(
+    135deg,
+    transparent 52%,
+    var(--line-high) 52% 60%,
+    transparent 60% 70%,
+    var(--line-high) 70% 78%,
+    transparent 78%
+  );
+}
+/* A thumb's corner on a touch screen, where a 14px square is a guess. */
+:root[data-narrow] .note-edge-se {
+  width: 24px;
+  height: 24px;
+}
+
+/* --------------------------------------------------------------------------
    The timeline
 
    The profile's board by when its cards are for — see `Timeline.tsx`. One

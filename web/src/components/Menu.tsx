@@ -14,6 +14,7 @@
  * the terminal underneath.
  */
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export interface MenuItem {
   label: string;
@@ -92,6 +93,15 @@ export function Menu({ at, items, onClose }: { at: MenuAt; items: MenuItem[]; on
  * scrolling content (the missed-replies list) needs a wheel over *it* to
  * scroll the list, not close the box — only a wheel over the backdrop, outside
  * it, still means "the layout underneath moved."
+ *
+ * **Drawn into `document.body`, wherever it was opened from.** A pane is a
+ * stacking context of its own (`.pane`'s `isolation`), so a menu opened on a
+ * board in one could climb no higher than the pane: the drawers, the sidebar
+ * over a phone and the floating notes all covered it, whatever its
+ * `z-index`. A portal changes where it is in the document and nothing about
+ * how it behaves — React still bubbles its events up the tree it was written
+ * in, so the pane under it hears a press on it as it did — and it inherits
+ * nothing from `.app` it needs, the type being `body`'s.
  */
 export function Popover({
   at,
@@ -138,7 +148,7 @@ export function Popover({
     };
   }, [onClose]);
 
-  return (
+  return createPortal(
     <div
       className="menu-backdrop"
       onPointerDown={onClose}
@@ -158,6 +168,7 @@ export function Popover({
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
