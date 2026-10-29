@@ -62,7 +62,7 @@ import { ReloadNotice } from "./components/ReloadNotice";
 import { installReload } from "./reload";
 import { isLoopback } from "./preview";
 import { KuruDrawer } from "./components/KuruDrawer";
-import { closeKuru, kuruLive, openKuru, toggleKuru, useKuruDrawer } from "./kuru";
+import { closeKuru, kuruLive, openKuru, referCardIn, toggleKuru, useKuruDrawer } from "./kuru";
 import { closeNeeds, toggleNeeds, useNeedsDrawer } from "./needs";
 import { arrangedNeeds, useNeedsView } from "./needsorder";
 import { NeedsDrawer } from "./components/NeedsDrawer";
@@ -707,6 +707,27 @@ export function App() {
       setProfileBoard(true);
     }
   }, [cardAsked, profile]);
+
+  /**
+   * A note pointing Kuru at its card — its own button over this page, or a
+   * note window's across the bridge — written into the drawer's box by the
+   * card's menu's own words (`referCardIn`). The profile's board is a scrim
+   * over that box, so it goes, as the board's own row puts it away. The
+   * bridge's ask is held for a profile, as `cardAsked` is.
+   */
+  const referNote = (cardId: string) => {
+    if (!profile || !referCardIn(profile, cardId, api.nodeNameOf)) return;
+    setProfileBoard(false);
+    setBoardShow(null);
+  };
+  const [referAsked, setReferAsked] = useState<{ cardId: string } | null>(null);
+  useEffect(() => desktop()?.notes?.onReferCard?.((cardId) => setReferAsked({ cardId })), []);
+  useEffect(() => {
+    if (!referAsked || !profile) return;
+    setReferAsked(null);
+    referNote(referAsked.cardId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [referAsked, profile]);
 
   const resizeFiles = useCallback((px: number) => {
     setFilesWidth(Math.round(Math.min(FILES_MAX, Math.max(FILES_MIN, px))));
@@ -1895,6 +1916,7 @@ export function App() {
           setBoardShow(cardId);
           setProfileBoard(true);
         }}
+        onRefer={referNote}
       />
       {databasesFor && (
         <Databases

@@ -130,6 +130,13 @@ export interface DesktopNotes {
   onList(listener: (notes: NoteWindowView[]) => void): () => void;
   /** The window: a note asked for its card on its board. An ask before the page listened is handed to the first listener. */
   onShowCard(listener: (cardId: string) => void): () => void;
+  /**
+   * The window: a note pointed Kuru at its card, which goes into the
+   * drawer's box here, as the card's menu puts it. Held for the first
+   * listener as `onShowCard` is. Optional, like `refer`: an app from before
+   * it never asks.
+   */
+  onReferCard?(listener: (cardId: string) => void): () => void;
   /** A note window's page only, here and below: which card it is, or null for any other page. */
   self(): Promise<NoteSelf | null>;
   onSelf(listener: (self: NoteSelf) => void): () => void;
@@ -141,6 +148,13 @@ export interface DesktopNotes {
   close(): void;
   /** The card shown on its board, in the window. */
   toBoard(): void;
+  /**
+   * The card pointed at in Kuru's box, in the window, which comes up with
+   * the keys in the box. Optional: a note window in an app from before it
+   * draws no button for it, since there would be nobody across the bridge
+   * to hear the press.
+   */
+  refer?(): void;
   /** The window brought up, for something the note did there — an agent revealed, a file opened. */
   raiseMain(): void;
 }

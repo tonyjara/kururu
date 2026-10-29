@@ -17,7 +17,8 @@
  * different is only what the window is: the desktop moves it by its title
  * bar (`-webkit-app-region`) and resizes it from its edges, folding it is the
  * window getting shorter, and "show it on its board" brings the main window
- * up to do it there.
+ * up to do it there — as "Reference in Kuru" does, since Kuru's box is the
+ * window's and the reference is written there, from the card's id alone.
  *
  * **Which card is the main process's word, not the address's.** The page
  * asks the bridge which note it is (`self`), and the main process answers
@@ -136,6 +137,7 @@ export function NotePage() {
         }}
         onClose={() => notes?.close()}
         onShowBoard={() => notes?.toBoard()}
+        onRefer={notes?.refer ? () => notes.refer?.() : undefined}
         onEditing={noKeys}
         onLeave={() => notes?.raiseMain()}
       />

@@ -23,18 +23,23 @@ shows, so it is written once and read in three places — see
   and click it to bring it in front of the others. It is the card itself, so
   an edit from the board, Kuru or an agent shows up in it at once, with the
   body drawn as Markdown and the agent's run, branch and files underneath;
-  the pencil edits the card right there. Where each note sits, its size and
-  whether it is folded are kept on this device, through reloads and
-  restarts, and a card popped out again comes back where you left its note.
+  the pencil edits the card right there, and the speech bubble puts the card
+  into Kuru's box, as **Reference in Kuru** on its menu does. Where each
+  note sits, its size and whether it is folded are kept on this device,
+  through reloads and restarts, and a card popped out again comes back
+  where you left its note.
 - **In the desktop app a note is a window of its own, over every app.**
   Popping a card out there puts it in a small window that floats above
   everything — your editor, the browser, a full-screen app — on every
   Space, without a Dock icon of its own. Drag it by its title bar, resize
   it from its edges, fold it to the bar; it is the same live card with the
   same editing, and "show it on its board" brings Kururu's window up with
-  the card lit. Several can be up at once, and each comes back where you
-  left it after a restart. A note you are not using is a little
-  see-through, with its buttons out of the way until you reach for it.
+  the card lit. Its speech bubble, or **Reference in Kuru** when you
+  right-click the card in it, brings the window up with the card in Kuru's box,
+  ready for you to say what you want done with it. Several can be up at
+  once, and each comes back where you left it after a restart. A note you
+  are not using is a little see-through, with its buttons out of the way
+  until you reach for it.
   The menu-bar frog lists your notes — tick one to show or hide it, Show
   All, Hide All, Close a Note — and **Pop Out a Card** pops one out with
   no window open: what needs you first, then your board a column at a

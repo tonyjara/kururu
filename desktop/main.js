@@ -811,6 +811,17 @@ function showCard(cardId) {
   tellWindow(openWindow(), "kururu:show-card", cardId);
 }
 
+/**
+ * A note's "Reference in Kuru": the window up and told which card, by id
+ * and nothing else. Kuru's box is the window's — a note has no drawer — and
+ * the words that go into it are written there from the window's own
+ * snapshot, by the code the card's menu uses (`referCardIn`), so what Kuru
+ * is handed cannot be anything a note's page made up.
+ */
+function referCard(cardId) {
+  tellWindow(openWindow(), "kururu:refer-card", cardId);
+}
+
 /** Send the window a message once its page is there to hear it — see `openKuru`. */
 function tellWindow(fresh, channel, ...args) {
   const target = win;
@@ -952,6 +963,12 @@ ipcMain.on("kururu:note-board", (event) => {
   const cardId = notes.cardOf(event.sender);
   if (cardId) showCard(cardId);
 });
+ipcMain.on("kururu:note-refer", (event) => {
+  const cardId = notes.cardOf(event.sender);
+  if (cardId) referCard(cardId);
+});
+// The same, from a note's right-click, which `notes.js` builds for the note it is on.
+notes.on("refer", referCard);
 // A note's run line or made link acted in the window — an agent revealed, a
 // file opened — so the window is what comes up.
 ipcMain.on("kururu:note-raise", (event) => {

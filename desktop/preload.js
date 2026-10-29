@@ -75,6 +75,11 @@ if (isPicker) {
   ipcRenderer.on("kururu:show-card", (_event, cardId) => {
     if (ipcRenderer.listenerCount("kururu:show-card") === 1 && typeof cardId === "string") pendingCard = cardId;
   });
+  /** A note's "Reference in Kuru", landed on a window still loading, as `pendingCard` is. */
+  let pendingRefer;
+  ipcRenderer.on("kururu:refer-card", (_event, cardId) => {
+    if (ipcRenderer.listenerCount("kururu:refer-card") === 1 && typeof cardId === "string") pendingRefer = cardId;
+  });
   contextBridge.exposeInMainWorld("kururu", {
     /** True in the Electron window, absent in a browser or on the phone. */
     desktop: true,
@@ -208,9 +213,10 @@ if (isPicker) {
      *
      * Two kinds of page use this, as with the voice. The window pops a card
      * out, is told which cards are up so its menus can say "bring it
-     * forward", and is asked to show a card on its board. A note window's
-     * page — `?note=` — asks which card it is, says what it is showing, and
-     * folds, closes or leaves itself. `main.js` checks the sender of each:
+     * forward", and is asked to show a card on its board or point Kuru at
+     * it. A note window's page — `?note=` — asks which card it is, says what
+     * it is showing, folds, closes or leaves itself, and asks for its card
+     * in Kuru's box, which is the window's. `main.js` checks the sender of each:
      * only the main window pops a card out, and a note's verbs act on the
      * note whose page sent them and no other, so the most a served page can
      * do here is put a card of its own server over the screen, which its
@@ -236,6 +242,18 @@ if (isPicker) {
         }
         return () => ipcRenderer.removeListener("kururu:show-card", relay);
       },
+      onReferCard: (listener) => {
+        const relay = (_event, cardId) => {
+          if (typeof cardId === "string") listener(cardId);
+        };
+        ipcRenderer.on("kururu:refer-card", relay);
+        if (pendingRefer !== undefined) {
+          const cardId = pendingRefer;
+          pendingRefer = undefined;
+          listener(cardId);
+        }
+        return () => ipcRenderer.removeListener("kururu:refer-card", relay);
+      },
       self: () => ipcRenderer.invoke("kururu:note-self"),
       onSelf: (listener) => {
         const relay = (_event, self) => listener(self);
@@ -251,6 +269,7 @@ if (isPicker) {
       fold: (collapsed) => ipcRenderer.send("kururu:note-fold", collapsed === true),
       close: () => ipcRenderer.send("kururu:note-close"),
       toBoard: () => ipcRenderer.send("kururu:note-board"),
+      refer: () => ipcRenderer.send("kururu:note-refer"),
       raiseMain: () => ipcRenderer.send("kururu:note-raise"),
     },
   });

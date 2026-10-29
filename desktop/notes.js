@@ -40,6 +40,11 @@
  * Only a note window's own webContents may say anything about its note, and
  * only the main window may pop a card out, both checked in `main.js`, so a
  * served page cannot move or close a note it is not.
+ *
+ * **Kuru's box is the window's.** A note has no drawer, so pointing Kuru at
+ * its card — its title bar's button, or its right-click here, which emits
+ * `refer` — brings the window up and hands it the card's id, and the window
+ * writes the reference the card's menu writes.
  */
 const { BrowserWindow, Menu, screen, shell } = require("electron");
 const { EventEmitter } = require("node:events");
@@ -224,14 +229,20 @@ class NoteWindows extends EventEmitter {
       event.preventDefault();
       if (/^https?:/i.test(url) && originOf(url) !== originOf(this.page)) void shell.openExternal(url);
     });
-    // Cut, Copy and Paste in the card's editor, as in the window.
+    // Cut, Copy and Paste in the card's editor, as in the window. Anywhere
+    // else on a card that is there, its menu's "Reference in Kuru" too —
+    // never in a field, where a right-click is about the words in it.
     contents.on("context-menu", (_event, params) => {
-      const template = editMenuTemplate(params);
-      if (!template) return;
+      const template = editMenuTemplate(params) ?? [];
       for (const item of template) {
         if (item.id === "replace") item.click = () => contents.replaceMisspelling(item.word);
         if (item.id === "learn") item.click = () => contents.session.addWordToSpellCheckerDictionary(item.word);
       }
+      if (!params.isEditable && entry.present === "here") {
+        if (template.length) template.push({ type: "separator" });
+        template.push({ label: "Reference in Kuru", click: () => this.emit("refer", note.cardId) });
+      }
+      if (template.length === 0) return;
       Menu.buildFromTemplate(template).popup({ window: win });
     });
     if (this.debug) {

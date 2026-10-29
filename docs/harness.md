@@ -138,7 +138,13 @@ timeline, a card's row in the Needs drawer, the caret and the right-click
 alike — has **Reference in Kuru**. It opens the drawer and puts the card into
 the composer at the cursor, unsent, with the keyboard there:
 `[card ACM-16 "Design the checkout…" (w8/c3f9a1e07b2d4)]`. The profile's
-board is a scrim over the window, so it closes on the way.
+board is a scrim over the window, so it closes on the way. A card popped out
+as a note has it too, as the speech bubble on its bar — and, in a note
+window of the desktop app, on its right-click — and writes the same words:
+the note knows only the card's id, so `referCardIn` finds the card in the
+profile on screen and builds what its menu would. A note window has no
+drawer, so it brings the main window up and hands it the id across the
+bridge (`notes.refer`), and the window writes the reference itself.
 
 Words and not a chip in the box, because the box is a textarea for the
 reasons `Composer` gives, and because what reaches Kuru is what was typed
@@ -156,8 +162,9 @@ by id — and its title, without the brackets.
 
 `cardReference`, `splitCardRefs` and `insertWords` in `shared/kuru.ts` are
 the format and the insertion; `referItem` in `web/src/kuru.ts` is the one
-menu row all four menus use, and `insertInKuru` the door the composer takes
-the words from.
+menu row all four menus use, `referCardIn` beside it the same words for a
+card known by its id, and `insertInKuru` the door the composer takes the
+words from.
 
 ## A file the user hands it
 

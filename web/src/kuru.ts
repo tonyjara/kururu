@@ -20,10 +20,12 @@
  * rather than just losing a click to it.
  */
 import { useSyncExternalStore } from "react";
-import { cardReference, type CardRef, type KuruConversation } from "../../shared/kuru";
+import { cardCode } from "../../shared/board";
+import { cardPlace, cardReference, type CardRef, type KuruConversation } from "../../shared/kuru";
 import type { AgentSnapshot, Profile } from "../../shared/model";
 import type { MenuItem } from "./components/Menu";
 import { closeNeeds } from "./needs";
+import { locateCard } from "./notes";
 
 /**
  * What Kuru is doing now, in one word, for the chip and the drawer's live
@@ -150,6 +152,30 @@ export function referItem(ref: CardRef, then?: () => void): MenuItem {
       then?.();
     },
   };
+}
+
+/**
+ * A card known only by its id pointed at as its menu would point at it — a
+ * note's, which has the id and no board around it: its own button over this
+ * page, and a note window's, which reaches this window across the bridge as
+ * the id alone. Looked for wherever the card is in the profile on screen, so
+ * a card sent to a workspace since its note was popped out is referred to
+ * where it is now. False for a card that is not there, and nothing is put in.
+ * `nameOf` is `cardPlace`'s, a node's name for a workspace of another node.
+ */
+export function referCardIn(profile: Profile, cardId: string, nameOf: (nodeId: string) => string | null): boolean {
+  const found = locateCard(profile, cardId);
+  if (!found) return false;
+  const { card, workspace } = found;
+  insertInKuru(
+    cardReference({
+      code: cardCode(workspace ? workspace.name : profile.name, card.number),
+      title: card.title,
+      place: cardPlace(workspace ? workspace.id : null, nameOf),
+      cardId: card.id,
+    }),
+  );
+  return true;
 }
 
 /** The chip, the harness key, and the pill: one press opens, the next closes. */

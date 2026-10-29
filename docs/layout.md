@@ -758,8 +758,13 @@ draw — filling the window. The window is moved by the title bar
 (`-webkit-app-region`, its buttons carved out) and resized from its edges,
 folding it makes the window as short as its bar, its ✕ closes it, and "show
 it on its board" brings the main window up (made if there is none) with the
-card lit, as is a button in its foot that acts there. Unfocused it is a
-little see-through and its buttons stand back until the pointer comes over.
+card lit, as is a button in its foot that acts there. "Reference in Kuru" —
+the speech bubble on the bar, and a right-click on the card outside its
+editor — brings it up the same way with the card's reference in Kuru's
+box: the main process sends the window the card's id alone
+(`kururu:refer-card`) and the window writes the words from its own snapshot
+(`referCardIn`), as the card's menu would. Unfocused it is a little
+see-through and its buttons stand back until the pointer comes over.
 
 **Where each window is, is the app's,** in `desktop.json` (`notes`, read by
 `desktop/notelist.js`): its box in screen points, its fold, whether it is up,

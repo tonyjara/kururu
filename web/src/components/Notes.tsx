@@ -97,6 +97,7 @@ export function Notes({
   mascots,
   onEditing,
   onProfileCard,
+  onRefer,
 }: {
   profile: Profile;
   agents: AgentSnapshot[];
@@ -105,6 +106,8 @@ export function Notes({
   onEditing: (editing: boolean) => void;
   /** Show a card of the profile's own board on its sheet, lit — the way back from its note to the board. */
   onProfileCard: (cardId: string) => void;
+  /** Point Kuru at a note's card, in the drawer's box — which the window owns, and which a sheet may be over. */
+  onRefer: (cardId: string) => void;
 }) {
   const notes = useNotes(profile.key);
   // So a card's menu, which knows its board and not whose it is, pops the
@@ -135,6 +138,7 @@ export function Notes({
           mascots={mascots}
           onEditing={onEditing}
           onProfileCard={onProfileCard}
+          onRefer={onRefer}
         />
       ))}
     </div>
@@ -207,6 +211,7 @@ function NoteView({
   mascots,
   onEditing,
   onProfileCard,
+  onRefer,
 }: {
   note: Note;
   /** Its place in the stack, from 1 at the back. */
@@ -218,6 +223,7 @@ function NoteView({
   mascots: MascotSet;
   onEditing: (editing: boolean) => void;
   onProfileCard: (cardId: string) => void;
+  onRefer: (cardId: string) => void;
 }) {
   const update = (fn: (note: Note) => Note) => updateNotes(profile.key, (notes) => change(notes, note.cardId, fn));
   const close = () => update((was) => ({ ...was, open: false }));
@@ -323,6 +329,7 @@ function NoteView({
         onFold={fold}
         onClose={close}
         onShowBoard={showOnBoard}
+        onRefer={() => onRefer(note.cardId)}
         onEditing={onEditing}
       />
 
@@ -388,6 +395,7 @@ export function NoteInside({
   onFold,
   onClose,
   onShowBoard,
+  onRefer,
   onEditing,
   onLeave,
 }: {
@@ -401,6 +409,12 @@ export function NoteInside({
   /** Closed: the card stays on its board. Its editor's draft goes with the note. */
   onClose: () => void;
   onShowBoard: (card: Card, workspace: Workspace | null) => void;
+  /**
+   * The card pointed at in Kuru's box, as its menu's "Reference in Kuru"
+   * does. Absent where nobody would hear it — a note window in an app from
+   * before the bridge carried it — and then there is no button.
+   */
+  onRefer?: () => void;
   onEditing: (editing: boolean) => void;
   /** A button in the foot acted in the window — went to the agent, opened a file, resumed a run — for a note that is not in it. */
   onLeave?: () => void;
@@ -453,6 +467,16 @@ export function NoteInside({
               onClick={() => onShowBoard(card, workspace)}
             >
               <Icon name="board" />
+            </button>
+          )}
+          {card && onRefer && (
+            <button
+              className="board-icon-btn"
+              title="Reference in Kuru — this card, in Kuru's box"
+              aria-label="Reference in Kuru"
+              onClick={onRefer}
+            >
+              <ReferIcon />
             </button>
           )}
           <button
@@ -517,6 +541,22 @@ export function NoteInside({
           </div>
         ))}
     </>
+  );
+}
+
+/**
+ * A speech bubble, for talking to Kuru about the card — drawn here rather
+ * than taken from the skin's icon set on the status bar's `SidebarIcon`
+ * reasoning: an entry in that set is a cell every skin has to ship, and a
+ * bubble says the same thing in any chrome.
+ */
+function ReferIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      <path d="M8 9h8M8 13h5" />
+    </svg>
   );
 }
 
