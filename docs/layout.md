@@ -741,6 +741,21 @@ takes no focus, as in the drawers, so a terminal being typed into is still
 being typed into after a note is moved. Its editor tells `App` it has the
 keys (`onEditing`) while a field in it is focused, as Kuru's composer does.
 
+**A fold keeps the place.** Folding takes a note's body out of the document,
+so `NoteInside` keeps where the body, the editor's form and the composer's
+body were scrolled to (`KeptScroll` in `web/src/notes.ts`) and puts each
+back as it is drawn again — before it is painted, and then each frame for a
+second and a half (`SCROLL_SETTLE_MS`), because what the place is measured
+against arrives in pieces: a note window draws its body before the desktop
+has made it tall again, and a card's diagrams are laid out after it is
+drawn. The place asked for is held, not the first clamp, and a card that got
+shorter while folded is shown to its end. The person's own wheel, touch, key
+or press ends the hold at once. The body is drawn from the note's last
+markup, so it is not the card's plain text for the moment its fetch takes.
+Leaving the editor brings the body back where it was read too; the editor's
+own place goes with its draft. Nothing of it is stored: a reload starts at
+the top.
+
 **In the desktop app a note is a window of its own, over every
 application.** A note over the panes is behind the editor the moment
 somebody turns to it, which is when a card is wanted in sight; only the

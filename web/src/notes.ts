@@ -48,6 +48,10 @@
  * note, and a window showing another server than the one the notes come
  * from; a note the window had kept here before is handed over once
  * (`Notes.tsx`).
+ *
+ * **How far a note was scrolled is not stored.** It is kept by the note
+ * while it is drawn (`KeptScroll`), so a fold and an unfold come back to
+ * the same line; a reload starts at the top, as a card on a board does.
  */
 import { useSyncExternalStore } from "react";
 import { cardCode, type Card } from "../../shared/board";
@@ -281,6 +285,83 @@ function adoptNote(value: unknown): Note | null {
     collapsed: collapsed === true,
     open: open !== false,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Where a note was scrolled to, kept across a fold.
+
+/**
+ * How long a note unfolded again is held at the place it was left: long
+ * enough for a note window to be made tall again — the page draws its body
+ * before the desktop has grown the window — and for the card's diagrams to
+ * be laid out, both of which change what the place is measured against;
+ * short enough that nothing the person does after it is undone.
+ */
+export const SCROLL_SETTLE_MS = 1500;
+
+/**
+ * Where one scrolled box of a note — its body, its editor — was left, kept
+ * by the note rather than the box, because folding takes the box out of the
+ * document and the one drawn on unfolding starts at the top.
+ *
+ * **Put back, then held while it settles.** What the place is measured
+ * against arrives in pieces after the box is drawn — the window's height,
+ * the card's markup, its diagrams — so the box is put at `top` at once and
+ * again on each frame until `SCROLL_SETTLE_MS` has passed, held inside how
+ * far it can scroll then. The place asked for is kept, not the clamp: a box
+ * measured before its diagrams were drawn is short, and the clamp it would
+ * write down is a place nobody left. Once settled the place is wherever the
+ * box came to, so a card that got shorter while folded is shown to its end
+ * and the next fold keeps that.
+ *
+ * **The person's own scroll ends the hold.** A wheel, a touch, a key or a
+ * press in the box (`touched`) is somebody reading, and the frames stop
+ * putting the box back under them. A scroll event alone says nothing — the
+ * frames' own writes and the browser's clamps fire it too — so while the
+ * box settles one is not taken as the place.
+ */
+export class KeptScroll {
+  /** The place to come back to, in CSS pixels from the top. */
+  top = 0;
+  /** Held at `top` until then, on `performance.now()`'s clock; zero when not. */
+  private until = 0;
+
+  /** The box drawn again: held at `top` from now until it settles. */
+  shown(now: number): void {
+    this.until = now + SCROLL_SETTLE_MS;
+  }
+
+  /**
+   * One frame of a box `at` a scroll that can go to `max`: where to put it
+   * while it settles, or null once it has, when the place kept is the one it
+   * came to.
+   */
+  frame(now: number, at: number, max: number): number | null {
+    if (this.until === 0) return null;
+    if (now >= this.until) {
+      this.until = 0;
+      this.top = at;
+      return null;
+    }
+    return clamp(this.top, 0, Math.max(0, max));
+  }
+
+  /** The box scrolled, by anybody: its place, unless it is still settling. */
+  scrolled(at: number): void {
+    if (this.until === 0) this.top = at;
+  }
+
+  /** The person reached for the box: it is theirs from here, and where it is now is its place. */
+  touched(at: number): void {
+    this.until = 0;
+    this.top = at;
+  }
+
+  /** Back to the top — an editor's place goes with its draft. */
+  forget(): void {
+    this.until = 0;
+    this.top = 0;
+  }
 }
 
 // ---------------------------------------------------------------------------

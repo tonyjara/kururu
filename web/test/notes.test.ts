@@ -3,7 +3,8 @@
  * and a resize that stop at the edges and the floor rather than pushing the
  * note, a card popped out twice coming back where it was left, and a stored
  * list that cannot put a NaN on screen. And the card found wherever in the
- * profile it has gone since it was popped out.
+ * profile it has gone since it was popped out, and a note unfolded back at
+ * the line it was folded on.
  */
 import { describe, expect, it } from "bun:test";
 import { addCard, emptyBoard, emptyProfileBoard, transferCard } from "../../shared/board";
@@ -12,6 +13,7 @@ import {
   adoptNotes,
   change,
   fitNote,
+  KeptScroll,
   locateCard,
   moveBox,
   NOTE_HEAD,
@@ -21,6 +23,7 @@ import {
   popOut,
   raise,
   resizeBox,
+  SCROLL_SETTLE_MS,
   type Note,
 } from "../src/notes";
 
@@ -208,5 +211,82 @@ describe("locateCard", () => {
     const { from, to } = transferCard(addCard(emptyProfileBoard(), { title: "sent" }, "csent"), emptyBoard(), "csent");
     const profile = { key: "pk1", board: from, workspaces: [workspace("w1", to)] } as unknown as Profile;
     expect(locateCard(profile, "csent")?.workspace?.id).toBe("w1");
+  });
+});
+
+describe("KeptScroll", () => {
+  /** A note read down to `top` and folded — a fold tells the keeper nothing, since the box is simply gone. */
+  function leftAt(top: number): KeptScroll {
+    const kept = new KeptScroll();
+    kept.scrolled(top);
+    return kept;
+  }
+
+  it("puts an unfolded body back where it was left", () => {
+    const kept = leftAt(240);
+    kept.shown(0);
+    expect(kept.frame(0, 0, 1000)).toBe(240);
+  });
+
+  it("holds the place asked for while the window grows back and the markup lands, not the first clamp", () => {
+    const kept = leftAt(240);
+    kept.shown(0);
+    // The card's text alone, before its markup and diagrams: shorter.
+    expect(kept.frame(0, 0, 100)).toBe(100);
+    // The browser's clamp and the frame's own write both fire a scroll event; neither is the place.
+    kept.scrolled(100);
+    expect(kept.top).toBe(240);
+    expect(kept.frame(16, 100, 900)).toBe(240);
+    // The note window grown to its height, which can scroll less far.
+    expect(kept.frame(80, 240, 700)).toBe(240);
+  });
+
+  it("shows a card that got shorter while folded to its end, and keeps that once settled", () => {
+    const kept = leftAt(240);
+    kept.shown(0);
+    expect(kept.frame(0, 0, 60)).toBe(60);
+    expect(kept.frame(SCROLL_SETTLE_MS, 60, 60)).toBeNull();
+    expect(kept.top).toBe(60);
+  });
+
+  it("holds a body with nothing to scroll at the top", () => {
+    const kept = leftAt(240);
+    kept.shown(0);
+    expect(kept.frame(0, 0, 0)).toBe(0);
+    expect(kept.frame(0, 0, -4)).toBe(0);
+  });
+
+  it("lets go the moment the person scrolls, and follows them from there", () => {
+    const kept = leftAt(240);
+    kept.shown(0);
+    expect(kept.frame(0, 0, 1000)).toBe(240);
+    kept.touched(240);
+    expect(kept.frame(16, 240, 1000)).toBeNull();
+    kept.scrolled(520);
+    expect(kept.top).toBe(520);
+  });
+
+  it("follows every scroll once settled", () => {
+    const kept = leftAt(240);
+    kept.shown(0);
+    expect(kept.frame(SCROLL_SETTLE_MS + 1, 240, 1000)).toBeNull();
+    kept.scrolled(80);
+    expect(kept.top).toBe(80);
+  });
+
+  it("keeps the place asked for through a fold made before the body settled", () => {
+    const kept = leftAt(240);
+    kept.shown(0);
+    expect(kept.frame(0, 0, 100)).toBe(100);
+    // Folded again here; the next unfold draws the whole card.
+    kept.shown(500);
+    expect(kept.frame(500, 0, 1000)).toBe(240);
+  });
+
+  it("forgets an editor's place with its draft", () => {
+    const kept = leftAt(240);
+    kept.forget();
+    kept.shown(0);
+    expect(kept.frame(0, 0, 1000)).toBe(0);
   });
 });

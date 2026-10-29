@@ -34,13 +34,19 @@
  * being typed into after a note is moved; the editor says it has the keys
  * (`onEditing`) while a field in it is focused, as Kuru's composer does.
  *
+ * **A fold keeps the place.** Folding takes the body out of the document,
+ * and the one drawn on unfolding would start at the top; so the note keeps
+ * where its body and its editor were scrolled to and puts them back as they
+ * are drawn again (`keepScroll`, and `KeptScroll` for why it holds them
+ * there a moment rather than putting them back once).
+ *
  * **In the desktop app a note is a window,** over every application
  * (`desktop/notes.js`), and this layer draws only the notes the bridge did
  * not take. What is inside a note — its bar, its body, its editor, its foot —
  * is `NoteInside`, drawn here and by `NotePage` in a note window, so the two
  * are one drawing of the card and cannot drift.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   boardLanes,
   canResume,
@@ -59,6 +65,7 @@ import {
   desktopNotes,
   EDGES,
   fitNote,
+  KeptScroll,
   locateCard,
   moveBox,
   notesProfile,
@@ -421,8 +428,28 @@ export function NoteInside({
 }) {
   const { card, workspace, lane, agent, mascot, code } = seen;
   const [editing, setEditing] = useState(false);
+  // Held here and not by the boxes, which a fold takes away: the body, the
+  // editor's form — which scrolls too in a note made small — and the
+  // composer's body inside it, which scrolls itself.
+  const [kept] = useState(() => ({ read: new KeptScroll(), form: new KeptScroll(), text: new KeptScroll() }));
+  /** The card's markup as last drawn, so the body drawn on unfolding is the one its place was measured on, not its text until a fetch is back. */
+  const drawn = useRef<string | null>(null);
+  const readScroll = useCallback((box: HTMLElement | null) => (box ? keepScroll(box, kept.read) : undefined), [kept]);
+  const formScroll = useCallback(
+    (box: HTMLElement | null) => {
+      if (!box) return;
+      const text = box.querySelector<HTMLElement>(".board-composer-body");
+      const stops = [keepScroll(box, kept.form), text ? keepScroll(text, kept.text) : null];
+      return () => {
+        for (const stop of stops) stop?.();
+      };
+    },
+    [kept],
+  );
   const stopEditing = () => {
     dropDraft(draftKey(cardId));
+    kept.form.forget();
+    kept.text.forget();
     setEditing(false);
     onEditing(false);
   };
@@ -512,6 +539,7 @@ export function NoteInside({
             </div>
             {editing ? (
               <div
+                ref={formScroll}
                 className="note-body note-editing"
                 onFocus={() => onEditing(true)}
                 onBlur={(event) => {
@@ -521,7 +549,7 @@ export function NoteInside({
                 <NoteEditor card={card} workspace={workspace} profile={profile} onDone={stopEditing} />
               </div>
             ) : (
-              <NoteBody card={card} onEdit={() => setEditing(true)} />
+              <NoteBody card={card} drawn={drawn} scroll={readScroll} onEdit={() => setEditing(true)} />
             )}
             <NoteFoot
               card={card}
@@ -542,6 +570,39 @@ export function NoteInside({
         ))}
     </>
   );
+}
+
+/** What says the person reached for a scrolled box (`KeptScroll.touched`); a scroll event alone is not one. */
+const REACHED = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+
+/**
+ * A scrolled box of a note kept at its place across a fold: put back the
+ * moment it is drawn again, before it is painted, and held there each frame
+ * while what its place is measured against settles. Handed the box by a
+ * callback ref, so the box's mounting is what says the note was unfolded,
+ * whoever unfolded it — the button, the bar's double-click, or the desktop
+ * bringing a folded note window forward.
+ */
+function keepScroll(box: HTMLElement, kept: KeptScroll): () => void {
+  let frame = 0;
+  const settle = () => {
+    const want = kept.frame(performance.now(), box.scrollTop, box.scrollHeight - box.clientHeight);
+    if (want === null) return;
+    // Within half a pixel is there: a dense display keeps a place the write would round.
+    if (Math.abs(box.scrollTop - want) > 0.5) box.scrollTop = want;
+    frame = requestAnimationFrame(settle);
+  };
+  const scrolled = () => kept.scrolled(box.scrollTop);
+  const reached = () => kept.touched(box.scrollTop);
+  kept.shown(performance.now());
+  settle();
+  box.addEventListener("scroll", scrolled, { passive: true });
+  for (const type of REACHED) box.addEventListener(type, reached, { passive: true });
+  return () => {
+    cancelAnimationFrame(frame);
+    box.removeEventListener("scroll", scrolled);
+    for (const type of REACHED) box.removeEventListener(type, reached);
+  };
 }
 
 /**
@@ -569,13 +630,27 @@ function draftKey(cardId: string): string {
  * The card's body as the server rendered it, refetched whenever its text
  * changes. The last render stays while the next is in flight, as the
  * reader's does: an edit is nearly the same text, and a blank between the
- * two would be a flash on every save. A card with no body says so, and the
- * saying is the way to write one.
+ * two would be a flash on every save. The note keeps the last render in
+ * `drawn` across a fold for the same reason. A card with no body says so,
+ * and the saying is the way to write one.
  */
-function NoteBody({ card, onEdit }: { card: Card; onEdit: () => void }) {
-  const [html, setHtml] = useState<string | null>(null);
+function NoteBody({
+  card,
+  drawn,
+  scroll,
+  onEdit,
+}: {
+  card: Card;
+  drawn: React.RefObject<string | null>;
+  scroll: React.Ref<HTMLDivElement>;
+  onEdit: () => void;
+}) {
+  const [html, setHtml] = useState<string | null>(() => drawn.current);
   const [error, setError] = useState<string | null>(null);
   const article = useRef<HTMLElement>(null);
+  useEffect(() => {
+    drawn.current = html;
+  }, [drawn, html]);
   useEffect(() => {
     if (!card.body.trim()) {
       setHtml(null);
@@ -608,7 +683,7 @@ function NoteBody({ card, onEdit }: { card: Card; onEdit: () => void }) {
 
   if (!card.body.trim()) {
     return (
-      <div className="note-body">
+      <div ref={scroll} className="note-body">
         <button type="button" className="note-empty note-empty-btn" onClick={onEdit}>
           No details yet — write some
         </button>
@@ -616,7 +691,7 @@ function NoteBody({ card, onEdit }: { card: Card; onEdit: () => void }) {
     );
   }
   return (
-    <div className="note-body" onDoubleClick={onEdit}>
+    <div ref={scroll} className="note-body" onDoubleClick={onEdit}>
       {html === null ? (
         // The text as it is, until its markup arrives — or for good, if it cannot.
         <p className="note-plain">{card.body}</p>
