@@ -52,6 +52,7 @@ import type { Profile, Workspace } from "../../shared/model";
 import { adoptBoard, adoptProfileBoard, emptyBoard, isNeedsBy, NEEDS_COLUMN, type Board, type BoardLane, type Card, type CardRun } from "../../shared/board";
 import { adoptMade } from "../../shared/made";
 import type { MoveDone } from "../../shared/move";
+import type { AttributionFacts, ConversationFact, RunFact } from "../../shared/usage";
 import { promptCarries, type StoredMissed, type StoredOutboxEntry, type VoiceLang } from "../../shared/voice";
 import {
   diffBoards,
@@ -523,6 +524,45 @@ export class Store {
     } catch {
       return 0;
     }
+  }
+
+  /**
+   * What this database knows about whose a session was, for the usage ledger,
+   * which keeps its own file and asks here rather than opening this one. A
+   * session a card ran twice is the later run's, and a card that moved between
+   * boards is where it is now. Two profiles sharing a login leave that login
+   * saying nothing, because which of them spent a token is not on any disk.
+   */
+  usageAttribution(): AttributionFacts {
+    const runs = new Map<string, RunFact>();
+    const rows = this.stmt(
+      `select r.session_id, r.id, r.card_id, r.agent_id, b.profile_key, b.workspace_key
+       from card_runs r join cards c on c.id = r.card_id join boards b on b.id = c.board_id
+       where r.session_id is not null order by r.started_at, r.id`,
+    ).all() as Row[];
+    for (const row of rows) {
+      runs.set(row.session_id as string, {
+        sessionId: row.session_id as string,
+        runId: row.id as number,
+        cardId: row.card_id as string,
+        agentId: (row.agent_id as string | null) ?? null,
+        profileKey: row.profile_key as string,
+        workspaceKey: (row.workspace_key as string | null) ?? null,
+      });
+    }
+    const conversations = new Map<string, ConversationFact>();
+    for (const row of this.stmt("select id, kind, profile_key from conversations").all() as Row[]) {
+      conversations.set(row.id as string, { sessionId: row.id as string, kind: row.kind as string, profileKey: row.profile_key as string });
+    }
+    const profileOfLogin = new Map<string, string>();
+    const shared = new Set<string>();
+    for (const row of this.stmt("select key, login_key from profiles where login_key is not null and gone_at is null").all() as Row[]) {
+      const login = row.login_key as string;
+      if (profileOfLogin.has(login)) shared.add(login);
+      profileOfLogin.set(login, row.key as string);
+    }
+    for (const login of shared) profileOfLogin.delete(login);
+    return { runs, conversations, profileOfLogin };
   }
 
   // -------------------------------------------------------------------------

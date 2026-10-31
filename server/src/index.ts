@@ -133,6 +133,7 @@ import { noteCards } from "../../shared/notecards";
 import { summarize, type NodeSummary } from "../../shared/nodes";
 import { hostname } from "node:os";
 import { Store, dataDir, dbPath } from "./store";
+import { openUsageReader, type UsageReader } from "./usage/sweep";
 import { isSearchScope, sessionOfTranscript, type Actor, type SearchHit } from "../../shared/store";
 import { configDir } from "./config";
 import { CLIP_MAX_BYTES, isClipId } from "../../shared/voice";
@@ -522,6 +523,8 @@ let screens!: OnScreen;
 let sleeper!: Sleeper;
 /** The database: boards, conversations and the voice's lists. Opened in `attach()`, before anything is served. See `store.ts`. */
 let store!: Store;
+/** The usage ledger's reader, or null when its file would not open. See `usage/sweep.ts`. */
+let usageReader: UsageReader | null = null;
 let backup!: Backup;
 /** This kururu among the others: pairing, the roster and the links. See `nodes.ts`. */
 let nodes!: NodeHost;
@@ -6192,6 +6195,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       // When and why this process started, and whether anything would start
       // it again. Without the file: this is asked every few seconds.
       life: lifeNow(),
+      // The usage ledger's counts, for `bun run status`. Held for two seconds, for the same reason.
+      ledger: usageReader?.status() ?? null,
     });
     return;
   }
@@ -6505,6 +6510,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       // The rest of the report is the harness's: where the transcript and the
       // inbox are, and what was last said. See `harness.ts`.
       harness.report(agentId, body as Record<string, unknown>);
+      // And the same path is the usage ledger's cue to read what the turn billed.
+      usageReader?.nudge((body as Record<string, unknown>).transcript);
       const spoken = harness.isHarness(agentId);
       const spokenKey = spoken ? workspaces.keyOf(spoken) : null;
       // A prompt Kuru took, which is how a message of yours is known to have
@@ -7663,6 +7670,14 @@ async function attach(port: Port): Promise<void> {
     );
     process.exit(1);
   }
+  // The usage ledger, read after the window has had a moment. Its own file and
+  // nothing to do with whether the boards opened: a server without it has lost
+  // a chart, and it says so rather than refusing to start.
+  usageReader = openUsageReader(
+    () => store.usageAttribution(),
+    (line) => console.log(line),
+  );
+  usageReader?.start();
   // Everything the harness touches, lent as functions: `index.ts` exports
   // nothing and should not start to for one caller.
   harness = new Harness({

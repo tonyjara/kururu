@@ -250,6 +250,22 @@ for (const each of health.watch?.of ?? []) {
 }
 if (health.watch?.by?.length) row("watched by", health.watch.by.join(", "), "its window can type into this node's terminals");
 
+// The usage ledger, asked of the server: it is the one writing it, and this
+// process cannot assume a Node that has `node:sqlite` to read it with.
+if (health.ledger) {
+  const ledger = health.ledger;
+  const mb = `${(ledger.bytes / 1e6).toFixed(1)} MB`;
+  const days = ledger.oldestDay ? `oldest ${ledger.oldestDay} · newest ${ledger.newestDay}` : "nothing read yet";
+  row("ledger", `${ledger.messages.toLocaleString("en-US")} messages`, `${days} · ${ledger.sessions} sessions · ${ledger.files} files · ${mb}`);
+  if (ledger.reading) {
+    const percent = ledger.reading.totalBytes ? Math.floor((100 * ledger.reading.doneBytes) / ledger.reading.totalBytes) : 100;
+    row("", `reading… ${percent} %`, `${Math.round(ledger.reading.doneBytes / 1e6)} of ${Math.round(ledger.reading.totalBytes / 1e6)} MB, ${ledger.reading.files} files`);
+  }
+  if (ledger.skipped) row("", down(`${ledger.skipped} lines not read`), "the logs' format may have moved — see the `skipped` table in usage.db");
+  if (ledger.unpriced) row("", `${ledger.unpriced} messages unpriced`, "a model shared/prices.ts does not have; their tokens are exact");
+  if (ledger.error) row("", down("stopped"), ledger.error);
+}
+
 const listed = await ask("/api/agents");
 const agents = listed?.agents ?? [];
 const live = agents.filter((agent) => !agent.exited);

@@ -58,6 +58,16 @@ follows the aliases.
 - Adding a CLI other than Claude or Codex is a feature, not an update: it needs
   `AGENT_CLIS`, `CLI_LABELS` and `MODEL_FLAG`. Ask first.
 
+## The prices
+
+A new Claude model belongs in `PRICES` in `shared/prices.ts` too, or the usage
+ledger counts its tokens exactly and gives them no dollars, which it reports as
+unpriced. Read the five figures off
+<https://platform.claude.com/docs/en/about-claude/pricing> and never work them
+out from a multiplier, since those differ by model. A price that changed gets a
+new dated entry, not an edit, so that last month keeps the price it was billed
+at. The ledger's rows carry the estimate made when they were read.
+
 ## Finishing
 
 ```sh

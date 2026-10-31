@@ -264,6 +264,16 @@ The load-bearing invariants, one line each, with the argument behind the link:
   Codex's allowance beside it reaches nowhere: `server/src/codexusage.ts`
   reads the `rate_limits` Codex writes into its own rollouts, and only stats
   `auth.json` to know it is signed in.
+- **The usage ledger keeps the numbers and never the words.** `usage.db`, beside
+  `kururu.db` and in no copy or backup, because Claude Code deletes a transcript
+  at thirty days and this is the durable copy: one row per billed message, read
+  by `server/src/usage/` from the logs the programs already write, read-only,
+  with no model token spent and nothing told to Kuru. A byte search comes before
+  any parse; no column can hold a sentence, and a test fails if a marked word
+  gets out. It fails open: a ledger that will not open is a server without a
+  chart. Dollars are an estimate at list price (`shared/prices.ts`), and Claude
+  Code spends tokens no transcript records, so its own figure is kept beside
+  the estimate. → [data](docs/data.md#the-usage-ledger)
 - **The OpenRouter key is one of the credentials kururu stores — a
   channel's bot token, the web providers' keys and the Anthropic Admin key,
   below, are the others —

@@ -17,6 +17,37 @@ and the data for optimising tokens later, Kuru first of all. Then: kururu "is
 going to grow a lot more" — are we storing things the best way? A data lake?
 Are vector databases even worth it?
 
+## Where it stands
+
+**Phase 1 is built** (2026-10-31): the ledger, the Claude reader, the backfill,
+the sweep and the nudge. The user took every default in the questions at the
+end: kururu does not write `cleanupPeriodDays`, Codex is tokens only, the
+backup carries rollups only, and phase 7 is not built. What phase 1 found, which
+this plan said otherwise about:
+
+- **The estimate does not always match Claude Code's figure, and that is not a
+  price error.** On the 224 (session, model) pairs where Claude Code's token
+  counts equal the ledger's, the dollars agree to the cent ($2,050.50 both). On
+  680 others Claude Code counts more tokens than the transcript holds records
+  for ($8,116 against $7,438, about 9 %), and its Haiku calls and web searches
+  ($96) have next to no assistant record at all. Nothing else in the file holds
+  those counts. Phase 4 draws "Claude Code says" beside the estimate and explains
+  the gap. A resumed session can go the other way (the harness: $55 said, $87
+  estimated), because its `cost-state` starts over.
+- **"The Mac's zone" below was America/Bogota, hard-coded in `week.py`. The Mac is
+  America/Asuncion (−03).** `daily` uses the Mac's real day, as this plan asks, so
+  its Sunday and its Saturday differ from the table below by two hours of
+  messages. With the script's zone and cut, a `SELECT` reproduces the table to
+  the message: 18,708 agents, 1,827 Kuru, and every day of the week.
+- **Sonnet 5.5's cache read is $0.10**, not the $0.20 under "How the analysis was
+  made". `shared/prices.ts` has what the page says. No week's total moves.
+- **A message row is about 400 bytes with its indexes, not 150**: 39 MB for
+  91,000 messages, so the ledger is more like 400–500 MB a year at this pace.
+  Still nowhere near the points named in part 2.
+- **The logins kept by hand under `identities/` are read too** (65 files), which
+  neither this plan nor `week.py` named, because they are being pruned as well.
+  None of them had a message in the week of the table.
+
 ## Verdict
 
 **Build a usage ledger, in a second SQLite file beside `kururu.db`, filled by

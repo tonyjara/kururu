@@ -228,6 +228,57 @@ ends by printing what the backup never carried: a login per profile, the
 OpenRouter key, the Anthropic Admin key and balance, the web providers' keys, the Telegram token and account, Input
 Monitoring.
 
+## The usage ledger
+
+`~/.local/share/kururu/usage.db`, beside the boards and nothing to do with
+them. Claude Code deletes a transcript thirty days after it was written, and
+with it the only record of what that session spent, so the ledger keeps the
+numbers and leaves the words: one row per billed API message (`messages`), a
+rollup per local day and key that a page can draw (`daily`), what Claude Code
+itself says a session spent (`session_totals`), and whose each session was
+(`sessions`). No column can hold a sentence, and
+`server/test/usageledger.test.ts` writes a transcript through it and fails if a
+marked word comes out, on any table or in the raw file.
+
+It is a second file because it wants the opposite rules from `kururu.db`. It
+grows twenty times faster, is rebuildable for thirty days, and is in no daily
+copy and no backup: `shared/backup.ts`'s allow-list does not name it. **A ledger
+that will not open is a server that starts anyway**, without a chart, and
+saying so in its log. A newer build's file is left alone.
+
+`server/src/usage/` reads it in: `tail.ts` follows a file from its offset and
+searches each chunk's raw bytes for two needles before anything becomes a
+string, so the tool output and request blobs that are most of the bytes cost a
+read and no more; `claude.ts` parses what is left into numbers, or into a
+reason, kept in `skipped`; `sweep.ts` walks `~/.claude`, `identities/` and each
+profile's login every five minutes, and tails one transcript the moment its
+agent's `/api/report` names it. A first sweep over an empty ledger is the
+backfill, and the same code: machine's login first, because its next `claude`
+will prune all of it at once, then newest first. It sleeps as long as each chunk
+took, and measured over 4.1 GB it took 20 seconds with the event loop's p99 at
+6 ms. A restart anywhere in that carries on from offsets written in the same
+transaction as their rows; a file's `size` is only recorded once a read has
+finished, so that a flush part way through is not taken for the whole file.
+
+**Tokens are exact, as far as a transcript goes, and dollars are an estimate at
+list price** (`shared/prices.ts`) that the user does not pay, since they pay a
+subscription. Where Claude Code's token counts equal the ledger's the two
+agree to the cent. They are often not equal, because **Claude Code spends tokens
+that no transcript records** — its own Haiku calls, web searches, and about 9 %
+more on the sessions that show a gap, none of it in any other record of the
+file. Only its `cost-state` says so, which is why `session_totals` is kept and
+why the page must draw that figure beside the estimate rather than call the
+gap an error. On a session resumed after a restart the gap can go the other
+way: its `cost-state` starts again, and a transcript does not.
+
+Attribution is read from this database through `Store.usageAttribution` and
+never written back: a card's run first, then anything that says harness (the
+conversation's kind, the harness's folder, its title), then the conversation,
+then the folder alone. A session the database learns about later moves when the
+next sweep reads the facts again.
+
+`bun run status` prints its count and its oldest day, off `/api/health`.
+
 ## Git, in two files
 
 `worktree.ts` was the one file that ran `git`, on the user's repositories.
