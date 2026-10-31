@@ -12,6 +12,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { getDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -35,6 +36,7 @@ import {
   cleanText,
   echoLine,
   judge,
+  networkCodes,
   pairingCode,
   pairingLink,
   replySpoken,
@@ -50,6 +52,7 @@ import { replyClock, splitReply } from "../../shared/reply";
 import { viaOf, type Turn } from "../../shared/store";
 import { isClipId } from "../../shared/voice";
 import { Channels } from "../src/channels";
+import { CONNECT_ATTEMPT_MS } from "../src/connectbudget";
 import { TelegramChannel, type Fetch, type TelegramDeps } from "../src/telegram";
 
 const ME = "111222333";
@@ -427,6 +430,13 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+/** What Node's `fetch` throws when IPv4 misses its attempt timer and IPv6 has no route, down to the shape. */
+function connectFailed(): Error {
+  const v4 = Object.assign(new Error("connect ETIMEDOUT 149.154.166.110:443"), { code: "ETIMEDOUT" });
+  const v6 = Object.assign(new Error("connect EHOSTUNREACH 2001:67c:4e8:f004::9:443"), { code: "EHOSTUNREACH" });
+  return Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new AggregateError([v4, v6]), { code: "ETIMEDOUT" }) });
+}
+
 function channel(fake: ReturnType<typeof fakeTelegram>, over: Partial<TelegramDeps> = {}) {
   const said: { profileKey: string; id: string; text: string }[] = [];
   const made = new TelegramChannel({
@@ -458,6 +468,26 @@ async function ready(fake: ReturnType<typeof fakeTelegram>, over: Partial<Telegr
   made.channel.set({ enabled: true });
   return made;
 }
+
+describe("reaching Telegram", () => {
+  it("gives a far address longer than Node's 250 ms, before the server starts anything", () => {
+    expect(CONNECT_ATTEMPT_MS).toBeGreaterThan(1000);
+    expect(getDefaultAutoSelectFamilyAttemptTimeout()).toBe(CONNECT_ATTEMPT_MS);
+    const entry = readFileSync(join(import.meta.dir, "../src/index.ts"), "utf8");
+    expect(entry.slice(entry.indexOf("\nimport ") + 1).startsWith('import "./connectbudget";')).toBe(true);
+  });
+
+  it("reads a failure's codes and nothing else of it", () => {
+    expect(networkCodes(connectFailed())).toEqual(["ETIMEDOUT", "EHOSTUNREACH"]);
+    expect(networkCodes(Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("x"), { code: "ENOTFOUND" }) }))).toEqual(["ENOTFOUND"]);
+    expect(networkCodes(Object.assign(new Error("x"), { code: `https://api.telegram.org/bot${TOKEN}/getMe` }))).toEqual([]);
+    expect(networkCodes(new Error("plain"))).toEqual([]);
+    const loop = new Error("a") as Error & { cause?: unknown };
+    loop.cause = loop;
+    expect(networkCodes(loop)).toEqual([]);
+    expect(networkCodes(null)).toEqual([]);
+  });
+});
 
 describe("TelegramChannel", () => {
   it("refuses a malformed token without asking anybody", async () => {
@@ -617,6 +647,41 @@ describe("TelegramChannel", () => {
     await until(() => c.status().waiting === 0);
     const texts = fake.calls.filter((call) => call.method === "sendMessage").map((call) => call.params.text);
     expect(texts.slice(-3)).toEqual(["first", "first", "second"]);
+  });
+
+  it("sends a stuck reply as soon as a poll comes back, and says why it is stuck", async () => {
+    const fake = fakeTelegram();
+    let down = true;
+    const fetch: Fetch = async (url, init) => {
+      if (down && url.endsWith("/sendMessage")) throw connectFailed();
+      return fake.fetch(url, init);
+    };
+    const { channel: c } = await ready(fake, { fetch });
+    c.post("pk-main", "first");
+    c.post("pk-main", "second");
+    const tries = () => fake.calls.filter((call) => call.method === "getUpdates").length;
+    const polls = tries();
+    await until(() => (c.status().error ?? "").includes("ETIMEDOUT, EHOSTUNREACH"));
+    expect(c.status().error).not.toContain(TOKEN);
+    expect(c.status().waiting).toBe(2);
+    await until(() => tries() > polls);
+    down = false;
+    // Well inside the two seconds the backoff alone would have taken.
+    await until(() => c.status().waiting === 0, 1000);
+    expect(fake.sent().map((m) => m.text).slice(-2)).toEqual(["first", "second"]);
+    expect(c.status().error).toBeNull();
+  });
+
+  it("does not cut short a wait Telegram asked for", async () => {
+    const fake = fakeTelegram();
+    const { channel: c } = await ready(fake);
+    fake.replies.set("sendMessage", () => ({ status: 429, body: { ok: false, error_code: 429, description: "Too Many Requests", parameters: { retry_after: 60 } } }));
+    c.post("pk-main", "hello");
+    await until(() => fake.calls.some((call) => call.method === "sendMessage"));
+    const polls = fake.calls.filter((call) => call.method === "getUpdates").length;
+    await until(() => fake.calls.filter((call) => call.method === "getUpdates").length > polls + 2);
+    expect(fake.calls.filter((call) => call.method === "sendMessage").length).toBe(1);
+    expect(c.status().waiting).toBe(1);
   });
 
   it("says what to do when the account never pressed Start", async () => {

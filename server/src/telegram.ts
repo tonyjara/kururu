@@ -85,6 +85,7 @@ import {
   channelMessageId,
   chunkText,
   judge,
+  networkCodes,
   pairingCode,
   pollRetryMs,
   sendRetryMs,
@@ -402,6 +403,8 @@ export class TelegramChannel {
   private error: string | null = null;
   /** Why the last message out could not be sent, or null: kept apart from the poll's, so a reply refused does not read as a link that is down. */
   private sendError: string | null = null;
+  /** Why the message at the head of the queue has not gone yet, while it is being retried. Read only while it is (`status`), so nothing has to remember to clear it. */
+  private sendFailure: string | null = null;
   private pairing: { code: string; until: number; candidate: ChannelUser | null } | null = null;
   private pairTimer: ReturnType<typeof setTimeout> | null = null;
   /** A token Telegram refused while polling: nothing is asked again until a new one is pasted. */
@@ -506,7 +509,7 @@ export class TelegramChannel {
       profileId: this.settings.profileKey ? this.deps.profileIdOf(this.settings.profileKey) : null,
       speakReplies: this.settings.speakReplies,
       link: this.hint ? this.link : "off",
-      error: this.hint ? (this.error ?? this.sendError) : null,
+      error: this.hint ? (this.error ?? this.sendError ?? (this.state.outgoing[0]?.attempts ? `A reply is waiting to go. ${this.sendFailure ?? "Telegram could not be reached."} kururu keeps trying.` : null)) : null,
       pairing,
       lastInAt: this.state.lastInAt,
       lastOutAt: this.state.lastOutAt,
@@ -1260,10 +1263,26 @@ export class TelegramChannel {
           this.state.offset = updates.last + 1;
           this.saveState();
         }
+        this.retryStuck();
       }
     } finally {
       this.looping = false;
     }
+  }
+
+  /**
+   * A poll just came back, so Telegram can be reached from here: a reply
+   * waiting out its backoff goes now rather than up to five minutes from now.
+   * The backoff is for not knowing whether the network is back, and this is
+   * knowing. It is the user who is waiting, often having just written. A wait
+   * Telegram asked for is another matter (`send` zeroes `attempts` for one), and
+   * is left alone.
+   */
+  private retryStuck(): void {
+    const head = this.state.outgoing[0];
+    if (!head || head.attempts === 0 || head.nextAt <= Date.now()) return;
+    head.nextAt = 0;
+    this.flush();
   }
 
   private async pollFailed(asked: Extract<Asked, { ok: false }>): Promise<void> {
@@ -1699,6 +1718,7 @@ export class TelegramChannel {
       return;
     }
     if (asked.ok) {
+      if (item.attempts > 0) console.error(`kururu: telegram: a reply went after ${item.attempts} failed ${item.attempts === 1 ? "try" : "tries"}`);
       drop((o) => o.id === item.id);
       this.state.lastOutAt = now;
       this.sendError = null;
@@ -1708,6 +1728,9 @@ export class TelegramChannel {
     } else if (asked.aborted) {
       return;
     } else if (asked.code === 429) {
+      // Telegram answered, so this is not the network: `attempts` counts only
+      // that, and `retryStuck` must not cut short a wait Telegram asked for.
+      item.attempts = 0;
       item.nextAt = now + (asked.retryAfter ?? 5) * 1000;
     } else if (asked.code === 401 || asked.code === 404) {
       this.parked = true;
@@ -1726,6 +1749,10 @@ export class TelegramChannel {
     } else {
       item.attempts++;
       item.nextAt = now + sendRetryMs(item.attempts);
+      this.sendFailure = refusal(asked);
+      // Once per message, not per retry. These failures used to be said
+      // nowhere, which left nine minutes of silence with no reason on record.
+      if (item.attempts === 1) console.error(`kururu: telegram: a reply could not be sent, and is being retried: ${this.sendFailure}`);
     }
     this.saveState();
     this.deps.changed();
@@ -1757,7 +1784,8 @@ export class TelegramChannel {
   /**
    * One Bot API call. The token is read here, for this request, unless one
    * being tried is passed in; it goes into the URL and nowhere else, and no
-   * error from here carries the URL or anything from the network stack.
+   * error from here carries the URL or anything from the network stack but
+   * its error codes (`networkCodes`).
    */
   private async ask(
     method: string,
@@ -1804,7 +1832,8 @@ export class TelegramChannel {
     } catch (err) {
       const name = err instanceof Error ? err.name : "";
       if (options.signal?.aborted) return { ok: false, aborted: true, code: null, description: "Stopped.", retryAfter: null };
-      return { ok: false, aborted: false, code: null, description: name === "TimeoutError" ? "Telegram did not answer in time." : "Could not reach Telegram.", retryAfter: null };
+      const codes = networkCodes(err);
+      return { ok: false, aborted: false, code: null, description: name === "TimeoutError" ? "Telegram did not answer in time." : `Could not reach Telegram${codes.length > 0 ? ` (${codes.join(", ")})` : ""}.`, retryAfter: null };
     }
   }
 

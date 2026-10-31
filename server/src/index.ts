@@ -28,6 +28,8 @@
  * you run, possibly on a machine with no window on it, and the window is one
  * client of it exactly as the phone is.
  */
+// First, so that nothing this server loads opens a connection on Node's 250 ms: see the module.
+import "./connectbudget";
 import { randomUUID } from "node:crypto";
 import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { execFile, spawn } from "node:child_process";

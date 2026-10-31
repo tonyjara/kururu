@@ -118,7 +118,19 @@ still on their way out. A reply is queued, then sent strictly in order (a
 reply split in two must not arrive second half first); a 429 is waited out,
 a network failure retried on a backoff for up to twelve hours, and a 403 —
 the account never pressed Start — drops that account's queue and says so on
-the page.
+the page. A poll that comes back ends a backoff, since it proves Telegram can
+be reached; a wait Telegram itself asked for stands. While a reply is being
+retried the page says why, with the network's codes, and `server.log` says so
+once per message.
+
+**Telegram is a long way away, and Node's fallback was in a hurry.** A send
+beside the long poll is a new connection, and `server/src/connectbudget.ts`
+exists because Node gives each address but the last only 250 ms: with no IPv6
+route and Telegram 240 ms off, a little jitter failed every new connection in
+under 300 ms with `ETIMEDOUT, EHOSTUNREACH`, while curl and the poll already up
+were fine. So a healthy-looking poll with a stuck queue means look at new
+connections, and a send that fails in far less than a TLS handshake never got
+that far.
 
 ## What goes to the chat
 

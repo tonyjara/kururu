@@ -650,6 +650,29 @@ export function sendRetryMs(attempt: number): number {
 }
 
 /**
+ * Why a request never got an answer, as the network stack's own codes: `fetch`
+ * says only "fetch failed" and keeps the reason in `cause`, one code or an
+ * `AggregateError` with one per address tried. Without it a stuck queue looked
+ * the same whether DNS, a route or a timer had failed. Codes only, and only
+ * what is shaped like one, because a message here can quote the URL and the
+ * URL holds the token.
+ */
+export function networkCodes(err: unknown): string[] {
+  const codes = new Set<string>();
+  const seen = new Set<unknown>();
+  const walk = (at: unknown) => {
+    if (!at || typeof at !== "object" || seen.has(at)) return;
+    seen.add(at);
+    const { code, errors, cause } = at as { code?: unknown; errors?: unknown; cause?: unknown };
+    if (Array.isArray(errors) && errors.length > 0) errors.forEach(walk);
+    else if (typeof code === "string" && /^[A-Z][A-Z0-9_]{1,40}$/.test(code)) codes.add(code);
+    walk(cause);
+  };
+  walk(err);
+  return [...codes];
+}
+
+/**
  * How long a message waits for a channel before it is given up. Half a day: a
  * reply that took longer than that to reach the phone is history, and the
  * drawer has it.
