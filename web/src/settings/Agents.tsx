@@ -4,10 +4,10 @@
  * agent is put to sleep, what Kuru does to the screen, and — on the Mac —
  * lending this profile's Claude login to a node (`Secrets.tsx`).
  *
- * A switch per CLI and a switch per model under it. The CLI's switch leaves
- * its models' switches as they were rather than turning them off, so switching
- * Codex off for a month and back on gives back the menu you had — which is why
- * the models sit in a card that dims rather than a list that empties.
+ * A switch per CLI and a dropdown of its models under it, a switch each. The
+ * CLI's switch leaves its models' switches as they were rather than turning
+ * them off, so switching Codex off for a month and back on gives back the menu
+ * you had — which is why the dropdown dims rather than empties.
  *
  * Where the models come from is not this page's business: the catalogue is
  * `shared/launchers.ts`, kept current by a skill, and a page that let you type
@@ -27,7 +27,7 @@ import {
 import type { AgentPlacement } from "../../../shared/agentpane";
 import * as api from "../session";
 import { LendLogin } from "./Secrets";
-import { Choice, Details, Group, Mono, NumField, P, Toggle } from "./ui";
+import { Choice, Details, Group, Mono, NumField, P, SwitchMenu, Toggle } from "./ui";
 
 /** The three answers, as the segments say them; the third's tooltip is what off means. */
 export const PLACEMENT_OPTIONS = [
@@ -66,15 +66,18 @@ export function AgentsPage({
               {/* Above the models because it applies to all of them, and it
                   changes the next launch only. */}
               <Toggle label="Bypass permissions" hint={<Mono>{BYPASS_FLAG[cli]}</Mono>} on={launch.bypassClis.includes(cli)} onChange={(next) => toggleBypass(cli, next)} />
-              {LAUNCHERS.filter((launcher) => launcher.cli === cli).map((launcher) => (
-                <Toggle
-                  key={launcher.id}
-                  label={launcher.model ? launcher.label : `${launcher.label}, default model`}
-                  hint={<Mono>{launcherCommand(launcher, launch)}</Mono>}
-                  on={!launch.offLaunchers.includes(launcher.id)}
-                  onChange={(next) => toggleLauncher(launcher.id, next)}
-                />
-              ))}
+              <SwitchMenu
+                label="Models"
+                items={LAUNCHERS.filter((launcher) => launcher.cli === cli).map((launcher) => {
+                  const shown = !launch.offLaunchers.includes(launcher.id);
+                  return {
+                    label: launcher.model ? launcher.label : `${launcher.label}, default model`,
+                    title: launcherCommand(launcher, launch),
+                    on: shown,
+                    run: () => toggleLauncher(launcher.id, !shown),
+                  };
+                })}
+              />
             </fieldset>
           </Group>
         );

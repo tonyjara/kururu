@@ -42,6 +42,7 @@ import {
   type ReactNode,
 } from "react";
 import { Icon } from "../components/Icon";
+import { Menu, type MenuAction, type MenuAt } from "../components/Menu";
 
 // ---------------------------------------------------------------------------
 // Typing, and the window's keyboard
@@ -223,6 +224,55 @@ export function Toggle({
         disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
       />
+    </Row>
+  );
+}
+
+/** What a folded list of switches says while it is shut. */
+export function switchesSummary(on: number, total: number): string {
+  if (on === 0) return "None on";
+  return on === total ? `All ${total} on` : `${on} of ${total} on`;
+}
+
+/**
+ * Many switches of one kind, folded into one row: a list of models, where
+ * seven rows of `Toggle` were the page's whole height spent on something
+ * looked at twice a year. The row says how many are on and the names are its
+ * tooltip; the switches are the rows of a `Menu`, which stays open while they
+ * are flipped and has the keyboard the other menus have, the arrows to walk
+ * and Space to flip. A `<select multiple>` would be the native word for this
+ * and is a scrolling well that no skin can draw.
+ */
+export function SwitchMenu({
+  label,
+  hint,
+  items,
+}: {
+  label: string;
+  hint?: ReactNode;
+  items: ReadonlyArray<MenuAction & { on: boolean }>;
+}) {
+  const [at, setAt] = useState<MenuAt | null>(null);
+  const on = items.filter((item) => item.on);
+  const summary = switchesSummary(on.length, items.length);
+  return (
+    <Row label={label} hint={hint}>
+      <button
+        type="button"
+        className="st-select st-dropdown"
+        aria-haspopup="menu"
+        aria-expanded={at !== null}
+        aria-label={`${label}: ${summary}`}
+        title={on.map((item) => item.label).join(", ") || undefined}
+        onClick={(event) => {
+          const box = event.currentTarget.getBoundingClientRect();
+          setAt({ x: box.right, y: box.bottom + 2, fromRight: true });
+        }}
+      >
+        {summary}
+        <Icon name="caret" />
+      </button>
+      {at && <Menu at={at} onClose={() => setAt(null)} items={[...items]} />}
     </Row>
   );
 }

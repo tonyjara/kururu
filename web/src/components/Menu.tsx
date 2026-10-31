@@ -29,6 +29,15 @@
  * a row's list and Left or Escape backs out of it. When it closes, focus goes
  * back where it came from, which is usually a terminal: a right-click that left
  * the keyboard nowhere would be typing into nothing until the next click.
+ *
+ * **A row may be a switch, and a switch does not close the menu.** It is the
+ * one exception to closing on the first thing that happens: Settings' list of
+ * models is a menu you go down, turning off three, and reopening it for each
+ * would be a dropdown worse than the row of switches it replaced. It is one
+ * field, `on`, rather than a "stay open" beside a "checked", because a switch
+ * that shut the menu and a row that stayed open for no reason are both things
+ * nobody wants. What it draws is the caller's snapshot, as every switch in
+ * Settings does: the row changes when the answer comes back.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -55,11 +64,15 @@ interface MenuRow {
    * — two bullets in one row would be a row saying two things with one glyph.
    */
   unread?: boolean;
+  /** What a pointer resting on the row is told, for what the row has no room to say. */
+  title?: string;
 }
 
 /** A row that does something. */
 export interface MenuAction extends MenuRow {
   run: () => void;
+  /** This row is a switch, in this position, and `run` flips it — see the module comment. */
+  on?: boolean;
 }
 
 /** A row that opens a list of its own — see the module comment. */
@@ -72,6 +85,13 @@ export type MenuItem = MenuAction | MenuParent;
 export interface MenuAt {
   x: number;
   y: number;
+  /**
+   * `x` is where the box's right edge goes rather than its left: a dropdown
+   * under a control at the end of a row, which would otherwise hang out past
+   * the edge of the card it belongs to. The width is the box's own, so only
+   * `Popover`, which measures it, can do the subtraction.
+   */
+  fromRight?: boolean;
 }
 
 /** How far a box keeps from the window's edge, as `Popover` does. */
@@ -180,7 +200,7 @@ export function Menu({ at, items, onClose }: { at: MenuAt; items: MenuItem[]; on
   };
   const pick = (item: MenuAction) => {
     item.run();
-    onClose();
+    if (item.on === undefined) onClose();
   };
 
   const keys = (event: React.KeyboardEvent, inSide: boolean) => {
@@ -295,12 +315,15 @@ function Row({
   onHover: (row: HTMLButtonElement) => void;
 }) {
   const opens = "items" in item;
+  const on = "items" in item ? undefined : item.on;
   return (
     <button
       ref={rowRef}
-      role="menuitem"
+      role={on === undefined ? "menuitem" : "menuitemcheckbox"}
       className={`menu-item ${item.danger ? "menu-danger" : ""} ${item.sep ? "menu-sep" : ""} ${open ? "menu-item-open" : ""}`}
       disabled={item.disabled}
+      title={item.title}
+      aria-checked={on}
       aria-haspopup={opens ? "menu" : undefined}
       aria-expanded={opens ? open : undefined}
       onClick={onClick}
@@ -317,6 +340,7 @@ function Row({
       <span className="menu-label">{item.label}</span>
       {item.unread && <span className="unread" aria-label="waiting for you" />}
       {item.hint && <span className="menu-hint">{item.hint}</span>}
+      {on !== undefined && <span className={`menu-switch${on ? " menu-switch-on" : ""}`} aria-hidden />}
       {opens && (
         <span className="menu-more" aria-hidden>
           ›
@@ -382,13 +406,15 @@ export function Popover({
    */
   const [at2, setAt2] = useState(at);
 
-  useEffect(() => {
+  // A layout effect, so a box placed by its right edge is never painted once
+  // with its left edge there instead.
+  useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
     const fit = () => {
       const { width, height } = el.getBoundingClientRect();
       setAt2({
-        x: Math.max(4, Math.min(at.x, window.innerWidth - width - 4)),
+        x: Math.max(4, Math.min(at.fromRight ? at.x - width : at.x, window.innerWidth - width - 4)),
         y: Math.max(4, Math.min(at.y, window.innerHeight - height - 4)),
       });
     };
