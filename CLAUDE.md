@@ -275,7 +275,11 @@ The load-bearing invariants, one line each, with the argument behind the link:
   Code spends tokens no transcript records, so its own figure is kept beside
   the estimate. Whose a session was is written when kururu starts it
   (`usage/attribute.ts`), by id, so a resume is the same row, and that write is
-  never why an agent did not start. → [data](docs/data.md#the-usage-ledger)
+  never why an agent did not start. Settings → Usage counts sessions off what
+  was billed, never off a launch's row, reads `session_days` so a report stays
+  milliseconds on the event loop, and wears `--chart-*`, a validated table in
+  `shared/chartcolor.ts`, because the board's colours cannot be told apart at a
+  chart's size. → [data](docs/data.md#the-page)
 - **The OpenRouter key is one of the credentials kururu stores — a
   channel's bot token, the web providers' keys and the Anthropic Admin key,
   below, are the others —

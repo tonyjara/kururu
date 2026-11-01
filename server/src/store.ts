@@ -565,6 +565,18 @@ export class Store {
     return { runs, conversations, profileOfLogin };
   }
 
+  /** What the Usage page calls a workspace, removed ones included: their tokens were still spent. */
+  usageWorkspaceName(key: string): string | null {
+    const row = this.stmt("select name from workspaces where key = ?").get(key) as Row | undefined;
+    return (row?.name as string | undefined) ?? null;
+  }
+
+  /** What the Usage page calls a card, and whose board it is on. A deleted card keeps its row and so its name. */
+  usageCard(id: string): { title: string; workspaceKey: string | null } | null {
+    const row = this.stmt("select c.title, b.workspace_key from cards c join boards b on b.id = c.board_id where c.id = ?").get(id) as Row | undefined;
+    return row ? { title: row.title as string, workspaceKey: (row.workspace_key as string | null) ?? null } : null;
+  }
+
   // -------------------------------------------------------------------------
   // Identities and start-up
   // -------------------------------------------------------------------------

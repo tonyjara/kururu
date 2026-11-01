@@ -14,6 +14,8 @@ in this folder.
 | `harness.ts` | The harness's vocabulary: the MCP tool catalogue, the role prompt, key and paste grammar, when a waiting message may be typed, the frames of a notice, transcript turns, its model, effort and compaction point, its folder's two files. Pure, tested |
 | `lifecycle.ts` | The line `lifecycle.log` is made of, and reading it back forgivingly. Three processes write it; two of them are plain JS and keep in step by hand |
 | `usage.ts` | The ledger's rows, the count that refuses a non-count, the Mac's days, and whose a session was: `attributionFor` and which reading wins |
+| `usagereport.ts` | What the Usage page draws, from the ledger's cells: ranges and their edges, buckets, whose a cell is, who keeps which colour |
+| `chartcolor.ts` | The colours a chart may wear, Kuru's moved into the band, and the arithmetic that says they can be told apart |
 | `prices.ts` | What a token costs at list price, dated, read off Anthropic's page. An unknown model has no price, never a guess. Kept by the `update-models` skill |
 | `voice.ts` | The voice's vocabulary: settings, the voice catalogue, which language a text is in, which of two transcripts is real, what of a reply to say aloud, the WAV encoder. Pure, tested |
 | `reload.ts` | An agent reloading the window: what holds a reload, who asked in words, what the agent is told. Pure, tested |
@@ -105,6 +107,7 @@ in this folder.
 | `src/usage/claude.ts` | A Claude Code transcript's billed messages and `cost-state`, each field checked; which config directories are read |
 | `src/usage/sweep.ts` | The reader: the backfill, the sweep every five minutes, the nudge off `/api/report`. Types into nothing |
 | `src/usage/attribute.ts` | Whose a session was, written when kururu starts it: a launch's row, a hook's word for a session no launch knew, and Codex's id found by folder and time. Never why an agent did not start. See [data](data.md#the-usage-ledger) |
+| `src/usage/report.ts` | The Usage page's one question to the ledger, and the one number read out of a login's settings. Thin on purpose: the arithmetic is `usagereport.ts` |
 | `src/codexusage.ts` | The Codex allowance, off the `rate_limits` in the newest rollout of the Codex home in use. No credential, no request |
 | `src/machines.ts` | The bottom bar's machines (a VPS, a PC on the tailnet): the user's own `ssh`, `BatchMode`, one fixed read-only script, `tmux ls` before a session that types something, `tmux kill-session` when a session tab is closed, and two fixed reads of an agent's conversation files for `sleep.ts`. A client names a host and nothing else (`shared/machines.ts`, [machines](machines.md)) |
 | `src/onscreen.ts` | Reads each remote agent's screen every two seconds and posts the status through `host.report`, as a hook would have ([machines](machines.md#status-read-off-the-screen)) |

@@ -29,6 +29,7 @@ export function BarChip({
   label,
   className = "",
   chip,
+  onPress,
   children,
 }: {
   /** What the chip is — its title while shut, and the popover's name. */
@@ -37,6 +38,13 @@ export function BarChip({
   className?: string;
   /** What the chip itself shows. */
   chip: ReactNode;
+  /**
+   * What a mouse's click does instead of pinning, for a chip whose popover a
+   * mouse already has on hover and whose click can therefore mean something
+   * more. Only a mouse's: a finger has no hover, so a tap still opens the
+   * popover, and whatever this opens must be a row in there too.
+   */
+  onPress?: () => void;
   /** The popover's content, or a function of the way to shut it. */
   children: ReactNode | ((close: () => void) => ReactNode);
 }) {
@@ -88,7 +96,12 @@ export function BarChip({
       <button
         className={`sb-usage-chip ${open ? "sb-usage-on" : ""}`}
         onMouseDown={(event) => event.preventDefault()}
-        onClick={() => {
+        onClick={(event) => {
+          if (onPress && (event.nativeEvent as PointerEvent).pointerType === "mouse") {
+            close();
+            onPress();
+            return;
+          }
           const next = !pinned;
           setPinned(next);
           setOpen(next);

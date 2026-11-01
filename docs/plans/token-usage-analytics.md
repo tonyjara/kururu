@@ -80,6 +80,28 @@ about:
   a week, because nothing here reads rollouts over ssh for one with no card. Its
   transcripts are not read yet either.
 
+**Phase 4 is built** (2026-11-01): Settings → System → Usage, in
+`web/src/settings/Usage.tsx`, `web/src/charts/`, `shared/usagereport.ts` and
+`server/src/usage/report.ts`. `docs/data.md` has the reasoning. Where it differs
+from "The page" below, and why:
+
+- **The board's palette and `--accent` cannot pass the validator**, on any dark
+  theme. The series are their own table, Kuru keeps the accent's hue moved into
+  the band, and `--dim` steps away from Kuru on the default theme, where the two
+  were 11 apart.
+- **A `session_days` rollup, not `daily`.** `daily` cannot name a folder or a
+  session. A limit week's two ends come off `messages`.
+- **Kuru vs agents is a sixth value of the dimension control**, since the default
+  has to be workspace for the ranked bars to mean anything. Kuru is not a row by
+  model or by program.
+- **Boxes for everything but the lines**, not all SVG.
+- **"What kind of token" is two bars**, tokens over dollars: alone, tokens are one
+  98 % block.
+- **Today is drawn by the hour**, and All by the month.
+- **The limit panel is here**, drawing what `limits` has: Codex, and Claude's
+  current reading. Phase 5's job is to write Claude's into `limits`, and the page needs no
+  change for that. Phase 5's export should keep reading `daily`.
+
 ## Verdict
 
 **Build a usage ledger, in a second SQLite file beside `kururu.db`, filled by
@@ -478,6 +500,8 @@ limits   (at, account, kind, scope, percent, resets_at, source)    -- usage.ts a
 skipped  (path, line_no, why, at)                                   -- what the parser would not read, capped
 waiting  (agent_id, program, profile_key, workspace_key, card_id, kind, node, machine, login_dir, cwd, at)
                                                                     -- a launch whose program has not said its id: Codex (version 2)
+session_days (day, session_id, model, messages, input, cache_write_5m, cache_write_1h, cache_read, output, thinking,
+          cost_est, unpriced, PRIMARY KEY (day, session_id, model))  -- what the Usage page reads (version 3)
 ```
 
 Indexes: `messages(at)`, `messages(session_id, at)`, `daily(day)`,

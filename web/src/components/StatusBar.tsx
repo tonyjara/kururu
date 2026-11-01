@@ -84,6 +84,8 @@ interface Props {
   chips: ReactNode;
   /** A page of Settings, from the foot of the machines or OpenRouter chip's popover. */
   onSettings: (page: "machines" | "openrouter" | "anthropic") => void;
+  /** Settings → Usage, from an allowance's chip. */
+  onUsage: () => void;
 }
 
 export function StatusBar({
@@ -98,6 +100,7 @@ export function StatusBar({
   onLastPane,
   chips,
   onSettings,
+  onUsage,
 }: Props) {
   const running = agents.filter(countsAsAgent);
   const working = running.filter((agent) => agent.status === "working").length;
@@ -110,7 +113,7 @@ export function StatusBar({
           Anthropic API credit's estimate. Each opens its detail on a hover
           or a tap. See `Usage.tsx`, `Machines.tsx`, `OpenRouter.tsx` and
           `AnthropicCredit.tsx`. */}
-      <UsageChips />
+      <UsageChips onDetails={onUsage} />
       <MachinesChip onSettings={() => onSettings("machines")} />
       <OpenRouterChip onSettings={() => onSettings("openrouter")} />
       <AnthropicCreditChip onSettings={() => onSettings("anthropic")} />

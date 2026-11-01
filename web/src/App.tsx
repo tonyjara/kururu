@@ -1874,6 +1874,7 @@ export function App() {
         prefixArmed={prefixArmed}
         resizeMode={resizeMode}
         onSettings={setSettings}
+        onUsage={() => setSettings("usage")}
         /* The toggle and the chips come down here on a phone only: its
            sidebar is a screen, so there is no header on show to hold them. */
         toggle={narrow ? toggle : null}

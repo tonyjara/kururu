@@ -63,7 +63,7 @@ import type {
   WorkspaceBranch,
   WorkspaceProject,
 } from "../../shared/wire";
-import { COMMIT_MESSAGE_MAX, GIT_ACTIONS, GIT_STATUS_MS } from "../../shared/wire";
+import { COMMIT_MESSAGE_MAX, GIT_ACTIONS, GIT_STATUS_MS, type UsageLimit } from "../../shared/wire";
 import { DB_ROW_CAP, DB_SQL_MAX, type WorkspaceDatabase } from "../../shared/databases";
 import { DROP_MAX_BYTES } from "../../shared/drops";
 import { isPictureName } from "../../shared/pictures";
@@ -135,6 +135,8 @@ import { hostname } from "node:os";
 import { Store, dataDir, dbPath } from "./store";
 import { openUsageReader, type UsageReader } from "./usage/sweep";
 import { Launches, type LaunchNote } from "./usage/attribute";
+import { readRetention, usageReport } from "./usage/report";
+import { isUsageDimension, isUsageRange, type UsageDimension, type UsageNames, type UsageRange, type UsageReport } from "../../shared/usagereport";
 import type { LaunchRow } from "../../shared/usage";
 import { isSearchScope, sessionOfTranscript, type Actor, type SearchHit } from "../../shared/store";
 import { configDir } from "./config";
@@ -2155,6 +2157,61 @@ function launchRow(agentId: string, profileId: string, workspaceId: string | nul
 /** kururu has just started an agent: the ledger is told whose it is. See `usage/attribute.ts`. */
 function noteLaunch(agentId: string, profileId: string, workspaceId: string | null, note: LaunchNote): void {
   usageLaunches?.spawned(launchRow(agentId, profileId, workspaceId, note));
+}
+
+/**
+ * What the Usage page needs from the rest of the server: what things are called
+ * and what is alive. Memoised for the one request, since these are asked per
+ * cell and a card's title is a query. A session's `agent_id` is only as good as
+ * the terminal still being the one it named, and ids are given out again after a
+ * host restart, so a terminal younger than the session's last message is
+ * somebody else's.
+ */
+function usageReportFor(reader: UsageReader, range: UsageRange, by: UsageDimension): UsageReport {
+  const memo = <T,>(read: (key: string) => T) => {
+    const held = new Map<string, T>();
+    return (key: string): T => {
+      if (!held.has(key)) held.set(key, read(key));
+      return held.get(key)!;
+    };
+  };
+  const home = homedir();
+  const card = memo((id) => store.usageCard(id));
+  const liveIn = workspaces.active.workspaces;
+  const names: UsageNames = {
+    workspace: memo((key) => store.usageWorkspaceName(key)),
+    card: (id) => card(id)?.title ?? null,
+    liveAgent: (fact) => {
+      if (!fact.agentId) return null;
+      const agent = host.find(fact.agentId);
+      if (!agent || agent.exited || agent.createdAt > fact.lastAt) return null;
+      return { id: agent.id, label: agentLabel(agent) };
+    },
+    openableCard: (id) => {
+      const key = card(id)?.workspaceKey;
+      const workspace = key ? liveIn.find((w) => w.key === key) : undefined;
+      return workspace ? { workspaceId: workspace.id } : null;
+    },
+    folder: (path) => (path === home ? "~" : path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path),
+  };
+  const claude = usageSnapshot();
+  const weekly = (limits: readonly UsageLimit[] | undefined) => {
+    const held = limits?.find((limit) => limit.kind === "weekly_all") ?? limits?.find((limit) => limit.kind.startsWith("weekly"));
+    const at = held?.resetsAt ? Date.parse(held.resetsAt) : NaN;
+    return Number.isFinite(at) ? at : null;
+  };
+  const claudeWeek = weekly(claude?.limits);
+  const codexWeek = weekly(codexUsageSnapshot()?.limits);
+  const profile = claudeDirOf(workspaces.active.id);
+  const machine = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+  return usageReport(reader.ledger, range, by, Date.now(), {
+    names,
+    weekResetsAt: claudeWeek ?? codexWeek,
+    weekOwner: claudeWeek !== null ? "claude" : codexWeek !== null ? "codex" : null,
+    liveLimits: (claude?.limits ?? []).map((limit) => ({ at: claude!.at, kind: limit.kind, scope: limit.scope, percent: limit.percent, source: "claude" })),
+    retention: profile === machine ? [readRetention(machine, "This Mac's login")] : [readRetention(profile, `${workspaces.active.name}'s login`), readRetention(machine, "This Mac's login")],
+    status: reader.status(),
+  });
 }
 
 /** A hook in one of kururu's terminals named its session, which may be one no launch knew: `/clear`, or a `claude` typed into a shell. */
@@ -6489,6 +6546,23 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    */
   if (url.pathname === "/api/footprint") {
     json(res, await footprint());
+    return;
+  }
+
+  /**
+   * Settings → Usage, asked for while the page is open and never pushed: what a
+   * range spent is a page's question, and the ledger's reader changes it every
+   * few seconds whether or not anybody is looking. Names and live terminals are
+   * looked up here because the ledger has neither. See `usage/report.ts`.
+   */
+  if (url.pathname === "/api/usage/report") {
+    if (!usageReader) {
+      json(res, { error: "The usage ledger did not open, so there is nothing to draw. Why is in the server's log." }, 503);
+      return;
+    }
+    const range = url.searchParams.get("range");
+    const by = url.searchParams.get("by");
+    json(res, usageReportFor(usageReader, isUsageRange(range) ? range : "week", isUsageDimension(by) ? by : "workspace"));
     return;
   }
 

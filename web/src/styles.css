@@ -10886,3 +10886,542 @@ html.note-page #root {
   font-size: var(--fs-base);
   color: var(--dim);
 }
+
+/* Settings → Usage (`settings/Usage.tsx`) and the charts it draws
+   (`charts/`). A chart's colours are written by `applyTheme` from
+   `shared/chartcolor.ts`, so only ink and chrome tokens are named here; the 2px
+   between marks is `--border-thick` because it is the same surface gap a skin's
+   thick rule is, and the axis's gutter is in em so it grows with the type. */
+.ch-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--st-gap);
+}
+.ch-filters .st-select {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.ch-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--st-stack);
+  transition: opacity 120ms;
+}
+.ch-page-busy {
+  opacity: 0.6;
+}
+.ch-span {
+  margin: 0;
+}
+.ch-page > .st-tiles {
+  padding: 0;
+}
+.ch-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--st-gap);
+}
+.ch-toggle {
+  padding: 1px 6px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--dim);
+  font-size: var(--fs-sm);
+  font-weight: normal;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.ch-toggle:hover {
+  color: var(--text);
+}
+.ch-body {
+  position: relative;
+  padding: 12px var(--st-x);
+  min-width: 0;
+}
+.ch-tablewrap {
+  overflow-x: auto;
+}
+.ch-frame .ch-tablewrap {
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+/* One tooltip per chart, off the pointer. Values lead and names follow, the
+   legend's order turned round, because here the reader has the name. */
+.ch-tip {
+  position: absolute;
+  z-index: 5;
+  transform: translate(10px, calc(-100% - 8px));
+  width: max-content;
+  max-width: min(260px, 70vw);
+  padding: 6px 8px;
+  border: var(--border) var(--border-style) var(--line-high);
+  border-radius: var(--radius-md);
+  background: var(--chrome-high);
+  box-shadow: var(--elev-menu);
+  pointer-events: none;
+  font-size: var(--fs-sm);
+}
+.ch-tip-left {
+  transform: translate(calc(-100% - 10px), calc(-100% - 8px));
+}
+.ch-tip-below {
+  transform: translate(10px, 14px);
+}
+.ch-tip-left.ch-tip-below {
+  transform: translate(calc(-100% - 10px), 14px);
+}
+.ch-tip-title {
+  margin-bottom: 3px;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.ch-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ch-tip-key {
+  flex: none;
+  width: 10px;
+  height: var(--border-thick);
+}
+.ch-tip-value {
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+.ch-tip-label {
+  color: var(--dim);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ch-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.ch-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+}
+.ch-legend-name {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ch-legend-note {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.ch-key {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: var(--radius-xs);
+}
+.ch-key-line {
+  flex: none;
+  width: 12px;
+  height: var(--border-thick);
+}
+
+/* Ranked bars. The name, the bar, then the figures in columns of their own, so
+   the eye can run down them; on a phone the name goes above. */
+.ch-ranked {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ch-rank {
+  display: grid;
+  grid-template-columns: minmax(0, 11em) minmax(0, 1fr) 4.2em 3.4em;
+  align-items: center;
+  column-gap: 8px;
+  min-height: 24px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-base);
+}
+.ch-rank:hover,
+.ch-rank:focus-visible {
+  background: var(--chrome-high);
+  outline: none;
+}
+.ch-rank-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text);
+  white-space: nowrap;
+}
+.ch-rank-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ch-rank-sub {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+.ch-rank-track {
+  display: block;
+  min-width: 0;
+}
+.ch-rank-bar {
+  display: block;
+  min-width: var(--border-thick);
+  height: 14px;
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+}
+.ch-rank-tokens,
+.ch-rank-share {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ch-rank-tokens {
+  color: var(--dim);
+}
+.ch-rank-share {
+  color: var(--text-strong);
+}
+.st-dialog-narrow .ch-rank {
+  grid-template-columns: minmax(0, 1fr) 4.2em 3.4em;
+  row-gap: 2px;
+  padding: 3px 0;
+}
+.st-dialog-narrow .ch-rank-name {
+  grid-column: 1 / -1;
+}
+
+/* Columns. The gutter holds the axis; the plot and the limit's below share it,
+   so a Thursday is under a Thursday. */
+.ch-chart {
+  min-width: 0;
+}
+.ch-gutter {
+  flex: none;
+  width: 3.4em;
+}
+.ch-plotrow {
+  display: flex;
+  height: 168px;
+  padding-top: 14px;
+  font-size: var(--fs-sm);
+}
+.ch-limit .ch-plotrow {
+  height: 92px;
+  padding-top: 6px;
+}
+.ch-y {
+  position: relative;
+  color: var(--dim);
+}
+.ch-y-tick {
+  position: absolute;
+  right: 6px;
+  transform: translateY(50%);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ch-plot {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ch-grid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--border);
+  background: var(--line);
+}
+.ch-slots {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+.ch-slot {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.ch-slot:hover,
+.ch-slot:focus-visible {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  outline: none;
+}
+.ch-slot-line:hover::after,
+.ch-slot-line:focus-visible::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: var(--border);
+  background: var(--line-high);
+}
+.ch-col {
+  position: relative;
+  display: flex;
+  flex-direction: column-reverse;
+  width: 70%;
+  max-width: 24px;
+  min-width: 1px;
+}
+.ch-seg {
+  display: block;
+  border-top: var(--border-thick) var(--border-style) var(--chrome);
+}
+.ch-seg:last-child {
+  border-top: none;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+.ch-peak {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 1px;
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ch-x {
+  display: flex;
+  margin-top: 4px;
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+.ch-x-labels {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+}
+.ch-x-label {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+  white-space: nowrap;
+}
+.ch-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.ch-dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  transform: translate(-50%, 50%);
+  border-radius: var(--radius-round);
+  box-shadow: 0 0 0 var(--border-thick) var(--chrome);
+  pointer-events: none;
+}
+
+/* The tall segmented bar, twice: 28px, each part its block with its share on it,
+   the ink chosen for that fill by `chartTokens`. */
+.ch-segs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ch-segs .ch-legend {
+  margin: 2px 0 0;
+}
+.ch-segrow {
+  display: grid;
+  grid-template-columns: 4.6em minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.ch-seg-name {
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.ch-segbar {
+  display: flex;
+  gap: var(--border-thick);
+  height: 28px;
+  min-width: 0;
+}
+.ch-segpart {
+  flex: 1 1 0;
+  min-width: var(--border-thick);
+  overflow: hidden;
+  padding: 0 5px;
+  border-radius: var(--radius-lg);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: 28px;
+  white-space: nowrap;
+}
+.ch-segpart:hover,
+.ch-segpart:focus-visible {
+  outline: var(--border) var(--border-style) var(--text);
+  outline-offset: 1px;
+}
+
+/* Context carried: small multiples on one scale. */
+.ch-strips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+}
+.st-dialog-narrow .ch-strips {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.ch-strip {
+  margin: 0;
+  min-width: 0;
+}
+.ch-strip-head {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-bottom: 4px;
+}
+.ch-strip-name,
+.ch-strip-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ch-strip-name {
+  font-size: var(--fs-base);
+  color: var(--text);
+}
+.ch-strip-sub {
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+.ch-strip-plot {
+  position: relative;
+  height: 52px;
+  border-bottom: var(--border) var(--border-style) var(--line);
+}
+.ch-strip-plot:focus-visible {
+  outline: var(--border) var(--border-style) var(--line-high);
+}
+.ch-strip-mark {
+  background: var(--line-high);
+}
+
+/* Tables: a chart's twin and the sessions. Figures line up, so they alone get
+   tabular numbers. */
+.ch-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+.ch-table th {
+  position: sticky;
+  top: 0;
+  background: var(--chrome);
+  color: var(--dim);
+  font-weight: normal;
+  text-align: left;
+  white-space: nowrap;
+}
+.ch-table th,
+.ch-table td {
+  padding: 3px 6px;
+  border-bottom: var(--border) var(--border-style) var(--line);
+}
+.ch-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.ch-table .ch-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ch-sessions td {
+  vertical-align: top;
+  color: var(--dim);
+}
+.ch-sessions .ch-strong {
+  color: var(--text-strong);
+}
+.ch-sort {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+}
+.ch-sort:hover {
+  color: var(--text);
+}
+.ch-when {
+  white-space: nowrap;
+}
+.ch-what {
+  max-width: 15em;
+  min-width: 0;
+}
+.ch-what-name,
+.ch-what-sub {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ch-what-name {
+  color: var(--text);
+}
+.ch-what-sub {
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+.ch-where {
+  max-width: 8em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ch-go {
+  display: flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+.ch-tap {
+  cursor: var(--cursor-pointer);
+}
+.st-dialog-narrow .ch-what {
+  max-width: 60vw;
+}
+.ch-more {
+  color: var(--dim);
+  line-height: var(--ui-line-height);
+}
+.ch-more .ch-go {
+  margin-top: 4px;
+}

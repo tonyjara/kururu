@@ -25,6 +25,7 @@ import { applyTerminalAppearance } from "./terminals";
 import { applySkin } from "./skin";
 import type { Appearance, Theme, UiTokens, WorkspaceColorName } from "../../shared/theme";
 import { themeFor } from "../../shared/theme";
+import { chartTokens } from "../../shared/chartcolor";
 import { skinFor } from "../../shared/skin";
 import { EMPTY_LIBRARY, type StyleLibrary } from "../../shared/styles";
 
@@ -82,6 +83,12 @@ export function applyTheme(theme: Theme): void {
    * declarations, which never see the one written inline here.
    */
   root.style.setProperty("--chrome-low", chromeLow(theme));
+  /**
+   * The colours a chart wears, which are not the theme's to choose: they are
+   * validated against each other, and only Kuru's follows the accent. See
+   * `shared/chartcolor.ts`, which is why these are not in the palettes.
+   */
+  for (const [name, value] of Object.entries(chartTokens(theme))) root.style.setProperty(name, value);
   /**
    * The eight workspace tags, as properties rather than as a lookup.
    *

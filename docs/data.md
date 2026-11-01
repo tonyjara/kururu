@@ -322,6 +322,55 @@ sessions off `messages` or `daily`.
 
 `bun run status` prints its count and its oldest day, off `/api/health`.
 
+### The page
+
+Settings → System → Usage (`web/src/settings/Usage.tsx`), and a mouse's click on
+an allowance's chip; a finger still gets the popover, whose last row is the same
+door. `GET /api/usage/report?range&by` is asked while the page is open and once a
+minute after that, and the arithmetic is `shared/usagereport.ts`, pure, so a
+tile and the chart under it cannot disagree.
+
+**`session_days` is what it reads, not `daily`** (version 3; the plan said
+`daily`). `daily` cannot name a folder or draw a session's row, and the messages
+behind a month are 70,000 rows on the event loop every terminal shares. It is a
+few rows per session per day with no attribution in it, so a session that changes
+hands moves on the page with nothing to rebuild; `daily` stays for phases 5 and 6.
+A span that does not fall on midnight (a limit week, or "today") takes its two
+ends off `messages` (`splitDays`), so a limit week is cut at the account's
+instant. A report is about 10–40 ms on this Mac's 96,000 messages.
+
+**Sessions are counted off cells, never off `sessions`**, because a launch writes
+that row before anything is billed. Kuru is always a row of its own except by
+model and by program, where carving it out would make Opus read shorter than its
+bill. A comparison is the same length of time ending the same distance back, so
+today at nine is set beside yesterday by nine.
+
+**Colour.** The plan had the board's palette and `--accent`, and neither can pass:
+those colours are chosen for chips and sit at OKLCH lightness 0.71–0.92 on the dark
+themes where a chart's want 0.48–0.67. So the series are a table per appearance
+in `shared/chartcolor.ts`, and `applyTheme` writes them as `--chart-*`. Kuru keeps
+the accent's hue, moved into the band, and the quiet colour is `dim` stepped until
+it can be told from Kuru: on the default theme the two were 11 apart. A series's
+slot goes by all-time rank (`seriesSlots`), so a filter never repaints a survivor.
+`web/test/usage-palette.test.ts` runs the checks on every built-in theme and both
+surfaces; its arithmetic is held to the figures the method publishes for its own
+palette. An installed theme gets the same `kuruInk` and no check.
+
+**Marks.** No charting library, in `web/src/charts/`. Bars, columns and segments
+are boxes rather than SVG: a name then wraps and ellipsises by itself, and corners
+come from the skin's radius tokens. Only the lines are SVG. Every chart has a table
+behind a toggle, which is what makes a tooltip and a colour under 3:1 legal. "What
+kind of token" draws two bars, tokens over dollars, because tokens alone are one
+block at 98 %.
+
+**The limit panel** draws the `limits` table, which is Codex's until phase 5, plus
+whatever Claude reading is in hand now, so Claude's line starts as one dot. The
+"this limit week" range takes its instant from Claude's reading, then Codex's, says
+whose, and says when it had to fall back to seven days.
+
+`cleanupPeriodDays` is read per login, that one number and nothing else from the
+file, and never written. The answer to the plan's first question stands.
+
 ## Git, in two files
 
 `worktree.ts` was the one file that ran `git`, on the user's repositories.

@@ -49,6 +49,7 @@ import {
   type UsageProgram,
   type WaitingLaunch,
 } from "../../../shared/usage";
+import { splitDays, type LimitReading, type SessionFact, type UsageCell } from "../../../shared/usagereport";
 import { dataDir } from "../store";
 
 export function ledgerPath(): string {
@@ -114,11 +115,36 @@ create table if not exists waiting (
 ) without rowid;
 `;
 
+/**
+ * What the Usage page reads: `daily` again, but by session rather than by
+ * attribution, since a page that names a folder or draws a session's row cannot
+ * get either out of a table keyed by workspace. A few rows per session per day,
+ * where the messages behind them are thousands, and with no attribution in it,
+ * so a session that changes hands moves on the page without a row here changing.
+ * `daily` stays as the shape phase 5's export and phase 6's pull want.
+ */
+const SESSION_DAYS = `
+create table if not exists session_days (
+  day text not null, session_id text not null, model text not null, messages integer not null,
+  input integer not null, cache_write_5m integer not null, cache_write_1h integer not null, cache_read integer not null,
+  output integer not null, thinking integer not null, cost_est real not null, unpriced integer not null,
+  primary key (day, session_id, model)
+) without rowid;
+`;
+
 /** Each entry takes the file from its index's version to the next. The first makes it. */
-const MIGRATIONS: readonly string[] = [SCHEMA, WAITING];
+const MIGRATIONS: readonly string[] = [SCHEMA, WAITING, SESSION_DAYS];
 
 /** A format that moved would otherwise write a row per line forever; the count stops being useful long before this. */
 const MAX_SKIPPED = 10_000;
+
+/** One cell's numbers off `messages`, in `session_days`' order, for the two places that sum them. */
+const CELL_SUMS = `count(*), sum(input), sum(cache_write_5m), sum(cache_write_1h), sum(cache_read), sum(output), sum(thinking),
+         coalesce(sum(cost_est), 0), sum(cost_est is null)`;
+/** The same read back: `messages`' sums and `session_days`' columns, under one set of names. */
+const CELL_READ = `count(*) as messages, sum(input) as input, sum(cache_write_5m) as cache_write_5m, sum(cache_write_1h) as cache_write_1h,
+         sum(cache_read) as cache_read, sum(output) as output, sum(thinking) as thinking, coalesce(sum(cost_est), 0) as cost_est, sum(cost_est is null) as unpriced`;
+const QUARTER_MS = 900_000;
 
 export interface FileRow {
   path: string;
@@ -241,6 +267,10 @@ export class Ledger {
     for (let v = version; v < MIGRATIONS.length; v++) {
       this.tx(() => {
         this.db.exec(MIGRATIONS[v]!);
+        // A new rollup is empty and the messages it rolls up are already here.
+        if (MIGRATIONS[v] === SESSION_DAYS) {
+          for (const row of this.db.prepare("select distinct day from daily").all() as Row[]) this.rollupSessions(row.day as string);
+        }
         this.db.exec(`pragma user_version = ${v + 1}`);
       });
     }
@@ -474,6 +504,19 @@ export class Ledger {
        where m.at >= ? and m.at < ?
        group by 2, 3, 4, 5, 6, 7, 8`,
     ).run(day, start, end);
+    this.rollupSessions(day);
+  }
+
+  /** A local day's rows of `session_days`, made again from its messages. */
+  private rollupSessions(day: string): void {
+    const { start, end } = dayBounds(day);
+    this.stmt("delete from session_days where day = ?").run(day);
+    this.stmt(
+      `insert into session_days(day, session_id, model, messages, input, cache_write_5m, cache_write_1h, cache_read, output, thinking, cost_est, unpriced)
+       select ?, session_id, model, ${CELL_SUMS}
+       from messages where at >= ? and at < ?
+       group by session_id, model`,
+    ).run(day, start, end);
   }
 
   /**
@@ -640,6 +683,95 @@ export class Ledger {
   // Reading
   // -------------------------------------------------------------------------
 
+  /**
+   * What was billed in a span, a cell per session per model per slice: whole
+   * days off the rollup, however many messages are behind them, and the two ends
+   * that do not fall on midnight off the messages, which are at most two days'
+   * worth. What the page asks for most, so what must not grow with the ledger.
+   */
+  usageCells(from: number, to: number): UsageCell[] {
+    const { firstDay, lastDay, edges } = splitDays(from, to);
+    const out: UsageCell[] = [];
+    if (firstDay && lastDay) {
+      const starts = new Map<string, number>();
+      for (const row of this.stmt("select * from session_days where day >= ? and day <= ?").all(firstDay, lastDay) as Row[]) {
+        const day = row.day as string;
+        let at = starts.get(day);
+        if (at === undefined) {
+          at = dayBounds(day).start;
+          starts.set(day, at);
+        }
+        out.push(cellOf(row, at));
+      }
+    }
+    for (const edge of edges) {
+      for (const row of this.stmt(`select session_id, model, ${CELL_READ} from messages where at >= ? and at < ? group by session_id, model`).all(edge.from, edge.to) as Row[]) {
+        out.push(cellOf(row, edge.from));
+      }
+    }
+    return out;
+  }
+
+  /** A span by the quarter hour, off the messages, for a single day drawn by the hour. Quarters because every zone there is falls on one. */
+  usageQuarters(from: number, to: number): UsageCell[] {
+    const rows = this.stmt(`select session_id, model, at / ${QUARTER_MS} * ${QUARTER_MS} as quarter, ${CELL_READ} from messages where at >= ? and at < ? group by session_id, model, quarter`).all(from, to) as Row[];
+    return rows.map((row) => cellOf(row, Math.max(from, row.quarter as number)));
+  }
+
+  /** Everything ever, by session and model: who has spent the most is what decides who keeps which colour. */
+  usageAllTime(): UsageCell[] {
+    const rows = this.stmt(
+      `select session_id, model, sum(messages) as messages, sum(input) as input, sum(cache_write_5m) as cache_write_5m, sum(cache_write_1h) as cache_write_1h,
+         sum(cache_read) as cache_read, sum(output) as output, sum(thinking) as thinking, sum(cost_est) as cost_est, sum(unpriced) as unpriced
+       from session_days group by session_id, model`,
+    ).all() as Row[];
+    return rows.map((row) => cellOf(row, 0));
+  }
+
+  /** Every session the ledger has heard of, to look up by an id a cell named. A launch's row has no messages yet, so this is never a count. */
+  usageFacts(): Map<string, SessionFact> {
+    const out = new Map<string, SessionFact>();
+    for (const row of this.stmt("select id, program, kind, workspace_key, card_id, cwd, attributed_by, agent_id, started_at, last_at from sessions").all() as Row[]) {
+      out.set(row.id as string, {
+        id: row.id as string,
+        program: row.program as UsageProgram,
+        kind: row.kind as SessionFact["kind"],
+        workspaceKey: (row.workspace_key as string | null) ?? null,
+        cardId: (row.card_id as string | null) ?? null,
+        cwd: (row.cwd as string | null) ?? null,
+        attributedBy: row.attributed_by as SessionFact["attributedBy"],
+        agentId: (row.agent_id as string | null) ?? null,
+        startedAt: row.started_at as number,
+        lastAt: row.last_at as number,
+      });
+    }
+    return out;
+  }
+
+  /** What the programs themselves say each session spent, in dollars, where they say. */
+  usageSays(): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const row of this.stmt("select session_id, sum(cost_program) as says from session_totals where cost_program is not null group by session_id").all() as Row[]) {
+      out.set(row.session_id as string, row.says as number);
+    }
+    return out;
+  }
+
+  /**
+   * How much context a session carried on each of its messages, in order. A
+   * subagent's messages are its own conversation, so they are left out rather
+   * than drawn as sawteeth through the parent's.
+   */
+  usageContext(sessionId: string): number[] {
+    const rows = this.stmt("select input + cache_read + cache_write_5m + cache_write_1h as context from messages where session_id = ? and sidechain = 0 order by at").all(sessionId) as Row[];
+    return rows.map((row) => row.context as number);
+  }
+
+  usageLimits(from: number, to: number): LimitReading[] {
+    const rows = this.stmt("select at, kind, scope, percent, source from limits where at >= ? and at < ? and percent is not null order by at").all(from, to) as Row[];
+    return rows.map((row) => ({ at: row.at as number, kind: row.kind as string, scope: (row.scope as string | null) ?? null, percent: row.percent as number, source: row.source as string }));
+  }
+
   /** The counts `bun run status` prints. Off `daily` where it can, which is a few thousand rows however many messages. */
   counts(): { messages: number; sessions: number; files: number; oldestDay: string | null; newestDay: string | null; skipped: number; unpriced: number; bytes: number } {
     const daily = this.stmt("select coalesce(sum(messages), 0) as messages, coalesce(sum(unpriced), 0) as unpriced, min(day) as oldest, max(day) as newest from daily").get() as Row;
@@ -665,6 +797,23 @@ export class Ledger {
       bytes,
     };
   }
+}
+
+function cellOf(row: Row, at: number): UsageCell {
+  return {
+    at,
+    sessionId: row.session_id as string,
+    model: row.model as string,
+    messages: row.messages as number,
+    input: row.input as number,
+    write5m: row.cache_write_5m as number,
+    write1h: row.cache_write_1h as number,
+    read: row.cache_read as number,
+    output: row.output as number,
+    thinking: row.thinking as number,
+    cost: row.cost_est as number,
+    unpriced: row.unpriced as number,
+  };
 }
 
 function attributionFromRow(row: Row): Attribution {

@@ -42,7 +42,7 @@ import { limitLabel, limitMarks, limitTitle, resetIn, staleTitle } from "../usag
  * recorded has reset since, which is what "signed in, not used lately" looks
  * like from a rollout.
  */
-export function UsageChips() {
+export function UsageChips({ onDetails }: { onDetails: () => void }) {
   const { usage, codexUsage } = useKururu();
   /**
    * A tick, only so the countdowns move. The numbers arrive on their own push
@@ -67,6 +67,7 @@ export function UsageChips() {
           limits={claude.limits}
           stale={claude.stale ? staleTitle(claude.at) : null}
           foot={claude.email}
+          onDetails={onDetails}
         />
       )}
       {codexUsage && (
@@ -83,6 +84,7 @@ export function UsageChips() {
               ? "No Codex session on this Mac has recorded its limits yet."
               : `Every window it last recorded, ${when(codexUsage.at)}, has reset since. Codex writes its limits into each session, so the next Codex turn here brings them back.`
           }
+          onDetails={onDetails}
         />
       )}
     </span>
@@ -100,6 +102,7 @@ function UsageChip({
   stale,
   foot,
   empty,
+  onDetails,
 }: {
   name: string;
   icon: ReactNode;
@@ -109,6 +112,8 @@ function UsageChip({
   foot: string | null;
   /** What the bars say when there are none. */
   empty?: string;
+  /** Settings → Usage, which is where "am I running out" gets its why. A mouse's click on the chip; on a phone, the last row of the popover. */
+  onDetails: () => void;
 }) {
   const marks = limitMarks(limits);
   /**
@@ -122,6 +127,7 @@ function UsageChip({
   return (
     <BarChip
       label={`${name} usage`}
+      onPress={onDetails}
       chip={
         <>
           <span className="sb-usage-mark" aria-hidden="true">
@@ -179,6 +185,11 @@ function UsageChip({
       )}
       {stale && <span className="usage-pop-foot">{stale}</span>}
       {foot && <span className="usage-pop-foot">{foot}</span>}
+      <span className="usage-pop-foot machines-foot">
+        <button className="kuru-head-btn" onClick={onDetails}>
+          Where it went
+        </button>
+      </span>
     </BarChip>
   );
 }
