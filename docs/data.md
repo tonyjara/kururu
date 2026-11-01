@@ -271,11 +271,33 @@ why the page must draw that figure beside the estimate rather than call the
 gap an error. On a session resumed after a restart the gap can go the other
 way: its `cost-state` starts again, and a transcript does not.
 
-Attribution is read from this database through `Store.usageAttribution` and
+**Whose a session was is written down when kururu starts it** (`usage/attribute.ts`),
+because a transcript says which folder it ran in and nothing else, and a dozen
+workspaces here live in the home folder. Each road that starts an agent says so:
+the + menu, a card's run and resume (an idle card picked back up is one of those),
+Kuru's `start_agent`, and Kuru itself. The row is `sessions`, keyed by the
+session's id and `attributed_by = 'spawn'`, with its workspace, card, terminal,
+kind, node and machine; a card resumed is the same id and so the same row.
+Claude is told its id on its line (`--session-id`, which the menu and `start_agent`
+now pass as a card's run always did); so is OpenCode. Codex takes none, so its
+launch waits in `waiting`, on disk because the server restarts far more often than
+an agent does: a card's run is settled by its own words when `sleep.ts` finds its
+rollout, and a tab from the menu by folder and time (`matchRollouts`). One on a
+machine waits for the remote reader. A launch that cannot be written is never why
+an agent did not start.
+
+A hook names a session too, which catches what no launch could: a card's agent
+that moved to a new session with `/clear`, and a `claude` somebody typed into a
+shell. Those are `attributed_by = 'report'`, under the terminal's card or workspace.
+
+Everything else is read from this database through `Store.usageAttribution` and
 never written back: a card's run first, then anything that says harness (the
 conversation's kind, the harness's folder, its title), then the conversation,
 then the folder alone. A session the database learns about later moves when the
-next sweep reads the facts again.
+next sweep reads the facts again, and never against a stronger word: a launch
+takes only the run's number from there, since a card sent to another board spent
+those tokens where it was. A row can exist with no message yet, so a page counts
+sessions off `messages` or `daily`.
 
 `bun run status` prints its count and its oldest day, off `/api/health`.
 

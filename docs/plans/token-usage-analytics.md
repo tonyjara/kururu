@@ -48,6 +48,38 @@ this plan said otherwise about:
   neither this plan nor `week.py` named, because they are being pruned as well.
   None of them had a message in the week of the table.
 
+**Phase 2 is built** (2026-11-01): `sessions` rows at every launch, in
+`server/src/usage/attribute.ts`. What it found, which this plan said otherwise
+about:
+
+- **No profile-board card has ever run, so the "finding on its own" below has the
+  wrong cause.** The board of a profile has no terminal to run in: `runCardAt` finds
+  a card only on a workspace's board, `transferCard` clears `run` on the way across,
+  and of 479 runs in the database none is on a profile board. Of the 55 home-folder
+  sessions in the ledger, 49 are cards in workspaces whose panes sit in `~`, which
+  `card_runs` already named, and the other six are not cards. So the criterion "the `~` folder stops appearing"
+  holds for every card run, old and new, by workspace and card. Whether those
+  workspaces should have a project folder is question 5, reworded by this.
+- **The `+` menu's and `start_agent`'s Claude had no `--session-id`**, only a card's
+  run did, contrary to "it even mints the session id first". They have one now. It
+  is the same flag and asks nothing new of the program.
+- **A launch cannot name every session.** `/clear` moves a running agent to a new
+  id, and a `claude` typed into a shell has no launch at all. Both report through
+  their hooks, so there is a fifth `attributed_by`, `report`, ranked below `spawn`:
+  kururu saw it running under that terminal and did not start it.
+- **A row now exists before any message does.** Phase 4 should count sessions off
+  `messages` or `daily`, not `sessions`, and treat `~` as a folder only for what is
+  still `attributed_by = 'folder'`: 498 Claude sessions today, none of them in a
+  worktree, which is why the worktree mapping in the risks below was not needed.
+- **`node` is written at launch and left empty on what only a log has seen**, so
+  `daily` has two values for this Mac; phase 6 reads an empty node as this one.
+- **Owed to phase 3, which is being built beside this:** a menu-started OpenCode
+  mints its id inside `agentCommandFor`, so it is named by its plugin's report rather
+  than at launch, and likewise Kuru on OpenCode.
+- **Owed to phase 6:** a Codex tab on a machine stays in `waiting`, then goes after
+  a week, because nothing here reads rollouts over ssh for one with no card. Its
+  transcripts are not read yet either.
+
 ## Verdict
 
 **Build a usage ledger, in a second SQLite file beside `kururu.db`, filled by
@@ -431,7 +463,7 @@ stated on the page rather than guessed at.
 files    (path PRIMARY KEY, program, login_dir, inode, size, offset, mtime, session_id, read_at)
 sessions (id PRIMARY KEY, program, profile_key, login_dir, cwd, workspace_key, card_id, run_id,
           agent_id, kind, node, machine, started_at, last_at, parent_session, version,
-          attributed_by)                     -- 'spawn' | 'card_runs' | 'conversations' | 'folder'
+          attributed_by)                     -- 'spawn' | 'report' | 'card_runs' | 'conversations' | 'folder'
 messages (session_id, message_id, at, model, requested_model, effort, input, cache_write_5m,
           cache_write_1h, cache_read, output, thinking, cost_est, sidechain, source,
           PRIMARY KEY (session_id, message_id))
@@ -444,6 +476,8 @@ daily    (day, profile_key, workspace_key, card_id, kind, program, model, node, 
           PRIMARY KEY (day, profile_key, workspace_key, card_id, kind, program, model, node))
 limits   (at, account, kind, scope, percent, resets_at, source)    -- usage.ts and Codex rate_limits, as read
 skipped  (path, line_no, why, at)                                   -- what the parser would not read, capped
+waiting  (agent_id, program, profile_key, workspace_key, card_id, kind, node, machine, login_dir, cwd, at)
+                                                                    -- a launch whose program has not said its id: Codex (version 2)
 ```
 
 Indexes: `messages(at)`, `messages(session_id, at)`, `daily(day)`,
@@ -688,10 +722,11 @@ rollup, not the message.
 4. **Does Kuru get `usage_report` (phase 7)?** It is the one phase that adds
    anything to Kuru's context — a tool description on every turn. Default:
    not until asked.
-5. **The profile-board cards running in `~`.** 38 % of this week. Was that
-   intended (planning cards with no project), or should a profile-board card
-   run in the folder of the workspace its text names, or ask? Not this
-   plan's change, but the page will make it visible on day one.
+5. **The workspaces whose cards run in `~`.** 38 % of this week. (Written here
+   first as profile-board cards; those never run, see "Where it stands".) Was it
+   intended that those workspaces have no project folder, so their agents start
+   with no `CLAUDE.md`, or should they be given one? Not this plan's change, but
+   the page will make it visible on day one.
 6. **Which `~/.cache/kururu/voicelab` engines go**, as promised earlier — 11 GB
    that no plan here touches.
 

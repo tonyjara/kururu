@@ -104,6 +104,7 @@ in this folder.
 | `src/usage/tail.ts` | Following a file from an offset: a chunk at a time, a byte search before any string, half the loop at most |
 | `src/usage/claude.ts` | A Claude Code transcript's billed messages and `cost-state`, each field checked; which config directories are read |
 | `src/usage/sweep.ts` | The reader: the backfill, the sweep every five minutes, the nudge off `/api/report`. Types into nothing |
+| `src/usage/attribute.ts` | Whose a session was, written when kururu starts it: a launch's row, a hook's word for a session no launch knew, and Codex's id found by folder and time. Never why an agent did not start. See [data](data.md#the-usage-ledger) |
 | `src/codexusage.ts` | The Codex allowance, off the `rate_limits` in the newest rollout of the Codex home in use. No credential, no request |
 | `src/machines.ts` | The bottom bar's machines (a VPS, a PC on the tailnet): the user's own `ssh`, `BatchMode`, one fixed read-only script, `tmux ls` before a session that types something, `tmux kill-session` when a session tab is closed, and two fixed reads of an agent's conversation files for `sleep.ts`. A client names a host and nothing else (`shared/machines.ts`, [machines](machines.md)) |
 | `src/onscreen.ts` | Reads each remote agent's screen every two seconds and posts the status through `host.report`, as a hook would have ([machines](machines.md#status-read-off-the-screen)) |

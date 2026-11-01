@@ -22,8 +22,11 @@ export type UsageProgram = "claude" | "codex" | "opencode";
 /** Which log a row came from. A subagent's turns are in a file of their own and nowhere else. */
 export type UsageSource = "transcript" | "subagent" | "rollout" | "opencode";
 export type SessionKind = "harness" | "agent" | "card";
-/** What named a session: a launch record, the database's two tables, or only the folder it ran in. */
-export type AttributedBy = "spawn" | "card_runs" | "conversations" | "folder";
+/**
+ * What named a session: kururu's own launch, a hook from a terminal kururu
+ * holds, the database's two tables, or only the folder it ran in.
+ */
+export type AttributedBy = "spawn" | "report" | "card_runs" | "conversations" | "folder";
 
 /** One billed API message. A streamed reply is several records of one message, and this is the message. */
 export interface MessageRow {
@@ -213,16 +216,24 @@ export function attributionFor(sessionId: string, seen: SeenInLog, facts: Attrib
   return { ...none, profileKey: ofLogin, kind: "agent", attributedBy: "folder" };
 }
 
-const STRENGTH: Record<AttributedBy, number> = { folder: 0, conversations: 1, card_runs: 2, spawn: 3 };
+const STRENGTH: Record<AttributedBy, number> = { folder: 0, conversations: 1, card_runs: 2, report: 3, spawn: 4 };
 
 /**
  * Two attributions of one session, as what the ledger should keep. A weaker
  * reading never replaces a stronger one, since the facts only ever grow and a
  * session read again from a later file knows less than the first read did: a
  * subagent's file has no title, and a harness read from it must stay one.
+ *
+ * One thing crosses that line. A card's run has its number only once the board
+ * has been written, after the terminal is up, and a resume adds another; so a
+ * launch keeps its word about whose the session is and takes the run from the
+ * database, on the card it already names.
  */
 export function strongerAttribution(held: Attribution, read: Attribution): Attribution {
-  if (STRENGTH[read.attributedBy] < STRENGTH[held.attributedBy]) return held;
+  if (STRENGTH[read.attributedBy] < STRENGTH[held.attributedBy]) {
+    const newerRun = read.attributedBy === "card_runs" && read.cardId === held.cardId && read.runId !== held.runId;
+    return newerRun ? { ...held, runId: read.runId } : held;
+  }
   if (read.attributedBy === held.attributedBy) {
     if (held.kind === "harness" && read.kind !== "harness") return held;
     if (held.profileKey !== null && read.profileKey === null) return held;
@@ -233,6 +244,83 @@ export function strongerAttribution(held: Attribution, read: Attribution): Attri
 /** The fields that decide which row of `daily` a session's messages land on. */
 export function sameRollupKeys(a: Attribution, b: Attribution): boolean {
   return a.profileKey === b.profileKey && a.workspaceKey === b.workspaceKey && a.cardId === b.cardId && a.kind === b.kind;
+}
+
+/**
+ * Whether a hook's word about a session is worth writing. It names a session
+ * nothing better has named: one a card's agent moved to with `/clear`, or a
+ * `claude` somebody typed into a shell. A launch's word stands against it, and
+ * so does an earlier hook's, because a session resumed in another terminal has
+ * already spent its tokens where it began.
+ */
+export function reportNames(held: Attribution | null): boolean {
+  return held === null || STRENGTH[held.attributedBy] < STRENGTH.report;
+}
+
+// ---------------------------------------------------------------------------
+// Launches
+// ---------------------------------------------------------------------------
+
+/**
+ * What kururu knows at the moment it starts an agent, and no log will ever say.
+ * `sessionId` is null only for Codex, which takes no id and is told its own: the
+ * launch then waits, on disk, because the server restarts far more often than an
+ * agent does.
+ */
+export interface LaunchRow {
+  agentId: string | null;
+  sessionId: string | null;
+  program: UsageProgram;
+  profileKey: string | null;
+  workspaceKey: string | null;
+  cardId: string | null;
+  kind: SessionKind;
+  node: string | null;
+  machine: string | null;
+  loginDir: string | null;
+  cwd: string | null;
+  at: number;
+}
+
+/** A launch still waiting for its id: the fields of one, known by its terminal. */
+export type WaitingLaunch = LaunchRow & { agentId: string };
+
+/** How far before a launch a rollout may say it began. One clock, and a rounding; `CLOCK_SLACK_MS` allows a minute for two machines. */
+const ROLLOUT_EARLY_MS = 5_000;
+/**
+ * How long after a launch a rollout may say it began. Codex stamps a session as
+ * its TUI comes up, which is a login shell and a few seconds behind the spawn,
+ * and this is what stops a tab left unanswered for a week claiming somebody
+ * else's rollout in that folder.
+ */
+export const ROLLOUT_LATE_MS = 120_000;
+
+/** A rollout as far as the ledger cares: whose it is by folder and time, and never its words. */
+export interface RolloutSeen {
+  id: string;
+  cwd: string | null;
+  at: number;
+}
+
+/**
+ * Which rollout is which waiting launch, by folder and time: each in order of
+ * starting, to the earliest launch it could be. A card's run is not in the list
+ * given here, since its own words find it (`pickCodexRollout`, off the sleeper's
+ * look) and that is better evidence than a folder. Two tabs opened together in
+ * one folder may be swapped, which costs nothing: everything the ledger keeps
+ * about them but the terminal's id is the same.
+ */
+export function matchRollouts(waiting: readonly WaitingLaunch[], rollouts: readonly RolloutSeen[], taken: ReadonlySet<string>): { launch: WaitingLaunch; sessionId: string }[] {
+  const open = [...waiting].sort((a, b) => a.at - b.at);
+  const out: { launch: WaitingLaunch; sessionId: string }[] = [];
+  for (const rollout of [...rollouts].sort((a, b) => a.at - b.at)) {
+    if (taken.has(rollout.id) || rollout.cwd === null) continue;
+    const fits = open.findIndex((launch) => launch.cwd === rollout.cwd && rollout.at >= launch.at - ROLLOUT_EARLY_MS && rollout.at <= launch.at + ROLLOUT_LATE_MS);
+    if (fits === -1) continue;
+    const [launch] = open.splice(fits, 1);
+    out.push({ launch: launch!, sessionId: rollout.id });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

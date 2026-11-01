@@ -9,12 +9,13 @@
  * everything in the fixtures that a ledger must not keep.
  */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { baseModelId, costOf, priceOf } from "../../shared/prices";
-import { attributionFor, countOf, dayBounds, dayOf, harnessProfileOf, noFacts, splitCacheWrite, strongerAttribution, type Attribution, type AttributionFacts } from "../../shared/usage";
+import { attributionFor, countOf, dayBounds, dayOf, harnessProfileOf, matchRollouts, noFacts, reportNames, ROLLOUT_LATE_MS, splitCacheWrite, strongerAttribution, type Attribution, type AttributionFacts, type LaunchRow, type WaitingLaunch } from "../../shared/usage";
+import { Launches } from "../src/usage/attribute";
 import { parseClaudeLine, placeOf } from "../src/usage/claude";
 import { Ledger, LedgerBatch, type FileRow } from "../src/usage/store";
 import { UsageReader } from "../src/usage/sweep";
@@ -661,5 +662,230 @@ describe("what the database knows", () => {
     expect(facts.conversations.get("s3")).toEqual({ sessionId: "s3", kind: "harness", profileKey: "pk000000000002" });
     expect(facts.profileOfLogin.get("aaaaaaaaaaaa")).toBe("pk000000000001");
     expect(facts.profileOfLogin.has("bbbbbbbbbbbb")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Launches
+// ---------------------------------------------------------------------------
+
+describe("whose a session is, from its launch", () => {
+  const PROJECT = "-home-someone-project";
+  const launch = (over: Partial<LaunchRow> = {}): LaunchRow & { sessionId: string } => ({
+    agentId: "a1",
+    sessionId: SESSION,
+    program: "claude",
+    profileKey: "pk000000000001",
+    workspaceKey: "wk000000000001",
+    cardId: null,
+    kind: "agent",
+    node: "mac",
+    machine: null,
+    loginDir: "/login",
+    cwd: "/home/someone/project",
+    at: Date.parse("2026-10-20T11:00:00Z"),
+    ...over,
+    sessionId: over.sessionId ?? SESSION,
+  });
+
+  let ledger: Ledger;
+  const db = () => new DatabaseSync(join(dir, "usage.db"), { readOnly: true });
+  const rows = (sql: string): Record<string, any>[] => {
+    const read = db();
+    try {
+      return read.prepare(sql).all() as Record<string, any>[];
+    } finally {
+      read.close();
+    }
+  };
+  /** A pass of the reader over one message, as a log with only a folder to go on would give it. */
+  const sighting = (id: string, at: string, facts: AttributionFacts = noFacts()) => {
+    const batch = new LedgerBatch();
+    const when = Date.parse(at);
+    batch.addMessage({ sessionId: SESSION, messageId: id, at: when, model: "claude-opus-5-5", requestedModel: null, effort: null, input: 1, write5m: 0, write1h: 0, read: 10, output: 2, thinking: 0, costEst: 0.01, sidechain: false, source: "transcript" });
+    batch.addSession({ id: SESSION, program: "claude", loginDir: "/login/real", cwd: "/home/someone/project", version: "2.1.311", firstAt: when, lastAt: when, parentSession: null, seen: { projectDir: PROJECT, titled: false, loginKey: null } });
+    ledger.flush(batch, facts);
+  };
+
+  beforeEach(() => {
+    ledger = Ledger.open(join(dir, "usage.db"));
+  });
+  afterEach(() => {
+    ledger.close();
+  });
+
+  it("writes the row before there is a word in any log, and the log only adds to it", () => {
+    ledger.recordLaunch(launch({ cardId: "card1", kind: "card" }));
+    expect(rows("select attributed_by, kind, workspace_key, card_id, node, agent_id, last_at from sessions")).toEqual([
+      { attributed_by: "spawn", kind: "card", workspace_key: "wk000000000001", card_id: "card1", node: "mac", agent_id: "a1", last_at: launch().at },
+    ]);
+    sighting("m1", "2026-10-20T11:00:05Z");
+    const [row] = rows("select * from sessions");
+    expect(row).toMatchObject({ attributed_by: "spawn", card_id: "card1", started_at: launch().at, last_at: Date.parse("2026-10-20T11:00:05Z"), version: "2.1.311", project_dir: PROJECT, login_dir: "/login/real" });
+    expect(rows("select workspace_key, card_id, kind, node, messages from daily")).toEqual([{ workspace_key: "wk000000000001", card_id: "card1", kind: "card", node: "mac", messages: 1 }]);
+  });
+
+  it("moves what a folder already claimed when the launch is heard second", () => {
+    sighting("m1", "2026-10-20T11:00:05Z");
+    expect(rows("select workspace_key, kind, node from daily")).toEqual([{ workspace_key: "", kind: "agent", node: "" }]);
+    ledger.recordLaunch(launch());
+    expect(rows("select workspace_key, kind, node, messages from daily")).toEqual([{ workspace_key: "wk000000000001", kind: "agent", node: "mac", messages: 1 }]);
+    expect(rows("select attributed_by from sessions")).toEqual([{ attributed_by: "spawn" }]);
+  });
+
+  it("keeps a card picked back up as the one row it was, on its newest terminal and run", () => {
+    ledger.recordLaunch(launch({ cardId: "card1", kind: "card" }));
+    sighting("m1", "2026-10-20T11:00:05Z");
+    const later = Date.parse("2026-10-20T15:00:00Z");
+    ledger.recordLaunch(launch({ cardId: "card1", kind: "card", agentId: "a9", at: later }));
+    const facts: AttributionFacts = { ...noFacts(), runs: new Map([[SESSION, { sessionId: SESSION, runId: 7, cardId: "card1", agentId: null, profileKey: "pk000000000001", workspaceKey: "wk000000000001" }]]) };
+    expect(ledger.reattribute(facts)).toBe(1);
+    expect(rows("select id, agent_id, run_id, attributed_by, started_at from sessions")).toEqual([{ id: SESSION, agent_id: "a9", run_id: 7, attributed_by: "spawn", started_at: launch().at }]);
+    expect(ledger.reattribute(facts)).toBe(0);
+    ledger.recordLaunch(launch({ cardId: "card1", kind: "card", agentId: "a10", at: later + 1 }));
+    expect(rows("select run_id from sessions")).toEqual([{ run_id: 7 }]);
+  });
+
+  it("does not let the database's word about a run move a launch", () => {
+    ledger.recordLaunch(launch({ cardId: "card1", kind: "card" }));
+    // The card has since been sent to another workspace. The tokens were spent where it was.
+    const facts: AttributionFacts = { ...noFacts(), runs: new Map([[SESSION, { sessionId: SESSION, runId: 7, cardId: "card1", agentId: null, profileKey: "pk000000000001", workspaceKey: "wk000000000002" }]]) };
+    ledger.reattribute(facts);
+    expect(rows("select workspace_key, run_id from sessions")).toEqual([{ workspace_key: "wk000000000001", run_id: 7 }]);
+  });
+
+  it("takes a hook's word only for a session nothing better has named", () => {
+    const by = (attributedBy: Attribution["attributedBy"]): Attribution => ({ profileKey: null, workspaceKey: null, cardId: null, runId: null, agentId: null, kind: "agent", attributedBy });
+    expect(reportNames(null)).toBe(true);
+    expect(reportNames(by("folder"))).toBe(true);
+    expect(reportNames(by("card_runs"))).toBe(true);
+    expect(reportNames(by("report"))).toBe(false);
+    expect(reportNames(by("spawn"))).toBe(false);
+
+    sighting("m1", "2026-10-20T11:00:05Z");
+    expect(ledger.recordReport(launch({ agentId: "a4" }))).toBe(true);
+    expect(rows("select attributed_by, agent_id from sessions")).toEqual([{ attributed_by: "report", agent_id: "a4" }]);
+    expect(rows("select workspace_key from daily")).toEqual([{ workspace_key: "wk000000000001" }]);
+    // Resumed by hand in another workspace's shell: it began where it began.
+    expect(ledger.recordReport(launch({ agentId: "a5", workspaceKey: "wk000000000002" }))).toBe(false);
+    ledger.recordLaunch(launch({ agentId: "a6" }));
+    expect(ledger.recordReport(launch({ agentId: "a7", workspaceKey: "wk000000000002" }))).toBe(false);
+    expect(rows("select attributed_by, agent_id, workspace_key from sessions")).toEqual([{ attributed_by: "spawn", agent_id: "a6", workspace_key: "wk000000000001" }]);
+  });
+
+  const waiting = (over: Partial<WaitingLaunch> = {}): WaitingLaunch => ({ ...launch({ program: "codex", loginDir: join(dir, "codex"), cwd: dir }), sessionId: null, agentId: "a1", ...over });
+
+  it("keeps a launch with no id on disk, for a server that restarts before the id is known", () => {
+    ledger.addWaiting(waiting());
+    ledger.close();
+    ledger = Ledger.open(join(dir, "usage.db"));
+    expect(ledger.waiting().map((each) => each.agentId)).toEqual(["a1"]);
+    expect(ledger.settleWaiting("a2", OTHER)).toBe(false);
+    expect(ledger.settleWaiting("a1", OTHER)).toBe(true);
+    expect(ledger.waiting()).toEqual([]);
+    expect(rows("select id, program, attributed_by, started_at from sessions")).toEqual([{ id: OTHER, program: "codex", attributed_by: "spawn", started_at: waiting().at }]);
+    expect(ledger.settleWaiting("a1", OTHER)).toBe(false);
+  });
+
+  it("gives a reused terminal id to its newest launch, and forgets one a week old", () => {
+    const at = waiting().at;
+    ledger.addWaiting(waiting({ at: at - 1000, workspaceKey: "wk000000000009" }));
+    ledger.addWaiting(waiting({ at }));
+    expect(ledger.settleWaiting("a1", OTHER)).toBe(true);
+    expect(rows("select workspace_key from sessions")).toEqual([{ workspace_key: "wk000000000001" }]);
+    ledger.dropWaitingBefore(at);
+    expect(ledger.waiting()).toEqual([]);
+  });
+
+  it("matches a rollout to a launch by folder and time, and nothing else", () => {
+    const at = waiting().at;
+    const here = (agentId: string, over: Partial<WaitingLaunch> = {}) => waiting({ agentId, ...over });
+    const rollout = (id: string, delta: number, cwd: string | null = dir) => ({ id, cwd, at: at + delta });
+    const ids = (found: ReturnType<typeof matchRollouts>) => found.map((each) => `${each.launch.agentId}=${each.sessionId}`);
+
+    expect(ids(matchRollouts([here("a1")], [rollout("r", 8_000)], new Set()))).toEqual(["a1=r"]);
+    expect(ids(matchRollouts([here("a1")], [rollout("other folder", 8_000, "/elsewhere")], new Set()))).toEqual([]);
+    expect(ids(matchRollouts([here("a1")], [rollout("no folder", 8_000, null)], new Set()))).toEqual([]);
+    expect(ids(matchRollouts([here("a1")], [rollout("too old", -60_000)], new Set()))).toEqual([]);
+    expect(ids(matchRollouts([here("a1")], [rollout("too late", ROLLOUT_LATE_MS + 1)], new Set()))).toEqual([]);
+    expect(ids(matchRollouts([here("a1")], [rollout("a card's", 8_000)], new Set(["a card's"])))).toEqual([]);
+    // Two tabs in one folder: one rollout each, the earliest to the earliest.
+    expect(ids(matchRollouts([here("a2", { at: at + 2000 }), here("a1")], [rollout("r2", 9_000), rollout("r1", 8_000)], new Set()))).toEqual(["a1=r1", "a2=r2"]);
+  });
+
+  describe("the book", () => {
+    let logged: string[];
+    let book: Launches;
+    beforeEach(() => {
+      logged = [];
+      book = new Launches({ ledger, cardSessions: () => new Set(), log: (line) => logged.push(line) });
+    });
+
+    it("never lets a launch that cannot be written reach the road that started the agent", () => {
+      ledger.close();
+      expect(() => book.spawned(launch())).not.toThrow();
+      expect(() => book.learned("a1", OTHER)).not.toThrow();
+      expect(() => book.reported(OTHER, () => launch())).not.toThrow();
+      expect(logged.length).toBe(3);
+      ledger = Ledger.open(join(dir, "usage.db"));
+    });
+
+    it("waits only for a program whose id can be found, and refuses an id that is not one", () => {
+      book.spawned({ ...launch({ program: "codex" }), sessionId: null });
+      book.spawned({ ...launch({ program: "opencode", agentId: "a2" }), sessionId: null });
+      book.spawned({ ...launch({ agentId: "a3" }), sessionId: "not an id; drop table sessions" });
+      expect(ledger.waiting().map((each) => each.agentId)).toEqual(["a1"]);
+      expect(rows("select count(*) as n from sessions")).toEqual([{ n: 0 }]);
+    });
+
+    it("asks who a hook's terminal is once per session, and ignores what is not an id", () => {
+      let asked = 0;
+      const who = () => {
+        asked++;
+        return launch();
+      };
+      book.reported(SESSION, who);
+      book.reported(SESSION, who);
+      book.reported(undefined, who);
+      book.reported(42, who);
+      book.reported("not an id; really", who);
+      expect(asked).toBe(1);
+      expect(rows("select attributed_by from sessions")).toEqual([{ attributed_by: "report" }]);
+    });
+
+    it("finds a menu's Codex tab by folder and time, and takes nothing of the rollout but its id", async () => {
+      const at = Date.now();
+      const stamp = new Date(at + 8_000);
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const day = join(dir, "codex", "sessions", String(stamp.getFullYear()), pad(stamp.getMonth() + 1), pad(stamp.getDate()));
+      mkdirSync(day, { recursive: true });
+      const write = (id: string, cwd: string) =>
+        writeFileSync(
+          join(day, `rollout-x-${id}.jsonl`),
+          `${JSON.stringify({ timestamp: stamp.toISOString(), type: "session_meta", payload: { id, timestamp: stamp.toISOString(), cwd, instructions: SECRET } })}\n${JSON.stringify({ type: "event_msg", payload: { type: "user_message", message: SECRET } })}\n`,
+        );
+      // Through a link, as `/tmp` is on a Mac: Codex records where the link goes.
+      const real = realpathSync(dir);
+      const link = join(dir, "link");
+      symlinkSync(real, link);
+      write(SESSION, real);
+      write(OTHER, "/elsewhere");
+      book.spawned({ ...waiting({ cwd: link, at }) });
+      book.spawned({ ...waiting({ agentId: "a2", cwd: real, at, cardId: "card1", kind: "card" }) });
+      book.spawned({ ...waiting({ agentId: "a3", cwd: real, at, machine: "box" }) });
+
+      expect(await book.lookForWaiting(at + 20_000)).toBe(1);
+      expect(rows("select id, program, agent_id, attributed_by from sessions")).toEqual([{ id: SESSION, program: "codex", agent_id: "a1", attributed_by: "spawn" }]);
+      // The card waits for its own words, and the machine for the remote reader.
+      expect(ledger.waiting().map((each) => each.agentId)).toEqual(["a2", "a3"]);
+      // Nothing left to claim it twice, and the second look is quiet.
+      expect(await book.lookForWaiting(at + 30_000)).toBe(0);
+      ledger.close();
+      for (const name of ["usage.db", "usage.db-wal"]) {
+        const raw = join(dir, name);
+        if (existsSync(raw)) expect(readFileSync(raw).includes(SECRET)).toBe(false);
+      }
+      ledger = Ledger.open(join(dir, "usage.db"));
+    });
   });
 });

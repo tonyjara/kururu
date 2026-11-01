@@ -273,7 +273,9 @@ The load-bearing invariants, one line each, with the argument behind the link:
   gets out. It fails open: a ledger that will not open is a server without a
   chart. Dollars are an estimate at list price (`shared/prices.ts`), and Claude
   Code spends tokens no transcript records, so its own figure is kept beside
-  the estimate. → [data](docs/data.md#the-usage-ledger)
+  the estimate. Whose a session was is written when kururu starts it
+  (`usage/attribute.ts`), by id, so a resume is the same row, and that write is
+  never why an agent did not start. → [data](docs/data.md#the-usage-ledger)
 - **The OpenRouter key is one of the credentials kururu stores — a
   channel's bot token, the web providers' keys and the Anthropic Admin key,
   below, are the others —

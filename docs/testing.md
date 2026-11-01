@@ -21,7 +21,7 @@ has is refused rather than rolled into the next month, and that a change of
 clocks is not a day), `board` (the run automation, and a card's dates and the
 timeline's window), `sleep` (what idle is, the question in a reply, the
 draft in a prompt, and the CLIs' conversation files — a Codex rollout found
-by its card's words, a last reply read off a tail — against a temp directory), `store` (the database against a temp directory: boards written through and read back, the history, deleted cards kept and restored, the file never taking a card off the database, keys matched back by name, and the mirror written and read back as the same database), `reload` (when a page may reload for an agent, what the agent is told, and the server's bookkeeping on a hand-turned clock, plus the harness's tool), `channels` (every way a Telegram message can fail to be the user's, in `judge`'s order; pairing codes; splitting a reply; when a reply is spoken; and the bot module itself against a stand-in Bot API in memory — the token's file mode, the offset kept across a restart, the queue's order through a 429, a 403, a revoked token, and the token never in an error), `usageledger` (the ledger against a temp directory and hand-written records: a stream counted once, a half-written line, a file pruned or replaced, dying part way through a long file, whose a session was, a nudge refused outside its roots, and that no word of a transcript reaches a table or the raw file), `markdown` (the reader's whole
+by its card's words, a last reply read off a tail — against a temp directory), `store` (the database against a temp directory: boards written through and read back, the history, deleted cards kept and restored, the file never taking a card off the database, keys matched back by name, and the mirror written and read back as the same database), `reload` (when a page may reload for an agent, what the agent is told, and the server's bookkeeping on a hand-turned clock, plus the harness's tool), `channels` (every way a Telegram message can fail to be the user's, in `judge`'s order; pairing codes; splitting a reply; when a reply is spoken; and the bot module itself against a stand-in Bot API in memory — the token's file mode, the offset kept across a restart, the queue's order through a 429, a 403, a revoked token, and the token never in an error), `usageledger` (the ledger against a temp directory and hand-written records: a stream counted once, a half-written line, a file pruned or replaced, dying part way through a long file, whose a session was, a nudge refused outside its roots, a launch's row against what a log and the database say, a card resumed as one row, a Codex rollout found by folder and time, and that no word of a transcript reaches a table or the raw file), `markdown` (the reader's whole
 security story: that raw HTML cannot be emitted and that no `href` or `src`
 carries a scheme the browser would run — the one test that drives a real
 dependency, since Shiki's wasm has to load), and the pane tree in `web/test`,
@@ -107,6 +107,14 @@ left in the Dock is how a force quit reached a coalition on 2026-10-10.
 
 Kept short on purpose; the detail is in git history.
 
+- **Usage attribution at launch** (2026-11-01), in an isolated instance on
+  :7817 with stand-in `claude`, `codex` and `ssh` that write synthetic records
+  and spend nothing, its rows read with `sqlite3`: the menu's Claude and Codex,
+  a card's Claude and Codex, Kuru started and started again, `start_agent`, a card
+  closed and resumed as one row, a card in a workspace in the home folder, a card's
+  agent after `/clear` and a `claude` typed into a shell off their hooks, a Codex
+  tab settled by folder and time after the server restarted under it, and agents
+  and a card pinned to a machine. There is no page yet; phase 4 draws these.
 - **Remote workspaces, phase 5** (2026-10-21), between two throwaway nodes
   from a scratch clone, in a real page in headless Chrome: `C-a N` and
   `C-a P` across this node's and the child's workspaces with the wrap,

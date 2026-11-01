@@ -58,7 +58,7 @@ function dayDirs(since: number, until: number): string[] {
 }
 
 /** The rollouts in `home` touched since `since`, newest first, each read down to its first user message. */
-async function rolloutsSince(home: string, since: number, now: number): Promise<{ rollout: CodexRollout; path: string }[]> {
+export async function rolloutsSince(home: string, since: number, now: number): Promise<{ rollout: CodexRollout; path: string }[]> {
   const found: { path: string; mtime: number }[] = [];
   for (const day of dayDirs(since - 24 * 3600_000, now)) {
     const dir = join(home, "sessions", day);

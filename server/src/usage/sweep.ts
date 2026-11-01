@@ -67,7 +67,8 @@ interface Listed {
 }
 
 export class UsageReader {
-  private readonly ledger: Ledger;
+  /** Lent to `attribute.ts`, which writes launches into the same file on the same connection. */
+  readonly ledger: Ledger;
   private batch = new LedgerBatch();
   private factsHeld: AttributionFacts = noFacts();
   private factsAt = 0;

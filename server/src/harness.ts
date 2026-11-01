@@ -99,6 +99,7 @@ import { COLUMN_LABELS } from "../../shared/board";
 import type { Actor, CardEvent, SearchHit, SearchScope } from "../../shared/store";
 import type { McpResult } from "./mcp";
 import { harnessHome, prepareHarnessHome } from "./harnesshome";
+import type { LaunchNote } from "./usage/attribute";
 import type { HostLink } from "./hostlink";
 import type { Workspaces } from "./workspaces";
 import type { RemoteScreen } from "./nodewatch";
@@ -126,6 +127,8 @@ export interface HarnessDeps {
   claudeDir: (profileId: string) => string;
   /** A launcher's full command line as a terminal in that profile would get it: flags, hooks and all. */
   agentCommand: (launcher: Launcher, profileId: string) => string;
+  /** An agent has been started, for the usage ledger to know whose it is. See `usage/attribute.ts`. */
+  spawned?: (agentId: string, profileId: string, workspaceId: string | null, note: LaunchNote) => void;
   /**
    * Open a terminal into a pane of a workspace that need not be on screen. A
    * plain shell in a pinned workspace opens on its machine unless `local`.
@@ -819,19 +822,24 @@ export class Harness {
         if ("error" in place) return fail(place.error);
         let agent: AgentSnapshot;
         let where: string;
+        // Named now, as a card's run is, so the ledger knows whose it is from its first word.
+        const sessionId = launcher.cli === "claude" ? randomUUID() : null;
+        const sessionFlag = sessionId ? ` --session-id ${sessionId}` : "";
         if (place.machine) {
           // The launcher's own line, without the hooks a local agent gets:
           // they name files on this Mac. See `remoteAgentRun`.
-          const line = withPrompt(launcherCommand(launcher, this.deps.launch()), prompt);
+          const line = withPrompt(launcherCommand(launcher, this.deps.launch()) + sessionFlag, prompt);
           const command = await this.deps.agentOn(place.machine, workspace.name, place.folder, launcher.cli, line);
           agent = await this.deps.openTerminal(profileId, workspaceId, into(), { command, kind: "agent" });
+          this.deps.spawned?.(agent.id, profileId, workspaceId, { program: launcher.cli, sessionId, machine: place.machine.name, cwd: place.folder });
           where = `on ${place.machine.name}, in ${place.folder}`;
         } else {
           const asked = str(args.cwd);
           if (asked && !asked.startsWith("/")) return fail("On this Mac, cwd must be an absolute path.");
           const cwd = asked || (await this.deps.cwdFor(profileId, workspaceId, fromPane));
-          const command = withPrompt(this.deps.agentCommand(launcher, profileId), prompt);
+          const command = withPrompt(this.deps.agentCommand(launcher, profileId) + sessionFlag, prompt);
           agent = await this.deps.openTerminal(profileId, workspaceId, into(), { cwd, command, kind: "agent" });
+          this.deps.spawned?.(agent.id, profileId, workspaceId, { program: launcher.cli, sessionId, cwd: agent.cwd });
           where = `in ${agent.cwd}`;
         }
         const nameFor = str(args.name);
@@ -1229,6 +1237,8 @@ export class Harness {
     // that lied.
     const command = `MCP_TOOL_TIMEOUT=${MCP_TIMEOUT_MS} ${this.deps.agentCommand(launcher, profileId)} ${flags.join(" ")}`;
     const agent = await this.deps.openTerminal(profileId, workspaceId, pane, { cwd, command, kind: "agent", apart: true });
+    // No workspace: Kuru's pane sits in one, and its spending is nobody's but Kuru's.
+    this.deps.spawned?.(agent.id, profileId, null, { program: "claude", sessionId: sessionId!, kind: "harness", cwd });
     this.deps.host.rename(agent.id, HARNESS_NAME);
     ws.setHarness(profileId, { sessionId: sessionId!, launcher: launcher.id, agentId: agent.id, startedAt: Date.now() });
     ws.reveal(agent.id);

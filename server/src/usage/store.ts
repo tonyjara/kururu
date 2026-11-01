@@ -23,9 +23,11 @@
  * The empty string stands for "none" in its keys, since SQLite treats two
  * NULLs in a primary key as different and the conflict would never fire.
  *
- * **Everything is written by `flush`, in one transaction, with the offsets that
- * produced it.** A crash replays from the last offset that was written, and the
- * primary key makes replaying harmless.
+ * **Everything a log said is written by `flush`, in one transaction, with the
+ * offsets that produced it.** A crash replays from the last offset that was
+ * written, and the primary key makes replaying harmless. What kururu says about
+ * a session it started comes the other way, through `recordLaunch`, on the same
+ * connection, and neither can run inside the other: both are synchronous.
  */
 import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
@@ -34,14 +36,17 @@ import {
   attributionFor,
   dayBounds,
   dayOf,
+  reportNames,
   sameRollupKeys,
   strongerAttribution,
   type Attribution,
   type AttributionFacts,
+  type LaunchRow,
   type MessageRow,
   type SeenInLog,
   type TotalsRow,
   type UsageProgram,
+  type WaitingLaunch,
 } from "../../../shared/usage";
 import { dataDir } from "../store";
 
@@ -95,8 +100,21 @@ create table if not exists skipped (
 ) without rowid;
 `;
 
+/**
+ * A launch whose program has not said its session's id yet, which today means
+ * Codex. On disk rather than in memory, because the server restarts on any save
+ * and an agent does not, and a rollout can take its first prompt to appear.
+ */
+const WAITING = `
+create table if not exists waiting (
+  agent_id text not null, program text not null, profile_key text, workspace_key text, card_id text, kind text not null,
+  node text, machine text, login_dir text, cwd text, at integer not null,
+  primary key (agent_id, at)
+) without rowid;
+`;
+
 /** Each entry takes the file from its index's version to the next. The first makes it. */
-const MIGRATIONS: readonly string[] = [SCHEMA];
+const MIGRATIONS: readonly string[] = [SCHEMA, WAITING];
 
 /** A format that moved would otherwise write a row per line forever; the count stops being useful long before this. */
 const MAX_SKIPPED = 10_000;
@@ -312,6 +330,7 @@ export class Ledger {
        on conflict(id) do update set
          profile_key = excluded.profile_key, workspace_key = excluded.workspace_key, card_id = excluded.card_id,
          run_id = excluded.run_id, agent_id = excluded.agent_id, kind = excluded.kind, attributed_by = excluded.attributed_by,
+         login_dir = coalesce(excluded.login_dir, sessions.login_dir), project_dir = coalesce(sessions.project_dir, excluded.project_dir),
          cwd = case when excluded.started_at < sessions.started_at then coalesce(excluded.cwd, sessions.cwd) else coalesce(sessions.cwd, excluded.cwd) end,
          started_at = min(sessions.started_at, excluded.started_at),
          last_at = max(sessions.last_at, excluded.last_at),
@@ -472,6 +491,129 @@ export class Ledger {
       for (const day of days) this.rollup(day);
     });
     return changes.length;
+  }
+
+  // -------------------------------------------------------------------------
+  // Launches
+  // -------------------------------------------------------------------------
+
+  /**
+   * An agent kururu started, or a resume of one: its session's row, by id, so
+   * a card picked back up is the one row it always was. Whatever a log already
+   * said gives way, with the days it had reached moved to match. `last_at` is
+   * left alone, since it means the last message and starting is not one.
+   */
+  recordLaunch(launch: LaunchRow & { sessionId: string }): void {
+    this.tx(() => this.writeLaunch(launch, "spawn"));
+  }
+
+  /** A hook said this terminal is running this session. Writes only when nothing better has named it. */
+  recordReport(launch: LaunchRow & { sessionId: string }): boolean {
+    return this.tx(() => {
+      if (!reportNames(this.attributionOf(launch.sessionId))) return false;
+      this.writeLaunch(launch, "report");
+      return true;
+    });
+  }
+
+  private writeLaunch(launch: LaunchRow & { sessionId: string }, by: "spawn" | "report"): void {
+    const held = this.stmt("select profile_key, workspace_key, card_id, run_id, agent_id, kind, attributed_by, node from sessions where id = ?").get(launch.sessionId) as Row | undefined;
+    const next: Attribution = {
+      profileKey: launch.profileKey,
+      workspaceKey: launch.workspaceKey,
+      cardId: launch.cardId,
+      // The run is the database's to number; see `strongerAttribution`.
+      runId: held && held.card_id === launch.cardId ? ((held.run_id as number | null) ?? null) : null,
+      agentId: launch.agentId,
+      kind: launch.kind,
+      attributedBy: by,
+    };
+    const days = new Set<string>();
+    if (held && (!sameRollupKeys(attributionFromRow(held), next) || held.node !== launch.node)) this.addDaysOf(launch.sessionId, days);
+    this.upsertLaunch(launch, next);
+    for (const day of days) this.rollup(day);
+  }
+
+  private upsertLaunch(launch: LaunchRow & { sessionId: string }, next: Attribution): void {
+    this.stmt(
+      `insert into sessions(id, program, profile_key, login_dir, cwd, workspace_key, card_id, run_id, agent_id, kind, node, machine,
+         started_at, last_at, attributed_by)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       on conflict(id) do update set
+         profile_key = excluded.profile_key, workspace_key = excluded.workspace_key, card_id = excluded.card_id, run_id = excluded.run_id,
+         agent_id = excluded.agent_id, kind = excluded.kind, attributed_by = excluded.attributed_by, node = excluded.node, machine = excluded.machine,
+         login_dir = coalesce(sessions.login_dir, excluded.login_dir), cwd = coalesce(sessions.cwd, excluded.cwd),
+         started_at = min(sessions.started_at, excluded.started_at)`,
+    ).run(
+      launch.sessionId,
+      launch.program,
+      next.profileKey,
+      launch.loginDir,
+      launch.cwd,
+      next.workspaceKey,
+      next.cardId,
+      next.runId,
+      next.agentId,
+      next.kind,
+      launch.node,
+      launch.machine,
+      launch.at,
+      launch.at,
+      next.attributedBy,
+    );
+  }
+
+  /** A launch with no id yet, in a table of its own because a row in `sessions` needs the key it does not have. */
+  addWaiting(launch: WaitingLaunch): void {
+    this.stmt(
+      `insert or replace into waiting(agent_id, program, profile_key, workspace_key, card_id, kind, node, machine, login_dir, cwd, at)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(launch.agentId, launch.program, launch.profileKey, launch.workspaceKey, launch.cardId, launch.kind, launch.node, launch.machine, launch.loginDir, launch.cwd, launch.at);
+  }
+
+  /** The launches still waiting, oldest first. A handful at most, read once a minute. */
+  waiting(): WaitingLaunch[] {
+    const rows = this.stmt("select * from waiting order by at").all() as Row[];
+    return rows.map((row) => ({
+      agentId: row.agent_id as string,
+      sessionId: null,
+      program: row.program as UsageProgram,
+      profileKey: (row.profile_key as string | null) ?? null,
+      workspaceKey: (row.workspace_key as string | null) ?? null,
+      cardId: (row.card_id as string | null) ?? null,
+      kind: row.kind as WaitingLaunch["kind"],
+      node: (row.node as string | null) ?? null,
+      machine: (row.machine as string | null) ?? null,
+      loginDir: (row.login_dir as string | null) ?? null,
+      cwd: (row.cwd as string | null) ?? null,
+      at: row.at as number,
+    }));
+  }
+
+  /** A terminal's program said its id: the newest launch waiting on that terminal gets its row. False when none was. */
+  settleWaiting(agentId: string, sessionId: string): boolean {
+    return this.tx(() => {
+      const row = this.waiting().filter((each) => each.agentId === agentId).at(-1);
+      if (!row) return false;
+      this.writeLaunch({ ...row, sessionId }, "spawn");
+      this.stmt("delete from waiting where agent_id = ? and at = ?").run(row.agentId, row.at);
+      return true;
+    });
+  }
+
+  /** A launch nothing has claimed in a week had no session to find: a tab opened and never spoken to. */
+  dropWaitingBefore(at: number): void {
+    this.stmt("delete from waiting where at < ?").run(at);
+  }
+
+  /** Which of these sessions a launch has already named, so that a folder and a time cannot claim one twice. */
+  launched(ids: readonly string[]): Set<string> {
+    const out = new Set<string>();
+    for (const id of ids) {
+      const row = this.stmt("select attributed_by from sessions where id = ?").get(id) as Row | undefined;
+      if (row?.attributed_by === "spawn") out.add(id);
+    }
+    return out;
   }
 
   // -------------------------------------------------------------------------

@@ -1609,6 +1609,26 @@ export class Workspaces {
   }
 
   /**
+   * Whose a terminal is, for the usage ledger: the card it was handed to, on
+   * that card's board wherever its tab has since been dragged, and otherwise
+   * the workspace its tab is in.
+   */
+  terminalAt(agentId: string): { profileId: string; workspaceId: string; cardId: string | null } | null {
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) {
+        const card = workspace.board?.cards.find((c) => c.run?.agentId === agentId);
+        if (card) return { profileId: profile.id, workspaceId: workspace.id, cardId: card.id };
+      }
+    }
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) {
+        if (this.agentsInWorkspace(profile.id, workspace.id).includes(agentId)) return { profileId: profile.id, workspaceId: workspace.id, cardId: null };
+      }
+    }
+    return null;
+  }
+
+  /**
    * Where the agent a card was handed to should go: a pane beside the board's
    * rather than a tab in it, since a new tab is shown and taking the board
    * away from somebody who has just pressed a robot on it would be the

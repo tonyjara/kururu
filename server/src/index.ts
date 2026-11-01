@@ -134,6 +134,8 @@ import { summarize, type NodeSummary } from "../../shared/nodes";
 import { hostname } from "node:os";
 import { Store, dataDir, dbPath } from "./store";
 import { openUsageReader, type UsageReader } from "./usage/sweep";
+import { Launches, type LaunchNote } from "./usage/attribute";
+import type { LaunchRow } from "../../shared/usage";
 import { isSearchScope, sessionOfTranscript, type Actor, type SearchHit } from "../../shared/store";
 import { configDir } from "./config";
 import { CLIP_MAX_BYTES, isClipId } from "../../shared/voice";
@@ -525,6 +527,8 @@ let sleeper!: Sleeper;
 let store!: Store;
 /** The usage ledger's reader, or null when its file would not open. See `usage/sweep.ts`. */
 let usageReader: UsageReader | null = null;
+/** Whose each session was, written at launch, into the same file. See `usage/attribute.ts`. */
+let usageLaunches: Launches | null = null;
 let backup!: Backup;
 /** This kururu among the others: pairing, the roster and the links. See `nodes.ts`. */
 let nodes!: NodeHost;
@@ -2126,6 +2130,50 @@ function agentCommandFor(launcher: Launcher, profileId: string): string {
   return launcherCommand(launcher, launch) + hooksFor(launcher, profileId) + web.launchFlags(launcher.cli);
 }
 
+/** Everything the usage ledger keeps about a launch: what the road that started it said, and what can be looked up. */
+function launchRow(agentId: string, profileId: string, workspaceId: string | null, note: LaunchNote): LaunchRow {
+  const machine = note.machine ?? null;
+  return {
+    agentId,
+    sessionId: note.sessionId,
+    program: note.program,
+    profileKey: workspaces.keyOf(profileId),
+    workspaceKey: workspaceId ? (workspaces.workspaceIn(profileId, workspaceId)?.key ?? null) : null,
+    cardId: note.cardId ?? null,
+    kind: note.kind ?? (note.cardId ? "card" : "agent"),
+    // Through `?.`, since the harness can start before the nodes are up, and a
+    // row with no node is one read as this node's, like everything before this.
+    node: nodes?.name() ?? null,
+    machine,
+    // A machine's login is over there, and the reader there will say.
+    loginDir: machine ? null : note.program === "codex" ? codexHomeOf(profileId) : note.program === "claude" ? claudeDirOf(profileId) : null,
+    cwd: note.cwd,
+    at: Date.now(),
+  };
+}
+
+/** kururu has just started an agent: the ledger is told whose it is. See `usage/attribute.ts`. */
+function noteLaunch(agentId: string, profileId: string, workspaceId: string | null, note: LaunchNote): void {
+  usageLaunches?.spawned(launchRow(agentId, profileId, workspaceId, note));
+}
+
+/** A hook in one of kururu's terminals named its session, which may be one no launch knew: `/clear`, or a `claude` typed into a shell. */
+function noteReported(agentId: string, body: Record<string, unknown>): void {
+  const transcript = typeof body.transcript === "string" ? sessionOfTranscript(body.transcript) : null;
+  usageLaunches?.reported(transcript ?? body.session, () => {
+    const own = harness.isHarness(agentId);
+    const at = own ? { profileId: own, workspaceId: null, cardId: null } : workspaces.terminalAt(agentId);
+    if (!at) return null;
+    return launchRow(agentId, at.profileId, at.workspaceId, {
+      program: transcript ? "claude" : "opencode",
+      sessionId: null,
+      cardId: at.cardId,
+      kind: own ? "harness" : undefined,
+      cwd: host.find(agentId)?.cwd ?? null,
+    });
+  });
+}
+
 /**
  * Kururu's hooks for a Claude launch whose config directory does not already
  * run them — a profile's own, or the machine's on a box nobody installed them
@@ -2301,6 +2349,7 @@ async function runCardAt(
   const agent = onScreen
     ? await openTerminal(target, options)
     : await openTerminalAt(profileId, workspaceId, target, options);
+  noteLaunch(agent.id, profileId, workspaceId, { program: launcher.cli, sessionId, cardId, machine: remote?.machine.name, cwd: remote ? remote.dir : agent.cwd });
   /*
    * Named after the card, as if somebody had typed it into rename-tab. Without
    * it the sidebar row says `starting…` and then whatever the agent titles its
@@ -2740,6 +2789,8 @@ async function resumeCardAt(
   const agent = onScreen
     ? await openTerminal(target, options)
     : await openTerminalAt(profileId, workspaceId, target, options);
+  // The same id, so the same row: a card picked back up is one session of that card.
+  noteLaunch(agent.id, profileId, workspaceId, { program: launcher.cli, sessionId: run.sessionId, cardId, machine: remote?.machine.name, cwd: remote ? remote.dir : agent.cwd });
   host.rename(agent.id, found.card.title.slice(0, 80));
   workspaces.as(actor, () =>
     workspaces.editBoardIn(profileId, workspaceId, (board) =>
@@ -4694,11 +4745,20 @@ function handleMessage(ws: WebSocket, raw: string): void {
           // second client with a stale one is still asking for a real agent.
           const launcher = typeof msg.launcher === "string" ? findLauncher(msg.launcher) : undefined;
           if (!launcher) throw new Error(`no such agent: ${String(msg.launcher)}`);
+          // Named now, as a card's run is, so that the ledger knows whose it is
+          // before it has said a word. See `usage/attribute.ts`.
+          const at = { profileId: workspaces.active.id, workspaceId: workspaces.activeWorkspace.id };
+          const sessionId = launcher.cli === "claude" ? randomUUID() : null;
+          const sessionFlag = sessionId ? ` --session-id ${sessionId}` : "";
           if (pin) {
-            const command = await agentOn(pin.machine, pin.workspaceName, pin.dir, launcher.cli, launcherCommand(launcher, launch));
-            return openTerminal(paneId, { command, kind: "agent" });
+            const command = await agentOn(pin.machine, pin.workspaceName, pin.dir, launcher.cli, launcherCommand(launcher, launch) + sessionFlag);
+            const agent = await openTerminal(paneId, { command, kind: "agent" });
+            noteLaunch(agent.id, at.profileId, at.workspaceId, { program: launcher.cli, sessionId, machine: pin.machine.name, cwd: pin.dir });
+            return agent;
           }
-          return openTerminal(paneId, { cwd: msg.cwd, command: agentCommand(launcher), kind: "agent" });
+          const agent = await openTerminal(paneId, { cwd: msg.cwd, command: agentCommand(launcher) + sessionFlag, kind: "agent" });
+          noteLaunch(agent.id, at.profileId, at.workspaceId, { program: launcher.cli, sessionId, cwd: agent.cwd });
+          return agent;
         }
         if (msg.nvim) {
           // The editor there, not this one: no socket for the reader to follow
@@ -6511,6 +6571,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       // inbox are, and what was last said. See `harness.ts`.
       harness.report(agentId, body as Record<string, unknown>);
       // And the same path is the usage ledger's cue to read what the turn billed.
+      noteReported(agentId, body as Record<string, unknown>);
       usageReader?.nudge((body as Record<string, unknown>).transcript);
       const spoken = harness.isHarness(agentId);
       const spokenKey = spoken ? workspaces.keyOf(spoken) : null;
@@ -7678,6 +7739,10 @@ async function attach(port: Port): Promise<void> {
     (line) => console.log(line),
   );
   usageReader?.start();
+  usageLaunches = usageReader
+    ? new Launches({ ledger: usageReader.ledger, cardSessions: () => workspaces.cardSessions(), log: (line) => console.log(line) })
+    : null;
+  usageLaunches?.start();
   // Everything the harness touches, lent as functions: `index.ts` exports
   // nothing and should not start to for one caller.
   harness = new Harness({
@@ -7691,6 +7756,7 @@ async function attach(port: Port): Promise<void> {
     activity,
     claudeDir: claudeDirOf,
     agentCommand: agentCommandFor,
+    spawned: noteLaunch,
     openTerminal: openTerminalAt,
     machines: machinesSnapshot,
     nodes: () => nodes.statuses(),
@@ -7755,7 +7821,10 @@ async function attach(port: Port): Promise<void> {
     transcript: (agentId) => harness.transcriptOf(agentId),
     claudeDir: claudeDirOf,
     codexHome: codexHomeOf,
-    learned: (agentId, sessionId) => workspaces.noteRunSession(agentId, sessionId),
+    learned: (agentId, sessionId) => {
+      workspaces.noteRunSession(agentId, sessionId);
+      usageLaunches?.learned(agentId, sessionId);
+    },
     sleep: (at, agent, idleMs) => {
       // The card first, so that a board the database refuses ends nothing.
       if (!workspaces.sleepRunOf(agent.id)) return;
