@@ -342,6 +342,9 @@ describe("the reader", () => {
       ledger,
       facts: () => facts,
       roots: async () => [{ dir: root, loginKey: extra.loginKey ?? null }],
+      // Never this machine's own Codex or OpenCode, which these tests are not about.
+      codexRoots: async () => [],
+      opencodeHome: () => join(dir, "no-opencode"),
       tail: noPause,
     });
   }
@@ -460,6 +463,8 @@ describe("the reader", () => {
       ledger,
       facts: () => facts,
       roots: async () => [{ dir: root, loginKey: null }],
+      codexRoots: async () => [],
+      opencodeHome: () => join(dir, "no-opencode"),
       tail: {
         chunk: 32 * 1024,
         pause: async () => {

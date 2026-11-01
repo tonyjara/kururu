@@ -61,6 +61,22 @@ export interface TotalsRow {
   at: number;
 }
 
+/**
+ * One reading of how full an allowance window was, as the program that wrote
+ * it said. Append-only and never deduplicated against an earlier reading,
+ * since the point is the history: "the week limit read 80 % on Thursday" needs
+ * every sighting kept, not the latest one winning.
+ */
+export interface LimitRow {
+  at: number;
+  account: string | null;
+  kind: string;
+  scope: string | null;
+  percent: number;
+  resetsAt: number | null;
+  source: string;
+}
+
 // ---------------------------------------------------------------------------
 // Numbers
 // ---------------------------------------------------------------------------

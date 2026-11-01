@@ -42,6 +42,7 @@ import {
   type Attribution,
   type AttributionFacts,
   type LaunchRow,
+  type LimitRow,
   type MessageRow,
   type SeenInLog,
   type TotalsRow,
@@ -148,6 +149,7 @@ export class LedgerBatch {
   readonly messages = new Map<string, MessageRow>();
   readonly sessions = new Map<string, SessionSighting>();
   readonly totals = new Map<string, TotalsRow>();
+  readonly limits = new Map<string, LimitRow>();
   readonly files = new Map<string, FileRow>();
   readonly skipped: { path: string; atByte: number; why: string }[] = [];
 
@@ -179,8 +181,13 @@ export class LedgerBatch {
     this.totals.set(`${row.sessionId}\0${row.model}`, row);
   }
 
+  /** One sighting of a window's percentage. Keyed by its moment, so re-reading the same line within a pass is free rather than doubled. */
+  addLimit(row: LimitRow): void {
+    this.limits.set(`${row.source}\0${row.account}\0${row.kind}\0${row.at}`, row);
+  }
+
   get size(): number {
-    return this.messages.size + this.sessions.size + this.totals.size + this.files.size + this.skipped.length;
+    return this.messages.size + this.sessions.size + this.totals.size + this.limits.size + this.files.size + this.skipped.length;
   }
 }
 
@@ -312,6 +319,7 @@ export class Ledger {
         this.writeMessage(row);
       }
       for (const row of batch.totals.values()) this.writeTotals(row);
+      for (const row of batch.limits.values()) this.writeLimit(row);
       for (const file of batch.files.values()) this.writeFile(file, at);
       this.writeSkipped(batch.skipped, at);
       for (const day of days) this.rollup(day);
@@ -420,6 +428,18 @@ export class Ledger {
          cache_write_5m = excluded.cache_write_5m, cache_write_1h = excluded.cache_write_1h,
          cost_program = excluded.cost_program, at = excluded.at`,
     ).run(row.sessionId, row.model, row.input, row.output, row.thinking, row.read, row.write5m, row.write1h, row.costProgram, row.at);
+  }
+
+  private writeLimit(row: LimitRow): void {
+    this.stmt("insert into limits(at, account, kind, scope, percent, resets_at, source) values (?, ?, ?, ?, ?, ?, ?)").run(
+      row.at,
+      row.account,
+      row.kind,
+      row.scope,
+      row.percent,
+      row.resetsAt,
+      row.source,
+    );
   }
 
   private writeFile(file: FileRow, at: number): void {

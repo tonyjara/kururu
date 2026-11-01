@@ -1,0 +1,14 @@
+{
+  "id": "msg_a",
+  "sessionID": "ses_aaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "role": "assistant",
+  "mode": "build",
+  "agent": "build",
+  "path": { "cwd": "/home/someone/project", "root": "/home/someone/project" },
+  "cost": 0.41,
+  "tokens": { "input": 103, "output": 25, "reasoning": 32, "cache": { "write": 10, "read": 16000 } },
+  "modelID": "claude-opus-5-5",
+  "providerID": "anthropic",
+  "time": { "created": 1792500000000, "completed": 1792500005000 },
+  "finish": "stop"
+}

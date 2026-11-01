@@ -260,6 +260,27 @@ took, and measured over 4.1 GB it took 20 seconds with the event loop's p99 at
 transaction as their rows; a file's `size` is only recorded once a read has
 finished, so that a flush part way through is not taken for the whole file.
 
+**Codex and OpenCode are read the same way, by `codex.ts` and `opencode.ts`.**
+A Codex rollout carries no session id on its lines, only in its filename
+(`rollout-<time>-<id>.jsonl`), so that is where `placeOfCodex` reads it from; a
+`turn_context` line names the model, and every `token_count` event afterward
+already carries its own call's tokens in `info.last_token_usage` — Codex has
+done the arithmetic the plan's "totals-difference rule" argued for, so nothing
+here has to remember a running total across a restart to get the next call
+right, and an event without it is counted in `skipped` rather than guessed at.
+Its `rate_limits` rides on the same event into `limits`, kept whatever its
+reset says rather than filtered to what is still current, which is
+`codexusage.ts`'s job for the live bar. **Codex's own model ids are not in
+`shared/prices.ts`, so its tokens are exact and its dollars are always
+unpriced** — the user's choice, and not a gap. OpenCode keeps no log at all:
+since 1.2.0 its sessions are rows of one SQLite database,
+`~/.local/share/opencode/opencode.db`, read read-only and incrementally by
+`time_updated`; the handful of Macs with files from before that version get
+one backfill of `storage/message/<session>/<id>.json`, marked done in `files`
+so the directory is never walked again. An OpenCode session on an Anthropic
+model is priced off the same table a Claude Code one would be; any other
+provider's is unpriced, the same as Codex's.
+
 **Tokens are exact, as far as a transcript goes, and dollars are an estimate at
 list price** (`shared/prices.ts`) that the user does not pay, since they pay a
 subscription. Where Claude Code's token counts equal the ledger's the two
