@@ -88,6 +88,7 @@ export const CONFIG_FILES: readonly string[] = [
   "projects.json",
   "servers.json",
   "vps.json",
+  "specs.json",
   "voice.json",
   "desktop.json",
   "backup.json",
@@ -101,7 +102,6 @@ export const CONFIG_DIRS: readonly string[] = ["styles", "sheets"];
 export const EXCLUDED: readonly { what: string; why: string }[] = [
   { what: "access.json", why: "the share token" },
   { what: "openrouter.json", why: "the OpenRouter management key" },
-  { what: "anthropic.json", why: "the Anthropic Admin key, with the API credit balance you set beside it" },
   { what: "telegram.json", why: "the Telegram bot token, with the channel's switch and allowed accounts beside it" },
   { what: "firecrawl.json", why: "the cloud Firecrawl API key, with its daily budget beside it" },
   { what: "web-*.json", why: "the web providers' keys and addresses: the self-hosted Firecrawl's, and any added later" },
@@ -118,6 +118,7 @@ export const EXCLUDED: readonly { what: string; why: string }[] = [
   { what: "profiles/*/claude/history.jsonl", why: "Claude Code's own prompt history, which may hold pasted secrets" },
   { what: "profiles/*/claude/projects/*/*.jsonl", why: "transcripts: a gigabyte, and Claude Code's" },
   { what: "the database file", why: "git keeps a whole copy per change; the text export rebuilds it" },
+  { what: "usage.db", why: "the raw message rows; a binary growing by megabytes a week. Only its daily rollup, as usage/<month>.jsonl, comes here" },
   { what: "agents' replies", why: "in the database and searchable, but an agent's reply can quote a file that holds a secret" },
   { what: "drops/", why: "the pictures and files pasted or sent from a phone into Kuru's box: a screenshot holds whatever was on the screen" },
   { what: "telegram/", why: "the pictures sent from the Telegram chat, and copies of those on their way to it" },
@@ -153,6 +154,9 @@ Written by kururu every few minutes, when something changed. Not a place to edit
 - \`profiles/<login>/settings.json\` — each profile's Claude settings, with
   its \`env\` block dropped.
 - \`state/session.json\` — the arrangement of panes.
+- \`usage/<month>.jsonl\` — the usage ledger's daily rollup, numbers and keys
+  only: no message, no title, no transcript. The raw \`usage.db\` never comes
+  here; this is what a restore has of it.
 - \`nodes/<name>/\` — each child kururu's own mirror, the same tree as this
   one, pulled over its link whenever its boards changed while this Mac was
   awake. A node's keys, the roster and the secrets it was lent are never

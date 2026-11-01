@@ -16,6 +16,7 @@ import { configDir, readConfigFile } from "./config";
 import { walk } from "./export";
 import { snapshotPath } from "./persist";
 import { dataDir, dbPath, Store } from "./store";
+import { Ledger } from "./usage/store";
 
 const PORT = Number(process.env.KURURU_PORT ?? 7717);
 
@@ -39,7 +40,7 @@ async function main(): Promise<void> {
     console.log("What a backup carries, from this Mac:");
     for (const name of CONFIG_FILES) console.log(`  config/${name}`);
     for (const name of CONFIG_DIRS) for (const file of walk(join(configDir(), name))) console.log(`  config/${name}/${file}`);
-    console.log("  boards/<profile>/<workspace>.json, conversations/<profile>/<session>.jsonl, memory/<login>/<project>/*, profiles/<login>/settings.json, state/session.json");
+    console.log("  boards/<profile>/<workspace>.json, conversations/<profile>/<session>.jsonl, memory/<login>/<project>/*, profiles/<login>/settings.json, state/session.json, usage/<month>.jsonl");
     console.log("And never:");
     for (const { what, why } of EXCLUDED) console.log(`  ${what} — ${why}`);
     const settings = adoptBackupSettings(readConfigFile("backup.json"));
@@ -57,13 +58,22 @@ async function main(): Promise<void> {
   // Opened, never made: a backup of a database this command had just made would be a commit of nothing.
   if (!existsSync(dbPath())) throw new Error(`there is no database at ${dbPath()} yet; kururu makes it on its first start`);
   const store = Store.open();
+  // A ledger that will not open is a backup without this month's rollup, not a failed run.
+  const ledger = (() => {
+    try {
+      return Ledger.open();
+    } catch {
+      return null;
+    }
+  })();
   try {
-    const backup = new Backup({ store, broadcast: () => undefined, configDir, stateDir: () => join(snapshotPath(), ".."), dataDir });
+    const backup = new Backup({ store, broadcast: () => undefined, configDir, stateDir: () => join(snapshotPath(), ".."), dataDir, ledger: () => ledger });
     const status = await backup.run();
     backup.close();
     if (status.error) throw new Error(status.error);
     say(status);
   } finally {
+    ledger?.close();
     store.close();
   }
 }

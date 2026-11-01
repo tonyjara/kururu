@@ -102,6 +102,47 @@ from "The page" below, and why:
   current reading. Phase 5's job is to write Claude's into `limits`, and the page needs no
   change for that. Phase 5's export should keep reading `daily`.
 
+**Phase 5 is built** (2026-11-01): `server/src/usage/{limits,export}.ts`,
+`shared/backup.ts`, `server/src/export.ts`, `server/src/backup.ts`,
+`server/src/backup-cli.ts`, `server/src/restore-cli.ts`. Where it differs from
+"Limits over time and the backup export" above, and why:
+
+- **Only `usage.ts` needed a new bridge into `limits`; `codexusage.ts` did
+  not.** Codex's history was already there from phase 3: `codexLimitSnapshots`
+  rides on the same `token_count` event the rollout tailer reads for its
+  tokens, written by `flush` on the sweep's own beat, across every
+  `CODEX_HOME` the sweep walks. Writing it again from the live bar's poll
+  would be the same rows twice from two readers of the same files. Claude's
+  reading has no such log anywhere, so `usage/limits.ts`'s
+  `recordClaudeLimits` is the one new thing, called once a tick from
+  `pollAccountUsage` after `pollUsage`, gated on the reading's own `at` so a
+  stale or short-circuited poll adds nothing.
+- **`deps.liveLimits` is gone, not merged.** It existed only because the
+  ledger had never kept Claude's reading; now every successful poll writes
+  one, within the 60 s `USAGE_POLL_MS` the page already lives with, so
+  `ledger.usageLimits(from, now)` alone is as fresh as the merge was.
+- **The export reads `Ledger.dailyExport`, grouped by month in
+  `usage/export.ts`'s `usageMirrorFiles`**, and sits in `mirrorFiles`
+  (`server/src/export.ts`) beside boards and conversations — the one function
+  every backup path already calls, including a child's `exportFiles` to its
+  parent, so a child's own rollup rides the same road without anything
+  node-specific added here. `OWNED` grew a `usage` entry so a month that
+  somehow stopped existing would prune the same way a deleted board's file
+  does.
+- **The restore path upserts, not adds.** Every other table in the mirror is
+  additive — a row already there is left alone — but `daily` is itself a sum,
+  so reading the same month's file twice must be the same table, never double
+  the totals. `importDaily`'s `on conflict … do update` is the one place that
+  rule is different, and says why.
+- **`Backup.fingerprint` now stamps `usage.db` and its `-wal`.** Otherwise a
+  day that only changed because agents ran, with no board or conversation
+  touched, would never be seen as a reason to back up.
+- **`bun run backup --check` and the standalone CLI path also carry it.** The
+  check line names `usage/<month>.jsonl` without opening a ledger, the way it
+  already lists the rest from a static list; the no-server fallback
+  (`backup-cli.ts`) opens one itself, tolerant of it failing to open, the same
+  as the server's own path.
+
 ## Verdict
 
 **Build a usage ledger, in a second SQLite file beside `kururu.db`, filled by

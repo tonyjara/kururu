@@ -435,7 +435,6 @@ describe("with a real ledger", () => {
     names,
     weekResetsAt: null,
     weekOwner: null,
-    liveLimits: [],
     retention: [],
     status: { ...ledger.counts(), reading: null, sweptAt: null, firstPass: null, error: null },
   });

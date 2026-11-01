@@ -71,7 +71,6 @@ import {
   DEV_SCAN_MS,
   GIT_SCAN_MS,
   OPENROUTER_POLL_MS,
-  ANTHROPIC_COST_POLL_MS,
   SAVE_DEBOUNCE_MS,
   MACHINE_POLL_MS,
   USAGE_POLL_MS,
@@ -101,8 +100,8 @@ import { PictureRefused, stageOutgoing, wholePath } from "./pictures";
 import { readHead, repoAt } from "./git";
 import { accountEmail, claudeSignedIn, claudeSignedInAt, pollUsage, usageSnapshot } from "./usage";
 import { codexUsageSnapshot, pollCodexUsage } from "./codexusage";
+import { recordClaudeLimits } from "./usage/limits";
 import { clearOpenRouterKey, openRouterSnapshot, pollOpenRouter, rereadOpenRouterKey, setOpenRouterKey } from "./openrouter";
-import { clearAdminKey, clearCreditBalance, creditSnapshot, pollCredit, setAdminKey, setCreditBalance } from "./anthropiccredit";
 // Every provider in web/providers/, each registering itself; the build makes this module from the directory.
 import "kururu:web-providers";
 import { WebChain, callerAgent, fileStore, localCaller } from "./web/chain";
@@ -152,6 +151,7 @@ import {
   sessionsEnding,
   sessionsOn,
 } from "./machines";
+import { addHistory, adoptSpecs, dueForReading, editHistory, forgetSpecsRun, readSpecs, removeHistory, setTyped, specsSnapshot } from "./specs";
 import { remoteAgentRun, remoteShellCommand, remoteShellOf, sessionName, validRemoteDir, type MachineEntry } from "../../shared/machines";
 import { lazygitCommand, lazygitRun } from "../../shared/lazygit";
 import { OnScreen } from "./onscreen";
@@ -199,7 +199,7 @@ import {
 } from "./mascot";
 import { readKeys, writeKeys } from "./keys";
 import { agentLabel, agentSummary, basename } from "../../shared/labels";
-import { handsOf } from "../../shared/harness";
+import { handsOf, harnessConversation, OPENCODE_SESSION_ID } from "../../shared/harness";
 import {
   adoptNotify,
   isNotifyEvent,
@@ -249,14 +249,18 @@ import { claudeDirFor, codexDirFor, lentClaudeEnv, lentGhEnv, loginDir, loginEnv
 import {
   adoptLaunch,
   findLauncher,
+  launcherFor,
   launcherCommand,
   resumeCommand,
   visibleLaunchers,
+  withOpencodePrompt,
   withPrompt,
   type AgentCli,
   type Launcher,
   type LaunchSettings,
 } from "../../shared/launchers";
+import { mintOpencodeSession, opencodeAgentCommand } from "../../shared/opencode";
+import { findOpencode, prepareOpencodeAgent } from "./opencode";
 import {
   addCard,
   canResume,
@@ -749,7 +753,6 @@ function secretLanded(spec: KindSpec): void {
     case "openrouter":
       if (rereadOpenRouterKey()) {
         broadcast({ type: "openrouter", openrouter: openRouterSnapshot() });
-        broadcastCredit();
         void pollOpenRouterAccount();
       }
       return;
@@ -1037,7 +1040,6 @@ async function vaultFor(): Promise<VaultView> {
     hints: {
       openrouter: openRouterSnapshot()?.hint ?? null,
       telegram: telegram.hint && telegram.bot ? `@${telegram.bot.username} ${telegram.hint}` : telegram.hint,
-      anthropic: creditSnapshot(openRouterSnapshot()).adminHint,
       web: web
         .status()
         .providers.filter((p) => p.fields.some((f) => f.kind === "secret"))
@@ -2123,12 +2125,18 @@ function fillPane(paneId: string, from?: string): void {
  * agent is pointed at kururu's web tools while a web provider is on — an
  * address on this Mac, never a key. See `web/chain.ts`.
  */
-function agentCommand(launcher: Launcher): string {
+function agentCommand(launcher: Launcher): Promise<string> {
   return agentCommandFor(launcher, workspaces.active.id);
 }
 
 /** The same, for a profile that need not be on screen: its own hooks, if it has its own directory. */
-function agentCommandFor(launcher: Launcher, profileId: string): string {
+async function agentCommandFor(launcher: Launcher, profileId: string, sessionId?: string | null): Promise<string> {
+  if (launcher.cli === "opencode") {
+    const id = sessionId && sessionId.startsWith("ses_") ? sessionId : mintOpencodeSession();
+    const found = await findOpencode();
+    const config = prepareOpencodeAgent(id, { port: PORT, withToken: tokenInPtys(), model: launcher.model ?? launch.opencodeModel, web: web.active() });
+    return opencodeAgentCommand(found.path, config, id, launch.bypassClis.includes("opencode") || launch.bypassClis.includes("claude"));
+  }
   return launcherCommand(launcher, launch) + hooksFor(launcher, profileId) + web.launchFlags(launcher.cli);
 }
 
@@ -2208,7 +2216,6 @@ function usageReportFor(reader: UsageReader, range: UsageRange, by: UsageDimensi
     names,
     weekResetsAt: claudeWeek ?? codexWeek,
     weekOwner: claudeWeek !== null ? "claude" : codexWeek !== null ? "codex" : null,
-    liveLimits: (claude?.limits ?? []).map((limit) => ({ at: claude!.at, kind: limit.kind, scope: limit.scope, percent: limit.percent, source: "claude" })),
     retention: profile === machine ? [readRetention(machine, "This Mac's login")] : [readRetention(profile, `${workspaces.active.name}'s login`), readRetention(machine, "This Mac's login")],
     status: reader.status(),
   });
@@ -2302,7 +2309,7 @@ async function runCardAt(
   if (runLive(found.card.run) && host.agents.some((a) => a.id === found.card.run?.agentId && !a.exited)) {
     throw new Error("that card already has an agent on it");
   }
-  const launcher = typeof launcherId === "string" ? findLauncher(launcherId) : undefined;
+  const launcher = typeof launcherId === "string" ? launcherFor(launcherId, launch) : undefined;
   if (!launcher) throw new Error(`no such agent: ${String(launcherId)}`);
   /*
    * A card whose last agent has gone is picked back up, not started over —
@@ -2356,14 +2363,20 @@ async function runCardAt(
    * the id is the only road back to the conversation once the terminal has
    * gone — `resume-card` is `--resume` with it. Codex takes no such flag.
    */
-  const sessionId = launcher.cli === "claude" ? randomUUID() : null;
+  const sessionId = launcher.cli === "claude" ? randomUUID() : launcher.cli === "opencode" && !remote ? mintOpencodeSession() : null;
   const cwd = checkout?.worktree.path ?? from;
   // No hook settings on a machine: they name files on this one. See `remoteAgentRun`.
-  const line = remote ? launcherCommand(launcher, launch) : agentCommandFor(launcher, profileId);
+  const line = remote ? launcherCommand(launcher, launch) : await agentCommandFor(launcher, profileId, sessionId);
   // A card that has run before says so to the new conversation, which
   // otherwise starts from the card's words as if nothing had been done.
   const prompt = last ? `${cardPrompt(found.card)}\n\n${priorRunNote(last, wake.why)}` : cardPrompt(found.card);
-  let command = withPrompt(line + (sessionId ? ` --session-id ${sessionId}` : ""), prompt);
+  // Claude's id is a `--session-id`; OpenCode already has its corresponding
+  // `--session` in `agentCommandFor`. Its positional argument is a directory,
+  // so its opening card text must be the `--prompt` value instead.
+  const sessionFlag = launcher.cli === "claude" && sessionId ? ` --session-id ${sessionId}` : "";
+  let command = launcher.cli === "opencode"
+    ? withOpencodePrompt(line, prompt)
+    : withPrompt(line + sessionFlag, prompt);
   /*
    * The dev server starts with the worktree, when the project has a dev line —
    * so that the card's work can be looked at without anybody having to ask.
@@ -2471,7 +2484,7 @@ function recordTurn(agentId: string, report: { status?: string; message?: string
   const cwd = host.find(agentId)?.cwd ?? null;
   try {
     if (harness.isHarness(agentId) && profile.harness) {
-      const base = { conversationId: profile.harness.sessionId, profileKey: profile.key, kind: "harness" as const, launcher: profile.harness.launcher, cwd, at };
+      const base = { conversationId: harnessConversation(profile.harness), profileKey: profile.key, kind: "harness" as const, launcher: profile.harness.launcher, cwd, at };
       if (report.status === "working" && report.message?.trim()) store.recordTurn({ ...base, role: "you", text: report.message.trim() });
       // The reply names the utterance it was said as, so the drawer can put
       // its fate — being said, unheard, heard — beside the words.
@@ -2480,7 +2493,8 @@ function recordTurn(agentId: string, report: { status?: string; message?: string
       return turn;
     }
     if (report.status !== "done" || !reply) return null;
-    const sessionId = sessionOfTranscript(typeof body.transcript === "string" ? body.transcript : null);
+    const reportedSession = typeof body.session === "string" && OPENCODE_SESSION_ID.test(body.session) ? body.session : null;
+    const sessionId = sessionOfTranscript(typeof body.transcript === "string" ? body.transcript : null) ?? reportedSession;
     if (!sessionId) return null;
     store.recordTurn({ conversationId: sessionId, profileKey: profile.key, kind: "agent", launcher: null, cwd, role: "agent", text: reply, at });
   } catch (err) {
@@ -2505,7 +2519,7 @@ function sayAside(profileId: string, text: string): void {
   if (!profile?.harness) return;
   try {
     store.recordTurn({
-      conversationId: profile.harness.sessionId,
+      conversationId: harnessConversation(profile.harness),
       profileKey: profile.key,
       kind: "harness",
       launcher: profile.harness.launcher,
@@ -2796,6 +2810,12 @@ function workspaceOfRoot(root: string): string | null {
  * the pin says now, because here is where its transcript is.
  */
 async function resumeCard(workspaceId: string, cardId: string): Promise<{ agentId: string }> {
+  const run = workspaces.findCardIn(workspaces.active.id, workspaceId, cardId)?.card.run ?? null;
+  const was = run ? findLauncher(run.launcher)?.cli : null;
+  if ((launch.harnessCli === "opencode" && was === "claude") || (launch.harnessCli === "claude" && was === "opencode")) {
+    const launcher = launcherFor("claude", launch)!;
+    return runCardAt(workspaces.active.id, workspaceId, cardId, launcher.id, true, "user", false);
+  }
   return resumeCardAt(workspaces.active.id, workspaceId, cardId);
 }
 
@@ -2824,7 +2844,7 @@ async function resumeCardAt(
   if (run.sessionId && !(await conversationKept(profileId, workspaceId, run))) {
     throw new Error("its conversation is no longer on this Mac's disk");
   }
-  const launcher = on ?? findLauncher(run.launcher);
+  const launcher = on ?? launcherFor(run.launcher, launch);
   if (!launcher) throw new Error(`no such agent: ${run.launcher}`);
 
   const boardPane = paneWithAgent(workspace.layout, BOARD_TAB)?.id;
@@ -2836,11 +2856,13 @@ async function resumeCardAt(
   const remote = there || standing ? undefined : pinOf(profileId, workspaceId);
   const cwd = remote ? undefined : (there ?? found.card.worktree?.root ?? (await cwdForPaneIn(profileId, workspaceId, fromPane)));
   // On a machine the folder is the one it ran in, so Codex's picker is not widened to every directory.
-  const command = resumeCommand(launcher, launch, run.sessionId, !remote && there === null);
+  const command = launcher.cli === "opencode"
+    ? await agentCommandFor(launcher, profileId, run.sessionId)
+    : resumeCommand(launcher, launch, run.sessionId, !remote && there === null);
   if (!command) throw new Error("there is no conversation on this card to resume");
   const options = remote
     ? { command: await agentOn(remote.machine, remote.workspaceName, remote.dir, launcher.cli, command), kind: "agent" as const }
-    : { cwd, command: command + hooksFor(launcher, profileId) + web.launchFlags(launcher.cli), kind: "agent" as const };
+    : { cwd, command: launcher.cli === "opencode" ? command : command + hooksFor(launcher, profileId) + web.launchFlags(launcher.cli), kind: "agent" as const };
   const target = workspaces.agentPaneIn(profileId, workspaceId);
   if (!target) throw new Error("nowhere to put the agent");
   const agent = onScreen
@@ -3311,6 +3333,9 @@ function reapExited(): void {
      * and the card's ↻ or ■ is what takes the tab away.
      */
     if (workspaces.isCardDev(agent.id)) continue;
+    // A Kuru that died starting, for the same reason: the tab is the only
+    // record of why, and the next start is what takes it away.
+    if (harness.diedStarting(agent.id)) continue;
     // Before the tab goes, while the layout can still say whose it was.
     harness.noticed(agent, agent.status, true);
     host.kill(agent.id);
@@ -4633,8 +4658,13 @@ async function pollAccountUsage(): Promise<void> {
   // The profile's own login when profiles keep them, because that is the
   // account its terminals are spending; otherwise whichever this machine was
   // signed into last, as before.
-  const scope = loginsActive() ? claudeDirFor(workspaces.active.loginKey) : null;
-  if (await pollUsage(scope)) broadcast({ type: "usage", usage: usageSnapshot() });
+  const loginKey = loginsActive() ? workspaces.active.loginKey : null;
+  const scope = loginKey ? claudeDirFor(loginKey) : null;
+  const moved = await pollUsage(scope);
+  // Every fresh sighting, moved or not: a bar that read the same percentage
+  // twice is still two points on the history `limits` keeps.
+  recordClaudeLimits(usageReader?.ledger, usageSnapshot(), loginKey);
+  if (moved) broadcast({ type: "usage", usage: usageSnapshot() });
 }
 
 /**
@@ -4645,7 +4675,17 @@ async function pollAccountUsage(): Promise<void> {
 async function pollServers(): Promise<void> {
   if (windows() === 0) return;
   await pollMachines();
-  broadcast({ type: "machines", machines: machinesSnapshot() });
+  const machines = machinesSnapshot();
+  broadcast({ type: "machines", machines });
+  // The hardware rides the same poll: a machine that answered and is due —
+  // never read, six hours old, or just back after not answering — is read
+  // now. See `specs.ts`.
+  for (const machine of dueForReading(machines, Date.now())) void readSpecs(machine, broadcastSpecs);
+}
+
+/** Every machine's kept specs, to every window. Only when they move: a reading is hours old by design. */
+function broadcastSpecs(): void {
+  broadcast({ type: "specs", specs: specsSnapshot(machinesSnapshot()) });
 }
 
 /**
@@ -4656,20 +4696,7 @@ async function pollOpenRouterAccount(): Promise<void> {
   if (windows() === 0) return;
   if (await pollOpenRouter()) {
     broadcast({ type: "openrouter", openrouter: openRouterSnapshot() });
-    // The credit estimate may be counted off OpenRouter's BYOK totals.
-    broadcastCredit();
   }
-}
-
-/** The Anthropic credit estimate, worked out afresh: see `anthropiccredit.ts`. */
-function broadcastCredit(): void {
-  broadcast({ type: "anthropic-credit", credit: creditSnapshot(openRouterSnapshot()) });
-}
-
-/** Ask Anthropic's cost report what has gone, on the OpenRouter poll's terms; a no-op without an Admin key. */
-async function pollAnthropicCredit(): Promise<void> {
-  if (windows() === 0) return;
-  if (await pollCredit()) broadcastCredit();
 }
 
 /**
@@ -4715,7 +4742,6 @@ const timers = [
   setInterval(() => void pollAccountUsage(), USAGE_POLL_MS),
   setInterval(() => void pollServers(), MACHINE_POLL_MS),
   setInterval(() => void pollOpenRouterAccount(), OPENROUTER_POLL_MS),
-  setInterval(() => void pollAnthropicCredit(), ANTHROPIC_COST_POLL_MS),
   setInterval(sweepMade, MADE_SWEEP_MS),
 ];
 
@@ -4800,7 +4826,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
           // Looked up, never built: the id is the only thing taken off the wire.
           // Switched-off rows are not refused — the setting trims a menu, and a
           // second client with a stale one is still asking for a real agent.
-          const launcher = typeof msg.launcher === "string" ? findLauncher(msg.launcher) : undefined;
+          const launcher = typeof msg.launcher === "string" ? launcherFor(msg.launcher, launch) : undefined;
           if (!launcher) throw new Error(`no such agent: ${String(msg.launcher)}`);
           // Named now, as a card's run is, so that the ledger knows whose it is
           // before it has said a word. See `usage/attribute.ts`.
@@ -4813,7 +4839,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
             noteLaunch(agent.id, at.profileId, at.workspaceId, { program: launcher.cli, sessionId, machine: pin.machine.name, cwd: pin.dir });
             return agent;
           }
-          const agent = await openTerminal(paneId, { cwd: msg.cwd, command: agentCommand(launcher) + sessionFlag, kind: "agent" });
+          const agent = await openTerminal(paneId, { cwd: msg.cwd, command: (await agentCommand(launcher)) + sessionFlag, kind: "agent" });
           noteLaunch(agent.id, at.profileId, at.workspaceId, { program: launcher.cli, sessionId, cwd: agent.cwd });
           return agent;
         }
@@ -5213,10 +5239,25 @@ function handleMessage(ws: WebSocket, raw: string): void {
     case "open-harness": {
       const run = () =>
         harness.open(workspaces.active.id, { fresh: msg.fresh === true });
-      if (typeof msg.id === "number") void replyAsync(ws, msg.id, run);
+      // Asked with an id, the answer waits for a Kuru just started to be up
+      // or to have died, so the drawer can say which. See `Harness.whenUp`.
+      const ask = async () => {
+        const opened = await run();
+        if (opened.started) await harness.whenUp(opened.agentId);
+        return { agentId: opened.agentId };
+      };
+      if (typeof msg.id === "number") void replyAsync(ws, msg.id, ask);
       else void run().catch((err: unknown) => console.error("kururu: could not open the harness:", err instanceof Error ? err.message : err));
       return;
     }
+
+    case "restart-harness":
+      if (typeof msg.id !== "number") return;
+      void replyAsync(ws, msg.id, async () => {
+        if (typeof msg.profileId !== "string" || !workspaces.profile(msg.profileId)) throw new Error("no such profile");
+        return harness.restart(msg.profileId);
+      });
+      return;
 
     case "set-auto-swap":
       if (typeof msg.profileId !== "string") return;
@@ -5246,7 +5287,9 @@ function handleMessage(ws: WebSocket, raw: string): void {
     case "add-machine":
       reply(ws, msg.id, () => {
         const entry = addMachine(msg);
+        adoptSpecs(entry, machinesSnapshot());
         broadcast({ type: "machines", machines: machinesSnapshot() });
+        broadcastSpecs();
         void pollMachine(entry.id).then(() => broadcast({ type: "machines", machines: machinesSnapshot() }));
         return entry;
       });
@@ -5334,8 +5377,45 @@ function handleMessage(ws: WebSocket, raw: string): void {
     case "remove-machine":
       if (typeof msg.machineId !== "string") return;
       removeMachine(msg.machineId);
+      forgetSpecsRun(msg.machineId);
       workspaces.unpinMachine(msg.machineId);
       broadcast({ type: "machines", machines: machinesSnapshot() });
+      broadcastSpecs();
+      return;
+
+    case "set-specs": {
+      const machine = typeof msg.machineId === "string" ? findMachine(msg.machineId) : undefined;
+      if (!machine) return;
+      try {
+        setTyped(machine, msg.key, msg.value);
+      } catch {
+        return;
+      }
+      broadcastSpecs();
+      return;
+    }
+
+    case "specs-history":
+      reply(ws, msg.id, () => {
+        const machine = typeof msg.machineId === "string" ? findMachine(msg.machineId) : undefined;
+        if (!machine) throw new Error("That machine is not in the list any more.");
+        if (msg.op === "add") addHistory(machine, msg.date ?? "", msg.text);
+        else if (msg.op === "edit") editHistory(machine, msg.entryId, { date: msg.date, text: msg.text });
+        else if (msg.op === "remove") removeHistory(machine, msg.entryId);
+        else throw new Error("Not something the history does.");
+        broadcastSpecs();
+        return { ok: true };
+      });
+      return;
+
+    case "read-specs":
+      void replyAsync(ws, msg.id, async () => {
+        const machine = typeof msg.machineId === "string" ? findMachine(msg.machineId) : undefined;
+        if (!machine) throw new Error("That machine is not in the list any more.");
+        const error = await readSpecs(machine, broadcastSpecs);
+        if (error) throw new Error(error);
+        return { ok: true };
+      });
       return;
 
     case "open-machine-shell": {
@@ -5380,35 +5460,6 @@ function handleMessage(ws: WebSocket, raw: string): void {
       if (secrets.heldFrom("openrouter")) return;
       clearOpenRouterKey();
       broadcast({ type: "openrouter", openrouter: null });
-      broadcastCredit();
-      return;
-
-    // --- the Anthropic credit estimate ----------------------------------------
-    case "set-anthropic-balance":
-      void replyAsync(ws, msg.id, async () => {
-        await setCreditBalance(msg.balance, openRouterSnapshot());
-        await pollCredit();
-        broadcastCredit();
-        return creditSnapshot(openRouterSnapshot());
-      });
-      return;
-
-    case "clear-anthropic-balance":
-      clearCreditBalance();
-      broadcastCredit();
-      return;
-
-    case "set-anthropic-admin-key":
-      void replyAsync(ws, msg.id, async () => {
-        await setAdminKey(msg.key);
-        broadcastCredit();
-        return creditSnapshot(openRouterSnapshot());
-      });
-      return;
-
-    case "clear-anthropic-admin-key":
-      clearAdminKey();
-      broadcastCredit();
       return;
 
     // --- web -------------------------------------------------------------------
@@ -7680,10 +7731,10 @@ function admitClient(ws: WebSocket, watcher: string | null): void {
   send(ws, { type: "usage", usage: usageSnapshot() });
   send(ws, { type: "codex-usage", codex: codexUsageSnapshot() });
   send(ws, { type: "machines", machines: machinesSnapshot() });
+  send(ws, { type: "specs", specs: specsSnapshot(machinesSnapshot()) });
   send(ws, { type: "nodes", nodes: nodes.view() });
   send(ws, { type: "secrets", secrets: secrets.view() });
   send(ws, { type: "openrouter", openrouter: openRouterSnapshot() });
-  send(ws, { type: "anthropic-credit", credit: creditSnapshot(openRouterSnapshot()) });
   send(ws, { type: "web", web: web.status() });
   send(ws, { type: "voice", voice: voice.status() });
   send(ws, voice.hush());
@@ -7701,7 +7752,6 @@ function admitClient(ws: WebSocket, watcher: string | null): void {
   if (windows() === 1) {
     void pollServers();
     void pollOpenRouterAccount();
-    void pollAnthropicCredit();
   }
 }
 
@@ -7831,6 +7881,7 @@ async function attach(port: Port): Promise<void> {
     claudeDir: claudeDirOf,
     agentCommand: agentCommandFor,
     spawned: noteLaunch,
+    webTools: () => web.active(),
     openTerminal: openTerminalAt,
     machines: machinesSnapshot,
     nodes: () => nodes.statuses(),
@@ -7985,6 +8036,7 @@ async function attach(port: Port): Promise<void> {
     configDir,
     stateDir: () => dirname(snapshotPath()),
     dataDir,
+    ledger: () => usageReader?.ledger ?? null,
     // Each child's mirror, pulled over its link when its data moved, for
     // `nodes/<name>/` — through the variable, built on the next line.
     nodeMirrors: () => nodes.mirrors(),
@@ -8004,7 +8056,7 @@ async function attach(port: Port): Promise<void> {
       const marks = store.marks();
       return {
         mark: `${marks.events}.${marks.turns}.${store.changes}@${STARTED_AT}`,
-        files: mirrorFiles({ store, configDir: configDir(), stateDir: dirname(snapshotPath()) }),
+        files: mirrorFiles({ store, configDir: configDir(), stateDir: dirname(snapshotPath()), ledger: usageReader?.ledger ?? null }),
       };
     },
     changed: () => {

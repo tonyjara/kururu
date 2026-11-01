@@ -11,6 +11,12 @@
  * row already there is left alone. It refuses to run while a server is up,
  * because that server holds the database and the files it would write.
  *
+ * The usage ledger's `daily` is rebuilt the same way, from `usage/*.jsonl`
+ * into `usage.db` — upserted rather than added to, since a rollup is a sum
+ * and reading the same month twice must stay the same table, not two.
+ * `usage.db` itself was never in the backup (decision 9 of the plan); this
+ * is all the ledger a restore gets back.
+ *
  * It ends by saying what it could not put back: the logins, the OpenRouter
  * and web providers' keys and the share token are not in the backup, on purpose.
  *
@@ -29,6 +35,8 @@ import { readMirror, restoreFiles } from "./export";
 import { git } from "./gitcmd";
 import { snapshotPath } from "./persist";
 import { dataDir, Store } from "./store";
+import { importUsageMirror } from "./usage/export";
+import { Ledger } from "./usage/store";
 
 const PORT = Number(process.env.KURURU_PORT ?? 7717);
 
@@ -86,6 +94,14 @@ async function main(): Promise<void> {
   const files = restoreFiles(mirror, { configDir: configDir(), stateDir: join(snapshotPath(), "..") }, replace);
   for (const path of files.written) console.log(`  wrote ${path}`);
   for (const path of files.skipped) console.log(`  left alone (exists; --replace to overwrite): ${path}`);
+
+  const ledger = Ledger.open();
+  try {
+    const usage = importUsageMirror(mirror, ledger);
+    console.log(`usage ledger: ${usage.imported} day(s) added to \`daily\`${usage.skipped ? `, ${usage.skipped} line(s) would not parse` : ""}`);
+  } finally {
+    ledger.close();
+  }
 
   if (node) console.log(`\nThis box's boards are back. Pair it with the parent again (the parent's Settings → Nodes → Add a computer shows the command): its keys and the roster were never in the backup.`);
   console.log(`

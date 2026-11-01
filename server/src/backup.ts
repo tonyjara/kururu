@@ -40,6 +40,7 @@ import { readConfigFile, writeConfigFile } from "./config";
 import { OWNED, writeMirror, writeTree } from "./export";
 import { git } from "./gitcmd";
 import type { Store } from "./store";
+import type { Ledger } from "./usage/store";
 
 const FILE = "backup.json";
 /** A push over a slow link; past this it is a push that is not going to happen. */
@@ -53,6 +54,8 @@ export interface BackupDeps {
   configDir: () => string;
   stateDir: () => string;
   dataDir: () => string;
+  /** The usage ledger, when one opened, for the monthly rollup `export.ts` adds to the mirror. */
+  ledger?: () => Ledger | null;
   /**
    * Each child's mirror whose data moved since the last pull, fetched over
    * its link (`nodes.ts`). Written under `nodes/<name>/` and committed with
@@ -180,6 +183,12 @@ export class Backup {
       for (const project of listDir(projects)) stampTree(join(projects, project, "memory"), stamp);
     }
     stamp(join(this.deps.stateDir(), "session.json"));
+    // The usage ledger's own file, so a day's rollup changing is a reason to
+    // run even when nothing in `kururu.db` did. The WAL beside it is where a
+    // write lands first in `wal` mode, so it is stamped too.
+    const ledgerFile = join(this.deps.dataDir(), "usage.db");
+    stamp(ledgerFile);
+    stamp(`${ledgerFile}-wal`);
     return parts.join("\n");
   }
 
@@ -202,7 +211,7 @@ export class Backup {
       const dir = this.dir();
       await this.prepare(dir, this.settings.url);
       const changes = this.deps.store.changesSince(this.marks);
-      const written = writeMirror(dir, { store: this.deps.store, configDir: this.deps.configDir(), stateDir: this.deps.stateDir() });
+      const written = writeMirror(dir, { store: this.deps.store, configDir: this.deps.configDir(), stateDir: this.deps.stateDir(), ledger: this.deps.ledger?.() });
       // A child's tree is replaced whole each pull — its own walk decided
       // what goes, on its own disk — and a child that has gone keeps the
       // files of its last pull, since removing them is deleting a backup.

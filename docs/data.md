@@ -197,7 +197,7 @@ profile's Claude login. The files that go are named by name, and anything not na
 | `README.md` | what this is and how `bun run restore` uses it |
 | `nodes/<name>/` | each paired child's own mirror, the same tree, pulled over its link when its data moved ([nodes](nodes.md#backups)); `bun run restore <repo> --node <name>` reads it back onto a fresh child |
 
-Never: `access.json`, `openrouter.json`, `anthropic.json`, `telegram.json`, `node.json`, `nodes.json`, the lent secrets' records
+Never: `access.json`, `openrouter.json`, `telegram.json`, `node.json`, `nodes.json`, the lent secrets' records
 (`grants.json`, `secrets-held.json`, `claude-lend.json`, `claude-token.json`), `identities/`, `.claude.json`,
 `history.jsonl`, the transcripts, every cache, the database binary (git
 keeps a whole copy per change; the text rebuilds it), agents' replies, and
@@ -242,9 +242,11 @@ marked word comes out, on any table or in the raw file.
 
 It is a second file because it wants the opposite rules from `kururu.db`. It
 grows twenty times faster, is rebuildable for thirty days, and is in no daily
-copy and no backup: `shared/backup.ts`'s allow-list does not name it. **A ledger
-that will not open is a server that starts anyway**, without a chart, and
-saying so in its log. A newer build's file is left alone.
+copy and never itself in the backup: `shared/backup.ts`'s allow-list does not
+name `usage.db`. What does go is its `daily` rollup, numbers and keys only —
+see "The backup export" below. **A ledger that will not open is a server that
+starts anyway**, without a chart, and saying so in its log. A newer build's
+file is left alone.
 
 `server/src/usage/` reads it in: `tail.ts` follows a file from its offset and
 searches each chunk's raw bytes for two needles before anything becomes a
@@ -334,7 +336,8 @@ tile and the chart under it cannot disagree.
 `daily`). `daily` cannot name a folder or draw a session's row, and the messages
 behind a month are 70,000 rows on the event loop every terminal shares. It is a
 few rows per session per day with no attribution in it, so a session that changes
-hands moves on the page with nothing to rebuild; `daily` stays for phases 5 and 6.
+hands moves on the page with nothing to rebuild; `daily` stays for the backup
+export (above) and for phase 6's pull.
 A span that does not fall on midnight (a limit week, or "today") takes its two
 ends off `messages` (`splitDays`), so a limit week is cut at the account's
 instant. A report is about 10–40 ms on this Mac's 96,000 messages.
@@ -363,13 +366,31 @@ behind a toggle, which is what makes a tooltip and a colour under 3:1 legal. "Wh
 kind of token" draws two bars, tokens over dollars, because tokens alone are one
 block at 98 %.
 
-**The limit panel** draws the `limits` table, which is Codex's until phase 5, plus
-whatever Claude reading is in hand now, so Claude's line starts as one dot. The
-"this limit week" range takes its instant from Claude's reading, then Codex's, says
-whose, and says when it had to fall back to seven days.
+**The limit panel** draws the `limits` table: history, not a snapshot. Codex's
+rows ride free on the rollout tailer's own messages (`codexLimitSnapshots`, in
+`flush`); Claude's are the one thing nothing else on disk ever wrote down, so
+`usage/limits.ts`'s `recordClaudeLimits` is `pollAccountUsage`'s one extra call
+per tick — a row per window, keyed on the reading's own `at` so a poll that
+came back stale or unmoved (a `Retry-After` still waited out) adds nothing. The
+"this limit week" range takes its instant from Claude's reading, then Codex's,
+says whose, and says when it had to fall back to seven days.
 
 `cleanupPeriodDays` is read per login, that one number and nothing else from the
 file, and never written. The answer to the plan's first question stands.
+
+### The backup export
+
+Decision 9: `usage.db` itself never leaves, but its `daily` rollup does, as
+`usage/<month>.jsonl` — numbers, keys and folder names, grouped by calendar
+month so a year is twelve files rather than one growing blob. `usage/export.ts`
+reads `daily` through `Ledger.dailyExport` and `mirrorFiles` (`export.ts`) adds
+its lines beside the boards and conversations, under the same `OWNED` subtree
+rule that prunes a month gone stale. `bun run restore` reads it back with
+`importUsageMirror`, upserted on `daily`'s own key so running it twice is the
+same table, not a doubling — the one place in the restore where "added to,
+never replaced" would have been wrong. `bun run backup --check` lists the path
+without opening a ledger, the way it already lists everything else it would
+carry.
 
 ## Git, in two files
 

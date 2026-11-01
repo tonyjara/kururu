@@ -23,6 +23,8 @@ import { dirname, join, relative } from "node:path";
 import { BACKUP_README, CONFIG_DIRS, CONFIG_FILES, SETTINGS_DROP } from "../../shared/backup";
 import { isLoginKey } from "../../shared/model";
 import { EXPORT_VERSION, exportName, type BoardExport, type ConversationExport, type DataExport, type TurnExport } from "../../shared/store";
+import { usageMirrorFiles } from "./usage/export";
+import type { Ledger } from "./usage/store";
 import type { Store } from "./store";
 
 export interface MirrorSources {
@@ -31,10 +33,12 @@ export interface MirrorSources {
   configDir: string;
   /** Where `session.json` is. */
   stateDir: string;
+  /** The usage ledger, when one opened. Null carries no `usage/` files rather than throwing. */
+  ledger?: Ledger | null;
 }
 
 /** The subtrees this module owns in the mirror: anything else in the directory is left alone, `.git` first of all. */
-export const OWNED = ["config", "boards", "conversations", "memory", "profiles", "state"] as const;
+export const OWNED = ["config", "boards", "conversations", "memory", "profiles", "state", "usage"] as const;
 
 /**
  * Write the mirror under `dir`. Returns how many files are now in it and
@@ -98,6 +102,9 @@ export function mirrorFiles(sources: MirrorSources): Map<string, string | Buffer
 
   const session = join(sources.stateDir, "session.json");
   if (existsSync(session)) put(join("state", "session.json"), readFileSync(session));
+
+  // The usage ledger's monthly rollup, numbers and keys only — see `usage/export.ts`.
+  if (sources.ledger) for (const [rel, content] of usageMirrorFiles(sources.ledger)) put(rel, content);
   return files;
 }
 

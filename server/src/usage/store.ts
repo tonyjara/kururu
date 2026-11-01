@@ -41,6 +41,7 @@ import {
   strongerAttribution,
   type Attribution,
   type AttributionFacts,
+  type DailyExportRow,
   type LaunchRow,
   type LimitRow,
   type MessageRow,
@@ -680,6 +681,27 @@ export class Ledger {
   }
 
   // -------------------------------------------------------------------------
+  // Limits
+  // -------------------------------------------------------------------------
+
+  /**
+   * One or more sightings of an allowance window, written outside the sweep's
+   * batch: `usage.ts`'s own poll is the only source for Claude's reading, on a
+   * beat of its own, and nothing else here ever sees it. Codex's history
+   * arrives the other way, riding on the rollout tailer's messages
+   * (`codexLimitSnapshots`, written by `flush`), because every `rate_limits`
+   * object is already beside the tokens that reader reads; this is the one
+   * bridge the live bar's numbers still need. No rollup to keep in step —
+   * `limits` is not part of `daily` — so a plain transaction is enough.
+   */
+  recordLimits(rows: readonly LimitRow[]): void {
+    if (!rows.length) return;
+    this.tx(() => {
+      for (const row of rows) this.writeLimit(row);
+    });
+  }
+
+  // -------------------------------------------------------------------------
   // Reading
   // -------------------------------------------------------------------------
 
@@ -770,6 +792,85 @@ export class Ledger {
   usageLimits(from: number, to: number): LimitReading[] {
     const rows = this.stmt("select at, kind, scope, percent, source from limits where at >= ? and at < ? and percent is not null order by at").all(from, to) as Row[];
     return rows.map((row) => ({ at: row.at as number, kind: row.kind as string, scope: (row.scope as string | null) ?? null, percent: row.percent as number, source: row.source as string }));
+  }
+
+  // -------------------------------------------------------------------------
+  // Backup export
+  // -------------------------------------------------------------------------
+
+  /**
+   * Every row of `daily`, for `usage/export.ts` to write out one file a
+   * month. Decision 9: the rollup leaves the machine and the message rows
+   * never do, so this reads the one table that is already numbers, keys and
+   * folder names and nothing a transcript wrote.
+   */
+  dailyExport(): DailyExportRow[] {
+    const rows = this.stmt(
+      `select day, profile_key, workspace_key, card_id, kind, program, model, node, messages, input, cache_write_5m,
+         cache_write_1h, cache_read, output, thinking, cost_est, unpriced from daily
+       order by day, profile_key, workspace_key, card_id, kind, program, model, node`,
+    ).all() as Row[];
+    return rows.map((row) => ({
+      day: row.day as string,
+      profileKey: row.profile_key as string,
+      workspaceKey: row.workspace_key as string,
+      cardId: row.card_id as string,
+      kind: row.kind as string,
+      program: row.program as string,
+      model: row.model as string,
+      node: row.node as string,
+      messages: row.messages as number,
+      input: row.input as number,
+      write5m: row.cache_write_5m as number,
+      write1h: row.cache_write_1h as number,
+      read: row.cache_read as number,
+      output: row.output as number,
+      thinking: row.thinking as number,
+      costEst: row.cost_est as number,
+      unpriced: row.unpriced as number,
+    }));
+  }
+
+  /**
+   * A restore's `daily` rows, back in. Upserted on the table's own key rather
+   * than appended, so reading the same month's file twice is the same table,
+   * never two of each row — a restore the user runs again is not a doubling.
+   */
+  importDaily(rows: readonly DailyExportRow[]): number {
+    if (!rows.length) return 0;
+    return this.tx(() => {
+      const stmt = this.stmt(
+        `insert into daily(day, profile_key, workspace_key, card_id, kind, program, model, node, messages, input, cache_write_5m,
+           cache_write_1h, cache_read, output, thinking, cost_est, unpriced)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         on conflict(day, profile_key, workspace_key, card_id, kind, program, model, node) do update set
+           messages = excluded.messages, input = excluded.input, cache_write_5m = excluded.cache_write_5m,
+           cache_write_1h = excluded.cache_write_1h, cache_read = excluded.cache_read, output = excluded.output,
+           thinking = excluded.thinking, cost_est = excluded.cost_est, unpriced = excluded.unpriced`,
+      );
+      for (const row of rows) {
+        stmt.run(
+          row.day,
+          row.profileKey,
+          row.workspaceKey,
+          row.cardId,
+          row.kind,
+          row.program,
+          row.model,
+          row.node,
+          row.messages,
+          row.input,
+          row.write5m,
+          row.write1h,
+          row.read,
+          row.output,
+          row.thinking,
+          row.costEst,
+          row.unpriced,
+        );
+      }
+      return rows.length;
+    });
   }
 
   /** The counts `bun run status` prints. Off `daily` where it can, which is a few thousand rows however many messages. */

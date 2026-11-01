@@ -23,7 +23,6 @@ import {
   contextStrip,
   rangeBounds,
   type ContextStrip,
-  type LimitReading,
   type RetentionRow,
   type UsageDimension,
   type UsageNames,
@@ -43,8 +42,6 @@ export interface ReportDeps {
   /** When the account's week next resets, from the latest reading, if anybody has read it. */
   weekResetsAt: number | null;
   weekOwner: UsageReport["weekOwner"];
-  /** The readings in hand right now, which the ledger does not keep until phase 5 writes them. */
-  liveLimits: readonly LimitReading[];
   retention: RetentionRow[];
   status: LedgerStatus;
 }
@@ -77,7 +74,7 @@ export function usageReport(ledger: Ledger, range: UsageRange, by: UsageDimensio
     says: ledger.usageSays(),
     allTime: ledger.usageAllTime(),
     names: deps.names,
-    limits: [...ledger.usageLimits(Math.max(bounds.from, deps.status.oldestDay ? dayBounds(deps.status.oldestDay).start : 0), bounds.to), ...deps.liveLimits],
+    limits: ledger.usageLimits(Math.max(bounds.from, deps.status.oldestDay ? dayBounds(deps.status.oldestDay).start : 0), bounds.to),
     oldestDay: deps.status.oldestDay,
     retention: deps.retention,
     foot: {

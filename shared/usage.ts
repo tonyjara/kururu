@@ -77,6 +77,99 @@ export interface LimitRow {
   source: string;
 }
 
+/**
+ * One row of `daily`, as the backup's monthly export carries it. The same
+ * numbers, keys and folder names the table already holds and nothing else —
+ * no title, no agent label, no word a transcript wrote — which is what lets
+ * this leave the machine under `shared/backup.ts`'s allow-list at all.
+ */
+export interface DailyExportRow {
+  day: string;
+  profileKey: string;
+  workspaceKey: string;
+  cardId: string;
+  kind: string;
+  program: string;
+  model: string;
+  node: string;
+  messages: number;
+  input: number;
+  write5m: number;
+  write1h: number;
+  read: number;
+  output: number;
+  thinking: number;
+  costEst: number;
+  unpriced: number;
+}
+
+/** The calendar month a day falls in, `YYYY-MM` — also the export's one file a month. */
+export function monthOf(day: string): string {
+  return day.slice(0, 7);
+}
+
+/** A row as one line of its month's file. Field order is fixed above, so an unchanged row is an unchanged line. */
+export function dailyExportLine(row: DailyExportRow): string {
+  return JSON.stringify(row);
+}
+
+/**
+ * A line of a month's file, back into a row — or null, which the caller
+ * counts as skipped rather than fatal, the way `readMirror` treats a board or
+ * a conversation that will not parse. Every number is read the way a number
+ * off a log already is: finite or nothing, never a clamp.
+ */
+export function parseDailyExportLine(line: string): DailyExportRow | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const row = parsed as Record<string, unknown>;
+  const str = (value: unknown): string | null => (typeof value === "string" ? value : null);
+  const num = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) ? value : null);
+  const day = str(row.day);
+  const profileKey = str(row.profileKey);
+  const workspaceKey = str(row.workspaceKey);
+  const cardId = str(row.cardId);
+  const kind = str(row.kind);
+  const program = str(row.program);
+  const model = str(row.model);
+  const node = str(row.node);
+  const messages = num(row.messages);
+  const input = num(row.input);
+  const write5m = num(row.write5m);
+  const write1h = num(row.write1h);
+  const read = num(row.read);
+  const output = num(row.output);
+  const thinking = num(row.thinking);
+  const costEst = num(row.costEst);
+  const unpriced = num(row.unpriced);
+  if (
+    day === null ||
+    profileKey === null ||
+    workspaceKey === null ||
+    cardId === null ||
+    kind === null ||
+    program === null ||
+    model === null ||
+    node === null ||
+    messages === null ||
+    input === null ||
+    write5m === null ||
+    write1h === null ||
+    read === null ||
+    output === null ||
+    thinking === null ||
+    costEst === null ||
+    unpriced === null
+  )
+    return null;
+  return { day, profileKey, workspaceKey, cardId, kind, program, model, node, messages, input, write5m, write1h, read, output, thinking, costEst, unpriced };
+}
+
 // ---------------------------------------------------------------------------
 // Numbers
 // ---------------------------------------------------------------------------
