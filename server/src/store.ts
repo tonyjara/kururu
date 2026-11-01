@@ -1106,6 +1106,17 @@ export class Store {
     return { turns: rows.slice(0, limit).reverse().map(turnOf), more };
   }
 
+  /** The turns right after a moment, oldest first: the other way from `harnessTurns`, for reading on from a line a search jumped to. */
+  harnessTurnsAfter(profileKey: string, after: number, limit: number): { turns: Turn[]; more: boolean } {
+    const rows = this.stmt(
+      `select t.* from turns t join conversations v on v.id = t.conversation_id
+       where v.profile_key = ? and v.kind = 'harness' and t.at > ?
+       order by t.at, t.id limit ?`,
+    ).all(profileKey, after, limit + 1) as Row[];
+    const more = rows.length > limit;
+    return { turns: rows.slice(0, limit).map(turnOf), more };
+  }
+
   conversations(profileKey: string | null, kind: ConversationKind | null): Conversation[] {
     const rows = this.stmt("select * from conversations where (? is null or profile_key = ?) and (? is null or kind = ?) order by started_at").all(profileKey, profileKey, kind, kind) as Row[];
     return rows.map(conversationOf);

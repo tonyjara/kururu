@@ -81,9 +81,11 @@ export interface KuruDrawerState {
    * wait here when the drawer was closed, for the composer it mounts.
    */
   words: { text: string; n: number } | null;
+  /** The search was asked for from the keyboard: the drawer opens it and takes this down. */
+  search: boolean;
 }
 
-let state: KuruDrawerState = { open: false, focus: null, asked: 0, words: null };
+let state: KuruDrawerState = { open: false, focus: null, asked: 0, words: null, search: false };
 let wordsAsked = 0;
 const listeners = new Set<() => void>();
 
@@ -112,11 +114,38 @@ export function openKuru(focus: string | null = null): void {
   // Both drawers push the stage now, so one left open behind the other
   // would double the squeeze rather than just losing a click to it.
   closeNeeds();
-  set({ open: true, focus, asked: state.asked + 1, words: state.words });
+  set({ open: true, focus, asked: state.asked + 1, words: state.words, search: state.search });
 }
 
 export function closeKuru(): void {
-  if (state.open) set({ open: false, focus: null, asked: state.asked, words: state.words });
+  if (state.open) set({ open: false, focus: null, asked: state.asked, words: state.words, search: false });
+}
+
+/** Open the drawer if it is shut, and put the keyboard in its search. Open already, the list stays where it was being read. */
+export function searchInKuru(): void {
+  closeNeeds();
+  set(state.open ? { ...state, search: true } : { ...state, open: true, focus: null, asked: state.asked + 1, search: true });
+}
+
+/** The drawer has opened its search. */
+export function takeKuruSearch(): void {
+  if (state.search) set({ ...state, search: false });
+}
+
+/**
+ * What Escape does to a search that is up, for the window's key handler, which
+ * is above the drawer and otherwise closes it. Registered by the drawer while
+ * it is mounted; it answers whether there was a search to leave, so that the
+ * first Escape takes the search away and the next the drawer.
+ */
+let searchExit: (() => boolean) | null = null;
+
+export function setKuruSearchExit(exit: (() => boolean) | null): void {
+  searchExit = exit;
+}
+
+export function leaveKuruSearch(): boolean {
+  return searchExit?.() ?? false;
 }
 
 /**
@@ -128,7 +157,7 @@ export function insertInKuru(text: string): void {
   closeNeeds();
   const words = { text, n: ++wordsAsked };
   // Open already, the list stays where it was being read: only the box changes.
-  set(state.open ? { ...state, words } : { open: true, focus: null, asked: state.asked + 1, words });
+  set(state.open ? { ...state, words } : { open: true, focus: null, asked: state.asked + 1, words, search: state.search });
 }
 
 /** The composer has put the words in: they are not to be put in again. */

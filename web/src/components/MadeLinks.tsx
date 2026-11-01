@@ -19,7 +19,7 @@
  * through the same verb, which the server forwards. It wears the node's
  * chip, since a click on it changes a pane on another computer.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { madeName, readsInReader, type MadeFile } from "../../../shared/made";
 import { nodeOfId } from "../../../shared/remote";
 import * as api from "../session";
@@ -111,7 +111,7 @@ export function MadeLinks({
  * in the words it was written in. The server found the file (`KuruFile`);
  * which workspace it opens in is the server's to work out from its project.
  */
-export function MadeInline({ file, label, onOpened }: { file: MadeFile; label: string; onOpened?: () => void }) {
+export function MadeInline({ file, label, onOpened }: { file: MadeFile; label: ReactNode; onOpened?: () => void }) {
   const { open, error } = useOpenMade(null, onOpened);
   return (
     <>

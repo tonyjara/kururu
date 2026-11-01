@@ -51,6 +51,7 @@ import type { ChannelKind, ChannelsStatus, TelegramStatus } from "../../shared/c
 import type { BackupStatus } from "../../shared/backup";
 import type { SearchHit, SearchScope } from "../../shared/store";
 import type { KuruConversation, KuruPage, PeerKuru } from "../../shared/kuru";
+import type { KuruAround, KuruSearchAnswer } from "../../shared/kurusearch";
 import type { MadeFile } from "../../shared/made";
 import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "../../shared/voice";
 import type { MachineEntry, MachinePin, MachineStatus } from "../../shared/machines";
@@ -1658,6 +1659,24 @@ export async function fetchKuru(profileId: string, before: number | null): Promi
   if (!response.ok) throw new Error(`the conversation answered ${response.status}`);
   const body = (await response.json()) as Partial<KuruPage>;
   return { items: Array.isArray(body.items) ? body.items : [], more: body.more === true };
+}
+
+/** Every line of the conversation with these words, or a rejection when the server would not say; `signal` lets a keystroke drop the one before it. */
+export async function searchKuru(profileId: string, words: string, signal: AbortSignal): Promise<KuruSearchAnswer> {
+  const response = await fetch(`/api/kuru/search?${new URLSearchParams({ profile: profileId, q: words })}`, { signal });
+  if (!response.ok) throw new Error(`the search answered ${response.status}`);
+  const body = (await response.json()) as Partial<KuruSearchAnswer>;
+  return { raw: typeof body.raw === "string" ? body.raw : words, items: Array.isArray(body.items) ? body.items : [], total: Number.isFinite(body.total) ? body.total! : 0, exact: Number.isFinite(body.exact) ? body.exact! : 0 };
+}
+
+/** The lines around a moment — `before: 0` for only what comes after it — and whether there is more each way. */
+export async function fetchKuruAround(profileId: string, at: number, before?: number): Promise<KuruAround> {
+  const params = new URLSearchParams({ profile: profileId, at: String(at) });
+  if (before !== undefined) params.set("before", String(before));
+  const response = await fetch(`/api/kuru/around?${params}`);
+  if (!response.ok) throw new Error(`the conversation answered ${response.status}`);
+  const body = (await response.json()) as Partial<KuruAround>;
+  return { items: Array.isArray(body.items) ? body.items : [], older: body.older === true, newer: body.newer === true };
 }
 
 /**

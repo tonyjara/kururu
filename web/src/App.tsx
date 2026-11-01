@@ -62,7 +62,7 @@ import { ReloadNotice } from "./components/ReloadNotice";
 import { installReload } from "./reload";
 import { isLoopback } from "./preview";
 import { KuruDrawer } from "./components/KuruDrawer";
-import { closeKuru, kuruLive, openKuru, referCardIn, toggleKuru, useKuruDrawer } from "./kuru";
+import { closeKuru, kuruLive, leaveKuruSearch, openKuru, referCardIn, searchInKuru, toggleKuru, useKuruDrawer } from "./kuru";
 import { closeNeeds, toggleNeeds, useNeedsDrawer } from "./needs";
 import { arrangedNeeds, useNeedsView } from "./needsorder";
 import { NeedsDrawer } from "./components/NeedsDrawer";
@@ -996,6 +996,8 @@ export function App() {
         // header for the times the pty itself is wanted.
         case "open-harness":
           return toggleKuru();
+        case "search-kuru":
+          return searchInKuru();
         case "open-needs":
           return toggleNeeds();
         case "next-need":
@@ -1389,7 +1391,8 @@ export function App() {
       // the keyboard back, and the next Escape closes the drawer.
       if (kuruDrawer.open && keyName(event) === "escape" && !(event.target instanceof HTMLElement && event.target.closest(".kuru-composer"))) {
         take();
-        closeKuru();
+        // A search that is up goes first, as a reply being written does in the box.
+        if (!leaveKuruSearch()) closeKuru();
         return;
       }
       // The needs drawer is the same kind of thing — a list beside the panes,

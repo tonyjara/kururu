@@ -53,6 +53,7 @@ export type Action =
   | "open-reader"
   | "open-board"
   | "open-harness"
+  | "search-kuru"
   | "open-needs"
   | "next-need"
   | "settings"
@@ -113,6 +114,7 @@ export const ACTION_INFO: Record<Action, { label: string; group: ActionGroup }> 
   "open-reader": { label: "read the markdown open next door", group: "panes" },
   "open-board": { label: "this workspace's board", group: "panes" },
   "open-harness": { label: "Kuru: the conversation drawer, open or shut", group: "panes" },
+  "search-kuru": { label: "Kuru: search the conversation", group: "panes" },
   "open-needs": { label: "what needs you, across the workspaces: the drawer, open or shut", group: "panes" },
   "next-need": { label: "go to the next thing that needs you", group: "panes" },
 
@@ -151,6 +153,9 @@ export const DEFAULT_KEYMAP: Record<string, Action> = {
   // reaches for by this initial far more often than the agent finder ever
   // was.
   a: "open-harness",
+  // Unbound in ghosttown, and `/` is what less, vim and tmux's own copy mode
+  // have taught somebody to reach for to search what is on screen.
+  "/": "search-kuru",
   // Unbound in ghosttown. `i` for the inbox of things that need you, and `o`
   // beside it to go on to the next of them — the pair is pressed together,
   // and two keys under neighbouring fingers is what makes that a walk.

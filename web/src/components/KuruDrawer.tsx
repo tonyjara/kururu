@@ -106,23 +106,39 @@
  * shown, and a folded reply is not seen by being in view, since its first
  * line is not the reply.
  *
+ * **The search narrows the list in place.** The field is under the header —
+ * the magnifier, ⌘F with the keyboard in the drawer, or `C-a /` from anywhere —
+ * and as it is typed the list holds only the lines with those words, oldest
+ * first as ever, with the words lit (`shared/kurusearch.ts`). The lines already
+ * loaded are judged here on the keystroke and the server's answer for the whole
+ * history lands a moment later, so there is never a blank list to wait through.
+ * A line clicked opens the chat at it with the words still lit: from the loaded
+ * lines when it is among them, and otherwise from a page around it, kept apart
+ * from `known` with a "Show later" where it stops short of the newest, because
+ * those pages are the jump's and the chat's own span must not grow a hole.
+ * Empty field or Escape puts back the chat at the line that was at the top.
+ * Searching opens no fold for good and hears no reply: a reply in view among
+ * results has not been read as one of a conversation, so it stays unheard.
+ *
  * What it draws is the server's `kuru` message (`shared/kuru.ts`), already
  * merged: nothing in here decides what a message's state is or whether a
  * reply was heard. What it adds is this page's own two states for a clip the
  * server does not have yet — recording, and saving — from the voice module.
  */
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, createContext, useCallback, useContext, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cardCode } from "../../../shared/board";
 import { CHANNEL_NAMES, channelReady, isChannelKind, type TelegramStatus } from "../../../shared/channels";
 import { dropRefusal } from "../../../shared/drops";
 import { KURU_SEEN_MS, addressMatches, addressOf, addressQuery, clipLength, insertWords, mergeNodes, pickAddress, quotedLine, replyRefOf, splitCardCodes, splitCardRefs, typedAddress, type CardRef, type KuruItem, type KuruReply, type NodeKuruItem, type NoticeItem, type PeerKuru, type YouItem } from "../../../shared/kuru";
+import { matchItem, parseKuruQuery, splitHits, type KuruQuery } from "../../../shared/kurusearch";
 import { splitMentions } from "../../../shared/made";
 import type { AgentSnapshot, MascotConfig, Profile } from "../../../shared/model";
 import { REPLY_ME, replyClock, replyReference, splitReply, withReply, type ReplyRef } from "../../../shared/reply";
 import type { OutboxState, VoiceSettings } from "../../../shared/voice";
 import { escapePath, handoverFrom, isFileDrag } from "../drop";
-import { kuruLive, kuruWorking, takeKuruWords, useKuruDrawer, type KuruLive } from "../kuru";
+import { kuruLive, kuruWorking, setKuruSearchExit, takeKuruSearch, takeKuruWords, useKuruDrawer, type KuruLive } from "../kuru";
 import { firstLine, foldKeys, foldText, isFolded, isLong, readFolds, useFoldLong, withFold, withFolds, writeFolds, type Folds } from "../kurufold";
+import { useKuruSearch } from "../kurusearch";
 import { isLoopback } from "../preview";
 import * as api from "../session";
 import { useKururu } from "../session";
@@ -342,11 +358,49 @@ export function KuruDrawer({
     setMore((was) => was || conversation.more);
   }, [conversation]);
 
-  const own = [...known.values()].sort((a, b) => a.at - b.at);
-  const first = own[0]?.at ?? null;
-  const merged = mergeNodes(own, kuruPeers);
+  /**
+   * The search. `words` is the field; `viewing` is a result opened in the chat,
+   * with whatever had to be fetched to show it, kept out of `known` so that
+   * leaving puts the chat back exactly as it was.
+   */
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [words, setWords] = useState("");
+  const [viewing, setViewing] = useState<Viewing | null>(null);
+  const [opening, setOpening] = useState(false);
+  /** The line the arrows have reached in the results, which Enter opens. Null for the newest. */
+  const [walked, setWalked] = useState<string | null>(null);
+  const searchField = useRef<HTMLInputElement>(null);
+  const query = useMemo(() => parseKuruQuery(words), [words]);
+  // Typing never waits on the list: the field takes the key at once, and the
+  // lines catch up when React has a moment. The server's half is its own pause.
+  const deferred = useDeferredValue(query);
+  const lit = query && (deferred ?? query);
+  const searching = query !== null && viewing === null;
+  const { answer, failed } = useKuruSearch(profile.id, query?.raw ?? null);
+  const hits = useMemo(() => {
+    if (!lit) return null;
+    // The answer to something shorter than this still narrows: what is typed
+    // next only ever takes lines away from it, so it stands until its own.
+    const lines = new Map((answer?.items ?? []).filter((item) => matchItem(lit, item)).map((item) => [item.id, item] as const));
+    for (const item of known.values()) if (matchItem(lit, item)) lines.set(item.id, item);
+    const peers = kuruPeers.map((peer) => ({ ...peer, items: peer.items.filter((item) => matchItem(lit, item)) }));
+    return mergeNodes([...lines.values()].sort((a, b) => a.at - b.at), peers);
+  }, [lit, answer, known, kuruPeers]);
+
+  const context = viewing?.pages ?? null;
+  // A page of `viewing`'s and a line of `known`'s can be the same line, and `known`'s is the live one.
+  const own = [...(context?.size ? new Map([...context, ...known]) : known).values()].sort((a, b) => a.at - b.at);
+  const fetched = context?.size ? [...context.values()].sort((a, b) => a.at - b.at) : null;
+  const first = (fetched ?? own)[0]?.at ?? null;
+  const merged = searching && hits ? hits : mergeNodes(own, kuruPeers);
   const items = filter === null ? merged : merged.filter((item) => (item.node ?? selfName) === filter);
-  const away = filter !== null ? kuruPeers.find((peer) => peer.node.name === filter && peer.state !== "up") : undefined;
+  const away = filter !== null && !searching ? kuruPeers.find((peer) => peer.node.name === filter && peer.state !== "up") : undefined;
+  const moreEarlier = searching ? false : fetched ? viewing!.older : more;
+  /** The last line of what was fetched for a result, where the chat stops short of the newest. */
+  const fetchedLast = fetched?.at(-1) ?? null;
+  const gapAfter = viewing?.newer ? (fetchedLast?.id ?? null) : null;
+  /** Lines a search matched that the answer left out to stay at its cap. They are this node's, so they do not count while the list is narrowed to another's. */
+  const leftOut = answer && query && answer.raw === query.raw && (filter === null || filter === selfName) ? Math.max(0, answer.total - answer.items.length) : 0;
 
   /**
    * Which lines are folded to one row (`kurufold.ts`): open by default, or
@@ -359,12 +413,15 @@ export function KuruDrawer({
     return foldLong && text !== null && isLong(text);
   };
   /** Null for a line with nothing to fold. */
-  const foldedOf = (item: NodeKuruItem): boolean | null => (foldText(item) === null ? null : isFolded(folds, foldKeys(item), foldDefault(item)));
+  // A result stands open, and so does the one opened in the chat, without
+  // writing that down: what a line is folded to is for reading, and a search
+  // passing over it should leave it as it found it.
+  const foldedOf = (item: NodeKuruItem): boolean | null => (foldText(item) === null ? null : !searching && viewing?.id !== item.id && isFolded(folds, foldKeys(item), foldDefault(item)));
   const keepFolds = (next: Folds) => {
     setFolds(next);
     writeFolds(next);
   };
-  const foldable = items.filter((item) => foldText(item) !== null);
+  const foldable = searching ? [] : items.filter((item) => foldText(item) !== null);
   const anyOpen = foldable.some((item) => !foldedOf(item));
 
   /**
@@ -419,12 +476,19 @@ export function KuruDrawer({
   const earlier = () => {
     if (loading) return;
     setLoading(true);
+    const reading = fetched !== null;
     api
       .fetchKuru(profile.id, first)
       .then((page) => {
         // Kept where the eye is: the list grows above, and the scroll
         // position is put back by the layout effect below.
         anchor.current = list.current ? { height: list.current.scrollHeight, top: list.current.scrollTop } : null;
+        // Reading back from a result older than the chat's span: these are
+        // the jump's lines, and the chat's own stays as it was.
+        if (reading) {
+          setViewing((was) => was && { ...was, pages: new Map([...page.items.map((item) => [item.id, item] as const), ...was.pages]), older: page.more });
+          return;
+        }
         setKnown((prev) => {
           const next = new Map(prev);
           for (const item of page.items) if (!next.has(item.id)) next.set(item.id, item);
@@ -436,6 +500,168 @@ export function KuruDrawer({
       .finally(() => setLoading(false));
   };
   const anchor = useRef<{ height: number; top: number } | null>(null);
+
+  /** Reading on from a result, towards the chat's own lines. Once a page reaches them there is no gap left to show. */
+  const later = () => {
+    if (loading || !fetchedLast) return;
+    setLoading(true);
+    api
+      .fetchKuruAround(profile.id, fetchedLast.at, 0)
+      .then((page) => setViewing((was) => was && { ...was, pages: new Map([...was.pages, ...page.items.map((item) => [item.id, item] as const)]), newer: page.newer && !page.items.some((item) => known.has(item.id)) }))
+      .catch(() => setViewing((was) => was && { ...was, newer: false }))
+      .finally(() => setLoading(false));
+  };
+
+  /**
+   * Where the chat was when the search began, which is where it goes back to:
+   * the first line in view and how far down it sat, or the foot. A line and not
+   * a `scrollTop`, since a reply that arrives meanwhile moves every offset.
+   */
+  const left = useRef<{ id: string; top: number } | "foot" | null>(null);
+  const putBack = useRef(false);
+  const noteWhereWeAre = () => {
+    const el = list.current;
+    if (!el) return;
+    const line = stuck.current ? null : firstInView(el);
+    // Its real offset, and not `firstInView`'s, which stops at the list's top:
+    // a tall line half scrolled past it has to come back half scrolled past it.
+    const row = line && el.querySelector(`[data-item="${CSS.escape(line.id)}"]`);
+    left.current = line && row ? { id: line.id, top: row.getBoundingClientRect().top - el.getBoundingClientRect().top } : "foot";
+  };
+  const editWords = (next: string) => {
+    const was = query !== null;
+    const now = parseKuruQuery(next) !== null;
+    if (!was && now) noteWhereWeAre();
+    if (was && !now) putBack.current = true;
+    if (viewing || !now) setViewing(null);
+    setWalked(null);
+    setWords(next);
+  };
+  const [searchAsks, setSearchAsks] = useState(0);
+  const openSearch = useCallback(() => {
+    setSearchOpen(true);
+    setSearchAsks((n) => n + 1);
+  }, []);
+  // After the commit, since the field may only now have been drawn.
+  useLayoutEffect(() => {
+    if (!searchAsks) return;
+    searchField.current?.focus();
+    searchField.current?.select();
+  }, [searchAsks]);
+  /** Escape, or the ✕: the full chat, where it was. Says whether there was a search to leave. */
+  const leaveSearch = useCallback((): boolean => {
+    if (!searchOpen) return false;
+    // Before it goes: a focused field taken out of the page tells nobody, and
+    // the prefix would go on believing a field has the keyboard.
+    searchField.current?.blur();
+    if (parseKuruQuery(words)) putBack.current = true;
+    setViewing(null);
+    setWords("");
+    setWalked(null);
+    setSearchOpen(false);
+    return true;
+  }, [searchOpen, words]);
+  useEffect(() => {
+    setKuruSearchExit(leaveSearch);
+    return () => setKuruSearchExit(null);
+  }, [leaveSearch]);
+  useEffect(() => {
+    searchField.current?.blur();
+    setSearchOpen(false);
+    setWords("");
+    setViewing(null);
+  }, [profile.id]);
+  const { search: searchAsked } = useKuruDrawer();
+  useEffect(() => {
+    if (!searchAsked) return;
+    takeKuruSearch();
+    openSearch();
+  }, [searchAsked, openSearch]);
+  /**
+   * ⌘F, while the drawer is open: from anywhere on a Mac, a terminal included,
+   * since reading the drawer usually means the keyboard is still in a pane and
+   * no ⌘ chord ever reaches a pty — but not from another field, whose words a
+   * find may mean. Everywhere else it is ctrl+f, which a terminal does want, so
+   * there only with the keyboard in the drawer or in nothing. `C-a /` is the
+   * door from any pane on any machine.
+   */
+  useEffect(() => {
+    const mac = /Mac|iP(hone|ad)/.test(navigator.platform);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "f" || event.shiftKey || event.altKey || !(mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) return;
+      const target = event.target instanceof Element ? event.target : null;
+      const here = target === document.body || root.current?.contains(target);
+      if (!here && (!mac || target?.closest("input, textarea, select, [contenteditable]:not(.term)"))) return;
+      event.preventDefault();
+      event.stopPropagation();
+      openSearch();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [openSearch]);
+
+  /**
+   * A result opened: the chat at that line, in context, with the words still
+   * lit. A line the chat has loaded or another node's, which is all this drawer
+   * has of it, is there already; anything older is fetched first.
+   */
+  const openResult = (item: NodeKuruItem) => {
+    const show = (next: Viewing) => {
+      setViewing(next);
+      setGoal((was) => ({ id: item.id, smooth: false, n: (was?.n ?? 0) + 1 }));
+      setFlash(item.id);
+      stuck.current = false;
+    };
+    if (item.node !== null || known.has(item.id)) {
+      show({ id: item.id, pages: new Map(), older: false, newer: false });
+      return;
+    }
+    if (opening) return;
+    setOpening(true);
+    api
+      .fetchKuruAround(profile.id, item.at)
+      .then((page) => {
+        const pages = new Map(page.items.map((line) => [line.id, line] as const));
+        pages.set(item.id, item);
+        show({ id: item.id, pages, older: page.older, newer: page.newer && !page.items.some((line) => known.has(line.id)) });
+      })
+      .catch(() => show({ id: item.id, pages: new Map([[item.id, item]]), older: false, newer: false }))
+      .finally(() => setOpening(false));
+  };
+  const backToResults = () => {
+    const id = viewing?.id;
+    setViewing(null);
+    stuck.current = false;
+    if (id) setGoal((was) => ({ id, smooth: false, n: (was?.n ?? 0) + 1 }));
+  };
+  /** A click on a result that was not on one of its own doors, nor the end of selecting some of its words. */
+  const onListClick = (event: React.MouseEvent) => {
+    if (!searching || !(event.target instanceof Element) || event.target.closest("button, a") || window.getSelection()?.toString()) return;
+    const id = event.target.closest<HTMLElement>("[data-item]")?.dataset.item;
+    const item = id ? items.find((line) => line.id === id) : undefined;
+    if (item) openResult(item);
+  };
+  // The hits, and not `items`, which is the chat again while one of them is open.
+  const results = (hits ?? []).filter((item) => filter === null || (item.node ?? selfName) === filter);
+  const walkedAt = walked === null ? results.length - 1 : results.findIndex((item) => item.id === walked);
+  /** The field's own keys: the arrows walk the results, Enter opens the one reached, Escape leaves. */
+  const onSearchKey = (event: React.KeyboardEvent) => {
+    if (event.nativeEvent.isComposing) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      leaveSearch();
+    } else if (searching && results.length > 0 && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+      event.preventDefault();
+      const next = results[Math.max(0, Math.min(results.length - 1, (walkedAt < 0 ? results.length - 1 : walkedAt) + (event.key === "ArrowUp" ? -1 : 1)))]!;
+      setWalked(next.id);
+      setGoal((was) => ({ id: next.id, smooth: false, n: (was?.n ?? 0) + 1 }));
+    } else if (event.key === "Enter" && searching) {
+      event.preventDefault();
+      const item = results[walkedAt];
+      if (item) openResult(item);
+    }
+  };
 
   /**
    * Where the list sits. Opened, it is at the foot, or at the reply the pill
@@ -470,6 +696,31 @@ export function KuruDrawer({
     }
     if (stuck.current) el.scrollTop = el.scrollHeight;
   }, [items.length, live, working, outgoing.length, ui.phase]);
+  // Results open at the foot, the newest of them over the composer, as the chat does.
+  // New words only: coming back from a result goes to that result (`backToResults`).
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (!el || !searching) return;
+    el.scrollTop = el.scrollHeight;
+    stuck.current = true;
+  }, [lit?.raw]);
+  // Last of these on purpose: the chat is back and has its height, whatever the
+  // effects above just did with it.
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (!putBack.current || !el) return;
+    putBack.current = false;
+    const was = left.current;
+    left.current = null;
+    if (was === "foot" || !was) {
+      el.scrollTop = el.scrollHeight;
+      stuck.current = true;
+      return;
+    }
+    const row = el.querySelector(`[data-item="${CSS.escape(was.id)}"]`);
+    if (row) el.scrollTop += row.getBoundingClientRect().top - el.getBoundingClientRect().top - was.top;
+    stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
+  }, [query === null]);
   const onScroll = () => {
     const el = list.current;
     if (el) stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
@@ -483,7 +734,7 @@ export function KuruDrawer({
    * view read: its first line is not the reply, and it is folded unread when
    * it was long on its way in, or folded with all the rest.
    */
-  const unheard = items
+  const unheard = (searching ? [] : items)
     .filter((item): item is NodeKuruItem & KuruReply => item.kind === "kuru" && item.fate === "unheard" && item.utterance !== null && !foldedOf(item))
     .map((item) => item.utterance!);
   const unheardKey = unheard.join("\n");
@@ -626,8 +877,10 @@ export function KuruDrawer({
   }, [flash]);
 
   // This page's own clips, before the server has them, and the one being recorded.
-  const saving = outgoing.filter((clip) => clip.profileId === profile.id && !known.has(clip.id));
-  const recording = ui.phase === "listening" && !voiceIsRemote();
+  const saving = searching ? [] : outgoing.filter((clip) => clip.profileId === profile.id && !known.has(clip.id));
+  const recording = !searching && ui.phase === "listening" && !voiceIsRemote();
+  /** Whether the server has answered for these very words, or never will: until then an empty list is not "nothing". */
+  const settled = failed || (answer !== null && answer.raw === query?.raw);
 
   return (
     <aside className={`kuru-drawer ${sheet ? "kuru-sheet" : ""}`} ref={root} role="dialog" aria-label="Kuru">
@@ -640,6 +893,9 @@ export function KuruDrawer({
       <header className="kuru-head">
         {chips}
         <span className="kuru-head-spacer" />
+        <button type="button" className={`kuru-head-btn kuru-head-icon ${searchOpen ? "kuru-head-btn-on" : ""}`} aria-pressed={searchOpen} aria-label="Search the conversation" title="Search the conversation (⌘F, or C-a /)" onClick={() => (searchOpen ? leaveSearch() : openSearch())}>
+          <SearchIcon />
+        </button>
         {foldable.length > 0 && <FoldAll open={anyOpen} onFold={foldAll} />}
         {voice && <SpeakSwitch settings={voice.settings} />}
         {telegram && <TelegramSwitch status={telegram} />}
@@ -650,100 +906,144 @@ export function KuruDrawer({
 
       {kuruPeers.length > 0 && <NodeChips self={selfName} peers={kuruPeers} filter={filter} onPick={pickNode} />}
 
-      <ol className="kuru-list" ref={list} onScroll={onScroll}>
-        {more && (
-          <li className="kuru-earlier">
-            <button className="kuru-head-btn" onClick={earlier} disabled={loading}>
-              {loading ? "Loading…" : "Show earlier"}
-            </button>
-          </li>
-        )}
-        {items.map((item) =>
-          item.kind === "session" ? (
-            <li key={item.id} className="kuru-mark">
-              <span>New conversation{item.launcher ? ` · ${item.launcher}` : ""}</span>
-              <time dateTime={new Date(item.at).toISOString()}>{dayAt(item.at)}</time>
-            </li>
-          ) : item.kind === "you" ? (
-            (() => {
-              const to = item.node === null && item.text ? (addressOf(item.text, peerNames, item.via === "voice")?.node ?? null) : null;
-              const reply = item.text ? splitReply(item.text) : null;
-              const quoted = reply ? quotedOf(reply.ref, item.node ?? to, item.at) : null;
-              return (
-                <You
-                  key={item.id}
-                  item={item}
-                  state={item.state}
-                  note={item.note}
-                  node={item.node}
-                  to={to}
-                  refOf={item.node === null ? refOf : noRefs}
-                  onCard={onCard}
-                  reply={reply}
-                  onQuote={quoted ? () => goTo(quoted) : null}
-                  onReplyTo={() => replyTo(item)}
-                  flash={flash === item.id}
-                  folded={foldedOf(item) === true}
-                  onFold={item.text ? () => toggleFold(item) : null}
-                />
-              );
-            })()
-          ) : item.kind === "notice" ? (
-            <Notice
-              key={item.id}
-              item={item}
-              node={item.node}
-              cardOf={item.node === null ? cardOf : noCards}
-              onCard={onCard}
-              onReplyTo={() => replyTo(item)}
-              flash={flash === item.id}
-            />
-          ) : (
-            <Reply
-              key={item.id}
-              item={item}
-              node={item.node}
-              // Not `marked === item.utterance` alone: with nothing marked that
-              // is null === null for every reply never spoken, and each of them
-              // wore the accent of the one just scrolled to, for good.
-              marked={marked !== null && marked === item.utterance}
-              flash={flash === item.id}
-              replaying={replayingId === item.id}
-              onReplay={onReplay}
-              onReplyTo={() => replyTo(item)}
-              folded={foldedOf(item) === true}
-              onFold={() => toggleFold(item)}
-              cardOf={item.node === null ? cardOf : noCards}
-              onCard={onCard}
-              onFile={onFile}
-            />
-          ),
-        )}
-        {away && (
-          <li className="kuru-mark">
-            <span>
-              {away.node.name} {away.state === "away" ? "is away" : "is not linked yet"}
-              {away.lastSeen ? ` · last seen ${dayAt(away.lastSeen)}` : ""} · these are the last items it sent
-            </span>
-          </li>
-        )}
-        {saving.map((clip) => (
-          <You
-            key={clip.id}
-            item={{ kind: "you", id: clip.id, at: clip.at, text: null, via: "voice", ms: clip.ms, state: "queued", typedAt: null, note: null, outboxId: null }}
-            state="saving"
-            note={clip.error ? `Not with the server yet (${clip.error}). Kept on this device and sent again until it is.` : null}
+      {searchOpen && (
+        <div className="kuru-search" role="search">
+          <SearchIcon />
+          <input
+            ref={searchField}
+            className="kuru-search-field"
+            type="text"
+            value={words}
+            placeholder="Search the conversation"
+            aria-label="Search the conversation"
+            enterKeyHint="search"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            onChange={(event) => editWords(event.target.value)}
+            onKeyDown={onSearchKey}
+            onFocus={() => onEditing(true)}
+            onBlur={() => onEditing(false)}
           />
-        ))}
-        {recording && (
-          <li className="kuru-item kuru-you kuru-you-recording">
-            <span className="kuru-meta">
-              <MicIcon />
-              <span className="kuru-state kuru-state-recording">{STATE_WORD.recording}</span>
+          {query && (
+            <span className="kuru-search-count" role="status">
+              {opening ? "Opening…" : searchCount(results.length, leftOut, results.filter((item) => lit && matchItem(lit, item) === "near").length, settled)}
             </span>
-          </li>
-        )}
-      </ol>
+          )}
+          {viewing && (
+            <button type="button" className="kuru-head-btn" onClick={backToResults}>
+              Results
+            </button>
+          )}
+          <button type="button" className="kuru-quoting-cancel" onMouseDown={(event) => event.preventDefault()} onClick={leaveSearch} title="Back to the full chat (Esc)" aria-label="Close the search">
+            <Icon name="close" />
+          </button>
+        </div>
+      )}
+
+      <HitWords.Provider value={lit ?? null}>
+        <ol className={`kuru-list ${searching ? "kuru-searching" : ""}`} ref={list} onScroll={onScroll} onClick={onListClick}>
+          {moreEarlier && (
+            <li className="kuru-earlier">
+              <button className="kuru-head-btn" onClick={earlier} disabled={loading}>
+                {loading ? "Loading…" : "Show earlier"}
+              </button>
+            </li>
+          )}
+          {searching && results.length === 0 && settled && (
+            <li className="kuru-search-none" role="status">
+              {failed ? <>The search could not reach the server, so only the lines loaded here were looked through. Nothing there has “{query.raw}”.</> : <>Nothing in this conversation has “{query.raw}”, or anything spelt close to it.</>}
+            </li>
+          )}
+          {items.map((item) =>
+            withGap(item.id === gapAfter, later, loading, item.id, item.kind === "session" ? (
+              <li key={item.id} className="kuru-mark">
+                <span>New conversation{item.launcher ? ` · ${item.launcher}` : ""}</span>
+                <time dateTime={new Date(item.at).toISOString()}>{dayAt(item.at)}</time>
+              </li>
+            ) : item.kind === "you" ? (
+              (() => {
+                const to = item.node === null && item.text ? (addressOf(item.text, peerNames, item.via === "voice")?.node ?? null) : null;
+                const reply = item.text ? splitReply(item.text) : null;
+                const quoted = reply ? quotedOf(reply.ref, item.node ?? to, item.at) : null;
+                return (
+                  <You
+                    key={item.id}
+                    item={item}
+                    state={item.state}
+                    note={item.note}
+                    node={item.node}
+                    to={to}
+                    refOf={item.node === null ? refOf : noRefs}
+                    onCard={onCard}
+                    reply={reply}
+                    onQuote={quoted ? () => goTo(quoted) : null}
+                    onReplyTo={() => replyTo(item)}
+                    flash={flash === item.id || (searching && walked === item.id)}
+                    folded={foldedOf(item) === true}
+                    onFold={item.text ? () => toggleFold(item) : null}
+                  />
+                );
+              })()
+            ) : item.kind === "notice" ? (
+              <Notice
+                key={item.id}
+                item={item}
+                node={item.node}
+                cardOf={item.node === null ? cardOf : noCards}
+                onCard={onCard}
+                onReplyTo={() => replyTo(item)}
+                flash={flash === item.id || (searching && walked === item.id)}
+                onResult={searching ? () => openResult(item) : null}
+              />
+            ) : (
+              <Reply
+                key={item.id}
+                item={item}
+                node={item.node}
+                // Not `marked === item.utterance` alone: with nothing marked that
+                // is null === null for every reply never spoken, and each of them
+                // wore the accent of the one just scrolled to, for good.
+                marked={marked !== null && marked === item.utterance}
+                flash={flash === item.id || (searching && walked === item.id)}
+                replaying={replayingId === item.id}
+                onReplay={onReplay}
+                onReplyTo={() => replyTo(item)}
+                folded={foldedOf(item) === true}
+                onFold={() => toggleFold(item)}
+                cardOf={item.node === null ? cardOf : noCards}
+                onCard={onCard}
+                onFile={onFile}
+              />
+            )),
+          )}
+          {away && (
+            <li className="kuru-mark">
+              <span>
+                {away.node.name} {away.state === "away" ? "is away" : "is not linked yet"}
+                {away.lastSeen ? ` · last seen ${dayAt(away.lastSeen)}` : ""} · these are the last items it sent
+              </span>
+            </li>
+          )}
+          {saving.map((clip) => (
+            <You
+              key={clip.id}
+              item={{ kind: "you", id: clip.id, at: clip.at, text: null, via: "voice", ms: clip.ms, state: "queued", typedAt: null, note: null, outboxId: null }}
+              state="saving"
+              note={clip.error ? `Not with the server yet (${clip.error}). Kept on this device and sent again until it is.` : null}
+            />
+          ))}
+          {recording && (
+            <li className="kuru-item kuru-you kuru-you-recording">
+              <span className="kuru-meta">
+                <MicIcon />
+                <span className="kuru-state kuru-state-recording">{STATE_WORD.recording}</span>
+              </span>
+            </li>
+          )}
+        </ol>
+      </HitWords.Provider>
 
       <Live live={live} working={working} profileId={profile.id} mascot={mascot} onTerminal={onTerminal} />
 
@@ -874,6 +1174,68 @@ function NodeChips({ self, peers, filter, onPick }: { self: string; peers: PeerK
         );
       })}
     </nav>
+  );
+}
+
+/** A result opened in the chat: which line, what had to be fetched to show it, and whether that stops short of either end. */
+interface Viewing {
+  id: string;
+  pages: Map<string, KuruItem>;
+  older: boolean;
+  newer: boolean;
+}
+
+/** What the count beside the field says: how many, how many of them only by a typo, and that more may be coming. */
+function searchCount(shown: number, leftOut: number, near: number, settled: boolean): string {
+  if (!settled) return shown ? `${shown} so far…` : "Searching…";
+  if (!shown) return "No matches";
+  if (leftOut) return `Best ${shown} of ${(shown + leftOut).toLocaleString()}`;
+  const count = `${shown} ${shown === 1 ? "match" : "matches"}`;
+  return near ? `${count} · ${near} close` : count;
+}
+
+/** A row, and the door on past the end of a result's page when this row is that end. */
+function withGap(gap: boolean, later: () => void, loading: boolean, key: string, row: ReactNode): ReactNode {
+  if (!gap) return row;
+  return (
+    <Fragment key={key}>
+      {row}
+      <li className="kuru-earlier">
+        <button className="kuru-head-btn" onClick={later} disabled={loading}>
+          {loading ? "Loading…" : "Show later"}
+        </button>
+      </li>
+    </Fragment>
+  );
+}
+
+/** The query whose words are lit in the list, for every piece of a line however deep it is drawn. */
+const HitWords = createContext<KuruQuery | null>(null);
+
+/**
+ * Words, with what the search found in them in a `<mark>`. Every leaf of a line
+ * goes through this and nothing else: the words reach React as strings, cut by
+ * `splitHits` and never parsed, so a message holding a tag or a backtick draws
+ * as those characters with the highlight among them, and a path's link and a
+ * card's door stay what they are with the highlight inside. Kept per piece by
+ * `useMemo`, since the drawer draws again on every message of the socket.
+ */
+function Lit({ text }: { text: string }) {
+  const query = useContext(HitWords);
+  const parts = useMemo(() => (query ? splitHits(query, text) : null), [query, text]);
+  if (!parts) return <>{text}</>;
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.hit ? (
+          <mark key={i} className={part.hit === "near" ? "kuru-hit kuru-hit-near" : "kuru-hit"}>
+            {part.text}
+          </mark>
+        ) : (
+          <Fragment key={i}>{part.text}</Fragment>
+        ),
+      )}
+    </>
   );
 }
 
@@ -1206,7 +1568,7 @@ function ReplyWords({ text, files, cardOf, onCard, onFile }: { text: string; fil
       {(files?.length ? splitMentions(text) : [{ text }]).map((part, i) => {
         if ("mention" in part) {
           const file = files?.find((f) => f.text === part.mention.text);
-          if (file) return <MadeInline key={i} file={file} label={part.mention.text} onOpened={onFile} />;
+          if (file) return <MadeInline key={i} file={file} label={<Lit text={part.mention.text} />} onOpened={onFile} />;
         }
         return <CardWords key={i} text={"mention" in part ? part.mention.text : part.text} cardOf={cardOf} onCard={onCard} />;
       })}
@@ -1339,18 +1701,20 @@ function RefWords({ text, refOf, onCard }: { text: string; refOf: RefOf; onCard?
   return (
     <>
       {splitCardRefs(text).map((bit, j) => {
-        if ("text" in bit) return <Fragment key={j}>{bit.text}</Fragment>;
+        if ("text" in bit) return <Lit key={j} text={bit.text} />;
         const card = onCard ? refOf(bit.ref) : null;
         return (
           <Fragment key={j}>
             {card ? (
               <button className="kuru-card" onClick={() => onCard!(card.workspaceId, card.cardId)} title="Open the board at this card">
-                {bit.ref.code}
+                <Lit text={bit.ref.code} />
               </button>
             ) : (
-              <span className="kuru-card">{bit.ref.code}</span>
+              <span className="kuru-card">
+                <Lit text={bit.ref.code} />
+              </span>
             )}{" "}
-            “{bit.ref.title}”
+            “<Lit text={bit.ref.title} />”
           </Fragment>
         );
       })}
@@ -1363,14 +1727,14 @@ function CardWords({ text, cardOf, onCard }: { text: string; cardOf: CardOf; onC
   return (
     <>
       {splitCardCodes(text).map((bit, j) => {
-        if ("text" in bit) return <Fragment key={j}>{bit.text}</Fragment>;
+        if ("text" in bit) return <Lit key={j} text={bit.text} />;
         const card = cardOf(bit.code);
         return card ? (
           <button key={j} className="kuru-card" onClick={() => onCard(card.workspaceId, card.cardId)} title="Open the board at this card">
-            {bit.code}
+            <Lit text={bit.code} />
           </button>
         ) : (
-          <Fragment key={j}>{bit.code}</Fragment>
+          <Lit key={j} text={bit.code} />
         );
       })}
     </>
@@ -1395,6 +1759,7 @@ function Notice({
   onCard,
   onReplyTo,
   flash = false,
+  onResult = null,
 }: {
   item: NoticeItem;
   node?: string | null;
@@ -1402,8 +1767,15 @@ function Notice({
   onCard: (workspaceId: string | null, cardId: string) => void;
   onReplyTo: () => void;
   flash?: boolean;
+  /** It is a search's result, and a press on the line opens it in the chat rather than opening the message under it. */
+  onResult?: (() => void) | null;
 }) {
-  const [open, setOpen] = useState(false);
+  const [opened, setOpen] = useState(false);
+  const query = useContext(HitWords);
+  // What the search found may be behind the tap, and a result that does not
+  // show why it is one is no use: so the message stands open while it is lit.
+  const lit = useMemo(() => query !== null && splitHits(query, item.text).some((part) => part.hit), [query, item.text]);
+  const open = opened || lit;
   const agent = item.agent;
   // Another node's notice about its agents crosses without the reply it
   // quoted (`peerItems`), so there is nothing behind a tap.
@@ -1417,17 +1789,29 @@ function Notice({
           type="button"
           className="kuru-notice-line"
           aria-expanded={more ? open : undefined}
-          disabled={!more}
-          onClick={() => setOpen((was) => !was)}
-          title={more ? (open ? "Hide the message" : "Show the whole message") : undefined}
+          disabled={!more && !onResult}
+          onClick={onResult ?? (() => setOpen((was) => !was))}
+          title={onResult ? "Show this in the chat" : more ? (open ? "Hide the message" : "Show the whole message") : undefined}
         >
           {more && <Icon name="caret" />}
           <NodeTag node={node} />
-          <span className="kuru-notice-from">{item.from}</span>
+          <span className="kuru-notice-from">
+            <Lit text={item.from} />
+          </span>
           <span aria-hidden="true">·</span>
-          {agent && <span className="kuru-notice-cut">{agent.name ? `"${agent.name}"` : agent.program}</span>}
-          {agent?.workspace && <span className="kuru-notice-where">in {agent.workspace}</span>}
-          <span className={`kuru-notice-what ${agent ? "" : "kuru-notice-cut"}`}>{item.what}</span>
+          {agent && (
+            <span className="kuru-notice-cut">
+              <Lit text={agent.name ? `"${agent.name}"` : agent.program} />
+            </span>
+          )}
+          {agent?.workspace && (
+            <span className="kuru-notice-where">
+              in <Lit text={agent.workspace} />
+            </span>
+          )}
+          <span className={`kuru-notice-what ${agent ? "" : "kuru-notice-cut"}`}>
+            <Lit text={item.what} />
+          </span>
           <time dateTime={new Date(item.at).toISOString()}>{saidAt(item.at)}</time>
         </button>
         <ReplyButton onReply={onReplyTo} />
@@ -1932,6 +2316,16 @@ function FoldIcon({ folded }: { folded: boolean }) {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d={folded ? "m7 15 5 5 5-5M7 9l5-5 5 5" : "m7 20 5-5 5 5M7 4l5 5 5-5"} />
+    </svg>
+  );
+}
+
+/** A magnifier, for the search — drawn here for `KeysIcon`'s reason. */
+function SearchIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="m20 20-4.2-4.2" />
     </svg>
   );
 }

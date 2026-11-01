@@ -6464,6 +6464,45 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     json(res, kuru.page(workspaces.keyOf(profileId) ?? "", Number.isFinite(before) && before > 0 ? before : null, Number.isFinite(limit) ? Math.max(1, Math.min(200, Math.floor(limit))) : KURU_PAGE));
     return;
   }
+  /**
+   * The drawer's search, as it is typed: a GET like the page above, with the
+   * words in the query and never anywhere else — no model hears them, and no
+   * log is written of them. A window that has moved on closes the request, and
+   * that ends the scan.
+   */
+  if (url.pathname === "/api/kuru/search") {
+    const asked = url.searchParams.get("profile");
+    const profileId = asked && workspaces.profile(asked) ? asked : workspaces.active.id;
+    let gone = false;
+    res.on("close", () => {
+      gone = true;
+    });
+    void kuru
+      .search(workspaces.keyOf(profileId) ?? "", url.searchParams.get("q") ?? "", () => gone)
+      .then((answer) => {
+        if (!gone) json(res, answer);
+      })
+      .catch((err: unknown) => {
+        if (!gone) json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      });
+    return;
+  }
+  /** The lines around a moment, for a result older than the drawer has loaded; `before=0` reads on from it. */
+  if (url.pathname === "/api/kuru/around") {
+    const asked = url.searchParams.get("profile");
+    const profileId = asked && workspaces.profile(asked) ? asked : workspaces.active.id;
+    const at = Number(url.searchParams.get("at"));
+    if (!Number.isFinite(at)) {
+      json(res, { error: "at must be a time" }, 400);
+      return;
+    }
+    const count = (name: string): number => {
+      const asked = Number(url.searchParams.get(name) ?? KURU_PAGE);
+      return Number.isFinite(asked) ? Math.max(0, Math.min(200, Math.floor(asked))) : KURU_PAGE;
+    };
+    json(res, kuru.around(workspaces.keyOf(profileId) ?? "", at, count("before"), count("after")));
+    return;
+  }
   if (url.pathname === "/api/kuru/play" && req.method === "POST") {
     const asked = url.searchParams.get("profile");
     const profileId = asked && workspaces.profile(asked) ? asked : workspaces.active.id;

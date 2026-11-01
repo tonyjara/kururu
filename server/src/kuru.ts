@@ -29,6 +29,7 @@
  * On the restartable side, like everything that reads the database.
  */
 import { KURU_PAGE, KURU_RECENT, kuruCounts, mergeConversation, type KuruConversation, type KuruFile, type KuruItem, type KuruPage, type PeerKuru } from "../../shared/kuru";
+import { matchItem, parseKuruQuery, pickHits, type HitTier, type KuruAround, type KuruSearchAnswer } from "../../shared/kurusearch";
 import type { Turn } from "../../shared/store";
 import type { StoredMissed, StoredOutboxEntry } from "../../shared/voice";
 import type { ServerMessage } from "../../shared/wire";
@@ -36,6 +37,10 @@ import type { Store } from "./store";
 
 /** How long a burst of changes settles before one broadcast says all of it. */
 const COALESCE_MS = 25;
+/** How many lines a search compares before it lets the terminals have the event loop back. */
+const SEARCH_BATCH = 200;
+/** More turns than one conversation will ever hold; the read is one query however many there are. */
+const ALL_TURNS = 10_000_000;
 
 export interface KuruDeps {
   store: Store;
@@ -111,6 +116,62 @@ export class Kuru {
       launchers: this.launchers(profileKey),
     });
     return { items: this.linked(profileKey, items), more };
+  }
+
+  /**
+   * Every line of the conversation with the words asked for, not just the ones
+   * a window has loaded. It reads what `page` reads, through the same merge, so
+   * it searches what the drawer draws; a line can only be judged once the merge
+   * has said whose it is. The comparing is cut into batches with the event loop
+   * let go between them, since this process relays every terminal, and a query
+   * nobody is waiting for any more stops at the next batch (`gone`).
+   *
+   * Only the lines going back get their files looked for: that is a look at the
+   * disk per line, and most of the history is not coming back.
+   */
+  async search(profileKey: string, words: string, gone: () => boolean = () => false): Promise<KuruSearchAnswer> {
+    const query = parseKuruQuery(words);
+    const answer: KuruSearchAnswer = { raw: query?.raw ?? "", items: [], total: 0, exact: 0 };
+    if (!query) return answer;
+    const { turns } = this.deps.store.harnessTurns(profileKey, null, ALL_TURNS);
+    const items = mergeConversation({ turns, outbox: this.deps.outbox(profileKey), missed: this.deps.missed(profileKey) });
+    const found: { item: KuruItem; tier: HitTier }[] = [];
+    for (let at = 0; at < items.length; at += SEARCH_BATCH) {
+      await new Promise((resume) => setImmediate(resume));
+      if (gone()) return answer;
+      for (const item of items.slice(at, at + SEARCH_BATCH)) {
+        const tier = matchItem(query, item);
+        if (tier) found.push({ item, tier });
+      }
+    }
+    return {
+      raw: query.raw,
+      items: this.linked(profileKey, pickHits(found)),
+      total: found.length,
+      exact: found.filter((hit) => hit.tier === "exact").length,
+    };
+  }
+
+  /**
+   * The lines either side of a moment: a result clicked that is older than
+   * anything the drawer has loaded opens here, rather than loading every page
+   * from the newest down to it into a list that has no virtual scroll.
+   */
+  around(profileKey: string, at: number, before = KURU_PAGE, after = KURU_PAGE): KuruAround {
+    const older = this.deps.store.harnessTurns(profileKey, at + 1, before);
+    const newer = this.deps.store.harnessTurnsAfter(profileKey, at, after);
+    const turns = [...older.turns, ...newer.turns];
+    const since = older.more ? (turns[0]?.at ?? at) : -Infinity;
+    const until = newer.more ? (turns.at(-1)?.at ?? at) + 1 : Infinity;
+    const linked = linkedBy(turns);
+    const inSpan = (when: number) => when >= since && when < until;
+    const items = mergeConversation({
+      turns,
+      outbox: this.deps.outbox(profileKey).filter((entry) => inSpan(entry.at) || linked.has(entry.id)),
+      missed: this.deps.missed(profileKey).filter((entry) => inSpan(entry.at) || linked.has(entry.id)),
+      launchers: this.launchers(profileKey),
+    });
+    return { items: this.linked(profileKey, items), older: older.more, newer: newer.more };
   }
 
   private conversation(profileId: string, profileKey: string): KuruConversation {

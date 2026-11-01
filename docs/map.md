@@ -22,6 +22,7 @@ in this folder.
 | `reload.ts` | An agent reloading the window: what holds a reload, who asked in words, what the agent is told. Pure, tested |
 | `kuru.ts` | The conversation with Kuru as one list: turns, your messages' states and each reply's fate merged, the chip's two counts, the card codes in a reply. Pure, tested |
 | `reply.ts` | A message that answers one line, as the words Kuru reads: `[reply to Kuru 18:42 "…" (t1234)]` written, read back, put after an `@node`, and cut. No imports, since `kuru.ts` and `channels.ts` both write one. Pure, tested. See [harness](harness.md#a-message-the-user-replies-to) |
+| `kurusearch.ts` | What a search of Kuru's chat matches and which words it lights: exact or a typo away, every word of the query, on the words a line draws, ranges kept through accent folding. Pure, tested. See [voice](voice.md#the-drawer) |
 | `made.ts` | What an agent made: the paths in a reply, which of them are the deliverable (a document presented or changed alone, code presented and few), and the drawer's split of a reply into words and paths. Pure, tested. See [layout](layout.md#what-an-agent-made) |
 | `needs.ts` | What needs you across a profile's workspaces — an agent asking, a card in Review, a turn ended unseen, a card whose agent went — and the walk to the next. Pure, tested |
 | `notecards.ts` | The cards the menu bar offers to pop out as note windows: what needs you, by `needs.ts`, then the profile's board a column at a time. Pure, tested |
@@ -128,7 +129,7 @@ in this folder.
 | `src/harnesshome.ts` | The folder each profile's harness runs in, under the data directory and no project's: made with its AGENTS.md and CLAUDE.md, and the harness's own memories carried over once from wherever it ran before |
 | `src/mcp.ts` | Five methods of MCP over JSON-RPC, written out rather than the SDK. Pure; served at `POST /mcp` for the harness and `POST /mcp/web` for every agent |
 | `src/voice.ts` | The harness's ears and mouth: a clip through `yap` once per language, the words into the harness; a reply through Kokoro (or `say`) a sentence at a time, Spanish phonemised by `espeak-ng`. `/api/voice/hear`, `/api/speech` (`shared/voice.ts`) |
-| `src/kuru.ts` | The conversation assembled for the drawer, from the store's turns, the outbox and the voice's missed list — the `kuru` message, `GET /api/kuru`, the counts on `/api/health` |
+| `src/kuru.ts` | The conversation assembled for the drawer, from the store's turns, the outbox and the voice's missed list — the `kuru` message, `GET /api/kuru`, its search and the page around a result (`/api/kuru/search`, `/api/kuru/around`), the counts on `/api/health` |
 | `src/channels.ts` | What each channel hears of Kuru's turns: told what Kuru took in and said, decides whether a reply is spoken here, echoes your words from here, says when a channel's message failed |
 | `src/telegram.ts` | The Telegram bot: its token owner-only in `~/.config/kururu/telegram.json`, read per request and never sent back; the long poll (no webhook, nothing listens); the queue out; pairing; shared among nodes, the routing, the held messages, the reply map, the lines handed to the reader and the handover. `KURURU_TELEGRAM_API` points it at a stand-in |
 | `src/lead.ts` | One Telegram among the nodes: runs `LeadGate` on the links, the `lead-*` handshake that moves the poll, and the chat's words (`telegram-in`) and every Kuru's lines (`telegram-out`) crossing them. See [nodes](nodes.md#one-telegram) |
@@ -189,6 +190,7 @@ in this folder.
 | `src/voice.ts` | The talk key (hold or tap), the microphone as PCM off a worklet, and the player for what the harness says. Module state, like `session.ts` |
 | `src/reload.ts` | When this page may reload for an agent — the voice, the hands, what is open over it — and the notice carried across the reload |
 | `src/kuru.ts` | Whether the Kuru drawer is open and at which reply, for every door that opens it; what Kuru is doing in one word, for the chip and the drawer |
+| `src/kurusearch.ts` | The server's half of a search as a keystroke reaches it: a pause, and the request before it aborted |
 | `src/kurufold.ts` | Which lines of Kuru's drawer are folded to one row, on this device: the name a fold is kept under, what a folded line shows, and "Fold long messages". Pure, tested. See [harness](harness.md#a-line-folded-to-one-row) |
 | `src/needs.ts` | Whether the drawer of things that need you is open, for the tray and the key; one drawer at a time with Kuru's |
 | `src/needsorder.ts` | The Needs drawer's folds and the order its groups and cards were sorted into, per device and per profile; what Next walks. Pure but for the store, tested |

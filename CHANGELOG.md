@@ -13,6 +13,15 @@ shows, so it is written once and read in three places — see
 
 ## [Unreleased]
 
+### Added
+
+- **Search in Kuru's chat.** The magnifier in the drawer's header, ⌘F while the
+  drawer is open, or `C-a /` from anywhere. The chat narrows to the messages
+  with those words, across the whole history, with the words highlighted. A typo
+  or part of a word still finds it; a word found only by a typo is underlined
+  rather than filled, and the count says how many. Click a message to read it
+  where it was said, and press Escape to get back to the chat where you left it.
+
 ## [0.6.0] - 2026-10-29
 
 Nothing in this release needs the pty host restarted, and the database, the

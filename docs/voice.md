@@ -291,6 +291,52 @@ the colours alternate. The socket carries the newest `KURU_RECENT` of each
 profile and everything on the two lists with something to do about it;
 **Show earlier** pages back through `GET /api/kuru`.
 
+**The search** is the magnifier in the header, ⌘F while the drawer is open
+(from a terminal too on a Mac, since no ⌘ chord reaches a pty; ctrl+f elsewhere,
+and there only with the keyboard in the drawer, since a terminal wants that one)
+or `C-a /` from anywhere. The list narrows to the lines with those words, oldest
+first as the chat is, with the words in a `<mark>`. The rule is
+`shared/kurusearch.ts`, one function both halves share. The window judges the
+lines it has on the keystroke, and `GET /api/kuru/search` reads the rest of the
+history through the same merge a moment later (a 120 ms pause, and the request
+before it aborted, which ends its scan). No model hears a query, and no token is
+spent.
+
+It is not the `search` tool's FTS5 index, though that covers the same turns. The
+index answers for tokens, so a typo finds nothing, and it reads turns as written,
+wrappers and ids included, where this reads what the drawer draws: a card
+reference by its code and title, a reply without the line it quotes. So every
+word of the query must be in the line, in any order: as a substring (at the start
+of a word for one or two letters), which is exact, or failing that a word one
+edit away (two from eight letters; a swap of neighbours is one), which is close.
+Under four letters and with a digit there are no typos, since 8080 is not a
+misspelling of 8081. It is not a subsequence match, fzf's, because in a long reply
+nearly any short query is a subsequence of something.
+
+**Time order is kept**, because shuffled by score the lines around a decision read
+as nonsense. Rank decides only what is left out past the answer's cap of 200: exact
+before close, newest before older. The count then says "Best 200 of 516". A close
+word is underlined and an exact one filled.
+
+Highlighting is strings: `splitHits` cuts a line's text and `Lit` draws each piece,
+at every leaf a line has, so a tag in a message draws as those characters, and a
+path's link or a card's door stays one with the highlight inside. The drawer
+renders no markdown, so there is none to break. A notice whose message has the
+words stands open while it is lit.
+
+A result clicked (or reached with the arrows and Enter) opens the chat at that line
+with the words still lit. Older than anything loaded, it opens on a page from
+`GET /api/kuru/around` with **Show earlier** and **Show later**, because loading
+every page down to it would put thousands of rows in a list with no virtual scroll.
+Those pages stay out of the chat's own `known`, so **Results** goes back and an
+empty field or Escape puts the chat back at the same line and offset. Escape takes
+the search away first and the drawer second. While searching, nothing is written:
+results stand unfolded without touching what is folded, and a reply in view among
+them stays unheard.
+
+Another node's lines are searched only as far as this drawer holds them, its last
+`PEER_RECENT`: its history is on its own disk and `peerItems` is all that crosses.
+
 The live line says what Kuru is doing now — the mascot hopping with
 "Thinking…" and **Stop**, "asking something in its terminal" with **Open
 terminal**, "not running" with **Start** — and the chip says the same in a
