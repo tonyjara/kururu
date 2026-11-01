@@ -1564,6 +1564,15 @@ export class Workspaces {
     return out;
   }
 
+  /** Every machine a workspace is pinned to, in any profile: what gives the usage ledger a reason to read one. */
+  pinnedMachines(): Set<string> {
+    const ids = new Set<string>();
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) if (workspace.machine) ids.add(workspace.machine.machineId);
+    }
+    return ids;
+  }
+
   /** Every conversation id on any card, so the same one is never learned for two. */
   cardSessions(): Set<string> {
     const ids = new Set<string>();

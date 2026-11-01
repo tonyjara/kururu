@@ -130,6 +130,8 @@ export interface NodeHostDeps {
   summary: (leads: boolean, sees: string[]) => NodeSummary;
   /** This node's backup mirror, now, for the parent's pull. */
   exportFiles: () => { mark: string; files: ReadonlyMap<string, string | Buffer> };
+  /** This node's usage for the days the parent does not hold yet (`usage/remote.ts`), or null with no ledger. Absent in a test that has none. */
+  usageExport?: (known: unknown) => unknown;
   /** Something a client draws changed. */
   changed: () => void;
   log: (line: string) => void;
@@ -251,6 +253,7 @@ export class NodeHost {
   private readonly pending = new Set<Link>();
   private readonly dialers = new Map<string, Dialer>();
   private readonly pulls = new Map<string, Pull>();
+  private readonly usagePulls = new Map<string, { peer: string; resolve: (part: unknown) => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private readonly asks = new Map<string, Ask>();
   /** The data mark of each node's last backup pull. */
   private readonly pulled = new Map<string, string>();
@@ -1060,6 +1063,12 @@ export class NodeHost {
       case "export":
         this.onExport(message);
         return;
+      case "usage-ask":
+        this.answerUsage(link, message);
+        return;
+      case "usage-said":
+        this.onUsage(link, message);
+        return;
       case "workspace-move-check":
         this.answerMoveCheck(link, message);
         return;
@@ -1147,6 +1156,12 @@ export class NodeHost {
       if (pull.peer !== peerId) continue;
       clearTimeout(pull.timer);
       this.pulls.delete(id);
+      pull.reject(new Error("the link dropped"));
+    }
+    for (const [id, pull] of this.usagePulls) {
+      if (pull.peer !== peerId) continue;
+      clearTimeout(pull.timer);
+      this.usagePulls.delete(id);
       pull.reject(new Error("the link dropped"));
     }
     for (const [id, ask] of this.asks) {
@@ -1341,6 +1356,50 @@ export class NodeHost {
       }
     }
     return { pulled, failed };
+  }
+
+  // ---------------------------------------------------------------------------
+  // The usage pull (`usage/remote.ts` decides; this carries it)
+  // ---------------------------------------------------------------------------
+
+  /** A child answering its parent. Nobody else's: what a node spent is told upward, and to no sibling. */
+  private answerUsage(link: Link, message: Extract<LinkMessage, { type: "usage-ask" }>): void {
+    if (typeof message.id !== "string" || message.id.length > 64) return;
+    if (link.peer !== this.roster?.parent || this.role() !== "child") {
+      link.send({ type: "usage-said", id: message.id, part: null, error: "only the parent asks a node what it spent" });
+      return;
+    }
+    try {
+      const part = this.deps.usageExport?.(message.known) ?? null;
+      link.send({ type: "usage-said", id: message.id, part, error: part === null ? "this node has no ledger" : null });
+    } catch (err) {
+      link.send({ type: "usage-said", id: message.id, part: null, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private onUsage(link: Link, message: Extract<LinkMessage, { type: "usage-said" }>): void {
+    const pull = this.usagePulls.get(message.id);
+    if (!pull || pull.peer !== link.peer) return;
+    this.usagePulls.delete(message.id);
+    clearTimeout(pull.timer);
+    if (message.part === null || message.part === undefined) pull.reject(new Error(typeof message.error === "string" ? message.error.slice(0, 200) : "the node sent nothing"));
+    else pull.resolve(message.part);
+  }
+
+  /** Ask a linked child for the days of its usage the parent does not hold. The answer is off the wire: `adoptUsagePart` reads it. */
+  usagePull(nodeId: string, known: Record<string, string>): Promise<unknown> {
+    const link = this.links.get(nodeId);
+    if (!link || this.role() !== "parent") return Promise.reject(new Error("not linked"));
+    const id = randomBytes(8).toString("hex");
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.usagePulls.delete(id);
+        reject(new Error("the node did not answer in time"));
+      }, EXPORT_MS);
+      timer.unref();
+      this.usagePulls.set(id, { peer: nodeId, resolve, reject, timer });
+      link.send({ type: "usage-ask", id, known });
+    });
   }
 
   // ---------------------------------------------------------------------------

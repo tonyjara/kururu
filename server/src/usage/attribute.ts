@@ -30,7 +30,8 @@
  * the flag a card's run has always been started with.
  */
 import { realpath } from "node:fs/promises";
-import { matchRollouts, type LaunchRow, type SessionKind, type UsageProgram, type WaitingLaunch } from "../../../shared/usage";
+import { fitsRemoteDir } from "../../../shared/machines";
+import { matchRollouts, ROLLOUT_EARLY_REMOTE_MS, type LaunchRow, type RolloutSeen, type SessionKind, type UsageProgram, type WaitingLaunch } from "../../../shared/usage";
 import { rolloutsSince } from "../sessions";
 import type { Ledger } from "./store";
 
@@ -60,6 +61,8 @@ export interface LaunchesDeps {
   /** Conversations some card already holds, which a folder and a time must not claim. */
   cardSessions: () => ReadonlySet<string>;
   log: (line: string) => void;
+  /** The rollouts a machine has touched lately, or null when it could not be asked. Absent in a test with no machine. */
+  rolloutsOn?: (machine: string, minutes: number) => Promise<RolloutSeen[] | null>;
 }
 
 export class Launches {
@@ -115,9 +118,9 @@ export class Launches {
   }
 
   /**
-   * Waiting launches, matched against the rollouts of their Codex home. A card's
-   * run stays out of it, because its own words will find it, and so does one on a
-   * machine, whose rollouts are an ssh away and belong with the remote reader.
+   * Waiting launches, matched against the rollouts of their Codex home, here or
+   * on the machine they were started on. A card's run stays out of it, because
+   * its own words will find it.
    */
   async lookForWaiting(now = Date.now()): Promise<number> {
     if (this.looking) return 0;
@@ -135,13 +138,39 @@ export class Launches {
           if (this.ledger.settleWaiting(launch.agentId, sessionId)) settled++;
         }
       }
-      return settled;
+      return settled + (await this.lookOnMachines(now));
     } catch (err) {
       this.complain(err);
       return 0;
     } finally {
       this.looking = false;
     }
+  }
+
+  /**
+   * The same over ssh, once a minute and only while something is waiting. A pin's
+   * folder may be `~/code`, which only the far side can expand, so a rollout is
+   * read as the pin's folder when it fits; and that machine's clock is not this
+   * one's, so a rollout may say it began a little before its launch did.
+   */
+  private async lookOnMachines(now: number): Promise<number> {
+    const asked = this.deps.rolloutsOn;
+    if (!asked) return 0;
+    const there = this.ledger.waiting().filter((launch) => launch.cardId === null && launch.machine !== null && launch.cwd !== null);
+    let settled = 0;
+    for (const machine of new Set(there.map((launch) => launch.machine!))) {
+      const mine = there.filter((launch) => launch.machine === machine);
+      const since = Math.min(...mine.map((launch) => launch.at));
+      const rollouts = await asked(machine, Math.ceil((now - since) / 60_000) + 2);
+      if (!rollouts) continue;
+      const dirs = [...new Set(mine.map((launch) => launch.cwd!))];
+      const seen = rollouts.map((rollout) => ({ ...rollout, cwd: rollout.cwd === null ? null : (dirs.find((dir) => fitsRemoteDir(dir, rollout.cwd!)) ?? rollout.cwd) }));
+      const taken = new Set([...this.deps.cardSessions(), ...this.ledger.launched(seen.map((rollout) => rollout.id))]);
+      for (const { launch, sessionId } of matchRollouts(mine, seen, taken, ROLLOUT_EARLY_REMOTE_MS)) {
+        if (this.ledger.settleWaiting(launch.agentId, sessionId)) settled++;
+      }
+    }
+    return settled;
   }
 
   private quietly(fn: () => void): void {

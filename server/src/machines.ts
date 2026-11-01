@@ -15,6 +15,11 @@
  * makes before ending an idle card's agent there — each a constant with a
  * UUID or a whole number in it, and nothing else.
  *
+ * The usage ledger's two reads are here for the same reason: `usageListScript`
+ * and `usageReadScript`, which print sizes and the lines the ledger wants. A
+ * whole number and a path held to a grammar with nothing to escape in it are all
+ * that changes in them, and neither writes a byte over there.
+ *
  * **Nothing is ever asked for.** `BatchMode` means ssh fails rather than
  * prompting for a passphrase or a host key nobody is there to confirm: the
  * server is a daemon, and a prompt it cannot answer is a poll that hangs. A key
@@ -48,11 +53,14 @@ import {
   machineName,
   MACHINE_SEP,
   parseMachineSample,
+  usageListScript,
+  usageReadScript,
   validHost,
   validPanel,
   type MachineEntry,
   type MachineReading,
   type MachineStatus,
+  type UsageLog,
 } from "../../shared/machines";
 import { readConfigFile, writeConfigFile } from "./config";
 
@@ -149,11 +157,11 @@ function batchArgs(): string[] {
 }
 
 /** One line on one host, with ssh's own last word when it fails. */
-function run(host: string, line: string): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+function run(host: string, line: string, limits: { timeout: number; maxBuffer: number } = { timeout: TIMEOUT_MS, maxBuffer: 1024 * 1024 }): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   // Belt to `validHost`'s braces: after `--`, nothing is an option.
   const args = [...batchArgs(), "--", host, line];
   return new Promise((resolve) => {
-    execFile("ssh", args, { timeout: TIMEOUT_MS, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile("ssh", args, limits, (err, stdout, stderr) => {
       if (!err) return resolve({ ok: true, text: stdout });
       // ssh's last line is the one that says what went wrong; the ones above
       // it are banners and warnings.
@@ -304,6 +312,24 @@ export async function codexRolloutsOn(host: string, minutes: number): Promise<st
   ].join("\n");
   const result = await run(host, posix(script));
   return result.ok ? result.text : null;
+}
+
+/** A slow link and a first read of a long file, which is what a sweep waits on and nothing else does. */
+const USAGE_TIMEOUT_MS = 90_000;
+/** A listing of thousands of files, and a chunk at its largest, every line of it wanted. */
+const USAGE_MAX_OUTPUT = 72 * 1024 * 1024;
+
+/** Every log on a machine and its size, as `parseUsageListing` reads it. */
+export function usageFilesOn(host: string): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  if (!validHost(host)) return Promise.resolve({ ok: false, error: "not an ssh host" });
+  return run(host, posix(usageListScript()), { timeout: USAGE_TIMEOUT_MS, maxBuffer: USAGE_MAX_OUTPUT });
+}
+
+/** The lines the ledger wants of one log there, from an offset, as `parseUsageChunk` reads them. */
+export function usageChunkOn(host: string, log: UsageLog, rel: string, offset: number, length: number): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  const script = usageReadScript(log, rel, offset, length);
+  if (!validHost(host) || script === null) return Promise.resolve({ ok: false, error: "not a log on an ssh host" });
+  return run(host, posix(script), { timeout: USAGE_TIMEOUT_MS, maxBuffer: USAGE_MAX_OUTPUT });
 }
 
 /** The tail of a conversation read on a machine: past what a last turn takes, short of what ssh is asked to carry. */

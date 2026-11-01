@@ -22,15 +22,26 @@
  * Attribution is read from the database through a function the server lends,
  * and only `store.ts` touches that file; the other direction, nothing, ever.
  * Transcripts are opened read-only and nothing is ever written beside them.
+ *
+ * **A machine's logs come the same way, through ssh.** An agent there writes its
+ * transcript there, and its hooks cannot reach here, so the sweep is all there is.
+ * The same offsets, the same parsers and the same batch, keyed `machine/<id>/…`,
+ * after this disk's pass so a slow link never holds up the page's own numbers; and
+ * only for a machine kururu has a reason to think it has agents on. It reads every
+ * log under that login and not only those kururu started, as it does here, since
+ * a `claude` typed into a shell there spends the same allowance. See
+ * `shared/machines.ts` for the two reads.
  */
 import type { Dirent } from "node:fs";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { basename, dirname, join, normalize } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { claudeProjectDir } from "../../../shared/sessions";
+import { parseUsageChunk, parseUsageListing, type UsageFile, type UsageLog } from "../../../shared/machines";
 import { HARNESS_TITLE, HARNESS_TITLE_HEAD, noFacts, type AttributionFacts, type LedgerStatus, type UsageSource } from "../../../shared/usage";
+import type { RemoteSource } from "../../../shared/usagepull";
 import { CLAUDE_NEEDLES, claudeRoots, parseClaudeLine, placeOf, type ClaudeRoot } from "./claude";
-import { codexLimitSnapshots, codexRoots, noCodexTurn, parseCodexLine, placeOfCodex, CODEX_NEEDLES, type CodexRoot, type CodexTurn } from "./codex";
+import { codexLimitSnapshots, codexRoots, noCodexTurn, parseCodexLine, placeOfCodex, rolloutIdOf, CODEX_NEEDLES, type CodexRoot, type CodexTurn } from "./codex";
 import { opencodeDbPath, opencodeHome, opencodeLegacyDir, opencodeLegacyFiles, parseOpencodeMessage } from "./opencode";
 import { Ledger, LedgerBatch, ledgerPath, type FileRow } from "./store";
 import { halfDuty, tailFile, type TailOptions } from "./tail";
@@ -56,6 +67,39 @@ const FLUSH_MS = 500;
 const FACTS_MS = 30_000;
 /** Reports name a file each; a storm of them is one pass over a set no larger than this. */
 const MAX_NUDGED = 256;
+/** One read of a machine's log. Enough to cross a long file at a sensible pace, small enough to read three times over. */
+const MACHINE_CHUNK = 16 * 1024 * 1024;
+/** `MAX_LINE`, as `tail.ts` has it: a line longer than this is not read. */
+const MACHINE_CHUNK_MAX = 64 * 1024 * 1024;
+
+/** A computer reached over ssh, by the name a launch writes. */
+export interface MachineSource {
+  id: string;
+  name: string;
+  host: string;
+}
+
+type Answer = { ok: true; text: string } | { ok: false; error: string };
+
+export interface MachineReads {
+  list(host: string): Promise<Answer>;
+  chunk(host: string, log: UsageLog, rel: string, offset: number, length: number): Promise<Answer>;
+}
+
+/** Where a machine's log is kept in `files`. Never starts with `/`, so no nudge could name one and no walk of this disk could lose one. */
+export function machineFileKey(machineId: string, log: UsageLog, rel: string): string {
+  return `machine/${machineId}/${log}/${rel}`;
+}
+
+/** The session a machine's log belongs to, off its path: a line of it must not be what decides whether to read it. */
+export function sessionOfMachineFile(file: Pick<UsageFile, "log" | "rel">): string | null {
+  if (file.log === "codex") return rolloutIdOf(file.rel);
+  // `<project>/<session>.jsonl`, or a subagent's under `<project>/<session>/`.
+  const parts = file.rel.split("/");
+  const name = parts[1];
+  if (!name) return null;
+  return parts.length === 2 ? name.replace(/\.jsonl$/, "") : name;
+}
 
 export interface ReaderDeps {
   ledger: Ledger;
@@ -64,6 +108,11 @@ export interface ReaderDeps {
   roots?: () => Promise<ClaudeRoot[]>;
   codexRoots?: () => Promise<CodexRoot[]>;
   opencodeHome?: () => string;
+  /** The machines to read over ssh, asked at each sweep. */
+  machines?: () => readonly MachineSource[];
+  machineReads?: MachineReads;
+  /** How much of a machine's log one read covers. A test's to make small. */
+  machineChunk?: number;
   sweepMs?: number;
   tail?: TailOptions;
   log?: (line: string) => void;
@@ -75,6 +124,13 @@ interface Listed<R> {
   size: number;
   mtime: number;
   inode: number;
+}
+
+/** Where a log's lines came from, as far as a session's row cares. */
+interface LogOrigin {
+  dir: string | null;
+  loginKey: string | null;
+  machine?: string;
 }
 
 export class UsageReader {
@@ -96,6 +152,7 @@ export class UsageReader {
   private error: string | null = null;
   private countsAt = 0;
   private countsHeld: ReturnType<Ledger["counts"]> | null = null;
+  private readonly machineState = new Map<string, { at: number | null; error: string | null }>();
 
   constructor(private readonly deps: ReaderDeps) {
     this.ledger = deps.ledger;
@@ -155,6 +212,16 @@ export class UsageReader {
     }
     const counts = this.countsHeld ?? { messages: 0, sessions: 0, files: 0, bytes: 0, oldestDay: null, newestDay: null, skipped: 0, unpriced: 0 };
     return { ...counts, reading: this.reading, sweptAt: this.sweptAt, firstPass: this.firstPass, error: this.error };
+  }
+
+  /** How each machine's last read went, for the page's foot. Only ever for a machine still being read. */
+  machineSources(): RemoteSource[] {
+    const out: RemoteSource[] = [];
+    for (const machine of this.deps.machines?.() ?? []) {
+      const state = this.machineState.get(machine.name);
+      out.push({ name: machine.name, kind: "machine", at: state?.at ?? null, error: state?.error ?? null });
+    }
+    return out;
   }
 
   private pump(): void {
@@ -230,6 +297,121 @@ export class UsageReader {
       this.firstPass = { ms: Date.now() - began, bytes, files };
       if (files) this.deps.log?.(`kururu: the usage ledger read ${files} file(s), ${Math.round(bytes / 1e6)} MB, in ${((Date.now() - began) / 1000).toFixed(1)} s`);
     }
+    await this.sweepMachines();
+  }
+
+  // -------------------------------------------------------------------------
+  // Machines
+  // -------------------------------------------------------------------------
+
+  /** Each machine in turn. One that cannot be reached says so and costs the others nothing: its offsets are where they were. */
+  private async sweepMachines(): Promise<void> {
+    const reads = this.deps.machineReads;
+    if (!reads) return;
+    for (const machine of this.deps.machines?.() ?? []) {
+      if (this.stopped) return;
+      const before = this.machineState.get(machine.name);
+      try {
+        await this.sweepMachine(machine, reads);
+        this.machineState.set(machine.name, { at: Date.now(), error: null });
+      } catch (err) {
+        this.machineState.set(machine.name, { at: before?.at ?? null, error: err instanceof Error ? err.message : String(err) });
+      }
+      this.flush();
+    }
+  }
+
+  private async sweepMachine(machine: MachineSource, reads: MachineReads): Promise<void> {
+    const answer = await reads.list(machine.host);
+    if (!answer.ok) throw new Error(answer.error);
+    const listed = parseUsageListing(answer.text);
+    // An answer that is not a listing is not every file having gone.
+    if (listed === null) throw new Error("it did not answer with a list of logs");
+    const dir = `machine/${machine.id}`;
+    const here = new Set(listed.map((file) => machineFileKey(machine.id, file.log, file.rel)));
+    this.ledger.forget(this.ledger.filesUnder(dir).filter((path) => !here.has(path)));
+    // A node that told us about a session is the one that read it, and the same log is not read twice.
+    const nodes = this.ledger.nodeSessionIds();
+    for (const file of listed) {
+      if (this.stopped) return;
+      const key = machineFileKey(machine.id, file.log, file.rel);
+      const known = this.batch.files.get(key) ?? this.ledger.file(key);
+      if (known && known.size === file.size) continue;
+      const session = sessionOfMachineFile(file);
+      if (!session || nodes.has(session)) continue;
+      await this.tailMachine(machine, reads, file, key, session, known);
+      this.flushIfDue();
+      // Today on this disk keeps up while a far one is read.
+      if (this.nudged.size) await this.serveNudges();
+    }
+  }
+
+  /** `tail.ts`'s loop, a read at a time: whole lines, an offset that never stops inside one, and a file shorter than the offset read again from the start. */
+  private async tailMachine(machine: MachineSource, reads: MachineReads, file: UsageFile, key: string, session: string, known: FileRow | null): Promise<void> {
+    let offset = known && file.size >= known.offset ? known.offset : 0;
+    const chunkSize = this.deps.machineChunk ?? MACHINE_CHUNK;
+    let length = chunkSize;
+    const row: FileRow = { path: key, program: file.log, loginDir: null, inode: 0, size: offset, offset, mtime: 0, sessionId: known?.sessionId ?? (file.log === "codex" ? session : null) };
+    const origin = { dir: null, loginKey: null, machine: machine.name };
+    const parts = file.rel.split("/");
+    const place = { projectDir: parts[0] ?? "", source: (parts.slice(1).includes("subagents") ? "subagent" : "transcript") as UsageSource };
+    let turn = this.turnAt(offset, session);
+    for (;;) {
+      const began = performance.now();
+      const answer = await reads.chunk(machine.host, file.log, file.rel, offset, length);
+      if (!answer.ok) throw new Error(answer.error);
+      const chunk = parseUsageChunk(answer.text);
+      if (chunk === null) throw new Error("it did not answer with a log");
+      if (chunk === "gone") {
+        this.batch.files.delete(key);
+        if (known) this.ledger.forget([key]);
+        return;
+      }
+      for (const line of chunk.lines) {
+        const at = offset + line.at;
+        if (file.log === "claude") {
+          this.line(line.text, at, key, origin, place, false, row);
+          continue;
+        }
+        const parsed = parseCodexLine(line.text, turn);
+        if (parsed.kind === "skip") this.batch.skipped.push({ path: key, atByte: at, why: parsed.why });
+        else if (parsed.kind === "turn") turn = parsed.turn;
+        else if (parsed.kind === "message") this.lineCodex(parsed, at, session, turn, origin);
+      }
+      const reachedEnd = offset + chunk.length >= chunk.size;
+      if (chunk.whole === 0 && !reachedEnd) {
+        // One line longer than the read. The rest of it is passed over as `tail.ts` passes it: anything after it is still wanted.
+        if (length * 2 <= MACHINE_CHUNK_MAX) {
+          length *= 2;
+          continue;
+        }
+        this.batch.skipped.push({ path: key, atByte: offset, why: "a line too long to read" });
+        offset += chunk.length;
+      } else {
+        offset += chunk.whole;
+        length = chunkSize;
+      }
+      row.offset = offset;
+      row.size = offset;
+      if (this.batch.size >= FLUSH_ROWS) this.flush();
+      this.batch.files.set(key, row);
+      // All read but any half-written last line, which waits for the file to grow.
+      if (reachedEnd) {
+        row.size = Math.max(chunk.size, offset);
+        this.batch.files.set(key, row);
+        return;
+      }
+      await (this.deps.tail?.pause ?? halfDuty)(performance.now() - began);
+    }
+  }
+
+  /**
+   * What is known of the turn a rollout is being picked up in. Its `turn_context`
+   * is behind the offset, and a sweep cuts across turns all the time, so the model
+   * is what this session was last seen on rather than none.
+   */
+  private turnAt(offset: number, session: string): CodexTurn {
+    return offset > 0 ? { ...noCodexTurn(), model: this.ledger.lastModelOf(session) } : noCodexTurn();
   }
 
   /**
@@ -355,7 +537,7 @@ export class UsageReader {
     }
   }
 
-  private line(text: string, at: number, path: string, root: ClaudeRoot, place: { projectDir: string; source: UsageSource }, titled: boolean, row: FileRow | null): void {
+  private line(text: string, at: number, path: string, root: LogOrigin, place: { projectDir: string; source: UsageSource }, titled: boolean, row: FileRow | null): void {
     const parsed = parseClaudeLine(text, place.source);
     if (parsed.kind === "skip") {
       this.batch.skipped.push({ path, atByte: at, why: parsed.why });
@@ -381,6 +563,7 @@ export class UsageReader {
       lastAt: message.at,
       parentSession: parent && parent !== message.sessionId ? parent : null,
       seen: { projectDir: place.projectDir, titled, loginKey: root.loginKey },
+      machine: root.machine ?? null,
     });
   }
 
@@ -392,7 +575,7 @@ export class UsageReader {
     const place = placeOfCodex(path, root);
     if (!place) return;
     const known = this.batch.files.get(path) ?? this.ledger.file(path);
-    let turn: CodexTurn = noCodexTurn();
+    let turn: CodexTurn = this.turnAt(known?.offset ?? 0, place.sessionId);
     let row = null as FileRow | null;
     let finalSize = 0;
     const result = await tailFile(
@@ -440,7 +623,7 @@ export class UsageReader {
     }
   }
 
-  private lineCodex(parsed: Extract<ReturnType<typeof parseCodexLine>, { kind: "message" }>, at: number, sessionId: string, turn: CodexTurn, root: CodexRoot): void {
+  private lineCodex(parsed: Extract<ReturnType<typeof parseCodexLine>, { kind: "message" }>, at: number, sessionId: string, turn: CodexTurn, root: LogOrigin): void {
     // A `token_count` event carries no id of its own; `at` is the line's byte
     // offset in this rollout, which is as stable a key as the file itself.
     this.batch.addMessage({ ...parsed.row, sessionId, messageId: `t${at}` });
@@ -455,8 +638,10 @@ export class UsageReader {
       parentSession: null,
       // Codex never runs the harness, so `projectDir` only has to be something `harnessProfileOf` will not match.
       seen: { projectDir: "", titled: false, loginKey: root.loginKey },
+      machine: root.machine ?? null,
     });
-    if (parsed.limits) for (const limit of codexLimitSnapshots(parsed.limits.raw, parsed.limits.at, root.loginKey)) this.batch.addLimit(limit);
+    // A machine's login is its own allowance, so it is a line of its own on the page rather than a zigzag through this Mac's.
+    if (parsed.limits) for (const limit of codexLimitSnapshots(parsed.limits.raw, parsed.limits.at, root.loginKey)) this.batch.addLimit(root.machine ? { ...limit, scope: root.machine } : limit);
   }
 
   // -------------------------------------------------------------------------
@@ -593,9 +778,9 @@ async function walk<R>(dir: string, root: R): Promise<Listed<R>[] | null> {
  * carries on either way, and a ledger that will not open says why in the log;
  * `/api/health` has nothing to say about a ledger that is not there.
  */
-export function openUsageReader(facts: () => AttributionFacts, log: (line: string) => void): UsageReader | null {
+export function openUsageReader(facts: () => AttributionFacts, log: (line: string) => void, remote: Pick<ReaderDeps, "machines" | "machineReads"> = {}): UsageReader | null {
   try {
-    return new UsageReader({ ledger: Ledger.open(), facts, log });
+    return new UsageReader({ ledger: Ledger.open(), facts, log, ...remote });
   } catch (err) {
     log(`kururu: the usage ledger at ${ledgerPath()} could not be opened, so nothing is being recorded: ${err instanceof Error ? err.message : String(err)}`);
     return null;

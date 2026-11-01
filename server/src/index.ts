@@ -133,6 +133,8 @@ import { summarize, type NodeSummary } from "../../shared/nodes";
 import { hostname } from "node:os";
 import { Store, dataDir, dbPath } from "./store";
 import { openUsageReader, type UsageReader } from "./usage/sweep";
+import { exportUsage, NodeUsage } from "./usage/remote";
+import { parseRolloutListing } from "../../shared/sessions";
 import { Launches, type LaunchNote } from "./usage/attribute";
 import { readRetention, usageReport } from "./usage/report";
 import { isUsageDimension, isUsageRange, type UsageDimension, type UsageNames, type UsageRange, type UsageReport } from "../../shared/usagereport";
@@ -142,6 +144,7 @@ import { configDir } from "./config";
 import { CLIP_MAX_BYTES, isClipId } from "../../shared/voice";
 import {
   addMachine,
+  codexRolloutsOn,
   endSession,
   findMachine,
   machinesSnapshot,
@@ -150,6 +153,8 @@ import {
   removeMachine,
   sessionsEnding,
   sessionsOn,
+  usageChunkOn,
+  usageFilesOn,
 } from "./machines";
 import { addHistory, adoptSpecs, dueForReading, editHistory, forgetSpecsRun, readSpecs, removeHistory, setTyped, specsSnapshot } from "./specs";
 import { remoteAgentRun, remoteShellCommand, remoteShellOf, sessionName, validRemoteDir, type MachineEntry } from "../../shared/machines";
@@ -535,6 +540,8 @@ let store!: Store;
 let usageReader: UsageReader | null = null;
 /** Whose each session was, written at launch, into the same file. See `usage/attribute.ts`. */
 let usageLaunches: Launches | null = null;
+/** What the other nodes spent, asked of them by the parent. See `usage/remote.ts`. */
+let usageNodes: NodeUsage | null = null;
 let backup!: Backup;
 /** This kururu among the others: pairing, the roster and the links. See `nodes.ts`. */
 let nodes!: NodeHost;
@@ -824,6 +831,7 @@ function nodeSummary(leads: boolean, sees: string[]): NodeSummary {
     launchers: visibleLaunchers(launch),
     // Nothing watches the parent, so it does not say it can be watched.
     watchable: nodes?.role() !== "parent",
+    ledger: usageReader !== null,
   });
 }
 
@@ -2187,8 +2195,10 @@ function usageReportFor(reader: UsageReader, range: UsageRange, by: UsageDimensi
   const card = memo((id) => store.usageCard(id));
   const liveIn = workspaces.active.workspaces;
   const names: UsageNames = {
-    workspace: memo((key) => store.usageWorkspaceName(key)),
-    card: (id) => card(id)?.title ?? null,
+    // A node's own workspace and card are known here only by what it said they were called.
+    workspace: memo((key) => store.usageWorkspaceName(key) ?? reader.ledger.nodeName("workspaces", key)),
+    card: memo((id) => card(id)?.title ?? reader.ledger.nodeName("cards", id)),
+    here: process.platform === "darwin" ? "This Mac" : "This computer",
     liveAgent: (fact) => {
       if (!fact.agentId) return null;
       const agent = host.find(fact.agentId);
@@ -2218,6 +2228,7 @@ function usageReportFor(reader: UsageReader, range: UsageRange, by: UsageDimensi
     weekOwner: claudeWeek !== null ? "claude" : codexWeek !== null ? "codex" : null,
     retention: profile === machine ? [readRetention(machine, "This Mac's login")] : [readRetention(profile, `${workspaces.active.name}'s login`), readRetention(machine, "This Mac's login")],
     status: reader.status(),
+    remote: [...reader.machineSources(), ...(usageNodes?.sources() ?? [])],
   });
 }
 
@@ -7861,10 +7872,31 @@ async function attach(port: Port): Promise<void> {
   usageReader = openUsageReader(
     () => store.usageAttribution(),
     (line) => console.log(line),
+    {
+      // A machine is read once it has given a reason to: a workspace pinned to it,
+      // or an agent kururu started there. Being in the list is only being watched.
+      machines: () => {
+        const pinned = workspaces.pinnedMachines();
+        const launched = usageReader?.ledger.machinesLaunchedOn() ?? new Set<string>();
+        return machinesSnapshot()
+          .filter((machine) => pinned.has(machine.id) || launched.has(machine.name))
+          .map(({ id, name, host }) => ({ id, name, host }));
+      },
+      machineReads: { list: usageFilesOn, chunk: usageChunkOn },
+    },
   );
   usageReader?.start();
   usageLaunches = usageReader
-    ? new Launches({ ledger: usageReader.ledger, cardSessions: () => workspaces.cardSessions(), log: (line) => console.log(line) })
+    ? new Launches({
+        ledger: usageReader.ledger,
+        cardSessions: () => workspaces.cardSessions(),
+        log: (line) => console.log(line),
+        rolloutsOn: async (name, minutes) => {
+          const machine = machinesSnapshot().find((each) => each.name === name);
+          const listing = machine ? await codexRolloutsOn(machine.host, minutes) : null;
+          return listing === null ? null : parseRolloutListing(listing).map(({ id, cwd, at }) => ({ id, cwd, at }));
+        },
+      })
     : null;
   usageLaunches?.start();
   // Everything the harness touches, lent as functions: `index.ts` exports
@@ -8070,12 +8102,33 @@ async function attach(port: Port): Promise<void> {
     peer: (nodeId, message) => peerKurus?.message(nodeId, message),
     // Leading is the Telegram poll, so the node that holds it leads.
     leader: () => lead?.holder() ?? null,
+    usageExport: (known) =>
+      usageReader
+        ? exportUsage(usageReader.ledger, known, {
+            workspace: (key) => store.usageWorkspaceName(key),
+            card: (id) => store.usageCard(id)?.title ?? null,
+          })
+        : null,
     linked: (nodeId) => {
       peerKurus?.linked(nodeId);
+      usageNodes?.pullSoon(3_000);
       // The user's words for that node that were waiting go now.
       outbox.retry(nodeId);
     },
   });
+  // After the host, whose statuses it reads. Only a parent has anybody to ask.
+  usageNodes = usageReader
+    ? new NodeUsage({
+        ledger: usageReader.ledger,
+        nodes: () =>
+          nodes.role() !== "parent"
+            ? []
+            : nodes.statuses().map((node) => ({ id: node.id, name: node.name, up: node.state === "up", answers: (node.summary?.ledger ?? 0) >= 1 })),
+        ask: (nodeId, known) => nodes.usagePull(nodeId, known),
+        log: (line) => console.log(line),
+      })
+    : null;
+  usageNodes?.start();
   watches = new NodeWatches({
     member: (nodeId) => {
       const entry = nodes.member(nodeId);

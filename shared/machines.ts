@@ -641,3 +641,176 @@ export function remoteShellOf(command: string | null | undefined): RemoteShell |
   const agent = session !== null && tail !== undefined ? (AGENT_CLIS.find((cli) => cli === tail) ?? null) : null;
   return { host: match[1], session, agent };
 }
+
+// ---------------------------------------------------------------------------
+// The usage ledger's two reads
+// ---------------------------------------------------------------------------
+
+/** Which program's logs on a machine. OpenCode's are a database on that disk, and a query over ssh is another project. */
+export type UsageLog = "claude" | "codex";
+
+/** Where each program keeps its logs there, as `sessionTailOn` already finds them. */
+const USAGE_ROOTS: Record<UsageLog, string> = {
+  claude: '"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"',
+  codex: '"${CODEX_HOME:-$HOME/.codex}/sessions"',
+};
+
+/**
+ * The lines the ledger wants, for `grep -E` on the far side: `CLAUDE_NEEDLES`
+ * and `CODEX_NEEDLES` with each quote matched by `.`, since a remote script may
+ * not hold a quote. A little wider than the needles, which is why the parsers
+ * here still decide what a line is. A test holds the two together.
+ */
+export const USAGE_PATTERNS: Record<UsageLog, string> = {
+  claude: "type.:.assistant|type.:.cost-state",
+  codex: "type.:.turn_context|type.:.token_count",
+};
+
+const USAGE_LIST_MARK = "<<<kururu-usage-list";
+const USAGE_READ_MARK = "<<<kururu-usage-read";
+const USAGE_READ_FAILED = "<<<kururu-usage-failed";
+
+/**
+ * Every log on a machine and its size. `find -exec wc -c {} +` is one process
+ * for a thousand files and answers the same on Linux and on a Mac, where `stat`
+ * and `find -printf` do not, and the `total` line it adds has no `./` in front
+ * of it. From inside the root, so that nothing in the answer says where home is.
+ */
+export function usageListScript(): string {
+  const lines = ["export LC_ALL=C"];
+  for (const log of ["claude", "codex"] as const) {
+    lines.push(`echo "${USAGE_LIST_MARK} ${log}"`);
+    lines.push(`( cd ${USAGE_ROOTS[log]} 2>/dev/null && find . -type f -name "*.jsonl" -exec wc -c {} + 2>/dev/null )`);
+  }
+  lines.push("true");
+  return lines.join("\n");
+}
+
+export interface UsageFile {
+  log: UsageLog;
+  /** Under the program's root, and already held to `USAGE_REL`: it goes back into a script. */
+  rel: string;
+  size: number;
+}
+
+/**
+ * The only shape of path that goes back into a script. Letters, digits and
+ * `._-` is everything Claude Code spells a project directory with and everything
+ * in a rollout's name, so there is nothing to escape and nothing a shell gives
+ * a meaning to. A file named anything else is passed over rather than escaped,
+ * because the far side chose that name.
+ */
+const USAGE_REL = /^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*\.jsonl$/;
+const USAGE_REL_MAX = 512;
+
+export function validUsageRel(rel: unknown): rel is string {
+  return typeof rel === "string" && rel.length <= USAGE_REL_MAX && USAGE_REL.test(rel);
+}
+
+/** A listing, or null when this is not one: which must not read as every file having gone. */
+export function parseUsageListing(text: string): UsageFile[] | null {
+  if (!text.includes(USAGE_LIST_MARK)) return null;
+  const out: UsageFile[] = [];
+  let log: UsageLog | null = null;
+  for (const line of text.split("\n")) {
+    if (line.startsWith(USAGE_LIST_MARK)) {
+      const said = line.slice(USAGE_LIST_MARK.length).trim();
+      log = said === "claude" || said === "codex" ? said : null;
+      continue;
+    }
+    const match = /^\s*(\d{1,15})\s+\.\/(\S+)$/.exec(line);
+    if (!log || !match || !validUsageRel(match[2])) continue;
+    out.push({ log, rel: match[2]!, size: Number(match[1]) });
+  }
+  return out;
+}
+
+/**
+ * Up to `length` bytes of a log from `offset`, as only the lines the ledger
+ * wants, each with its byte offset, under a line saying what came of it. Null
+ * when an argument is not what it must be: this goes into a shell.
+ *
+ * **Most of a transcript never crosses the link.** Tool output and request
+ * blobs are ninety-odd percent of its bytes, so `grep` drops them on the far
+ * side, where they cost a read and no more. The lines that do cross are parsed
+ * into numbers here and forgotten, as they are on this Mac.
+ *
+ * **Only whole lines are read.** A last line still being written is left for
+ * next time, as `tail.ts` leaves it: `whole` is how far the whole lines reach,
+ * the two reads that work it out cost nothing beside the third, and the offset
+ * never stops inside a line. Without a temp file, because nothing here writes
+ * on somebody else's disk. `grep -b` rather than a count of what came back,
+ * since a Codex row's id is its line's offset in the file and has to be the
+ * same offset however the file was read. An Alpine box's `grep` has no `-b`, and
+ * a read that found nothing is not one that could not look, so a `grep` that
+ * failed says so, and the machine's row says why rather than its offsets running
+ * on past lines nobody counted.
+ */
+export function usageReadScript(log: UsageLog, rel: string, offset: number, length: number): string | null {
+  if (!validUsageRel(rel) || !Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 1) return null;
+  const range = `tail -c +$((o+1)) "$f"`;
+  return [
+    "export LC_ALL=C",
+    `f=${USAGE_ROOTS[log]}/${rel}`,
+    `[ -f "$f" ] || exit 0`,
+    `o=${offset}`,
+    `s=$(wc -c < "$f")`,
+    "s=$((s))",
+    "l=0",
+    "w=0",
+    `if [ "$s" -gt "$o" ]; then`,
+    "l=$((s-o))",
+    `[ "$l" -gt ${length} ] && l=${length}`,
+    `e=$(${range} | head -c "$l" | tail -c 1 | wc -l)`,
+    `n=$(${range} | head -c "$l" | tail -n 1 | wc -c)`,
+    `if [ "$e" -gt 0 ]; then w=$l; else w=$((l-n)); fi`,
+    "fi",
+    `echo "${USAGE_READ_MARK} $s $l $w"`,
+    `if [ "$w" -gt 0 ]; then ${range} | head -c "$w" | grep -abE "${USAGE_PATTERNS[log]}"; [ "$?" -gt 1 ] && echo "${USAGE_READ_FAILED}"; fi`,
+    "true",
+  ].join("\n");
+}
+
+export interface UsageChunk {
+  /** The file's size when it was asked. */
+  size: number;
+  /** How many bytes were looked at. */
+  length: number;
+  /** How far the whole lines among them reach. */
+  whole: number;
+  /** The lines the ledger wants; `at` is from where the read began. */
+  lines: { at: number; text: string }[];
+}
+
+/** What a read said: its chunk, `gone` for a file no longer there, or null for an answer that is neither. */
+export function parseUsageChunk(text: string): UsageChunk | "gone" | null {
+  if (text === "") return "gone";
+  const newline = text.indexOf("\n");
+  const head = newline === -1 ? text : text.slice(0, newline);
+  const match = new RegExp(`^${USAGE_READ_MARK} (\\d{1,15}) (\\d{1,15}) (\\d{1,15})$`).exec(head);
+  if (!match) return null;
+  const [size, length, whole] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  if (whole > length) return null;
+  const lines: UsageChunk["lines"] = [];
+  if (newline !== -1) {
+    for (const line of text.slice(newline + 1).split("\n")) {
+      if (line === USAGE_READ_FAILED) return null;
+      const colon = line.indexOf(":");
+      if (colon < 1) continue;
+      const at = Number(line.slice(0, colon));
+      if (Number.isSafeInteger(at) && at >= 0 && at < whole) lines.push({ at, text: line.slice(colon + 1) });
+    }
+  }
+  return { size, length, whole, lines };
+}
+
+/**
+ * Whether a folder a Codex rollout names is the one a workspace was pinned to.
+ * A pin may say `~/code`, which only the far side can expand (`validRemoteDir`),
+ * and a rollout says where it really ran.
+ */
+export function fitsRemoteDir(dir: string, cwd: string): boolean {
+  if (dir === cwd) return true;
+  if (dir === "~") return /^\/(?:root|home\/[^/]+|Users\/[^/]+)$/.test(cwd);
+  return dir.startsWith("~/") && cwd.endsWith(dir.slice(1));
+}

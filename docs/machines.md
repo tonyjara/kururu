@@ -260,6 +260,15 @@ and each workspace's pin, and marks each remote agent "status read off its
 screen, no transcript". A harness started before this has the old role and
 tool list until it is reopened.
 
+## Usage
+
+The sweep reads a machine's transcripts and rollouts over ssh once a workspace is
+pinned to it or kururu has started an agent there, from a saved offset, with `grep`
+dropping everything the ledger does not want before it crosses. Two more read-only
+scripts, in `shared/machines.ts`, each a constant with a whole number and a path held
+to a grammar with nothing to escape in it. See
+[data](data.md#other-computers).
+
 ## Not yet
 
 - **Hook reports from a machine** — see above.

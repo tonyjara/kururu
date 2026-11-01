@@ -623,6 +623,12 @@ export interface NodeSummary {
    * heading offers no new workspace.
    */
   drives?: number;
+  /**
+   * The version of `usage-ask` this node answers (`USAGE_PULL`). Absent from
+   * a node from before and from one whose ledger did not open: nothing is
+   * asked of it, and the Usage page says to update it.
+   */
+  ledger?: number;
 }
 
 /** The version of `say`, `kuru-turns`, `kuru-replied` and the board verbs. See `NodeSummary.talks`. */
@@ -638,6 +644,8 @@ export const WATCHABLE = 2;
 export const WATCH_READS = 2;
 /** The version of `card-done-ask` and `workspace-new`. See `NodeSummary.drives`. */
 export const DRIVES = 1;
+/** The version of `usage-ask` and `usage-said`. See `NodeSummary.ledger`. */
+export const USAGE_PULL = 1;
 
 export const SUMMARY_WORKSPACES_MAX = 60;
 export const SUMMARY_AGENTS_MAX = 40;
@@ -665,6 +673,8 @@ export interface SummaryInput {
   launchers: readonly Launcher[];
   /** Whether a parent may watch this node: every node but the parent itself (`watchRefusal`). */
   watchable: boolean;
+  /** Whether this node's usage ledger opened, so that it can answer `usage-ask`. */
+  ledger?: boolean;
 }
 
 /**
@@ -731,6 +741,7 @@ export function summarize(input: SummaryInput): NodeSummary {
     ...(input.watchable ? { watchable: WATCHABLE } : {}),
     launchers: input.launchers.map((l) => ({ ...l })),
     drives: DRIVES,
+    ...(input.ledger ? { ledger: USAGE_PULL } : {}),
     ...(input.lead ? { lead: { ...input.lead } } : {}),
   };
 }
@@ -877,6 +888,10 @@ export type LinkMessage =
   // A node flipped the shared switch: signed by that node, handed on by
   // every node that finds it newer than what it had.
   | { type: "telegram-switch"; switch: TelegramSwitch }
+  // What this node has spent, for its parent's Usage page: which of its days
+  // the parent already holds, and those that differ (`shared/usagepull.ts`).
+  | { type: "usage-ask"; id: string; known: Record<string, string> }
+  | { type: "usage-said"; id: string; part: unknown; error: string | null }
   | PeerMessage;
 
 /** The board verbs one Kuru may make on another node's boards directly. A run starts an agent, so it is never one of them. */
@@ -947,6 +962,8 @@ const LINK_TYPES = new Set<string>([
   "telegram-out",
   "telegram-out-ack",
   "telegram-switch",
+  "usage-ask",
+  "usage-said",
 ]);
 
 /** A frame off the socket, as a message with a known type, or null. The fields are each handler's to check. */

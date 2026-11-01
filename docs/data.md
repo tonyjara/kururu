@@ -337,7 +337,7 @@ tile and the chart under it cannot disagree.
 behind a month are 70,000 rows on the event loop every terminal shares. It is a
 few rows per session per day with no attribution in it, so a session that changes
 hands moves on the page with nothing to rebuild; `daily` stays for the backup
-export (above) and for phase 6's pull.
+export (below).
 A span that does not fall on midnight (a limit week, or "today") takes its two
 ends off `messages` (`splitDays`), so a limit week is cut at the account's
 instant. A report is about 10–40 ms on this Mac's 96,000 messages.
@@ -377,6 +377,64 @@ says whose, and says when it had to fall back to seven days.
 
 `cleanupPeriodDays` is read per login, that one number and nothing else from the
 file, and never written. The answer to the plan's first question stands.
+
+### Other computers
+
+An agent on a [machine](machines.md) writes its transcript there, and an agent on
+another [node](nodes.md) is that node's. Both reach the page, by different roads,
+because they are different things.
+
+**A machine is read over ssh, by the sweep** (`usage/sweep.ts`, the two scripts in
+`shared/machines.ts`). The same offsets, parsers and batch as this disk's logs,
+keyed `machine/<id>/…` in `files`, after this disk's pass so a slow link never holds
+up the page's own numbers. One listing (`find -exec wc -c`), then for each log that
+grew a read from its offset: `grep` drops tool output on the far side, so ninety-odd
+percent of a transcript never crosses, and the lines that do are parsed here and
+forgotten. Whole lines only, by working out on the far side where the last one ends;
+nothing is written there. A `grep` with no `-b` (Alpine's) says so in the machine's
+row rather than running the offset on past lines nobody counted. A machine is read
+once it has given a reason to, a workspace pinned to it or an agent kururu started
+there, and then all of that login's logs are, as on this Mac, since a `claude` typed
+into a shell there spends the same allowance. A Codex tab there finds its id by
+folder and time over the same ssh, its pin's `~` read the way the far side would.
+Its Codex allowance is a line of its own on the limit chart. OpenCode's logs are a
+database on that disk and are not read.
+
+**A node reads its own logs and tells its parent** (`usage/remote.ts`,
+`shared/usagepull.ts`, the link's `usage-ask` and `usage-said`). Every five minutes
+the parent says what it holds of each of the node's days, as a signature of that
+day's `daily` rows, and the node sends the days that differ, each whole, replacing
+what was there. There is no cursor to lose: a backfill that finds last month, or a
+session a card comes to name, moves a signature. Only the parent asks, and only a
+child answers; a node away keeps its numbers on the page with the time they were
+last good, under Other computers.
+
+**The rows are quarter hours, not days,** though the plan first said `daily`. A day
+is the local day of whoever cut it, and a box on UTC would draw Thursday night on the
+Mac's Friday; a quarter hour is an instant, and the parent cuts its own days. And the
+page has to answer "today so far" and a limit week starting at ten past four, which
+whole days cannot. On this Mac's whole history that is 4,200 rows against 96,000
+messages, and 1.3 MB over the wire the first time. A node's session has no context
+strip, since that needs its messages; its own page has one.
+
+They live in `node_cells`, `node_sessions`, `node_days`, `node_names` and `node_pulls`
+(version 4), keyed by the node's id, because a node can be renamed and its rows must
+not be asked for again under the new name. **`session_days` and `daily` are made from
+both**, so a rebuild of a day here cannot lose them and the page cannot tell them
+apart. `daily`'s `node` column is the node's name, and the Mac's export carries those
+rows too. A node's workspace and card are named by what it said they were called,
+which is the one thing here that is not a number or a folder, and which the link
+carries already in a summary and a mirror. Every field is checked on the way in
+(`adoptUsagePart`) and a qualified id is refused, because this goes to disk.
+
+**A machine that is also a child is counted once.** A session one road has read, the
+other leaves alone: the sweep skips a log whose session a node has told us about, and
+a pull drops the cells of a session whose messages are here. Whichever got there first
+keeps it, and a test holds both orders.
+
+The page's seventh split is **Computer**, a row each; the others name a computer that
+is not this one beside the row (`Api · box`), since the same folder on two of them is
+two rows and another's home is not this one's. A session's row says where it ran.
 
 ### The backup export
 

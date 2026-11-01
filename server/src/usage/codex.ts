@@ -172,6 +172,12 @@ export async function codexRoots(): Promise<CodexRoot[]> {
 export function placeOfCodex(path: string, root: CodexRoot): { sessionId: string } | null {
   const prefix = `${join(root.dir, "sessions")}/`;
   if (!path.startsWith(prefix)) return null;
+  const id = rolloutIdOf(path);
+  return id ? { sessionId: id } : null;
+}
+
+/** The session a rollout's path names, or null for anything not named like one. */
+export function rolloutIdOf(path: string): string | null {
   const id = ROLLOUT_NAME.exec(path.slice(path.lastIndexOf("/") + 1))?.[1];
-  return id && ID.test(id) ? { sessionId: id } : null;
+  return id && ID.test(id) ? id : null;
 }

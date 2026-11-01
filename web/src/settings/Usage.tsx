@@ -34,7 +34,7 @@ import * as api from "../session";
 import { Banner, Btn, Details, Empty, errorText, Group, Mono, P, Readout, Segments, Tile, Tiles, when } from "./ui";
 
 const RANGE_WORDS: Record<UsageRange, string> = { week: "This limit week", today: "Today", "7d": "7 days", "30d": "30 days", all: "All" };
-const BY_WORDS: Record<UsageDimension, string> = { workspace: "Workspace", kuru: "Kuru vs agents", card: "Card", agent: "Agent", model: "Model", program: "Program" };
+const BY_WORDS: Record<UsageDimension, string> = { workspace: "Workspace", kuru: "Kuru vs agents", card: "Card", agent: "Agent", model: "Model", program: "Program", computer: "Computer" };
 /** How often the numbers are asked for again while the page is open. Long, since it is a query on the server's event loop and they move by the message. */
 const EVERY_MS = 60_000;
 
@@ -194,7 +194,7 @@ function Report({ report, narrow, onClose }: { report: UsageReport; narrow: bool
 
           <ChartFrame
             title="Over the days"
-            lead={report.by === "kuru" ? "Kuru and the agents, in tokens." : `In tokens, by ${BY_WORDS[report.by].toLowerCase()}. Kuru's green stays its own.`}
+            lead={report.by === "kuru" ? "Kuru and the agents, in tokens." : `In tokens, by ${BY_WORDS[report.by].toLowerCase()}.${report.stack.some((series) => series.ink === "kuru") ? " Kuru's green stays its own." : ""}`}
             table={() => (
               <DataTable
                 head={["", ...report.stack.map((s) => s.label)]}
@@ -270,6 +270,20 @@ function Report({ report, narrow, onClose }: { report: UsageReport; narrow: bool
         </>
       )}
 
+      {report.foot.remote.length > 0 && (
+        <Group title="Other computers" foot="A machine is read over ssh, by this computer. A node reads its own logs and says what it spent, a rollup with no words in it. Both every few minutes, and neither costs a token.">
+          {report.foot.remote.map((source) => (
+            <Readout
+              key={`${source.kind}:${source.name}`}
+              label={source.name}
+              hint={source.error ?? (source.kind === "machine" ? "Machine" : "Node")}
+              tone={source.error ? "bad" : undefined}
+              value={source.at ? when(source.at) : "Not read yet"}
+            />
+          ))}
+        </Group>
+      )}
+
       <Group title="How long the transcripts last">
         {report.retention.map((row) => (
           <Readout key={row.who} label={row.who} hint={row.stated ? <>Set by <Mono>cleanupPeriodDays</Mono> in its settings.json</> : <>Claude Code's default; <Mono>cleanupPeriodDays</Mono> is not set</>} value={`${row.days.toLocaleString("en-US")} days`} />
@@ -320,6 +334,11 @@ function estimate(row: SessionRow): string {
 function modelWords(row: SessionRow): string {
   const program = row.program === "claude" ? "" : `${row.program === "codex" ? "Codex" : "OpenCode"} · `;
   return `${program}${row.model}${row.moreModels ? ` +${row.moreModels}` : ""}`;
+}
+
+/** Where it ran, in the sub-line, for one that did not run here. */
+function placeWords(row: SessionRow): string {
+  return row.place ? ` · on ${row.place}` : "";
 }
 
 /**
@@ -402,6 +421,7 @@ function Sessions({ report, narrow, onClose }: { report: UsageReport; narrow: bo
                     <span className="ch-what-name">{row.label}</span>
                     <span className="ch-what-sub">
                       {modelWords(row)} · {row.attribution}
+                      {placeWords(row)}
                     </span>
                   </td>
                   <td className="ch-where" title={row.workspace}>
@@ -436,6 +456,7 @@ function NarrowRow({ row, open, onToggle, actions }: { row: SessionRow; open: bo
           <span className="ch-what-name">{row.label}</span>
           <span className="ch-what-sub">
             {when(row.lastAt)} · {row.workspace}
+            {placeWords(row)}
           </span>
         </td>
         <td className="ch-num ch-strong">{compact(row.tokens)}</td>
@@ -445,7 +466,8 @@ function NarrowRow({ row, open, onToggle, actions }: { row: SessionRow; open: bo
         <tr>
           <td colSpan={3} className="ch-more">
             <div>
-              {modelWords(row)} · {row.attribution} · {row.messages.toLocaleString("en-US")} messages
+              {modelWords(row)} · {row.attribution}
+              {placeWords(row)} · {row.messages.toLocaleString("en-US")} messages
             </div>
             <div>
               Read {compact(row.read)} · write {compact(row.write)} · in {compact(row.input)} · out {compact(row.output)}

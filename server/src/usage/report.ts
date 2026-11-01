@@ -18,6 +18,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dayBounds, dayOf, type LedgerStatus } from "../../../shared/usage";
+import type { RemoteSource } from "../../../shared/usagepull";
 import {
   buildReport,
   contextStrip,
@@ -44,6 +45,8 @@ export interface ReportDeps {
   weekOwner: UsageReport["weekOwner"];
   retention: RetentionRow[];
   status: LedgerStatus;
+  /** The machines and nodes this page has numbers from. */
+  remote?: RemoteSource[];
 }
 
 /** The transcript retention a login's settings file states, or Claude Code's default. A number or nothing, and nothing else out of the file. */
@@ -84,6 +87,7 @@ export function usageReport(ledger: Ledger, range: UsageRange, by: UsageDimensio
       reading: deps.status.reading,
       sweptAt: deps.status.sweptAt,
       error: deps.status.error,
+      remote: deps.remote ?? [],
     },
   });
   const context: ContextStrip[] = [];
@@ -93,7 +97,7 @@ export function usageReport(ledger: Ledger, range: UsageRange, by: UsageDimensio
     const values = ledger.usageContext(row.id);
     // One message is a dot, and says nothing about a climb.
     if (values.length < 2) continue;
-    context.push({ sessionId: row.id, label: row.label, workspace: row.workspace, ...contextStrip(values) });
+    context.push({ sessionId: row.id, label: row.label, workspace: row.place ? `${row.workspace} · ${row.place}` : row.workspace, ...contextStrip(values) });
   }
   return { ...report, context, weekOwner: deps.weekOwner };
 }

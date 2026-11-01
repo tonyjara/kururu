@@ -24,10 +24,11 @@
 import { priceOf } from "./prices";
 import { dayBounds, dayOf, tokensOf, type AttributedBy, type SessionKind, type UsageProgram } from "./usage";
 import { SERIES_SLOTS } from "./chartcolor";
+import type { RemoteSource } from "./usagepull";
 
 export const USAGE_RANGES = ["week", "today", "7d", "30d", "all"] as const;
 export type UsageRange = (typeof USAGE_RANGES)[number];
-export const USAGE_DIMENSIONS = ["workspace", "kuru", "card", "agent", "model", "program"] as const;
+export const USAGE_DIMENSIONS = ["workspace", "kuru", "card", "agent", "model", "program", "computer"] as const;
 export type UsageDimension = (typeof USAGE_DIMENSIONS)[number];
 
 export function isUsageRange(value: unknown): value is UsageRange {
@@ -66,6 +67,10 @@ export interface SessionFact {
   agentId: string | null;
   startedAt: number;
   lastAt: number;
+  /** The node that told this one about it. Absent for what this node read for itself, however it read it. */
+  node?: string | null;
+  /** The machine it ran on, over ssh: this node's, or the node's above. */
+  machine?: string | null;
 }
 
 /** What kururu calls things, and what is alive enough to be gone to. Only ever from kururu. */
@@ -78,6 +83,8 @@ export interface UsageNames {
   openableCard(id: string): { workspaceId: string } | null;
   /** A folder as it is drawn: `~` for the home folder. */
   folder(path: string): string;
+  /** What this computer is called on the page. */
+  here?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -280,6 +287,26 @@ export function modelName(model: string): string {
   return `${family[0]!.toUpperCase()}${family.slice(1)} ${version.replace("-", ".")}`;
 }
 
+/**
+ * Which computer a session ran on, as words, or null for this one. Where a session
+ * ran is the one thing about it a folder cannot be trusted to say: `/home/me/api`
+ * could be anywhere.
+ */
+export function placeOf(fact: Pick<SessionFact, "node" | "machine">): string | null {
+  if (fact.node && fact.machine) return `${fact.machine}, through ${fact.node}`;
+  return fact.node ?? fact.machine ?? null;
+}
+
+/** A label, and the computer it is on when that is not this one. */
+function placed(label: string, place: string | null): string {
+  return place ? `${label} · ${place}` : label;
+}
+
+/** A key, kept apart by computer: the same folder on two of them is two rows. */
+function placedKey(key: string, place: string | null): string {
+  return place ? `${key}@${place}` : key;
+}
+
 function lastPart(path: string): string {
   const parts = path.split("/").filter(Boolean);
   return parts[parts.length - 1] ?? path;
@@ -292,7 +319,7 @@ export function sessionLabel(fact: SessionFact, names: UsageNames): string {
   if (card) return card;
   const live = names.liveAgent(fact);
   if (live) return live.label;
-  const folder = fact.cwd ? names.folder(fact.cwd) : null;
+  const folder = fact.cwd ? (placeOf(fact) ? fact.cwd : names.folder(fact.cwd)) : null;
   const where = folder ? (folder === "~" ? folder : lastPart(folder)) : "Unknown folder";
   return `${where}, ${monthDay(fact.startedAt)}`;
 }
@@ -306,20 +333,24 @@ export function sessionLabel(fact: SessionFact, names: UsageNames): string {
 export function entityOf(by: UsageDimension, cell: Pick<UsageCell, "model">, fact: SessionFact, names: UsageNames): UsageEntity {
   if (by === "model") return { key: cell.model, label: modelName(cell.model) };
   if (by === "program") return { key: fact.program, label: programName(fact.program) };
+  const place = placeOf(fact);
+  // Kuru is not a row of this one either: a computer's tokens are all of its tokens.
+  if (by === "computer") return { key: place ? `at:${place}` : "here", label: place ?? names.here ?? "This computer" };
   if (fact.kind === "harness") return KURU;
   switch (by) {
     case "kuru":
       return { key: "agents", label: "Agents" };
     case "card": {
       if (!fact.cardId) return { key: "no-card", label: "Not on a card" };
-      return { key: fact.cardId, label: names.card(fact.cardId) ?? "A card since removed" };
+      return { key: placedKey(fact.cardId, place), label: placed(names.card(fact.cardId) ?? "A card since removed", place) };
     }
     case "agent":
-      return { key: fact.id, label: sessionLabel(fact, names), folderOnly: fact.attributedBy === "folder" };
+      return { key: fact.id, label: placed(sessionLabel(fact, names), place), folderOnly: fact.attributedBy === "folder" };
     case "workspace": {
-      if (fact.workspaceKey) return { key: fact.workspaceKey, label: names.workspace(fact.workspaceKey) ?? "A workspace since removed" };
-      if (!fact.cwd) return { key: "folder:?", label: "Unknown folder", folderOnly: true };
-      return { key: `folder:${fact.cwd}`, label: names.folder(fact.cwd), folderOnly: true };
+      if (fact.workspaceKey) return { key: placedKey(fact.workspaceKey, place), label: placed(names.workspace(fact.workspaceKey) ?? "A workspace since removed", place) };
+      if (!fact.cwd) return { key: placedKey("folder:?", place), label: placed("Unknown folder", place), folderOnly: true };
+      // Not `names.folder`: another computer's home is not this one's.
+      return { key: placedKey(`folder:${fact.cwd}`, place), label: place ? placed(fact.cwd, place) : names.folder(fact.cwd), folderOnly: true };
     }
   }
 }
@@ -690,6 +721,8 @@ export interface SessionRow {
   unpriced: number;
   /** What the program says the whole session spent, which may reach outside the range; null when it says nothing. */
   says: number | null;
+  /** The computer it ran on, when that is not this one. */
+  place: string | null;
   /** Who named it, as the page says it. */
   attribution: "Kuru" | "card" | "launch" | "hook" | "database" | "folder only";
   /** A terminal to go to, if this session is running. */
@@ -712,7 +745,8 @@ function attributionWord(fact: SessionFact): SessionRow["attribution"] {
 export function workspaceOf(fact: SessionFact, names: UsageNames): string {
   if (fact.kind === "harness") return "Kuru";
   if (fact.workspaceKey) return names.workspace(fact.workspaceKey) ?? "A workspace since removed";
-  return fact.cwd ? names.folder(fact.cwd) : "Unknown folder";
+  if (!fact.cwd) return "Unknown folder";
+  return placeOf(fact) ? fact.cwd : names.folder(fact.cwd);
 }
 
 export function sessionRows(cells: readonly UsageCell[], facts: ReadonlyMap<string, SessionFact>, says: ReadonlyMap<string, number>, names: UsageNames): { rows: SessionRow[]; more: number } {
@@ -740,6 +774,7 @@ export function sessionRows(cells: readonly UsageCell[], facts: ReadonlyMap<stri
         cost: 0,
         unpriced: 0,
         says: says.get(fact.id) ?? null,
+        place: placeOf(fact),
         attribution: attributionWord(fact),
         agentId: null,
         card: null,
@@ -830,6 +865,8 @@ export interface UsageReport {
     reading: { doneBytes: number; totalBytes: number; files: number } | null;
     sweptAt: number | null;
     error: string | null;
+    /** The other computers whose numbers are on this page, and how fresh they are. */
+    remote: RemoteSource[];
   };
 }
 

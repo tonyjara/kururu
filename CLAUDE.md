@@ -279,7 +279,11 @@ The load-bearing invariants, one line each, with the argument behind the link:
   was billed, never off a launch's row, reads `session_days` so a report stays
   milliseconds on the event loop, and wears `--chart-*`, a validated table in
   `shared/chartcolor.ts`, because the board's colours cannot be told apart at a
-  chart's size. → [data](docs/data.md#the-page)
+  chart's size. A machine's logs are read over ssh by the sweep, read-only, once a
+  workspace is pinned to it or an agent was started there; a node reads its own and
+  its parent asks, keeping quarter-hour rollups by the node's id and never a
+  qualified one; a session one road has read, the other leaves alone. →
+  [data](docs/data.md#other-computers)
 - **The OpenRouter key is one of the credentials kururu stores — a
   channel's bot token, the web providers' keys and the Anthropic Admin key,
   below, are the others —

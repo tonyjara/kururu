@@ -143,6 +143,42 @@ from "The page" below, and why:
   (`backup-cli.ts`) opens one itself, tolerant of it failing to open, the same
   as the server's own path.
 
+**Phase 6 is built** (2026-11-01): a machine's logs through the sweep over ssh, and a
+node's numbers over the link, in `server/src/usage/{sweep,remote}.ts`,
+`shared/usagepull.ts`, `shared/machines.ts`, `server/src/machines.ts`,
+`server/src/nodes.ts`. `docs/data.md` has the reasoning. Where it differs from what is
+written below, and why:
+
+- **Quarter hours cross the link, not `daily` rows.** A day is the local day of whoever
+  cut it, so a box on UTC would draw Thursday night on the Mac's Friday; and "today so
+  far" and a limit week starting mid-afternoon cannot be answered from whole days. The
+  parent cuts its own days. It is still a rollup: 4,200 rows for this Mac's 96,000
+  messages, and 1.3 MB the first time.
+- **By session, not by attribution.** The page counts sessions and draws a row for each,
+  so `daily`'s shape would have had to invent them. `session_days` and `daily` are both
+  made from the messages and the node's rows.
+- **Tables of their own, not "the same table".** `sessions`' ids can be claimed by a
+  launch here, and these rows are not messages. The rollups read both, so nothing above
+  them knows.
+- **Keyed by the node's id**, because a node can be renamed, and under a new name every
+  day would have been asked for and counted again. `daily.node` is the name.
+- **A day's signature instead of a cursor.** Nothing has a write time, and a backfill or a
+  session a card comes to name changes old days. The signature is of that day's rows of
+  `daily`, so either moves it.
+- **A machine that is also a child** was not in the plan, and is a real shape here. One
+  road per session.
+- **A machine's whole login is read, not only what kururu started**, once there is a
+  reason to read that machine at all, as this Mac's is. The real reach: every machine
+  with a pinned workspace or a launch, over the user's own ssh, read-only, every five
+  minutes.
+- **Codex's model across a cut.** A sweep often picks a rollout up mid-turn with its
+  `turn_context` behind the offset, which made a row with no model. Both roads now take
+  the model the session was last on. Phase 3's reader had this too; nothing was live
+  on Codex to show it.
+- **Not done:** OpenCode on a machine, whose logs are a database on that disk; a node's
+  allowance on the limit chart; context strips for a node's sessions, which need its
+  messages. Its own page has them. Over a machine the context strips work.
+
 ## Verdict
 
 **Build a usage ledger, in a second SQLite file beside `kururu.db`, filled by
@@ -543,6 +579,13 @@ waiting  (agent_id, program, profile_key, workspace_key, card_id, kind, node, ma
                                                                     -- a launch whose program has not said its id: Codex (version 2)
 session_days (day, session_id, model, messages, input, cache_write_5m, cache_write_1h, cache_read, output, thinking,
           cost_est, unpriced, PRIMARY KEY (day, session_id, model))  -- what the Usage page reads (version 3)
+node_cells (node, node_day, session_id, model, at, messages, input, cache_write_5m, cache_write_1h, cache_read, output,
+          thinking, cost_est, unpriced, PRIMARY KEY (node, session_id, model, at))  -- a node's quarter hours (version 4)
+node_sessions (node, id, program, kind, profile_key, workspace_key, card_id, machine, cwd, attributed_by, started_at, last_at, says,
+          PRIMARY KEY (node, id))
+node_days (node, day, sig, PRIMARY KEY (node, day))                  -- what the next ask tells it
+node_names (node, kind, key, label, PRIMARY KEY (node, kind, key))   -- what it calls its workspaces and cards
+node_pulls (node PRIMARY KEY, name, at)                              -- its name, and when it was last heard from
 ```
 
 Indexes: `messages(at)`, `messages(session_id, at)`, `daily(day)`,

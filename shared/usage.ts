@@ -394,8 +394,10 @@ export interface LaunchRow {
 /** A launch still waiting for its id: the fields of one, known by its terminal. */
 export type WaitingLaunch = LaunchRow & { agentId: string };
 
-/** How far before a launch a rollout may say it began. One clock, and a rounding; `CLOCK_SLACK_MS` allows a minute for two machines. */
+/** How far before a launch a rollout may say it began. One clock, and a rounding. */
 const ROLLOUT_EARLY_MS = 5_000;
+/** The same on a machine, whose clock is not this one's. */
+export const ROLLOUT_EARLY_REMOTE_MS = 60_000;
 /**
  * How long after a launch a rollout may say it began. Codex stamps a session as
  * its TUI comes up, which is a login shell and a few seconds behind the spawn,
@@ -419,12 +421,12 @@ export interface RolloutSeen {
  * one folder may be swapped, which costs nothing: everything the ledger keeps
  * about them but the terminal's id is the same.
  */
-export function matchRollouts(waiting: readonly WaitingLaunch[], rollouts: readonly RolloutSeen[], taken: ReadonlySet<string>): { launch: WaitingLaunch; sessionId: string }[] {
+export function matchRollouts(waiting: readonly WaitingLaunch[], rollouts: readonly RolloutSeen[], taken: ReadonlySet<string>, earlyMs = ROLLOUT_EARLY_MS): { launch: WaitingLaunch; sessionId: string }[] {
   const open = [...waiting].sort((a, b) => a.at - b.at);
   const out: { launch: WaitingLaunch; sessionId: string }[] = [];
   for (const rollout of [...rollouts].sort((a, b) => a.at - b.at)) {
     if (taken.has(rollout.id) || rollout.cwd === null) continue;
-    const fits = open.findIndex((launch) => launch.cwd === rollout.cwd && rollout.at >= launch.at - ROLLOUT_EARLY_MS && rollout.at <= launch.at + ROLLOUT_LATE_MS);
+    const fits = open.findIndex((launch) => launch.cwd === rollout.cwd && rollout.at >= launch.at - earlyMs && rollout.at <= launch.at + ROLLOUT_LATE_MS);
     if (fits === -1) continue;
     const [launch] = open.splice(fits, 1);
     out.push({ launch: launch!, sessionId: rollout.id });

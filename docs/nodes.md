@@ -350,6 +350,16 @@ child's boards are therefore backed up as often as the Mac is awake.
 back. The child is then paired again, because its keys and the roster were
 never in the backup.
 
+## Usage
+
+Each node reads its own logs into its own ledger, and the parent keeps a rollup of
+what each child spent: `usage-ask` says which of the child's days it holds, by
+signature, and `usage-said` is the days that differ, by the quarter hour. Only the
+parent asks and only a child answers, so a sibling hears nothing, and a parent never
+passes another node's rows on. `NodeSummary.ledger` says a node answers; one from
+before is not asked, and the Usage page says to update it. Nothing here is told to
+either Kuru. See [data](data.md#other-computers).
+
 ## Moving a workspace
 
 Phase 6. A workspace row's ⋯ menu (and its right-click) has **Move to
