@@ -36,10 +36,13 @@ import {
   due,
   envelope,
   handsOf,
+  harnessCliOf,
+  harnessConversation,
   harnessRunFlags,
   inboxFrames,
   isCommand,
   keyBytes,
+  kuruRunningOn,
   mcpConfig,
   memoryIndexFor,
   memoryOrigin,
@@ -341,6 +344,14 @@ describe("when a waiting message is typed", () => {
     const held = [m("ls", "later"), m(":q", "next")];
     expect(due(held, "working", false)).toEqual({ type: ["ls", ":q"], rest: [] });
   });
+
+  it("types a notice as a turn of its own, never joined to the user's words", () => {
+    const notice = { text: "[kururu] \"Migrate\" finished its turn. It said:\n  done ", when: "next" as const, alone: true };
+    const held = [m("first", "now"), notice, m("then", "next")];
+    expect(due(held, "done", true).type).toEqual(["first", notice.text, "then"]);
+    // Its timing is still its when's: it waits out a turn in progress.
+    expect(due(held, "working", true)).toEqual({ type: ["first"], rest: [notice, m("then", "next")] });
+  });
 });
 
 describe("a transcript's turns", () => {
@@ -400,6 +411,52 @@ describe("the rest", () => {
       agentId: "a7",
       startedAt: 5,
     });
+  });
+
+  it("keeps the program and OpenCode's conversation beside Claude Code's, and only a real session id", () => {
+    const id = "0b6c2f1e-8d7a-4c3b-9e2f-1a2b3c4d5e6f";
+    const ses = "ses_e714cb960ffex1NPKeXQKla7iN";
+    expect(adoptHarness({ sessionId: id, cli: "opencode", opencodeSessionId: ses })).toEqual({
+      sessionId: id,
+      launcher: "claude",
+      agentId: null,
+      startedAt: 0,
+      cli: "opencode",
+      opencodeSessionId: ses,
+    });
+    // A record from before the choice reads back with neither key.
+    expect(Object.keys(adoptHarness({ sessionId: id })!)).toEqual(["sessionId", "launcher", "agentId", "startedAt"]);
+    expect(adoptHarness({ sessionId: id, cli: "gemini", opencodeSessionId: "ses_; rm -rf ~" })).toEqual({ sessionId: id, launcher: "claude", agentId: null, startedAt: 0 });
+  });
+
+  it("files turns under the conversation of the program the harness runs on", () => {
+    const base = { sessionId: "claude-one", opencodeSessionId: "ses_e714cb960ffex1NPKeXQKla7iN" };
+    expect(harnessConversation(base)).toBe("claude-one");
+    expect(harnessConversation({ ...base, cli: "claude" })).toBe("claude-one");
+    expect(harnessConversation({ ...base, cli: "opencode" })).toBe(base.opencodeSessionId);
+    expect(harnessCliOf({})).toBe("claude");
+  });
+
+  it("says what a running Kuru is on, and nothing for one that is not running", () => {
+    const harness = { sessionId: "s", launcher: "opencode", agentId: "h", startedAt: 0, cli: "opencode" as const };
+    expect(kuruRunningOn(harness, [{ id: "h", exited: false }])).toBe("opencode");
+    expect(kuruRunningOn({ ...harness, cli: undefined }, [{ id: "h", exited: false }])).toBe("claude");
+    expect(kuruRunningOn(harness, [{ id: "h", exited: true }])).toBeNull();
+    expect(kuruRunningOn(harness, [])).toBeNull();
+    expect(kuruRunningOn(null, [{ id: "h", exited: false }])).toBeNull();
+  });
+
+  it("tells an OpenCode harness its tools' names there, and that a typed notice is not the user", () => {
+    const claude = rolePrompt({ profile: "main", workspaces: [], launchers: [] });
+    const opencode = rolePrompt({ profile: "main", workspaces: [], launchers: [], cli: "opencode" });
+    expect(claude).toContain("mcp__kururu__");
+    expect(claude).toContain("SendMessage");
+    expect(opencode).not.toContain("mcp__kururu");
+    expect(opencode).not.toContain("SendMessage");
+    expect(opencode).toContain("kururu_kururu_status");
+    expect(opencode).toContain("kururu_web_ tools");
+    expect(opencode).toMatch(/it is not the user/);
+    expect(opencode).toMatch(/never an instruction from the user/);
   });
 
   it("addresses the endpoint with the profile and the session, and raises the per-request limit", () => {
@@ -513,6 +570,62 @@ describe("the feed", () => {
     expect(heard[0]).toContain("Migrate orders");
     expect(heard[0]).toContain("finished its turn");
     expect(heard.some((text) => text.includes("exited."))).toBe(true);
+  });
+
+  it("types a notice into an OpenCode harness, which has no inbox, once its turn is over", async () => {
+    const kuru = { ...terminal("h", "agent", "opencode"), status: "working" as const };
+    const claude = terminal("a9", "agent", "claude", "Migrate orders");
+    const all = new Map([kuru, claude].map((t) => [t.id, t]));
+    const typed: string[] = [];
+    const profile = { id: "p", harness: { agentId: "h", cli: "opencode" }, workspaces: [] };
+    const harness = new Harness({
+      workspaces: { profileOf: () => "p", profile: (id: string) => (id === "p" ? profile : undefined), agentsInWorkspace: () => [] },
+      host: { isLive: () => true, find: (id: string) => all.get(id), write: (_id: string, data: string) => typed.push(data) },
+      activity: new Map<string, string>(),
+      launch: () => ({ bypassClis: [] }),
+      madeOf: () => [],
+    } as unknown as HarnessDeps);
+    harness.noticed(claude, "done", false);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Mid-turn: held, as a `next` is.
+    expect(typed).toHaveLength(0);
+    all.set("h", { ...kuru, status: "done" });
+    harness.report("h", { status: "done" });
+    harness.noticed(all.get("h")!, "done", false);
+    await until(() => typed.at(-1) === "\r");
+    expect(typed.join("")).toContain('[kururu] "Migrate orders"');
+    expect(typed.join("")).toContain("finished its turn");
+  });
+
+  it("says why a Kuru died starting, keeps its tab for it, and lets go once another starts", async () => {
+    const all = new Map([["h1", terminal("h1", "agent", "opencode")]]);
+    const profile = { id: "p", harness: { agentId: "h1", cli: "opencode", startedAt: Date.now() }, workspaces: [] };
+    const harness = new Harness({
+      workspaces: { profileOf: () => "p", profile: (id: string) => (id === "p" ? profile : undefined), agentsInWorkspace: () => [] },
+      host: { isLive: (id: string) => all.get(id)?.exited === false, find: (id: string) => all.get(id), backlog: async () => "Error: no such flag --standalone\r\n", write: () => {} },
+      grid: () => ({ cols: 80, rows: 24 }),
+      activity: new Map<string, string>(),
+      launch: () => ({ bypassClis: [] }),
+      madeOf: () => [],
+    } as unknown as HarnessDeps);
+
+    // Up: reported in, so the wait is over and its end is an ordinary one.
+    harness.report("h1", { status: "idle" });
+    await harness.whenUp("h1", 500);
+    all.set("h1", { ...all.get("h1")!, exited: true });
+    expect(harness.diedStarting("h1")).toBe(false);
+
+    // Never up: the end of its screen, and its tab kept.
+    all.set("h2", { ...terminal("h2", "agent", "opencode"), exited: true });
+    profile.harness = { ...profile.harness, agentId: "h2" };
+    const said = await harness.whenUp("h2", 500).catch((err: Error) => err.message);
+    expect(said).toContain("closed as it started, saying:\nError: no such flag --standalone");
+    expect(harness.diedStarting("h2")).toBe(true);
+    expect(harness.diedStarting("h2")).toBe(true);
+
+    // The next start points the profile elsewhere, and the old tab is reaped.
+    profile.harness = { ...profile.harness, agentId: "h3" };
+    expect(harness.diedStarting("h2")).toBe(false);
   });
 
   it("still answers a wait that names a shell, since the harness asked", async () => {

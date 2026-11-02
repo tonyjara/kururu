@@ -65,6 +65,7 @@ import {
   WAIT_MAX_S,
   WHENS,
   agentName,
+  harnessCliOf,
   harnessRunFlags,
   clip,
   due,
@@ -83,7 +84,7 @@ import {
   type ModeClass,
   type When,
 } from "../../shared/harness";
-import { findLauncher, launcherCommand, visibleLaunchers, withPrompt, type AgentCli, type LaunchSettings, type Launcher } from "../../shared/launchers";
+import { findLauncher, launcherCommand, launcherFor, visibleLaunchers, withOpencodePrompt, withPrompt, type AgentCli, type LaunchSettings, type Launcher } from "../../shared/launchers";
 import { remoteShellOf, validRemoteDir, type MachineEntry, type MachineStatus } from "../../shared/machines";
 import { folderSentence, planText, type MoveDone, type MovePlan } from "../../shared/move";
 import { lendableText, type LendAsk, type Lendable } from "../../shared/secrets";
@@ -97,9 +98,11 @@ import type { MissedReply } from "../../shared/voice";
 import { RELOAD_TIMEOUT_MAX_MS, RELOAD_TIMEOUT_MIN_MS, RELOAD_TIMEOUT_MS, WHY_MAX, oneLine, outcomeText, type ReloadOutcome } from "../../shared/reload";
 import { COLUMN_LABELS } from "../../shared/board";
 import type { Actor, CardEvent, SearchHit, SearchScope } from "../../shared/store";
+import { mintOpencodeSession, opencodeHarnessCommand } from "../../shared/opencode";
 import type { McpResult } from "./mcp";
 import { harnessHome, prepareHarnessHome } from "./harnesshome";
 import type { LaunchNote } from "./usage/attribute";
+import { findOpencode, prepareOpencodeHome } from "./opencode";
 import type { HostLink } from "./hostlink";
 import type { Workspaces } from "./workspaces";
 import type { RemoteScreen } from "./nodewatch";
@@ -126,9 +129,11 @@ export interface HarnessDeps {
   /** Claude Code's config directory for a profile's terminals — where its transcripts are filed. */
   claudeDir: (profileId: string) => string;
   /** A launcher's full command line as a terminal in that profile would get it: flags, hooks and all. */
-  agentCommand: (launcher: Launcher, profileId: string) => string;
+  agentCommand: (launcher: Launcher, profileId: string) => Promise<string>;
   /** An agent has been started, for the usage ledger to know whose it is. See `usage/attribute.ts`. */
   spawned?: (agentId: string, profileId: string, workspaceId: string | null, note: LaunchNote) => void;
+  /** Whether kururu's web tools are on, which an OpenCode harness is given in its config rather than on its line. See `web/chain.ts`. */
+  webTools: () => boolean;
   /**
    * Open a terminal into a pane of a workspace that need not be on screen. A
    * plain shell in a pinned workspace opens on its machine unless `local`.
@@ -278,11 +283,26 @@ const WAKE_TIMEOUT_MS = 30_000;
  * line discipline's to lose.
  */
 const WAKE_SETTLE_MS = 1500;
+/**
+ * The same for OpenCode, whose plugin reports from its server before the
+ * TUI in front of it has drawn: measured at 0.5 s for the report and 1.35 s
+ * for the first frame, and keys sent before that frame are lost. The outbox
+ * types a lost message again, but fifteen seconds later.
+ */
+const WAKE_SETTLE_OPENCODE_MS = 3500;
 /** How long a Stop watches Kuru's screen for the turn to end, and how often it looks. */
 const STOP_WATCH_MS = 4000;
 const STOP_POLL_MS = 250;
 /** How long after a Stop another Escape is withheld: Claude Code reads two within about this as a double press. */
 const STOP_REPEAT_MS = 1200;
+/** How long a restart waits for the old Kuru's process to be gone before starting the new one. */
+const RESTART_WAIT_MS = 10_000;
+/** How long the drawer's Start waits for a new Kuru to report in or to die: past it, it is slow, not broken. */
+const UP_WAIT_MS = 10_000;
+/** How soon after its start a Kuru that ends without ever reporting in counts as one that died starting. See `diedStarting`. */
+const DIED_STARTING_MS = 60_000;
+/** How much of a Kuru's screen that died starting is quoted to the drawer. The tab has the rest. */
+const DIED_QUOTE = 400;
 
 export class Harness {
   private readonly inboxes = new Map<string, Inbox>();
@@ -304,11 +324,23 @@ export class Harness {
   private readonly retries = new Map<string, NodeJS.Timeout>();
   /** Harnesses just started and not yet reported in, whose words wait. See `hear`. */
   private readonly starting = new Map<string, NodeJS.Timeout>();
+  /** Harnesses that have reported in and are given a moment for their prompt box to listen. See `report`. */
+  private readonly settling = new Map<string, NodeJS.Timeout>();
+  /** Terminals that have reported at least once since this server started: the sign a harness got as far as being up. */
+  private readonly reported = new Set<string>();
+  /** Harnesses whose terminal ended before they were ever up, whose tab is kept for its screen. See `diedStarting`. */
+  private readonly died = new Set<string>();
   /** Harnesses an Escape was just sent to by `interrupt`, which does not send another until this lets go. */
   private readonly stopping = new Set<string>();
   /** Auto Swap's clock, and the one timer that asks it again. See `follow`. */
   private readonly swaps = new SwapGate<{ profileId: string; agentId: string }>();
   private swapTimer: NodeJS.Timeout | null = null;
+  /**
+   * A start under way, by profile. The Kuru drawer's Start, the voice and
+   * the outbox handing back words a Kuru dropped can all ask for one in the
+   * same second, and without this each would start a Kuru of its own.
+   */
+  private readonly opening = new Map<string, Promise<{ agentId: string; started?: true }>>();
 
   constructor(private readonly deps: HarnessDeps) {}
 
@@ -317,18 +349,34 @@ export class Harness {
   // ---------------------------------------------------------------------------
 
   /** The extras on a `/api/report`: where the transcript is, where the inbox is, what was last said. */
-  report(agentId: string, extras: { transcript?: unknown; inbox?: unknown; reply?: unknown }): void {
+  report(agentId: string, extras: { transcript?: unknown; inbox?: unknown; reply?: unknown; status?: unknown }): void {
     if (typeof extras.transcript === "string" && extras.transcript.startsWith("/")) this.transcripts.set(agentId, extras.transcript);
     const inbox = extras.inbox as { socket?: unknown; token?: unknown } | undefined;
     if (inbox && typeof inbox.socket === "string" && inbox.socket.startsWith("/")) {
       this.inboxes.set(agentId, { socket: inbox.socket, token: typeof inbox.token === "string" ? inbox.token : null });
     }
     if (typeof extras.reply === "string" && extras.reply.trim()) this.replies.set(agentId, extras.reply.trim().slice(0, REPLY_MAX));
+    this.reported.add(agentId);
     const wake = this.starting.get(agentId);
     if (wake) {
       clearTimeout(wake);
       this.starting.delete(agentId);
-      setTimeout(() => void this.pump(agentId), WAKE_SETTLE_MS).unref();
+      const profileId = this.isHarness(agentId);
+      const harness = profileId ? this.deps.workspaces.profile(profileId)?.harness : null;
+      const settle = harness && harnessCliOf(harness) === "opencode" ? WAKE_SETTLE_OPENCODE_MS : WAKE_SETTLE_MS;
+      // Still waking until it has settled, so words that arrive meanwhile
+      // wait with the first rather than being typed ahead of the frame.
+      const timer = setTimeout(() => {
+        this.settling.delete(agentId);
+        void this.pump(agentId);
+      }, settle);
+      timer.unref();
+      this.settling.set(agentId, timer);
+    } else if (extras.status === "idle") {
+      // Between turns without a `done` to say so — a turn interrupted, or
+      // one that only compacted, which OpenCode's plugin reports as idle so
+      // nothing is read aloud twice. What waited for the turn's end is due.
+      void this.pump(agentId);
     }
   }
 
@@ -340,7 +388,9 @@ export class Harness {
     this.told.delete(agentId);
     this.held.delete(agentId);
     this.keys.delete(agentId);
-    for (const timers of [this.retries, this.starting]) {
+    this.reported.delete(agentId);
+    this.died.delete(agentId);
+    for (const timers of [this.retries, this.starting, this.settling]) {
       clearTimeout(timers.get(agentId));
       timers.delete(agentId);
     }
@@ -408,9 +458,13 @@ export class Harness {
    * is what is true, and Stop can be pressed again.
    */
   async interrupt(profileId: string): Promise<boolean> {
-    const agentId = this.deps.workspaces.profile(profileId)?.harness?.agentId;
+    const harness = this.deps.workspaces.profile(profileId)?.harness;
+    const agentId = harness?.agentId;
     const agent = agentId ? this.deps.host.find(agentId) : undefined;
-    if (!agentId || !agent || agent.exited || agent.status !== "working" || this.stopping.has(agentId)) return false;
+    if (!harness || !agentId || !agent || agent.exited || agent.status !== "working" || this.stopping.has(agentId)) return false;
+    // OpenCode's plugin reports the interrupted turn itself (`idle`), and
+    // its screen has none of the footer `readScreen` knows Claude Code by.
+    const reports = harnessCliOf(harness) === "opencode";
     this.stopping.add(agentId);
     try {
       this.deps.host.write(agentId, "\x1b");
@@ -421,6 +475,7 @@ export class Harness {
         // A hook got there first — the turn ended on its own, or went on to
         // ask something — and its word is better than the screen's.
         if (!now || now.exited || now.status !== "working") return true;
+        if (reports) continue;
         const { cols, rows } = this.deps.grid(agentId);
         const screen = await screenText(await this.deps.host.backlog(agentId), cols, rows, rows);
         if (readScreen(screen).phase === "working") continue;
@@ -456,11 +511,11 @@ export class Harness {
     const profile = ws.profile(profileId);
     if (!profile) throw new Error("that profile is gone");
     const running = profile.harness?.agentId;
-    if (running && this.deps.host.isLive(running) && !this.starting.has(running)) {
+    if (running && this.deps.host.isLive(running) && !this.waking(running)) {
       return { outcome: await this.speak(running, text, "now", events), agentId: running };
     }
     const { agentId } = running && this.deps.host.isLive(running) ? { agentId: running } : await this.open(profileId);
-    if (!this.starting.has(agentId)) {
+    if (!this.waking(agentId)) {
       const timer = setTimeout(() => {
         this.starting.delete(agentId);
         void this.pump(agentId);
@@ -510,9 +565,14 @@ export class Harness {
     return run;
   }
 
+  /** Started and not yet listening: words for it wait for `report` to say it is. */
+  private waking(agentId: string): boolean {
+    return this.starting.has(agentId) || this.settling.has(agentId);
+  }
+
   private async pumpOnce(agentId: string): Promise<void> {
     const queue = this.held.get(agentId);
-    if (!queue?.length || this.starting.has(agentId)) return;
+    if (!queue?.length || this.waking(agentId)) return;
     const agent = this.deps.host.find(agentId);
     if (!agent || agent.exited) return;
     const hands = (this.keys.get(agentId) ?? 0) + SWAP_QUIET_MS - Date.now();
@@ -580,9 +640,12 @@ export class Harness {
     const profileId = this.deps.workspaces.profileOf(agent.id);
     const profile = profileId ? this.deps.workspaces.profile(profileId) : null;
     const self = profile?.harness?.agentId;
-    if (!profile || !self || self === agent.id || !this.deps.host.isLive(self)) return;
+    if (!profile?.harness || !self || self === agent.id || !this.deps.host.isLive(self)) return;
+    // OpenCode has no inbox: the notice is typed, at the end of Kuru's turn,
+    // on its own, and the role says it is kururu's and not the user's.
+    const typed = harnessCliOf(profile.harness) === "opencode";
     const inbox = this.inboxes.get(self);
-    if (!inbox) return;
+    if (!inbox && !typed) return;
     const last = this.told.get(agent.id);
     const now = Date.now();
     if (last && last.status === status && now - last.at < TELL_THROTTLE_MS) return;
@@ -594,7 +657,13 @@ export class Harness {
         : status === "blocked"
           ? `is blocked — it is asking something or waiting on a permission prompt${this.deps.activity.has(agent.id) ? `: ${this.deps.activity.get(agent.id)}` : ""}. Read its screen to see what.${this.held.has(agent.id) ? " What you sent it is waiting until the prompt is answered." : ""}`
           : `exited.${lost ? ` ${lost === 1 ? "A message you sent it was" : `${lost} messages you sent it were`} still waiting and never reached it.` : ""}`;
-    void this.post(inbox, `[kururu] ${this.name(agent)} ${said}`, "next").catch(() => {});
+    const notice = `[kururu] ${this.name(agent)} ${said}`;
+    if (typed) {
+      this.hold(self, { text: notice, when: "next", alone: true });
+      void this.pump(self);
+      return;
+    }
+    if (inbox) void this.post(inbox, notice, "next").catch(() => {});
   }
 
   // ---------------------------------------------------------------------------
@@ -828,7 +897,9 @@ export class Harness {
         if (place.machine) {
           // The launcher's own line, without the hooks a local agent gets:
           // they name files on this Mac. See `remoteAgentRun`.
-          const line = withPrompt(launcherCommand(launcher, this.deps.launch()) + sessionFlag, prompt);
+          const line = launcher.cli === "opencode"
+            ? withOpencodePrompt(launcherCommand(launcher, this.deps.launch()), prompt)
+            : withPrompt(launcherCommand(launcher, this.deps.launch()) + sessionFlag, prompt);
           const command = await this.deps.agentOn(place.machine, workspace.name, place.folder, launcher.cli, line);
           agent = await this.deps.openTerminal(profileId, workspaceId, into(), { command, kind: "agent" });
           this.deps.spawned?.(agent.id, profileId, workspaceId, { program: launcher.cli, sessionId, machine: place.machine.name, cwd: place.folder });
@@ -837,7 +908,10 @@ export class Harness {
           const asked = str(args.cwd);
           if (asked && !asked.startsWith("/")) return fail("On this Mac, cwd must be an absolute path.");
           const cwd = asked || (await this.deps.cwdFor(profileId, workspaceId, fromPane));
-          const command = withPrompt(this.deps.agentCommand(launcher, profileId) + sessionFlag, prompt);
+          const agentCommand = await this.deps.agentCommand(launcher, profileId);
+          const command = launcher.cli === "opencode"
+            ? withOpencodePrompt(agentCommand, prompt)
+            : withPrompt(agentCommand + sessionFlag, prompt);
           agent = await this.deps.openTerminal(profileId, workspaceId, into(), { cwd, command, kind: "agent" });
           this.deps.spawned?.(agent.id, profileId, workspaceId, { program: launcher.cli, sessionId, cwd: agent.cwd });
           where = `in ${agent.cwd}`;
@@ -1189,9 +1263,79 @@ export class Harness {
    * The tab still goes into the active workspace, beside the board; only the
    * directory is its own. And always the plain Claude launcher, with the
    * model, effort and compaction named after it (`harnessRunFlags`), so no
-   * launcher's `--model` and no profile's settings decide them.
+   * launcher's `--model` and no profile's settings decide them — unless
+   * Settings says Kuru runs on OpenCode, which is `startOpencode`.
    */
-  async open(profileId: string, options: { fresh?: boolean } = {}): Promise<{ agentId: string }> {
+  open(profileId: string, options: { fresh?: boolean } = {}): Promise<{ agentId: string; started?: true }> {
+    const already = this.opening.get(profileId);
+    if (already) return already;
+    const start = this.start(profileId, options).finally(() => this.opening.delete(profileId));
+    this.opening.set(profileId, start);
+    return start;
+  }
+
+  /**
+   * End a profile's running Kuru and start it again, on whichever program
+   * Settings names now — what Settings' restart asks for after the program
+   * was switched, since a running Kuru keeps the one it started on. The
+   * conversation of the program it comes back on is picked up as `open`
+   * picks it up; the one it leaves stays on its record for a switch back.
+   * The asking is the page's: this ends an agent, if only Kuru.
+   */
+  async restart(profileId: string): Promise<{ agentId: string }> {
+    const running = this.deps.workspaces.profile(profileId)?.harness?.agentId;
+    if (running && this.deps.host.isLive(running)) {
+      this.deps.stopTerminal(running);
+      const until = Date.now() + RESTART_WAIT_MS;
+      while (this.deps.host.isLive(running) && Date.now() < until) await sleep(200);
+      if (this.deps.host.isLive(running)) throw new Error("Kuru did not end; close its tab, then press Start in the drawer");
+    }
+    return this.open(profileId);
+  }
+
+  /**
+   * Once a Kuru just started has reported in, or throws when its terminal
+   * ended first — with the end of its screen, and the tab kept standing for
+   * the rest (`diedStarting`). For the drawer's Start, which otherwise saw a
+   * tab open and vanish and nothing else: that was all an OpenCode 1 on the
+   * PATH, killed at launch, ever showed. A Kuru that is only slow is let go
+   * after `UP_WAIT_MS` without a word.
+   */
+  async whenUp(agentId: string, ms = UP_WAIT_MS): Promise<void> {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+      if (this.reported.has(agentId)) return;
+      const agent = this.deps.host.find(agentId);
+      if (!agent) throw new Error("Kuru's terminal closed as it started.");
+      if (agent.exited) {
+        const said = (await this.screen(agent, 12).catch(() => "")).trim();
+        const quote = said && !said.endsWith("screen is blank.") ? said.slice(-DIED_QUOTE) : "";
+        throw new Error(`Kuru's terminal closed as it started${quote ? `, saying:\n${quote}` : ", without a word"}. Its tab is still there to read.`);
+      }
+      await sleep(100);
+    }
+  }
+
+  /**
+   * Whether a terminal that has ended is a Kuru that died starting: the
+   * profile's harness, ended within `DIED_STARTING_MS` of its start without
+   * ever reporting in. Its screen is the only place why was written, so
+   * `reapExited` leaves its tab standing, as it does a card's dev server
+   * for the same reason. Decided once and then remembered, so the tab does
+   * not vanish when the minute is up; the next start points the profile at
+   * a new terminal, and this one is reaped like any other.
+   */
+  diedStarting(agentId: string): boolean {
+    const profileId = this.isHarness(agentId);
+    const harness = profileId ? this.deps.workspaces.profile(profileId)?.harness : null;
+    if (!harness) return false;
+    if (this.died.has(agentId)) return true;
+    if (this.reported.has(agentId) || Date.now() - harness.startedAt > DIED_STARTING_MS) return false;
+    this.died.add(agentId);
+    return true;
+  }
+
+  private async start(profileId: string, options: { fresh?: boolean }): Promise<{ agentId: string; started?: true }> {
     const ws = this.deps.workspaces;
     const profile = ws.profile(profileId);
     if (!profile) throw new Error("no such profile");
@@ -1200,6 +1344,7 @@ export class Harness {
       ws.reveal(running);
       return { agentId: running };
     }
+    if (this.deps.launch().harnessCli === "opencode") return this.startOpencode(profileId, options);
     const launcher = this.launcher("claude");
     const key = ws.keyOf(profileId);
     if (!key) throw new Error("that profile has no key yet");
@@ -1235,15 +1380,73 @@ export class Harness {
     // in the pty's env, which only a current host applies: `sh -c` takes it
     // either way, and a wait that was cut off at the default would be a wait
     // that lied.
-    const command = `MCP_TOOL_TIMEOUT=${MCP_TIMEOUT_MS} ${this.deps.agentCommand(launcher, profileId)} ${flags.join(" ")}`;
+    const command = `MCP_TOOL_TIMEOUT=${MCP_TIMEOUT_MS} ${await this.deps.agentCommand(launcher, profileId)} ${flags.join(" ")}`;
     const agent = await this.deps.openTerminal(profileId, workspaceId, pane, { cwd, command, kind: "agent", apart: true });
     // No workspace: Kuru's pane sits in one, and its spending is nobody's but Kuru's.
     this.deps.spawned?.(agent.id, profileId, null, { program: "claude", sessionId: sessionId!, kind: "harness", cwd });
     this.deps.host.rename(agent.id, HARNESS_NAME);
-    ws.setHarness(profileId, { sessionId: sessionId!, launcher: launcher.id, agentId: agent.id, startedAt: Date.now() });
+    // OpenCode's conversation stays on the record, for a switch back.
+    const { opencodeSessionId } = profile.harness ?? {};
+    ws.setHarness(profileId, { sessionId: sessionId!, launcher: launcher.id, agentId: agent.id, startedAt: Date.now(), cli: "claude", ...(opencodeSessionId ? { opencodeSessionId } : {}) });
     ws.reveal(agent.id);
     void this.trustHome(agent.id);
-    return { agentId: agent.id };
+    return { agentId: agent.id, started: true };
+  }
+
+  /**
+   * The same start on OpenCode — see `shared/opencode.ts` for which door
+   * replaced which. The session id is kururu's choice, made once and kept,
+   * so `--session` resumes it every time after the first, and no
+   * transcript has to be looked for: OpenCode makes the session when it
+   * does not have it. What Claude Code's start does that this one does not:
+   * answer a trust dialog (OpenCode asks none), carry memories (OpenCode
+   * keeps none in the folder), and name model and effort on the line —
+   * they are in the config, and the plugin moves a resumed session onto
+   * them. Claude Code's session id stays on the record for a switch back.
+   */
+  private async startOpencode(profileId: string, options: { fresh?: boolean }): Promise<{ agentId: string; started: true }> {
+    const ws = this.deps.workspaces;
+    const profile = ws.profile(profileId)!;
+    const key = ws.keyOf(profileId);
+    if (!key) throw new Error("that profile has no key yet");
+    const workspaceId = profile.activeWorkspaceId;
+    const pane = ws.paneBesideBoardIn(profileId, workspaceId);
+    if (!pane) throw new Error("nowhere to put the harness");
+    // Before anything is written or opened: with no OpenCode 2 there is
+    // nothing to start, and the reason is the drawer's to show.
+    const opencode = await findOpencode();
+    const cwd = harnessHome(key);
+    await prepareHarnessHome(cwd, this.deps.claudeDir(profileId), null);
+
+    const kept = profile.harness?.opencodeSessionId;
+    const sessionId = !options.fresh && kept ? kept : mintOpencodeSession();
+    const launch = this.deps.launch();
+    const role = rolePrompt({
+      profile: profile.name,
+      workspaces: profile.workspaces.map((w) => ({ id: w.id, name: w.name })),
+      launchers: visibleLaunchers(launch).map((l) => ({ id: l.id, label: l.label })),
+      cli: "opencode",
+    });
+    prepareOpencodeHome(
+      cwd,
+      { port: this.deps.port(), profileId, sessionId, withToken: this.deps.tokenInPtys(), model: launch.opencodeModel, web: this.deps.webTools() },
+      role,
+    );
+    const command = opencodeHarnessCommand(opencode.path, sessionId, launch.bypassClis.includes("claude"));
+    const agent = await this.deps.openTerminal(profileId, workspaceId, pane, { cwd, command, kind: "agent", apart: true });
+    this.deps.host.rename(agent.id, HARNESS_NAME);
+    ws.setHarness(profileId, {
+      // Claude Code's conversation, kept; a profile that never had one gets
+      // an id no transcript has, which its first Claude start reads as fresh.
+      sessionId: profile.harness?.sessionId ?? randomUUID(),
+      launcher: "opencode",
+      agentId: agent.id,
+      startedAt: Date.now(),
+      cli: "opencode",
+      opencodeSessionId: sessionId,
+    });
+    ws.reveal(agent.id);
+    return { agentId: agent.id, started: true };
   }
 
   /**
@@ -1276,7 +1479,10 @@ export class Harness {
   /** Which harness, if any, a session id names — the MCP endpoint's way of knowing who is calling. */
   selfFor(profileId: string, sessionId: string): string | null {
     const harness = this.deps.workspaces.profile(profileId)?.harness;
-    return harness && harness.sessionId === sessionId ? harness.agentId : null;
+    if (!harness || !sessionId) return null;
+    // The address names the conversation of the program it was written for.
+    const own = harnessCliOf(harness) === "opencode" ? harness.opencodeSessionId : harness.sessionId;
+    return own === sessionId ? harness.agentId : null;
   }
 
   private async transcriptExists(profileId: string, cwd: string, sessionId: string): Promise<boolean> {
@@ -1635,7 +1841,7 @@ export class Harness {
   }
 
   private launcher(id: string | undefined): Launcher {
-    const launcher = findLauncher(id || "claude");
+    const launcher = launcherFor(id || "claude", this.deps.launch());
     if (!launcher) throw new Error(`No launcher ${id}. kururu_status lists them.`);
     return launcher;
   }

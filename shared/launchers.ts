@@ -23,18 +23,20 @@
 
 import { SESSION_ID } from "./board";
 
-export const AGENT_CLIS = ["claude", "codex"] as const;
+export const AGENT_CLIS = ["claude", "codex", "opencode"] as const;
 export type AgentCli = (typeof AGENT_CLIS)[number];
 
 export const CLI_LABELS: Record<AgentCli, string> = {
   claude: "Claude",
   codex: "Codex",
+  opencode: "OpenCode",
 };
 
 /** The flag each CLI takes a model on. They agree on the long spelling. */
 const MODEL_FLAG: Record<AgentCli, string> = {
   claude: "--model",
   codex: "--model",
+  opencode: "--model",
 };
 
 /**
@@ -50,6 +52,7 @@ const MODEL_FLAG: Record<AgentCli, string> = {
 export const BYPASS_FLAG: Record<AgentCli, string> = {
   claude: "--dangerously-skip-permissions",
   codex: "--dangerously-bypass-approvals-and-sandbox",
+  opencode: "--auto",
 };
 
 export interface Launcher {
@@ -95,11 +98,28 @@ export const LAUNCHERS: readonly Launcher[] = [
   { id: "codex:gpt-5.4-mini", cli: "codex", model: "gpt-5.4-mini", label: "Codex GPT-5.4-Mini" },
 ];
 
+/** The OpenCode row is derived from Settings rather than kept in the static model catalogue. */
+export function opencodeLauncher(settings: LaunchSettings): Launcher {
+  return { id: `opencode:${settings.opencodeModel}`, cli: "opencode", model: settings.opencodeModel, label: `OpenCode ${settings.opencodeModel}` };
+}
+
 /** What a model name may be made of. Anything else would need quoting. */
 export const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export function findLauncher(id: string): Launcher | undefined {
+  if (id.startsWith("opencode:")) {
+    const model = adoptOpencodeModel(id.slice("opencode:".length));
+    return model ? { id, cli: "opencode", model, label: `OpenCode ${model}` } : undefined;
+  }
   return LAUNCHERS.find((launcher) => launcher.id === id);
+}
+
+/** Resolve a request through the global program switch. Claude choices become the configured OpenCode model. */
+export function launcherFor(id: string | undefined, settings: LaunchSettings): Launcher | undefined {
+  const asked = findLauncher(id || "claude");
+  if (settings.harnessCli === "opencode" && (!asked || asked.cli === "claude" || asked.cli === "opencode")) return opencodeLauncher(settings);
+  if (settings.harnessCli === "claude" && asked?.cli === "opencode") return findLauncher("claude");
+  return asked;
 }
 
 /**
@@ -108,6 +128,11 @@ export function findLauncher(id: string): Launcher | undefined {
  * that is already running.
  */
 export function launcherCommand(launcher: Launcher, settings?: LaunchSettings): string {
+  if (launcher.cli === "opencode") {
+    const model = launcher.model ?? settings?.opencodeModel ?? OPENCODE_DEFAULT_MODEL;
+    const config = JSON.stringify({ agents: { build: { model } } });
+    return `OPENCODE_CONFIG_CONTENT='${config}' opencode${settings?.bypassClis.includes("opencode") ? " --auto" : ""}`;
+  }
   const parts: string[] = [launcher.cli];
   if (launcher.model) parts.push(MODEL_FLAG[launcher.cli], launcher.model);
   if (settings?.bypassClis.includes(launcher.cli)) parts.push(BYPASS_FLAG[launcher.cli]);
@@ -158,10 +183,20 @@ export function resumeCommand(
  * sequence has no business in a process's argv. A prompt that starts with a
  * dash is given a leading space so neither CLI reads it as a flag.
  */
-export function withPrompt(command: string, prompt: string): string {
+function promptArgument(command: string, prompt: string, flag?: string): string {
   let clean = prompt.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
   if (clean.startsWith("-")) clean = ` ${clean}`;
-  return `${command} '${clean.replaceAll("'", `'\\''`)}'`;
+  return `${command}${flag ? ` ${flag}` : ""} '${clean.replaceAll("'", `'\\''`)}'`;
+}
+
+/** Claude and Codex accept their opening request as a positional argument. */
+export function withPrompt(command: string, prompt: string): string {
+  return promptArgument(command, prompt);
+}
+
+/** OpenCode's only positional argument is a directory; its opening request is `--prompt`. */
+export function withOpencodePrompt(command: string, prompt: string): string {
+  return promptArgument(command, prompt, "--prompt");
 }
 
 /**
@@ -204,6 +239,57 @@ export interface LaunchSettings {
    */
   sleepIdle: boolean;
   sleepMinutes: number;
+  /**
+   * Which program Kuru runs on. Claude Code is billed to the Claude
+   * subscription; OpenCode is billed to whatever OpenCode is signed in to —
+   * an Anthropic API key, as a rule — which is what keeps Kuru answering on
+   * the day the subscription's allowance runs out. One switch for every
+   * profile, because what it answers is which account has credit left, and
+   * that is a fact about the machine. It changes the next start only: a
+   * running Kuru is a process, and Settings offers to restart it. See
+   * `server/src/opencode.ts`.
+   */
+  harnessCli: HarnessCli;
+  /**
+   * The model OpenCode runs Kuru on, as OpenCode spells one:
+   * `provider/model`, with an optional `#variant` for the effort. Claude
+   * Code's harness has its model on its command line (`harnessRunFlags`);
+   * OpenCode takes it from the config kururu writes into Kuru's folder.
+   */
+  opencodeModel: string;
+}
+
+/** The programs Kuru and, through the same switch, its default agents may run on. */
+export const HARNESS_CLIS = ["claude", "opencode"] as const;
+export type HarnessCli = (typeof HARNESS_CLIS)[number];
+
+export const HARNESS_CLI_LABELS: Record<HarnessCli, string> = {
+  claude: "Claude Code",
+  opencode: "OpenCode",
+};
+
+/**
+ * The model OpenCode's Kuru starts on: Claude Code's harness model
+ * (`HARNESS_MODEL`) at its effort, in OpenCode's spelling, so switching
+ * programs does not also switch brains.
+ */
+export const OPENCODE_DEFAULT_MODEL = "anthropic/claude-opus-5-5#high";
+
+/**
+ * What an OpenCode model may be written as: a provider, a slash, a model id
+ * that may itself hold slashes (`openrouter/anthropic/claude-opus-5-5`), and
+ * an optional `#variant`. It goes into a JSON file and never a shell, but it
+ * is held to a grammar anyway, because a field somebody typed into is a
+ * field that will one day hold a paragraph.
+ */
+export const OPENCODE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._:/-]*(#[A-Za-z0-9._-]+)?$/;
+const OPENCODE_MODEL_MAX = 120;
+
+/** A model somebody typed, as `opencodeModel` keeps it, or null when it is not one. */
+export function adoptOpencodeModel(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const model = value.trim();
+  return model.length <= OPENCODE_MODEL_MAX && OPENCODE_MODEL.test(model) ? model : null;
 }
 
 /** What `sleepMinutes` may be: a minute at the least, a day at the most. */
@@ -217,6 +303,8 @@ export const DEFAULT_LAUNCH: LaunchSettings = {
   loginsPerProfile: false,
   sleepIdle: true,
   sleepMinutes: 10,
+  harnessCli: "claude",
+  opencodeModel: OPENCODE_DEFAULT_MODEL,
 };
 
 /**
@@ -241,6 +329,10 @@ export function adoptLaunch(raw: unknown): LaunchSettings {
     // Absent is on: a `launch.json` written before this existed gets the default.
     sleepIdle: obj.sleepIdle !== false,
     sleepMinutes: sleepMinutes(obj.sleepMinutes),
+    // Claude unless OpenCode was chosen: a file from before the choice, or a
+    // word this version does not know, keeps Kuru where it always was.
+    harnessCli: obj.harnessCli === "opencode" ? "opencode" : "claude",
+    opencodeModel: adoptOpencodeModel(obj.opencodeModel) ?? OPENCODE_DEFAULT_MODEL,
   };
 }
 
@@ -256,6 +348,7 @@ function sleepMinutes(value: unknown): number {
 
 /** What the new-tab menu shows, in catalogue order. */
 export function visibleLaunchers(settings: LaunchSettings): Launcher[] {
+  if (settings.harnessCli === "opencode") return [opencodeLauncher(settings)];
   return LAUNCHERS.filter(
     (launcher) => !settings.offClis.includes(launcher.cli) && !settings.offLaunchers.includes(launcher.id),
   );
@@ -284,7 +377,7 @@ export function adoptLaunchers(raw: unknown): Launcher[] | null {
     if (typeof id !== "string" || !id || id.length > 120 || seen.has(id)) continue;
     if (typeof cli !== "string" || !(AGENT_CLIS as readonly string[]).includes(cli)) continue;
     if (typeof label !== "string" || !label.trim()) continue;
-    if (model !== undefined && (typeof model !== "string" || !MODEL_NAME.test(model))) continue;
+    if (model !== undefined && (typeof model !== "string" || (cli === "opencode" ? !adoptOpencodeModel(model) : !MODEL_NAME.test(model)))) continue;
     seen.add(id);
     out.push({ id, cli: cli as AgentCli, label: label.slice(0, LABEL_MAX), ...(typeof model === "string" ? { model } : {}) });
   }

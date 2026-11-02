@@ -5446,6 +5446,23 @@ button.kuru-quote:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Not running, and — after a Start that failed — why, under the line in
+   full: the reason names paths and a command to run, and an ellipsis would
+   cut exactly that. Scrolls rather than pushing the composer off a phone. */
+.kuru-live-off-box {
+  flex: none;
+}
+.kuru-live-error {
+  margin: 0;
+  padding: 0 12px 6px 30px;
+  max-height: 9em;
+  overflow-y: auto;
+  font-size: var(--fs-sm);
+  color: var(--danger);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
 /* Stop: a header button in the working ink, the colour the thinking mascot
    beside it wears, so the two read as one thing — this, and the way to end
    it — rather than as a status and an unrelated warning. */

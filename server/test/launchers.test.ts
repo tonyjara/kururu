@@ -11,10 +11,14 @@ import {
   AGENT_CLIS,
   LAUNCHERS,
   MODEL_NAME,
+  OPENCODE_DEFAULT_MODEL,
   adoptLaunch,
+  adoptOpencodeModel,
   adoptLaunchers,
   findLauncher,
   launcherCommand,
+  launcherFor,
+  opencodeLauncher,
   visibleLaunchers,
 } from "../../shared/launchers";
 
@@ -30,7 +34,7 @@ describe("LAUNCHERS", () => {
   });
 
   it("has a default-model row for every CLI", () => {
-    for (const cli of AGENT_CLIS) expect(LAUNCHERS.some((l) => l.cli === cli && !l.model)).toBe(true);
+    for (const cli of AGENT_CLIS.filter((cli) => cli !== "opencode")) expect(LAUNCHERS.some((l) => l.cli === cli && !l.model)).toBe(true);
   });
 
   it("builds the command with the model flag", () => {
@@ -52,7 +56,16 @@ describe("LAUNCHERS", () => {
 
 describe("adoptLaunch", () => {
   it("makes defaults out of nothing", () => {
-    const none = { offClis: [], offLaunchers: [], bypassClis: [], loginsPerProfile: false, sleepIdle: true, sleepMinutes: 10 };
+    const none = {
+      offClis: [],
+      offLaunchers: [],
+      bypassClis: [],
+      loginsPerProfile: false,
+      sleepIdle: true,
+      sleepMinutes: 10,
+      harnessCli: "claude",
+      opencodeModel: OPENCODE_DEFAULT_MODEL,
+    };
     expect(adoptLaunch(undefined)).toEqual(none);
     expect(adoptLaunch("nonsense")).toEqual(none);
   });
@@ -67,6 +80,8 @@ describe("adoptLaunch", () => {
       loginsPerProfile: false,
       sleepIdle: true,
       sleepMinutes: 10,
+      harnessCli: "claude",
+      opencodeModel: OPENCODE_DEFAULT_MODEL,
     });
   });
 
@@ -77,14 +92,34 @@ describe("adoptLaunch", () => {
 
 describe("visibleLaunchers", () => {
   it("shows everything by default, so a new model appears without being ticked", () => {
-    expect(visibleLaunchers({ offClis: [], offLaunchers: [], bypassClis: [] })).toEqual([...LAUNCHERS]);
+    const settings = adoptLaunch(undefined);
+    expect(visibleLaunchers(settings)).toEqual([...LAUNCHERS]);
   });
 
   it("leaves out a switched-off CLI and a switched-off model", () => {
-    const shown = visibleLaunchers({ offClis: ["codex"], offLaunchers: ["claude"], bypassClis: [] });
+    const shown = visibleLaunchers({ ...adoptLaunch(undefined), offClis: ["codex"], offLaunchers: ["claude"] });
     expect(shown.some((l) => l.cli === "codex")).toBe(false);
     expect(shown.some((l) => l.id === "claude")).toBe(false);
     expect(shown.some((l) => l.cli === "claude")).toBe(true);
+  });
+
+  it("shows only the configured OpenCode launcher while Runs on is OpenCode", () => {
+    const settings = { ...adoptLaunch(undefined), harnessCli: "opencode" as const, opencodeModel: "anthropic/claude-sonnet-5" };
+    expect(visibleLaunchers(settings)).toEqual([opencodeLauncher(settings)]);
+  });
+});
+
+describe("Runs on", () => {
+  it("maps default and explicit Claude launchers to the configured OpenCode model", () => {
+    const settings = { ...adoptLaunch(undefined), harnessCli: "opencode" as const, opencodeModel: "anthropic/claude-sonnet-5#high" };
+    expect(launcherFor(undefined, settings)).toEqual(opencodeLauncher(settings));
+    expect(launcherFor("claude:claude-opus-5-5", settings)).toEqual(opencodeLauncher(settings));
+    expect(launcherFor("codex:gpt-5.6-sol", settings)?.cli).toBe("codex");
+  });
+
+  it("maps an old OpenCode choice back to Claude when Runs on switches back", () => {
+    const settings = adoptLaunch(undefined);
+    expect(launcherFor("opencode:anthropic/claude-opus-5-5#high", settings)).toEqual(findLauncher("claude"));
   });
 });
 
@@ -153,5 +188,28 @@ describe("adoptLaunchers: another node's + menu, as it arrives", () => {
   it("is bounded", () => {
     const many = Array.from({ length: 500 }, (_, i) => ({ id: `claude:m${i}`, cli: "claude", model: `m${i}`, label: `M${i}` }));
     expect(adoptLaunchers(many)!.length).toBeLessThanOrEqual(64);
+  });
+});
+
+describe("what Kuru runs on", () => {
+  it("is Claude Code unless the file says OpenCode", () => {
+    expect(adoptLaunch(null).harnessCli).toBe("claude");
+    expect(adoptLaunch({ harnessCli: "gemini" }).harnessCli).toBe("claude");
+    expect(adoptLaunch({ harnessCli: "opencode" }).harnessCli).toBe("opencode");
+  });
+
+  it("keeps the choice when another page saves its own fields around it", () => {
+    const on = adoptLaunch({ harnessCli: "opencode", opencodeModel: "anthropic/claude-sonnet-5-5" });
+    expect(adoptLaunch({ ...on, sleepIdle: false })).toMatchObject({ harnessCli: "opencode", opencodeModel: "anthropic/claude-sonnet-5-5" });
+  });
+
+  it("takes an OpenCode model as OpenCode spells one, and nothing else", () => {
+    expect(adoptOpencodeModel("anthropic/claude-opus-5-5#high")).toBe("anthropic/claude-opus-5-5#high");
+    expect(adoptOpencodeModel("  anthropic/claude-sonnet-5-5 ")).toBe("anthropic/claude-sonnet-5-5");
+    expect(adoptOpencodeModel("openrouter/anthropic/claude-opus-5-5")).toBe("openrouter/anthropic/claude-opus-5-5");
+    for (const bad of ["claude-opus-5-5", "anthropic/", "/x", "a/b c", "a/b;rm -rf", "a/b#", "x".repeat(130) + "/y", 7, null]) {
+      expect(adoptOpencodeModel(bad)).toBeNull();
+    }
+    expect(adoptLaunch({ opencodeModel: "not a model" }).opencodeModel).toBe(OPENCODE_DEFAULT_MODEL);
   });
 });

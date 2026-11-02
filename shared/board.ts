@@ -257,7 +257,8 @@ export interface CardRun {
 }
 
 /** What a session id must look like to be put on a command line. Claude Code insists on a UUID. */
-export const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** Conversation ids kururu can persist on a card: Claude/Codex UUIDs and OpenCode's `ses_…`. */
+export const SESSION_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|ses_[0-9a-f]{12}[0-9A-Za-z]{14})$/;
 
 /**
  * The checkout a card's work happens in, when it has one of its own.

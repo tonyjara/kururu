@@ -30,7 +30,7 @@ import type { KeyOverrides } from "./keys";
 import type { LayoutNode } from "./layout";
 import type { Board } from "./board";
 import type { AgentPlacement } from "./agentpane";
-import type { LaunchSettings } from "./launchers";
+import type { HarnessCli, LaunchSettings } from "./launchers";
 import type { MadeFile } from "./made";
 import type { MachinePin } from "./machines";
 import type { NotifySettings } from "./notify";
@@ -857,10 +857,23 @@ export interface Profile {
 
 /** A profile's harness session: the conversation, the launcher it was started on, and the terminal it is in. */
 export interface HarnessState {
+  /** Claude Code's conversation, the one `--resume` takes. */
   sessionId: string;
   launcher: string;
   agentId: string | null;
   startedAt: number;
+  /**
+   * The program the harness was last started on — see
+   * `LaunchSettings.harnessCli`. Absent on a record from before there was a
+   * choice, which was Claude Code's.
+   */
+  cli?: HarnessCli;
+  /**
+   * OpenCode's conversation, beside Claude Code's rather than in its place,
+   * so that switching programs and switching back picks each one's own
+   * conversation up again. Neither program can read the other's.
+   */
+  opencodeSessionId?: string;
 }
 
 /** What a login key may be: the hex `mintLoginKey` makes, and nothing that could be a path. */

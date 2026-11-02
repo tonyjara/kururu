@@ -333,12 +333,17 @@ export function BoardView({
    */
   const robotMenu = (card: Card, at: MenuAt) => {
     const asleep = card.run?.state === "asleep";
+    const lastCli = card.run?.launcher.split(":")[0] ?? null;
+    const modeLauncher = launchers.every((launcher) => launcher.cli === "opencode") ? launchers[0] : launchers.find((launcher) => launcher.cli === "claude");
+    const switchedCli = card.run && modeLauncher && (lastCli === "claude" || lastCli === "opencode") && lastCli !== modeLauncher.cli ? modeLauncher : null;
     const resumeRow: MenuItem[] = canResume(card.run, agentOpen(card))
       ? [
           {
-            label: "Resume conversation",
-            hint: card.run?.sessionId ? `${card.run.label}${asleep ? " · asleep" : ""}` : `${card.run?.label ?? "Codex"} · pick a session`,
-            run: () => resume(card),
+            label: switchedCli ? `Start fresh on ${switchedCli.label}` : "Resume conversation",
+            hint: switchedCli
+              ? `${card.run?.label ?? "Earlier agent"}'s conversation cannot cross over`
+              : card.run?.sessionId ? `${card.run.label}${asleep ? " · asleep" : ""}` : `${card.run?.label ?? "Codex"} · pick a session`,
+            run: () => switchedCli ? run(card, switchedCli, false) : resume(card),
           },
         ]
       : [];

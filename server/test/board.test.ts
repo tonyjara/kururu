@@ -47,7 +47,7 @@ import {
   type Board,
   type CardRun,
 } from "../../shared/board";
-import { findLauncher, resumeCommand, withPrompt } from "../../shared/launchers";
+import { findLauncher, resumeCommand, withOpencodePrompt, withPrompt } from "../../shared/launchers";
 import { pickCodexRollout } from "../../shared/sessions";
 import { BOARD_TAB, findPane, isBoardTab, panes, visibleAgents } from "../../shared/layout";
 import type { Profile } from "../../shared/model";
@@ -258,6 +258,12 @@ describe("withPrompt", () => {
   it("is not read as a flag, and carries no control characters", () => {
     expect(lastArg(withPrompt("claude", "--help me"))).toBe(" --help me");
     expect(lastArg(withPrompt("claude", "a\u001b[31mb\u0007"))).toBe("a[31mb");
+  });
+
+  it("uses OpenCode's --prompt flag, whose positional argument is a directory", () => {
+    const line = withOpencodePrompt("opencode --standalone --session ses_x", "do the card");
+    expect(line).toBe("opencode --standalone --session ses_x --prompt 'do the card'");
+    expect(lastArg(line)).toBe("do the card");
   });
 });
 
@@ -835,6 +841,10 @@ describe("waking a card", () => {
     expect(wakeFor(run("codex:gpt-5.5", id, "ended"), "claude", false, false)).toEqual({
       resume: false,
       why: "its conversation is codex's, and claude cannot read it",
+    });
+    expect(wakeFor(run("claude:claude-opus-5-5", id, "ended"), "opencode", false, false)).toEqual({
+      resume: false,
+      why: "its conversation is claude's, and opencode cannot read it",
     });
   });
 

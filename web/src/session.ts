@@ -1833,6 +1833,20 @@ export function openHarness(options: { fresh?: boolean } = {}): void {
   send({ type: "open-harness", ...options });
 }
 
+/**
+ * The same, waiting for the answer: for the drawer's Start, which has a
+ * line to say why a Kuru would not start. A Kuru just started is answered
+ * for once it is up or has died, which can take a few seconds.
+ */
+export function startHarness(): Promise<unknown> {
+  return request((id) => ({ type: "open-harness", id }));
+}
+
+/** End a profile's Kuru and start it on the program Settings names now. Waits, because it can fail, and the page says so. */
+export function restartHarness(profileId: string): Promise<unknown> {
+  return request((id) => ({ type: "restart-harness", id, profileId }));
+}
+
 /** Auto Swap for a profile — the screen following what its harness acts on. The server does the following; this is only the switch. */
 export function setAutoSwap(profileId: string, on: boolean): void {
   send({ type: "set-auto-swap", profileId, on });

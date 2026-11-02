@@ -896,6 +896,13 @@ export type ClientMessage =
    */
   | { type: "open-harness"; id?: number; fresh?: boolean }
   /**
+   * End a profile's running harness and start it again on whichever program
+   * Settings names now (`LaunchSettings.harnessCli`) — a running Kuru keeps
+   * the program it started on. It ends an agent, so the page asks first.
+   * See `Harness.restart`.
+   */
+  | { type: "restart-harness"; id: number; profileId: string }
+  /**
    * Auto Swap, on or off, for a profile: whether the screen follows the agent
    * its harness acts on. A switch rather than a verb the harness could call,
    * because it is the user's screen — see `Profile.autoSwap`.

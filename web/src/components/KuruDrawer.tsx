@@ -231,8 +231,8 @@ export function KuruDrawer({
   onEditing: (editing: boolean) => void;
   /** A card named in a reply was clicked: take me to it — the profile's sheet for one of its own, the workspace's board for the rest. */
   onCard: (workspaceId: string | null, cardId: string) => void;
-  /** Take me to Kuru's terminal — started, resumed or revealed. */
-  onTerminal: () => void;
+  /** Take me to Kuru's terminal — started, resumed or revealed. Rejects with why a Kuru would not start. */
+  onTerminal: () => Promise<unknown>;
   /**
    * The two drawers' chips, which lead this header while the drawer is open —
    * Kuru's lit, since it is this drawer, and the other the way across. See
@@ -1071,12 +1071,29 @@ export function KuruDrawer({
  * second one meanwhile, since two Escapes together are Claude Code's rewind.
  * It does not take the keyboard from the composer, so a message being
  * written goes on being written.
+ *
+ * Start waits for the server's answer, which for a new Kuru is once it is
+ * up or has died (`Harness.whenUp`), and a Kuru that would not start says
+ * why under the line until the next press. Before, a press that failed
+ * opened a tab that vanished, or nothing at all, and the drawer said "not
+ * running" as if nobody had asked.
  */
-function Live({ live, working, profileId, mascot, onTerminal }: { live: KuruLive; working: boolean; profileId: string; mascot: MascotConfig; onTerminal: () => void }) {
+function Live({ live, working, profileId, mascot, onTerminal }: { live: KuruLive; working: boolean; profileId: string; mascot: MascotConfig; onTerminal: () => Promise<unknown> }) {
   const [stopping, setStopping] = useState(false);
+  const [start, setStart] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
   useEffect(() => {
     if (!working) setStopping(false);
   }, [working]);
+  useEffect(() => {
+    if (live !== "off") setStart({ busy: false, error: null });
+  }, [live]);
+  const press = () => {
+    setStart({ busy: true, error: null });
+    onTerminal().then(
+      () => setStart({ busy: false, error: null }),
+      (err: unknown) => setStart({ busy: false, error: err instanceof Error ? err.message : String(err) }),
+    );
+  };
   useEffect(() => {
     if (!stopping) return;
     const timer = setTimeout(() => setStopping(false), STOPPING_MS);
@@ -1112,7 +1129,7 @@ function Live({ live, working, profileId, mascot, onTerminal }: { live: KuruLive
       <div className="kuru-live kuru-live-asking" role="status">
         <span className="kuru-dot kuru-dot-asking" />
         <span className="kuru-live-word">asking something in its terminal</span>
-        <button className="kuru-head-btn" onClick={onTerminal}>
+        <button className="kuru-head-btn" onClick={() => void onTerminal().catch(() => {})}>
           Open terminal
         </button>
       </div>
@@ -1120,12 +1137,15 @@ function Live({ live, working, profileId, mascot, onTerminal }: { live: KuruLive
   }
   if (live === "off") {
     return (
-      <div className="kuru-live kuru-live-off" role="status">
-        <span className="kuru-dot kuru-dot-off" />
-        <span className="kuru-live-word">not running</span>
-        <button className="kuru-head-btn" onClick={onTerminal}>
-          Start
-        </button>
+      <div className="kuru-live-off-box" role="status">
+        <div className="kuru-live kuru-live-off">
+          <span className="kuru-dot kuru-dot-off" />
+          <span className="kuru-live-word">{start.busy ? "starting…" : start.error ? "would not start" : "not running"}</span>
+          <button className="kuru-head-btn" onClick={press} disabled={start.busy}>
+            {start.error ? "Try again" : "Start"}
+          </button>
+        </div>
+        {start.error && <p className="kuru-live-error">{start.error}</p>}
       </div>
     );
   }

@@ -20,7 +20,7 @@
  */
 import { useState, type ReactNode } from "react";
 import type { KeyOverrides } from "../../../shared/keys";
-import type { LaunchSettings } from "../../../shared/launchers";
+import type { HarnessCli, LaunchSettings } from "../../../shared/launchers";
 import type { AgentPlacement } from "../../../shared/agentpane";
 import type { HostInfo, LoginSummary, MascotSet, ProfileSummary, Workspace } from "../../../shared/model";
 import type { NotifySettings as NotifyConfig } from "../../../shared/notify";
@@ -157,6 +157,7 @@ export function Settings({
   logins,
   activeProfileId,
   autoSwap,
+  kuruOn,
   agentPlacement,
   workspaces,
   activeWorkspaceId,
@@ -183,6 +184,8 @@ export function Settings({
   logins: LoginSummary[];
   activeProfileId: string;
   autoSwap: boolean;
+  /** The program the profile's Kuru is running on, or null when it is not running. */
+  kuruOn: HarnessCli | null;
   agentPlacement: AgentPlacement;
   /** Which page this opening is about. Only the opening: where you go afterwards is this window's business. */
   initialTab: Tab;
@@ -265,6 +268,7 @@ export function Settings({
                       logins,
                       activeProfileId,
                       autoSwap,
+                      kuruOn,
                       agentPlacement,
                       workspaces,
                       activeWorkspaceId,
@@ -305,6 +309,7 @@ type PageProps = {
   logins: LoginSummary[];
   activeProfileId: string;
   autoSwap: boolean;
+  kuruOn: HarnessCli | null;
   agentPlacement: AgentPlacement;
   workspaces: Workspace[];
   activeWorkspaceId: string;
@@ -348,6 +353,7 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
           profileId={p.activeProfileId}
           profileName={p.profiles.find((x) => x.id === p.activeProfileId)?.name ?? "this profile"}
           autoSwap={p.autoSwap}
+          kuruOn={p.kuruOn}
           agentPlacement={p.agentPlacement}
         />
       );

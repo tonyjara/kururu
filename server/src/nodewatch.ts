@@ -155,6 +155,7 @@ const SHOWS_LOCAL = new Set<ClientMessage["type"]>([
   "switch-profile",
   "reveal-agent",
   "open-harness",
+  "restart-harness",
   "show-doc",
 ]);
 

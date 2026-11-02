@@ -337,7 +337,12 @@ The load-bearing invariants, one line each, with the argument behind the link:
   end, and nothing is typed into a prompt or under the user's hands. The
   inbox carries only kururu's `[kururu]` notices to the harness, signed
   `kururu (no reply)` because SendMessage resolves names by prefix and
-  "kururu" is the prefix of every session in this repo. It is told every
+  "kururu" is the prefix of every session in this repo. **Or it runs on
+  OpenCode** (Settings → Agents → Kuru, `LaunchSettings.harnessCli`), for
+  when the subscription is spent: `--standalone --session ses_…`, its flags
+  as `.opencode/opencode.json` in its folder, its hooks as a plugin posting
+  the same `/api/report`s, its notices typed on their own — see
+  [harness](docs/harness.md#on-opencode). It is told every
   agent's `done`/`blocked` edge in its profile — never a shell's, and
   `blocked` only when Claude is asking. A permission prompt is the user's to
   answer, and the role says so. A message from a channel comes in by the

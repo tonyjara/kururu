@@ -555,10 +555,102 @@ conversation as a chat, over the panes, with a composer that types to it
 through the voice's outbox. The agents' own transcripts as chat (roadmap item
 2) are still owed.
 
+## On OpenCode
+
+Settings → Agents → Kuru → **Runs on** picks the program: Claude Code, the
+default, billed to the Claude subscription, or OpenCode, billed to whatever
+OpenCode is signed in to — an Anthropic API key, as a rule. It is there for
+the day the subscription's allowance runs out and Kuru would otherwise stop
+answering. One switch for every profile (`LaunchSettings.harnessCli`),
+because which account has credit left is a fact about the machine; the
+model is a field beside it (`opencodeModel`, `anthropic/claude-opus-5-5#high`
+by default — Claude Code's harness model and effort, in OpenCode's
+spelling). A running Kuru keeps the program it started on, so while the one
+running is on the other program the page offers **Restart Kuru on …**,
+which asks first, since it ends a process (`restart-harness`,
+`Harness.restart`).
+
+Everything Kuru is arrives by OpenCode's doors instead of Claude Code's.
+`shared/opencode.ts` is the map and the pure half; `server/src/opencode.ts`
+writes the files:
+
+| Claude Code | OpenCode |
+|---|---|
+| `--model`, `--effort` | `build`'s model in `.opencode/opencode.json`, which kururu writes into Kuru's folder on every start; the folder's plain `opencode.json` stays the user's |
+| `--append-system-prompt` | the role as an instruction file (`.opencode/kururu-role.md`). Not an agent's `system`, which would *replace* OpenCode's own prompt |
+| `--mcp-config` | `mcp.servers.kururu`, the same `/mcp?profile=…&session=…`, Code Mode off so each verb is a tool: `kururu_send_agent`, and `kururu_kururu_status`. The role tells it so. The web tools are `kururu_web` beside it while a provider is on |
+| hooks → `report-cli.ts` | a plugin, `~/.local/state/kururu/opencode-plugin/index.js`, rewritten on every start. It listens to the one session kururu started and posts the same `/api/report`s: `idle` once it is up, `working` with the prompt (the drawer's "you" turn, the outbox's delivery), `done` with the last message's words (the voice, Telegram, the drawer), `blocked` for a permission prompt or a question, and the context reading |
+| `--session-id` / `--resume` | `--session ses_…`, an id kururu mints in OpenCode's own shape and keeps as `HarnessState.opencodeSessionId`. OpenCode continues it when it has it and makes it when it does not, so the same line starts and resumes, and no transcript is looked for |
+| the inbox, for `[kururu]` notices | typed, `next`, at the turn's end, each **on its own** (`Held.alone`) so it is never joined to the user's words. The role says a typed notice is kururu's and carries none of the user's authority — what follows "It said:" is an agent's own words |
+| `--autocompact 233k` | the plugin asks OpenCode to compact after a turn that leaves the context past `HARNESS_COMPACT_AT`. OpenCode's own summary, at its next safe point; left alone it compacts near the model's limit, a million tokens for Opus, re-sent on every notice and billed per token |
+| the bypass flag | `--auto`, when Claude Code's bypass is on — the same switch, so both run Kuru on the same leash |
+| the trust dialog | none; OpenCode asks no such thing |
+
+**`--standalone`, always.** OpenCode normally hands every client one shared
+background service. Kuru gets a private server that is its TUI's own child
+(`opencode serve --stdio`): it has the pty's environment, which is how the
+plugin knows its agent (`KURURU_AGENT_ID`) and how `{env:KURURU_TOKEN}` in
+the config resolves; it loads only this folder's plugin; and it ends with
+the terminal, so closing Kuru's tab ends Kuru's turn rather than leaving it
+running in a service nobody watches.
+
+**By its full path, found first.** A terminal's command runs through
+`zsh -l -c`, a login shell that never reads `~/.zshrc`, which is where
+OpenCode's installer puts `~/.opencode/bin` on the PATH. So `opencode` in
+Kuru's terminal was whatever else the PATH had. On the first Mac that ran
+this, it was Homebrew's OpenCode 1, which macOS killed at launch: the tab
+opened and vanished, and Start did nothing anyone could see.
+`findOpencode` (`server/src/opencode.ts`) now asks `--version` of
+`~/.opencode/bin/opencode` and then of every `opencode` on the PATH. It
+starts the first that is OpenCode 2 or newer by its path. When there is
+none, it throws a sentence naming what it found and how to install.
+
+**A failed start says so.** The drawer's Start asks with a reply, and for
+a Kuru it just started the reply waits until Kuru has reported in, or its
+terminal has ended (`Harness.whenUp`, ten seconds at most). The reason
+shows under the drawer's "would not start". A Kuru whose terminal ends
+before it ever reported in, within a minute of its start, keeps its tab
+(`diedStarting`, honoured by `reapExited` as a card's dev server is),
+because the screen is the only place why was written. The next start
+points the profile at a new terminal, and the old tab is reaped then.
+
+**One reply per turn.** The plugin reports each turn's end by the id of the
+message it ended on, so the compaction's own run, or an interrupted turn,
+ends `idle` and is never read aloud a second time; `Harness.report` types
+what was waiting on an `idle` as it would on a `done`. A turn that *failed*
+— the key out of credit, say — is `done` with "OpenCode could not finish
+that turn: …", so the user hears why rather than silence.
+
+**Its conversation is filed under OpenCode's session id** in the database
+(`harnessConversation`), so the drawer marks a switch of program as the new
+conversation it is. Claude Code's session id stays on the record, and so
+does OpenCode's when Kuru goes back: a switch back picks each program's own
+conversation up again. Neither can read the other's, so the first start on
+the other program is fresh; the boards, the drawer and the search are what
+carry over.
+
+**Waking.** OpenCode's server reports in at about 0.5 s and its TUI draws
+at about 1.35 s, and keys sent before that frame are lost — measured, as
+was the rest of this, against OpenCode 2.2. So an OpenCode Kuru is given
+3.5 s after its first report (`WAKE_SETTLE_OPENCODE_MS`) before held words
+are typed, and anything that arrives in that window waits with them
+(`settling`). The TUI also asks the terminal what it can do before it
+draws; a client's emulator answers, and with nobody watching it still
+draws, a second later.
+
+**What differs and stays different.** The Stop button sends one Escape,
+OpenCode's interrupt, and believes the plugin's `idle` rather than reading
+the screen. `read_agent`'s `transcript` is Claude Code's JSONL and does not
+read an OpenCode Kuru's — nothing asks it to, since Kuru reads the others,
+not itself. Memories are Claude Code's and are not carried. And a session
+the user opens by hand in Kuru's TUI (`ctrl+x n`) is not the one kururu
+listens to: the plugin hears only the session it was started on.
+
 ## What it is not
 
 - **Not a loop.** No Anthropic SDK, no API key, nothing in kururu generates
-  text. The harness is billed to the subscription like every other session.
+  text. The harness is billed to the subscription like every other session —
+  or, run on OpenCode (above), to whatever OpenCode is signed in to.
 - **Not pi.** Pi's agent core would have been a second brain on API-key
   billing; what was taken from it is two ideas — `now` versus `next`, and the
   difference between a turn ending and nothing being queued.

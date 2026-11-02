@@ -41,6 +41,7 @@ import {
 import { keymapFrom } from "../../shared/keys";
 import { mascotFor, type AgentSnapshot } from "../../shared/model";
 import { DEFAULT_AGENT_PLACEMENT } from "../../shared/agentpane";
+import { kuruRunningOn } from "../../shared/harness";
 import { Dialog, type DialogState } from "./components/Dialog";
 import { FileTree, MARKDOWN } from "./components/FileTree";
 import { ProfileBoard } from "./components/ProfileBoard";
@@ -1791,10 +1792,13 @@ export function App() {
           onResetWidth={() => setDrawerWidth(DRAWER_DEFAULT)}
           onEditing={setEditing}
           chips={chips}
-          onTerminal={() => {
-            api.openHarness();
-            if (narrow) closeKuru();
-          }}
+          onTerminal={() =>
+            // On a phone the sheet gives way to the terminal, but only once
+            // there is one: a Kuru that would not start says so in the sheet.
+            api.startHarness().then(() => {
+              if (narrow) closeKuru();
+            })
+          }
           onCard={(workspaceId, cardId) => {
             // A workspace's card is on its board, in its pane; the profile's
             // own is in the sheet. Either way the card is scrolled to and lit.
@@ -1942,6 +1946,7 @@ export function App() {
           logins={snapshot.logins}
           activeProfileId={profile.id}
           autoSwap={profile.autoSwap}
+          kuruOn={kuruRunningOn(profile.harness, agents)}
           agentPlacement={profile.agentPlacement ?? DEFAULT_AGENT_PLACEMENT}
           workspaces={profile.workspaces}
           activeWorkspaceId={profile.activeWorkspaceId}
