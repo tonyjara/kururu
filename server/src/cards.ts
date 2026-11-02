@@ -48,22 +48,8 @@ import {
 } from "../../shared/projects";
 import type { Actor } from "../../shared/store";
 import { host, launch, overlay, projects, state, workspaces } from "./context";
-import {
-  agentCommandFor,
-  agentOn,
-  claudeDirOf,
-  cwdForPaneIn,
-  hooksFor,
-  killAll,
-  kururuMcpOnly,
-  noteLaunch,
-  openTerminal,
-  openTerminalAt,
-  pinOf,
-  repoFor,
-  shellQuote,
-  web,
-} from "./index";
+import { claudeDirOf, repoFor, shellQuote, web } from "./index";
+import { agentCommandFor, agentOn, cwdForPaneIn, hooksFor, killAll, kururuMcpOnly, noteLaunch, openTerminal, openTerminalAt, pinOf } from "./terminals";
 import { devOpen, startDev, stopDev } from "./carddev";
 import { claudeTranscriptPath } from "./sessions";
 import {

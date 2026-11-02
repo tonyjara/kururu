@@ -43,20 +43,12 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 import { adoptMascot, countsAsAgent, defaultMascot } from "../../shared/model";
 import { bindKey } from "../../shared/keys";
-import type { AgentSnapshot, AgentStatus, MascotSet, Profile, PtyKind, Workspace } from "../../shared/model";
-import type { ClientMessage, EditorChoice, GitAction, RepoGit, ServerMessage, WorkspaceBranch, WorkspaceProject } from "../../shared/wire";
-import { COMMIT_MESSAGE_MAX, GIT_ACTIONS, GIT_STATUS_MS, parseClientMessage, type UsageLimit } from "../../shared/wire";
+import type { MascotSet, Profile, Workspace } from "../../shared/model";
+import type { ClientMessage, EditorChoice, GitAction, RepoGit, WorkspaceBranch, WorkspaceProject } from "../../shared/wire";
+import { COMMIT_MESSAGE_MAX, GIT_ACTIONS, GIT_STATUS_MS, parseClientMessage } from "../../shared/wire";
 import { DB_ROW_CAP, DB_SQL_MAX, type WorkspaceDatabase } from "../../shared/databases";
 import { DROP_MAX_BYTES } from "../../shared/drops";
-import { isPictureName } from "../../shared/pictures";
-import {
-  DEV_SCAN_MS,
-  GIT_SCAN_MS,
-  OPENROUTER_POLL_MS,
-  SAVE_DEBOUNCE_MS,
-  MACHINE_POLL_MS,
-  USAGE_POLL_MS,
-} from "../../shared/wire";
+import { DEV_SCAN_MS, GIT_SCAN_MS, MACHINE_POLL_MS, OPENROUTER_POLL_MS, USAGE_POLL_MS } from "../../shared/wire";
 import {
   bindProblem,
   listenAddresses,
@@ -74,12 +66,10 @@ import {
   verdict,
 } from "./access";
 import { parseReport } from "./agents/report";
-import { dump as dumpRecording, forget as forgetRecording, recordBacklog, recordInput, recordNote, recordOutput } from "./record";
-import { processCwd, processCwds } from "./cwd";
+import { dump as dumpRecording, recordInput, recordNote } from "./record";
+import { processCwds } from "./cwd";
 import { scanDevServers, stopDevServer } from "./devservers";
 import { DropRefused, keepDrop } from "./drops";
-import { harnessHome, kuruLaunchFlags } from "./harnesshome";
-import { PictureRefused, stageOutgoing, wholePath } from "./pictures";
 import { readHead, repoAt } from "./git";
 import { accountEmail, claudeSignedIn, claudeSignedInAt, pollUsage, usageSnapshot } from "./usage";
 import { codexUsageSnapshot, pollCodexUsage } from "./codexusage";
@@ -92,15 +82,14 @@ import { Voice } from "./voice";
 import { Outbox, legacyHeard } from "./outbox";
 import { Kuru } from "./kuru";
 import { Channels } from "./channels";
-import { KURU_PAGE, KURU_SAY_MAX, type KuruFile } from "../../shared/kuru";
-import { mentionsIn, readsInReader, type MadeFile } from "../../shared/made";
-import { channelReady, isChannelKind, nodeSubject, type ChannelKind } from "../../shared/channels";
+import { KURU_PAGE, KURU_SAY_MAX } from "../../shared/kuru";
+import { type ChannelKind, isChannelKind, nodeSubject } from "../../shared/channels";
 import { Backup } from "./backup";
 import { mirrorFiles } from "./export";
 import { NodeHost, nodeRequestRefusal } from "./nodes";
 import { NodeWatches } from "./nodewatch";
 import { NodeNotices } from "./nodenotice";
-import { isRemote, qualifyRoot } from "../../shared/remote";
+import { qualifyRoot } from "../../shared/remote";
 import { Mover } from "./move";
 import { nodeOfUtterance, PeerKurus, peerKey } from "./peerkuru";
 import { Secrets } from "./secrets";
@@ -113,32 +102,27 @@ import { noteCards } from "../../shared/notecards";
 import { summarize, type NodeSummary } from "../../shared/nodes";
 import { hostname } from "node:os";
 import { Store, dataDir, dbPath } from "./store";
-import { openUsageReader, type UsageReader } from "./usage/sweep";
+import { openUsageReader } from "./usage/sweep";
 import { exportUsage, NodeUsage } from "./usage/remote";
 import { parseRolloutListing } from "../../shared/sessions";
-import { Launches, type LaunchNote } from "./usage/attribute";
-import { readRetention, usageReport } from "./usage/report";
-import { isUsageDimension, isUsageRange, type UsageDimension, type UsageNames, type UsageRange, type UsageReport } from "../../shared/usagereport";
-import type { LaunchRow } from "../../shared/usage";
-import { isSearchScope, sessionOfTranscript, type Actor, type SearchHit } from "../../shared/store";
+import { Launches } from "./usage/attribute";
+import { isUsageDimension, isUsageRange } from "../../shared/usagereport";
+import { type Actor, isSearchScope } from "../../shared/store";
 import { configDir } from "./config";
 import { CLIP_MAX_BYTES, isClipId } from "../../shared/voice";
 import {
   addMachine,
   codexRolloutsOn,
-  endSession,
   findMachine,
   machinesSnapshot,
   pollMachine,
   pollMachines,
   removeMachine,
-  sessionsEnding,
-  sessionsOn,
   usageChunkOn,
   usageFilesOn,
 } from "./machines";
 import { addHistory, adoptSpecs, dueForReading, editHistory, forgetSpecsRun, readSpecs, removeHistory, setTyped, specsSnapshot } from "./specs";
-import { remoteAgentRun, remoteShellCommand, remoteShellOf, sessionName, validRemoteDir, type MachineEntry } from "../../shared/machines";
+import { remoteShellCommand, remoteShellOf, validRemoteDir } from "../../shared/machines";
 import { lazygitCommand, lazygitRun } from "../../shared/lazygit";
 import { OnScreen } from "./onscreen";
 import { Sleeper } from "./sleep";
@@ -168,24 +152,14 @@ import {
   type NvimPlace,
 } from "../../shared/footprint";
 import { attach as attachEditor, endHard, findNvim, isNvimTab, nvimCommand, openFile, quit as quitNvim } from "./nvim";
-import { locateMentions, stillThere as madeStillThere } from "./made";
 import { readProcTable } from "./agents/procs";
 import { activeAgent, BOARD_TAB, findPane, isBoardTab, isDocTab, panes, paneWithAgent, terminalsOf } from "../../shared/layout";
 import { isAgentPlacement } from "../../shared/agentpane";
 import { builtinSheets, freshMascotId, importedSheets, importSheet, removeSheet, sheetImage, sheetsDir, writeMascots } from "./mascot";
 import { writeKeys } from "./keys";
-import { agentLabel, agentSummary, basename } from "../../shared/labels";
-import { HARNESS_SERVER, handsOf, harnessConversation, OPENCODE_SESSION_ID, type HarnessFeatures } from "../../shared/harness";
-import { WEB_SERVER } from "../../shared/web";
-import {
-  adoptNotify,
-  isNotifyEvent,
-  notifyGate,
-  notifyText,
-  NOTIFY_THROTTLE_MS,
-  type NotifyEvent,
-  type NotifySettings,
-} from "../../shared/notify";
+import { agentLabel, agentSummary } from "../../shared/labels";
+import { handsOf } from "../../shared/harness";
+import { adoptNotify, type NotifySettings } from "../../shared/notify";
 import { writeNotify } from "./notify";
 import { writeLaunch } from "./launch";
 import { withProject, writeProjects } from "./projects";
@@ -200,27 +174,14 @@ import {
   repoStatus,
   worktreePresent,
 } from "./worktree";
-import { adoptProject, standingDir } from "../../shared/projects";
-import { hookSettingsFlag, hookSettingsFor } from "./hooks";
-import { Harness, type SayOutcome } from "./harness";
+import { adoptProject } from "../../shared/projects";
+import { Harness } from "./harness";
 import { initializes, mcpAnswer } from "./mcp";
-import { claudeDirFor, codexDirFor, lentClaudeEnv, lentGhEnv, loginDir, loginEnv, scanLogins } from "./logins";
-import {
-  adoptLaunch,
-  type AgentCli,
-  findLauncher,
-  type Launcher,
-  launcherCommand,
-  launcherFor,
-  type LaunchSettings,
-  visibleLaunchers,
-} from "../../shared/launchers";
-import { mintOpencodeSession, opencodeAgentCommand } from "../../shared/opencode";
-import { findOpencode, prepareOpencodeAgent } from "./opencode";
+import { claudeDirFor, codexDirFor, lentClaudeEnv, lentGhEnv, loginEnv, scanLogins } from "./logins";
+import { adoptLaunch, findLauncher, launcherCommand, launcherFor, type LaunchSettings, visibleLaunchers } from "../../shared/launchers";
 import {
   addCard,
   addLane,
-  type Card,
   cardPrompt,
   collapseLane,
   colorLane,
@@ -272,10 +233,9 @@ import { HOST_PROTOCOL, HostLink, type Port } from "./hostlink";
 import { connectToHost, hostSocketPath, type SocketPort } from "./hostsock";
 import { hostEnv, hostJobRunning, hostRuntime, launchHost, launchHostSystemd, unitOf } from "./hostlaunch";
 import { hostEnding, lifecycleReport, lifeNow, readTail, record, recordStart, socketHeld, socketHolder, supervised } from "./lifecycle";
-import { adoptReaders, hostBlob, readSnapshot, snapshotPath, writeSnapshot } from "./persist";
+import { adoptReaders, readSnapshot, snapshotPath, writeSnapshot } from "./persist";
 import { closeAllPreviews, closePreview, openPreview, openPreviews } from "./proxy";
 import { reach } from "./reach";
-import { smallestGrid, type Grid } from "./sizing";
 import { sweep } from "./sweep";
 import { checkForUpdate } from "./update";
 import {
@@ -307,7 +267,6 @@ import {
   keys,
   kuru,
   kuruKey,
-  lastAgent,
   launch,
   lead,
   logins,
@@ -315,13 +274,10 @@ import {
   mascots,
   MAX_ACTIVITY,
   memory,
-  mouseEncodingOf,
-  mouseEncodings,
   mover,
   nodeNotices,
   nodes,
   notify,
-  onScreenAnywhere,
   outbox,
   overlay,
   peerKurus,
@@ -344,7 +300,6 @@ import {
   store,
   styles,
   syncRosterChannels,
-  turnStart,
   unread,
   usageLaunches,
   usageNodes,
@@ -358,7 +313,6 @@ import {
   cardDoneFor,
   cardStatus,
   commitCard,
-  isDirectory,
   mergeCard,
   openWorktree,
   resumeCard,
@@ -368,6 +322,44 @@ import {
   stashCard,
 } from "./cards";
 import { restartDev, stopDev } from "./carddev";
+import { noticeStatuses } from "./notices";
+import { cardHistoryOf, recordTurn, sayAside, searchFor } from "./conversation";
+import { kuruFiles, MADE_SWEEP_MS, noteMade, openMade, sendPictureFor, showFileFor, sweepMade } from "./madelinks";
+import {
+  agentCommand,
+  agentCommandFor,
+  agentOn,
+  applySize,
+  commandOn,
+  cwdForPaneIn,
+  dropClient,
+  endRemote,
+  endTerminal,
+  fillPane,
+  forget,
+  harnessFeatures,
+  keepNow,
+  keepTimer,
+  killAll,
+  kuruCommandFor,
+  noteLaunch,
+  noteReported,
+  onOutput,
+  openQueue,
+  openTerminal,
+  openTerminalAt,
+  ownedGrid,
+  pinOf,
+  queueSave,
+  reapExited,
+  saveTimer,
+  sendBacklog,
+  sessionShell,
+  syncWatched,
+  tabCwd,
+  usageReportFor,
+  workspaceRepo,
+} from "./terminals";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /**
@@ -552,7 +544,7 @@ function loginsActive(): boolean {
  * server's own: the profile's login directories, or nothing at all. Absent
  * rather than empty, which keeps the common case off the wire.
  */
-function spawnEnv(): Record<string, string> | undefined {
+export function spawnEnv(): Record<string, string> | undefined {
   return spawnEnvFor(workspaces.active.id);
 }
 
@@ -561,7 +553,7 @@ function spawnEnv(): Record<string, string> | undefined {
  * screen — the harness's case. And `KURURU_TOKEN` beside the logins, while
  * loopback wants the token (`tokenInPtys`).
  */
-function spawnEnvFor(profileId: string): Record<string, string> | undefined {
+export function spawnEnvFor(profileId: string): Record<string, string> | undefined {
   const profile = workspaces.profile(profileId);
   const login = loginsActive() && profile ? loginEnv(profile.loginKey) : undefined;
   const token = tokenInPtys() ? tokenEnv() : undefined;
@@ -579,7 +571,7 @@ function spawnEnvFor(profileId: string): Record<string, string> | undefined {
  * MCP configs name the variable only then, since a config asking for one that
  * is not set is a server Claude Code will not start.
  */
-function tokenInPtys(): boolean {
+export function tokenInPtys(): boolean {
   return loopbackTokenRequired() && hostProtocol >= 2;
 }
 
@@ -747,7 +739,7 @@ async function lendingLogin(profileId: unknown): Promise<{ login: string; accoun
 }
 
 /** The same for Codex, whose rollouts are where a card's Codex conversation is found (`sleep.ts`). */
-function codexHomeOf(profileId: string): string {
+export function codexHomeOf(profileId: string): string {
   const profile = workspaces.profile(profileId);
   if (loginsActive() && profile) return codexDirFor(profile.loginKey);
   return process.env.CODEX_HOME || join(homedir(), ".codex");
@@ -1031,1420 +1023,6 @@ function wearFont(look: Look, pack: PackManifest): Look {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Notifications
-//
-// The only thing kururu does that reaches somebody who is not looking at it,
-// which is what makes every decision in here about *restraint*. The policy is
-// `shared/notify.ts`, ported from ghosttown so that "needs input" means the same
-// thing in both; what is here is the two things the policy cannot be pure about
-// — noticing that a status moved, and knowing which clients can already see it.
-//
-// It lives in `index.ts` and not in `agents/`, and that is not filing. The host
-// is where a status is *computed*, and it is also the half of kururu that costs
-// the user every running agent to edit — so a feature that will be tuned (and
-// this one will: every threshold in a notification is a matter of taste) belongs
-// on the side that restarts for free. It is the same line `activity` and
-// `unread` are drawn on, and the reason both of those sit here too.
-// ---------------------------------------------------------------------------
-
-/**
- * What each terminal's status was the last time we looked.
- *
- * Notifications are about *transitions* and a snapshot only carries states, so
- * somebody has to remember. The host cannot: it raises `onAgents` when anything
- * changes and says nothing about what changed, which is right — a delta is a
- * thing every reader of this protocol would then have to understand, and the
- * one reader that wants it can keep four bytes per terminal instead.
- *
- * An id that is not in here yet notifies for nothing, which is the whole reason
- * the absent case is separated from the equal case below. A server restart
- * relearns every status on the first tick, and without that guard sixteen
- * terminals sitting at `done` would all announce themselves at once — the same
- * "a restart forgets it and that is correct" the `activity` map argues for,
- * except that here forgetting it wrongly is audible.
- */
-const lastStatus = new Map<string, AgentStatus>();
-
-/** When each terminal was last allowed to interrupt. See `NOTIFY_THROTTLE_MS`. */
-const notifiedAt = new Map<string, number>();
-
-/**
- * Look for terminals that have just started wanting a human, and answer it twice
- * — with a card for whoever is reachable now, and with a mark for whoever is
- * not.
- *
- * Hung off the same `onAgents` that pushes a snapshot, because it is the same
- * event — anything about any agent changed — and a second subscription would
- * only be a second thing to keep in step. That is also why nothing in here
- * pushes: `onAgents` calls this and then pushes, so a mark set on this pass is
- * already in the snapshot that pass sends.
- *
- * It walks every profile's terminals and not just the active one's: an agent
- * blocked in the profile you left is the notification most worth having, since
- * it is the one there is no dot on screen for.
- *
- * The card and the mark share this loop deliberately. They are the same
- * judgement — *this wants a human* — asked of two different audiences, and
- * deciding them apart is how a dot ends up lit for reasons no notification
- * would ever have fired on. What differs is only the audience: `announce` runs
- * the gate per client and is throttled, because interrupting somebody twice is
- * worse than not at all; the mark is for the client that was not there to be
- * interrupted, so it is neither throttled nor per client.
- */
-function noticeStatuses(): void {
-  const live = new Set<string>();
-  for (const agent of host.agents) {
-    live.add(agent.id);
-    // Level-triggered on purpose, unlike everything below: a board compares
-    // against the state it recorded, so a server restart that forgot
-    // `lastStatus` still catches a run up. A no-op when nothing moved.
-    workspaces.noteRun(agent.id, agent.status, agent.exited);
-    const before = lastStatus.get(agent.id);
-    lastStatus.set(agent.id, agent.status);
-    // Never seen before, or has not moved. See `lastStatus` for why those are
-    // two cases and not one.
-    if (before === undefined || before === agent.status) continue;
-    // Any edge is something happening, which an idle card's clock starts again on.
-    sleeper.status(agent.id, agent.status);
-    if (agent.exited) continue;
-    // The harness hears every edge a person would; `reapExited` tells it the exits.
-    harness.noticed(agent, agent.status, false);
-    if (!isNotifyEvent(agent.status)) {
-      // It has stopped wanting anybody — it was typed into, or it went back to
-      // work — so the dot has nothing left to be about. `forget` covers the
-      // terminal going away; this covers the terminal carrying on.
-      unread.delete(agent.id);
-      continue;
-    }
-    // Nobody saw it happen, so leave something that says it did. Checked at the
-    // moment of the transition and never again: walking in on a terminal that
-    // was already `done` before you left is not news, which is the same reason
-    // `announce` fires on the edge rather than on the state.
-    if (!onScreenAnywhere(agent.id)) unread.add(agent.id);
-    announce(agent, agent.status);
-  }
-  for (const id of [...lastStatus.keys()]) {
-    if (live.has(id)) continue;
-    lastStatus.delete(id);
-    notifiedAt.delete(id);
-  }
-}
-
-/**
- * Tell whoever should be told, and nobody else.
- *
- * The gate is run *per client* rather than once, because the one question it
- * asks that is not a setting — is this terminal on screen — has a different
- * answer for the desktop showing the pane and the phone in your pocket. Which is
- * exactly the shape `unread` already has, and for the same reason: `watching` is
- * what a human can see, and a warm pooled emulator is nobody looking.
- *
- * The throttle is recorded only if something actually went out. A burst of
- * transitions while you are staring at the pane is not a notification and must
- * not spend the quiet period a real one four seconds later would need.
- */
-function announce(agent: AgentSnapshot, event: NotifyEvent): void {
-  const now = Date.now();
-  if (now - (notifiedAt.get(agent.id) ?? 0) < NOTIFY_THROTTLE_MS) return;
-
-  /**
-   * The overlaid snapshot, not the host's. `activity` is what the agent said it
-   * was doing — the permission prompt's own words, when a Claude Code hook is
-   * installed — and it is the single most useful line a card can carry. It is
-   * merged on this side, so the un-overlaid agent would notify with the title
-   * and lose it.
-   */
-  const full = overlay(agent);
-  const place = workspaces.placeOf(agent.id);
-  /**
-   * `agentLabel` answers `starting…` for a terminal opened as an agent whose
-   * program the process scan has not named yet, and that is right where it is
-   * used: a sidebar row corrects itself two seconds later, when the scan lands.
-   * A card does not. It is drawn once and keeps what it was handed, so
-   * `starting… needs input` would sit in Notification Center saying nothing for
-   * the rest of the afternoon — and it is reachable, because a report can arrive
-   * before the first scan and because `procs.ts` does not recognise every agent
-   * anybody runs. The command is the better answer here for the reason the
-   * placeholder is the better answer there: it is the one name a terminal has
-   * that never stops being true.
-   */
-  const label = full.agent || full.titleOverride ? agentLabel(full) : basename(full.command);
-  const text = notifyText({
-    label,
-    summary: agentSummary(full),
-    workspace: place?.workspace,
-    // Only when there is more than one profile to be in. With one, naming it on
-    // every card is a word that never varies and therefore never informs —
-    // ghosttown's rule about its session name, and the same one `labels.ts`
-    // applies to a summary that is merely the label again.
-    profile: workspaces.all().length > 1 ? place?.profile : undefined,
-    event,
-  });
-  const notification = { agentId: agent.id, event, ...text };
-
-  const isHarness = harness.isHarness(agent.id) !== null;
-  let sent = false;
-  for (const [ws, st] of clients) {
-    // The parent's window is told by the parent's own gate, off what the
-    // watch relays (`nodenotice.ts`); a watch is not a window to raise a card on.
-    if (st.watcher) continue;
-    const verdict = notifyGate(
-      { event, visible: st.watching.has(agent.id), isAgent: countsAsAgent(full), isHarness },
-      notify,
-    );
-    if (!verdict.pass) continue;
-    send(ws, { type: "notify", notification });
-    sent = true;
-  }
-  if (sent) notifiedAt.set(agent.id, now);
-}
-
-/**
- * The layout goes two places, and they are not the same thing.
- *
- * The host gets it within `KEEP_GAP_MS`, agent ids and all — that is what makes
- * restarting this process invisible, and it never touches a disk. The file gets
- * it on a longer delay and with the processes stripped out, because that copy
- * is for surviving a quit, and dragging a divider changes the layout sixty
- * times a second while none of those are worth a write.
- *
- * Neither carries the boards. They are the database's (`store.ts`), and
- * `Store.attach` replaces whatever boards a blob brings with the rows, so
- * every card in the blob was 1.27 MB of a line the host had to parse — on the
- * thread that flushes every pty — for nothing, once per change, a divider
- * drag being sixty of those a second, each queued on the one socket ahead of
- * keystrokes. Without them the blob is the arrangement, it is sent at most
- * once per gap, and not at all when it is what the host already holds.
- */
-const KEEP_GAP_MS = 100;
-let keepTimer: ReturnType<typeof setTimeout> | null = null;
-let keptBlob: string | null = null;
-
-function keepNow(): void {
-  if (keepTimer) clearTimeout(keepTimer);
-  keepTimer = null;
-  if (!workspaces) return;
-  const blob = hostBlob(workspaces.all(), workspaces.active.id);
-  if (blob === keptBlob) return;
-  keptBlob = blob;
-  host.keep(blob);
-}
-
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
-function queueSave(): void {
-  if (!keepTimer) {
-    keepTimer = setTimeout(keepNow, KEEP_GAP_MS);
-    keepTimer.unref?.();
-  }
-  if (saveTimer) return;
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
-    writeSnapshot(workspaces.all(), workspaces.active.id);
-  }, SAVE_DEBOUNCE_MS);
-  saveTimer.unref?.();
-}
-
-/**
- * Where a new terminal should start.
- *
- * A multiplexer's answer is "where the terminal you were just in is", and it
- * means *is*, not was: a minute after a shell opens it has been cd'd into a
- * project, and a tab that landed in the directory the pty was spawned in would
- * open in a home directory nobody is working in. So the pid is asked of the
- * kernel (`cwd.ts`) and what was recorded at spawn is only the fallback.
- *
- * Which terminal to follow is the rest of the question. The one this pane is
- * showing is the obvious answer; a pane with nothing in it remembers the project
- * it was for, which is what a restored layout and a fresh split have instead;
- * and failing both, the newest terminal anywhere in this workspace, because a
- * workspace is one piece of work and its directory is a better guess than `~`.
- */
-async function cwdForNewTab(paneId: string): Promise<string | undefined> {
-  const showing = workspaces.activeAgentIn(paneId);
-  if (showing) {
-    const followed = standing(await followCwd(showing));
-    if (followed) return followed;
-  }
-  const remembered = standing(workspaces.cwdFor(paneId));
-  if (remembered) return remembered;
-  const newest = newestAgentHere();
-  return newest ? standing(await followCwd(newest)) : undefined;
-}
-
-/** A remembered directory that is still there, or the repository of a worktree that is not — see `standingDir`. */
-function standing(dir: string | undefined): string | undefined {
-  return dir === undefined ? undefined : standingDir(dir, isDirectory);
-}
-
-/**
- * Where that terminal is now, or failing that where it was opened — and
- * nowhere for the harness, whose folder is its own and no project's: a tab
- * opened beside it, a split off its pane or an agent it starts from there
- * belongs in the workspace, not in kururu's data directory.
- */
-async function followCwd(agentId: string): Promise<string | undefined> {
-  const agent = host.find(agentId);
-  if (!agent || isApart(agentId)) return undefined;
-  // An exited pty has no cwd to read, and asking about a recycled pid would be
-  // worse than not asking: its spawn directory is the only honest answer left.
-  const live = agent.exited || !agent.pid ? undefined : await processCwd(agent.pid);
-  return live ?? agent.cwd;
-}
-
-/** A terminal whose directory says nothing about its workspace: a harness, in its own folder. */
-function isApart(agentId: string): boolean {
-  return harness?.isHarness(agentId) != null;
-}
-
-/**
- * Open a terminal in a pane.
- *
- * Everything that *makes* a pane comes through here — a split, a new workspace,
- * a new profile, the first launch — as well as `new-tab` itself, which is the
- * point: a pane with nothing in it used to offer one button that opened a
- * terminal, and a choice with one option is not a choice, it is a step. Sharing
- * the call is also what keeps the automatic case and the asked-for one from
- * drifting apart.
- *
- * `from` is the pane whose cwd to follow, which is not always the pane the
- * terminal lands in. A split's new half is empty and remembers only the
- * directory its parent was *recorded* in, while the terminal still running next
- * door can be asked where it actually is.
- */
-export async function openTerminal(
-  paneId: string,
-  options: { cwd?: string; command?: string; kind?: PtyKind; from?: string; local?: boolean } = {},
-): Promise<AgentSnapshot> {
-  const command = options.command ?? pinnedShell(workspaces.active.id, workspaces.activeWorkspace.id, options);
-  const remote = remoteShellOf(command) !== null;
-  // A shell on a machine starts where its folder is, over there; here, ssh
-  // just needs somewhere to run, and home is the place that is always there.
-  const cwd = remote ? homedir() : (options.cwd ?? (await cwdForNewTab(options.from ?? paneId)));
-  const agent = await spawnHolding(command, () =>
-    host.create({
-      cwd,
-      command,
-      env: spawnEnv(),
-      /**
-       * A terminal unless the client insists otherwise. The window stopped
-       * offering "start me an agent" as a separate thing to click: it is one
-       * gesture fewer to open a terminal and type `claude` in it, and the tab ends
-       * up saying the same thing either way, because `procs.ts` reports what is
-       * actually running in there.
-       */
-      kind: options.kind ?? "shell",
-    }),
-  );
-  /**
-   * Crossing the link takes long enough for the pane to have been closed in the
-   * meantime — a split followed straight away by `C-a x` is all it takes. An
-   * agent in no pane at all is one running with nothing pointing at it, so it
-   * goes wherever the focus ended up instead.
-   */
-  const target = workspaces.hasPane(paneId) ? paneId : workspaces.focusedPaneId;
-  workspaces.addTab(agent.id, remote ? undefined : agent.cwd, target);
-  workspaces.focusPane(target);
-  // The project an agent is working in is one you can browse; that is the
-  // whole basis on which the file tree decides what it may read. A tab on a
-  // machine has no project here, and the `~` its ssh runs in is not one.
-  if (!remote) allowRoot(agent.cwd);
-  return agent;
-}
-
-/**
- * `openTerminal`, into a pane of a workspace that need not be on screen — the
- * harness's spelling, with the profile and workspace named. Nothing is
- * focused, because nobody is looking: the terminal is in the layout for when
- * they do. A pane closed while the host was spawning gets the workspace's
- * focused pane instead, on `openTerminal`'s reasoning.
- */
-export async function openTerminalAt(
-  profileId: string,
-  workspaceId: string,
-  paneId: string,
-  options: { cwd?: string; command?: string; kind?: PtyKind; local?: boolean; apart?: boolean } = {},
-): Promise<AgentSnapshot> {
-  const command = options.command ?? pinnedShell(profileId, workspaceId, options);
-  const remote = remoteShellOf(command) !== null;
-  const cwd = remote ? homedir() : (options.cwd ?? (await cwdForPaneIn(profileId, workspaceId, paneId)));
-  const agent = await spawnHolding(command, () =>
-    host.create({ cwd, command, env: spawnEnvFor(profileId), kind: options.kind ?? "shell" }),
-  );
-  const workspace = workspaces.workspaceIn(profileId, workspaceId);
-  if (!workspace) throw new Error("that workspace is gone");
-  const target = workspaces.hasPaneIn(profileId, workspaceId, paneId) ? paneId : workspace.focusedPaneId;
-  // `apart` is the harness in its own folder: a directory that is not this
-  // workspace's, so the pane does not remember it and the tree is not given it.
-  const here = !remote && !options.apart;
-  workspaces.addTabIn(profileId, workspaceId, target, agent.id, here ? agent.cwd : undefined);
-  if (here) allowRoot(agent.cwd);
-  return agent;
-}
-
-/**
- * What a plain shell in a workspace runs when the workspace is pinned to a
- * machine: a tmux session there, in its folder. Undefined — the login shell
- * here, as ever — for anything else.
- *
- * "Plain" is narrow on purpose. A command means somebody built a line for a
- * reason, and the callers that build one for the machine — the new-tab
- * menu's nvim and agents, a card's run — have already asked `pinOf` and built
- * the remote line themselves; the rest (a card's dev server, the harness's
- * own session) are about this Mac. A directory means a place on *this* disk
- * (a worktree, the file tree's "open here"); `local` is the harness's "on
- * this Mac". Only the tab strip's terminal, `C-a T` and the terminal a split
- * opens have none of the three, and those are the shells a pinned workspace
- * means.
- */
-function pinnedShell(
-  profileId: string,
-  workspaceId: string,
-  options: { cwd?: string; command?: string; kind?: PtyKind; local?: boolean },
-): string | undefined {
-  if (options.local || options.command !== undefined || options.cwd !== undefined || (options.kind ?? "shell") !== "shell") {
-    return undefined;
-  }
-  const pin = pinOf(profileId, workspaceId);
-  return pin ? sessionShell(pin.machine, pin.workspaceName, pin.dir) : undefined;
-}
-
-/**
- * A workspace's pin with its machine looked up, or undefined when it runs
- * here. A pin to a machine since removed is no pin: the workspace comes home
- * rather than opening tabs on a host nobody can see in the sidebar.
- */
-/**
- * The workspace's folder, for a LazyGit opened from its row: the main
- * checkout, which is what the row's git verbs act on, else where its file tree
- * starts — the repository the walk found, or outside one the directory the
- * focused terminal is in. Undefined before the walk has been, and the tab then
- * opens where any new tab would.
- *
- * Both are the walk's — directories the server found by going up from a
- * terminal it holds — and neither comes from the client. The active profile's
- * only, like the walk; a row's menu is always one of those.
- */
-function workspaceRepo(workspaceId: string): string | undefined {
-  return (
-    state.branches.find((head) => head.workspaceId === workspaceId)?.git?.root ??
-    state.projects.find((project) => project.workspaceId === workspaceId)?.root
-  );
-}
-
-export function pinOf(profileId: string, workspaceId: string): { machine: MachineEntry; dir: string; workspaceName: string } | undefined {
-  const workspace = workspaces.workspaceIn(profileId, workspaceId);
-  const pin = workspace?.machine;
-  const machine = pin ? findMachine(pin.machineId) : undefined;
-  return workspace && pin && machine ? { machine, dir: pin.dir, workspaceName: workspace.name } : undefined;
-}
-
-/**
- * Session names handed to a tab whose spawn has not come back yet. The host
- * only lists a terminal once `create` returns, so two shells opened in the
- * same breath — a split, then another — would otherwise both see the slot
- * free and attach to one session, two tabs mirroring each other.
- */
-const claimedSessions = new Set<string>();
-
-/**
- * A shell on a machine in a tmux session of its own — see `sessionName` for
- * why the first slot no tab holds. Every machine's sessions count against
- * every other's, so two aliases for one box cannot hand out the same name.
- * `avoid` is what the machine itself says it has, for a line that types
- * something; see `commandOn`.
- */
-function sessionShell(
-  machine: MachineEntry,
-  workspaceName: string,
-  dir: string,
-  run?: string,
-  more: { agent?: AgentCli; avoid?: Iterable<string> } = {},
-): string {
-  const taken = new Set([...sessionsEnding(), ...claimedSessions, ...(more.avoid ?? [])]);
-  for (const agent of host.agents) {
-    const session = remoteShellOf(agent.command)?.session;
-    if (session) taken.add(session);
-  }
-  const session = sessionName(workspaceName, taken);
-  claimedSessions.add(session);
-  return remoteShellCommand({ host: machine.host, session, dir, run, agent: more.agent });
-}
-
-/**
- * A line that types `run` into a new session on a machine — nvim, an agent,
- * the harness's command — in a slot the machine says is free as well as the
- * tabs. See `sessionsOn` for why a plain shell does not ask and this does.
- * The listing is taken before the slot is chosen, and the choice and the
- * claim happen together after it, so two of these in flight cannot pick one
- * name.
- */
-async function commandOn(machine: MachineEntry, workspaceName: string, dir: string, run: string, agent?: AgentCli): Promise<string> {
-  const avoid = (await sessionsOn(machine.host)) ?? [];
-  return sessionShell(machine, workspaceName, dir, run, { agent, avoid });
-}
-
-/**
- * An agent on a machine: the launcher's line, with kururu's check that the
- * CLI is there and signed in typed ahead of it. `command` is the launcher's
- * line without the hook settings — see `remoteAgentRun`.
- */
-export function agentOn(machine: MachineEntry, workspaceName: string, dir: string, cli: AgentCli, command: string): Promise<string> {
-  return commandOn(machine, workspaceName, dir, remoteAgentRun(cli, command, machine.name), cli);
-}
-
-/** Spawn, and let go of the session name it was holding once the host lists it — or has refused it. */
-async function spawnHolding(command: string | undefined, spawn: () => Promise<AgentSnapshot>): Promise<AgentSnapshot> {
-  try {
-    return await spawn();
-  } finally {
-    const session = remoteShellOf(command)?.session;
-    if (session) claimedSessions.delete(session);
-  }
-}
-
-/**
- * The tmux session behind a tab on a machine, ended because the tab is being
- * closed — see `endSession` for why closing and nothing else.
- *
- * Called from the doors a person closes a tab by (the tab, a pane, a
- * workspace, the harness's stop on their say-so) and never from
- * `reapExited`: a remote tab only ends on its own when ssh exits on purpose,
- * and the one way that leaves a session standing is a detach, which is a
- * person saying they want it kept.
- */
-function endRemote(agentId: string): void {
-  const remote = remoteShellOf(host.find(agentId)?.command);
-  if (remote?.session) endSession(remote.host, remote.session);
-}
-
-/** `cwdForNewTab`, for a pane of any workspace: the terminal it shows, else what it remembers, else the workspace's newest. */
-export async function cwdForPaneIn(profileId: string, workspaceId: string, paneId: string): Promise<string | undefined> {
-  const showing = workspaces.activeAgentInW(profileId, workspaceId, paneId);
-  if (showing) {
-    const followed = standing(await followCwd(showing));
-    if (followed) return followed;
-  }
-  const remembered = standing(workspaces.cwdForIn(profileId, workspaceId, paneId));
-  if (remembered) return remembered;
-  const newest = workspaces
-    .agentsInWorkspace(profileId, workspaceId)
-    .map((id) => host.find(id))
-    .filter((a): a is AgentSnapshot => a !== undefined && !a.exited && !isApart(a.id))
-    .sort((a, b) => b.createdAt - a.createdAt)[0];
-  return newest ? standing(await followCwd(newest.id)) : undefined;
-}
-
-/**
- * The same, for the gestures that make a pane rather than ask for a terminal.
- * There is no reply for them to fail: a spawn that cannot happen leaves the pane
- * empty, which is a state the window can still draw and click its way out of.
- */
-function fillPane(paneId: string, from?: string): void {
-  void openTerminal(paneId, from === undefined ? {} : { from }).catch((err) => {
-    console.error("kururu: could not open a terminal:", err instanceof Error ? err.message : err);
-  });
-}
-
-/**
- * The line that starts an agent from the menu, flags and all.
- *
- * A profile's own login directory has none of the hooks the machine's does, so
- * a Claude started into one is handed kururu's. See `hooks.ts`. And every
- * agent is pointed at kururu's web tools while a web provider is on — an
- * address on this Mac, never a key. See `web/chain.ts`.
- */
-function agentCommand(launcher: Launcher): Promise<string> {
-  return agentCommandFor(launcher, workspaces.active.id);
-}
-
-/** The same, for a profile that need not be on screen: its own hooks, if it has its own directory. */
-export async function agentCommandFor(launcher: Launcher, profileId: string, sessionId?: string | null): Promise<string> {
-  if (launcher.cli === "opencode") {
-    const id = sessionId && sessionId.startsWith("ses_") ? sessionId : mintOpencodeSession();
-    const found = await findOpencode();
-    const config = prepareOpencodeAgent(id, { port: PORT, withToken: tokenInPtys(), model: launcher.model ?? launch.opencodeModel, web: web.active() });
-    return opencodeAgentCommand(found.path, config, id, launch.bypassClis.includes("opencode") || launch.bypassClis.includes("claude"));
-  }
-  return launcherCommand(launcher, launch) + hooksFor(launcher, profileId) + web.launchFlags(launcher.cli) + kururuMcpOnly(launcher, profileId);
-}
-
-/**
- * ` --strict-mcp-config` for a Claude agent in a profile that keeps its agents
- * to kururu's MCP servers, or nothing — see `Profile.agentsKururuMcpOnly`.
- * kururu's own reach the agent through `--mcp-config`, which the flag keeps.
- * Claude Code only: Codex and OpenCode are handed their servers in config
- * kururu writes, and have no flag that drops the rest.
- */
-export function kururuMcpOnly(launcher: Launcher, profileId: string): string {
-  return launcher.cli === "claude" && workspaces.profile(profileId)?.agentsKururuMcpOnly ? " --strict-mcp-config" : "";
-}
-
-/**
- * Kuru's line on Claude Code: the launcher's, kururu's web tools, and
- * `kuruLaunchFlags` — strict MCP, the user's own servers, the plugins and
- * synced skills off, and the hooks folded into the one `--settings` rather
- * than passed as a second (`hooksFor`), which would replace it.
- */
-async function kuruCommandFor(launcher: Launcher, profileId: string): Promise<string> {
-  const key = workspaces.keyOf(profileId);
-  if (!key) throw new Error("that profile has no key yet");
-  const dir = claudeDirOf(profileId);
-  const kuru = await kuruLaunchFlags(dir, key, hookSettingsFor(dir), [HARNESS_SERVER, WEB_SERVER]);
-  return launcherCommand(launcher, launch) + web.launchFlags(launcher.cli) + kuru;
-}
-
-/**
- * Which of the features Kuru's role and tools have parts about are set up on
- * this node — see `HarnessFeatures`. Telegram counts once it could be
- * switched on, and while it is on, whichever node set it up.
- */
-function harnessFeatures(): HarnessFeatures {
-  const telegram = channels.status().telegram;
-  return {
-    nodes: nodes.statuses().length > 0,
-    telegram: telegram.enabled || channelReady(telegram),
-    machines: machinesSnapshot().length > 0,
-    speak: voice.speaks(),
-  };
-}
-
-/** Everything the usage ledger keeps about a launch: what the road that started it said, and what can be looked up. */
-function launchRow(agentId: string, profileId: string, workspaceId: string | null, note: LaunchNote): LaunchRow {
-  const machine = note.machine ?? null;
-  return {
-    agentId,
-    sessionId: note.sessionId,
-    program: note.program,
-    profileKey: workspaces.keyOf(profileId),
-    workspaceKey: workspaceId ? (workspaces.workspaceIn(profileId, workspaceId)?.key ?? null) : null,
-    cardId: note.cardId ?? null,
-    kind: note.kind ?? (note.cardId ? "card" : "agent"),
-    // Through `?.`, since the harness can start before the nodes are up, and a
-    // row with no node is one read as this node's, like everything before this.
-    node: nodes?.name() ?? null,
-    machine,
-    // A machine's login is over there, and the reader there will say.
-    loginDir: machine ? null : note.program === "codex" ? codexHomeOf(profileId) : note.program === "claude" ? claudeDirOf(profileId) : null,
-    cwd: note.cwd,
-    at: Date.now(),
-  };
-}
-
-/** kururu has just started an agent: the ledger is told whose it is. See `usage/attribute.ts`. */
-export function noteLaunch(agentId: string, profileId: string, workspaceId: string | null, note: LaunchNote): void {
-  usageLaunches?.spawned(launchRow(agentId, profileId, workspaceId, note));
-}
-
-/**
- * What the Usage page needs from the rest of the server: what things are called
- * and what is alive. Memoised for the one request, since these are asked per
- * cell and a card's title is a query. A session's `agent_id` is only as good as
- * the terminal still being the one it named, and ids are given out again after a
- * host restart, so a terminal younger than the session's last message is
- * somebody else's.
- */
-function usageReportFor(reader: UsageReader, range: UsageRange, by: UsageDimension): UsageReport {
-  const memo = <T,>(read: (key: string) => T) => {
-    const held = new Map<string, T>();
-    return (key: string): T => {
-      if (!held.has(key)) held.set(key, read(key));
-      return held.get(key)!;
-    };
-  };
-  const home = homedir();
-  const card = memo((id) => store.usageCard(id));
-  const liveIn = workspaces.active.workspaces;
-  const names: UsageNames = {
-    // A node's own workspace and card are known here only by what it said they were called.
-    workspace: memo((key) => store.usageWorkspaceName(key) ?? reader.ledger.nodeName("workspaces", key)),
-    card: memo((id) => card(id)?.title ?? reader.ledger.nodeName("cards", id)),
-    here: process.platform === "darwin" ? "This Mac" : "This computer",
-    liveAgent: (fact) => {
-      if (!fact.agentId) return null;
-      const agent = host.find(fact.agentId);
-      if (!agent || agent.exited || agent.createdAt > fact.lastAt) return null;
-      return { id: agent.id, label: agentLabel(agent) };
-    },
-    openableCard: (id) => {
-      const key = card(id)?.workspaceKey;
-      const workspace = key ? liveIn.find((w) => w.key === key) : undefined;
-      return workspace ? { workspaceId: workspace.id } : null;
-    },
-    folder: (path) => (path === home ? "~" : path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path),
-  };
-  const claude = usageSnapshot();
-  const weekly = (limits: readonly UsageLimit[] | undefined) => {
-    const held = limits?.find((limit) => limit.kind === "weekly_all") ?? limits?.find((limit) => limit.kind.startsWith("weekly"));
-    const at = held?.resetsAt ? Date.parse(held.resetsAt) : NaN;
-    return Number.isFinite(at) ? at : null;
-  };
-  const claudeWeek = weekly(claude?.limits);
-  const codexWeek = weekly(codexUsageSnapshot()?.limits);
-  const profile = claudeDirOf(workspaces.active.id);
-  const machine = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
-  return usageReport(reader.ledger, range, by, Date.now(), {
-    names,
-    weekResetsAt: claudeWeek ?? codexWeek,
-    weekOwner: claudeWeek !== null ? "claude" : codexWeek !== null ? "codex" : null,
-    retention: profile === machine ? [readRetention(machine, "This Mac's login")] : [readRetention(profile, `${workspaces.active.name}'s login`), readRetention(machine, "This Mac's login")],
-    status: reader.status(),
-    remote: [...reader.machineSources(), ...(usageNodes?.sources() ?? [])],
-  });
-}
-
-/** A hook in one of kururu's terminals named its session, which may be one no launch knew: `/clear`, or a `claude` typed into a shell. */
-function noteReported(agentId: string, body: Record<string, unknown>): void {
-  const transcript = typeof body.transcript === "string" ? sessionOfTranscript(body.transcript) : null;
-  usageLaunches?.reported(transcript ?? body.session, () => {
-    const own = harness.isHarness(agentId);
-    const at = own ? { profileId: own, workspaceId: null, cardId: null } : workspaces.terminalAt(agentId);
-    if (!at) return null;
-    return launchRow(agentId, at.profileId, at.workspaceId, {
-      program: transcript ? "claude" : "opencode",
-      sessionId: null,
-      cardId: at.cardId,
-      kind: own ? "harness" : undefined,
-      cwd: host.find(agentId)?.cwd ?? null,
-    });
-  });
-}
-
-/**
- * Kururu's hooks for a Claude launch whose config directory does not already
- * run them — a profile's own, or the machine's on a box nobody installed them
- * on by hand, which is every child. `hookSettingsFlag` steps aside for a
- * directory that has them, so the Mac's hand-installed hooks are not doubled.
- */
-export function hooksFor(launcher: Launcher, profileId: string): string {
-  if (launcher.cli !== "claude" || !workspaces.profile(profileId)) return "";
-  return hookSettingsFlag(claudeDirOf(profileId));
-}
-
-// ---------------------------------------------------------------------------
-// The database: search, history, the conversation
-// ---------------------------------------------------------------------------
-
-/** Hits for a profile, with this session's ids beside the keys so a window can go to the card. */
-function searchFor(profileId: string, query: string, scope: "all" | "cards" | "turns", limit: number): SearchHit[] {
-  const key = workspaces.keyOf(profileId);
-  if (!key) return [];
-  const profile = workspaces.profileByKey(key);
-  return store.search(query, scope, key, limit).map((hit) => {
-    if (hit.kind === "card") {
-      const workspaceId = hit.workspaceKey ? (profile?.workspaces.find((w) => w.key === hit.workspaceKey)?.id ?? null) : null;
-      return { ...hit, profileId, workspaceId };
-    }
-    return { ...hit, profileId };
-  });
-}
-
-function cardHistoryOf(cardId: string): { card: Card; workspaceName: string | null; deleted: boolean; events: import("../../shared/store").CardEvent[] } | null {
-  const found = store.findCard(cardId);
-  if (!found) return null;
-  const profile = workspaces.profileByKey(found.profileKey);
-  const workspaceName = found.workspaceKey ? (profile?.workspaces.find((w) => w.key === found.workspaceKey)?.name ?? null) : null;
-  return { card: found.card, workspaceName, deleted: found.deleted, events: store.cardHistory(cardId) };
-}
-
-/**
- * What a hook report says about a conversation, written down. The harness's
- * prompt on `UserPromptSubmit` is the one report that is `working` with a
- * message; its reply on `Stop` is `done` with one. Any other agent's reply
- * is kept too, as its own conversation named by its transcript, so the
- * search finds what an agent said about a card.
- */
-function recordTurn(agentId: string, report: { status?: string; message?: string }, body: Record<string, unknown>, utterance: string | null): number | null {
-  const profileId = workspaces.profileOf(agentId);
-  const profile = profileId ? workspaces.profile(profileId) : null;
-  if (!profile) return null;
-  const reply = typeof body.reply === "string" ? body.reply.trim() : "";
-  const at = Date.now();
-  const cwd = host.find(agentId)?.cwd ?? null;
-  try {
-    if (harness.isHarness(agentId) && profile.harness) {
-      const base = { conversationId: harnessConversation(profile.harness), profileKey: profile.key, kind: "harness" as const, launcher: profile.harness.launcher, cwd, at };
-      if (report.status === "working" && report.message?.trim()) store.recordTurn({ ...base, role: "you", text: report.message.trim() });
-      // The reply names the utterance it was said as, so the drawer can put
-      // its fate — being said, unheard, heard — beside the words.
-      const turn = report.status === "done" && reply ? store.recordTurn({ ...base, role: "kuru", text: reply, voiceId: utterance }) : null;
-      kuru.changed();
-      return turn;
-    }
-    if (report.status !== "done" || !reply) return null;
-    const reportedSession = typeof body.session === "string" && OPENCODE_SESSION_ID.test(body.session) ? body.session : null;
-    const sessionId = sessionOfTranscript(typeof body.transcript === "string" ? body.transcript : null) ?? reportedSession;
-    if (!sessionId) return null;
-    store.recordTurn({ conversationId: sessionId, profileKey: profile.key, kind: "agent", launcher: null, cwd, role: "agent", text: reply, at });
-  } catch (err) {
-    console.error(`kururu: a turn could not be written down: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  return null;
-}
-
-/**
- * A line Kuru says aloud mid-turn through its `say` tool: spoken, and written
- * down as a turn of its own — `via: "kururu"`, which the drawer draws smaller —
- * named for the utterance it was said as, so a line that was cut off shows as
- * unheard beside the reply it preceded and can be played again from there.
- */
-function sayAside(profileId: string, text: string): SayOutcome {
-  const profile = workspaces.profile(profileId);
-  const key = profile?.key ?? "";
-  // Not aloud with "speak replies" off, which `aside` asks; and not in a turn
-  // that answers only a channel, for the reason its reply is not
-  // (`replySpoken`). In the chat and the drawer either way.
-  const outcome: SayOutcome = !voice.speaks() ? "voice-off" : key && !channels.speaks(key) ? "channel" : "spoken";
-  const utterance = outcome === "spoken" ? voice.aside(key, text) : null;
-  if (key) channels.aside(key, text);
-  if (!profile?.harness) return outcome;
-  try {
-    store.recordTurn({
-      conversationId: harnessConversation(profile.harness),
-      profileKey: profile.key,
-      kind: "harness",
-      launcher: profile.harness.launcher,
-      cwd: null,
-      role: "kuru",
-      via: "kururu",
-      text,
-      voiceId: utterance,
-      at: Date.now(),
-    });
-    kuru.changed();
-  } catch (err) {
-    console.error(`kururu: a said line could not be written down: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  return outcome;
-}
-
-/**
- * A turn's start and end, as the links under an agent's row hear of them.
- * The start is the prompt hook's report; the end is the Stop report's reply,
- * read for what the turn made (`MadeFiles.turnEnded`) and written onto the
- * card the agent runs, if it runs one. Kuru's own replies are the drawer's
- * (`kuruFiles`), and an agent on a machine sends no reply here and has no
- * disk here to find its files on.
- */
-function noteMade(agentId: string, report: { status?: string; message?: string }, body: Record<string, unknown>): void {
-  if (report.status === "working" && report.message?.trim()) turnStart.set(agentId, Date.now());
-  const reply = typeof body.reply === "string" ? body.reply : "";
-  if (report.status !== "done" || !reply.trim() || harness.isHarness(agentId)) return;
-  const agent = host.find(agentId);
-  if (!agent || agent.exited || remoteShellOf(agent.command)) return;
-  const since = turnStart.get(agentId) ?? madeFiles.lastTurn(agentId) ?? agent.createdAt;
-  const moved = madeFiles.turnEnded({ id: agent.id, createdAt: agent.createdAt, cwd: agent.cwd }, reply, since);
-  workspaces.setMade(agentId, madeFiles.of(agentId));
-  if (moved) pushSnapshot();
-}
-
-/**
- * The directories a path Kuru wrote may be relative to: the projects of the
- * profile on screen, every terminal's directory in Kuru's profile, then every
- * root the server allows. Kuru answers about every agent in its profile and
- * writes a path as the agent's project spells it, so there is no one
- * directory to read it from — `locateMentions` tries each, and the most
- * recently written match wins.
- */
-function projectDirsOf(profileId: string): string[] {
-  const dirs: string[] = [];
-  if (profileId === workspaces.active.id) for (const project of state.projects) dirs.push(project.root, ...project.choices);
-  for (const id of workspaces.agentsIn(profileId)) {
-    const agent = host.find(id);
-    if (agent && !remoteShellOf(agent.command)) dirs.push(agent.cwd);
-  }
-  dirs.push(...allowedRoots());
-  return [...new Set(dirs)];
-}
-
-/**
- * The files each of Kuru's replies names, for the drawer to make links of.
- *
- * Resolved once per reply and kept, since a reply's words never change and
- * the conversation is assembled again on every change to it — except a reply
- * that named nothing findable, which is tried again after a while: right
- * after a restart the projects' roots are still being relearnt. A link whose
- * file goes is taken off by `sweepMade`.
- */
-const kuruFound = new Map<string, { at: number; files: KuruFile[] }>();
-
-/** How long "this reply names no file" is believed before it is looked for again. */
-const KURU_RETRY_MS = 30_000;
-
-/** Replies remembered. The drawer shows sixty and pages back; this is a few pages. */
-const KURU_FOUND_MAX = 400;
-
-function kuruFiles(profileKey: string, reply: { id: string; text: string }): KuruFile[] {
-  const key = `${profileKey}\0${reply.id}`;
-  const now = Date.now();
-  const had = kuruFound.get(key);
-  if (had && (had.files.length > 0 || now - had.at < KURU_RETRY_MS)) return had.files;
-  const profileId = workspaces.profileIdOf(profileKey);
-  const mentions = mentionsIn(reply.text);
-  const found = profileId && mentions.length ? locateMentions(mentions, projectDirsOf(profileId), 0) : [];
-  const files: KuruFile[] = [];
-  const seen = new Set<string>();
-  for (const { mention, file } of found) {
-    if (seen.has(mention.text)) continue;
-    seen.add(mention.text);
-    files.push({ ...file, text: mention.text });
-  }
-  kuruFound.delete(key);
-  kuruFound.set(key, { at: now, files });
-  if (kuruFound.size > KURU_FOUND_MAX) kuruFound.delete(kuruFound.keys().next().value!);
-  return files;
-}
-
-/**
- * How often the links are checked against the disk. A link to a file that was
- * deleted or moved should be gone within a glance of it, and the check is a
- * `stat` for each of a handful of files.
- */
-const MADE_SWEEP_MS = 5000;
-
-/** Every link — on rows, on cards, in the drawer — that no longer goes anywhere, taken away. */
-function sweepMade(): void {
-  if (!host || !workspaces) return;
-  if (madeFiles.sweep(host.agents.map((agent) => ({ id: agent.id, createdAt: agent.createdAt })))) pushSnapshot();
-  workspaces.pruneMade(madeStillThere);
-  let gone = false;
-  for (const [key, entry] of kuruFound) {
-    const files = entry.files.filter(madeStillThere);
-    if (files.length === entry.files.length) continue;
-    kuruFound.set(key, { ...entry, files });
-    gone = true;
-  }
-  if (gone) kuru.changed();
-}
-
-/**
- * Whether kururu itself is holding this link — on an agent's row, on a card,
- * in a reply of Kuru's. What lets `openMade` allow a root that has not been
- * relearnt since a restart: a card's link into a worktree no terminal is in
- * any more is a root the server found, not one a client made up.
- */
-function heldLink(root: string, path: string): boolean {
-  const is = (file: MadeFile) => file.root === root && file.path === path;
-  for (const agent of host.agents) if (madeFiles.of(agent.id).some(is)) return true;
-  if (workspaces.cardHasMade(root, path)) return true;
-  for (const entry of kuruFound.values()) if (entry.files.some(is)) return true;
-  return false;
-}
-
-/**
- * Open what an agent made: Markdown in the reader, as a tab of the focused
- * pane — the file tree's `show-doc` — and anything else in a new nvim tab
- * there, at the line the link names. The focused pane because that is the
- * one you were last in (KUR-44); a new nvim rather than one already running,
- * unlike the tree, because a link is one click and the tree's question of
- * which editor is the one you are typing in is a second.
- *
- * In the workspace the link was in — the agent's, the card's — switched to
- * first, the way clicking the agent's row goes to it, so the file opens
- * beside the work it came from. A link out of Kuru's drawer names no
- * workspace and goes to the one whose project holds it, or stays put.
- */
-async function openMade(
-  root: string,
-  path: string,
-  line: number | null,
-  workspaceId: string | null,
-  focus: boolean,
-): Promise<{ paneId: string }> {
-  let full = resolveInRoot(root, path);
-  if (!full && heldLink(root, path)) {
-    allowRoot(root);
-    full = resolveInRoot(root, path);
-  }
-  // Which of the two refusals it was is said only for a root kururu already
-  // allows: whether a file exists anywhere else is not a phone's to learn.
-  if (!full) throw new Error(rootAllowed(root) ? "that file is not there any more" : "that file is outside every project kururu has open");
-  try {
-    if (!statSync(full).isFile()) throw new Error("not a file");
-  } catch {
-    throw new Error("that file is not there any more");
-  }
-  const target = workspaceId ?? workspaceOfRoot(root);
-  if (target && target !== workspaces.activeWorkspace.id) {
-    if (!workspaces.active.workspaces.some((w) => w.id === target)) throw new Error("that workspace is not in this profile");
-    workspaces.switchWorkspace(target);
-  }
-  if (readsInReader(path)) {
-    const paneId = workspaces.showDoc(root, path);
-    if (!paneId) throw new Error("there is no pane to show it in");
-    if (focus) workspaces.focusPane(paneId);
-    return { paneId };
-  }
-  const paneId = workspaces.focusedPaneId;
-  await openTerminal(paneId, { cwd: root, command: nvimCommand(path, line), kind: "shell" });
-  return { paneId };
-}
-
-/**
- * Kuru's `show_file`: the path found the way a reply's paths are — from the
- * agent's directory, or with no agent from the profile's projects — put
- * first on the agent's row and its card, and opened when asked. Opened only
- * while Kuru's profile is the one on screen: a file opened in a profile
- * nobody is looking at is a layout changed for no one.
- */
-async function showFileFor(profileId: string, agentId: string | null, path: string, line: number | null, open: boolean): Promise<string> {
-  const agent = agentId ? host.find(agentId) : undefined;
-  if (agent && remoteShellOf(agent.command)) throw new Error("That agent runs on a machine, and kururu only opens files on this Mac.");
-  const written = mentionsIn(`\`${path}\``)[0] ?? { text: path, path, line: null, cue: true, at: 0 };
-  const [found] = locateMentions([{ ...written, line: line ?? written.line }], agent ? [agent.cwd] : projectDirsOf(profileId), 0);
-  if (!found) throw new Error(`${path} is not a file inside a project kururu has open${agent ? ` (looked from ${agent.cwd})` : ""}.`);
-  const said: string[] = [];
-  if (agent) {
-    madeFiles.pin(agent, found.file);
-    workspaces.setMade(agent.id, madeFiles.of(agent.id));
-    pushSnapshot();
-    said.push(`Linked ${found.file.path} under the agent's row, and on its card if it runs one.`);
-  }
-  if (open) {
-    if (profileId !== workspaces.active.id) {
-      said.push("Not opened: the user's window is showing another profile.");
-    } else {
-      const home = agent ? workspaces.active.workspaces.find((w) => paneWithAgent(w.layout, agent.id))?.id : undefined;
-      await openMade(found.file.root, found.file.path, found.file.line, home ?? null, false);
-      said.push(`Opened it on the user's screen, in ${readsInReader(found.file.path) ? "the reader" : "nvim"}.`);
-    }
-  }
-  // The user wrote from Telegram, so they are on their phone, where a link
-  // on the Mac's sidebar is no use: a picture goes to the chat as well.
-  const key = workspaces.profile(profileId)?.key;
-  if (key && isPictureName(found.file.path) && channels.answers(key, "telegram")) {
-    try {
-      said.push(await sendPicture(key, join(found.file.root, found.file.path), null));
-    } catch (err) {
-      said.push(`Not sent to the Telegram chat: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-  return said.join(" ");
-}
-
-/**
- * Kuru's `send_telegram_photo`: a picture found where Kuru said — a whole
- * path, `~/…`, or one relative to the agent named or to Kuru's own folder
- * and the profile's projects — checked and copied by `stageOutgoing`, and
- * sent to the chat by the node that reads it. Says what happened, or throws
- * why not, in words for Kuru.
- */
-async function sendPictureFor(profileId: string, agentId: string | null, path: string, caption: string | null): Promise<string> {
-  const profile = workspaces.profile(profileId);
-  if (!profile) throw new Error("That profile is gone.");
-  const agent = agentId ? host.find(agentId) : undefined;
-  if (agent && remoteShellOf(agent.command)) throw new Error("That agent runs on a machine, and its files are not on this computer.");
-  const refused = channels.telegram.pictureRefusal(profile.key);
-  if (refused) throw new Error(refused);
-  const bases = agent ? [agent.cwd] : [harnessHome(profile.key), ...projectDirsOf(profileId)];
-  const full = wholePath(path, bases);
-  if (!full) throw new Error(`${path} is not a file kururu can find${agent ? ` from ${agent.cwd}` : ""}. Give its whole path.`);
-  return sendPicture(profile.key, full, caption);
-}
-
-async function sendPicture(profileKey: string, full: string, caption: string | null): Promise<string> {
-  try {
-    return await channels.telegram.sendPicture(profileKey, await stageOutgoing(full), caption);
-  } catch (err) {
-    if (err instanceof PictureRefused) throw new Error(err.message);
-    throw err;
-  }
-}
-
-/** Whether a root, as a client spelt it, is one the server allows — realpath'd first, as `files.ts` stores them. */
-function rootAllowed(root: string): boolean {
-  try {
-    return allowedRoots().includes(realpathSync(root));
-  } catch {
-    return false;
-  }
-}
-
-/**
- * The workspace on screen if its project holds this root, else the first one
- * in the profile whose project does, else null — the drawer's link, which
- * names none. The projects are the branch walk's (`pollBranches`).
- */
-function workspaceOfRoot(root: string): string | null {
-  const holds = (dir: string) => root === dir || root.startsWith(`${dir}/`);
-  const here = state.projects.find((p) => p.workspaceId === workspaces.activeWorkspace.id);
-  if (here && [here.root, ...here.choices].some(holds)) return here.workspaceId;
-  return state.projects.find((p) => [p.root, ...p.choices].some(holds))?.workspaceId ?? null;
-}
-
-/** The newest terminal in this workspace, preferring one that is still running. */
-function newestAgentHere(): string | undefined {
-  const here = new Set(workspaces.agentsHere());
-  // host.agents is oldest first, so the last of them is the most recent.
-  const mine = host.agents.filter((agent) => here.has(agent.id) && !isApart(agent.id));
-  const live = mine.filter((agent) => !agent.exited);
-  return (live.length ? live : mine).at(-1)?.id;
-}
-
-/**
- * End one terminal the way its close button does: its tmux session on a
- * machine, the process group here, its tab, and everything this side kept
- * about it. `close-tab` and an idle card's sleep (`sleep.ts`) are the same
- * gesture, so they are the same function.
- */
-function endTerminal(agentId: string): void {
-  endRemote(agentId);
-  host.kill(agentId);
-  workspaces.reapTab(agentId);
-  forget(agentId);
-}
-
-/**
- * Reap a terminal the arrangement no longer has room for. Pane and workspace
- * deletion hand back what was inside them; this is what ends it.
- */
-export function killAll(agentIds: string[]): void {
-  for (const agentId of terminalsOf(agentIds)) {
-    endRemote(agentId);
-    host.kill(agentId);
-    // It must not be left as a tab pointing at a terminal that no longer exists.
-    workspaces.removeTab(agentId);
-    forget(agentId);
-  }
-}
-
-/**
- * Everything on this side that was about one terminal.
- *
- * Ids are not reused, so none of this is correctness — but every one of these
- * maps would otherwise grow for the life of the process. `lastStatus` and
- * `notifiedAt` are deliberately not in here: `noticeStatuses` drops an id the
- * moment the host stops listing it, which is the same event by a shorter road.
- */
-function forget(agentId: string): void {
-  // A card whose agent was killed outright ends here; one that exited on its
-  // own was already told by `noticeStatuses`.
-  workspaces.noteRun(agentId, "", true);
-  activity.delete(agentId);
-  madeFiles.forget(agentId);
-  turnStart.delete(agentId);
-  harness.forget(agentId);
-  sleeper.forget(agentId);
-  lastAgent.delete(agentId);
-  memory.delete(agentId);
-  unread.delete(agentId);
-  sizes.delete(agentId);
-  for (const st of clients.values()) st.proposals.delete(agentId);
-  forgetRecording(agentId);
-  mouseEncodings.delete(agentId);
-}
-
-/**
- * Clear away terminals whose pty has ended on its own — `exit` at a shell, a
- * command that ran out, an agent that quit.
- *
- * The host keeps an exited pty listed with its screen intact, and that is right
- * for the host: it cannot know whether anybody still wants to read it, and a
- * screen is the only record a dead terminal leaves. Deciding is this side's
- * job, and the answer is that a tab is where a terminal *lives* — so when the
- * terminal has gone the tab has nothing left to be, and a pane holding nothing
- * else goes with it (`reapTab`). That is tmux's default and what typing `exit`
- * means everywhere else; the cost is the screen, and the alternative was a dead
- * tab per terminal you ever closed, waiting to be dismissed by hand.
- *
- * It is noticed here rather than in `agents/host.ts` for the reason `lastStatus`
- * is: that file costs the user every running agent to edit, and this is a matter
- * of taste that will be tuned. Nothing has to be remembered between calls,
- * because the reap is what makes the host stop listing it — the kill is a
- * message, so the same agent may still be in the list on the next push, and a
- * second kill is swallowed by `ptyhost.ts` and a second `reapTab` finds no pane.
- */
-function reapExited(): void {
-  for (const agent of host.agents) {
-    if (!agent.exited) continue;
-    /*
-     * Except a card's dev server. A dev line that dies does it in its first
-     * second — a missing `.env`, a port already taken — and the screen is the
-     * only place the reason was ever written; reaping it made the tab flash
-     * and vanish with nothing to say why. It stays, the card says "ended",
-     * and the card's ↻ or ■ is what takes the tab away.
-     */
-    if (workspaces.isCardDev(agent.id)) continue;
-    // A Kuru that died starting, for the same reason: the tab is the only
-    // record of why, and the next start is what takes it away.
-    if (harness.diedStarting(agent.id)) continue;
-    // Before the tab goes, while the layout can still say whose it was.
-    harness.noticed(agent, agent.status, true);
-    host.kill(agent.id);
-    workspaces.reapTab(agent.id);
-    forget(agent.id);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// The loops that remain
-// ---------------------------------------------------------------------------
-
-/**
- * What the host should stream, recomputed whenever it might have changed: every
- * terminal any client has on screen, plus every one any client is keeping an
- * emulator for. The union, because a pooled emulator that stops being fed is one
- * that has to be reconstructed — see `ClientState.warm`.
- *
- * The host reads its watched set as "somebody is looking at this" and keeps a
- * mark of its own off the back of it. That mark is not used — see `unread` and
- * `overlay` — and it is left alone because `agents/host.ts` costs the user every
- * running agent to edit.
- */
-function syncWatched(): void {
-  const watched = new Set<string>();
-  for (const st of clients.values()) {
-    for (const id of st.watching) if (!isRemote(id)) watched.add(id);
-    for (const id of st.warm) if (!isRemote(id)) watched.add(id);
-  }
-  host.watch(watched);
-  // Another node's terminals are that node's to stream: the watch says so.
-  watches?.sync();
-}
-
-/**
- * The shape each terminal is, as decided here rather than claimed by a pane.
- *
- * Empty at startup and filled by the first proposal, which is the honest state
- * of affairs: a pty the host spawned has whatever grid the host gave it, this
- * process has no way to ask, and the first client to put a pane on it is the
- * first thing that makes the size a decision anybody made. See `ownedGrid` for
- * the one path that has to answer before that has happened.
- */
-const sizes = new Map<string, Grid>();
-
-/**
- * The shape to fall back on for a terminal nothing has ever proposed a size for
- * — and it is applied, not merely reported, which is what makes it safe.
- *
- * It mirrors the spawn grid in `agents/screen.ts` rather than importing it:
- * that module is the pty host's and pulling it in here would drag a headless
- * xterm into this bundle, and the alternative — a constant they share — means
- * editing a file in `agents/`, which costs the user every agent they are
- * running. A mirror that has drifted therefore has to be harmless, and it is:
- * the screen is put into this shape before it is serialized, so the answer
- * names a grid that is true whether or not the guess matched.
- *
- * Nothing should reach it. `web/src/session.ts` sends `propose-size` and
- * `request-backlog` from one function for exactly this reason, so by the time
- * a history is being built the server owns a size for that terminal.
- */
-const FALLBACK_GRID: Grid = {
-  cols: Number(process.env.KURURU_COLS) || 120,
-  rows: Number(process.env.KURURU_ROWS) || 40,
-};
-
-/**
- * The grid a terminal is at, establishing one if nobody has ever said.
- *
- * A read in every case that matters. The write is the cold path above, and it
- * resizes rather than guessing quietly, because a caller asking this is about
- * to lay a screen out in the answer.
- */
-function ownedGrid(agentId: string): Grid {
-  const had = sizes.get(agentId);
-  if (had) return had;
-  host.resize(agentId, FALLBACK_GRID.cols, FALLBACK_GRID.rows);
-  const grid = { ...FALLBACK_GRID };
-  sizes.set(agentId, grid);
-  return grid;
-}
-
-/**
- * Decide how big a terminal is, resize it, and tell everybody drawing it.
- *
- * This is the inversion Part 2 of the lifecycle rework exists for. A pane used
- * to fit its emulator to its own box and inform the pty afterwards, so the size
- * was whichever client resized last — which is fine with one window, is why a
- * phone made the desktop ragged, and, worse, let the client and the pty hold
- * two ideas of the shape at once. Every screen kururu has drawn wrong has been
- * that disagreement. Now the pty is resized first and each client's emulator
- * conforms to what it is told, in that order, so the two cannot diverge.
- *
- * The policy itself is `sizing.ts`, which argues for it. What is here is whose
- * proposals are still in play, and the answer is *everyone who has one* — with
- * no test against `watching`, deliberately. A pane measures its box in a layout
- * effect and the watch listing it arrives a passive effect later, so a proposal
- * is reliably the first this server hears of a terminal being on screen;
- * requiring `watching` to already contain it would mean answering the first
- * backlog at a size nobody asked for and correcting it a moment afterwards. So
- * a proposal counts from the moment it arrives, and `watch` is what takes it
- * away again — which is also what keeps a warm client, whose detached emulator
- * cannot measure a box and so never proposes anyway, out of the minimum.
- *
- * The one test here is `looking`, and it is a different question from either of
- * those: not which panes a client has, but whether anybody is in front of it.
- * A phone that locks keeps its panes and its socket and would otherwise go on
- * holding the desktop at phone width from a pocket, which is the bug this
- * inherited when the policy stopped being last-writer-wins. See `ClientState`.
- */
-function applySize(agentId: string): void {
-  // Another node's terminal is sized there; what this node has to say about
-  // it is one proposal, composed in `nodewatch.ts`.
-  if (isRemote(agentId)) {
-    watches?.sync();
-    return;
-  }
-  const proposals: Grid[] = [];
-  for (const st of clients.values()) {
-    if (!st.looking) continue;
-    const proposed = st.proposals.get(agentId);
-    if (proposed) proposals.push(proposed);
-  }
-  const next = smallestGrid(proposals);
-  if (!next) return;
-  const { cols, rows } = next;
-  const had = sizes.get(agentId);
-  if (had && had.cols === cols && had.rows === rows) return;
-  sizes.set(agentId, next);
-  // Recorded for the same reason an input is: a repaint arriving on the wrong
-  // side of a resize is the shape of most terminal bugs, and the bytes alone
-  // cannot show which side it was on.
-  recordNote(agentId, "resize", `${cols}x${rows}`);
-  host.resize(agentId, cols, rows);
-  /**
-   * Warm clients are told too. A pooled emulator that is off screen is still
-   * being fed bytes the agent laid out for the pty's grid, so an emulator left
-   * at the old shape would wrap every one of them — and it would carry that
-   * damage into the pane that borrows it next, having asked for nothing,
-   * because there is nothing about a tab switch that says a rebuild is needed.
-   */
-  for (const [ws, st] of clients) {
-    if (sees(st, agentId)) send(ws, { type: "grid", agentId, cols, rows });
-  }
-}
-
-/**
- * A client went away, which is a window closing, a phone going to sleep, or
- * this server being about to be replaced. Everything it was holding open goes
- * with it: the terminals it had streaming, and its say in how big they are.
- *
- * The sizes are decided again *after* it is out of the map, so its proposals
- * are gone from the minimum. Closing the narrow window is how the wide one gets
- * its columns back, and without this the last shape a departed client asked for
- * would outlive it for as long as the terminal did.
- */
-function dropClient(ws: WebSocket): void {
-  const st = clients.get(ws);
-  if (!st) return;
-  clients.delete(ws);
-  watches?.leave(ws);
-  syncWatched();
-  for (const agentId of st.proposals.keys()) applySize(agentId);
-  // A phone whose socket died with its key held must not keep Kuru quiet
-  // everywhere else, and what it was going to play is not going to be heard
-  // there.
-  voice.leave(ws);
-  // A page that said it was reloading goes this way, and so does one that
-  // was closed while it waited.
-  reloads.leave(ws);
-  // The viewer cannot be open with nobody connected, and a connection to
-  // somebody's production database is not a thing to keep for the company.
-  if (windows() === 0) void closeDatabasePools();
-}
-
-/**
- * Output arrives already coalesced — the host batches it at one frame, because
- * the flood is on its side of the link and a message per pty write would cross
- * the process boundary as well as the socket. What is left here is fan-out: the
- * same chunk to every client watching that terminal.
- *
- * It used to decide `unread` here as well, on the theory that bytes off screen
- * are news. They are not — see `unread` — and a function on the hot path that
- * also carried a policy was the shape that made that easy to miss.
- */
-function onOutput(agentId: string, data: string): void {
-  recordOutput(agentId, data);
-  mouseEncodingOf(agentId).read(data);
-  // Stringified once for every client that gets it, and only if one does:
-  // this is the hottest path in the process.
-  let payload: string | null = null;
-  for (const [ws, st] of clients) {
-    if (!sees(st, agentId)) continue;
-    const pending = st.awaiting.get(agentId);
-    if (pending) pending.queued.push(data);
-    else deliver(ws, (payload ??= JSON.stringify({ type: "output", agentId, data } satisfies ServerMessage)));
-  }
-}
-
-/**
- * Start holding a terminal's live output, ready for its backlog to go out first.
- *
- * One rebuild, one hold; the count is what makes overlapping rebuilds safe. See
- * `ClientState.awaiting` for why releasing on the first of them loses bytes.
- */
-function openQueue(st: ClientState, agentId: string): void {
-  const pending = st.awaiting.get(agentId);
-  if (pending) pending.inflight++;
-  else st.awaiting.set(agentId, { inflight: 1, queued: [] });
-}
-
-/**
- * Hand a pane the history of a terminal, at the size the server owns.
- *
- * It used to resize first, to whatever grid the asking pane claimed on the
- * request, because a backlog is the server's emulator *serialized* and a
- * serialized screen is laid out at a particular width: reconstructed into a
- * grid of a different one it wraps, the rows below shift, and the top scrolls
- * away. The client's buffer then disagrees with the server's about where
- * everything is — permanently, because an agent redraws differentially and
- * never resends a row it believes is already right. That was the borked text on
- * a workspace switch and the cwd sitting inside an agent's input box.
- *
- * The shape still has to be right; what changed is who says so. It is settled
- * before this is ever called, by the `propose-size` the client sends in the
- * same breath as its request, so there is nothing to resize here and nothing to
- * take a pane's word for. The answer names the grid all the same — a screen
- * that states its own shape is correct for whoever receives it, and that is
- * worth keeping for the one ordering a single size does not cover.
- *
- * Everything after the `await` re-checks. A pane can close, the whole socket go
- * away, or the size be decided again by another client, in the time it takes to
- * drain the write queue and serialize.
- */
-async function sendBacklog(ws: WebSocket, agentId: string): Promise<void> {
-  const { cols, rows } = ownedGrid(agentId);
-  /**
-   * The serialized screen, plus the one thing it cannot carry. Appended here
-   * rather than in `screen.ts` so this fix costs a reconnect and not every agent
-   * the user is running; see `mouseencoding.ts` for what is being restored.
-   */
-  const serialized = await host.backlog(agentId).catch(() => "");
-  const data = serialized + mouseEncodingOf(agentId).suffix();
-  const st = clients.get(ws);
-  const pending = st?.awaiting.get(agentId);
-  if (!st || !pending) return;
-  const watching = sees(st, agentId);
-  if (watching) {
-    // The bytes, not just the size: a screen rebuilt wrongly can only be
-    // explained by replaying exactly what rebuilt it.
-    recordNote(agentId, "backlog", `${data.length} bytes rebuilt at ${cols}x${rows}`);
-    recordBacklog(agentId, data);
-    send(ws, { type: "backlog", agentId, data, cols, rows });
-    /**
-     * And the shape again, if it moved while this was being built.
-     *
-     * The host serialized at `cols`x`rows` — it had the request before any
-     * later resize — so the answer is correct and the client is right to
-     * become that shape to read it. But the `grid` announcing the newer size
-     * went out *before* this did, so without this the client would end up back
-     * at the older one while the pty sat at the newer, which is exactly the
-     * permanent disagreement everything else here is arranged to prevent. It
-     * takes two clients and a resize inside a few milliseconds to reach, and it
-     * costs one message to close.
-     */
-    const now = sizes.get(agentId);
-    if (now && (now.cols !== cols || now.rows !== rows)) {
-      send(ws, { type: "grid", agentId, cols: now.cols, rows: now.rows });
-    }
-  }
-  // A later rebuild is still being prepared, so the hold stays on for it.
-  if (--pending.inflight > 0) return;
-  st.awaiting.delete(agentId);
-  if (!watching) return;
-  for (const queued of pending.queued) send(ws, { type: "output", agentId, data: queued });
-}
-
 let lastDevJson = "";
 let devScansStarted = 0;
 let devScanShown = 0;
@@ -2543,40 +1121,6 @@ async function stopListedDevServer(port: unknown, pid: unknown): Promise<{ stopp
   });
   await pollDevServers();
   return { stopped: stopped.length };
-}
-
-/**
- * Where a tab's terminal is now, as of the last look — never a wait.
- *
- * The spawn directory was the answer here once, and it is the reason a fresh
- * workspace's tree could sit on `~` while its only terminal had long since
- * `cd`'d into a project: a shell that moves never says so. The live cwd is an
- * `lsof` on macOS, one per terminal, and this is asked about every tab of
- * every workspace on the git poll — so the answer is cached, refreshed in the
- * background when stale, and a tab nobody has looked at yet answers with where
- * it was opened until the first look comes back one poll later.
- */
-const cwdSeen = new Map<string, { at: number; cwd: string | undefined }>();
-const CWD_CACHE_MS = 10_000;
-
-function tabCwd(agentId: string): string | undefined {
-  const agent = host.find(agentId);
-  if (!agent) {
-    cwdSeen.delete(agentId);
-    return undefined;
-  }
-  // Somewhere kururu cannot read: the branch, the tree and the database scan
-  // are all about this disk, and the `~` the tab's ssh runs in is not a
-  // project. A pinned workspace whose tabs are all remote has no project here.
-  if (remoteShellOf(agent.command) || isApart(agentId)) return undefined;
-  const seen = cwdSeen.get(agentId);
-  if (!seen || Date.now() - seen.at > CWD_CACHE_MS) {
-    // Stamped before the look so a slow `lsof` is not asked again by every
-    // poll that lands while it is still running.
-    cwdSeen.set(agentId, { at: Date.now(), cwd: seen?.cwd });
-    void followCwd(agentId).then((cwd) => cwdSeen.set(agentId, { at: Date.now(), cwd }));
-  }
-  return seen?.cwd ?? agent.cwd;
 }
 
 /** The databases a workspace's env files name, as the last scan found them. Outside `attach`, whose own `state` is the host's. */
