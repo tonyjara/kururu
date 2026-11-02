@@ -56,7 +56,7 @@ export function UsageChips({ onDetails }: { onDetails: () => void }) {
     return () => clearInterval(timer);
   }, []);
 
-  const claude = usage && !usage.signedOut && usage.limits.length > 0 ? usage : null;
+  const claude = usage && !usage.signedOut ? usage : null;
   if (!claude && !codexUsage) return null;
   return (
     <span className="sb-usages">
@@ -67,6 +67,7 @@ export function UsageChips({ onDetails }: { onDetails: () => void }) {
           limits={claude.limits}
           stale={claude.stale ? staleTitle(claude.at) : null}
           foot={claude.email}
+          empty={claude.error ? `${claude.error}${claude.retryAt ? ` It will retry ${when(claude.retryAt)}.` : ""}` : "Claude reported no active usage windows."}
           onDetails={onDetails}
         />
       )}

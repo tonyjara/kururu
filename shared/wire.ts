@@ -332,6 +332,10 @@ export interface AccountUsage {
   signedOut: boolean;
   /** Whose allowance this is, as Claude Code recorded it, or null if it did not. */
   email: string | null;
+  /** Why a first reading is unavailable, or why the last reading is stale. */
+  error: string | null;
+  /** Do not ask again before this time when Claude supplied `Retry-After`. */
+  retryAt: number | null;
 }
 
 /**

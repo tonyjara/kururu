@@ -318,7 +318,16 @@ export function limitsFrom(body: unknown): UsageLimit[] {
 type Reading =
   | { ok: true; limits: UsageLimit[]; email: string | null }
   | { ok: false; signedOut: true }
-  | { ok: false; signedOut: false };
+  | { ok: false; signedOut: false; error: string; retryAt: number | null };
+
+/** A retry delay is a delay, not a plan reset. Keep it bounded before putting it on the wire. */
+export function retryAtFrom(value: string | null, now = Date.now()): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return now + Math.min(seconds, 86_400) * 1000;
+  const at = Date.parse(value);
+  return Number.isFinite(at) && at > now ? at : null;
+}
 
 /**
  * Ask the account. Any failure that is not an explicit 401 keeps the previous
@@ -342,10 +351,11 @@ async function fetchUsage(claudeDir: string | null): Promise<Reading> {
     // read and refused. Every other status is the network or their side having a
     // bad minute, and says nothing about the account.
     if (res.status === 401 || res.status === 403) return { ok: false, signedOut: true };
-    if (!res.ok) return { ok: false, signedOut: false };
+    if (res.status === 429) return { ok: false, signedOut: false, error: "Claude is rate-limiting usage checks.", retryAt: retryAtFrom(res.headers.get("retry-after")) };
+    if (!res.ok) return { ok: false, signedOut: false, error: `Claude usage check answered ${res.status}.`, retryAt: null };
     return { ok: true, limits: limitsFrom(await res.json()), email: await email(login) };
   } catch {
-    return { ok: false, signedOut: false };
+    return { ok: false, signedOut: false, error: "Could not reach Claude for usage.", retryAt: null };
   }
 }
 
@@ -382,25 +392,24 @@ export async function pollUsage(claudeDir: string | null = null): Promise<boolea
     scope = claudeDir;
     reading = null;
   }
+  if (reading?.retryAt && Date.now() < reading.retryAt) return switched;
   const fresh = await fetchUsage(claudeDir);
   // Switched again while this one was in flight. Its answer is about a
   // directory nobody is looking at now, and the poll that switched is coming.
   if (scope !== claudeDir) return false;
   let next: AccountUsage;
   if (fresh.ok) {
-    next = { limits: fresh.limits, at: Date.now(), stale: false, signedOut: false, email: fresh.email };
+    next = { limits: fresh.limits, at: Date.now(), stale: false, signedOut: false, email: fresh.email, error: null, retryAt: null };
   } else if (fresh.signedOut) {
-    next = { limits: [], at: Date.now(), stale: false, signedOut: true, email: null };
+    next = { limits: [], at: Date.now(), stale: false, signedOut: true, email: null, error: null, retryAt: null };
   } else if (reading) {
     // Keep the numbers, admit their age. `at` is not touched: it is when the
     // reading was taken, and a failed poll did not take one.
-    next = { ...reading, stale: true };
+    next = { ...reading, stale: true, error: fresh.error, retryAt: fresh.retryAt };
   } else {
-    // Nothing was ever known and this attempt failed. Say nothing at all rather
-    // than draw an empty bar, which would read as "all spent" — unless the
-    // scope just changed, in which case "nothing" is exactly what the clients
-    // must be told, because what they are drawing is the previous account.
-    return switched;
+    // A first failure is not a usage figure, but it is useful state: otherwise
+    // the bar disappears precisely when a plan limit makes somebody wait.
+    next = { limits: [], at: Date.now(), stale: false, signedOut: false, email: null, error: fresh.error, retryAt: fresh.retryAt };
   }
   const moved = !same(reading, next);
   reading = next;
@@ -419,7 +428,7 @@ export function usageSnapshot(): AccountUsage | null {
  */
 function same(a: AccountUsage | null, b: AccountUsage): boolean {
   if (!a) return false;
-  if (a.stale !== b.stale || a.signedOut !== b.signedOut || a.email !== b.email) return false;
+  if (a.stale !== b.stale || a.signedOut !== b.signedOut || a.email !== b.email || a.error !== b.error || a.retryAt !== b.retryAt) return false;
   if (a.limits.length !== b.limits.length) return false;
   return a.limits.every((limit, i) => {
     const other = b.limits[i]!;

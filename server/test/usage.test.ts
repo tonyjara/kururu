@@ -15,7 +15,7 @@
  * would be inventing, and each is badly wrong in one direction.
  */
 import { describe, expect, it } from "bun:test";
-import { limitsFrom } from "../src/usage";
+import { limitsFrom, retryAtFrom } from "../src/usage";
 
 /** One entry as the account actually sends it, for tests to bend out of shape. */
 function entry(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -78,6 +78,10 @@ describe("limitsFrom", () => {
     expect(limitsFrom({ limits: [entry({ percent: -20 })] })[0]!.percent).toBe(0);
   });
 
+  it("keeps a fully used window and its reset time", () => {
+    expect(limitsFrom({ limits: [entry({ percent: 100, resets_at: "2026-09-20T00:40:00.000Z" })] })[0]).toMatchObject({ percent: 100, resetsAt: "2026-09-20T00:40:00.000Z" });
+  });
+
   it("drops a limit with no kind, which has nothing to label it with", () => {
     for (const kind of [null, undefined, "", "   ", 7]) {
       expect(limitsFrom({ limits: [entry({ kind })] })).toEqual([]);
@@ -120,5 +124,12 @@ describe("limitsFrom", () => {
   it("skips junk entries without losing the good ones beside them", () => {
     const mixed = { limits: [null, entry(), "nope", entry({ kind: "weekly_all" }), 7] };
     expect(limitsFrom(mixed).map((l) => l.kind)).toEqual(["session", "weekly_all"]);
+  });
+});
+
+describe("retryAtFrom", () => {
+  it("turns Retry-After seconds into a bounded retry time", () => {
+    expect(retryAtFrom("120", 1_000)).toBe(121_000);
+    expect(retryAtFrom("90000", 1_000)).toBe(86_401_000);
   });
 });
