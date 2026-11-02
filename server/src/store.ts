@@ -851,6 +851,7 @@ export class Store {
       }
       cards.push(card);
     }
+    if (workspaceKey === null) this.needsSinceOf(boardId, cards);
     const raw: Board = { cards, next: Number(boardRow.next) || 1, ...(columns ? { columns } : {}), ...widthsOf(boardRow.widths as string | null) };
     if (workspaceKey !== null) return adoptBoard(raw) ?? emptyBoard();
     const board = adoptProfileBoard(raw);
@@ -858,6 +859,21 @@ export class Store {
     // back here, once, so the rows and the backup say the board has it too.
     if (!laneRows.some((row) => row.id === NEEDS_COLUMN)) this.writeLanes(boardId, board.columns ?? null);
     return board;
+  }
+
+  /**
+   * `Card.needsSince` on each card of a profile's board that is in Needs you:
+   * the last time its history says it went there, by a move or by being
+   * written there. One query for the board rather than one per card.
+   */
+  private needsSinceOf(boardId: string, cards: Card[]): void {
+    if (!cards.some((card) => card.column === NEEDS_COLUMN)) return;
+    const rows = this.stmt("select card_id, max(at) as at from card_events where board_id = ? and to_column = ? group by card_id").all(boardId, NEEDS_COLUMN) as Row[];
+    const since = new Map(rows.map((row) => [row.card_id as string, Number(row.at)] as const));
+    for (const card of cards) {
+      const at = since.get(card.id);
+      if (card.column === NEEDS_COLUMN && at !== undefined && Number.isFinite(at)) card.needsSince = at;
+    }
   }
 
   private latestRun(cardId: string): CardRun | null {

@@ -59,12 +59,13 @@ import {
 import type { Profile } from "../../../shared/model";
 import { cardPlace, cardReference } from "../../../shared/kuru";
 import { useCardClick } from "../cardclick";
+import { cardTimes } from "../cardtimes";
 import { colorValue } from "../colors";
 import { referItem } from "../kuru";
 import { noteItem, popOutNote } from "../notes";
 import { revealCard } from "../reveal";
 import * as api from "../session";
-import { CARD_KEEP, CardBody, CardWhen, Composer, dropDraft, showCardNext, useCardOpen, useComposerInView } from "./Board";
+import { ago, CARD_KEEP, CardBody, CardWhen, Composer, dropDraft, showCardNext, useCardOpen, useComposerInView } from "./Board";
 import { ColorPicker } from "./ColorPicker";
 import { ColumnResizeHandle } from "./ColumnResize";
 import { Icon } from "./Icon";
@@ -682,8 +683,28 @@ function ProfileCard({
         </div>
         <CardBody text={card.body} opening={opening} quoteRef={quoteRef} />
         {card.dates && <CardWhen dates={card.dates} />}
+        {opening.open && card.column === NEEDS_COLUMN && <NeedsTimes card={card} />}
       </article>
     </>
+  );
+}
+
+/**
+ * When an open card in Needs you was written, and — when it came later — when
+ * it arrived there (`Card.needsSince`): what the user reads to tell how long
+ * a thing has been waiting on them. Only on an open card, since a closed one
+ * is a line in a column scanned for its title, and only in Needs you, the
+ * one column whose cards are waiting on somebody. The wording is
+ * `cardtimes.ts`'s; the ages are the hover, in the board's own `ago`.
+ */
+function NeedsTimes({ card }: { card: Card }) {
+  const times = cardTimes(card.createdAt, card.needsSince, Date.now());
+  const hover = [`written ${ago(card.createdAt)}`, times.since && card.needsSince ? `in Needs you since ${ago(card.needsSince)}` : ""].filter(Boolean).join(" · ");
+  return (
+    <span className="board-card-times" title={hover}>
+      <span>Added {times.added}</span>
+      {times.since && <span>In Needs since {times.since}</span>}
+    </span>
   );
 }
 

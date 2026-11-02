@@ -363,6 +363,19 @@ export interface Card {
    * hand-edited file, where nobody can say.
    */
   needsBy?: NeedsBy;
+  /**
+   * When the card last came into Needs you, which on a card written somewhere
+   * else and moved here later is the time the open card says beside the one
+   * it was written. Only on a card in that column, as `needsBy` is: stamped
+   * as it arrives (`markNeeds`), taken off as it leaves.
+   *
+   * Not a column of its own in the database, unlike `needsBy`: `card_events`
+   * already says when every card went where, and one query per board load
+   * reads it back (`Store.loadBoard`) — which also gives the cards that were
+   * in Needs you before this field existed their time, where a new column
+   * would have started them all empty.
+   */
+  needsSince?: number;
 }
 
 /**
@@ -714,7 +727,7 @@ export function transferCard(from: Board, to: Board, cardId: string): { from: Bo
   const card = from.cards.find((c) => c.id === cardId);
   if (!card) return { from, to };
   const column = hasLane(to, card.column) ? card.column : firstLane(to);
-  const { needsBy: _mark, ...rest } = card;
+  const { needsBy: _mark, needsSince: _since, ...rest } = card;
   const moved: Card = { ...rest, number: to.next, column, run: null, isolate: false, worktree: null, dev: null };
   return {
     from: removeCard(from, cardId),
@@ -770,6 +783,7 @@ export function adoptBoard(value: unknown): Board | null {
       ...madeOf(item.made),
       // Only on a card that is in Needs you, for `Card.needsBy`'s reason.
       ...(item.column === NEEDS_COLUMN && hasLane(shape, NEEDS_COLUMN) && isNeedsBy(item.needsBy) ? { needsBy: item.needsBy } : {}),
+      ...(item.column === NEEDS_COLUMN && hasLane(shape, NEEDS_COLUMN) && Number.isFinite(item.needsSince) ? { needsSince: item.needsSince as number } : {}),
     });
   }
   // A card from before cards were numbered, or one whose number is a second
@@ -799,30 +813,30 @@ export function adoptProfileBoard(value: unknown): Board {
 }
 
 /**
- * Write on each card that has just come into Needs you who put it there, and
- * take the mark off each that has left. A card already in the column keeps
- * the mark it had, so dragging it up or down the column does not make it the
- * user's. `by` null is a change nobody is answerable for — an import — and
- * stamps nothing.
+ * Write on each card that has just come into Needs you who put it there and
+ * when, and take both off each that has left. A card already in the column
+ * keeps what it had, so dragging it up or down the column does not make it
+ * the user's or new. `by` null is a change nobody is answerable for — an
+ * import — and stamps nothing.
  *
  * Done once, over the board a change made, rather than in each verb that can
  * put a card there: a drag, a card written in the column, Kuru's `add_card`
  * and `move_card`, another node's Kuru through the link — and whatever verb
  * comes next. The same board back when nothing moved in or out.
  */
-export function markNeeds(before: Board, after: Board, by: NeedsBy | null): Board {
+export function markNeeds(before: Board, after: Board, by: NeedsBy | null, at: number = Date.now()): Board {
   const was = new Map(before.cards.map((card) => [card.id, card.column] as const));
   let changed = false;
   const cards = after.cards.map((card) => {
     if (card.column !== NEEDS_COLUMN) {
-      if (card.needsBy === undefined) return card;
+      if (card.needsBy === undefined && card.needsSince === undefined) return card;
       changed = true;
-      const { needsBy: _gone, ...rest } = card;
+      const { needsBy: _gone, needsSince: _since, ...rest } = card;
       return rest;
     }
-    if (was.get(card.id) === NEEDS_COLUMN || by === null || card.needsBy === by) return card;
+    if (was.get(card.id) === NEEDS_COLUMN || by === null || (card.needsBy === by && card.needsSince !== undefined)) return card;
     changed = true;
-    return { ...card, needsBy: by };
+    return { ...card, needsBy: by, needsSince: at };
   });
   return changed ? { ...after, cards } : after;
 }

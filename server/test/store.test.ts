@@ -278,6 +278,34 @@ describe("the store", () => {
     store.close();
   });
 
+  it("reads when a card came into Needs you back off its history, and forgets it once the card leaves", () => {
+    const store = Store.open();
+    const plain = emptyProfileBoard();
+    const written = addCard(addCard(plain, { title: "call the bank", column: "todo" }, "c1", 1), { title: "sign the form", column: NEEDS_COLUMN }, "c2", 2);
+    const own = markNeeds(plain, written, "user", 10);
+    const p0 = profile(PK, "Work", [workspace(WK, "Kururu", emptyBoard())], own);
+    store.syncProfile(null, p0, "user", 10);
+    const moved = markNeeds(own, moveCard(own, "c1", NEEDS_COLUMN), "kuru", 50);
+    expect(moved.cards.find((c) => c.id === "c1")!.needsSince).toBe(50);
+    store.syncProfile(p0, { ...p0, board: moved }, "harness", 50);
+    store.close();
+
+    const again = Store.open();
+    const loaded = again.loadBoard(PK, null)!.cards;
+    expect(loaded.find((c) => c.id === "c1")!.needsSince).toBe(50);
+    // Written straight into the column: its arrival is its writing.
+    expect(loaded.find((c) => c.id === "c2")!.needsSince).toBe(10);
+    const out = markNeeds(moved, moveCard(moved, "c1", "done"), "user", 60);
+    expect(out.cards.find((c) => c.id === "c1")!.needsSince).toBeUndefined();
+    again.syncProfile({ ...p0, board: moved }, { ...p0, board: out }, "user", 60);
+    expect(again.loadBoard(PK, null)!.cards.find((c) => c.id === "c1")!.needsSince).toBeUndefined();
+    // Back again, it is the latest arrival that counts.
+    const back = markNeeds(out, moveCard(out, "c1", NEEDS_COLUMN), "user", 70);
+    again.syncProfile({ ...p0, board: out }, { ...p0, board: back }, "user", 70);
+    expect(again.loadBoard(PK, null)!.cards.find((c) => c.id === "c1")!.needsSince).toBe(70);
+    again.close();
+  });
+
   it("keeps who put a card in Needs you through a restart, and forgets it once the card leaves", () => {
     const store = Store.open();
     const plain = emptyProfileBoard();

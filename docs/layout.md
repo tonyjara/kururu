@@ -233,7 +233,10 @@ as any column's are. Each card in it wears who put it there — **Kuru** in the
 accent, **You** quiet — from `Card.needsBy`, stamped as the card arrives off
 the actor every change carries (`markNeeds`; see
 [harness](harness.md#things-for-the-user-to-do)) and taken off as it leaves.
-A card sent to a workspace from it goes to that workspace's To do, unmarked.
+Opened, it says when it was written and, if it came later, when it arrived
+(`Card.needsSince`) — stamped beside the mark, and read back at load off
+`card_events` rather than kept in a column, so cards older than the field
+have it too. A card sent to a workspace from it goes to that workspace's To do, unmarked.
 A node's own Needs you is its own: the summary a child pushes leaves it out,
 since no other node's window can open that board. No robot, no worktree. The one thing it does that a workspace board
 does not is the card menu's **Send to**, one row whose list is every
