@@ -34,7 +34,7 @@ import { firecrawlHint, validFirecrawlKey } from "./firecrawl";
 import type { MoveCheck } from "./move";
 import { keyHint, validOpenRouterKey } from "./openrouter";
 import { canonical } from "./nodes";
-import { checkGhValue, checkSshValue, ENV_TEXT_MAX, envHint, envPathOk, GH_ACCOUNT, ghHint, SSH_ALIAS, sshHint, type GhValue, type SshValue } from "./vault";
+import { checkGhValue, checkSshValue, ENV_TEXT_MAX, envHint, envPathOk, GH_ACCOUNT, ghHint, SSH_ALIAS, sshHint } from "./vault";
 
 // ---------------------------------------------------------------------------
 // Kinds

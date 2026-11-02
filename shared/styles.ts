@@ -65,7 +65,6 @@ import {
   BASE_ICONS,
   DEFAULT_SKIN_ID,
   ICON_NAMES,
-  isPartName,
   isStyleId,
   PAINT_MODES,
   PAINT_REPEATS,

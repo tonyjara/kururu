@@ -162,7 +162,6 @@ function onRequest(req: IncomingMessage, res: ServerResponse): void {
  * on 100.x does not answer there.
  */
 const servers = listenAddresses().map(() => createServer(onRequest));
-const server = servers[0]!;
 
 /**
  * Compressed, because a snapshot is JSON of every card on every board and

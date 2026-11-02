@@ -49,10 +49,20 @@ import {
 import type { Actor } from "../../shared/store";
 import { host, launch, overlay, projects, state, workspaces } from "./context";
 import { web } from "./sweeps";
-
 import { repoFor } from "./repostatus";
 import { claudeDirOf } from "./lending";
-import { agentCommandFor, agentOn, cwdForPaneIn, hooksFor, killAll, kururuMcpOnly, noteLaunch, openTerminal, openTerminalAt, pinOf } from "./terminals";
+import {
+  agentCommandFor,
+  agentOn,
+  cwdForPaneIn,
+  hooksFor,
+  killAll,
+  kururuMcpOnly,
+  noteLaunch,
+  openTerminal,
+  openTerminalAt,
+  pinOf,
+} from "./terminals";
 import { devOpen, startDev, stopDev } from "./carddev";
 import { claudeTranscriptPath } from "./sessions";
 import {

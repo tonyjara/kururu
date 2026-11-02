@@ -504,7 +504,6 @@ export class NodeHost {
   view(): NodesView {
     const roster = this.roster;
     const mine = memberOf(roster, this.me.id);
-    const now = Date.now();
     return {
       self: { id: this.me.id, name: this.selfName(), address: this.deps.address(), port: this.deps.port, rank: mine?.rank ?? null },
       role: this.role(),

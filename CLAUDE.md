@@ -258,7 +258,7 @@ Match ghosttown — the user writes in a distinctive register and kururu follows
   sentences. "Ports come from the kernel because `vite --port` lies when the port
   is taken" — not `// get port`.
 - No comment that restates the code on the next line.
-- TypeScript strict, `noUncheckedIndexedAccess` on. Tests cover pure functions.
+- TypeScript strict, `noUncheckedIndexedAccess` and `noUnusedLocals` on. Tests cover pure functions.
 
 ## Where we're going
 

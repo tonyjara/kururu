@@ -180,10 +180,7 @@ const MIGRATIONS: readonly string[] = [SCHEMA, WAITING, SESSION_DAYS, NODES];
 /** A format that moved would otherwise write a row per line forever; the count stops being useful long before this. */
 const MAX_SKIPPED = 10_000;
 
-/** One cell's numbers off `messages`, in `session_days`' order, for the two places that sum them. */
-const CELL_SUMS = `count(*), sum(input), sum(cache_write_5m), sum(cache_write_1h), sum(cache_read), sum(output), sum(thinking),
-         coalesce(sum(cost_est), 0), sum(cost_est is null)`;
-/** The same read back: `messages`' sums and `session_days`' columns, under one set of names. */
+/** One cell's numbers read back: `messages`' sums and `session_days`' columns, under one set of names. */
 const CELL_READ = `count(*) as messages, sum(input) as input, sum(cache_write_5m) as cache_write_5m, sum(cache_write_1h) as cache_write_1h,
          sum(cache_read) as cache_read, sum(output) as output, sum(thinking) as thinking, coalesce(sum(cost_est), 0) as cost_est, sum(cost_est is null) as unpriced`;
 const QUARTER_MS = 900_000;

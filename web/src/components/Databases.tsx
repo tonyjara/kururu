@@ -46,7 +46,6 @@ import {
   type DbResultColumn,
   type DbRows,
   type DbTable,
-  type WorkspaceDatabase,
 } from "../../../shared/databases";
 import * as api from "../session";
 import { useKururu } from "../session";

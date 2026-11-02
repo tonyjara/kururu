@@ -14,7 +14,6 @@ import { BOARD_TAB, paneWithAgent, showsDoc } from "../../shared/layout";
 import { projectSettingsFor } from "../../shared/projects";
 import { worktreeOf } from "./cards";
 import { host, projects, workspaces } from "./context";
-
 import { killAll, openTerminal, openTerminalAt } from "./terminals";
 import { copyEnvFiles, worktreePresent } from "./worktree";
 import { shq } from "../../shared/text";

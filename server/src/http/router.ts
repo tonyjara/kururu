@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { cookieHeader, hasToken, isShared, loopbackTokenRequired, token, verdict } from "../access";
-import { host, nodes } from "../context";
+import { nodes } from "../context";
 import { listDir, readFile } from "../files";
 import { PORT, WEB_DIST } from "../preamble";
 import { json, readJsonBody, serveStatic, text } from "./respond";

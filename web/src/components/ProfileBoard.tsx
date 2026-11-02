@@ -52,7 +52,6 @@ import {
   laneInto,
   LANES_MAX,
   NEEDS_COLUMN,
-  type Board,
   type BoardLane,
   type Card,
   type NeedsBy,

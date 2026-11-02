@@ -46,7 +46,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Mascot, MascotSet } from "../../shared/model";
+import type { MascotSet } from "../../shared/model";
 import { adoptMascots, DEFAULT_MASCOT, isSheetName } from "../../shared/model";
 import { configDir, readConfigFile, writeConfigFile } from "./config";
 import { writeAtomic } from "./fsutil";

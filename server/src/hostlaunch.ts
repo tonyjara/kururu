@@ -610,11 +610,6 @@ export function unitOf(pid: number): string | null {
   }
 }
 
-/** Whether `pid` is a host the user manager started, which is to say one in a cgroup of its own. */
-export function launchedBySystemd(pid: number): boolean {
-  return isHostUnit(unitOf(pid));
-}
-
 /** Whether a host unit is still running, or starting; `hostJobRunning`'s question, asked of systemd. */
 export function hostUnitRunning(unit: string): boolean {
   try {

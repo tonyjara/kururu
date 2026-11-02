@@ -86,8 +86,6 @@ export const BUTTON_NONE = 3;
  */
 export const WHEEL_UP = 64;
 export const WHEEL_DOWN = 65;
-export const WHEEL_LEFT = 66;
-export const WHEEL_RIGHT = 67;
 
 export interface MouseReport {
   action: MouseAction;

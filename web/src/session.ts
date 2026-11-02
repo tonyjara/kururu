@@ -55,7 +55,7 @@ import type { MadeFile } from "../../shared/made";
 import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "../../shared/voice";
 import type { MachineEntry, MachinePin, MachineStatus } from "../../shared/machines";
 import type { MachineSpecs, TypedKey } from "../../shared/specs";
-import type { NodeStatus, NodesView } from "../../shared/nodes";
+import type { NodesView } from "../../shared/nodes";
 import type { MoveCheck, MoveDone, MovePlan, NewWorkspaceMade } from "../../shared/move";
 import { EMPTY_SECRETS, type Lendable, type LendAsk, type SecretsView } from "../../shared/secrets";
 import type { VaultView } from "../../shared/vaultview";

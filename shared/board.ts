@@ -46,9 +46,6 @@ export const COLUMN_LABELS: Record<BoardColumn, string> = {
   done: "Done",
 };
 
-export function isBoardColumn(value: unknown): value is BoardColumn {
-  return typeof value === "string" && (BOARD_COLUMNS as readonly string[]).includes(value);
-}
 
 /**
  * A column a person made, on a board that takes them — which is the profile's
