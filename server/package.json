@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "bun run src/index.ts",
-    "dev": "KURURU_DEV=1 bun run --watch src/index.ts"
+    "start": "node run.mjs",
+    "dev": "node run.mjs --watch"
   },
   "dependencies": {
     "@xterm/addon-serialize": "^0.14.0",

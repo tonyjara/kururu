@@ -19,6 +19,7 @@ The detail that used to be in `CLAUDE.md`. That file is now the operational brie
 | [nodes.md](nodes.md) | The Mac and its children, linked: pairing by a code, the signed roster, one link per pair proved by keys, away by silence, the summaries every node draws, the parent pulling a child's backup, and the Kurus as peers — ask_kuru, the marks, one drawer for every node |
 | [linux.md](linux.md) | A child kururu: the headless server on a Linux box under systemd, the `kururu` command, its wizard and doctor, the unit, what a restart costs there, and the skill that walks an agent through it |
 | [packaging.md](packaging.md) | electron-builder, signing, notarizing, the updater, releases |
+| [invariants.md](invariants.md) | The load-bearing invariants in full: each one `CLAUDE.md` names in a line, with its argument, its files and its exceptions |
 | [gotchas.md](gotchas.md) | Errors that name something other than their cause |
 | [testing.md](testing.md) | What `bun test` covers, the isolated instance, what is verified |
 | [ghosttown.md](ghosttown.md) | The sibling project, what was ported, and the one-way rule |

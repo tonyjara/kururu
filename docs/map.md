@@ -12,6 +12,7 @@ in this folder.
 | `layout.ts` | The split tree and every pure operation on it. Both halves use it |
 | `agentpane.ts` | Where the agents kururu starts go: the bottom (or top) pane by geometry, the mark that keeps them in one, the word to split when there is none. Pure, tested. See [layout](layout.md#the-agents-pane) |
 | `harness.ts` | The harness's vocabulary: the MCP tool catalogue, the role prompt, key and paste grammar, when a waiting message may be typed, the frames of a notice, transcript turns, its model, effort and compaction point, its folder's two files. Pure, tested |
+| `opencode.ts` | Kuru on OpenCode, the pure half: the command line, the config kururu writes into Kuru's folder, the session id it picks, and the map of which Claude Code door each OpenCode one replaces. See [harness](harness.md#on-opencode) |
 | `lifecycle.ts` | The line `lifecycle.log` is made of, and reading it back forgivingly. Three processes write it; two of them are plain JS and keep in step by hand |
 | `usage.ts` | The ledger's rows, the count that refuses a non-count, the Mac's days, and whose a session was: `attributionFor` and which reading wins |
 | `usagepull.ts` | What a node tells its parent it spent, by the quarter hour, and how the parent checks it off the wire |
@@ -34,6 +35,7 @@ in this folder.
 | `firecrawl.ts` | Firecrawl's API as two providers speak it: the key, the cloud's daily budget, request bodies, its answers read, a self-hosted address, `crawlNext`. Pure, tested |
 | `nodes.ts` | Every kururu as a node: the roster and its signature, `adoptRoster`, who dials and who leads, the pairing code, an address, the summary another node draws, `LinkHandshake` as a state machine, `LeadGate` (which node reads the Telegram chat, and when that moves) and the handover's shape, and `watchRefusal` (who may watch whom). Pure, tested. See [nodes](nodes.md) |
 | `remote.ts` | Another node's things on this window: the one grammar of a qualified id (`n:<node>:<id>`), the child's workspace, agents and disk roots qualified, `route` (which node a client's verb is for, ids bare, or why it goes nowhere), a node's hue, the walk `C-a N`, `C-a P` and `C-a w` take across nodes (`workspacesAcross`, `stepAcross`), what a drop target says to the other machine's thing (`dropRefusal`), and `containsQualified`, which the never-written test reads with. Pure, tested. See [nodes](nodes.md#remote-workspaces) |
+| `move.ts` | Moving a workspace to another node: what is refused, what the dialog says goes and stays, and the shapes the two nodes trade over the link. Pure, tested. See [nodes](nodes.md) |
 | `secrets.ts` | The secrets the parent lends a child: the kinds (what part of which file travels, its hint, where it lands), the envelope's header, grant states and `plan`, the one rule for what to push and take back, and `NEVER_SHARED`. Pure, tested. See [nodes](nodes.md#lending-secrets) |
 | `vault.ts` | A project's own secrets as text: which env files are offered, an ssh config's `Host` blocks and which of their lines travel, `known_hosts` lines plain and hashed, a key's type and passphrase from its preamble, gh's accounts, the entry, `Include` line and gh files a child writes, and the guesses at what a project needs. Pure, tested. See [nodes](nodes.md#lending-a-projects-secrets) |
 | `vaultview.ts` | Settings → Vault: what the page is told (kururu's keys by hint, env files by variable name, ssh hosts by key file name, gh accounts, the other logins agents use), an env file's names, a Vercel config's team, and what is lent to which node. Names, never values. See [nodes](nodes.md#the-vault-page) |
@@ -53,6 +55,7 @@ in this folder.
 | `lazygit.ts` | LazyGit as a tab: the line here, the line typed on a machine, and the is-it-installed check ahead of both. A clean quit closes the tab |
 | `cursor.ts` | DECSCUSR + OSC 12 in both directions. One parser over one stream |
 | `theme.ts` | Every theme: the chrome's tokens and the emulator's ANSI palette |
+| `contrast.ts` | Whether a theme can be read: each token's floor as ink, the pairs read out of the stylesheet, and `CONTRAST_KNOWN`, which records the pairs already under it. See [styles](styles.md) |
 | `skin.ts` | The shape tokens, the icon glyphs, and the twelve paintable parts |
 | `styles.ts` | The registry's format, and every check on a stranger's manifest |
 
@@ -84,10 +87,12 @@ in this folder.
 | `src/store.ts` | The database: boards written through before memory takes them, every move as history, deleted cards kept, the conversation, the voice's lists, the search, the export and the restore's import. `node:sqlite`, under `~/.local/share/kururu`, made on the first start |
 | `src/export.ts` | The mirror: the database and the allowed config as a tree git can diff, and the tree read back for `restore` |
 | `src/backup.ts` | Every few minutes when something changed: mirror, commit, push to the user's private repository. Never forced |
-| `src/gitcmd.ts` | Running `git`, for the two files allowed to |
+| `src/gitcmd.ts` | Running `git`, for the two files allowed to (and `restore-cli.ts`, which clones what `backup.ts` pushed); a `GitError` keeps all of stderr beside its first line |
 | `src/nodes.ts` | `NodeHost`: joining (the Mac's `/api/nodes/join`, ahead of the gate, and the new computer's half), the roster taken and relayed, a link per pair (`/link`, ahead of the gate, proved by keys), pings and away, summaries pushed on change, the backup pull, and the handshake alone on a watch socket (`watchHandshake`). See [nodes](nodes.md) |
 | `src/nodenotice.ts` | Another node's agents wanting a human, raised on this node's clients: `blocked`/`done` edges read off the watch's relayed snapshot while one is up and off the node's summary while none is, never both, through the same gate and throttle as a local agent's. See [notifications](notifications.md#rules) |
 | `src/nodewatch.ts` | Another node's workspace on this window: one watch per node (`/link/watch`, this server as a client of the child's), the child's snapshot relayed under qualified ids, the clients' verbs routed there, their watching, looking and size composed into one client's, backlogs and replies matched to who asked, which remote workspace is on screen and the steps and toggle onto one, and the reads of a node's disk `/api/node/<id>/…` asks over the watch. Memory only. See [nodes](nodes.md#remote-workspaces) |
+| `src/peerkuru.ts` | The other nodes' Kurus as this one meets them: `ask_kuru` as words typed through the other node's own outbox, the marks the receiver writes, and one drawer for every node's conversation. See [nodes](nodes.md#kurus-as-peers) |
+| `src/move.ts` | A workspace moved to another node, both halves: the folder asked about, the board sent with a move id, and the source's copy removed only once the target has answered |
 | `src/nodekeys.ts` | This node's Ed25519 and X25519 pairs and, on the parent, the roster's signing key, in `node.json` at `0600`. Never sent, never backed up |
 | `src/seal.ts` | A secret sealed to one node: X25519 with an ephemeral key, HKDF-SHA256, AES-256-GCM with the header as additional data; the parent's signature beside it |
 | `src/secrets.ts` | Lending, both halves: the parent's catalogue, grants, pushes on a tick, a link-up and a file change, and the acknowledgements; a child's take, write at `0600`, take-back, and letting go when it leaves the roster; a workspace's offer and `lendProject`. See [nodes](nodes.md#lending-secrets) |
@@ -108,6 +113,9 @@ in this folder.
 | `src/usage/store.ts` | The usage ledger, `usage.db`: one row per billed message and the daily rollup, written with their offsets in one transaction. Holds numbers and never words. See [data](data.md#the-usage-ledger) |
 | `src/usage/tail.ts` | Following a file from an offset: a chunk at a time, a byte search before any string, half the loop at most |
 | `src/usage/claude.ts` | A Claude Code transcript's billed messages and `cost-state`, each field checked; which config directories are read |
+| `src/usage/codex.ts` | A Codex rollout's billed calls, one `token_count` at a time, and the allowance windows riding on them; the session id is read off the file's name |
+| `src/usage/opencode.ts` | What OpenCode wrote about a message, out of its SQLite database (opened read-only) or the older message files: its tokens and whose turn it was |
+| `src/usage/limits.ts` | The one bridge Claude's live allowance reading needs into the ledger: a row per window each time `usage.ts` polls, none for a reading already written |
 | `src/usage/sweep.ts` | The reader: the backfill, the sweep every five minutes, the nudge off `/api/report`. Types into nothing |
 | `src/usage/attribute.ts` | Whose a session was, written when kururu starts it: a launch's row, a hook's word for a session no launch knew, and Codex's id found by folder and time. Never why an agent did not start. See [data](data.md#the-usage-ledger) |
 | `src/usage/remote.ts` | What the other nodes spent: a child's answer, and the parent asking every five minutes and keeping it. A machine's logs are `sweep.ts`'s, through ssh |
@@ -128,14 +136,19 @@ in this folder.
 | `src/report-cli.ts` | What a Claude Code hook runs. Not in `agents/` on purpose. Also carries the session's inbox socket, transcript path and last reply for the harness |
 | `src/harness.ts` | The harness's hands: kururu's verbs as MCP tools for one profile, a terminal read as text, the user's words typed into a pty when it may take them, the status feed into the harness's inbox. Explicit targets, never `active` (`shared/harness.ts`) |
 | `src/harnesshome.ts` | The folder each profile's harness runs in, under the data directory and no project's: made with its AGENTS.md and CLAUDE.md, and the harness's own memories carried over once from wherever it ran before |
+| `src/opencode.ts` | Kuru on OpenCode, the half that touches the disk: kururu's plugin, which posts the same `/api/report`s Claude Code's hooks do, and the config and role written into Kuru's folder before each start. See [harness](harness.md#on-opencode) |
+| `src/hooks.ts` | The hooks kururu hands a Claude Code it starts in a profile with a login of its own, whose empty `settings.json` would otherwise run it with none |
+| `src/outbox.ts` | Your words on their way to Kuru, kept on the disk from the moment they arrive until Kuru's own hook says it has them. See [voice](voice.md) |
 | `src/mcp.ts` | Five methods of MCP over JSON-RPC, written out rather than the SDK. Pure; served at `POST /mcp` for the harness and `POST /mcp/web` for every agent |
 | `src/voice.ts` | The harness's ears and mouth: a clip through `yap` once per language, the words into the harness; a reply through Kokoro (or `say`) a sentence at a time, Spanish phonemised by `espeak-ng`. `/api/voice/hear`, `/api/speech` (`shared/voice.ts`) |
 | `src/kuru.ts` | The conversation assembled for the drawer, from the store's turns, the outbox and the voice's missed list — the `kuru` message, `GET /api/kuru`, its search and the page around a result (`/api/kuru/search`, `/api/kuru/around`), the counts on `/api/health` |
 | `src/channels.ts` | What each channel hears of Kuru's turns: told what Kuru took in and said, decides whether a reply is spoken here, echoes your words from here, says when a channel's message failed |
 | `src/telegram.ts` | The Telegram bot: its token owner-only in `~/.config/kururu/telegram.json`, read per request and never sent back; the long poll (no webhook, nothing listens); the queue out; pairing; shared among nodes, the routing, the held messages, the reply map, the lines handed to the reader and the handover. `KURURU_TELEGRAM_API` points it at a stand-in |
+| `src/connectbudget.ts` | How long one address gets to answer when this process connects: 2.5 s, not Node's 250 ms, set before anything else is imported. Why Telegram's replies once sat nine minutes |
 | `src/lead.ts` | One Telegram among the nodes: runs `LeadGate` on the links, the `lead-*` handshake that moves the poll, and the chat's words (`telegram-in`) and every Kuru's lines (`telegram-out`) crossing them. See [nodes](nodes.md#one-telegram) |
 | `src/reload.ts` | Agents' reload asks: sent to every page on this Mac, timed, answered with what each page did. Reloads nothing itself |
 | `src/kokoro.ts` | Kokoro in a process of its own (`dist/kokoro.mjs`), forked by `voice.ts` and talked to over IPC. Never exits the ordinary way: its ONNX runtime aborts on exit, so it ends by SIGKILL |
+| `src/voicelab.ts` | The voice lab's trial engines, each in a process of its own the way Kokoro is, started for the first sentence that wants one and ended with SIGKILL |
 | `src/devservers.ts` | lsof + ps discovery of what is listening, and what started it — and stopping one: the named command's tree, never a terminal's (`stopTargets`). Never kururu itself (`isKururu`) |
 | `src/drops.ts` | `POST /api/drop`'s write: a pasted picture or a phone's file kept `0600` in `drops/` under the data directory, never over another, never backed up |
 | `src/pictures.ts` | the Telegram chat's pictures on disk: `telegram/inbox/` for what came in, a checked copy in `telegram/outbox/` for what goes out, HEIC to JPEG, and which folders a picture may go out from |
@@ -233,7 +246,7 @@ for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` (the windo
 keymap, so it cannot document a dead key) · `VoicePill.tsx` (the microphone is
 open, and this is how loud the room is; dragged anywhere, ✕ or Esc to stop Kuru, a tap opens the drawer) ·
 `ReloadNotice.tsx` (who reloaded the window and why, for ten seconds after an agent did) ·
-`KuruDrawer.tsx` (the conversation with Kuru: every message's state, every reply's fate, a composer, the Telegram switch; opened by Kuru's chip in `DrawerChips.tsx`) · Settings is `web/src/settings/`, not a component: `ui.tsx` is the language every page is written in (a group is a card of rows; a row is a label and one control of a dozen kinds; the in-place danger question; lists, galleries, steps, details), `Settings.tsx` the shell and the list of pages, and one file per page (`Channels.tsx` is the Telegram walkthrough, `Firecrawl.tsx` the Firecrawl one), and `Secrets.tsx` the lent secrets as four pages draw them: a child's grants under Nodes (kururu's keys, then a project's env files, ssh hosts and GitHub logins, and *Lend a workspace's env files*), what a child holds, the *Held from* line a key's page draws in place of its field, and Agents' *Lend this login to a node*. `Specs.tsx` is each machine's hardware, read and typed, with its history. `Vault.tsx` is the census of all of it on one page, by name, with *Take back* (not from a phone).
+`KuruDrawer.tsx` (the conversation with Kuru: every message's state, every reply's fate, a composer, the Telegram switch; opened by Kuru's chip in `DrawerChips.tsx`) · Settings is `web/src/settings/`, not a component: `ui.tsx` is the language every page is written in (a group is a card of rows; a row is a label and one control of a dozen kinds; the in-place danger question; lists, galleries, steps, details), `Settings.tsx` the shell and the list of pages, and one file per page (`Channels.tsx` is the Telegram walkthrough, `Web.tsx` the web chain's), and `Secrets.tsx` the lent secrets as four pages draw them: a child's grants under Nodes (kururu's keys, then a project's env files, ssh hosts and GitHub logins, and *Lend a workspace's env files*), what a child holds, the *Held from* line a key's page draws in place of its field, and Agents' *Lend this login to a node*. `Specs.tsx` is each machine's hardware, read and typed, with its history. `Vault.tsx` is the census of all of it on one page, by name, with *Take back* (not from a phone).
 
 ## `desktop/` — Electron main + preload, and the esbuild step
 
@@ -249,6 +262,8 @@ open, and this is how loud the room is; dragged anywhere, ✕ or Esc to stop Kur
 | `desktop.js` | `desktop.json`: where the server runs from, whether the hook is on, where the pill was left, which cards are note windows and where |
 | `connect.html` | The one page kururu draws itself — the address picker |
 | `servers.js` | Addresses you have connected to, and what a typed one means |
+| `nodes.js` | The other kururus as the tray's "Open <node>" and the picker offer them, asked of the local server; a node that can be driven from here opens on its own Settings |
+| `globals.d.ts` | Types for the JavaScript half only: a `null` timer may be cleared. `tsconfig.js.json` at the root checks every file here and `server/*.mjs` |
 | `preload.js` | Two bridges in one file, split on `file:`; `voice` is the hook's half, `notes` the note windows' |
 | `build.mjs` | `server/src` → `dist/{server,ptyhostd,report,kokoro}.mjs`; stamps the version. `talkkey/build.mjs` compiles the hook beside them |
 | `brand.mjs` | postinstall: stamps and re-signs the Electron copy in `node_modules` |

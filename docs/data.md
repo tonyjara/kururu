@@ -181,7 +181,7 @@ be on; a repository nobody can push to failing quietly every five minutes
 is the one way a backup is worse than none.
 
 **An allow-list, not a deny-list** (`shared/backup.ts`). The config
-directory holds a share token, an OpenRouter key, an Anthropic Admin key, a Telegram bot token, the
+directory holds a share token, an OpenRouter key, a Telegram bot token, the
 web providers' keys, the
 leftovers of the removed accounts feature with ssh keys in them, and every
 profile's Claude login. The files that go are named by name, and anything not named stays:
@@ -225,7 +225,7 @@ through the same importer, and puts config, memory folders and the
 arrangement back — only where nothing is, unless `--replace`, which moves
 what is there to `.bak` first. It refuses to run while a server is up, and
 ends by printing what the backup never carried: a login per profile, the
-OpenRouter key, the Anthropic Admin key and balance, the web providers' keys, the Telegram token and account, Input
+OpenRouter key, the web providers' keys, the Telegram token and account, Input
 Monitoring.
 
 ## The usage ledger
@@ -457,3 +457,15 @@ carry.
 else. Both run it through `gitcmd.ts`: one timeout, one reading of what git
 said, `GIT_TERMINAL_PROMPT=0` so nothing ever waits on a password nobody is
 there to type, and batch-mode ssh for the pushes. Neither forces anything.
+
+Those are the two in a running server. Two commands run git as well, and
+neither is the server: `bun run restore` (`restore-cli.ts`, through
+`gitcmd.ts`) clones or pulls the backup repository onto a new machine, and
+`kururu child update` (`tools/kururu.mjs`) runs `git pull --ff-only` on
+kururu's own checkout and refuses a dirty one.
+
+"What git said" is the first line of its stderr, as the error's message, and
+all of it beside on a `GitError`. A refused push is the case that needs the
+rest: it opens with `To <remote>` and says `rejected` below, and until the
+backup read the whole of it, a remote with another machine's commits was
+reported as a push to be tried again rather than a stop.

@@ -168,8 +168,8 @@ To put it all back on a new Mac: clone kururu, then
 
 and onto a fresh child, on that box: \`bun run restore <URL> --node <name>\`.
 
-Then \`/login\` in each profile, paste the OpenRouter key, the Anthropic Admin key
-and balance (Settings → Claude API) and the web providers' keys (Settings → Web) in Settings, set
+Then \`/login\` in each profile, paste the OpenRouter key (Settings → OpenRouter)
+and the web providers' keys (Settings → Web), set
 Telegram up again in Settings → Channels if you used it, and approve Input
 Monitoring for the talk key. A child restored this way is paired again, and
 then ticked again in the Mac's Settings → Nodes → Secrets for whatever it
