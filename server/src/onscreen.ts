@@ -25,6 +25,7 @@ import { remoteShellOf } from "../../shared/machines";
 import type { AgentReport, AgentStatus } from "../../shared/model";
 import { screenText } from "./harness";
 import type { HostLink } from "./hostlink";
+import { sweep } from "./sweep";
 
 /** Often enough that a turn's end is heard about in seconds, seldom enough to cost nothing. */
 const POLL_MS = 2000;
@@ -48,7 +49,7 @@ export class OnScreen {
 
   start(): void {
     if (this.timer) return;
-    this.timer = setInterval(() => void this.tick(), POLL_MS);
+    this.timer = setInterval(sweep("remote screens", () => this.tick()), POLL_MS);
     this.timer.unref?.();
   }
 

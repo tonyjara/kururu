@@ -41,6 +41,7 @@ import { OWNED, writeMirror, writeTree } from "./export";
 import { git, GitError } from "./gitcmd";
 import type { Store } from "./store";
 import type { Ledger } from "./usage/store";
+import { sweep } from "./sweep";
 
 const FILE = "backup.json";
 /** A push over a slow link; past this it is a push that is not going to happen. */
@@ -141,9 +142,10 @@ export class Backup {
     this.timer = null;
     if (!this.settings.enabled) return;
     const every = Math.max(BACKUP_INTERVAL_MIN, this.settings.intervalMin) * 60_000;
-    this.timer = setInterval(() => void this.tick(), every);
+    const tick = sweep("backup", () => this.tick());
+    this.timer = setInterval(tick, every);
     this.timer.unref();
-    setTimeout(() => void this.tick(), FIRST_LOOK_MS).unref();
+    setTimeout(tick, FIRST_LOOK_MS).unref();
   }
 
   private async tick(): Promise<void> {

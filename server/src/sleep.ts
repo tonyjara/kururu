@@ -45,6 +45,7 @@ import { screenText } from "./harness";
 import type { HostLink } from "./hostlink";
 import { codexRolloutsOn, sessionTailOn } from "./machines";
 import { claudeTranscriptPath, codexRolloutPath, findCodexRollout, readTail } from "./sessions";
+import { sweep } from "./sweep";
 
 /** A card whose run has a terminal, and where the card is. */
 export interface CardAt {
@@ -112,7 +113,7 @@ export class Sleeper {
 
   start(): void {
     if (this.timer) return;
-    this.timer = setInterval(() => void this.tick(), SLEEP_TICK_MS);
+    this.timer = setInterval(sweep("idle cards", () => this.tick()), SLEEP_TICK_MS);
     this.timer.unref?.();
   }
 

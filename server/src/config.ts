@@ -57,7 +57,7 @@ export function readConfigFile(name: string): unknown {
  * `writeFileSync`'s own option, which only applies when the file is created and
  * so would not apply to a temp left behind by a crash.
  */
-export function writeConfigFile(name: string, value: unknown, mode?: number): void {
+export function writeConfigFile(name: string, value: unknown, mode?: number): boolean {
   const path = configPath(name);
   try {
     mkdirSync(configDir(), { recursive: true });
@@ -65,8 +65,14 @@ export function writeConfigFile(name: string, value: unknown, mode?: number): vo
     writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode });
     if (mode !== undefined) chmodSync(temp, mode);
     renameSync(temp, path);
-  } catch {
-    // Settings that could not be saved are still settings for now.
+    return true;
+  } catch (err) {
+    // Settings that could not be saved are still settings for now — but only
+    // until the next start, and this is the write path for the pasted keys and
+    // the roster, so it is said. The error's message names the path and the
+    // errno, never the value, which for half of these files is a secret.
+    console.error(`kururu: could not save ${name}: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
   }
 }
 

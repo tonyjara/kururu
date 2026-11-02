@@ -80,6 +80,7 @@ import {
   type VoiceLang,
 } from "../../shared/voice";
 import type { ServerMessage } from "../../shared/wire";
+import { sweep } from "./sweep";
 
 /** How long Kuru may sit between turns with a typed message it never took before that message is typed again. Its prompt hook takes a moment; a turn starting is a status change. */
 const CONFIRM_MS = 15_000;
@@ -618,7 +619,7 @@ export class Outbox {
   private watch(): void {
     // Another node's words are its outbox's to confirm, and it reports.
     const waiting = this.entries.some((e) => e.state === "queued" && e.typedAt !== null && !this.peerOf(e));
-    if (waiting && !this.checker) this.checker = setInterval(() => void this.check(), CHECK_MS).unref();
+    if (waiting && !this.checker) this.checker = setInterval(sweep("outbox", () => this.check()), CHECK_MS).unref();
     else if (!waiting && this.checker) {
       clearInterval(this.checker);
       this.checker = null;

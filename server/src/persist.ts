@@ -226,8 +226,10 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
     const temp = `${path}.tmp`;
     writeFileSync(temp, JSON.stringify(session, null, 2), "utf8");
     renameSync(temp, path);
-  } catch {
-    // A layout that could not be saved is not worth failing a launch over.
+  } catch (err) {
+    // A layout that could not be saved is not worth failing a launch over,
+    // but it is worth a line: the next start restores the last one that was.
+    console.error(`kururu: could not save the layout to ${path}: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

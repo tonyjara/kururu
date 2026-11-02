@@ -34,6 +34,7 @@ import { fitsRemoteDir } from "../../../shared/machines";
 import { matchRollouts, ROLLOUT_EARLY_REMOTE_MS, type LaunchRow, type RolloutSeen, type SessionKind, type UsageProgram, type WaitingLaunch } from "../../../shared/usage";
 import { rolloutsSince } from "../sessions";
 import type { Ledger } from "./store";
+import { sweep } from "../sweep";
 
 /** How often a launch still waiting for its id is looked for. It costs a `select` when none is. */
 const WAITING_MS = 60_000;
@@ -77,7 +78,7 @@ export class Launches {
   }
 
   start(): void {
-    this.interval = setInterval(() => void this.lookForWaiting(), WAITING_MS);
+    this.interval = setInterval(sweep("usage attribution", () => this.lookForWaiting()), WAITING_MS);
     this.interval.unref?.();
   }
 

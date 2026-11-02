@@ -72,6 +72,7 @@ import {
 import { readConfigFile, writeConfigFile } from "../config";
 import type { McpResult, McpTool } from "../mcp";
 import { webProviderDefs, type ProviderDeps, type StepAnswer, type WebProvider } from "./provider";
+import { sweep } from "../sweep";
 
 const SETTINGS_FILE = "web.json";
 const RECENT_FILE = "web-usage.json";
@@ -226,7 +227,7 @@ export class WebChain {
   /** The timer that keeps health and figures fresh while somebody is looking. Unref'd: a question is never a reason to stay up. */
   start(): void {
     if (this.tick) return;
-    this.tick = setInterval(() => void this.refresh(), TICK_MS);
+    this.tick = setInterval(sweep("web providers", () => this.refresh()), TICK_MS);
     this.tick.unref();
     void this.refresh(true);
   }

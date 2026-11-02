@@ -348,6 +348,7 @@ import { adoptReaders, readSnapshot, snapshotPath, writeSnapshot } from "./persi
 import { closeAllPreviews, closePreview, openPreview, openPreviews } from "./proxy";
 import { reach } from "./reach";
 import { smallestGrid, type Grid } from "./sizing";
+import { sweep } from "./sweep";
 import { checkForUpdate } from "./update";
 import { WindowReloads } from "./reload";
 import {
@@ -4748,20 +4749,25 @@ function webAgentName(agentId: string): string | null {
  * these that leaves the machine at all. It is out here with the rest because it
  * is the same shape — a question with no event behind it — and a minute apart
  * rather than seconds because it is measuring a five-hour window.
+ *
+ * Each goes through `sweep`, which catches and logs, because a rejection here
+ * is an unhandled one and Node ends the server over it.
  */
+const sweepDevServers = sweep("dev servers", pollDevServers);
+const sweepBranches = sweep("branches", pollBranches);
 const timers = [
-  setInterval(() => void pollDevServers(), DEV_SCAN_MS),
-  setInterval(() => void pollBranches(), GIT_SCAN_MS),
-  setInterval(() => void pollEditors(), NVIM_SCAN_MS),
-  setInterval(() => void pollMemory(), MEM_SCAN_MS),
-  setInterval(() => void pollAccountUsage(), USAGE_POLL_MS),
-  setInterval(() => void pollServers(), MACHINE_POLL_MS),
-  setInterval(() => void pollOpenRouterAccount(), OPENROUTER_POLL_MS),
-  setInterval(sweepMade, MADE_SWEEP_MS),
+  setInterval(sweepDevServers, DEV_SCAN_MS),
+  setInterval(sweepBranches, GIT_SCAN_MS),
+  setInterval(sweep("editors", pollEditors), NVIM_SCAN_MS),
+  setInterval(sweep("memory", pollMemory), MEM_SCAN_MS),
+  setInterval(sweep("usage bar", pollAccountUsage), USAGE_POLL_MS),
+  setInterval(sweep("machines", pollServers), MACHINE_POLL_MS),
+  setInterval(sweep("OpenRouter", pollOpenRouterAccount), OPENROUTER_POLL_MS),
+  setInterval(sweep("made links", sweepMade), MADE_SWEEP_MS),
 ];
 
-void pollDevServers();
-void pollBranches();
+void sweepDevServers();
+void sweepBranches();
 
 // ---------------------------------------------------------------------------
 // WebSocket
@@ -7656,7 +7662,10 @@ async function nodeRead(res: ServerResponse, node: string, op: string, query: UR
 // ---------------------------------------------------------------------------
 
 function onRequest(req: IncomingMessage, res: ServerResponse): void {
-  void handleRequest(req, res).catch(() => {
+  void handleRequest(req, res).catch((err: unknown) => {
+    // The path without its query, which is where a share token or a search would be.
+    const path = (req.url ?? "").split("?")[0];
+    console.error(`kururu: ${req.method ?? "?"} ${path} failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
     if (!res.headersSent) text(res, "kururu: internal error", 500);
     else res.destroy();
   });

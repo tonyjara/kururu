@@ -8,7 +8,7 @@
  * at any more, so it goes round the trip unchanged, and a file from before it
  * existed comes back with a fresh one rather than none.
  */
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -52,6 +52,23 @@ describe("loginKey on disk", () => {
     expect(old!.loginKey).toMatch(LOGIN_KEY);
     expect(tampered!.loginKey).toMatch(LOGIN_KEY);
     expect(tampered!.loginKey).not.toBe(old!.loginKey);
+  });
+});
+
+describe("a save that fails", () => {
+  it("is said on stderr rather than swallowed, and does not throw", () => {
+    // A file where the state directory should be: mkdir fails, as on a full or read-only disk.
+    writeFileSync(join(dir, "blocked"), "");
+    process.env.KURURU_STATE_DIR = join(dir, "blocked");
+    const errors = spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const workspaces = new Workspaces();
+      expect(() => writeSnapshot(workspaces.all(), workspaces.active.id)).not.toThrow();
+      expect(errors).toHaveBeenCalledTimes(1);
+      expect(String(errors.mock.calls[0]?.[0])).toContain("could not save the layout");
+    } finally {
+      errors.mockRestore();
+    }
   });
 });
 
