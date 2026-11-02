@@ -61,8 +61,6 @@ import { StatusBar, WorkspaceToggle } from "./components/StatusBar";
 import { DrawerChips } from "./components/DrawerChips";
 import { VoicePill } from "./components/VoicePill";
 import { ReloadNotice } from "./components/ReloadNotice";
-import { installReload } from "./reload";
-import { isLoopback } from "./preview";
 import { KuruDrawer } from "./components/KuruDrawer";
 import { closeKuru, kuruLive, leaveKuruSearch, openKuru, quoteInKuru, referCardIn, searchInKuru, toggleKuru, useKuruDrawer } from "./kuru";
 import { closeNeeds, toggleNeeds, useNeedsDrawer } from "./needs";
@@ -76,30 +74,25 @@ import { nextNeedAcross, nodeNeeds as nodeNeedsOf, parseRemote, qualify, workspa
 import { nodesNeedCount, WATCH_READS, type NodesView } from "../../shared/nodes";
 import { visibleLaunchers } from "../../shared/launchers";
 import { showCardNext } from "./components/Board";
-import type { VoiceGlobalState } from "./desktop";
-import { installSpeech, installTalkKey, setSpeechVolume, setVoiceProfile, setVoiceRemote, useVoiceUi } from "./voice";
-import { DEFAULT_VOICE } from "../../shared/voice";
-import {
-  actionFor,
-  drawerChord,
-  isModifier,
-  isPrefix,
-  keyName,
-  workspaceDigit,
-  PREFIX_BYTE,
-  PREFIX_TIMEOUT_MS,
-  type Action,
-} from "./keys";
+import { useVoiceUi } from "./voice";
+import { actionFor, isModifier, isPrefix, keyName, workspaceDigit, PREFIX_BYTE, PREFIX_TIMEOUT_MS, type Action } from "./keys";
 import { desktop } from "./desktop";
-import { isFileDrag } from "./drop";
-import { announce, primeAudio, primeNotifyPermission } from "./notify";
 import { agentLabel, basename, tabLabel } from "./labels";
-import { applyAppearance } from "./theme";
 import { skinFor } from "../../shared/skin";
 import * as api from "./session";
 import type { MachinePin, MachineStatus } from "../../shared/machines";
 import { useKururu } from "./session";
 import * as terminals from "./terminals";
+import {
+  useAppearance,
+  useCommandChords,
+  useFileDropGuard,
+  useNarrowLayout,
+  useNotifyWiring,
+  useReloadGate,
+  useRemembered,
+  useVoiceWiring,
+} from "./wiring";
 
 /** How far one press of a resize key moves a divider. */
 const NUDGE = 0.03;
@@ -565,120 +558,20 @@ export function App() {
     else goToNodeNeed(next.there);
   }, [queue, nodes, onScreen, workspace, remote, goToNeed, goToNodeNeed]);
 
-  /**
-   * Wear whatever the server says. The chrome's tokens go onto the root element
-   * and the palette goes to every pooled emulator, neither of which is anything
-   * React draws — which is the point of doing it in an effect rather than in the
-   * tree. A theme is a property of the document, and threading forty colours
-   * through a context so that components could re-render to learn them would be
-   * paying a render of the whole window for something the cascade does for free.
-   *
-   * Keyed on the appearance *serialized*, and that is not laziness. A snapshot
-   * goes out on every status tick and arrives as JSON, so the object is a new
-   * one several times a second however little has changed — keying on it would
-   * ask every pooled emulator whether its font had moved twice a second, for the
-   * lifetime of the window. Five fields stringified is the cheapest thing that
-   * is actually stable.
-   */
-  const appearance = snapshot?.appearance;
-  /**
-   * The installed styles are in the key as well, because the *same* appearance
-   * means a different window once one is installed or removed: the ids in
-   * `appearance` do not move when a theme arrives under one of them, and without
-   * this the palette that was just downloaded would sit there unapplied until
-   * something else changed. Their versions rather than the whole library, on the
-   * reasoning above — a palette stringified several times a second is the cost
-   * this key exists to avoid.
-   */
-  const styles = snapshot?.styles;
-  const appearanceKey = appearance
-    ? JSON.stringify(appearance) + (styles?.installed.map((s) => `${s.kind}/${s.id}@${s.version}`).join() ?? "")
-    : null;
-  useEffect(() => {
-    if (!appearance) return;
-    /**
-     * A palette the emulators cannot be talked out of — see
-     * `applyTerminalAppearance`, which explains why a colour is settled inside
-     * the wasm and why nothing short of new terminals moves one. Reloading is
-     * the only lever, and this is the layer that should pull it: the dialog
-     * somebody picked the theme in is this component's state and nobody else's.
-     *
-     * Safe to do the instant it is reported, because the appearance arrives on
-     * a *snapshot*. The server has already written it down, so the window that
-     * comes back reads the new theme as the one it was always on — which is
-     * also why this cannot loop: the reload lands on a first application, and a
-     * first application is never a change.
-     */
-    if (applyAppearance(appearance, styles)) {
-      keepSettings(settings);
-      location.reload();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appearanceKey]);
+  useAppearance(snapshot, () => keepSettings(settings));
 
-  /**
-   * Tell the stylesheet which shape the window is in.
-   *
-   * An attribute on the root rather than a `@media` rule of its own, so the
-   * breakpoint is stated once — see `NARROW` above. It is the same trick
-   * `theme.ts` and `skin.ts` use for a different reason: the cascade is the
-   * cheapest way to tell several hundred rules something, and it costs no
-   * render at all.
-   */
-  useEffect(() => {
-    document.documentElement.toggleAttribute("data-narrow", narrow);
-  }, [narrow]);
+  useNarrowLayout(narrow, kuruDrawer.open, setSidebarOpen, setFilesSheet);
 
   // Remembered per device, for the reason the sidebar's width is. Storage that
   // refuses to answer is a bar that comes back next time, not an error.
-  useEffect(() => {
-    try {
-      localStorage.setItem(KEYBAR_KEY, keybarOpen ? "1" : "0");
-    } catch {
-      // A private window keeps the default. Nothing here is worth a dialog.
-    }
-  }, [keybarOpen]);
+  useRemembered(KEYBAR_KEY, keybarOpen ? "1" : "0");
 
   /** Give the window back to the keyboard when one is up. See `useKeyboardInset`. */
   useKeyboardInset();
 
-  /**
-   * Crossing the breakpoint decides for you, once.
-   *
-   * Going narrow closes the sidebar, because a sidebar that is a full-screen
-   * overlay is not something to leave standing over the panes; coming back wide
-   * opens it, because a column beside them is the ordinary state of the window.
-   * Only on the *crossing* — a deliberate `toggle-sidebar` either side of it
-   * survives until the window changes shape again, which is the difference
-   * between the layout having an opinion and the layout overruling you.
-   */
-  useEffect(() => {
-    setSidebarOpen(!narrow);
-  }, [narrow]);
-
   /** The tree's two, remembered the same way. Only a wide window's choice is kept. */
-  useEffect(() => {
-    try {
-      localStorage.setItem(FILES_WIDTH_KEY, String(filesWidth));
-      localStorage.setItem(FILES_OPEN_KEY, JSON.stringify([...filesOpenIn]));
-    } catch {
-      // As for the sidebar: no storage is a default, not a failure.
-    }
-  }, [filesWidth, filesOpenIn]);
-  useEffect(() => {
-    if (narrow) setFilesSheet(false);
-  }, [narrow]);
-
-  /**
-   * One sheet at a time on a phone: the drawer opening puts the sidebar and
-   * the tree away, as the board does. On a desktop it is a panel beside
-   * them and nothing moves.
-   */
-  useEffect(() => {
-    if (!narrow || !kuruDrawer.open) return;
-    setSidebarOpen(false);
-    setFilesSheet(false);
-  }, [narrow, kuruDrawer.open]);
+  useRemembered(FILES_WIDTH_KEY, String(filesWidth));
+  useRemembered(FILES_OPEN_KEY, JSON.stringify([...filesOpenIn]));
 
   /**
    * The desktop asking for the drawer: the floating pill was clicked, or the
@@ -749,13 +642,7 @@ export function App() {
   }, []);
 
   /** Remembered the same way as the tree's. */
-  useEffect(() => {
-    try {
-      localStorage.setItem(DRAWER_WIDTH_KEY, String(drawerWidth));
-    } catch {
-      // No storage is a drawer that opens at the default width, not a failure.
-    }
-  }, [drawerWidth]);
+  useRemembered(DRAWER_WIDTH_KEY, String(drawerWidth));
 
   /** A width proposed by either drawer's grip, held between the floor and the ceiling. */
   const resizeDrawer = useCallback((px: number) => {
@@ -763,13 +650,7 @@ export function App() {
   }, []);
 
   /** Remember the width for the next time this browser opens kururu. */
-  useEffect(() => {
-    try {
-      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
-    } catch {
-      // No storage is a window that opens at the default width, not a failure.
-    }
-  }, [sidebarWidth]);
+  useRemembered(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
 
   /**
    * A width proposed by the drag handle, held between the floor and the ceiling.
@@ -811,88 +692,11 @@ export function App() {
     api.watch(visible);
   }, [visible]);
 
-  /**
-   * Make the noise and draw the card when the server says somebody is wanted.
-   *
-   * Registered once, and the settings are read through a ref rather than
-   * captured, for the reason the appearance effect is keyed on a string: a
-   * snapshot arrives several times a second and is a new object every time, so
-   * a dependency on it would tear this subscription down and rebuild it at that
-   * rate forever. Nothing is lost by reading late — a notification is answered
-   * with whatever the settings are at the moment it arrives, which is the only
-   * sensible reading of them.
-   *
-   * No policy here. Everything that decides *whether* is in `shared/notify.ts`
-   * and has already run on the server; a message that got this far passed.
-   */
-  const notifySettings = snapshot?.notify;
-  const notifyRef = useRef(notifySettings);
-  notifyRef.current = notifySettings;
-  useEffect(() => {
-    // The browser will not let a page make a noise until it has been touched,
-    // and there is no way to ask whether it has — so be there when it happens.
-    primeAudio();
-    // And ask for the cards on that same first touch, so somebody opening kururu
-    // for the first time is asked rather than finding out months later that the
-    // notifications they never saw were a permission nobody had requested. The
-    // gesture matters: Safari ignores an ask without one, and a prompt raised
-    // while the window is still drawing gets dismissed — which is `denied`, and
-    // a page cannot take that back.
-    primeNotifyPermission();
-    return api.onNotify((card) => {
-      const settings = notifyRef.current;
-      if (settings) announce(card, settings);
-    });
-  }, []);
+  useNotifyWiring(snapshot?.notify);
 
-  /**
-   * The voice: the talk key on the window, and what Kuru says off the socket.
-   *
-   * Installed once and read through refs rather than re-installed on every
-   * change of settings or profile, for the prefix listener's reason in
-   * reverse: this one must *not* move to the back of the capture list, since
-   * a key held across a re-render would lose its key-up. The module holds the
-   * microphone and the player; see `voice.ts`.
-   */
-  const voiceRef = useRef(voice);
-  voiceRef.current = voice;
-  const profileRef = useRef(snapshot?.profile.id ?? "");
-  profileRef.current = snapshot?.profile.id ?? "";
-  useEffect(() => {
-    setVoiceProfile(() => profileRef.current);
-    setSpeechVolume(() => voiceRef.current?.settings.volume ?? DEFAULT_VOICE.volume);
-    const stopKey = installTalkKey(() => voiceRef.current?.settings.talkKey ?? DEFAULT_VOICE.talkKey);
-    const stopSpeech = installSpeech();
-    /**
-     * In the desktop window, whether the key is hooked system-wide. While it
-     * is, the floating pill is the voice client and this page hands its
-     * gestures over; the moment the hook is denied or dies, this page's own
-     * handler is back, so the key never fires twice and never fires nowhere.
-     */
-    const bridge = desktop()?.voice ?? null;
-    const follow = (state: VoiceGlobalState) => setVoiceRemote(state.live && bridge ? (gesture) => bridge.gesture(gesture) : null, state.phase);
-    let stopGlobal = () => {};
-    if (bridge) {
-      void bridge.global().then(follow);
-      stopGlobal = bridge.onGlobal(follow);
-    }
-    return () => {
-      stopKey();
-      stopSpeech();
-      stopGlobal();
-      setVoiceRemote(null);
-    };
-  }, []);
+  useVoiceWiring(voice, snapshot?.profile.id ?? "");
 
-  /**
-   * Agents may ask this page to reload, and it does once that is safe — see
-   * `reload.ts`. The desktop window and a browser on this Mac; never a page
-   * on another device, which is somebody's phone and reloads when they say.
-   */
-  useEffect(() => {
-    const page = desktop() ? "window" : isLoopback(location.hostname) ? "tab" : null;
-    return page ? installReload(page) : undefined;
-  }, []);
+  useReloadGate();
 
   /**
    * And let go of the emulators of terminals that no longer exist.
@@ -1516,67 +1320,9 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [prefixArmed, resizeMode, dialog, editing, help, settings, reach, profileMenu, profileBoard, databasesFor, kuruDrawer.open, needsOpen, workspace, onScreen, keymap, run, arm, disarm]);
 
-  /**
-   * A file dropped anywhere that is not a terminal does nothing.
-   *
-   * This is a guard, not a feature. A web page's default answer to a dropped
-   * file is to navigate to it, and this page is the whole application — so a
-   * screenshot missing the pane by ten pixels would replace kururu with a
-   * picture of a screenshot, and take every terminal on screen with it. The
-   * agents would survive, being processes on the other end; the window would
-   * not.
-   *
-   * Bubble phase on purpose, so `Terminal.tsx` gets the drop first and this only
-   * ever sees the ones that missed. And only for file drags: kururu's own tab
-   * and pane drags carry custom MIME types and must keep reaching their own drop
-   * zones untouched.
-   */
-  useEffect(() => {
-    const swallow = (event: DragEvent) => {
-      if (isFileDrag(event.dataTransfer)) event.preventDefault();
-    };
-    window.addEventListener("dragover", swallow);
-    window.addEventListener("drop", swallow);
-    return () => {
-      window.removeEventListener("dragover", swallow);
-      window.removeEventListener("drop", swallow);
-    };
-  }, []);
+  useFileDropGuard();
 
-  /**
-   * The ⌘ shortcuts, kept from before the prefix existed. A second door: ⌘W and
-   * ⌘R stay Electron's, which is why closing a pane is ⇧⌘W. ⌘, and ⌘. are
-   * the ones added since, for the two drawers — see `drawerChord`.
-   */
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (!event.metaKey || event.ctrlKey) return;
-      const key = event.key.toLowerCase();
-      const take = () => {
-        event.preventDefault();
-        event.stopPropagation();
-      };
-      const drawer = drawerChord(event);
-      if (drawer) {
-        take();
-        run(drawer);
-      } else if (key === "d") {
-        take();
-        run(event.shiftKey ? "split-down" : "split-right");
-      } else if (key === "t" && !event.shiftKey) {
-        take();
-        run("new-tab");
-      } else if (key === "w" && event.shiftKey) {
-        take();
-        run("close-pane");
-      } else if (key === "[" || key === "]") {
-        take();
-        api.stepPane(key === "]" ? 1 : -1);
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [run]);
+  useCommandChords(run);
 
   // -------------------------------------------------------------------------
 
