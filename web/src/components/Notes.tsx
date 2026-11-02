@@ -476,8 +476,9 @@ export function NoteInside({
         {card ? (
           <>
             {agent && <Status agent={agent} mascot={mascot} />}
-            <span className="note-code">{code}</span>
-            <span className="note-title">{card.title}</span>
+            <span className="note-title" title={card.title}>
+              {card.title}
+            </span>
           </>
         ) : (
           <span className="note-title note-title-gone">Card gone</span>
@@ -527,6 +528,7 @@ export function NoteInside({
         (card ? (
           <>
             <div className="note-meta">
+              <span className="note-code">{code}</span>
               {lane ? (
                 <>
                   <span className="board-col-dot" aria-hidden="true" />

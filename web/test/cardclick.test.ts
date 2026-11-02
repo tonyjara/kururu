@@ -142,17 +142,17 @@ function el(
 describe("ownClick", () => {
   const keep = ["board-run", "board-made", "board-card-note"];
   const article = el("article", el("div", null), { classes: ["board-card"] });
-  const top = el("div", article, { classes: ["board-card-top"] });
+  const foot = el("div", article, { classes: ["board-card-foot"] });
 
   it("takes a click on the card itself, its title, its body and its dates", () => {
     expect(ownClick(article, article, keep)).toBe(true);
-    expect(ownClick(el("span", top, { classes: ["board-card-title"] }), article, keep)).toBe(true);
+    expect(ownClick(el("span", article, { classes: ["board-card-title"] }), article, keep)).toBe(true);
     expect(ownClick(el("p", el("div", article), { classes: ["board-card-body"] }), article, keep)).toBe(true);
     expect(ownClick(el("span", article, { classes: ["board-card-when"] }), article, keep)).toBe(true);
   });
 
   it("leaves a button, and anything inside one, to the button", () => {
-    const actions = el("span", top, { classes: ["board-card-actions"] });
+    const actions = el("span", foot, { classes: ["board-card-actions"] });
     const robot = el("button", actions);
     expect(ownClick(robot, article, keep)).toBe(false);
     expect(ownClick(el("svg", robot), article, keep)).toBe(false);

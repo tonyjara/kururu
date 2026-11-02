@@ -833,41 +833,10 @@ const CardView = memo(function CardView({
           verbs.current.menu(card, { x: event.clientX, y: event.clientY });
         }}
       >
-        <div className="board-card-top">
-          <span className="board-card-code">{code}</span>
-          <span ref={opening.titleRef} className="board-card-title" {...(quoteRef ? quotable(quoteRef, "title") : {})}>
-            {card.title}
-          </span>
-          <span className="board-card-actions">
-            <button
-              className="board-icon-btn board-robot"
-              disabled={running || !canRun}
-              title={
-                running
-                  ? "An agent is already on this card"
-                  : canRun
-                    ? "Hand this card to an agent"
-                    : "Every agent is switched off in Settings → Agents"
-              }
-              aria-label="Hand to an agent"
-              aria-haspopup="menu"
-              onClick={(event) => verbs.current.robot(card, below(event))}
-            >
-              <Icon name="bot" />
-            </button>
-            <button
-              className="board-icon-btn"
-              title="Move, edit or delete"
-              aria-label="Card menu"
-              aria-haspopup="menu"
-              onClick={(event) => verbs.current.menu(card, below(event))}
-            >
-              <Icon name="caret" />
-            </button>
-          </span>
-        </div>
+        <span ref={opening.titleRef} className="board-card-title" {...(quoteRef ? quotable(quoteRef, "title") : {})}>
+          {card.title}
+        </span>
         <CardBody text={card.body} opening={opening} quoteRef={quoteRef} />
-        {card.dates && <CardWhen dates={card.dates} now={day} />}
         {card.worktree ? (
           <TreeLine worktree={card.worktree} />
         ) : (
@@ -902,6 +871,33 @@ const CardView = memo(function CardView({
         {/* The links its agent's row carries, kept here so they outlive the agent —
             after an idle card's agent is ended, this is where the document still is. */}
         {card.made?.length ? <MadeLinks className="board-made" files={card.made} workspaceId={workspaceId} /> : null}
+        <CardFoot code={code} when={card.dates && <CardWhen dates={card.dates} now={day} />}>
+          <button
+            className="board-icon-btn board-robot"
+            disabled={running || !canRun}
+            title={
+              running
+                ? "An agent is already on this card"
+                : canRun
+                  ? "Hand this card to an agent"
+                  : "Every agent is switched off in Settings → Agents"
+            }
+            aria-label="Hand to an agent"
+            aria-haspopup="menu"
+            onClick={(event) => verbs.current.robot(card, below(event))}
+          >
+            <Icon name="bot" />
+          </button>
+          <button
+            className="board-icon-btn"
+            title="Move, edit or delete"
+            aria-label="Card menu"
+            aria-haspopup="menu"
+            onClick={(event) => verbs.current.menu(card, below(event))}
+          >
+            <Icon name="caret" />
+          </button>
+        </CardFoot>
         {error && <p className="board-card-error">{error}</p>}
         {working && (
           <p className="board-card-busy" role="status">
@@ -918,6 +914,33 @@ const CardView = memo(function CardView({
     </>
   );
 }, sameJson);
+
+/**
+ * The last line of a card: its key, whatever else is only ever read about it
+ * — who put it in Needs you, when it is for — and, in the corner, its two
+ * buttons. The title used to share its first line with all of this, and a
+ * key, a pill and a pair of buttons left a profile card's title a third of
+ * the column, cut off at two lines of three words each. A footer is where a
+ * card's metadata is read on every board people already know, and it is
+ * read second: the title is what a column is scanned by, the key is what a
+ * card is referred to by, and the eye finds a small line at the bottom
+ * without it getting in the way of the first. The buttons stay, rather than
+ * leaving the menu to a right-click alone: a phone has a long press, but a
+ * door nobody can see is a door nobody new finds. They sit at the end of the
+ * footer, where they cost the title nothing.
+ */
+export function CardFoot({ code, when, mark, children }: { code: string; when?: React.ReactNode; mark?: React.ReactNode; children?: React.ReactNode }) {
+  return (
+    <div className="board-card-foot">
+      <span className="board-card-meta">
+        <span className="board-card-code">{code}</span>
+        {mark}
+        {when}
+      </span>
+      {children && <span className="board-card-actions">{children}</span>}
+    </div>
+  );
+}
 
 /**
  * The line under a card that has been handed to an agent: whose it is, what it

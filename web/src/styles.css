@@ -5988,18 +5988,32 @@ a.needs-go {
   flex-direction: column;
   gap: 1px;
 }
-.needs-title,
+/* The title keeps two lines rather than one with an ellipsis: a drawer is
+   read on a phone as often as not, and the half of a title that fits on one
+   line there is the half that says which project, not what to do. The line
+   under it stays one line, being a reason and not a name. */
+.needs-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-base);
+}
 .needs-why {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.needs-title {
-  font-size: var(--fs-base);
-}
-.needs-why {
   font-size: var(--fs-sm);
   color: var(--dim);
+}
+/* The card's key, first on the line under the title and in the cards' own
+   face for it, so the eye that knows a key finds it where it is on the board. */
+.needs-code {
+  margin-right: 6px;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
 }
 .needs-row-asking .needs-why {
   color: var(--blocked);
@@ -8774,10 +8788,25 @@ a.st-btn {
   box-shadow: inset 2px 0 0 var(--working);
 }
 
-.board-card-top {
+/* The card's last line (`CardFoot`): its key and what is only ever read about
+   it on the left, its two buttons on the right. The title is a line of its
+   own above all of this, and gets the column's whole width — which is the
+   point of the footer, see the component. The buttons are allowed to be
+   taller than the small text beside them; the text sits centred on them. */
+.board-card-foot {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 6px;
+  min-height: 20px;
+  margin: 0 -2px -2px 0;
+}
+.board-card-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
 }
 /* The robot and the menu, as one pair tucked into the corner. Quiet until the
    card is pointed at, where there is a pointer to point with; a phone has no
@@ -8785,12 +8814,12 @@ a.st-btn {
 .board-card-actions {
   flex: none;
   display: inline-flex;
+  align-self: flex-end;
   gap: 1px;
-  margin: -2px -2px 0 0;
 }
 @media (hover: hover) {
   .board-card-actions {
-    opacity: 0.55;
+    opacity: 0.45;
     transition: opacity 120ms;
   }
   .board-card:hover .board-card-actions,
@@ -8820,19 +8849,15 @@ a.st-btn {
   font-size: var(--fs-lg);
 }
 /* The card's key, `KUR-12`: set in the monospace face so that a column of
-   them lines up and reads as a label rather than as the start of the title. */
+   them lines up and reads as a label rather than as a word of the card. */
 .board-card-code {
   flex: none;
   font-family: var(--mono);
   font-size: var(--fs-xs);
-  /* The title's first line box, so the two sit on one line whatever the sizes. */
-  line-height: calc(var(--fs-md) * 1.35);
   color: var(--dimmer);
   font-variant-numeric: tabular-nums;
 }
 .board-card-title {
-  flex: 1;
-  min-width: 0;
   font-size: var(--fs-md);
   line-height: 1.35;
   overflow-wrap: anywhere;
@@ -8904,7 +8929,6 @@ a.st-btn {
    a date behind today is not a card that is late, since nothing on a board
    knows a card is finished but a person. */
 .board-card-when {
-  align-self: flex-start;
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
   color: var(--dim);
@@ -10090,8 +10114,10 @@ a.st-btn {
   display: inline-flex;
   gap: 1px;
 }
-/* Its column, its board, its dates: the card's place, which the title bar has
-   no room for and a note on its own would otherwise not say. */
+/* Its key, its column, its board, its dates: the card's place, which the
+   title bar has no room for and a note on its own would otherwise not say.
+   The key is here rather than in the bar for the reason the cards keep it in
+   their footer — the bar is the title's. */
 .note-meta {
   flex: none;
   display: flex;

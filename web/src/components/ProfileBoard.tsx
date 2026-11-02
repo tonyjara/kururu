@@ -65,7 +65,7 @@ import { referItem } from "../kuru";
 import { noteItem, popOutNote } from "../notes";
 import { revealCard } from "../reveal";
 import * as api from "../session";
-import { ago, CARD_KEEP, CardBody, CardWhen, Composer, dropDraft, showCardNext, useCardOpen, useComposerInView } from "./Board";
+import { ago, CARD_KEEP, CardBody, CardFoot, CardWhen, Composer, dropDraft, showCardNext, useCardOpen, useComposerInView } from "./Board";
 import { ColorPicker } from "./ColorPicker";
 import { ColumnResizeHandle } from "./ColumnResize";
 import { Icon } from "./Icon";
@@ -660,30 +660,29 @@ function ProfileCard({
           onMenu({ x: event.clientX, y: event.clientY });
         }}
       >
-        <div className="board-card-top">
-          <span className="board-card-code">{code}</span>
-          {card.column === NEEDS_COLUMN && card.needsBy && <NeedsByMark by={card.needsBy} />}
-          <span ref={opening.titleRef} className="board-card-title" {...(quoteRef ? quotable(quoteRef, "title") : {})}>
-            {card.title}
-          </span>
-          <span className="board-card-actions">
-            <button
-              className="board-icon-btn"
-              title="Move, send to a workspace, edit or delete"
-              aria-label="Card menu"
-              aria-haspopup="menu"
-              onClick={(event) => {
-                const box = event.currentTarget.getBoundingClientRect();
-                onMenu({ x: box.left, y: box.bottom + 4 });
-              }}
-            >
-              <Icon name="caret" />
-            </button>
-          </span>
-        </div>
+        <span ref={opening.titleRef} className="board-card-title" {...(quoteRef ? quotable(quoteRef, "title") : {})}>
+          {card.title}
+        </span>
         <CardBody text={card.body} opening={opening} quoteRef={quoteRef} />
-        {card.dates && <CardWhen dates={card.dates} />}
         {opening.open && card.column === NEEDS_COLUMN && <NeedsTimes card={card} />}
+        <CardFoot
+          code={code}
+          mark={card.column === NEEDS_COLUMN && card.needsBy && <NeedsByMark by={card.needsBy} />}
+          when={card.dates && <CardWhen dates={card.dates} />}
+        >
+          <button
+            className="board-icon-btn"
+            title="Move, send to a workspace, edit or delete"
+            aria-label="Card menu"
+            aria-haspopup="menu"
+            onClick={(event) => {
+              const box = event.currentTarget.getBoundingClientRect();
+              onMenu({ x: box.left, y: box.bottom + 4 });
+            }}
+          >
+            <Icon name="caret" />
+          </button>
+        </CardFoot>
       </article>
     </>
   );

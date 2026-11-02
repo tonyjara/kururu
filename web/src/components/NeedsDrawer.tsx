@@ -845,7 +845,7 @@ function NeedRow({
   onMenu: ((x: number, y: number) => void) | undefined;
 }) {
   const { agent, card } = need;
-  const title = card ? `${cardCode(workspaceName, card.number)} ${card.title}` : agentLabel(agent!);
+  const title = card ? card.title : agentLabel(agent!);
   /* What its turn ended in, which is usually the reason to come here at all: a card in
      Review is a document to read before it is a card to move. The agent's own list while
      it has a terminal, being the fresher of the two; the card's once it has gone. */
@@ -871,7 +871,10 @@ function NeedRow({
         {agent ? <Status agent={agent} mascot={mascot} /> : <span className="needs-mark" aria-hidden="true" />}
         <span className="needs-what">
           <span className="needs-title">{title}</span>
-          <span className="needs-why">{why(need)}</span>
+          <span className="needs-why">
+            {card && <span className="needs-code">{cardCode(workspaceName, card.number)}</span>}
+            {why(need)}
+          </span>
         </span>
       </button>
       {card && need.plainDone && (
@@ -902,13 +905,16 @@ function NeedRow({
 /**
  * One card of the profile board's Needs you: who put it there where an
  * agent's mark would be — the thing to tell these rows apart by — then its
- * code and title, and under them its dates and the first line of what it
- * says. The row opens the card on the board; **Done** is drawn whenever the
- * board has a Done, since nothing on this board runs and the move asks no
- * question; the rest of the card's menu is the row's own, on a right-click
- * or a held touch, as a workspace card's row has. Dragging one, or moving
- * it from that menu, moves it in the board's Needs you column, which is
- * the order these are drawn in.
+ * title, and under it its code, its dates and the first line of what it
+ * says. The code is on the second line and not in front of the title for
+ * the reason the cards keep it in their footer: a title cut short on a
+ * phone to make room for a key is the wrong half kept. The row opens the
+ * card on the board; **Done** is drawn whenever the board has a Done, since
+ * nothing on this board runs and the move asks no question; the rest of the
+ * card's menu is the row's own, on a right-click or a held touch, as a
+ * workspace card's row has. Dragging one, or moving it from that menu,
+ * moves it in the board's Needs you column, which is the order these are
+ * drawn in.
  */
 function BoardRow({
   card,
@@ -931,7 +937,7 @@ function BoardRow({
 }) {
   const { handlers, swallow } = useRowMenu(onMenu);
   const first = card.body.split("\n").find((line) => line.trim())?.trim() ?? "";
-  const why = [card.dates ? datesLabel(card.dates) : "", first].filter(Boolean).join(" · ") || "on your board";
+  const why = [card.dates ? datesLabel(card.dates) : "", first].filter(Boolean).join(" · ");
   return (
     <li
       className={`needs-row needs-row-yours needs-row-by-${card.needsBy ?? "none"} ${sortClass}`}
@@ -951,8 +957,11 @@ function BoardRow({
       >
         {card.needsBy ? <NeedsByMark by={card.needsBy} /> : <span className="needs-mark" aria-hidden="true" />}
         <span className="needs-what">
-          <span className="needs-title">{`${code} ${card.title}`}</span>
-          <span className="needs-why">{why}</span>
+          <span className="needs-title">{card.title}</span>
+          <span className="needs-why">
+            <span className="needs-code">{code}</span>
+            {why}
+          </span>
         </span>
       </button>
       {onDone && (
