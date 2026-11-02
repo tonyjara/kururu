@@ -16,7 +16,7 @@
  * prompt. The inbox is a Unix socket in a temp directory, which is all the
  * real one is; the pty is a function that records what it was written.
  */
-import { afterAll, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -579,6 +579,15 @@ describe("the feed", () => {
   });
 
   it("types a notice into an OpenCode harness, which has no inbox, once its turn is over", async () => {
+    jest.useFakeTimers();
+    try {
+      await notices();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  async function notices() {
     const kuru = { ...terminal("h", "agent", "opencode"), status: "working" as const };
     const claude = terminal("a9", "agent", "claude", "Migrate orders");
     const all = new Map([kuru, claude].map((t) => [t.id, t]));
@@ -592,16 +601,16 @@ describe("the feed", () => {
       madeOf: () => [],
     } as unknown as HarnessDeps);
     harness.noticed(claude, "done", false);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await elapse(50);
     // Mid-turn: held, as a `next` is.
     expect(typed).toHaveLength(0);
     all.set("h", { ...kuru, status: "done" });
     harness.report("h", { status: "done" });
     harness.noticed(all.get("h")!, "done", false);
-    await until(() => typed.at(-1) === "\r");
+    await untilFaked(() => typed.at(-1) === "\r");
     expect(typed.join("")).toContain('[kururu] "Migrate orders"');
     expect(typed.join("")).toContain("finished its turn");
-  });
+  }
 
   it("says why a Kuru died starting, keeps its tab for it, and lets go once another starts", async () => {
     const all = new Map([["h1", terminal("h1", "agent", "opencode")]]);
@@ -647,7 +656,41 @@ describe("the feed", () => {
   });
 });
 
+/**
+ * A faked clock, for the tests that wait on the harness's own pacing — the
+ * pause before Enter, the gap between pieces of a long line — which are
+ * hundreds of milliseconds of nothing in real time. The clock is moved a
+ * step at a time, and between steps what real time would have let finish is
+ * let finish. Only for a test that called `jest.useFakeTimers()` first.
+ */
+const STEP_MS = 25;
+
+async function elapse(ms: number): Promise<void> {
+  for (let passed = 0; passed < ms; passed += STEP_MS) {
+    jest.advanceTimersByTime(STEP_MS);
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+async function untilFaked(check: () => boolean, ms = 3000): Promise<void> {
+  for (let passed = 0; !check() && passed < ms; passed += STEP_MS) await elapse(STEP_MS);
+}
+
+/** A promise that waits on the harness's timers, resolved by moving the clock until it is. */
+async function settled<T>(promise: Promise<T>, ms = 10_000): Promise<T> {
+  let done = false;
+  promise.then(
+    () => (done = true),
+    () => (done = true),
+  );
+  await untilFaked(() => done, ms);
+  return promise;
+}
+
 describe("the user's words", () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
   /** A harness for profile `p` over terminals whose pty is a list of what was written to it. */
   function rig(terminals: AgentSnapshot[]) {
     const all = new Map(terminals.map((t) => [t.id, t]));
@@ -676,7 +719,7 @@ describe("the user's words", () => {
       madeOf: () => [],
     } as unknown as HarnessDeps;
     const harness = new Harness(deps);
-    const send = async (agent: string, text: string, when?: string) => JSON.stringify(await harness.call("p", "h", "send_agent", { agent, text, when }));
+    const send = async (agent: string, text: string, when?: string) => JSON.stringify(await settled(harness.call("p", "h", "send_agent", { agent, text, when })));
     const set = (id: string, status: AgentSnapshot["status"]) => {
       const agent = { ...all.get(id)!, status };
       all.set(id, agent);
@@ -685,10 +728,7 @@ describe("the user's words", () => {
     return { harness, typed, writes, send, set };
   }
 
-  async function until(check: () => boolean, ms = 3000): Promise<void> {
-    const end = Date.now() + ms;
-    while (!check() && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 10));
-  }
+  const until = untilFaked;
 
   it("types a message into an agent between turns, with no envelope and no sender", async () => {
     const { typed, send } = rig([terminal("a1", "agent", "claude", "Mailpit")]);
@@ -733,7 +773,7 @@ describe("the user's words", () => {
     const { harness, typed, send, set } = rig([{ ...terminal("a1", "agent", "claude"), status: "blocked" }]);
     expect(await send("a1", "yes, go ahead", "now")).toContain("showing a prompt");
     harness.noticed(set("a1", "blocked"), "blocked", false);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await elapse(50);
     expect(typed.has("a1")).toBe(false);
   });
 

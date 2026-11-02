@@ -1,5 +1,6 @@
 /**
- * Running `git`, for the two files allowed to.
+ * Running `git`, for the two files allowed to — and for `restore-cli.ts`,
+ * which clones or pulls back the repository `backup.ts` pushes to.
  *
  * `worktree.ts` runs it on the user's repositories — a card's checkout, made
  * and retired on a click — and `backup.ts` runs it on one repository kururu
@@ -37,8 +38,22 @@ function envFor(options: GitOptions): NodeJS.ProcessEnv {
 }
 
 /**
- * Run git and get stdout, or the first line of what it said on stderr as the
- * error.
+ * Git's refusal: the first line of what it said, as the message, and all of
+ * it beside. The first line is the answer for nearly every command, but not
+ * for a push — that opens with `To <remote>` and says *why* below it, and
+ * `backup.ts` has to tell a rejection from a network failure.
+ */
+export class GitError extends Error {
+  constructor(
+    message: string,
+    readonly stderr: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Run git and get stdout, or a `GitError` saying what it said on stderr.
  */
 export function git(args: string[], cwd: string, options: GitOptions = {}): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -49,7 +64,7 @@ export function git(args: string[], cwd: string, options: GitOptions = {}): Prom
       (err, stdout, stderr) => {
         if (!err) return resolve(stdout);
         const said = String(stderr).split("\n").find((line) => line.trim()) ?? err.message;
-        reject(new Error(`git: ${said.replace(/^fatal:\s*/, "")}`));
+        reject(new GitError(`git: ${said.replace(/^fatal:\s*/, "")}`, String(stderr)));
       },
     );
   });

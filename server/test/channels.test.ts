@@ -10,7 +10,7 @@
  * what is tested is the module the server runs — the poll, the offset, the
  * queue, the file's mode — without a request ever leaving the process.
  */
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { getDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { tmpdir } from "node:os";
@@ -421,6 +421,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  jest.useRealTimers();
   for (const channel of open) channel.close();
   open = [];
   for (const [name, value] of Object.entries(was)) {
@@ -458,6 +459,30 @@ async function until(test: () => boolean, ms = 2000): Promise<void> {
   while (!test()) {
     if (Date.now() - start > ms) throw new Error("timed out");
     await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+/**
+ * `until`, for a test that has called `jest.useFakeTimers()` before making its
+ * channel: the clock is moved on a step at a time, and between steps the
+ * fetches and file writes that real time would have let finish are let
+ * finish. For the waits the channel takes by design — a poll's backoff, an
+ * album's quiet second — which are seconds of nothing in real time.
+ */
+async function untilFaked(test: () => boolean, ms = 60_000): Promise<void> {
+  for (let passed = 0; !test(); passed += STEP_MS) {
+    if (passed > ms) throw new Error("timed out");
+    await elapse(STEP_MS);
+  }
+}
+
+const STEP_MS = 100;
+
+/** Move a faked clock on by `ms`, a step at a time, letting what was due run. */
+async function elapse(ms: number): Promise<void> {
+  for (let passed = 0; passed < ms; passed += STEP_MS) {
+    jest.advanceTimersByTime(STEP_MS);
+    for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
   }
 }
 
@@ -695,13 +720,16 @@ describe("TelegramChannel", () => {
   });
 
   it("never lets the token into an error", async () => {
+    // The error is said only after the quiet failures, a second and two
+    // seconds of backoff apart.
+    jest.useFakeTimers();
     const fake = fakeTelegram();
     const { channel: c } = await ready(fake);
     fake.replies.set("getUpdates", () => ({ status: 500, body: { ok: false, error_code: 500, description: `boom at /bot${TOKEN}/getUpdates` } }));
-    await until(() => (c.status().error ?? "").includes("boom"), 8000);
+    await untilFaked(() => (c.status().error ?? "").includes("boom"));
     expect(c.status().error).not.toContain(TOKEN);
     expect(c.status().error).toContain("<token>");
-  }, 10_000);
+  });
 
   it("stops asking when Telegram no longer knows the token", async () => {
     const fake = fakeTelegram();
@@ -749,18 +777,20 @@ describe("pictures", () => {
   });
 
   it("gathers an album sent across two polls into one message", async () => {
+    // An album is passed on after `ALBUM_QUIET_MS` with no more of it.
+    jest.useFakeTimers();
     const fake = fakeTelegram();
     for (const n of [1, 2, 3]) fake.files.set(`al${n}`, { path: `photos/al_${n}.jpg`, bytes: JPEG });
     const { said } = await ready(fake);
     fake.deliver(ME, null, ME, { photo: photo("al1"), caption: "the three screens", media_group_id: "g7" });
     fake.deliver(ME, null, ME, { photo: photo("al2"), media_group_id: "g7" });
-    await until(() => fake.calls.filter((c) => c.method === "download").length === 2);
+    await untilFaked(() => fake.calls.filter((c) => c.method === "download").length === 2);
     fake.deliver(ME, null, ME, { photo: photo("al3"), media_group_id: "g7" });
-    await until(() => said.length === 1, 4000);
+    await untilFaked(() => said.length === 1);
     expect(said[0]!.text).toMatch(/^\(3 pictures: \S+\.jpg \S+\.jpg \S+\.jpg\) the three screens$/);
     // While it gathered, the poll was a short one.
     expect(fake.calls.some((c) => c.method === "getUpdates" && c.params.timeout === 1)).toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await elapse(3_000);
     expect(said).toHaveLength(1);
   });
 

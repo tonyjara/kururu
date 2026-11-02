@@ -14,7 +14,7 @@
  * the handover. The clock the rule reads is the test's, so a minute is a
  * line, not a minute.
  */
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -256,17 +256,34 @@ function evaluate(...sides: Side[]): void {
   for (const side of sides) side.lead?.evaluate();
 }
 
-async function until(test: () => boolean, ms = 2000): Promise<void> {
-  const start = Date.now();
-  while (!test()) {
-    if (Date.now() - start > ms) throw new Error("timed out");
-    await new Promise((resolve) => setTimeout(resolve, 5));
+/**
+ * Every test here runs on a faked clock (`beforeEach`): the poll's backoff, a
+ * held long poll and the freeze tick are seconds of nothing in real time.
+ * Waiting is moving the clock on a step at a time, and between steps letting
+ * the fetches, the file writes and the link's microtasks that real time would
+ * have let finish, finish. `now`, the lead's own clock, is moved by hand as
+ * before, and separately: it is the rule's, not the timers'.
+ */
+const STEP_MS = 25;
+
+async function elapse(ms: number): Promise<void> {
+  for (let passed = 0; passed < ms; passed += STEP_MS) {
+    jest.advanceTimersByTime(STEP_MS);
+    for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
   }
 }
 
-const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
+async function until(test: () => boolean, ms = 2000): Promise<void> {
+  for (let passed = 0; !test(); passed += STEP_MS) {
+    if (passed > ms) throw new Error("timed out");
+    await elapse(STEP_MS);
+  }
+}
+
+const settle = () => elapse(60);
 
 beforeEach(() => {
+  jest.useFakeTimers();
   dir = mkdtempSync(join(tmpdir(), "kururu-lead-"));
   for (const name of ["KURURU_STATE_DIR", "XDG_CONFIG_HOME", "KURURU_TELEGRAM_API"]) was[name] = process.env[name];
   process.env.KURURU_STATE_DIR = join(dir, "state");
@@ -302,6 +319,7 @@ afterEach(() => {
     else process.env[name] = value;
   }
   rmSync(dir, { recursive: true, force: true });
+  jest.useRealTimers();
 });
 
 /** Both up and linked, the Mac reading the chat. */

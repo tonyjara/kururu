@@ -38,7 +38,7 @@ import { isLoginKey } from "../../shared/model";
 import type { ServerMessage } from "../../shared/wire";
 import { readConfigFile, writeConfigFile } from "./config";
 import { OWNED, writeMirror, writeTree } from "./export";
-import { git } from "./gitcmd";
+import { git, GitError } from "./gitcmd";
 import type { Store } from "./store";
 import type { Ledger } from "./usage/store";
 
@@ -273,8 +273,11 @@ export class Backup {
     } catch (err) {
       const said = err instanceof Error ? err.message : String(err);
       this.unpushed = await this.countUnpushed(dir);
-      if (/rejected|non-fast-forward|fetch first/i.test(said)) {
-        throw new Error(`The repository has commits this Mac does not; nothing was forced. Another machine may be backing up to it. ${said}`);
+      // The refusal is on a line of its own below `To <remote>`, which is all
+      // the first line says; read for it in everything git said.
+      const refused = (err instanceof GitError ? err.stderr : said).split("\n").find((line) => /rejected|non-fast-forward|fetch first/i.test(line));
+      if (refused) {
+        throw new Error(`The repository has commits this Mac does not; nothing was forced. Another machine may be backing up to it. git: ${refused.trim()}`);
       }
       throw new Error(`The push failed and will be tried again: ${said}`);
     }
