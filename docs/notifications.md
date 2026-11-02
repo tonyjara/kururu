@@ -33,7 +33,7 @@ to trim exactly that source. Both come back when the source does.
   `web/src/notify.ts` reads exactly two of the five settings, the sound and the
   volume, because those are the only two about making a noise rather than about
   whether to.
-- **Notifications are noticed in `index.ts`, never in `agents/`.** A status is
+- **Notifications are noticed in `notices.ts`, never in `agents/`.** A status is
   computed by the host, and diffing for the transition there would be the obvious
   place. It is also the half that costs the user every running agent to edit — and
   every threshold in a notification is a matter of taste, so this is a feature

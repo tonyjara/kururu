@@ -185,7 +185,7 @@ the harness's own line (`kuruCommandFor`) and in a card picked back up
 **Only kururu's servers, when a profile says so.** Settings → Agents → Claude
 Code → **Only kururu's MCP servers** (`Profile.agentsKururuMcpOnly`, off by
 default, per profile) adds `--strict-mcp-config` to a Claude agent's line,
-a resumed card's included (`kururuMcpOnly` in `index.ts`), so these tools are the only MCP server it
+a resumed card's included (`kururuMcpOnly` in `terminals.ts`), so these tools are the only MCP server it
 loads: no claude.ai connectors, no plugins' servers, none of the login's own.
 Their names and instructions were about 15k tokens on each of a couple of
 thousand agent calls a day — the largest saving the 2026-11-02 review found,
@@ -381,7 +381,7 @@ If it reaches a new host on the user's behalf, say so in its `about` and in
 
 ## Calling the chain from elsewhere in kururu
 
-`web.run(call, agent)` in `index.ts` is the chain without the MCP wrapping: it
+`web.run(call, agent)` on the chain `sweeps.ts` builds is the chain without the MCP wrapping: it
 takes a `WebCall` (`webCall` checks raw arguments into one) and returns a
 `ChainAnswer` — the result as data (`WebResult`), who served it, every step, the
 credits — so another part of kururu can read a page through the same order,

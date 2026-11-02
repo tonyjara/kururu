@@ -9,7 +9,7 @@
 import type { WebSocket } from "ws";
 import type { ClientMessage } from "../../../shared/wire";
 import { type ClientState, logins, workspaces } from "../context";
-import { requestRestart } from "../index";
+import { requestRestart } from "../boot";
 import { pollAccountUsage } from "../sweeps";
 import { fillPane, killAll } from "../terminals";
 

@@ -43,7 +43,7 @@ disk. Never move a layout decision back into React state.
   it is a fact about the list rather than about the terminal — see below. Closing a *pane* ends everything in it. What does
   **not** end anything: switching workspace or profile, which is why those exist.
 - **The host keeps an exited agent listed; the server clears it away.**
-  `reapExited` in `index.ts` ends the tab and `Workspaces.reapTab` takes the pane
+  `reapExited` in `terminals.ts` ends the tab and `Workspaces.reapTab` takes the pane
   with it when nothing else is in there — tmux's default, and what typing `exit`
   means everywhere else. The pane half refuses the last pane of a workspace
   (`pruneEmptied`'s rule), and a pane with a document or the board still in
@@ -963,7 +963,7 @@ plugins, and linking shares until the first tool that writes through a rename.
 **A profile may point at another's login.** That is choosing again, and it is
 allowed because of what is chosen from. `scanLogins()` in `logins.ts` lists the
 directories under `profiles/` whose names are keys, each labelled by the email in
-the account record Claude Code wrote there; `index.ts` keeps that list — plus
+the account record Claude Code wrote there; `lending.ts` keeps that list — plus
 every key a profile currently holds, so a fresh profile reads as *not signed in
 yet* — as `SessionSnapshot.logins`, refreshed on the usage poll's minute and on
 every profile verb, and pushes a snapshot when it changes. The Profiles page
@@ -980,7 +980,7 @@ The switch is `LaunchSettings.loginsPerProfile`, off by default, and it is one
 switch rather than a field per profile because the only thing per profile to set
 is which of kururu's own directories it uses. **It waits for the host.** An old pty host drops the `env` on the floor and
 opens the terminal as the machine's own account with nothing to say so — the one
-failure this must not have — so `loginsActive()` in `index.ts` is the switch
+failure this must not have — so `loginsActive()` in `lending.ts` is the switch
 *and* `HostInfo.current`, the usage bar follows the same answer, and the Profiles
 page says when it is on and not yet in force.
 

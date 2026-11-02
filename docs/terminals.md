@@ -71,7 +71,7 @@ library.
 ## The size policy
 
 **The pty follows the pane, but only the server may say which pane.** The pooled
-emulator measures its box and *proposes* a grid; `index.ts` keeps a proposal per
+emulator measures its box and *proposes* a grid; `terminals.ts` keeps a proposal per
 client, takes the **smallest** over the clients that can see the terminal
 (tmux's `window-size`, in `server/src/sizing.ts` — pure and tested, because it is
 the one decision in there), resizes the screen and the pty once, and tells every
@@ -163,7 +163,7 @@ until something resynchronises.
   dropped is told it is `stale` and asks once a pane gives it a box.
 - **Backlog then output, in that order, per client.** A client that has just
   opened a pane clears its emulator and writes the history, so live output that
-  overtakes the backlog is wiped. `index.ts` holds that terminal's output in the
+  overtakes the backlog is wiped. `terminals.ts` holds that terminal's output in the
   client's `awaiting` queue until the backlog has gone out.
 - **Two rebuilds can overlap, and the first to finish must not release the
   second's hold.** `awaiting` counts rebuilds rather than flagging them: letting

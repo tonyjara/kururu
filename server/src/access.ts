@@ -327,7 +327,7 @@ export function hasToken(req: IncomingMessage, url: URL): boolean {
  * The name is learned the way `reach.ts` learns the address, without running
  * `tailscale`: a reverse lookup of this machine's tailnet address, asked of
  * MagicDNS itself at 100.100.100.100, which answers it whenever tailscaled is
- * up. Asked at start (`learnTailnetName`, from `index.ts`) and again — at
+ * up. Asked at start (`learnTailnetName`, from `boot.ts`) and again — at
  * most every half minute — when a `ts.net` origin arrives that it does not
  * know, so tailscale coming up after the server does is caught by the
  * phone's next reconnect rather than by a restart. The rejected alternative

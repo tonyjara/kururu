@@ -740,7 +740,7 @@ this is what was built.
 - **Eligible to read the chat**: the channel is on — the switch as this
   node last heard it, from the roster or a node's flip — the node holds the
   token (its own on the parent, lent on a child), and Claude is signed in
-  there (`leadEligibility` in `index.ts`). Each node says so in its summary
+  there (`leadEligibility` in `thisnode.ts`). Each node says so in its summary
   (`NodeSummary.lead`), with whether it reads the chat now. A kururu from
   before says nothing, and is never counted as one that could.
 
@@ -962,7 +962,7 @@ Toward the child it is one client whose opinion is everyone's here:
   terminal and are looking. The child then takes the smallest over its own
   clients, the relay among them, which is the smallest over everybody;
 - **output** is forwarded frame for frame, the moment it arrives, behind the
-  same per-client backlog hold `index.ts` keeps for local terminals. The
+  same per-client backlog hold `terminals.ts` keeps for local terminals. The
   child's host already waits up to 16 ms, so the relay never batches.
 
 **Routing** (`route` in `shared/remote.ts`). A verb whose ids are a node's

@@ -779,7 +779,7 @@ export function adoptPackManifest(value: unknown): PackManifest | null {
 
 /**
  * The three files a look lands in, gathered up so that wearing a pack writes
- * each of them at most once — see `saveLook` in `server/src/index.ts`, which
+ * each of them at most once — see `saveLook` in `server/src/look.ts`, which
  * compares these by identity and writes only the ones that moved. That is why
  * everything below hands back the object it was given when nothing changed.
  */

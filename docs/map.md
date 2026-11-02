@@ -82,7 +82,18 @@ in this folder.
 
 | file | |
 |---|---|
-| `src/index.ts` | HTTP, WS, static, one timer. The whole protocol surface |
+| `src/index.ts` | The entry point, and only the order of start-up: the modules that load first, the sweeps, the link to the host awaited, what a dropped link means, `attach`, the signals |
+| `src/preamble.ts` | What runs before any other module: crash recording, the process name, the port, the restart exit code, where the web app is |
+| `src/context.ts` | What every part shares: the subsystems `attach` fills through `provide`, the clients, `send`/`broadcast`, the snapshot and the deltas, and the settings and per-agent state a snapshot is made of |
+| `src/boot.ts` | Listening, the WebSocket upgrade, a client admitted, the host found or started, `attach`, a restart asked for, `shutdown` |
+| `src/ws/dispatch.ts` | A client's message: the shape check, the hands, another node's workspace forwarded, then each area of verbs in `src/ws/` (terminals, panes, workspaces, look, kuru, voice, nodes, machines, services, dbviewer, profiles, board, reader) until one answers. `reply.ts` is how a verb answers |
+| `src/http/router.ts` | An HTTP request: the node join ahead of the gate, the gate, the cookie, then one lookup in the route tables in `src/http/` (server, agents, mcp, nodes, kuru, voice, styles, files), another node's disk, the static app. `respond.ts` holds the body readers and responders |
+| `src/terminals.ts` | Opening a terminal (here, on a pinned machine, or in a held session) with its launcher's command line; sizes, backlog then output per client, forget and reap; the layout's save |
+| `src/cards.ts` · `src/carddev.ts` | Running and resuming a card and its worktree verbs · a card's dev server |
+| `src/notices.ts` | Status edges and `announce`: notification policy applied per client |
+| `src/madelinks.ts` · `src/conversation.ts` | What an agent made, swept and opened, and files sent on · search, a card's history, turns off reports, Kuru's asides |
+| `src/look.ts` · `src/lending.ts` · `src/thisnode.ts` | Settings saved, styles installed and worn · spawn env, logins, the vault census, lending · this node's summary, address and Telegram lead |
+| `src/repostatus.ts` · `src/editors.ts` · `src/sweeps.ts` | Workspace dirs, branches and git status · nvim hooks, the census, close and kill · the polls, the web chain, the timers (`startSweeps`/`stopSweeps`) |
 | `src/workspaces.ts` | Profiles, workspaces, focus. The arrangement lives HERE |
 | `src/persist.ts` | The arrangement on disk. Structure only — never respawns. Keys, never boards |
 | `src/store.ts` | The database: boards written through before memory takes them, every move as history, deleted cards kept, the conversation, the voice's lists, the search, the export and the restore's import. `node:sqlite`, under `~/.local/share/kururu`, made on the first start |

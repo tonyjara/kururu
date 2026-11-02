@@ -314,7 +314,7 @@ export function openPreviews(): Map<number, number> {
   return new Map([...previews].map(([devPort, p]) => [devPort, p.proxyPort]));
 }
 
-/** Every preview, shut down. Called on the way out; see index.ts. */
+/** Every preview, shut down. Called on the way out; see `shutdown` in boot.ts. */
 export function closeAllPreviews(): void {
   for (const devPort of [...previews.keys()]) closePreview(devPort);
 }

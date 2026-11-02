@@ -320,7 +320,7 @@ it is [One Telegram](nodes.md#one-telegram).
 A kind in `CHANNEL_KINDS`, a prefix and a name beside it; its own module
 beside `telegram.ts` with the same verbs (`setToken`, `set`, `pair`, `allow`,
 `post`, `status`); a field beside `telegram` in `Channels` and in
-`ChannelsStatus`; `channelFor` in `index.ts`; a section on the page.
+`ChannelsStatus`; `channelFor` in `ws/reply.ts`; a section on the page.
 Discord's ids are snowflakes past 2^53, which is why every account id is a
 string.
 

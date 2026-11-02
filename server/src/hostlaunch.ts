@@ -38,7 +38,7 @@
  * first, which ends nothing because nothing is running in them.
  *
  * A server that cannot reach launchd (an ssh session outside the console's)
- * is told why, and `index.ts` spawns the host the old way and says so in the
+ * is told why, and `boot.ts` spawns the host the old way and says so in the
  * record.
  *
  * **Linux has the same problem under another name.** A child kururu runs as a
@@ -645,7 +645,7 @@ export function userRuntimeDir(env: NodeJS.ProcessEnv, uid: number | null, exist
  * Hand the host to the user manager and return once it has been started.
  *
  * Refused up front on a machine not booted with systemd, where the fallback
- * in `index.ts` is the whole of the answer; anything `systemd-run` says when
+ * in `boot.ts` is the whole of the answer; anything `systemd-run` says when
  * it refuses — no user bus in an ssh session without `pam_systemd`, most
  * likely — comes back as the reason.
  */

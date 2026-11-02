@@ -9,6 +9,9 @@
  * from `index.ts` (`startSweeps`) at the point in start-up they always did,
  * and `shutdown` stops them first (`stopSweeps`).
  */
+// Every provider in web/providers/, each registering itself; the build makes this module from the directory.
+// Here, because the chain below is built from the registry when this module loads.
+import "kururu:web-providers";
 import { totalmem } from "node:os";
 import type { Footprint, FootprintTerminal } from "../../shared/footprint";
 import { agentLabel, agentSummary } from "../../shared/labels";
@@ -379,7 +382,7 @@ const sweepProcesses = sweep("processes", async () => {
 });
 let procTimer: ReturnType<typeof setTimeout> | null = null;
 let procRunning = false;
-/** Set by `stopSweeps`, for `shutdown`, which this cannot read `stopping` for: that is declared below the top-level `await`, and this runs during it. */
+/** Set by `stopSweeps`, for `shutdown`: a tick in flight when it runs must not start another. */
 let procHalted = false;
 async function procTick(): Promise<void> {
   if (procTimer) clearTimeout(procTimer);

@@ -309,7 +309,7 @@ function readerTabs(stored: { root: string; path: string; docs?: unknown }): { a
  * with the database's rows, so a card in here was only bytes on the host's
  * one socket and its parse on the host's one thread; `Workspaces` reads a
  * missing board the way it reads one from before boards existed, empty,
- * until the database fills it a moment later. See `queueSave` in `index.ts`.
+ * until the database fills it a moment later. See `queueSave` in `terminals.ts`.
  */
 export function hostBlob(profiles: readonly Profile[], activeProfileId: string): string {
   return JSON.stringify({

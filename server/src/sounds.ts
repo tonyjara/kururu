@@ -50,7 +50,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 /**
  * The sounds that ship. The same `../../` walk `mascot.ts` does for its sheets
- * and `index.ts` does for `web/dist` — one way of finding the things that sit
+ * and `preamble.ts` does for `web/dist` — one way of finding the things that sit
  * beside the code, not three.
  */
 const ASSETS = process.env.KURURU_SOUNDS || join(HERE, "../../assets/sounds");

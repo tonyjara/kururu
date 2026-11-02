@@ -381,7 +381,7 @@ let scope: string | null = null;
  * `claudeDir` is which login to ask: a profile's Claude config directory when
  * profiles keep their own logins — the one the terminals in it are signed in
  * as — or null for the machine's own, which is the last one signed into. One
- * account, so one request. The poll is still the only thing in `index.ts` that
+ * account, so one request. The poll is still the only thing in `sweeps.ts` that
  * asks somebody else's API rather than this machine, which is why it does not
  * run while nothing is connected.
  */

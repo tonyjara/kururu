@@ -1,7 +1,7 @@
 /**
  * At most one run per gap, the first of a quiet spell at once.
  *
- * What the snapshot is sent through (`pushSnapshot` in `index.ts`). Changes
+ * What the snapshot is sent through (`pushSnapshot` in `context.ts`). Changes
  * come in two shapes there and the obvious tools each fit one: coalescing in
  * a microtask fits a burst inside one turn of the loop and does nothing for
  * hook reports, which arrive as separate requests; a trailing debounce fits

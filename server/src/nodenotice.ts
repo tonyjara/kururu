@@ -82,7 +82,7 @@ export class NodeNotices {
     for (const edge of edges) this.announce(node, edge, edge.event);
   }
 
-  /** `announce` in `index.ts`, for a node's agent: the same gate per client, the same throttle, the node in the words. */
+  /** `announce` in `notices.ts`, for a node's agent: the same gate per client, the same throttle, the node in the words. */
   private announce(node: string, { agent, workspace }: RemoteAgent, event: NotifyEvent): void {
     const id = qualify(node, agent.id);
     const now = Date.now();

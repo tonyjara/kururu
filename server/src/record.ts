@@ -23,7 +23,7 @@
  *
  * It records what the *server* sees, which is only terminals somebody has open:
  * unwatched ptys are never streamed across the link (that is deliberate, and
- * `index.ts` says why). So a terminal records while a pane is showing it and not
+ * `syncWatched` in `terminals.ts` says why). So a terminal records while a pane is showing it and not
  * otherwise — which is the right half for anything you noticed happening, and no
  * use at all for something that went wrong in a pane you had closed.
  *

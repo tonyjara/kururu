@@ -113,7 +113,7 @@ file, a version mismatch never discards, and every move is reversible.
 The report route already sees the harness's prompt on every
 `UserPromptSubmit` — the one report that is `working` with a message — and
 its reply on every `Stop`, with the session id in the profile's harness
-record. Each becomes a turn (`recordTurn` in `index.ts`); a `[voice]`
+record. Each becomes a turn (`recordTurn` in `conversation.ts`); a `[voice]`
 prefix makes `via` spoken and a `[telegram]` one makes it `telegram` (see
 [channels](channels.md)), and `promptCarries` links the turn to the outbox
 message it delivered. Every other agent's reply is kept too, as an `agent`

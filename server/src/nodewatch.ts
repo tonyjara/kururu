@@ -93,7 +93,7 @@ const BUFFER_WARN = 4 * 1024 * 1024;
  */
 const ASK_MS = 20_000;
 
-/** What `index.ts` keeps per client that the relay reads and, for remote terminals, writes. */
+/** What `context.ts` (`ClientState`) keeps per client that the relay reads and, for remote terminals, writes. */
 export interface WatchClient {
   watching: Set<string>;
   warm: Set<string>;

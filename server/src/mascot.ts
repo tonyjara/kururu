@@ -10,7 +10,7 @@
  *
  * This module exists because *which* animation is the user's decision, and there
  * are two halves to that. The picture comes from `assets/spritesheets` — found
- * on disk the same way `index.ts` finds the built web app, and overridable with
+ * on disk the same way `preamble.ts` finds the built web app, and overridable with
  * `KURURU_ASSETS`, because an app that already resolves its own front end
  * relative to this file gains nothing from a second, cleverer scheme for its
  * artwork. The *selections* — which row, which columns, how fast, and which of
@@ -53,7 +53,7 @@ import { configDir, readConfigFile, writeConfigFile } from "./config";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 /**
- * Where the sheets live. The same `../../` walk `index.ts` does for `web/dist`,
+ * Where the sheets live. The same `../../` walk `preamble.ts` does for `web/dist`,
  * and wrong in exactly the same situations — which is the point: one way of
  * finding the things that ship beside the code, not two.
  */

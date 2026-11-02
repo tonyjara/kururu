@@ -529,7 +529,7 @@ async function connect(address, { node = false, settings = false } = {}) {
 
 /**
  * A node's page with its token in the address, once: the server answers a
- * `?k=` with the cookie (`server/src/index.ts`), so this window is let in
+ * `?k=` with the cookie (`server/src/http/router.ts`), so this window is let in
  * for a year and every later load is the bare address. Only on the node's
  * own origin — never on a vite page in front of it.
  */

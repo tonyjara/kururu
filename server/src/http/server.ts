@@ -27,7 +27,7 @@ import {
   windows,
   workspaces,
 } from "../context";
-import { remoteClientAt, requestHostRestart, requestRestart } from "../index";
+import { remoteClientAt, requestHostRestart, requestRestart } from "../boot";
 import { lifecycleReport, lifeNow, record } from "../lifecycle";
 import { renderMarkdown } from "../markdown";
 import { PORT, RESTART_EXIT_CODE } from "../preamble";

@@ -19,7 +19,7 @@
  * them would then be clipping what it cannot draw.
  *
  * It is a module of its own, and a pure one, because the policy is the decision
- * — everything around it in `index.ts` is bookkeeping about whose proposals are
+ * — everything around it in `terminals.ts` is bookkeeping about whose proposals are
  * still in play. A minimum is also the kind of thing that reads as obviously
  * right and has an edge at each end: nobody proposing at all, and two clients
  * whose boxes are smaller in different dimensions.

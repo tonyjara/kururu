@@ -26,7 +26,7 @@ is, the transcript-tail reader. Tested.
 `notifications/initialized`, `ping`, `tools/list`, `tools/call` — written out
 rather than pulled in as the SDK, because a server with seven dependencies
 does not take a ninth to answer five methods. Pure; the test speaks the
-protocol to it. `index.ts` serves it at `POST /mcp`.
+protocol to it. `http/mcp.ts` serves it at `POST /mcp`.
 
 **`server/src/harness.ts`** is the hands: `Harness.call` runs one tool for one
 profile, `Harness.open` starts, resumes or reveals the session, `noticed` is
@@ -86,7 +86,7 @@ tools (`ask_kuru`, `read_kuru`, `move_workspace`, `lend_secrets`) only with a
 node linked, `send_telegram_photo` only with a Telegram bot that could be
 switched on, `say` and `play_missed` only with "speak replies" on. The role's
 **Machines**, **Nodes** and **Telegram** sections follow the same switches
-(`HarnessFeatures`, read by `harnessFeatures` in `index.ts`), and with replies
+(`HarnessFeatures`, read by `harnessFeatures` in `terminals.ts`), and with replies
 off **Your voice** shrinks to what `[voice]` means and says nothing is read
 aloud — it used to promise every reply was, which is half of why Kuru kept
 calling `say` into silence. About 1.9k tokens a call for a profile with none
@@ -378,7 +378,7 @@ clicking a notification, opening the harness, a new tab or a split is
 steering, which *drops* what was waiting and holds what comes after. A list of
 what counts rather than of what does not, because the other way round a client
 polling something on a timer would hold swaps off for good, silently.
-`index.ts` asks it of every message before the verb runs.
+`ws/dispatch.ts` asks it of every message before the verb runs.
 
 **And when it is due**, `Harness.swapNow` checks what only the layout knows:
 the switch is still on; the harness's profile is the one on screen — never a
@@ -448,7 +448,7 @@ At the `done` edge everything waiting goes in, `now` before `next` before
 `later`, neighbours joined into one turn as Claude Code joins its own
 queued messages, each slash command on its own. And whatever `due` says,
 nothing is typed into a terminal the user typed into in the last
-`SWAP_QUIET_MS` — `index.ts` passes the `input` verb's agent to
+`SWAP_QUIET_MS` — `ws/dispatch.ts` passes the `input` verb's agent to
 `Harness.hands` — so a message never lands in the middle of their sentence.
 `send_agent` says which of these happened and why, and an exit notice says
 if something waiting never got in.

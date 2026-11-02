@@ -9,7 +9,7 @@
  * resources, prompts, sessions, server-sent event streams — and pulling it
  * into a server with seven dependencies to answer five methods was the wrong
  * trade. This is the whole protocol surface kururu speaks, written out, and
- * `handleMcp` in `index.ts` is the one route that reaches it.
+ * `handleMcp` in `http/mcp.ts` is the one route that reaches it.
  *
  * Pure: a body in, a status and a body out, and the tools passed in. The test
  * speaks the protocol to it without a socket.

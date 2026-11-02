@@ -168,7 +168,7 @@ export function makePane(id: string, cwd?: string): PaneNode {
  * Refused rather than repaired, and that is the same line
  * `set-profile-column-color` draws. A ratio of `"x"` is not a drag that went too far, with a nearest legal
  * value to snap to; it is not a drag at all, and the tree it was aimed at is
- * already a perfectly good one. `propose-size` in `index.ts` has always taken
+ * already a perfectly good one. `propose-size` in `ws/terminals.ts` has always taken
  * this shape — it is the same argument, arriving at the same answer, for the one
  * number that was already known to reach a pty.
  */

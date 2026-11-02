@@ -213,7 +213,7 @@ export async function pollMachine(id: string): Promise<void> {
  * not handed to a new tab in the second between the old tab closing and tmux
  * hearing about it, which would attach the new tab to the session a moment
  * before it was killed. Names only, not hosts: names are kept unique across
- * every machine (see `sessionShell` in `index.ts`).
+ * every machine (see `sessionShell` in `terminals.ts`).
  */
 const ending = new Set<string>();
 
