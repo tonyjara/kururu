@@ -29,6 +29,25 @@ export interface McpResult {
 
 export type McpCall = (name: string, args: Record<string, unknown>) => Promise<McpResult>;
 
+/**
+ * Who the server says it is. `listChanged` promises the client a
+ * `notifications/tools/list_changed` when the tools' descriptions move, which
+ * only a server that holds a stream open to it can keep (`/mcp/web` does;
+ * `/mcp` has nothing that changes under a session).
+ */
+export interface McpServerInfo {
+  name: string;
+  version: string;
+  instructions?: string;
+  listChanged?: boolean;
+}
+
+/** Whether a POST body is, or holds, an `initialize`: the request a session is issued on. */
+export function initializes(body: unknown): boolean {
+  const one = (raw: unknown) => Boolean(raw) && typeof raw === "object" && (raw as Request).method === "initialize";
+  return Array.isArray(body) ? body.some(one) : one(body);
+}
+
 /** The version of the protocol answered when the client names none, or one this does not know. */
 const PROTOCOL = "2025-06-18";
 const KNOWN = new Set(["2024-11-05", "2025-03-26", "2025-06-18"]);
@@ -49,7 +68,7 @@ export async function mcpAnswer(
   body: unknown,
   tools: readonly McpTool[],
   call: McpCall,
-  server: { name: string; version: string; instructions?: string },
+  server: McpServerInfo,
 ): Promise<{ status: number; body?: unknown }> {
   if (Array.isArray(body)) {
     const replies = (await Promise.all(body.map((one) => answerOne(one, tools, call, server)))).filter((r) => r !== null);
@@ -63,7 +82,7 @@ async function answerOne(
   raw: unknown,
   tools: readonly McpTool[],
   call: McpCall,
-  server: { name: string; version: string; instructions?: string },
+  server: McpServerInfo,
 ): Promise<Record<string, unknown> | null> {
   if (!raw || typeof raw !== "object") return failure(null, -32700, "Parse error");
   const req = raw as Request;
@@ -79,10 +98,10 @@ async function answerOne(
       // `instructions` is the protocol's place for what a client should tell
       // its model about the server as a whole; Claude Code puts it in the
       // system prompt beside the tools.
-      const { instructions, ...info } = server;
+      const { instructions, listChanged, ...info } = server;
       return success(id, {
         protocolVersion: KNOWN.has(asked) ? asked : PROTOCOL,
-        capabilities: { tools: {} },
+        capabilities: { tools: listChanged ? { listChanged: true } : {} },
         serverInfo: info,
         ...(instructions ? { instructions } : {}),
       });

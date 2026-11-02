@@ -11,7 +11,7 @@ import { describe, expect, it } from "bun:test";
 
 import type { WebCall, WebCallRecord, WebCapability, WebHealth, WebPage, WebSettings } from "../../shared/web";
 import { webCall } from "../../shared/web";
-import { WebChain, type ChainStore } from "../src/web/chain";
+import { WebChain, freeBeforePaid, type ChainStore, type McpStream } from "../src/web/chain";
 import { webProviderDefs, type ProviderView, type RunContext, type StepAnswer, type WebProvider } from "../src/web/provider";
 import "../src/web/providers/handback";
 
@@ -64,7 +64,9 @@ class Fake implements WebProvider {
         return new Promise<StepAnswer>(() => undefined);
     }
   }
+  healthy = true;
   async health(): Promise<WebHealth> {
+    if (!this.healthy) throw new Error("no route to host");
     return { state: "ok", detail: null, at: 0 };
   }
   view(): ProviderView {
@@ -273,5 +275,116 @@ describe("what the descriptions are written from", () => {
     off.defaultEnabled = () => false;
     const { store } = chainOf([off, handBack()]);
     expect((store.readSettings() as WebSettings).enabled).toEqual({ off: false, "agent-tools": true });
+  });
+});
+
+describe("free before paid", () => {
+  const svc = (id: string, paid: boolean) => ({ id, kind: "service", paid });
+  const back = { id: "back", kind: "handback", paid: false };
+  const ids = (list: { id: string }[]) => list.map((p) => p.id);
+
+  it("moves a paid provider behind every free one that came after it, and leaves a right order alone", () => {
+    expect(ids(freeBeforePaid([back, svc("cloud", true), svc("self", false)]))).toEqual(["back", "self", "cloud"]);
+    expect(ids(freeBeforePaid([svc("p1", true), svc("f1", false), svc("p2", true), svc("f2", false)]))).toEqual(["f1", "f2", "p1", "p2"]);
+    expect(ids(freeBeforePaid([svc("cloud", true), back, svc("self", false)]))).toEqual(["back", "self", "cloud"]);
+    const right = [back, svc("self", false), svc("cloud", true)];
+    expect(ids(freeBeforePaid(right))).toEqual(ids(right));
+  });
+
+  it("tries the free one first even when Settings has the paid one above it, and says so everywhere", async () => {
+    const self = new Fake("self", "page");
+    const cloud = new Fake("cloud", "page", true);
+    // The order the user's web.json held on 2026-10-28.
+    const { chain } = chainOf([self, handBack(), cloud], { order: ["agent-tools", "cloud", "self"] });
+    const answer = await chain.run(scrape({ ownToolsFailed: true }));
+    expect(answer.served?.provider).toBe("self");
+    expect(cloud.calls).toBe(0);
+    expect(chain.routes().routes.scrape_page.after.map((p) => p.label)).toEqual(["Fake self", "Fake cloud"]);
+    expect(chain.status().providers.map((p) => p.id)).toEqual(["agent-tools", "self", "cloud"]);
+  });
+});
+
+describe("a provider that was down at the start", () => {
+  it("is described and tried all the same, and is tried again once its rest is over", async () => {
+    const now = 1_000_000;
+    const self = new Fake("self", "unreachable");
+    self.healthy = false;
+    const cloud = new Fake("cloud", "page", true);
+    const { chain } = chainOf([handBack(), self, cloud], null, () => now);
+    await chain.checkHealth("self");
+    expect(chain.status().providers.find((p) => p.id === "self")?.health.state).toBe("bad");
+    // The health check failing changes nothing an agent is told.
+    expect(chain.instructions()).toContain("Fake self (free) and Fake cloud (paid");
+
+    const first = await chain.run(scrape({ ownToolsFailed: true }));
+    expect(first.served?.provider).toBe("cloud");
+    expect(first.steps.find((s) => s.provider === "self")?.failure).toBe("unreachable");
+
+    // The box comes back: a health check that answers ends the rest at once.
+    self.behaviour = "page";
+    self.healthy = true;
+    await chain.checkHealth("self");
+    const back = await chain.run(scrape({ ownToolsFailed: true }));
+    expect(back.served?.provider).toBe("self");
+    expect(cloud.calls).toBe(1);
+  });
+
+  it("is tried again after the rest even with no health check in between", async () => {
+    let now = 1_000_000;
+    const self = new Fake("self", "unreachable");
+    const cloud = new Fake("cloud", "page", true);
+    const { chain } = chainOf([self, cloud], null, () => now);
+    await chain.run(scrape());
+    self.behaviour = "page";
+    expect((await chain.run(scrape())).served?.provider).toBe("cloud");
+    now += 31_000;
+    expect((await chain.run(scrape())).served?.provider).toBe("self");
+  });
+});
+
+describe("keeping what agents were told current", () => {
+  const stream = () => {
+    const s: McpStream & { written: string[]; ended: boolean } = { written: [], ended: false, write: (chunk: string) => s.written.push(chunk), end: () => (s.ended = true) };
+    return s;
+  };
+
+  it("tells an open stream the tools changed when a provider is set up, and refuses the session from before", () => {
+    // The Deck's address saved after Kuru connected: not ready, then ready.
+    const self = new Fake("self", "page", false, undefined, false);
+    const { chain } = chainOf([handBack(), self, new Fake("cloud", "page", true)]);
+    expect(chain.instructions()).not.toContain("Fake self");
+    const session = chain.session();
+    expect(chain.sessionCurrent(session)).toBe(true);
+    const open = stream();
+    chain.openStream(open, session);
+
+    chain.noticeRoutes();
+    expect(open.written.some((w) => w.includes("list_changed"))).toBe(false);
+
+    self.isReady = true;
+    chain.noticeRoutes();
+    expect(open.written.filter((w) => w.includes('"notifications/tools/list_changed"'))).toHaveLength(1);
+    expect(chain.sessionCurrent(session)).toBe(false);
+    const again = chain.session();
+    expect(chain.sessionCurrent(again)).toBe(true);
+    expect(chain.instructions()).toContain("Fake self (free) and Fake cloud (paid");
+    expect(chain.tools().find((t) => t.name === "scrape_page")?.description).toContain("Fake self (free) and Fake cloud");
+  });
+
+  it("notices a change made through Settings at once, and answers a client with no session as it always did", () => {
+    const { chain } = chainOf([handBack(), new Fake("self", "page"), new Fake("cloud", "page", true)]);
+    const open = stream();
+    const close = chain.openStream(open, chain.session());
+    chain.setEnabled("self", false);
+    expect(open.written.filter((w) => w.includes("list_changed"))).toHaveLength(1);
+    expect(chain.sessionCurrent(null)).toBe(true);
+    close();
+    chain.setEnabled("self", true);
+    expect(open.written.filter((w) => w.includes("list_changed"))).toHaveLength(1);
+  });
+
+  it("takes a session issued before a restart onto the same settings as its own", () => {
+    const make = () => chainOf([handBack(), new Fake("self", "page"), new Fake("cloud", "page", true)]).chain;
+    expect(make().sessionCurrent(make().session())).toBe(true);
   });
 });

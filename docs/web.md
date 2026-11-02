@@ -57,6 +57,20 @@ is tried at once.
 reached without asking; the tool descriptions say so (`paid, on the user's
 credits`), and the page marks it `· paid`.
 
+**Free before paid, whatever the order says.** The one exception to the user's
+order: a paid provider is moved behind every free one that came after it
+(`freeBeforePaid` in `chain.ts`), stably, so the hand-back and the paid ones
+among themselves keep their places. Placed `agent-tools, cloud, self` — the
+order `web.json` held on 2026-10-28 — the chain runs, describes and draws
+`agent-tools, self, cloud`. A credit spent on a page the box at home would
+have fetched is the mistake the order exists to prevent.
+
+**Health never takes a provider out.** A failed health check is a word on the
+Settings page, not a switch: the descriptions and the chain read only *on*,
+*set up* (`ready()`, which reads the provider's file) and *able*. A provider
+that could not be reached rests for thirty seconds, and a health check that
+answers ends the rest at once.
+
 ## What counts as a failure
 
 Anything that was not the page (`resultVerdict` in `shared/web.ts`):
@@ -99,10 +113,29 @@ first, and call this only when that fails, with `ownToolsFailed: true`. It goes
 to Cloud Firecrawl (paid, on the user's credits)*. With a free provider first:
 *use this first, before your own web fetch… if kururu cannot get it, the result
 says so: then use your own… if that fails too, call again with
-`ownToolsFailed: true`*. An agent started before the order changed keeps the
-description it was given; its calls meet the new order all the same. Every
-tool has the `ownToolsFailed` argument, described as the way past the
-hand-back and what it may cost.
+`ownToolsFailed: true`*. Every tool has the `ownToolsFailed` argument,
+described as the way past the hand-back and what it may cost.
+
+**What an agent was told is kept current.** A CLI reads the instructions once,
+at `initialize`, and holds the descriptions from then; a harness session lives
+for days, and compaction re-announces the copy it holds. Kuru went 2026-11-01
+and -02 describing a chain without the self-hosted Firecrawl, because its
+Claude Code connected on 10-31, before the Deck's address was set — while its
+calls, which read the order afresh every time, went to the Deck first. So
+`/mcp/web` keeps sessions, unlike `/mcp`: an `initialize` is answered with an
+`Mcp-Session-Id` carrying a fingerprint of the routes (`WebChain.session`); a
+`GET` holds a server-sent-event stream; when the fingerprint moves — a save in
+Settings at once, a provider file edited by hand within the minute's tick
+(`noticeRoutes`) — every stream is sent `notifications/tools/list_changed`;
+and a request on a session from before is answered `404` / `-32001 Session not
+found`. Claude Code (2.1.316, tried against a stand-in) asks for the tools on
+the old session, is refused, and initializes again — instructions, tools and a
+new stream; Codex's rmcp re-initializes on the same 404 at its next call. A
+client with no session is answered as before. A server restart needs nothing:
+the fingerprint is the settings', so a restarted server takes the old
+sessions, and a Claude Code whose stream dropped initializes again anyway.
+A client that connected before sessions existed has neither a session nor a
+stream and keeps what it was told until it reconnects.
 
 It is said once more as the server's MCP `instructions`, which Claude Code puts
 in the system prompt beside the tools, and in the harness's role
@@ -361,8 +394,9 @@ built not to lend.)
 `bun test server/test/webchain.test.ts` is the chain over fake providers and the
 real hand-back: the order, a provider off, not set up or unable, failover on an
 error, a timeout (and the abort), a challenge page and no results, the rest
-after an unreachable provider, the hand-back and the opt-in, the MCP answer and
-the record. `web.test.ts` is the vocabulary — the verdicts, the descriptions as
+after an unreachable provider and its return, free before paid, the hand-back
+and the opt-in, the MCP answer and the record, and the sessions and
+`list_changed` that keep the descriptions current. `web.test.ts` is the vocabulary — the verdicts, the descriptions as
 the chain changes, the settings — and `firecrawl.test.ts` is Firecrawl's API.
 
 `KURURU_FIRECRAWL_API=http://127.0.0.1:<port>/v2` points the cloud provider at a

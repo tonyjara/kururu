@@ -250,7 +250,7 @@ import {
 } from "../../shared/projects";
 import { hookSettingsFlag } from "./hooks";
 import { Harness, type SayOutcome } from "./harness";
-import { mcpAnswer } from "./mcp";
+import { initializes, mcpAnswer } from "./mcp";
 import { claudeDirFor, codexDirFor, lentClaudeEnv, lentGhEnv, loginDir, loginEnv, scanLogins } from "./logins";
 import {
   adoptLaunch,
@@ -6828,34 +6828,59 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
    * program on this Mac only — loopback, no `Origin`, nothing a proxy added —
    * whether or not sharing is on. The agent names itself in a header so the
    * Settings page can say who asked for what; one that does not is still
-   * served. See `web/chain.ts`.
+   * served.
+   *
+   * Unlike `/mcp`, it keeps what it told a client current: an `initialize`
+   * is given a session carrying a fingerprint of the chain, a `GET` holds a
+   * stream that hears `tools/list_changed` when the chain moves, and a
+   * request on a session from before is answered 404, the protocol's way of
+   * saying "start again". See `web/chain.ts`.
    */
   if (url.pathname === "/mcp/web") {
-    if (req.method === "GET") {
-      text(res, "kururu speaks MCP over POST only\n", 405);
+    if (!localCaller(req)) {
+      json(res, { jsonrpc: "2.0", id: null, error: { code: -32000, message: "kururu's web tools answer programs on this Mac only" } }, 403);
       return;
     }
+    const header = req.headers["mcp-session-id"];
+    const session = typeof header === "string" ? header : null;
+    // Word for word what the reference SDK's server says, because that is
+    // what the clients were written against.
+    const expired = (id: unknown) => json(res, { jsonrpc: "2.0", id: id ?? null, error: { code: -32001, message: "Session not found" } }, 404);
     if (req.method === "DELETE") {
       res.writeHead(200).end();
       return;
     }
-    if (req.method !== "POST") {
-      text(res, "POST only", 405);
+    if (req.method === "GET") {
+      if (!web.sessionCurrent(session)) {
+        expired(null);
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+      res.on("close", web.openStream(res, session));
       return;
     }
-    if (!localCaller(req)) {
-      json(res, { jsonrpc: "2.0", id: null, error: { code: -32000, message: "kururu's web tools answer programs on this Mac only" } }, 403);
+    if (req.method !== "POST") {
+      text(res, "GET or POST", 405);
       return;
     }
     const said = callerAgent(req);
     const agentId = said && host.find(said) ? said : null;
     try {
       const body = await readJsonBody(req, 64 * 1024);
+      const fresh = initializes(body);
+      if (!fresh && !web.sessionCurrent(session)) {
+        expired(body && typeof body === "object" && !Array.isArray(body) ? (body as { id?: unknown }).id : null);
+        return;
+      }
+      // Issued before the answer is written, from the same chain: the
+      // fingerprint in the id is the one the instructions were written from.
+      if (fresh) res.setHeader("mcp-session-id", web.session());
       const agent = agentId ? webAgentName(agentId) : null;
       const answer = await mcpAnswer(body, web.tools(), (name, args) => web.call(name, args, agent), {
         name: "kururu_web",
         version: VERSION,
         instructions: web.instructions(),
+        listChanged: true,
       });
       if (answer.body === undefined) res.writeHead(answer.status).end();
       else json(res, answer.body, answer.status);

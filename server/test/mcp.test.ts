@@ -6,7 +6,7 @@
  * not get them hangs rather than complains.
  */
 import { describe, expect, it } from "bun:test";
-import { mcpAnswer, type McpTool } from "../src/mcp";
+import { initializes, mcpAnswer, type McpTool } from "../src/mcp";
 
 const tools: McpTool[] = [
   { name: "echo", description: "says it back", inputSchema: { type: "object", properties: { text: { type: "string" } } } },
@@ -27,6 +27,21 @@ describe("mcpAnswer", () => {
     expect(known.status).toBe(200);
     expect(result(known)).toMatchObject({ protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: server });
     expect(result(await ask("initialize", { protocolVersion: "1999-01-01" })).protocolVersion).toBe("2025-06-18");
+  });
+
+  it("promises tools/list_changed only when the server says it keeps the promise, and never names it in serverInfo", async () => {
+    const plain = result(await ask("initialize", {}));
+    expect(plain.capabilities).toEqual({ tools: {} });
+    const web = result(await mcpAnswer({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }, tools, call, { ...server, listChanged: true }));
+    expect(web.capabilities).toEqual({ tools: { listChanged: true } });
+    expect(web.serverInfo).toEqual(server);
+  });
+
+  it("knows an initialize, alone or in a batch, from everything else", () => {
+    expect(initializes({ jsonrpc: "2.0", id: 1, method: "initialize" })).toBe(true);
+    expect(initializes([{ jsonrpc: "2.0", method: "notifications/initialized" }, { jsonrpc: "2.0", id: 2, method: "initialize" }])).toBe(true);
+    expect(initializes({ jsonrpc: "2.0", id: 1, method: "tools/list" })).toBe(false);
+    expect(initializes(null)).toBe(false);
   });
 
   it("answers a notification with 202 and nothing, and a ping with nothing much", async () => {

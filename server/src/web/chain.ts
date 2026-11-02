@@ -28,9 +28,27 @@
  * calls again with `ownToolsFailed`. Nothing here knows what the hand-back
  * is — it is a step that answered `stop`.
  *
+ * **Free before paid, whatever the order says.** The order is the user's,
+ * except that a paid provider never runs while a free one that could still
+ * do the call is behind it (`freeBeforePaid`): a credit spent on a page the
+ * box at home would have fetched is the one mistake the order exists to
+ * prevent. The Settings page draws the order this makes, so it does not lie.
+ *
+ * **What an agent was told goes stale, so it is told again.** A CLI reads the
+ * instructions once, at `initialize`, and the descriptions with them, and a
+ * harness session lives for days: Kuru went a day describing a chain without
+ * the self-hosted Firecrawl, because it connected before the address was set.
+ * So a session is issued against a fingerprint of what the descriptions say
+ * (`session`), every client that holds a stream is sent `tools/list_changed`
+ * when that moves (`noticeRoutes`), and a request on a session from before is
+ * answered 404 — which both CLIs take as an expired session, and so
+ * initialize again and read everything afresh. Routing never needed this: it
+ * reads the order as it stands on every call.
+ *
  * The key never leaves its provider and the endpoint is loopback only
  * (`localCaller`); the argument for both is in `docs/web.md`.
  */
+import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { homedir } from "node:os";
@@ -87,6 +105,15 @@ const HEALTH_EVERY_MS = 5 * 60_000;
 const TICK_MS = 60_000;
 /** How often a refusal repeated in a loop is written down and broadcast. */
 const REPEAT_FLUSH_MS = 1_000;
+/** A comment down every open stream this often, so nothing between treats a quiet one as dead. */
+const STREAM_PING_MS = 30_000;
+/**
+ * How long a stream from before a change is kept after it was told: long
+ * enough for the client to ask for the tools, be refused and start again,
+ * which takes it milliseconds. Ended after, or every change would leave one.
+ */
+const STALE_STREAM_MS = 10_000;
+const LIST_CHANGED = `event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", method: "notifications/tools/list_changed" })}\n\n`;
 
 function stateDir(): string {
   return process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
@@ -172,6 +199,32 @@ function quote(value: string): string {
 
 class Timeout extends Error {}
 
+/**
+ * The order the chain runs in: the user's, with each paid service moved to
+ * just behind the last free service that came after it. Stable otherwise —
+ * paid ones keep their order among themselves, the hand-back stays where it
+ * was — so an order that already has the free ones first is left alone.
+ */
+export function freeBeforePaid<T extends { kind: string; paid: boolean }>(order: readonly T[]): T[] {
+  const out = [...order];
+  for (let i = out.length - 1; i >= 0; i--) {
+    const item = out[i]!;
+    if (item.kind !== "service" || !item.paid) continue;
+    let last = -1;
+    for (let j = i + 1; j < out.length; j++) if (out[j]!.kind === "service" && !out[j]!.paid) last = j;
+    if (last === -1) continue;
+    out.splice(i, 1);
+    out.splice(last, 0, item);
+  }
+  return out;
+}
+
+/** An open `GET /mcp/web`: somewhere to write a server-sent event. */
+export interface McpStream {
+  write(chunk: string): unknown;
+  end(): unknown;
+}
+
 export class WebChain {
   private settings: WebSettings;
   private readonly providers: Map<string, WebProvider>;
@@ -182,7 +235,11 @@ export class WebChain {
   private recent: WebCallRecord[];
   private flush: ReturnType<typeof setTimeout> | null = null;
   private tick: ReturnType<typeof setInterval> | null = null;
+  private pinger: ReturnType<typeof setInterval> | null = null;
   private readonly now: () => number;
+  /** What the descriptions said when last looked at, by fingerprint. */
+  private told: string | null = null;
+  private readonly streams = new Map<McpStream, string>();
 
   /**
    * The chain over every registered provider, each made with what it needs
@@ -222,18 +279,35 @@ export class WebChain {
       options.store.writeSettings(this.settings);
     } else this.settings = adoptWebSettings(stored, known);
     this.recent = options.store.readRecent();
+    this.told = this.fingerprint();
   }
 
   /** The timer that keeps health and figures fresh while somebody is looking. Unref'd: a question is never a reason to stay up. */
   start(): void {
     if (this.tick) return;
-    this.tick = setInterval(sweep("web providers", () => this.refresh()), TICK_MS);
+    // Every tick, window or not: `ready()` reads its file, and a file edited
+    // by hand changes the descriptions without a save to notice it at.
+    this.tick = setInterval(
+      sweep("web providers", () => {
+        this.noticeRoutes();
+        return this.refresh();
+      }),
+      TICK_MS,
+    );
     this.tick.unref();
+    this.pinger = setInterval(() => {
+      for (const stream of this.streams.keys()) stream.write(": ping\n\n");
+    }, STREAM_PING_MS);
+    this.pinger.unref();
+    this.noticeRoutes();
     void this.refresh(true);
   }
 
   close(): void {
     if (this.tick) clearInterval(this.tick);
+    if (this.pinger) clearInterval(this.pinger);
+    for (const stream of this.streams.keys()) stream.end();
+    this.streams.clear();
     if (this.flush) clearTimeout(this.flush);
     for (const p of this.providers.values()) p.close?.();
   }
@@ -242,12 +316,14 @@ export class WebChain {
     return this.settings.pageLimit;
   }
 
-  /** The providers, first first, with whether each is on. Ids in the order with no provider behind them are kept but not drawn. */
+  /**
+   * The providers, first first, with whether each is on: the user's order
+   * with the free ones ahead of the paid (`freeBeforePaid`). Ids in the
+   * order with no provider behind them are kept but not drawn.
+   */
   private ordered(): { provider: WebProvider; enabled: boolean }[] {
-    return this.settings.order
-      .map((id) => this.providers.get(id))
-      .filter((p): p is WebProvider => p !== undefined)
-      .map((provider) => ({ provider, enabled: this.settings.enabled[provider.id] ?? provider.defaultEnabled() }));
+    const known = this.settings.order.map((id) => this.providers.get(id)).filter((p): p is WebProvider => p !== undefined);
+    return freeBeforePaid(known).map((provider) => ({ provider, enabled: this.settings.enabled[provider.id] ?? provider.defaultEnabled() }));
   }
 
   /** Whether agents started now are given the tools: something other than the hand-back is on and set up. */
@@ -286,6 +362,7 @@ export class WebChain {
     this.settings = next;
     this.options.store.writeSettings(next);
     this.changed();
+    this.noticeRoutes();
   }
 
   setOrder(order: unknown): WebStatus {
@@ -319,6 +396,7 @@ export class WebChain {
     await provider.setField(name, value);
     this.resting.delete(provider.id);
     this.changed();
+    this.noticeRoutes();
     void this.checkHealth(provider.id);
     return this.status();
   }
@@ -329,6 +407,7 @@ export class WebChain {
     provider.clearField(name);
     this.health.delete(provider.id);
     this.changed();
+    this.noticeRoutes();
     return this.status();
   }
 
@@ -517,6 +596,66 @@ export class WebChain {
 
   instructions(): string {
     return webInstructions(this.routes());
+  }
+
+  // -------------------------------------------------------------------------
+  // Keeping what agents were told current
+  // -------------------------------------------------------------------------
+
+  /** What the instructions and descriptions say, as a short hash: equal exactly when they are. */
+  fingerprint(): string {
+    return createHash("sha256").update(JSON.stringify(this.routes())).digest("hex").slice(0, 12);
+  }
+
+  /** A session id for an `initialize`: the fingerprint it was answered with, and a part of its own. */
+  session(): string {
+    return `${this.fingerprint()}.${randomBytes(8).toString("hex")}`;
+  }
+
+  /**
+   * Whether a request on this session may be answered, or must be refused so
+   * the client starts again. No session is a client from before sessions or
+   * one that ignores them, and is answered as it always was; any other id
+   * must carry the fingerprint as it stands. Nothing is kept per session, so
+   * a server restarted onto the same settings takes the old ones as its own.
+   */
+  sessionCurrent(id: string | null | undefined): boolean {
+    if (!id) return true;
+    return id.split(".")[0] === this.fingerprint();
+  }
+
+  /** Hold a client's stream, for `noticeRoutes` to write to. The caller calls what comes back when it closes. */
+  openStream(stream: McpStream, session: string | null | undefined): () => void {
+    this.streams.set(stream, session?.split(".")[0] ?? this.fingerprint());
+    stream.write(": kururu_web\n\n");
+    return () => {
+      this.streams.delete(stream);
+    };
+  }
+
+  /**
+   * Look at what the descriptions say, and if it moved since last time, tell
+   * every open stream the tools changed. The client asks for them on the
+   * session it holds, which no longer matches, is refused, and initializes
+   * again — instructions and all. Streams from before are ended a little
+   * after, by which time their clients have opened new ones.
+   */
+  noticeRoutes(): void {
+    const now = this.fingerprint();
+    const before = this.told;
+    this.told = now;
+    if (before === null || before === now) return;
+    const stale = [...this.streams].filter(([, fp]) => fp !== now).map(([stream]) => stream);
+    for (const stream of this.streams.keys()) stream.write(LIST_CHANGED);
+    if (!stale.length) return;
+    const timer = setTimeout(() => {
+      for (const stream of stale) {
+        if (this.streams.get(stream) === now) continue;
+        this.streams.delete(stream);
+        stream.end();
+      }
+    }, STALE_STREAM_MS);
+    timer.unref?.();
   }
 
   /**
