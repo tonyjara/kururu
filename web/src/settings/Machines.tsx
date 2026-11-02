@@ -8,7 +8,8 @@
  * Each row here carries ssh's own error and a **Shell**, which is the terminal
  * to do it in — it was a button on the sidebar's row until 2026-10-18, and
  * moved here because answering ssh once is setting a machine up, not a thing
- * a glance at the gauges is for.
+ * a glance at the gauges is for. Beside it, **Specs** opens what the machine
+ * is made of on the page after this one (`Specs.tsx`).
  *
  * It holds nothing but what is being typed: the list is the server's, pushed
  * to every window.
@@ -16,9 +17,10 @@
 import { useState } from "react";
 import * as api from "../session";
 import { useKururu } from "../session";
+import { showSpecsOf } from "./Specs";
 import { Btn, DangerButton, Details, errorText, Group, Item, Mono, Outcome, P, Row, Step, Steps, useTyping } from "./ui";
 
-export function MachinesPage({ onClose }: { onClose: () => void }) {
+export function MachinesPage({ onClose, onSpecs }: { onClose: () => void; onSpecs: () => void }) {
   const { machines } = useKururu();
   const [name, setName] = useState("");
   const [host, setHost] = useState("");
@@ -84,7 +86,18 @@ export function MachinesPage({ onClose }: { onClose: () => void }) {
             >
               Shell
             </Btn>
-            <DangerButton label="Remove" ask={`Stop watching ${machine.name}?`} onConfirm={() => api.removeMachine(machine.id)} />
+            <Btn
+              title={`What ${machine.name} is made of, and its history`}
+              onClick={() => {
+                showSpecsOf(machine.id);
+                onSpecs();
+              }}
+            >
+              Specs
+            </Btn>
+            {/* Its specs are kept: what was typed about a box is not the same
+                decision as watching it, and adding it again finds them. */}
+            <DangerButton label="Remove" ask={`Stop watching ${machine.name}? Its specs are kept.`} onConfirm={() => api.removeMachine(machine.id)} />
           </Item>
         ))}
       </Group>

@@ -47,6 +47,7 @@ import type { BackupStatus } from "./backup";
 import type { KuruConversation, PeerKuru } from "./kuru";
 import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "./voice";
 import type { MachineStatus } from "./machines";
+import type { MachineSpecs } from "./specs";
 import type { NodesView } from "./nodes";
 import type { LendAsk, SecretsView } from "./secrets";
 import type { WorkspaceDatabase } from "./databases";
@@ -409,6 +410,14 @@ export type ServerMessage =
    * which exist.
    */
   | { type: "machines"; machines: MachineStatus[] }
+  /**
+   * Sent on connect, whenever a reading starts or ends, and whenever the user
+   * types something into Settings → Specs: each machine's kept reading, what
+   * was typed beside it and its history, by machine id. Not on every poll —
+   * a reading is hours old by design, so this moves only when it does. See
+   * `shared/specs.ts`.
+   */
+  | { type: "specs"; specs: Record<string, MachineSpecs> }
   /**
    * Sent on connect and whenever a link, a summary or the roster changes:
    * this node, every other member with its last summary and whether it is
@@ -1414,6 +1423,20 @@ export type ClientMessage =
    * `ssh -t <host>`. By id, so the host it runs is the one the server has.
    */
   | { type: "open-machine-shell"; id: number; machineId: string; paneId?: string }
+  /**
+   * Settings → Specs: one typed field of a machine — a part, the purchase,
+   * the notes — by its key in `shared/specs.ts`; blank removes it. The value
+   * is text that is kept and drawn, and never reaches a command line.
+   */
+  | { type: "set-specs"; machineId: string; key: string; value: string }
+  /**
+   * A line of a machine's history: added with a date and words, edited, or
+   * removed. Replied to with nothing, or with why it was refused — a date
+   * that is not `2026`, `2026-10` or `2026-10-31`.
+   */
+  | { type: "specs-history"; id: number; machineId: string; op: "add" | "edit" | "remove"; entryId?: string; date?: string; text?: string }
+  /** Read a machine's hardware now, over the same ssh the gauges use. Replied to once it is done, with ssh's words if it failed. */
+  | { type: "read-specs"; id: number; machineId: string }
   /**
    * Settings → Nodes → Add a computer: show a join command for ten minutes —
    * this node's address and a single-use code, to run on the new PC — or

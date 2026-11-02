@@ -11,9 +11,10 @@
  * only reads — `/proc` and `df` — because it runs as whoever the user's ssh
  * config logs in as, which on a fresh VPS is root. The other lines this file
  * sends are `tmux kill-session` on a session name `sessionName` made, `tmux
- * ls`, and the two reads of an agent's conversation files that `sleep.ts`
+ * ls`, the two reads of an agent's conversation files that `sleep.ts`
  * makes before ending an idle card's agent there — each a constant with a
- * UUID or a whole number in it, and nothing else.
+ * UUID or a whole number in it, and nothing else — and `SPECS_SCRIPT`, the
+ * hardware reading `specs.ts` keeps, which is a constant and only reads.
  *
  * The usage ledger's two reads are here for the same reason: `usageListScript`
  * and `usageReadScript`, which print sizes and the lines the ledger wants. A
@@ -48,6 +49,7 @@ import { join } from "node:path";
 import { SESSION_ID } from "../../shared/board";
 import type { AgentCli } from "../../shared/launchers";
 import { ROLLOUT_MARK } from "../../shared/sessions";
+import { SPECS_SCRIPT } from "../../shared/specs";
 import {
   adoptMachineList,
   machineName,
@@ -312,6 +314,16 @@ export async function codexRolloutsOn(host: string, minutes: number): Promise<st
   ].join("\n");
   const result = await run(host, posix(script));
   return result.ok ? result.text : null;
+}
+
+/**
+ * What the machine is made of, as `SPECS_SCRIPT` prints it — or ssh's own
+ * last word when it could not be asked. Over the warm connection the gauges
+ * keep, so a machine that answers them answers this in a second or two.
+ */
+export function hardwareOn(host: string): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  if (!validHost(host)) return Promise.resolve({ ok: false, error: "not an ssh host" });
+  return run(host, posix(SPECS_SCRIPT));
 }
 
 /** A slow link and a first read of a long file, which is what a sweep waits on and nothing else does. */

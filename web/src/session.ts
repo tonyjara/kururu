@@ -54,6 +54,7 @@ import type { KuruAround, KuruSearchAnswer } from "../../shared/kurusearch";
 import type { MadeFile } from "../../shared/made";
 import type { OutboxEntry, SpeechChunk, VoiceChoice, VoiceLang, VoiceSettings, VoiceStatus } from "../../shared/voice";
 import type { MachineEntry, MachinePin, MachineStatus } from "../../shared/machines";
+import type { MachineSpecs, TypedKey } from "../../shared/specs";
 import type { NodeStatus, NodesView } from "../../shared/nodes";
 import type { MoveCheck, MoveDone, MovePlan, NewWorkspaceMade } from "../../shared/move";
 import { EMPTY_SECRETS, type Lendable, type LendAsk, type SecretsView } from "../../shared/secrets";
@@ -93,6 +94,8 @@ export interface KururuState {
   codexUsage: CodexUsage | null;
   /** Every machine the sidebar watches, with its last reading. See `shared/machines.ts`. */
   machines: MachineStatus[];
+  /** Each machine's kept hardware reading, what was typed beside it and its history, by machine id. See `shared/specs.ts`. */
+  specs: Record<string, MachineSpecs>;
   /**
    * This kururu among the others — its role, every other member with its
    * last summary, who leads — or null until the server has said. See
@@ -150,10 +153,10 @@ let state: KururuState = {
   usage: null,
   codexUsage: null,
   machines: [],
+  specs: {},
   nodes: null,
   secrets: EMPTY_SECRETS,
   openrouter: null,
-  credit: null,
   web: null,
   backup: null,
   databases: [],
@@ -332,6 +335,9 @@ function connect(): void {
         break;
       case "machines":
         set({ machines: msg.machines });
+        break;
+      case "specs":
+        set({ specs: msg.specs });
         break;
       case "nodes":
         set({ nodes: msg.nodes });
@@ -1328,6 +1334,24 @@ export function openClaudeLend(profileId: string): Promise<unknown> {
 /** Stop watching it, which also brings home every workspace pinned to it. */
 export function removeMachine(machineId: string): void {
   send({ type: "remove-machine", machineId });
+}
+
+/** Settings → Specs: one typed field of a machine. Blank removes it. */
+export function setSpecs(machineId: string, key: TypedKey, value: string): void {
+  send({ type: "set-specs", machineId, key, value });
+}
+
+/** A line of a machine's history. Rejects with the server's sentence, about a date it will not keep. */
+export function specsHistory(
+  machineId: string,
+  change: { op: "add"; date: string; text: string } | { op: "edit"; entryId: string; date?: string; text?: string } | { op: "remove"; entryId: string },
+): Promise<unknown> {
+  return request((id) => ({ type: "specs-history", id, machineId, ...change }));
+}
+
+/** Read a machine's hardware now. Rejects with ssh's words when it could not. */
+export function readSpecsNow(machineId: string): Promise<unknown> {
+  return request((id) => ({ type: "read-specs", id, machineId }));
 }
 
 /** The machine row's shell button: `ssh -t <host>` in a tab of the focused pane. */

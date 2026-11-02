@@ -260,6 +260,47 @@ and each workspace's pin, and marks each remote agent "status read off its
 screen, no transcript". A harness started before this has the old role and
 tool list until it is reopened.
 
+## Specs
+
+Settings → Connections → **Specs** (`web/src/settings/Specs.tsx`) is what each
+machine is made of, kept for the day it will not turn on — which is the day
+nothing can be asked of it. It is reached from a **Specs** on every row of the
+bottom bar's popover and of Settings → Machines, answering or not, and opens
+on that machine; a strip of names at the top switches.
+
+**Read.** `SPECS_SCRIPT` (`shared/specs.ts`) is a constant run under `sh -c`
+over the gauges' warm connection (`hardwareOn` in `server/src/machines.ts`),
+and only reads: `lscpu`, `/proc/meminfo`, `/sys/class/dmi/id`, the memory
+devices systemd's udev keeps from the SMBIOS tables (systemd 253 and later, no
+root needed), `lsblk`, `lspci -mm -D`, the drm nodes for video memory, and
+`/sys/class/net` for each interface's card, address and driver. `dmidecode` is
+asked only when the login is root already and udev kept nothing; nothing asks
+sudo, and no serial number is read. Linux only: a Mac answers with nothing,
+and a run that read nothing never replaces a reading that read something.
+
+**When.** On the gauges' poll, a machine that answered is read if it never has
+been, if its reading is six hours old, or at once if it answered after not
+answering — a swap means the machine was off, and that is the reading that
+finds it. A failed reading waits ten minutes; **Read now** does not.
+
+**Kept.** `~/.config/kururu/specs.json`, by machine id, with a copy of the host:
+the last reading, what was typed, the history. On the backup's allow-list,
+since what is typed cannot be made again. Never deleted with the machine —
+Remove says so — and a machine added again under the same host takes the
+specs back (`adoptSpecs`).
+
+**Typed beside it.** Each part is a row: the reading as its hint, the user's
+words in its box. The power supply has no reading, and no row for a machine
+that read as virtual unless something was typed there. Where the two disagree
+both stay and the row says so: `agreement` compares model numbers, counts and
+sizes — never spelling — and says nothing when there is nothing to compare
+on. Then the purchase (from, paid, when) and notes.
+
+**History.** Lines dated `2026`, `2026-10` or `2026-10-31`, newest first. The
+user writes them; a reading writes one for each part different from the
+reading before (`changesBetween`) — CPU, board, BIOS version, RAM, graphics,
+drives, network cards, and not the kernel, a link's state or a USB stick.
+
 ## Usage
 
 The sweep reads a machine's transcripts and rollouts over ssh once a workspace is
@@ -271,6 +312,7 @@ to a grammar with nothing to escape in it. See
 
 ## Not yet
 
+- **Specs for a Mac** — `system_profiler` would answer; nothing asks it yet.
 - **Hook reports from a machine** — see above.
 - **The web tools for an agent on a machine** — a reverse tunnel per link to a
   listener that serves only the web tools; see [web](web.md#agents-on-a-machine).

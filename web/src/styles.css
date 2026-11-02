@@ -6520,6 +6520,18 @@ label.st-row {
   width: 6em;
   text-align: right;
 }
+/* Notes: a field of more than one line, the row's width, and pulled taller
+   by hand if its own growth is not enough. */
+.st-textarea {
+  width: 100%;
+  resize: vertical;
+  line-height: var(--ui-line-height);
+}
+/* One value that wraps rather than scrolling sideways: no handle, since it
+   is as tall as its words. */
+.st-textarea-line {
+  resize: none;
+}
 .st-input-mini {
   width: 3.8em;
   padding: 2px 4px;
@@ -6769,6 +6781,22 @@ label.st-row {
   display: block;
   font-size: var(--fs-xs);
   color: var(--dimmer);
+}
+/* Settings → Specs (`Specs.tsx`). A part whose reading is not what is typed
+   says so in the text's own ink rather than the hint's dim, behind the
+   blocked dot; a history line leads with its date in the mono face, wide
+   enough for 2026-10-31, so a column of them lines up. */
+.specs-differs {
+  color: var(--text);
+}
+.specs-differs .st-dot {
+  margin-right: 4px;
+}
+.specs-date {
+  min-width: 7em;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--dim);
 }
 /* The chosen or current one: the accent down its left edge, never a filled
    ground, which reads as a selection you are about to lose. */

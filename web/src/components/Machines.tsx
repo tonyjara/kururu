@@ -19,7 +19,8 @@
  * about load, and a box that is down has none.
  *
  * Each row keeps the Shell that answers ssh's question for a machine that
- * cannot get in, and the foot goes to Settings → Machines, where machines are
+ * cannot get in, and a Specs that opens what the machine is made of in
+ * Settings → Specs; the foot goes to Settings → Machines, where machines are
  * added and removed. Drawn only once one has been added, as the section was:
  * a chip for a feature most people never use is noise on every bar.
  */
@@ -27,10 +28,11 @@ import type { MachineStatus } from "../../../shared/machines";
 import { formatBytes, machineSeverity, usedShare, worstLoad } from "../../../shared/machines";
 import * as api from "../session";
 import { useKururu } from "../session";
+import { showSpecsOf } from "../settings/Specs";
 import { BarChip } from "./BarChip";
 import { GaugeRing } from "./Usage";
 
-export function MachinesChip({ onSettings }: { onSettings: () => void }) {
+export function MachinesChip({ onSettings }: { onSettings: (page: "machines" | "specs") => void }) {
   const { machines } = useKururu();
   if (machines.length === 0) return null;
   const connected = machines.filter((machine) => !machine.error).length;
@@ -78,6 +80,11 @@ export function MachinesChip({ onSettings }: { onSettings: () => void }) {
                   void api.openMachineShell(machine.id);
                   close();
                 }}
+                onSpecs={() => {
+                  showSpecsOf(machine.id);
+                  close();
+                  onSettings("specs");
+                }}
               />
             ))}
           </ul>
@@ -86,7 +93,7 @@ export function MachinesChip({ onSettings }: { onSettings: () => void }) {
               className="kuru-head-btn"
               onClick={() => {
                 close();
-                onSettings();
+                onSettings("machines");
               }}
             >
               Settings → Machines
@@ -100,10 +107,11 @@ export function MachinesChip({ onSettings }: { onSettings: () => void }) {
 
 /**
  * One machine: its name, a ring each for CPU, memory and disk — or why there
- * are none — and its Shell. The name links to the machine's panel when it has
- * one, as the sidebar's row did.
+ * are none — and its Shell and Specs. The name links to the machine's panel
+ * when it has one, as the sidebar's row did. Specs is on every row, answering
+ * or not, since a machine that is down is the one whose parts you want.
  */
-function MachineRow({ machine, onShell }: { machine: MachineStatus; onShell: () => void }) {
+function MachineRow({ machine, onShell, onSpecs }: { machine: MachineStatus; onShell: () => void; onSpecs: () => void }) {
   const reading = machine.reading;
   const title = [machine.host, machine.error && `Last attempt: ${machine.error}`].filter(Boolean).join("\n");
   const name = machine.panel ? (
@@ -140,6 +148,14 @@ function MachineRow({ machine, onShell }: { machine: MachineStatus; onShell: () 
           aria-label={`Shell on ${machine.name}`}
         >
           Shell
+        </button>
+        <button
+          className="kuru-head-btn machines-shell"
+          onClick={onSpecs}
+          title={`What ${machine.name} is made of, kept for when it is off — Settings → Specs`}
+          aria-label={`Specs of ${machine.name}`}
+        >
+          Specs
         </button>
       </span>
       {machine.error && <span className="machine-error">{machine.error}</span>}

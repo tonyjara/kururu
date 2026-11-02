@@ -43,10 +43,10 @@ import { MachinesPage } from "./Machines";
 import { NodesPage } from "./Nodes";
 import { MascotPage } from "./Mascot";
 import { NotificationsPage } from "./Notifications";
-import { AnthropicCreditPage } from "./AnthropicCredit";
 import { OpenRouterPage } from "./OpenRouter";
 import { ProcessesPage } from "./Processes";
 import { ProfilesPage } from "./Profiles";
+import { SpecsPage } from "./Specs";
 import { StudioPage } from "./Studio";
 import { ThemePage } from "./Theme";
 import { UsagePage } from "./Usage";
@@ -68,11 +68,11 @@ export type Tab =
   | "voice"
   | "channels"
   | "machines"
+  | "specs"
   | "nodes"
   | "vault"
   | "web"
   | "openrouter"
-  | "anthropic"
   | "backups"
   | "notify"
   | "processes"
@@ -117,9 +117,9 @@ const GROUPS: ReadonlyArray<{ label: string; pages: ReadonlyArray<readonly [Tab,
       ["nodes", "Nodes", "The other kururus this one is linked with, and pairing a new one."],
       ["vault", "Vault", "Every key, env file and login kururu can see or lend, by name. Never a value."],
       ["machines", "Machines", "Your other computers, watched over ssh."],
+      ["specs", "Specs", "What each machine is made of: read over ssh, typed in by you, kept for when it is off."],
       ["web", "Web", "Search and page reading for agents: who is asked, in what order."],
       ["openrouter", "OpenRouter", "Your balance on the bottom bar."],
-      ["anthropic", "Claude API", "What is left of your API credit, on the bottom bar."],
       ["backups", "Backups", "The precious things, in a private repository."],
     ],
   },
@@ -360,7 +360,9 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
     case "nodes":
       return <NodesPage />;
     case "machines":
-      return <MachinesPage onClose={p.onClose} />;
+      return <MachinesPage onClose={p.onClose} onSpecs={() => p.onOpen("specs")} />;
+    case "specs":
+      return <SpecsPage onMachines={() => p.onOpen("machines")} />;
     case "vault":
       // Looking only, on a phone or anywhere off this Mac: taking a secret
       // back from a node is done where the keys are.

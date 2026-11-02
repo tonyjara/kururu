@@ -433,6 +433,74 @@ export function TextBox({
   );
 }
 
+/**
+ * `TextBox` for more than a line: notes. The same rule — it follows the
+ * server until somebody types, commits on blur, reverts on Escape — except
+ * that Enter is a new line, as it is in every box of more than one, and
+ * ⌘Enter (Ctrl+Enter) is the commit. It grows with what is in it up to a
+ * screenful rather than scrolling a slot three lines tall.
+ *
+ * `oneLine` is a value that is one line to the server but too long for a box
+ * one line tall — a part's model with its clocks after it: it wraps to be
+ * read whole, a phone's width included, and Enter commits as `TextBox` does.
+ */
+export function TextArea({
+  value,
+  onCommit,
+  placeholder,
+  ariaLabel,
+  disabled,
+  oneLine,
+}: {
+  value: string;
+  onCommit: (value: string) => void;
+  placeholder?: string;
+  ariaLabel?: string;
+  disabled?: boolean;
+  oneLine?: boolean;
+}) {
+  const [typing, setTyping] = useState<string | null>(null);
+  const reverting = useRef(false);
+  const typingProps = useTyping();
+  const shown = typing ?? value;
+  // Lines as they wrap, roughly: a paragraph with no breaks in it is still four lines on a phone.
+  const wrapped = shown.split("\n").reduce((n, line) => n + Math.max(1, Math.ceil(line.length / (oneLine ? 52 : 64))), 0);
+  const rows = oneLine ? Math.min(6, wrapped) : Math.min(16, Math.max(3, wrapped + 1));
+  return (
+    <textarea
+      className={`st-input st-textarea${oneLine ? " st-textarea-line" : ""}`}
+      rows={rows}
+      spellCheck={!oneLine}
+      value={shown}
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+      disabled={disabled}
+      onChange={(event) => setTyping(oneLine ? event.target.value.replace(/\n/g, " ") : event.target.value)}
+      onFocus={(event) => {
+        setTyping(event.currentTarget.value);
+        typingProps.onFocus();
+      }}
+      onBlur={() => {
+        if (!reverting.current && typing !== null && typing !== value) onCommit(typing);
+        reverting.current = false;
+        setTyping(null);
+        typingProps.onBlur();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" && (oneLine || event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          event.currentTarget.blur();
+        }
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          reverting.current = true;
+          event.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
+
 /** A text field as a row. Wide, because a name or a path wants the width. */
 export function Field({
   label,

@@ -81,8 +81,8 @@ interface Props {
   onLastPane: () => void;
   /** The two drawers' chips, on a phone; null where they are at the top. */
   chips: ReactNode;
-  /** A page of Settings, from the foot of the machines or OpenRouter chip's popover. */
-  onSettings: (page: "machines" | "openrouter" | "anthropic") => void;
+  /** A page of Settings, from the machines or OpenRouter chip's popover. */
+  onSettings: (page: "machines" | "specs" | "openrouter") => void;
   /** Settings → Usage, from an allowance's chip. */
   onUsage: () => void;
 }
@@ -108,14 +108,12 @@ export function StatusBar({
       {toggle}
       {/* The left end on a desktop: the allowances — whose they are and a
           ring a window — the machines, a glyph in the colour of the worst
-          load and how many are connected, the OpenRouter balance and the
-          Anthropic API credit's estimate. Each opens its detail on a hover
-          or a tap. See `Usage.tsx`, `Machines.tsx`, `OpenRouter.tsx` and
-          `AnthropicCredit.tsx`. */}
+          load and how many are connected, and the OpenRouter balance. Each
+          opens its detail on a hover or a tap. See `Usage.tsx`,
+          `Machines.tsx` and `OpenRouter.tsx`. */}
       <UsageChips onDetails={onUsage} />
-      <MachinesChip onSettings={() => onSettings("machines")} />
+      <MachinesChip onSettings={onSettings} />
       <OpenRouterChip onSettings={() => onSettings("openrouter")} />
-      <AnthropicCreditChip onSettings={() => onSettings("anthropic")} />
       <span className="sb-spacer" />
 
       {prefixArmed && <span className="sb-badge sb-prefix">PREFIX</span>}
