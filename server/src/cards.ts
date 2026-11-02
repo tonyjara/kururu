@@ -48,7 +48,10 @@ import {
 } from "../../shared/projects";
 import type { Actor } from "../../shared/store";
 import { host, launch, overlay, projects, state, workspaces } from "./context";
-import { claudeDirOf, repoFor, shellQuote, web } from "./index";
+import { web } from "./sweeps";
+import { shellQuote } from "./editors";
+import { repoFor } from "./repostatus";
+import { claudeDirOf } from "./lending";
 import { agentCommandFor, agentOn, cwdForPaneIn, hooksFor, killAll, kururuMcpOnly, noteLaunch, openTerminal, openTerminalAt, pinOf } from "./terminals";
 import { devOpen, startDev, stopDev } from "./carddev";
 import { claudeTranscriptPath } from "./sessions";

@@ -33,32 +33,30 @@ import "./connectbudget";
 // Second, so that every module after it runs with crashes recorded: see the module.
 import { PORT, RESTART_EXIT_CODE } from "./preamble";
 import { randomUUID } from "node:crypto";
-import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, statSync } from "node:fs";
 import { execFile, spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { homedir, totalmem } from "node:os";
+import { homedir } from "node:os";
 import { dirname, extname, join } from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 import { adoptMascot, countsAsAgent, defaultMascot } from "../../shared/model";
 import { bindKey } from "../../shared/keys";
-import type { MascotSet, Profile, Workspace } from "../../shared/model";
-import type { ClientMessage, EditorChoice, GitAction, RepoGit, WorkspaceBranch, WorkspaceProject } from "../../shared/wire";
-import { COMMIT_MESSAGE_MAX, GIT_ACTIONS, GIT_STATUS_MS, parseClientMessage } from "../../shared/wire";
-import { DB_ROW_CAP, DB_SQL_MAX, type WorkspaceDatabase } from "../../shared/databases";
+import type { Profile } from "../../shared/model";
+import type { ClientMessage } from "../../shared/wire";
+import { COMMIT_MESSAGE_MAX, GIT_ACTIONS, parseClientMessage } from "../../shared/wire";
+import { DB_ROW_CAP, DB_SQL_MAX } from "../../shared/databases";
 import { DROP_MAX_BYTES } from "../../shared/drops";
-import { DEV_SCAN_MS, GIT_SCAN_MS, MACHINE_POLL_MS, OPENROUTER_POLL_MS, USAGE_POLL_MS } from "../../shared/wire";
 import {
   bindProblem,
-  listenAddresses,
-  loopbackTokenRequired,
-  tokenEnv,
   cookieHeader,
   fromLoopback,
   hasToken,
   isShared,
   learnTailnetName,
+  listenAddresses,
+  loopbackTokenRequired,
   rotateToken,
   setShare,
   sharing,
@@ -67,23 +65,19 @@ import {
 } from "./access";
 import { parseReport } from "./agents/report";
 import { dump as dumpRecording, recordInput, recordNote } from "./record";
-import { processCwds } from "./cwd";
-import { scanDevServers, stopDevServer } from "./devservers";
 import { DropRefused, keepDrop } from "./drops";
-import { readHead, repoAt } from "./git";
-import { accountEmail, claudeSignedIn, claudeSignedInAt, pollUsage, usageSnapshot } from "./usage";
-import { codexUsageSnapshot, pollCodexUsage } from "./codexusage";
-import { recordClaudeLimits } from "./usage/limits";
-import { clearOpenRouterKey, openRouterSnapshot, pollOpenRouter, rereadOpenRouterKey, setOpenRouterKey } from "./openrouter";
+import { usageSnapshot } from "./usage";
+import { codexUsageSnapshot } from "./codexusage";
+import { clearOpenRouterKey, openRouterSnapshot, setOpenRouterKey } from "./openrouter";
 // Every provider in web/providers/, each registering itself; the build makes this module from the directory.
 import "kururu:web-providers";
-import { WebChain, callerAgent, fileStore, localCaller } from "./web/chain";
+import { callerAgent, localCaller } from "./web/chain";
 import { Voice } from "./voice";
 import { Outbox, legacyHeard } from "./outbox";
 import { Kuru } from "./kuru";
 import { Channels } from "./channels";
 import { KURU_PAGE, KURU_SAY_MAX } from "../../shared/kuru";
-import { type ChannelKind, isChannelKind, nodeSubject } from "../../shared/channels";
+import { type ChannelKind, isChannelKind } from "../../shared/channels";
 import { Backup } from "./backup";
 import { mirrorFiles } from "./export";
 import { NodeHost, nodeRequestRefusal } from "./nodes";
@@ -93,13 +87,9 @@ import { qualifyRoot } from "../../shared/remote";
 import { Mover } from "./move";
 import { nodeOfUtterance, PeerKurus, peerKey } from "./peerkuru";
 import { Secrets } from "./secrets";
-import { vaultView } from "./vaultview";
-import type { VaultView } from "../../shared/vaultview";
 import { TelegramLead } from "./lead";
-import { adoptLendAsk, asksAnything, type KindSpec, type Lendable, type SecretsView, webKind } from "../../shared/secrets";
-import { folderSentence, type MoveCheck } from "../../shared/move";
+import { webKind } from "../../shared/secrets";
 import { noteCards } from "../../shared/notecards";
-import { summarize, type NodeSummary } from "../../shared/nodes";
 import { hostname } from "node:os";
 import { Store, dataDir, dbPath } from "./store";
 import { openUsageReader } from "./usage/sweep";
@@ -107,7 +97,7 @@ import { exportUsage, NodeUsage } from "./usage/remote";
 import { parseRolloutListing } from "../../shared/sessions";
 import { Launches } from "./usage/attribute";
 import { isUsageDimension, isUsageRange } from "../../shared/usagereport";
-import { type Actor, isSearchScope } from "../../shared/store";
+import { isSearchScope } from "../../shared/store";
 import { configDir } from "./config";
 import { CLIP_MAX_BYTES, isClipId } from "../../shared/voice";
 import {
@@ -116,69 +106,30 @@ import {
   findMachine,
   machinesSnapshot,
   pollMachine,
-  pollMachines,
   removeMachine,
   usageChunkOn,
   usageFilesOn,
 } from "./machines";
-import { addHistory, adoptSpecs, dueForReading, editHistory, forgetSpecsRun, readSpecs, removeHistory, setTyped, specsSnapshot } from "./specs";
+import { addHistory, adoptSpecs, editHistory, forgetSpecsRun, readSpecs, removeHistory, setTyped, specsSnapshot } from "./specs";
 import { remoteShellCommand, remoteShellOf, validRemoteDir } from "../../shared/machines";
 import { lazygitCommand, lazygitRun } from "../../shared/lazygit";
 import { OnScreen } from "./onscreen";
 import { Sleeper } from "./sleep";
-import { closeDatabasePools, dbCatalog, dbQuery, dbRows, scanDatabases, type DatabaseScanInput } from "./databases";
+import { closeDatabasePools, dbCatalog, dbQuery, dbRows } from "./databases";
 import { allowedRoots, allowRoot, findDocs, listDir, listDirs, readBytes, readFile, resolveInRoot } from "./files";
 import { parseFileOp, runFileOp } from "./fileops";
 import { renderMarkdown } from "./markdown";
-import { measureMemory } from "./memory";
-import { PING_MS } from "./backpressure";
-import { readProcRows, type ProcRows } from "./proctable";
-import {
-  childIndex as footChildren,
-  findNvims,
-  hostPidOf,
-  readFootTable,
-  readTree,
-  type FootProc,
-  type FootTable,
-  type FoundNvim,
-} from "./footprint";
-import {
-  nvimWhere,
-  type Footprint,
-  type FootprintNvim,
-  type FootprintTerminal,
-  type NvimCloseReport,
-  type NvimPlace,
-} from "../../shared/footprint";
-import { attach as attachEditor, endHard, findNvim, isNvimTab, nvimCommand, openFile, quit as quitNvim } from "./nvim";
-import { readProcTable } from "./agents/procs";
-import { activeAgent, BOARD_TAB, findPane, isBoardTab, isDocTab, panes, paneWithAgent, terminalsOf } from "../../shared/layout";
+import { nvimCommand } from "./nvim";
+import { activeAgent, BOARD_TAB, findPane, isBoardTab, isDocTab, terminalsOf } from "../../shared/layout";
 import { isAgentPlacement } from "../../shared/agentpane";
-import { builtinSheets, freshMascotId, importedSheets, importSheet, removeSheet, sheetImage, sheetsDir, writeMascots } from "./mascot";
+import { builtinSheets, freshMascotId, importedSheets, importSheet, removeSheet, sheetImage, sheetsDir } from "./mascot";
 import { writeKeys } from "./keys";
-import { agentLabel, agentSummary } from "../../shared/labels";
 import { handsOf } from "../../shared/harness";
-import { adoptNotify, type NotifySettings } from "../../shared/notify";
-import { writeNotify } from "./notify";
-import { writeLaunch } from "./launch";
-import { withProject, writeProjects } from "./projects";
-import {
-  commitTyped,
-  defaultBranch,
-  fastForward,
-  fetchAll,
-  mainRoot,
-  pullBranch,
-  pushBranch,
-  repoStatus,
-  worktreePresent,
-} from "./worktree";
-import { adoptProject } from "../../shared/projects";
+import { adoptNotify } from "../../shared/notify";
+import { worktreePresent } from "./worktree";
 import { Harness } from "./harness";
 import { initializes, mcpAnswer } from "./mcp";
-import { claudeDirFor, codexDirFor, lentClaudeEnv, lentGhEnv, loginEnv, scanLogins } from "./logins";
-import { adoptLaunch, findLauncher, launcherCommand, launcherFor, type LaunchSettings, visibleLaunchers } from "../../shared/launchers";
+import { adoptLaunch, findLauncher, launcherCommand, launcherFor } from "../../shared/launchers";
 import {
   addCard,
   addLane,
@@ -196,29 +147,16 @@ import {
   resizeLane,
 } from "../../shared/board";
 import { soundBytes, sounds } from "./sounds";
-import { writeAppearance } from "./appearance";
 import {
   annotate as annotateCatalog,
   assetFile,
   catalog,
-  install as installStyle,
-  installedPack,
-  readLibrary,
-  rememberMascotId,
   preview as previewStyle,
+  readLibrary,
   remove as removeStyle,
   stylesHome,
 } from "./styles";
-import {
-  isBuiltinPack,
-  isStyleKind,
-  PACK_PARTS,
-  wearKururu,
-  type InstalledStyle,
-  type Look,
-  type PackManifest,
-  type StyleKind,
-} from "../../shared/styles";
+import { isStyleKind } from "../../shared/styles";
 import {
   createLocalSkin,
   localDir,
@@ -227,16 +165,15 @@ import {
   removeLocalAsset,
   writeLocalManifest,
 } from "./studio";
-import { adoptAppearance, themeFor, type Appearance } from "../../shared/theme";
+import { adoptAppearance, themeFor } from "../../shared/theme";
 import { isStyleId, skinFor } from "../../shared/skin";
 import { HOST_PROTOCOL, HostLink, type Port } from "./hostlink";
 import { connectToHost, hostSocketPath, type SocketPort } from "./hostsock";
 import { hostEnv, hostJobRunning, hostRuntime, launchHost, launchHostSystemd, unitOf } from "./hostlaunch";
 import { hostEnding, lifecycleReport, lifeNow, readTail, record, recordStart, socketHeld, socketHolder, supervised } from "./lifecycle";
 import { adoptReaders, readSnapshot, snapshotPath, writeSnapshot } from "./persist";
-import { closeAllPreviews, closePreview, openPreview, openPreviews } from "./proxy";
+import { closeAllPreviews } from "./proxy";
 import { reach } from "./reach";
-import { sweep } from "./sweep";
 import { checkForUpdate } from "./update";
 import {
   isReloadHold,
@@ -256,7 +193,6 @@ import {
   backup,
   broadcast,
   channels,
-  checkLiveness,
   clients,
   type ClientState,
   deliver,
@@ -273,7 +209,6 @@ import {
   madeFiles,
   mascots,
   MAX_ACTIVITY,
-  memory,
   mover,
   nodeNotices,
   nodes,
@@ -290,7 +225,6 @@ import {
   reloads,
   screens,
   secrets,
-  sees,
   send,
   sendState,
   sleeper,
@@ -324,7 +258,7 @@ import {
 import { restartDev, stopDev } from "./carddev";
 import { noticeStatuses } from "./notices";
 import { cardHistoryOf, recordTurn, sayAside, searchFor } from "./conversation";
-import { kuruFiles, MADE_SWEEP_MS, noteMade, openMade, sendPictureFor, showFileFor, sweepMade } from "./madelinks";
+import { kuruFiles, noteMade, openMade, sendPictureFor, showFileFor } from "./madelinks";
 import {
   agentCommand,
   agentCommandFor,
@@ -356,1812 +290,50 @@ import {
   sendBacklog,
   sessionShell,
   syncWatched,
-  tabCwd,
   usageReportFor,
   workspaceRepo,
 } from "./terminals";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-/**
- * Where the built web app is. The Electron app passes this explicitly, because
- * once this file is bundled it no longer sits where the source did; running it
- * straight from the repo falls back to the source layout.
- */
-const WEB_DIST = process.env.KURURU_WEB_DIST || join(HERE, "../../web/dist");
-/**
- * Where the web app is built *from*, which is where the window's vite runs —
- * the one listener on the machine besides this process that is kururu, and so
- * never a dev server (see `Self` in `devservers.ts`). From the source layout
- * and not from `WEB_DIST`, because a packaged app's built copy has no source
- * beside it and no vite either, and there this is null. Real, because the
- * kernel's answer for a cwd always is.
- */
-const WEB_SOURCE = (() => {
-  try {
-    return realpathSync(join(HERE, "../../web"));
-  } catch {
-    return null;
-  }
-})();
-
-/**
- * Extra directories the file browser may read, colon-separated. Agent cwds and
- * dev server cwds are added automatically; this is for a project with nothing
- * running in it yet. Set at launch by the person running the server, never by a
- * client.
- */
-for (const dir of (process.env.KURURU_ROOTS ?? "").split(":")) allowRoot(dir.trim() || undefined);
-
-/**
- * Whether Claude is signed in for this node's Kuru, as last looked: the
- * machine's own login, the profile's when profiles keep their own, or a
- * token the parent lent. Null until the first look, which counts as yes
- * rather than keep a holder that restarts off the poll for a minute.
- */
-let claudeReady: boolean | null = null;
-
-async function refreshClaudeReady(): Promise<void> {
-  if (!channels || !nodes) return;
-  const key = kuruKey();
-  const profile = key ? workspaces.profileByKey(key) : null;
-  const ready = Boolean(lentClaudeEnv()) || (await claudeSignedIn(loginsActive() && profile ? claudeDirFor(profile.loginKey) : null));
-  if (ready === claudeReady) return;
-  claudeReady = ready;
-  lead?.evaluate();
-  nodes?.queueSummary();
-}
-
-/**
- * Whether this node may poll Telegram for the others (`lead.ts`), and the
- * sentence that says why not. Eligible is the plan's three things: the
- * channel is on — the switch as this node last heard it, from the roster or
- * a node's flip — this node holds the bot's token — its own on the parent,
- * lent on a child — and a Kuru that could answer, which is Claude signed in.
- */
-function leadEligibility(): { eligible: boolean; why: string | null } {
-  const shared = nodes.rosterTelegram();
-  const parentId = nodes.parentId();
-  const parent = parentId ? (nodes.nameOf(parentId) ?? "the parent") : "the parent";
-  if (!shared) return { eligible: false, why: "the roster carries no Telegram channel" };
-  if (!channels.telegram.switchedOn) return { eligible: false, why: "the channel is off (Settings → Channels, on any node)" };
-  if (nodes.role() === "child") {
-    if (!secrets.heldFrom("telegram")) return { eligible: false, why: `${nodeSubject(parent)} has not lent this node the bot's token (its Settings → Nodes → ${nodes.name()} → Secrets → Telegram)` };
-  } else if (!channels.telegram.hasToken) return { eligible: false, why: "no bot token here" };
-  if (claudeReady === false) return { eligible: false, why: "Claude is not signed in here, so no Kuru could answer (claude, then /login)" };
-  return { eligible: true, why: null };
-}
-
-/** Where the poll stands, for `/api/health` and so the doctor's leading row. Null before the links exist. */
-function leadHealth(): { shared: boolean; eligible: boolean; why: string | null; polls: boolean; holder: string | null; rank: number | null } | null {
-  if (!lead) return null;
-  const eligible = leadEligibility();
-  const holder = lead.holder();
-  return { shared: channels.telegram.isShared, ...eligible, polls: channels.telegram.polling, holder: holder ? nodes.nameOf(holder) : null, rank: nodes.ownRank() };
-}
-
-/**
- * A lent kind was written or taken back on this node, under a reader that
- * holds what it read: each one reads its file again and tells the windows.
- * The web providers and a lent Claude token are read per request and per
- * spawn, so they need only the windows told.
- */
-function secretLanded(spec: KindSpec): void {
-  switch (spec.family) {
-    case "openrouter":
-      if (rereadOpenRouterKey()) {
-        broadcast({ type: "openrouter", openrouter: openRouterSnapshot() });
-        void pollOpenRouterAccount();
-      }
-      return;
-    case "telegram":
-      channels.telegram.reread();
-      lead?.evaluate();
-      nodes.queueSummary();
-      return;
-    case "firecrawl-cloud":
-    case "web":
-      broadcast({ type: "web", web: web.status() });
-      return;
-    default:
-      return;
-  }
-}
-
-/** What kind of field a web provider's field is, as its Settings page draws it, or null for none by that name. */
-function webFieldKind(provider: unknown, field: unknown): string | null {
-  return web.status().providers.find((p) => p.id === provider)?.fields.find((f) => f.name === field)?.kind ?? null;
-}
-
-/** When this process started, which a node's data mark carries so a restart is a pull. */
-const STARTED_AT = Date.now();
-
-/**
- * Where the other nodes dial this one: `KURURU_NODE_ADDRESS` when set — two
- * isolated instances on one machine are tested on loopback — else the
- * tailnet address off the interface list, as the Share dialog finds it.
- */
-function nodeAddress(): string | null {
-  return process.env.KURURU_NODE_ADDRESS || reach(0).tailscale;
-}
-
-/** Why no other node could dial this one, or null when one could. */
-function nodeUnreachable(): string | null {
-  const address = nodeAddress();
-  if (!address) return "This machine has no tailnet address, so no other node can reach it. Bring Tailscale up, then restart the server.";
-  const listening = listenAddresses();
-  if (listening.includes("0.0.0.0") || listening.includes("::") || listening.includes(address)) return null;
-  return process.platform === "darwin"
-    ? "This Mac is not shared, so no node can reach it. Turn sharing on in the Share dialog first."
-    : `This server listens on ${listening.join(", ")}, not on ${address}, so no node can reach it.`;
-}
-
-/**
- * What this node tells the others about itself: the profile on screen, as
- * `kururu_status` would say it. See `summarize`.
- */
-function nodeSummary(leads: boolean, sees: string[]): NodeSummary {
-  const profile = workspaces.active;
-  const mine = new Set(workspaces.agentsIn(profile.id));
-  const marks = store.marks();
-  return summarize({
-    at: Date.now(),
-    version: VERSION,
-    host: hostInfo,
-    profile,
-    agents: host.agents.filter((agent) => mine.has(agent.id)).map(overlay),
-    folderOf: (workspaceId) => {
-      const workspace = profile.workspaces.find((w) => w.id === workspaceId);
-      return workspace ? (workspaceDirs(workspace)[0] ?? null) : null;
-    },
-    kuru: kuru.counts(profile.key),
-    leads,
-    sees,
-    dataMark: `${marks.events}.${marks.turns}.${store.changes}@${STARTED_AT}`,
-    ...(lead ? { lead: { eligible: leadEligibility().eligible, polls: channels.telegram.polling } } : {}),
-    launchers: visibleLaunchers(launch),
-    // Nothing watches the parent, so it does not say it can be watched.
-    watchable: nodes?.role() !== "parent",
-    ledger: usageReader !== null,
-  });
-}
-
-/**
- * Whether terminals open with their profile's own logins right now.
- *
- * The setting and the host, together. The switch is the person's; the host is
- * what applies the `env` that makes it real, and an old one would drop that
- * field on the floor and open the terminal as the machine's own account with
- * nothing to say so — the one failure this feature must not have. So with the
- * switch on and the host behind, everything that reads this behaves as though
- * the switch were off, and the Profiles page says why.
- */
-function loginsActive(): boolean {
-  return launch.loginsPerProfile && hostInfo.current;
-}
-
-/**
- * The environment a terminal opened in the active profile gets on top of the
- * server's own: the profile's login directories, or nothing at all. Absent
- * rather than empty, which keeps the common case off the wire.
- */
-export function spawnEnv(): Record<string, string> | undefined {
-  return spawnEnvFor(workspaces.active.id);
-}
-
-/**
- * The same, for a terminal opened in a profile that need not be the one on
- * screen — the harness's case. And `KURURU_TOKEN` beside the logins, while
- * loopback wants the token (`tokenInPtys`).
- */
-export function spawnEnvFor(profileId: string): Record<string, string> | undefined {
-  const profile = workspaces.profile(profileId);
-  const login = loginsActive() && profile ? loginEnv(profile.loginKey) : undefined;
-  const token = tokenInPtys() ? tokenEnv() : undefined;
-  // A Claude login the parent lent this node, on a child whose user has no
-  // browser anywhere, and a GitHub login it lent so agents can clone and
-  // push: both need the host's `env` too, so protocol 2.
-  const lent = hostProtocol >= 2 ? lentClaudeEnv() : undefined;
-  const gh = hostProtocol >= 2 ? lentGhEnv() : undefined;
-  return login || token || lent || gh ? { ...login, ...token, ...lent, ...gh } : undefined;
-}
-
-/**
- * Whether the ptys this server opens carry `KURURU_TOKEN`: loopback wants the
- * token (`access.ts`), and the host takes an `env`, which is protocol 2. The
- * MCP configs name the variable only then, since a config asking for one that
- * is not set is a server Claude Code will not start.
- */
-export function tokenInPtys(): boolean {
-  return loopbackTokenRequired() && hostProtocol >= 2;
-}
-
-/** Where a profile's Claude keeps its config, and so its transcripts: its own directory, or the machine's. */
-export function claudeDirOf(profileId: string): string {
-  const profile = workspaces.profile(profileId);
-  if (loginsActive() && profile) return claudeDirFor(profile.loginKey);
-  return process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
-}
-
-/**
- * The checkout a workspace's env files are read from: the repository its
- * folders are in, the focused one first, as the branch walk finds it. Found
- * by the server, as every root is, and never a path a client sent; null for
- * a workspace in no repository. Not `state.projects`, whose root is the
- * workspace's first folder even when that is no repository — a new
- * workspace's shell at home, whose env files would be every project's.
- */
-async function checkoutOf(workspace: Workspace): Promise<string | null> {
-  for (const dir of focusedDirs(workspace)) {
-    const repo = await repoFor(dir);
-    if (repo) return repo.root;
-  }
-  return null;
-}
-
-function workspaceIn(profileId: string, workspaceId: string): Workspace {
-  const workspace = workspaces.profile(profileId)?.workspaces.find((w) => w.id === workspaceId);
-  if (!workspace) throw new Error("That workspace is gone.");
-  return workspace;
-}
-
-/**
- * What a workspace could lend a node — its env files, the ssh entries and
- * GitHub logins this Mac has, the ones it seems to need first — with the
- * node's word on the folder its env files would go to. Hints only.
- */
-async function lendOffer(profileId: string, workspaceId: string, nodeId: string, folder: string | null): Promise<Lendable> {
-  const workspace = workspaceIn(profileId, workspaceId);
-  const name = nodes.nameOf(nodeId);
-  if (!name) throw new Error("That node is not in the roster.");
-  const root = await checkoutOf(workspace);
-  let check: MoveCheck | null = null;
-  let checkError: string | null = null;
-  try {
-    check = await mover.folderCheck(profileId, workspaceId, nodeId, folder, root);
-  } catch (err) {
-    checkError = err instanceof Error ? err.message : String(err);
-  }
-  const pinned = workspace.machine ? (findMachine(workspace.machine.machineId)?.host ?? null) : null;
-  return secrets.offer({ node: { id: nodeId, name }, workspace: { id: workspace.id, name: workspace.name }, root, pinned, check, checkError });
-}
-
-/**
- * Lend a node what was asked of a workspace's. The folder its env files go
- * to is asked of the node again now, whatever a client said it checked:
- * it is where the node will write, and the node is the one who knows.
- */
-async function lendSecrets(profileId: string, workspaceId: string, nodeId: string, folder: string | null, raw: unknown): Promise<{ view: SecretsView; lent: string[]; to: string | null }> {
-  const ask = adoptLendAsk(raw);
-  if (!asksAnything(ask)) throw new Error("Nothing was named to lend.");
-  const workspace = workspaceIn(profileId, workspaceId);
-  const root = await checkoutOf(workspace);
-  let to: string | null = null;
-  if (ask.env.length) {
-    const check = await mover.folderCheck(profileId, workspaceId, nodeId, folder, root);
-    if (check.problem) throw new Error(folderSentence(check.problem, nodes.nameOf(nodeId) ?? "the node", check.shown));
-    to = check.folder;
-  }
-  return { ...secrets.lendProject(nodeId, { root, to, workspace: workspace.name }, ask), to };
-}
-
-/**
- * Settings → Vault: everything this kururu can see and lend, by name. The
- * hints are the ones each key's own module holds for its own page; every
- * profile's workspaces are walked for their env files' names; the logins are
- * the ones a profile's terminals are sent to. Asked for by the page when it
- * opens, never broadcast.
- */
-async function vaultFor(): Promise<VaultView> {
-  const home = homedir();
-  const profiles = workspaces.all();
-  const perProfile = loginsActive();
-  const names = (key: string | null) => profiles.filter((p) => (key === null ? !perProfile : p.loginKey === key)).map((p) => p.name);
-  const keys = perProfile ? [...new Set(profiles.map((p) => p.loginKey))] : [];
-
-  const machineDir = process.env.CLAUDE_CONFIG_DIR || null;
-  const claude = [
-    {
-      name: "this Mac",
-      dir: machineDir,
-      profiles: names(null),
-      account: await accountEmail(machineDir ? join(machineDir, ".claude.json") : join(home, ".claude.json")),
-      signedAt: await claudeSignedInAt(machineDir),
-    },
-  ];
-  for (const key of keys) {
-    const dir = claudeDirFor(key);
-    claude.push({ name: `login ${key}`, dir, profiles: names(key), account: await accountEmail(join(dir, ".claude.json")), signedAt: await claudeSignedInAt(dir) });
-  }
-  const codex = [
-    { name: "this Mac", home: process.env.CODEX_HOME || join(home, ".codex"), login: "machine", profiles: names(null) },
-    ...keys.map((key) => ({ name: `login ${key}`, home: codexDirFor(key), login: key, profiles: names(key) })),
-  ];
-
-  const found = [];
-  for (const profile of profiles) {
-    for (const workspace of profile.workspaces) {
-      const pinned = workspace.machine ? (findMachine(workspace.machine.machineId)?.host ?? null) : null;
-      found.push({ id: workspace.id, name: workspace.name, profile: profile.name, root: await checkoutOf(workspace), pinned });
-    }
-  }
-
-  const telegram = channels.status().telegram;
-  return vaultView({
-    home,
-    configDir: configDir(),
-    role: nodes.role(),
-    hints: {
-      openrouter: openRouterSnapshot()?.hint ?? null,
-      telegram: telegram.hint && telegram.bot ? `@${telegram.bot.username} ${telegram.hint}` : telegram.hint,
-      web: web
-        .status()
-        .providers.filter((p) => p.fields.some((f) => f.kind === "secret"))
-        .map((p) => ({ id: p.id, label: p.label, hint: p.fields.flatMap((f) => (f.kind === "secret" && f.held ? [f.held] : [])).join(" · ") || null })),
-    },
-    secrets: secrets.view(),
-    workspaces: found,
-    claude,
-    codex,
-  });
-}
-
-/**
- * Move a workspace, and lend the node what the dialog ticked once it is
- * there: into the folder the move was made to, which the node has just
- * judged. The checkout here is found first, while the workspace still is.
- * A move that is refused or fails lends nothing; a lend that fails after a
- * move that worked is said beside it, since the move is done.
- */
-async function moveAndLend(profileId: string, workspaceId: string, nodeId: string, folder: string, raw: unknown, actor: Actor) {
-  const ask = adoptLendAsk(raw ?? {});
-  const root = asksAnything(ask) ? await checkoutOf(workspaceIn(profileId, workspaceId)) : null;
-  const moved = await mover.move(profileId, workspaceId, nodeId, folder, actor);
-  if (!asksAnything(ask)) return { ...moved, lent: [] as string[], lendError: null };
-  try {
-    const { lent } = secrets.lendProject(nodeId, { root, to: moved.done.folder, workspace: moved.done.name }, ask);
-    return { ...moved, lent, lendError: null };
-  } catch (err) {
-    return { ...moved, lent: [] as string[], lendError: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-/**
- * Which login "Lend this login" lends, for a profile: its own directory
- * while profiles keep their own logins, else the machine's — and whose
- * account it is, as Claude Code recorded it there.
- */
-async function lendingLogin(profileId: unknown): Promise<{ login: string; account: string | null }> {
-  const profile = typeof profileId === "string" ? workspaces.profile(profileId) : undefined;
-  if (!profile) throw new Error("That profile is gone.");
-  if (loginsActive()) return { login: profile.loginKey, account: await accountEmail(join(claudeDirFor(profile.loginKey), ".claude.json")) };
-  const dir = process.env.CLAUDE_CONFIG_DIR;
-  return { login: "machine", account: await accountEmail(dir ? join(dir, ".claude.json") : join(homedir(), ".claude.json")) };
-}
-
-/** The same for Codex, whose rollouts are where a card's Codex conversation is found (`sleep.ts`). */
-export function codexHomeOf(profileId: string): string {
-  const profile = workspaces.profile(profileId);
-  if (loginsActive() && profile) return codexDirFor(profile.loginKey);
-  return process.env.CODEX_HOME || join(homedir(), ".codex");
-}
-
-async function refreshLogins(): Promise<void> {
-  const found = new Map((await scanLogins()).map((login) => [login.key, login] as const));
-  for (const profile of workspaces.all()) {
-    if (!found.has(profile.loginKey)) found.set(profile.loginKey, { key: profile.loginKey, email: null });
-  }
-  const held = new Set(workspaces.all().map((p) => p.loginKey));
-  // A directory nobody uses and nobody signed into is an empty folder, and
-  // listing it would offer a choice that means nothing.
-  const next = [...found.values()]
-    .filter((login) => login.email !== null || held.has(login.key))
-    .sort((a, b) => a.key.localeCompare(b.key));
-  if (JSON.stringify(next) === JSON.stringify(logins)) return;
-  provide("logins", next);
-  pushSnapshot();
-}
-
-/**
- * Every appearance change is the same two steps the mascot's are — write it
- * down, then tell every client — and the snapshot is the answer, exactly as it
- * is to a split. Nothing here restarts, reloads or repaints anything: the
- * window redraws because the snapshot it is rendering changed, which is what
- * makes a theme picked on the desktop land on the phone without either of them
- * knowing about the other.
- */
-function saveAppearance(next: Appearance): void {
-  provide("appearance", next);
-  writeAppearance(next);
-  pushSnapshot();
-}
-
-/** The same two steps, for the same reason. See `saveAppearance`. */
-function saveNotify(next: NotifySettings): void {
-  provide("notify", next);
-  writeNotify(next);
-  pushSnapshot();
-}
-
-/** And again, for the new-tab menu. */
-function saveLaunch(next: LaunchSettings): void {
-  provide("launch", next);
-  writeLaunch(next);
-  pushSnapshot();
-}
-
-/**
- * And for one repository. The root is checked against what the server has
- * found for itself — the repositories the active profile's workspaces are in,
- * and the ones already in the file — and anything else is dropped: a settings
- * write is not a way to teach kururu a path.
- */
-function saveProject(root: unknown, raw: unknown): void {
-  if (typeof root !== "string") return;
-  const known = root in projects || state.projects.some((project) => project.root === root);
-  if (!known) return;
-  provide("projects", withProject(projects, root, adoptProject(raw)));
-  writeProjects(projects);
-  pushSnapshot();
-}
-
-/**
- * Every mascot change goes through here, because all five of them are the same
- * two steps — write it down, then tell every client — and a verb that forgot the
- * second would leave the window that sent it drawing the badge it had before.
- * The snapshot is the answer to these messages, the way it is to a split.
- */
-function saveMascots(next: MascotSet): void {
-  provide("mascots", next);
-  writeMascots(next);
-  pushSnapshot();
-}
-
-/**
- * Fetch a style, put it on disk, and make it the one in use if that is what was
- * meant.
- *
- * The four kinds end in four different places and that asymmetry is real rather
- * than an inconsistency. A theme and a skin are one id in `appearance.json`. A
- * **mascot** is not: it becomes a row in the user's mascot list — the same list
- * Settings edits by dragging cells out of a sheet — because once it is installed
- * there is no useful difference between a mascot from the registry and one
- * somebody cut out by hand, and keeping two kinds would mean every reader
- * downstream learning which it had. A **sound** lands in a fourth place again,
- * `notify.json`, and that is the one worth defending: a noise is not a look, so
- * it does not belong in `appearance.json` — the same sentence `server/src/notify.ts`
- * already makes about why that file exists at all. A **pack** is a handful of
- * ids and nothing else, so installing one is installing what it names; it is
- * stored as a record so that it can be listed and removed, and removing it
- * deliberately leaves its parts alone, because a pack is a *reference* and
- * taking away the recommendation is not taking away the theme.
- */
-async function installOne(kind: string, id: string, activate: boolean): Promise<{ ok: true } | { ok: false; error: string }> {
-  const result = await installStyle(kind, id);
-  if (!result.ok) return result;
-
-  if (result.mascot) {
-    const { name, config, replaces } = result.mascot;
-    const already = replaces ? mascots.list.find((m) => m.id === replaces) : undefined;
-    const mascotId = already?.id ?? freshMascotId(mascots.list);
-    const one = { id: mascotId, name: name.slice(0, 40), ...config };
-    // The default is left alone even when this is being worn: `wear` below is
-    // the one place that decides, and it needs the id `rememberMascotId` is
-    // about to write down.
-    saveMascots({
-      default: mascots.default,
-      list: already ? mascots.list.map((m) => (m.id === mascotId ? one : m)) : [...mascots.list, one],
-    });
-    rememberMascotId(result.record.kind, result.record.id, mascotId);
-  }
-
-  provide("styles", readLibrary());
-
-  if (result.record.kind === "pack") {
-    const pack = (result.manifest ?? {}) as Record<string, unknown>;
-    for (const part of PACK_PARTS) {
-      const partId = pack[part];
-      if (typeof partId !== "string") continue;
-      // A part that fails is reported nowhere and that is deliberate: a pack
-      // whose skin is temporarily unreachable should still leave you with its
-      // theme, its mascot and its sound, which is most of the look. Refusing the
-      // lot would make one bad file take three good ones down with it.
-      //
-      // Never activated on the way past, even when the pack is being worn. What
-      // a pack *means* is one answer and `wear` below is where it is given; a
-      // part that put itself on here would be a second, arrived at by a
-      // different route, and the two would drift the first time a pack learned
-      // to name something new. It also saves three writes of `appearance.json`
-      // for one click.
-      await installOne(part, partId, false);
-    }
-    provide("styles", readLibrary());
-  }
-
-  if (activate) wear(result.record.kind, result.record.id);
-  else pushSnapshot();
-  return { ok: true };
-}
-
-/*
- * `Look` is the three files a style can land in, gathered up so that wearing a
- * pack writes each of them at most once. It lives in `shared/styles.ts` beside
- * `wearKururu`, which builds one.
- *
- * A pack is the reason it exists. Every other style is one decision in one
- * file and `saveAppearance` is the whole story; a pack is up to five — a theme,
- * a skin, a mascot, a sound and a face — spread across `appearance.json`,
- * `mascots.json` and `notify.json`, and doing them one saver at a time would
- * push three snapshots for one click and repaint the window three times on the
- * way to the look somebody asked for. So the parts are folded into a `Look`
- * first and written afterwards.
- */
-
-/**
- * One installed style, folded into a look.
- *
- * The four kinds land in the four places `installOne`'s comment argues for, and
- * the ids are resolved through `themeFor` and `skinFor` for the reason those
- * exist: what is being worn has to be something this version can draw, and the
- * fallback belongs at the moment of wearing rather than in the file.
- *
- * A mascot is the one that can silently decline. It is worn by *its row in the
- * user's list*, not by its registry id — see `installOne` — so a record from
- * before `mascotId` was written down, or one whose row somebody has since
- * deleted in Settings, has nothing to point at. Leaving the current mascot up is
- * the right answer there: the alternative is a badge that goes blank because a
- * pack mentioned a sprite that is not on the machine any more.
- */
-function put(look: Look, record: InstalledStyle): Look {
-  switch (record.kind) {
-    case "theme":
-      return { ...look, appearance: { ...look.appearance, themeId: themeFor(record.id, styles.themes).id } };
-    case "skin":
-      return { ...look, appearance: { ...look.appearance, skinId: skinFor(record.id, styles.skins).id } };
-    case "mascot":
-      if (!record.mascotId || !look.mascots.list.some((m) => m.id === record.mascotId)) return look;
-      return { ...look, mascots: { ...look.mascots, default: record.mascotId } };
-    /**
-     * Picking the sound, and not also turning notifications on.
-     *
-     * `enabled` and `events` are a decision about being interrupted and this is
-     * a decision about what the interruption sounds like — so a pack worn by
-     * somebody who has notifications switched off is a pack whose sound is
-     * waiting for them when they switch them back on, rather than a style
-     * choice that quietly started interrupting them.
-     */
-    case "sound":
-      return { ...look, notify: { ...look.notify, sound: record.id } };
-    default:
-      return look;
-  }
-}
-
-/** Write whichever of the three actually moved, then tell every client once. */
-function saveLook(next: Look): void {
-  if (next.appearance !== appearance) {
-    provide("appearance", next.appearance);
-    writeAppearance(next.appearance);
-  }
-  if (next.mascots !== mascots) {
-    provide("mascots", next.mascots);
-    writeMascots(next.mascots);
-  }
-  if (next.notify !== notify) {
-    provide("notify", next.notify);
-    writeNotify(next.notify);
-  }
-  pushSnapshot();
-}
-
-/**
- * Put on something that is already on the machine.
- *
- * Split out of `installOne` because wearing and installing stopped being the
- * same gesture. They were, for as long as the only way to arrive at a style was
- * to press its row in the registry — and then a pack is five decisions somebody
- * made once, in an order they cannot get back to afterwards: change the skin,
- * try a different mascot, and there is no longer any way to say *put the pack
- * back on* short of removing it and installing it again over the network. So
- * this takes an id and nothing else, touches no network, and is what both the
- * Appearance tab's pack picker and an installed row in the Styles tab call.
- *
- * A pack fans out here rather than in the caller, which is the whole point: what
- * it means to wear one is written down once.
- */
-function wear(kind: StyleKind, id: string): { ok: true } | { ok: false; error: string } {
-  // Kururu's own pack first, and ahead of an installed pack that took its id:
-  // it is the way back from every other pack, so nothing installed may stand
-  // in front of it. Its parts are all built in, which is why it is not folded
-  // through `put` — there is no record for any of them to be found by.
-  if (kind === "pack" && isBuiltinPack(id)) {
-    saveLook(wearKururu({ appearance, mascots, notify }));
-    return { ok: true };
-  }
-  const record = styles.installed.find((r) => r.kind === kind && r.id === id);
-  if (!record) return { ok: false, error: "that style is not installed" };
-  let look: Look = { appearance, mascots, notify };
-  if (kind === "pack") {
-    const pack = installedPack(id);
-    if (!pack) return { ok: false, error: `${record.name} is installed but its manifest is unreadable` };
-    for (const part of PACK_PARTS) {
-      const partId = pack[part];
-      // A part the pack names but the machine does not have is skipped rather
-      // than refused, which is `installOne`'s rule for a part that would not
-      // download, arriving at the same conclusion from the other end: most of a
-      // pack is most of the look, and nothing here is worth losing the rest of
-      // it over.
-      const partRecord = partId ? styles.installed.find((r) => r.kind === part && r.id === partId) : undefined;
-      if (partRecord) look = put(look, partRecord);
-    }
-    look = wearFont(look, pack);
-  } else {
-    look = put(look, record);
-  }
-  saveLook(look);
-  return { ok: true };
-}
-
-/**
- * The face a pack asks for, if it asks for one.
- *
- * Kururu installs no fonts and never should — see `adoptPackManifest` — so this
- * writes a *name* into the same field the box in Settings writes, and a machine
- * without that face keeps the one it had. Which is the honest behaviour and not
- * a silent failure: naming a font nobody has is what typing one character wrong
- * into that box already does, and `web/src/fonts.ts` exists because of it.
- *
- * A pack with no `font` leaves the setting alone rather than clearing it. The
- * empty string means "kururu's own stack" and writing it would make wearing a
- * pack quietly undo a font somebody chose for themselves, which is a decision
- * about type that the pack declined to have an opinion about.
- */
-function wearFont(look: Look, pack: PackManifest): Look {
-  if (!pack.font || pack.font === look.appearance.terminal.fontFamily) return look;
-  return {
-    ...look,
-    appearance: { ...look.appearance, terminal: { ...look.appearance.terminal, fontFamily: pack.font } },
-  };
-}
-
-let lastDevJson = "";
-let devScansStarted = 0;
-let devScanShown = 0;
-
-async function pollDevServers(procs?: ProcRows): Promise<void> {
-  const scan = ++devScansStarted;
-  const servers = await scanDevServers({ pid: process.pid, webDir: WEB_SOURCE }, procs);
-  /**
-   * Never an older reading over a newer one. Stopping a server asks for a scan
-   * at once, so the row goes when the server does, and a timer scan that began
-   * before the stop can finish after it — putting the stopped server back in
-   * the list and opening it a fresh proxy.
-   */
-  if (scan < devScanShown) return;
-  devScanShown = scan;
-  for (const server of servers) allowRoot(server.cwd);
-  /**
-   * Every dev server gets a proxy, whether or not anything has asked for one.
-   *
-   * This used to wait for `open-preview`, which is the right shape for a preview
-   * *pane* — it is opened deliberately, and the pane can wait a round trip for
-   * the port to come back. It is the wrong shape for a link. A phone opening a
-   * dev server wants a real anchor with a real href, because that is what buys
-   * long-press to copy, the share sheet, a background tab, and Add to Home
-   * Screen; a button that sends a message, waits for the next `dev-servers`
-   * push and then calls `window.open` gets none of those, and is additionally
-   * blocked by mobile Safari for opening a window outside the gesture that
-   * asked for it. An href cannot be built after the fact, so the port has to
-   * exist before anybody taps.
-   *
-   * The cost is a listener per dev server for sessions that never look at one —
-   * an idle accept loop, which is nothing, and which `closePreview` reclaims as
-   * soon as the dev server stops. Opening these only while a non-loopback client
-   * is connected was the obvious economy and is a worse feature: previews are
-   * global while that test is per-client, so a link would appear and disappear
-   * according to who *else* had the window open.
-   */
-  const proxyPorts = new Set(openPreviews().values());
-  for (const server of servers) {
-    /**
-     * Never a preview of a preview. `scanDevServers` already refuses this
-     * process's own sockets, which is where the loop actually came from and the
-     * fix that matters; this is the second lock on the same door, because the
-     * failure mode is not a wrong row in a list but a process that opens
-     * listeners until it runs out of ports, and the two guards fail for
-     * different reasons — that one needs the pid to be ours, this one only needs
-     * the port to be one we handed out.
-     */
-    if (proxyPorts.has(server.port)) continue;
-    try {
-      openPreview(server.port);
-    } catch {
-      // Out of preview ports. The snapshot simply carries no proxyPort for this
-      // one, and the sidebar row draws without a link rather than with a broken.
-    }
-  }
-  const proxied = openPreviews();
-  for (const server of servers) {
-    const proxyPort = proxied.get(server.port);
-    if (proxyPort) server.proxyPort = proxyPort;
-  }
-  // A proxy whose dev server has stopped is holding a port for nothing.
-  const live = new Set(servers.map((s) => s.port));
-  for (const devPort of proxied.keys()) {
-    if (!live.has(devPort)) closePreview(devPort);
-  }
-  const json = JSON.stringify(servers);
-  if (json === lastDevJson) return;
-  lastDevJson = json;
-  state.devServers = servers;
-  broadcast({ type: "dev-servers", servers });
-}
-
-/**
- * Stop a dev server from the sidebar's list, by the port and pid its row showed.
- *
- * The pair has to be one the last scan reported, which is what keeps this a
- * verb about servers kururu found rather than a way to signal any pid a client
- * names. What is spared is decided here because only here knows it: this
- * process, every terminal the host holds, and the host itself, found as the
- * terminals' parent — the same way `hostPidOf` finds it.
- */
-async function stopListedDevServer(port: unknown, pid: unknown): Promise<{ stopped: number }> {
-  if (!Number.isInteger(port) || !Number.isInteger(pid)) throw new Error("no such dev server");
-  if (!state.devServers.some((server) => server.port === port && server.pid === pid)) {
-    throw new Error("That dev server is not running any more");
-  }
-  const roots = memRoots().map(([, root]) => root);
-  const stopped = await stopDevServer(port as number, pid as number, (table) => {
-    const spare = new Set([process.pid, ...roots]);
-    for (const root of roots) {
-      const parent = table.get(root)?.ppid;
-      if (parent && parent > 1) spare.add(parent);
-    }
-    return spare;
-  });
-  await pollDevServers();
-  return { stopped: stopped.length };
-}
-
-/** The databases a workspace's env files name, as the last scan found them. Outside `attach`, whose own `state` is the host's. */
-function databasesOfWorkspace(workspaceId: string): WorkspaceDatabase[] {
-  return state.databases.filter((db) => db.workspaceId === workspaceId);
-}
-
-/**
- * Every directory this workspace could be said to be *in*, best first.
- *
- * A workspace has no directory of its own — it is an arrangement, not a project
- * — so this asks the two things that do have one, in the order of how much they
- * know. A live terminal's cwd is where somebody actually is. A pane's remembered
- * cwd is where its terminals were, and is the only one of the two that survives
- * a restart with the panes empty.
- */
-function workspaceDirs(workspace: Workspace): string[] {
-  const dirs: string[] = [];
-  const add = (dir: string | undefined | null) => {
-    if (dir && !dirs.includes(dir)) dirs.push(dir);
-  };
-  for (const pane of panes(workspace.layout)) {
-    for (const agentId of pane.agentIds) add(tabCwd(agentId));
-    add(pane.cwd);
-  }
-  return dirs;
-}
-
-/**
- * The same directories, with the one you are *looking at* first.
- *
- * `workspaceDirs` answers in tree order, which is the wrong answer for the
- * branch: a workspace holding two checkouts reported whichever pane happened to
- * be first in the tree, so a row named after the project could sit there
- * showing a sibling repository's branch and never move while you checked things
- * out all afternoon. That is not a stale row — it is a
- * row faithfully reporting a repository nobody asked about, which is worse,
- * because it looks exactly like the poll being broken.
- *
- * Focus is what breaks the tie, and it is the tie-break that costs nothing to
- * be wrong about: it is one line of text, the tooltip already says which
- * working tree it came from, and the pane you last touched is the one you just
- * ran `git switch` in. The tab showing inside that pane goes first for the same
- * reason one pane goes before another.
- *
- * Only a reordering. Every directory `workspaceDirs` would have offered is
- * still offered, in its own order, behind these — so a focused pane with no
- * repository under it falls through to exactly the old answer.
- */
-function focusedDirs(workspace: Workspace): string[] {
-  const pane = findPane(workspace.layout, workspace.focusedPaneId);
-  const front: (string | undefined)[] = [];
-  if (pane) {
-    const showing = pane.agentIds[pane.activeIdx];
-    if (showing) front.push(tabCwd(showing));
-    for (const agentId of pane.agentIds) front.push(tabCwd(agentId));
-    front.push(pane.cwd);
-  }
-  const first = front.filter((dir): dir is string => Boolean(dir));
-  return [...new Set([...first, ...workspaceDirs(workspace)])];
-}
-
-// ---------------------------------------------------------------------------
-// Git
-// ---------------------------------------------------------------------------
-
-/**
- * Where the repository is for a given directory, so the walk up the tree is not
- * redone every four seconds.
- *
- * Only the *walk* is remembered, never the branch. That split is the whole
- * design: where `.git` lives changes about as often as somebody moves a project,
- * and what is in `HEAD` changes every time they check something out — which is
- * the fact the row exists to show. Caching the second would make the row a
- * picture of a branch from a minute ago, which is worse than no row.
- */
-const repoSeen = new Map<string, { at: number; found: { root: string; git: string } | null }>();
-const REPO_CACHE_MS = 60_000;
-
-export async function repoFor(dir: string): Promise<{ root: string; git: string } | null> {
-  const had = repoSeen.get(dir);
-  if (had && Date.now() - had.at < REPO_CACHE_MS) return had.found;
-  const found = await repoAt(dir);
-  repoSeen.set(dir, { at: Date.now(), found });
-  return found;
-}
-
-/**
- * The roots a workspace's tree could be drawn at: each directory's repository,
- * and the directory itself when it is somewhere inside one — a tab sitting in
- * `web/` of a monorepo is a tab whose tree you might want to start at `web/`.
- * Tabs in the same place say it once, which is most workspaces: one entry, and
- * the header draws no picker at all.
- */
-async function rootChoices(dirs: string[]): Promise<string[]> {
-  const choices: string[] = [];
-  const add = (dir: string) => {
-    if (!choices.includes(dir)) choices.push(dir);
-  };
-  for (const dir of dirs) {
-    const repo = await repoFor(dir);
-    if (repo) add(repo.root);
-    if (!repo || repo.root !== dir) add(dir);
-  }
-  return choices;
-}
-
-let lastBranchJson = "";
-let lastProjectJson = "";
-let lastDatabasesJson = "";
-
-/**
- * What every workspace of the active profile has checked out.
- *
- * The active profile only. Every other profile's workspaces are not on
- * anybody's screen — the snapshot itself carries one profile for the same
- * reason — so the rows this could describe are the rows nobody can see.
- */
-async function pollBranches(): Promise<void> {
-  if (!host || !workspaces) return;
-  const branches: WorkspaceBranch[] = [];
-  const projects: WorkspaceProject[] = [];
-  const scans: DatabaseScanInput[] = [];
-  for (const workspace of workspaces.active.workspaces) {
-    const dirs = focusedDirs(workspace);
-    let project = dirs[0];
-    for (const dir of dirs) {
-      const repo = await repoFor(dir);
-      if (!repo) continue;
-      project = repo.root;
-      const head = await readHead(repo);
-      // A repository whose HEAD could not be read is still the answer to "which
-      // repository is this workspace in", so the walk stops here either way —
-      // trying the next directory up would find the *parent* repo and report a
-      // branch from a project this workspace is not in.
-      if (head) branches.push({ workspaceId: workspace.id, ...head, git: await gitFor(repo.root) });
-      break;
-    }
-    /**
-     * The roots are allowed here, by the server, having found them by walking
-     * up from a directory a terminal is in — which is the rule `files.ts`
-     * keeps: a root is learned from what kururu holds, never from a client. None
-     * is wider than what that terminal can already read.
-     *
-     * The choices are in tree order rather than focus order, so the header's
-     * list does not reshuffle every time focus crosses a pane.
-     */
-    if (project) {
-      const choices = await rootChoices(workspaceDirs(workspace));
-      if (!choices.includes(project)) choices.unshift(project);
-      for (const root of choices) allowRoot(root);
-      projects.push({ workspaceId: workspace.id, root: project, choices });
-      scans.push({ workspaceId: workspace.id, project, roots: choices });
-    }
-  }
-  const projectJson = JSON.stringify(projects);
-  if (projectJson !== lastProjectJson) {
-    lastProjectJson = projectJson;
-    state.projects = projects;
-    broadcast({ type: "projects", projects });
-  }
-  /**
-   * The env files in the same roots, for the row menu's Databases. The
-   * roots are this walk's, which is the whole of why the scan sits here rather
-   * than on a timer of its own: it reads under directories the server found
-   * by walking up from a terminal, and learns none from anywhere else.
-   */
-  const databases = await scanDatabases(scans);
-  const databasesJson = JSON.stringify(databases);
-  if (databasesJson !== lastDatabasesJson) {
-    lastDatabasesJson = databasesJson;
-    state.databases = databases;
-    broadcast({ type: "databases", databases });
-  }
-  const json = JSON.stringify(branches);
-  if (json === lastBranchJson) return;
-  lastBranchJson = json;
-  state.branches = branches;
-  broadcast({ type: "branches", branches });
-}
-
-// ---------------------------------------------------------------------------
-// The workspace's git, from its row's menu
-// ---------------------------------------------------------------------------
-
-/**
- * Which checkout is the main one for a repository the walk found, and which
- * branch "merge" goes into — both subprocesses, and both facts that change
- * about as often as a repository is moved, so they are kept for a minute like
- * the walk is.
- */
-const mainSeen = new Map<string, { at: number; root: string; base: string | null }>();
-
-async function mainFor(root: string, fresh = false): Promise<{ root: string; base: string | null }> {
-  const had = mainSeen.get(root);
-  if (!fresh && had && Date.now() - had.at < REPO_CACHE_MS) return had;
-  const main = await mainRoot(root);
-  const base = await defaultBranch(main).catch(() => null);
-  const seen = { at: Date.now(), root: main, base };
-  mainSeen.set(root, seen);
-  return seen;
-}
-
-/**
- * What `git status` last said, by main checkout. Only the half of `RepoGit`
- * that needs a subprocess is kept here; the branch is read off `HEAD` on every
- * poll like the row's own, so the button can never name a branch the line
- * under it has already moved on from.
- */
-const statusSeen = new Map<string, { changes: number; upstream: string | null; ahead: number; behind: number }>();
-const statusAt = new Map<string, number>();
-const statusBusy = new Set<string>();
-
-/**
- * Ask again, in the background, if it has been long enough — or now, after
- * one of the button's own verbs. One at a time per checkout, so a slow status
- * on a large tree is never stacked up behind itself. A change reruns the
- * branch poll, which is what carries it to the clients.
- */
-function refreshStatus(root: string, now = false): void {
-  if (statusBusy.has(root)) return;
-  if (!now && Date.now() - (statusAt.get(root) ?? 0) < GIT_STATUS_MS) return;
-  statusBusy.add(root);
-  statusAt.set(root, Date.now());
-  void repoStatus(root)
-    .then(
-      (status) => {
-        const changed = JSON.stringify(status) !== JSON.stringify(statusSeen.get(root));
-        statusSeen.set(root, status);
-        return changed;
-      },
-      () => statusSeen.delete(root),
-    )
-    .then((changed) => {
-      statusBusy.delete(root);
-      if (changed) void pollBranches();
-    });
-}
-
-/** The row's `git`: the main checkout's head, read now, and its status as last asked. */
-async function gitFor(root: string): Promise<RepoGit | null> {
-  const main = await mainFor(root).catch(() => null);
-  if (!main) return null;
-  refreshStatus(main.root);
-  const status = statusSeen.get(main.root);
-  const repo = status ? await repoFor(main.root) : null;
-  const head = repo ? await readHead(repo) : null;
-  if (!status || !head) return null;
-  return {
-    root: main.root,
-    branch: head.branch,
-    detached: head.detached,
-    ...status,
-    base: main.base && main.base !== head.branch ? main.base : null,
-  };
-}
-
-/**
- * One of the row menu's git verbs, on the workspace's main checkout.
- *
- * The checkout is found the way the row's branch is — walking up from where
- * the workspace's terminals are — and then taken to the main one, so a
- * workspace looking at a card's worktree still commits where the button said
- * it would. That walk follows focus, which `docs/layout.md` warns is no way
- * to choose what a button acts on; so the client says which checkout it was
- * showing and a mismatch is refused, and the commit prompt names the path. Detached is refused for everything but a fetch: a commit there is
- * the one git makes easiest to lose.
- */
-async function workspaceGit(
-  workspaceId: string,
-  shown: string,
-  action: GitAction,
-  message: string,
-): Promise<{ said: string }> {
-  const workspace = workspaces.active.workspaces.find((w) => w.id === workspaceId);
-  if (!workspace) throw new Error("that workspace is not in this profile");
-  let found: { root: string; git: string } | null = null;
-  for (const dir of focusedDirs(workspace)) {
-    found = await repoFor(dir);
-    if (found) break;
-  }
-  if (!found) throw new Error("this workspace is not in a git repository");
-  const { root, base } = await mainFor(found.root, true);
-  // Compared, never used: see `workspace-git` in `shared/wire.ts`.
-  if (root !== shown) throw new Error(`the workspace is looking at ${root} now, not ${shown} — try again`);
-  const repo = await repoFor(root);
-  const head = repo ? await readHead(repo) : null;
-  if (!head) throw new Error("could not read what is checked out");
-  if (head.detached && action !== "fetch") throw new Error(`HEAD is detached at ${head.branch} — check out a branch first`);
-  const branch = head.branch;
-
-  try {
-    if (action === "fetch") {
-      await fetchAll(root);
-      return { said: "Fetched" };
-    }
-    if (action === "pull") {
-      await pullBranch(root);
-      return { said: `Pulled ${branch}` };
-    }
-    if (action === "push") {
-      await pushBranch(root, branch, (await repoStatus(root)).upstream);
-      return { said: `Pushed ${branch}` };
-    }
-
-    // The three that commit. Nothing to commit is not a refusal for the two
-    // that go on to do something else — a clean tree with commits to merge or
-    // push is exactly when those are wanted — only for a plain commit.
-    const { changes, upstream } = await repoStatus(root);
-    const committed = changes ? (await commitTyped(root, message)).length : 0;
-    if (!changes && action === "commit") throw new Error("nothing to commit");
-    const files = committed ? `Committed ${committed} file${committed === 1 ? "" : "s"}` : "Nothing to commit";
-    if (action === "commit") return { said: files };
-    if (action === "commit-push") {
-      await pushBranch(root, branch, upstream);
-      return { said: `${files}, pushed ${branch}` };
-    }
-    if (!base) throw new Error(`${files}; there is no main branch to merge into`);
-    const { commits } = await fastForward(root, branch, base).catch((err: unknown) => {
-      // The commit already happened and is not undone; say so beside the refusal.
-      const why = err instanceof Error ? err.message : String(err);
-      throw new Error(committed ? `${files}, but ${why}` : why);
-    });
-    return { said: `${files}, ${base} took ${commits} commit${commits === 1 ? "" : "s"}` };
-  } finally {
-    refreshStatus(root, true);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// The reader, and the editor that drives it
-// ---------------------------------------------------------------------------
-
-/**
- * How often kururu looks for an editor to attach to.
- *
- * An nvim starting inside a pty raises no event anything out here can hear — the
- * same reason the dev-server scan is a timer — so this is a poll, and it is a
- * cheap one because it only asks about terminals a reader is actually following.
- * A pane with no reader beside it costs nothing at all.
- */
-const NVIM_SCAN_MS = 2000;
-
-/**
- * Sockets already hooked. Keyed by the socket path rather than the pid, because
- * a pid is reused and a socket path carries the pid *and* the directory nvim
- * made for that run — so a new editor in a recycled pid is a new key, which is
- * what stops kururu from deciding it has already attached to a process that has
- * never heard of it.
- */
-const attached = new Set<string>();
-
-/** A path and a filetype. Anything larger is not an editor reporting a buffer. */
-const NVIM_BODY_LIMIT = 8 * 1024;
-
-/**
- * Attach to whatever editor is in this terminal, if there is one.
- *
- * Failure is silent and normal: most terminals have no nvim in them, an nvim
- * that has just started may not have its socket yet, and `--remote-expr` against
- * an editor sitting in a modal prompt will time out. All three are answered by
- * the next sweep.
- */
-async function hookEditor(agentId: string): Promise<void> {
-  const agent = host.find(agentId);
-  if (!agent || agent.exited || !agent.pid) return;
-  const nvim = await findNvim(agent.pid);
-  if (!nvim || attached.has(nvim.socket)) return;
-  if (await attachEditor(nvim, agentId, PORT)) attached.add(nvim.socket);
-}
-
-/**
- * Sweep the terminals that have a reader pointed at them.
- *
- * Deliberately not every terminal: attaching is a process spawn, and installing
- * a hook in an editor nobody asked to watch would be reaching into somebody's
- * session for no reason at all. A reader is the asking.
- */
-async function pollEditors(): Promise<void> {
-  // The host may not have said hello yet, in which case there is no
-  // arrangement to read — the guard every other poll in here has, and the one
-  // that was missing when a fresh instance's timer fired before its host was up.
-  if (!workspaces) return;
-  const following = new Set<string>();
-  for (const profile of workspaces.all()) {
-    for (const workspace of profile.workspaces) {
-      for (const pane of panes(workspace.layout)) {
-        if (pane.reader?.follow) following.add(pane.reader.follow);
-      }
-    }
-  }
-  for (const agentId of following) await hookEditor(agentId);
-  // A socket for an editor that has gone is a key that will never be asked
-  // about again; drop it so a long session does not accumulate them.
-  if (attached.size > 64) attached.clear();
-}
-
-/**
- * The root a file belongs to, or null.
- *
- * The longest allowed root that contains it, which is `files.ts`'s question
- * asked from the other end. Roots still come only from the places the server
- * already knows — an agent's cwd, a dev server's, `KURURU_ROOTS` — so an editor
- * that wanders outside every project kururu is holding gets no answer rather
- * than teaching the server a new place to read from. That asymmetry is the whole
- * point of the rule: a path arriving from outside may *select* a root, never
- * create one.
- */
-function rootFor(absolute: string): { root: string; rel: string } | null {
-  let best: { root: string; rel: string } | null = null;
-  for (const root of allowedRoots()) {
-    const prefix = root.endsWith("/") ? root : `${root}/`;
-    if (!absolute.startsWith(prefix)) continue;
-    if (best && best.root.length >= root.length) continue;
-    best = { root, rel: absolute.slice(prefix.length) };
-  }
-  return best;
-}
-
-/**
- * The root a *directory* is in, or "" — `rootFor` asked about a path that may
- * be a root itself rather than something underneath one.
- *
- * Which is the common case here and not an edge: `allowRoot` is told about a
- * terminal's cwd, so a pane's cwd is usually a root exactly, and `rootFor`
- * matches on a prefix and therefore answers nothing for it. The empty string is
- * a real answer and the picker draws it — a reader that cannot guess its project
- * asks which one, rather than guessing wrong and looking broken.
- */
-function rootForDir(dir: string | undefined): string {
-  if (!dir) return "";
-  if (allowedRoots().includes(dir)) return dir;
-  return rootFor(dir.endsWith("/") ? dir : `${dir}/`)?.root ?? "";
-}
-
-/**
- * An editor saying where it is. The one endpoint whose caller is a program
- * kururu installed rather than a person or a client — `report-cli.ts`'s shape,
- * for the same reason: the thing that knows is the thing that should say so.
- */
-function nvimBuffer(body: unknown): void {
-  if (!body || typeof body !== "object") return;
-  const { agent, path, filetype } = body as { agent?: unknown; path?: unknown; filetype?: unknown };
-  if (typeof agent !== "string" || typeof path !== "string" || !path.startsWith("/")) return;
-  // A reader that draws markdown should not blank itself because you looked at
-  // a source file for a moment. Anything it cannot render leaves it as it was.
-  const markdown = filetype === "markdown" || /\.(md|markdown|mdx)$/i.test(path);
-  if (!markdown) return;
-  const located = rootFor(path);
-  if (!located) return;
-  for (const { workspaceId, paneId } of workspaces.readersFollowing(agent)) {
-    workspaces.setReaderTarget(workspaceId, paneId, located.root, located.rel);
-  }
-}
-
-/**
- * Every nvim in the workspace on screen, in the order a person would reach for
- * them.
- *
- * The focused pane first, because it is where you were typing; then the pane
- * focus came from, which is where you were typing a moment ago — clicking in the
- * tree does not move the pane focus, but a phone's trip through a reader might
- * have. Within a pane the showing tab goes before the ones behind it. The
- * process table is read once for the lot rather than once per terminal.
- *
- * The active workspace only, deliberately. The file is in this workspace's
- * project, and an editor in another workspace is one you would have to go and
- * find after it had opened the file — the move this exists to save.
- */
-async function editorsHere(): Promise<EditorChoice[]> {
-  const workspace = workspaces.activeWorkspace;
-  const all = panes(workspace.layout);
-  const order = [workspace.focusedPaneId, workspace.lastPaneId];
-  const ranked = [...all].sort((a, b) => rank(a.id) - rank(b.id));
-  function rank(id: string): number {
-    const at = order.indexOf(id);
-    return at === -1 ? order.length : at;
-  }
-  const table = await readProcTable();
-  const found: EditorChoice[] = [];
-  for (const pane of ranked) {
-    const tabs = pane.agentIds.map((id, i) => ({ id, i }));
-    tabs.sort((a, b) => (a.i === pane.activeIdx ? -1 : b.i === pane.activeIdx ? 1 : a.i - b.i));
-    for (const { id } of tabs) {
-      const agent = host.find(id);
-      if (!agent || agent.exited || !agent.pid) continue;
-      if (await findNvim(agent.pid, table)) found.push({ agentId: id, paneId: pane.id });
-    }
-  }
-  return found;
-}
-
-/**
- * What `/api/ls`, `/api/docs`, `/api/markdown` and `/api/file-raw` would
- * answer, for the parent's server reading this disk through its watch
- * (`files-ask`, `doc-ask`). The same functions and so the same refusals and
- * the same bounds — `files.ts` holds a file to 2 MB and a listing to 500
- * entries — with a file's bytes as base64, since the watch carries text.
- *
- * The markup is rendered in the asker's theme when this node has it, so the
- * code in a document matches the Mac's panes; one this node does not know
- * draws its fallback, as an unknown theme here always has.
- */
-async function readForWatcher(msg: Extract<ClientMessage, { type: "files-ask" | "doc-ask" }>): Promise<unknown> {
-  const root = msg.root;
-  const path = typeof msg.path === "string" ? msg.path : "";
-  if (msg.type === "files-ask") {
-    if (msg.op === "ls") return { entries: listDir(root, path) };
-    if (msg.op === "docs") {
-      const roots = allowedRoots();
-      const at = root || (roots.length === 1 ? (roots[0] ?? "") : "");
-      return at ? { roots, root: at, docs: findDocs(at) } : { roots, root: "", docs: [] };
-    }
-    throw new Error("not a read this node answers");
-  }
-  if (msg.op === "markdown") {
-    const themeId = typeof msg.themeId === "string" ? msg.themeId : appearance.themeId;
-    return renderMarkdown(readFile(root, path).text, root, path, themeId);
-  }
-  if (msg.op === "raw") {
-    const file = readBytes(root, path);
-    return { type: file.type, data: Buffer.from(file.bytes).toString("base64") };
-  }
-  throw new Error("not a read this node answers");
-}
-
-/**
- * Open a file from the tree in nvim — one that is running, or a new one.
- *
- * The path is resolved before anything else, and it is the resolved path that
- * reaches the editor: `files.ts` is the only thing that decides what a path from
- * a client means, and this one is about to be handed to a program.
- *
- * A new editor goes in a tab of the focused pane — a click in the tree adds to
- * the pane you were last in rather than rearranging the window around it. It is
- * started in the project so `:e` and every picker in somebody's config are
- * relative to the right place, and it drops into a shell when you quit it. The
- * alternative — the tab ending with the editor — means `:q` on the wrong buffer
- * closes a tab, which is not something `:q` does anywhere else.
- */
-async function openInEditor(
-  root: string,
-  path: string,
-  agentId: string | null,
-  at: { paneId?: string; line?: number | null } = {},
-): Promise<{ agentId: string }> {
-  const full = resolveInRoot(root, path);
-  if (!full) throw new Error("that file is outside the project");
-  if (agentId !== null) {
-    if (typeof agentId !== "string" || !workspaces.agentsHere().includes(agentId)) {
-      throw new Error("that terminal is not in this workspace any more");
-    }
-    const agent = host.find(agentId);
-    const nvim = agent && !agent.exited && agent.pid ? await findNvim(agent.pid) : null;
-    if (!nvim) throw new Error("there is no nvim in that terminal any more");
-    if (!(await openFile(nvim, full))) throw new Error("nvim did not answer — is it waiting at a prompt?");
-    const pane = paneWithAgent(workspaces.activeWorkspace.layout, agentId);
-    if (pane) {
-      workspaces.focusPane(pane.id);
-      workspaces.selectTab(pane.id, pane.agentIds.indexOf(agentId));
-    }
-    return { agentId };
-  }
-  // A pane named that is not in the workspace on screen is the focused one,
-  // on `openTerminal`'s reasoning for a pane closed while the host spawned.
-  const paneId = at.paneId && workspaces.hasPane(at.paneId) ? at.paneId : workspaces.focusedPaneId;
-  const agent = await openTerminal(paneId, { cwd: root, command: nvimCommand(path, at.line), kind: "shell" });
-  return { agentId: agent.id };
-}
-
-/** One argument for a POSIX shell, whatever is in it. */
-export function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
-// ---------------------------------------------------------------------------
-// What each terminal is costing the machine
-// ---------------------------------------------------------------------------
-
-/**
- * Which pids to add up from: every live pty, and deliberately not the filtered
- * set the dev scan walks.
- *
- * `devRoots` withholds terminals with an agent running in them, because what it
- * feeds is a button that types into one. Nothing here types anywhere — it reads
- * a number out of a table — and an agent's terminal is the one whose memory is
- * worth knowing, so withholding it would leave the feature answering only for
- * the rows nobody asked about.
- */
-function memRoots(): Array<[string, number]> {
-  const roots: Array<[string, number]> = [];
-  if (!host) return roots;
-  for (const agent of host.agents) {
-    if (agent.exited || !agent.pid) continue;
-    roots.push([agent.id, agent.pid]);
-  }
-  return roots;
-}
-
-/**
- * Measure, and say so only when the figure moved.
- *
- * The comparison is against what was already rounded (see `memory.ts`), which is
- * the whole reason this can push at all: on the raw byte count every working
- * agent changes every poll, and a snapshot every five seconds for the life of a
- * session is a lot of bytes to spend redrawing `390 MB` as `390 MB`.
- */
-async function pollMemory(procs: ProcRows): Promise<void> {
-  const found = measureMemory(memRoots(), procs);
-  let changed = false;
-  for (const [agentId, bytes] of found) {
-    if (memory.get(agentId) !== bytes) changed = true;
-    memory.set(agentId, bytes);
-  }
-  // A terminal the scan could not find is one whose process has gone; the row
-  // stays (an exited agent is still listed) and simply stops saying a number,
-  // rather than keeping the last one it had, which would be a claim about a
-  // process that does not exist.
-  for (const agentId of [...memory.keys()]) {
-    if (found.has(agentId)) continue;
-    memory.delete(agentId);
-    changed = true;
-  }
-  if (changed) pushSnapshot();
-}
-
-/**
- * One reading of every terminal the host holds, placed in the profile and
- * workspace whose tab holds it.
- *
- * Every profile and not only the active one, which is the difference between
- * this and the snapshot: the snapshot is what one window is drawing, and this is
- * what the machine is paying for — a claude left running in a profile you
- * switched away from yesterday is exactly the one worth finding. A terminal no
- * tab holds is listed apart rather than dropped, for the same reason.
- */
-async function footprint(): Promise<Footprint> {
-  const table = await readFootTable();
-  const children = footChildren(table);
-  const roots: number[] = [];
-  const terminals: FootprintTerminal[] = (host?.agents ?? []).map((raw) => {
-    const agent = overlay(raw);
-    const tree = !agent.exited && agent.pid ? readTree(agent.pid, table, children) : null;
-    if (tree) roots.push(agent.pid);
-    return {
-      agentId: agent.id,
-      label: agentLabel(agent),
-      summary: agentSummary(agent),
-      kind: agent.kind,
-      status: agent.status,
-      exited: agent.exited,
-      cwd: agent.cwd,
-      rss: tree?.rss ?? null,
-      processes: tree?.processes ?? 0,
-      agents: tree?.agents ?? [],
-      editors: tree?.editors ?? 0,
-      devServers: tree?.devServers ?? [],
-    };
-  });
-  const known = new Set(terminals.map((t) => t.agentId));
-  const placed = new Set<string>();
-  const profiles = workspaces.all().map((profile) => ({
-    id: profile.id,
-    name: profile.name,
-    active: profile.id === workspaces.active.id,
-    workspaces: profile.workspaces.map((workspace) => {
-      const ids = panes(workspace.layout)
-        .flatMap((pane) => terminalsOf(pane.agentIds))
-        .filter((id) => known.has(id));
-      for (const id of ids) placed.add(id);
-      return { id: workspace.id, name: workspace.name, terminals: ids };
-    }),
-  }));
-  const hostPid = hostPidOf(roots, table);
-  return {
-    measuredAt: Date.now(),
-    terminals,
-    profiles,
-    unplaced: terminals.filter((t) => !placed.has(t.agentId)).map((t) => t.agentId),
-    nvims: await nvimCensus(table, children),
-    kururu: {
-      server: table.get(process.pid)?.rss ?? null,
-      host: hostPid === null ? null : (table.get(hostPid)?.rss ?? null),
-    },
-    machineTotal: totalmem(),
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Every nvim on the machine, and ending them
-// ---------------------------------------------------------------------------
-
-/**
- * How long the nvims that did not refuse `:qa` get to finish going — `VimLeave`
- * autocmds, a shada write — before the ones still standing are reported as not
- * having answered. Polled, because an exit in somebody else's terminal raises
- * nothing out here.
- */
-const NVIM_QUIT_MS = 2000;
-const NVIM_QUIT_POLL_MS = 150;
-/** After `endHard`, which has already waited out its own grace: long enough for the kernel to reap. */
-const NVIM_KILL_SETTLE_MS = 500;
-
-/** More than anybody has open, and a ceiling on what one message can set going. */
-const NVIM_CLOSE_LIMIT = 256;
-
-/** Every live terminal kururu holds, by the pid on the end of its pty — where `findNvims` stops walking up. */
-function ptyRoots(): Map<number, string> {
-  const roots = new Map<number, string>();
-  for (const agent of host?.agents ?? []) if (!agent.exited && agent.pid) roots.set(agent.pid, agent.id);
-  return roots;
-}
-
-/** A process is its pid and when it started; see `FootProc.start`. */
-function nvimId(nvim: { pid: number; start: string }): string {
-  return `${nvim.pid}@${nvim.start}`;
-}
-
-/** Whether the process an id named is still running, as itself, in this table. */
-function stillThere(nvim: FoundNvim, table: FootTable): boolean {
-  return table.get(nvim.pid)?.start === nvim.start;
-}
-
-/**
- * Where an nvim is, for a person: the tab it is in and that tab's workspace, or
- * the app it is running under. The tab is named as its strip names it — for an
- * nvim, by its title, because the label alone is the command line cut at a
- * slash and says `sh}" -l`.
- */
-function placeOf(nvim: FoundNvim, roots: Map<number, string>): NvimPlace {
-  const agentId = nvim.ptyRoot === null ? undefined : roots.get(nvim.ptyRoot);
-  const agent = agentId === undefined ? undefined : host.find(agentId);
-  if (agentId === undefined || !agent) return { kind: "outside", app: nvim.app };
-  const shown = overlay(agent);
-  const workspace = workspaces
-    .all()
-    .flatMap((profile) => profile.workspaces)
-    .find((w) => panes(w.layout).some((pane) => pane.agentIds.includes(agentId)));
-  return {
-    kind: "kururu",
-    agentId,
-    tab: shown.titleOverride || agentSummary(shown) || agentLabel(shown),
-    workspace: workspace?.name ?? null,
-    nvimTab: isNvimTab(agent.command),
-    agent: nvim.underAgent,
-  };
-}
-
-/**
- * Every nvim on the machine for the Processes page, placed and with its
- * directory — one `lsof` for the lot. Machine-wide on purpose: the tile is about
- * what the machine is paying for, and an nvim in another terminal app costs the
- * same as one in a tab.
- */
-async function nvimCensus(table: FootTable, children: Map<number, FootProc[]>): Promise<FootprintNvim[]> {
-  const roots = ptyRoots();
-  const found = findNvims(table, children, new Set(roots.keys()));
-  const cwds = await processCwds(found.map((nvim) => nvim.pid));
-  return found.map((nvim) => ({
-    id: nvimId(nvim),
-    pid: nvim.pid,
-    args: nvim.args,
-    rss: nvim.rss,
-    processes: nvim.pids.length,
-    cwd: cwds.get(nvim.pid) ?? null,
-    place: placeOf(nvim, roots),
-  }));
-}
-
-/**
- * The nvims these ids name that are still those processes, in a table read now.
- * An id is the page's word for what it showed, and only that is acted on: a
- * pid that has since become another process, or an id that was never an nvim,
- * names nothing here.
- */
-function nvimsNamed(ids: unknown, table: FootTable, roots: Map<number, string>): FoundNvim[] {
-  if (!Array.isArray(ids)) throw new Error("which nvims?");
-  const wanted = new Set(ids.slice(0, NVIM_CLOSE_LIMIT).filter((id): id is string => typeof id === "string"));
-  return findNvims(table, footChildren(table), new Set(roots.keys())).filter((nvim) => wanted.has(nvimId(nvim)));
-}
-
-/** Read the table until none of these is still running, or the time is up, and hand back the last read. */
-async function untilGone(nvims: FoundNvim[], ms: number): Promise<FootTable> {
-  let table = await readFootTable();
-  const until = Date.now() + ms;
-  while (Date.now() < until && nvims.some((nvim) => stillThere(nvim, table))) {
-    await new Promise((resolve) => setTimeout(resolve, NVIM_QUIT_POLL_MS));
-    table = await readFootTable();
-  }
-  return table;
-}
-
-/**
- * A tab kururu opened as nvim, once its nvim has gone, closed the way
- * `close-tab` closes one — when what is left is a shell with nothing in it,
- * which is what `nvimCommand` drops into. A shell somebody typed nvim into is a
- * shell they wanted, and stays; so does an nvim tab where something else has
- * been started from that shell since, which is theirs.
- */
-function closeEmptiedTab(agentId: string, table: FootTable): void {
-  const agent = host.find(agentId);
-  if (!agent || !isNvimTab(agent.command)) return;
-  const tree = agent.exited || !agent.pid ? null : readTree(agent.pid, table, footChildren(table));
-  if (tree && (tree.agents.length > 0 || tree.devServers.length > 0 || tree.editors > 0)) return;
-  host.kill(agentId);
-  workspaces.reapTab(agentId);
-  forget(agentId);
-}
-
-/** Count what went, closing nvim tabs behind them, and list what did not with `why`. */
-function settle(
-  nvims: FoundNvim[],
-  table: FootTable,
-  roots: Map<number, string>,
-  why: (nvim: FoundNvim) => string,
-): NvimCloseReport {
-  const report: NvimCloseReport = { closed: 0, left: [] };
-  for (const nvim of nvims) {
-    if (stillThere(nvim, table)) {
-      const args = nvim.args.length > 60 ? `${nvim.args.slice(0, 59)}…` : nvim.args;
-      report.left.push({ id: nvimId(nvim), label: `${args} (${nvimWhere(placeOf(nvim, roots))})`, reason: why(nvim) });
-      continue;
-    }
-    report.closed++;
-    const agentId = nvim.ptyRoot === null ? undefined : roots.get(nvim.ptyRoot);
-    if (agentId !== undefined) closeEmptiedTab(agentId, table);
-  }
-  return report;
-}
-
-/**
- * Settings → Processes' close buttons: `:qa` in each nvim the page showed,
- * wherever it is running, and a moment for them to go.
- *
- * Gentle is all this does. `:qa` refuses unsaved work, and a refusal is
- * reported and never escalated — ending what refused is `killNvims`, which the
- * page asks for on a button of its own, so a signal is always a second yes.
- * Whether one went is read off the process table rather than the socket,
- * because an nvim that quits drops the socket in the middle of its answer — see
- * `quit` in `nvim.ts`.
- */
-async function closeNvims(ids: unknown): Promise<NvimCloseReport> {
-  const roots = ptyRoots();
-  const [before, procs] = await Promise.all([readFootTable(), readProcTable()]);
-  const targets = nvimsNamed(ids, before, roots);
-  const said = new Map<FoundNvim, string>();
-  await Promise.all(
-    targets.map(async (nvim) => {
-      const found = await findNvim(nvim.pid, procs);
-      const answer = found ? await quitNvim(found) : "kururu could not find its socket";
-      if (answer) said.set(nvim, answer);
-    }),
-  );
-  const table = await untilGone(targets.filter((nvim) => !said.has(nvim)), NVIM_QUIT_MS);
-  return settle(targets, table, roots, (nvim) => said.get(nvim) ?? "did not answer — it may be waiting at a prompt");
-}
-
-/**
- * The second yes: end what refused `:qa`. SIGTERM and then SIGKILL to each
- * one's own tree, and nothing above it — see `endHard`. The ids are checked
- * exactly as `closeNvims` checks them, against a table read now.
- */
-async function killNvims(ids: unknown): Promise<NvimCloseReport> {
-  const roots = ptyRoots();
-  const targets = nvimsNamed(ids, await readFootTable(), roots);
-  await endHard(targets.flatMap((nvim) => nvim.pids));
-  const table = await untilGone(targets, NVIM_KILL_SETTLE_MS);
-  return settle(targets, table, roots, (nvim) => {
-    try {
-      process.kill(nvim.pid, 0);
-      return "it survived SIGKILL";
-    } catch (err) {
-      return (err as NodeJS.ErrnoException).code === "EPERM" ? "it belongs to another user" : "it survived SIGKILL";
-    }
-  });
-}
-
-/**
- * Ask the account where it stands against its limits.
- *
- * Skipped entirely when nobody is connected, which none of the other polls
- * bother with and this one must. The others read this machine — a `ps`, an
- * `lsof` — and running them for nobody wastes a few milliseconds of our own CPU.
- * This one is a request to somebody else's API carrying somebody's credential,
- * and making it on a schedule for a window that is not open is the kind of thing
- * that should never have been written. A client connecting gets the last reading
- * immediately and a fresh one within the minute.
- */
-async function pollAccountUsage(): Promise<void> {
-  // The login list first and regardless of who is connected: it reads this
-  // machine and nothing else, like the other polls, and it is on this schedule
-  // because a `/login` is the one thing that changes both. Whether Kuru could
-  // answer the chat here, for the Telegram poll, is the same kind of look.
-  await refreshLogins();
-  await refreshClaudeReady();
-  if (windows() === 0) return;
-  // Codex's allowance on the same beat, though it is read off this disk and
-  // asks nobody: the profile's Codex home when profiles keep their logins, the
-  // machine's otherwise — the same rule as the Claude scope below.
-  const codexHome = loginsActive() ? codexDirFor(workspaces.active.loginKey) : null;
-  if (await pollCodexUsage(codexHome)) broadcast({ type: "codex-usage", codex: codexUsageSnapshot() });
-  // The profile's own login when profiles keep them, because that is the
-  // account its terminals are spending; otherwise whichever this machine was
-  // signed into last, as before.
-  const loginKey = loginsActive() ? workspaces.active.loginKey : null;
-  const scope = loginKey ? claudeDirFor(loginKey) : null;
-  const moved = await pollUsage(scope);
-  // Every fresh sighting, moved or not: a bar that read the same percentage
-  // twice is still two points on the history `limits` keeps.
-  recordClaudeLimits(usageReader?.ledger, usageSnapshot(), loginKey);
-  if (moved) broadcast({ type: "usage", usage: usageSnapshot() });
-}
-
-/**
- * Sample every machine the sidebar watches. Skipped while nobody is connected,
- * on the usage poll's argument: it leaves this Mac, as the user, and doing that
- * for a window that is not open is not a thing to do on a timer.
- */
-async function pollServers(): Promise<void> {
-  if (windows() === 0) return;
-  await pollMachines();
-  const machines = machinesSnapshot();
-  broadcast({ type: "machines", machines });
-  // The hardware rides the same poll: a machine that answered and is due —
-  // never read, six hours old, or just back after not answering — is read
-  // now. See `specs.ts`.
-  for (const machine of dueForReading(machines, Date.now())) void readSpecs(machine, broadcastSpecs);
-}
-
-/** Every machine's kept specs, to every window. Only when they move: a reading is hours old by design. */
-function broadcastSpecs(): void {
-  broadcast({ type: "specs", specs: specsSnapshot(machinesSnapshot()) });
-}
-
-/**
- * Ask OpenRouter what is left. Skipped while nobody is connected, on the usage
- * poll's argument, and a no-op while no key has been given.
- */
-async function pollOpenRouterAccount(): Promise<void> {
-  if (windows() === 0) return;
-  if (await pollOpenRouter()) {
-    broadcast({ type: "openrouter", openrouter: openRouterSnapshot() });
-  }
-}
-
-/**
- * The web for the agents: an ordered chain of providers set in Settings →
- * Web, served at `/mcp/web`. It checks its providers' health and reads their
- * figures on its own timer, only while a window is open, and broadcasts
- * whatever moves. See `web/chain.ts`.
- */
-export const web = WebChain.fromRegistry({
-  store: fileStore,
-  changed: () => broadcast({ type: "web", web: web.status() }),
-  clients: () => windows(),
-  port: () => PORT,
-  tokenInPtys: () => tokenInPtys(),
-});
-web.start();
-
-/** An agent's name, for the list of recent web calls, or null if it is not one of ours. */
-function webAgentName(agentId: string): string | null {
-  const agent = host.find(agentId);
-  if (!agent) return null;
-  const where = `${agent.agent ?? "agent"} in ${agent.cwd.split("/").pop() || agent.cwd}`;
-  const what = agent.title?.replace(/\s+/g, " ").trim().slice(0, 60);
-  return what ? `${where}: ${what}` : where;
-}
-
-/**
- * The timers left in this process, and what they have in common: each one asks
- * the *machine* a question no pty can raise an event about. The status heuristic
- * and the agent scan went with the ptys, because those are questions about a
- * process kururu owns and the host is where those live now.
- *
- * The usage poll is the exception to the sentence above and the only one of
- * these that leaves the machine at all. It is out here with the rest because it
- * is the same shape — a question with no event behind it — and a minute apart
- * rather than seconds because it is measuring a five-hour window.
- *
- * Each goes through `sweep`, which catches and logs, because a rejection here
- * is an unhandled one and Node ends the server over it.
- */
-const sweepBranches = sweep("branches", pollBranches);
-
-/**
- * The dev-server scan and the memory column, off one `ps` (`proctable.ts`),
- * on one timer: every `DEV_SCAN_MS` while anybody is connected, and every
- * `PROC_IDLE_MS` while nobody is — the answers go to windows, and a Mac with
- * none open was spending its share of a core on a list nobody was shown. A
- * card's dev server is found within that slower beat even so, and the first
- * client back is not made to wait for it: `wakeProcesses` reads at once.
- *
- * Memory used to be read every five seconds rather than three, as the one
- * answer nobody acts on within a second; it rides along now because the read
- * is shared, and a figure that changes only on a 10 MB step costs nothing
- * extra to look at more often.
- */
-const PROC_IDLE_MS = 30_000;
-const sweepProcesses = sweep("processes", async () => {
-  const procs = await readProcRows();
-  // Separately caught, so that one failing does not cost the other its turn.
-  await Promise.all([sweep("dev servers", () => pollDevServers(procs))(), sweep("memory", () => pollMemory(procs))()]);
-});
-let procTimer: ReturnType<typeof setTimeout> | null = null;
-let procRunning = false;
-/** Set by `shutdown`, which this cannot read `stopping` for: that is declared below the top-level `await`, and this runs during it. */
-let procHalted = false;
-async function procTick(): Promise<void> {
-  if (procTimer) clearTimeout(procTimer);
-  procTimer = null;
-  if (procRunning) return;
-  procRunning = true;
-  try {
-    await sweepProcesses();
-  } finally {
-    procRunning = false;
-    if (!procHalted) {
-      procTimer = setTimeout(() => void procTick(), clients.size > 0 ? DEV_SCAN_MS : PROC_IDLE_MS);
-      procTimer.unref?.();
-    }
-  }
-}
-
-/** A client arrived to a server that was reading slowly: read now, and at the fast beat from here. */
-function wakeProcesses(): void {
-  if (!procRunning) void procTick();
-}
-
-const timers = [
-  setInterval(sweepBranches, GIT_SCAN_MS),
-  setInterval(sweep("editors", pollEditors), NVIM_SCAN_MS),
-  setInterval(checkLiveness, PING_MS),
-  setInterval(sweep("usage bar", pollAccountUsage), USAGE_POLL_MS),
-  setInterval(sweep("machines", pollServers), MACHINE_POLL_MS),
-  setInterval(sweep("OpenRouter", pollOpenRouterAccount), OPENROUTER_POLL_MS),
-  setInterval(sweep("made links", sweepMade), MADE_SWEEP_MS),
-];
-
-void procTick();
-void sweepBranches();
+import { WEB_DIST } from "./preamble";
+import {
+  leadEligibility,
+  leadHealth,
+  nodeAddress,
+  nodeSummary,
+  nodeUnreachable,
+  refreshClaudeReady,
+  secretLanded,
+  STARTED_AT,
+  webFieldKind,
+} from "./thisnode";
+import { claudeDirOf, codexHomeOf, lendingLogin, lendOffer, lendSecrets, moveAndLend, tokenInPtys, vaultFor } from "./lending";
+import { installOne, saveAppearance, saveLaunch, saveMascots, saveNotify, saveProject, wear } from "./look";
+import { databasesOfWorkspace, workspaceDirs, workspaceGit } from "./repostatus";
+import {
+  closeNvims,
+  editorsHere,
+  hookEditor,
+  killNvims,
+  NVIM_BODY_LIMIT,
+  nvimBuffer,
+  openInEditor,
+  readForWatcher,
+  rootForDir,
+} from "./editors";
+import {
+  broadcastSpecs,
+  footprint,
+  pollAccountUsage,
+  pollOpenRouterAccount,
+  pollServers,
+  startSweeps,
+  stopListedDevServer,
+  stopSweeps,
+  wakeProcesses,
+  web,
+  webAgentName,
+} from "./sweeps";
+
+startSweeps();
 
 // ---------------------------------------------------------------------------
 // WebSocket
@@ -6139,9 +4311,7 @@ let stopping: Promise<void> | null = null;
 export function shutdown(): Promise<void> {
   if (stopping) return stopping;
   stopping = (async () => {
-    for (const timer of timers) clearInterval(timer);
-    procHalted = true;
-    if (procTimer) clearTimeout(procTimer);
+    stopSweeps();
     // The arrangement outlives this process either way; flush it while it is
     // whole, to the host as well, since a restart is what reads that copy.
     if (keepTimer) keepNow();
