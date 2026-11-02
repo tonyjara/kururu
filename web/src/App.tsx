@@ -67,7 +67,8 @@ import { closeNeeds, toggleNeeds, useNeedsDrawer } from "./needs";
 import { arrangedNeeds, useNeedsView } from "./needsorder";
 import { NeedsDrawer } from "./components/NeedsDrawer";
 import { Notes } from "./components/Notes";
-import { QuoteToKuru, quoteUp } from "./components/Quote";
+import { QuoteToKuru, quoteUp, type QuoteFrom } from "./components/Quote";
+import { holdNoteQuotes, takeNoteQuote } from "./notequote";
 import { locateCard } from "./notes";
 import { needsOf, type Need } from "../../shared/needs";
 import { longWaits } from "../../shared/slots";
@@ -621,19 +622,34 @@ export function App() {
     setBoardShow(null);
   };
   /**
-   * Part of a card quoted from this page — a board's card, the profile's
-   * board, a note over the window — by the reference the words were marked
-   * with where they are drawn (`Quote.tsx`), into the same box and out of
-   * the profile board's way as a reference is.
+   * Part of a card or of a message quoted from this page — a board's card,
+   * the profile's board, a note over the window, a line in Kuru's drawer —
+   * by the reference the words were marked with where they are drawn
+   * (`Quote.tsx`), into the same box. A card's goes out of the profile
+   * board's way as a reference does; a message's is in the drawer already,
+   * and leaves whatever is under it alone.
    */
-  const quoteHere = (cardRef: string, quote: CardQuote) => {
-    quoteInKuru(cardRef, quote);
+  const quoteHere = (reference: string, quote: CardQuote, from: QuoteFrom) => {
+    quoteInKuru(reference, quote);
+    if (from === "message") return;
     setProfileBoard(false);
     setBoardShow(null);
   };
   const [referAsked, setReferAsked] = useState<{ cardId: string; quote: CardQuote | null } | null>(null);
-  // A note window's quote crosses with its card's id, and is another page's word until `adoptQuote` says it is one.
-  useEffect(() => desktop()?.notes?.onReferCard?.((cardId, quote) => setReferAsked({ cardId, quote: adoptQuote(quote) })), []);
+  // A note window's quote crosses with its card's id, and is another page's
+  // word until `adoptQuote` says it is one. From an app whose bridge carries
+  // only the id, the note said its quote on the page's own channel first
+  // (`notequote.ts`), and it is taken from there.
+  useEffect(() => {
+    const notes = desktop()?.notes;
+    if (!notes?.onReferCard) return;
+    const stopHolding = holdNoteQuotes();
+    const stopReferring = notes.onReferCard((cardId, quote) => setReferAsked({ cardId, quote: adoptQuote(quote) ?? takeNoteQuote(cardId) }));
+    return () => {
+      stopReferring();
+      stopHolding();
+    };
+  }, []);
   useEffect(() => {
     if (!referAsked || !profile) return;
     setReferAsked(null);
@@ -1696,7 +1712,7 @@ export function App() {
         }}
         onRefer={referNote}
       />
-      {/* The popover over a selection in a card or a note: one for the page. */}
+      {/* The popover over a selection in a card, a note or Kuru's drawer: one for the page. */}
       <QuoteToKuru onQuote={quoteHere} />
       {databasesFor && (
         <Databases

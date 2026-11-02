@@ -9954,41 +9954,50 @@ a.st-btn {
   box-shadow: var(--elev-dialog);
 }
 
-/* The popover over words selected in a card or a note (`Quote.tsx`): a
-   menu's box, since it is one thing to do with the selection, drawn into
-   `document.body` over the notes and the sheets as a menu is, and as narrow
-   as a note window allows. The quote is clamped to two lines — it is a
-   reminder of what was selected, not the place to read it — and the field
-   is the settings' well, the button their one primary. */
+/* The popover over words selected in a card, a note or Kuru's drawer
+   (`Quote.tsx`): first only a mark by the end of the selection, a menu's
+   box the size of one icon, in the accent so it is found at a glance and
+   small enough to be in the way of nothing; pressed, the same box grows
+   into a field and the arrow that puts the quote in, as narrow as a note
+   window allows. Drawn into `document.body` over the notes and the sheets
+   as a menu is. The words chosen are not repeated in it — they stay marked
+   where they are (`::highlight`), since the field takes the selection. */
 .quote-pop {
   position: fixed;
   z-index: 60;
-  width: min(320px, calc(100vw - 16px));
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 7px;
+  align-items: center;
   background: var(--chrome);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) var(--border-style) var(--line-high);
   border-radius: var(--radius-xl);
   box-shadow: var(--elev-menu);
 }
-.quote-pop-quote {
-  margin: 0;
-  padding-left: 7px;
-  border-left: var(--border) var(--border-style) var(--line-high);
-  font-size: var(--fs-sm);
-  color: var(--dim);
-  line-height: 1.4;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+.quote-pop-mark {
+  padding: 2px;
 }
-.quote-pop-row {
-  display: flex;
+.quote-pop-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: var(--radius-lg);
+  color: var(--accent);
+  cursor: var(--cursor-pointer);
+}
+.quote-pop-btn:hover,
+.quote-pop-btn:focus-visible {
+  background: var(--chrome-high);
+}
+.quote-pop-write {
   gap: 6px;
+  width: min(300px, calc(100vw - 12px));
+  padding: 4px 4px 4px 8px;
+}
+.quote-pop-write > .quote-pop-glyph {
+  flex: none;
+  color: var(--accent);
 }
 .quote-pop-field {
   flex: 1;
@@ -10009,15 +10018,30 @@ a.st-btn {
   color: var(--dimmer);
 }
 .quote-pop-go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
-  padding: 4px 9px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
   border-radius: var(--radius-lg);
   background: var(--accent);
   color: var(--on-accent);
-  font-size: var(--fs-base);
-  font-weight: 600;
-  white-space: nowrap;
   cursor: var(--cursor-pointer);
+}
+/* A finger's size where there are fingers: the mark is pressed over words a
+   thumb has just let go of. */
+:root[data-narrow] .quote-pop-btn,
+:root[data-narrow] .quote-pop-go {
+  width: 34px;
+  height: 34px;
+}
+/* The words being commented on, while the field has the keys and the page's
+   selection with them: the accent laid thinly over the words, so they stay
+   readable in every theme. */
+::highlight(kururu-quote) {
+  background-color: color-mix(in srgb, var(--accent) 32%, transparent);
 }
 .note-head {
   flex: none;

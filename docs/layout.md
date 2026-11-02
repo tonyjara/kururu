@@ -194,7 +194,7 @@ clicks; a click with the card's text selected, a modified click and a drag
 do nothing. A card with nothing cut off opens too, with no "More" or
 "Less" to show for it: open is being read, and an open card's words select
 rather than drag, to quote a part of it to Kuru (`Quote.tsx`, and
-[harness](harness.md#part-of-a-card-quoted-with-a-comment)). Cards are not
+[harness](harness.md#part-of-a-card-or-a-message-quoted-with-a-comment)). Cards are not
 focusable, so the keyboard's way in is the "More" button and the menu's
 Edit, as it was. The profile's board draws its cards the same way; its
 timeline's bars and the Needs drawer's rows have nothing to open, and keep

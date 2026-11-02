@@ -660,10 +660,14 @@ export function quoteWords(text: string, max = QUOTE_MAX): string {
  * card, `quote title` when it was the title; and what follows, to the end
  * of the line, is the comment on that part. Each quote is a line of its own
  * in the box (`insertLine`), so several read as a review's comments do.
+ *
+ * A message in Kuru's drawer is quoted the same way, after the reference
+ * its reply arrow writes — `[reply to Kuru 18:42 "Want me to…" (t1234)]
+ * [quote "the second agent"] not that one` — so `reference` is either.
  */
-export function quoteReference(cardRef: string, quote: CardQuote): string {
+export function quoteReference(reference: string, quote: CardQuote): string {
   const comment = quote.comment.slice(0, QUOTE_TAKEN_MAX).replace(/\s+/g, " ").trim();
-  const said = `${cardRef} [quote${quote.part === "title" ? " title" : ""} "${quoteWords(quote.text)}"]`;
+  const said = `${reference} [quote${quote.part === "title" ? " title" : ""} "${quoteWords(quote.text)}"]`;
   return comment ? `${said} ${comment}` : said;
 }
 

@@ -405,6 +405,25 @@ describe("a quote of a card", () => {
     }
     expect(adoptQuote({ part: "body", text: "x".repeat(QUOTE_TAKEN_MAX + 5) })?.text.length).toBe(QUOTE_TAKEN_MAX);
   });
+
+  test("a message in the drawer is quoted after its reply reference, which still opens the message it is in", () => {
+    const at = new Date(2026, 10, 2, 18, 42).getTime();
+    const said: KuruReply = { kind: "kuru", id: "t1234", at, text: "I started two agents on the checkout.\nThe second one rebuilds the cart.", utterance: null, fate: null, aside: false };
+    const reference = replyReference(replyRefOf(said, said.id, at)!);
+    const words = quoteReference(reference, { part: "body", text: "the second one rebuilds\nthe cart", comment: "stop that one" });
+    expect(words).toBe(`[reply to Kuru 18:42 "I started two agents on the checkout. The second one rebuilds the cart." (t1234)] [quote "the second one rebuilds the cart"] stop that one`);
+    expect(splitReply(words)).toEqual({
+      ref: { who: "Kuru", when: "18:42", quote: "I started two agents on the checkout. The second one rebuilds the cart.", id: "t1234" },
+      text: '[quote "the second one rebuilds the cart"] stop that one',
+    });
+  });
+
+  test("the role's example of a quoted message is a reply reference", () => {
+    const role = rolePrompt({ profile: "main", workspaces: [], launchers: [] });
+    const example = /\[reply to [^\]]*\)\] \[quote "[^"]*"\] [^.]*/.exec(role)?.[0] ?? "";
+    expect(example).not.toBe("");
+    expect(splitReply(example)?.text.startsWith("[quote ")).toBe(true);
+  });
 });
 
 describe("insertLine", () => {

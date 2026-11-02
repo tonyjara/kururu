@@ -20,7 +20,9 @@
  * up to do it there — as "Reference in Kuru" does, since Kuru's box is the
  * window's and the reference is written there, from the card's id alone.
  * Part of the card quoted from a selection goes the same way, with the
- * words and the comment beside the id (`Quote.tsx`).
+ * words and the comment beside the id (`Quote.tsx`) — or, from an app whose
+ * bridge carries the id alone, the words over the page's own channel first
+ * (`notequote.ts`).
  *
  * **Which card is the main process's word, not the address's.** The page
  * asks the bridge which note it is (`self`), and the main process answers
@@ -34,6 +36,7 @@ import { useEffect, useRef, useState } from "react";
 import { skinFor } from "../../../shared/skin";
 import { themeFor } from "../../../shared/theme";
 import type { NoteReport, NoteSelf } from "../desktop";
+import { quoteAcross } from "../notequote";
 import { desktopNotes, locateCard } from "../notes";
 import { installReload } from "../reload";
 import { useKururu } from "../session";
@@ -146,8 +149,17 @@ export function NotePage() {
       />
       {/* A quote goes to the window as "Reference in Kuru" does — the card by
           the id the main process knows this note by, and the words with it —
-          so the reference the note's words were marked with is not used here. */}
-      {notes?.quote && <QuoteToKuru onQuote={(_cardRef, quote) => notes.quote?.(quote)} />}
+          so the reference the note's words were marked with is not used here.
+          An app whose bridge has no `quote` gets the words to the window over
+          the page's own channel, then presses `refer` (`notequote.ts`). */}
+      {(notes?.quote || notes?.refer) && (
+        <QuoteToKuru
+          onQuote={(_reference, quote) => {
+            if (notes.quote) notes.quote(quote);
+            else if (notes.refer) quoteAcross(self.cardId, quote, () => notes.refer?.());
+          }}
+        />
+      )}
     </section>
   );
 }

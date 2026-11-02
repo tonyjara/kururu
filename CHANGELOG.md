@@ -32,12 +32,13 @@ shows, so it is written once and read in three places — see
   or part of a word still finds it; a word found only by a typo is underlined
   rather than filled, and the count says how many. Click a message to read it
   where it was said, and press Escape to get back to the chat where you left it.
-- **Quote part of a card to Kuru.** Click a card to open it, or pop it out as a
-  note, and select some of its words: a small box comes up beside them for a
-  comment. Enter (or **Quote to Kuru**) puts the card, the words and your comment into
-  Kuru's box as one line. Do it again for another part, of this card or
-  another, and the lines add up, like review comments, until you send them.
-  Escape or a click elsewhere puts the box away, and ⌘C still copies.
+- **Quote part of a card, or of Kuru's chat, to Kuru.** Select some words in
+  an open card, a note (a floating note window too), one of Kuru's replies or
+  a kururu notice, and a small quote mark comes up beside them. Press it to
+  write a comment: Enter puts the card or the message, the words and your
+  comment into Kuru's box as one line. Do it again for another part and the
+  lines add up, like review comments, until you send them. Escape or a click
+  elsewhere puts it away, and ⌘C still copies.
 
 ### Changed
 

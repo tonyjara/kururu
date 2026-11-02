@@ -181,43 +181,60 @@ menu row all four menus use, `referCardIn` beside it the same words for a
 card known by its id, and `insertInKuru` the door the composer takes the
 words from.
 
-### Part of a card, quoted with a comment
+### Part of a card or a message, quoted with a comment
 
 Select words in an open card — a workspace's board or the profile's —
-or in a note's body, and a popover comes up by the selection with a
-field and **Quote to Kuru**. Enter in the field, or the button, puts the
-card's reference, the quote and the comment into the box as a line of
-their own; Escape or a press anywhere else closes it. Several stack up
-as the lines of one message, as a review's comments do, and nothing is
-sent until the user sends it:
+in a note's body, in a reply of Kuru's or in a kururu notice's message,
+and a small quote mark comes up by the end of the selection. Pressing it
+opens a field for the comment; Enter in it, or its arrow, puts the
+reference, the quote and the comment into the box as a line of their
+own; Escape or a press anywhere else closes it. Several stack up as the
+lines of one message, as a review's comments do, and nothing is sent
+until the user sends it:
 
 ```
 [card ACM-16 "Design the checkout…" (w8/c3f9a1e07b2d4)] [quote "the button sits under … on every screen"] make it the first thing
 [card ACM-16 "Design the checkout…" (w8/c3f9a1e07b2d4)] [quote title "Design the checkout"] and the mobile one
+[reply to Kuru 18:42 "I started two agents on the checkout…" (t1234)] [quote "the second one rebuilds the cart"] stop that one
 ```
 
 The reference is the card's own, whole, so the drawer draws its door and
-the role reads it as any other; the quote names the part — `quote title`
-for the title — and is cut in the middle rather than at the end
+the role reads it as any other — or, for a message, the reference its
+reply arrow writes, so a quote that starts the message is drawn as that
+reply's door back to the line. The quote names the part — `quote title`
+for a card's title — and is cut in the middle rather than at the end
 (`quoteWords`), because which part is a matter of both ends. The role's
 "Cards the user points at" says the quote is the part meant and the
-words after it the comment on that part.
+words after it the comment on that part, and its reply paragraph says a
+reply reference may carry one too. Only this node's lines are quotable:
+a quote is one line among others, with no `@node` to route it to the
+Kuru that said another node's line.
 
 There is one popover for the page (`web/src/components/Quote.tsx`),
 listening to the document's selection; the words that can be quoted
 carry the reference as a data attribute where they are drawn
 (`quotable`), so a memoised card draws nothing new for a selection. It
-never takes the keyboard by itself: ⌘C still copies, and what was
-selected is read when it opens, so clicking into the field loses
-nothing. A board card is `draggable`, and a press on a draggable is a
-drag — so only an open card's words select, and only for that press
-(`selectNotDrag`); a closed card is still the thing you drag. A note
-window has no box, so its quote crosses the bridge with the card's id
-on "Reference in Kuru"'s own channel (`notes.quote`), and the window
-writes the reference from its snapshot and puts the quote after it
-(`referCardIn` with a quote, `adoptQuote` for what crossed). The Needs
-drawer draws only a card's first line, inside a button, and quotes
-nothing.
+never takes the keyboard by itself: the mark is a button, ⌘C still
+copies while it is up, and the mark follows the selection as it is
+pulled about. Only the press on it gives the field the keys; the
+selection is read before then, and stays marked on the page with a CSS
+highlight (`::highlight(kururu-quote)`) while the field holds the
+document's selection, which is why the popover never repeats the words.
+A board card is `draggable`, and a press on a draggable is a drag — so
+only an open card's words select, and only for that press
+(`selectNotDrag`); a closed card is still the thing you drag.
+
+A note window has no box, so its quote goes to the window with the
+card's id: across the bridge on "Reference in Kuru"'s own channel
+(`notes.quote`) where the app has it. An app built before quoting has
+only `notes.refer`, which carries the id alone, so the note says the
+quote on a `BroadcastChannel` the two same-origin pages share, waits for
+the window to say it holds it, and then presses `refer`; the window
+takes the held quote for that card (`web/src/notequote.ts`). Either way
+the window writes the reference from its snapshot and puts the quote
+after it (`referCardIn` with a quote, `adoptQuote` for what crossed).
+The Needs drawer draws only a card's first line, inside a button, and
+quotes nothing.
 
 ## A file the user hands it
 

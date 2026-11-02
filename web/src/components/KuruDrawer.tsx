@@ -145,6 +145,7 @@ import { useKururu } from "../session";
 import { dismissVoice, talkDown, talkUp, useOutgoing, useVoiceUi, voiceIsRemote, voiceNow } from "../voice";
 import { Icon } from "./Icon";
 import { MadeInline } from "./MadeLinks";
+import { quotable } from "./Quote";
 import { Mascot } from "./Status";
 import { MicIcon, PlaneIcon, SpeakerIcon, SpeakerOffIcon } from "./VoiceIcons";
 import { hueStyle } from "./NodeChip";
@@ -261,6 +262,19 @@ export function KuruDrawer({
     const ref = replyRefOf(item, ownId(item), Date.now());
     if (ref) setReplyAsk((was) => ({ quoting: { node: item.node, at: item.at, ref }, n: (was?.n ?? 0) + 1 }));
   }, []);
+  /**
+   * The words a quote of a line's words is written after — the reference
+   * its reply arrow writes, so Kuru finds the message as it finds a reply's
+   * — for Kuru's replies and kururu's notices in this node's conversation.
+   * Another node's line is left unquotable: a quote is a line among others
+   * in the box, with no `@node` in front of it to send it to the Kuru that
+   * said it, and the id in it would be that Kuru's.
+   */
+  const quoteRefOf = (item: NodeKuruItem & (KuruReply | NoticeItem)): string | null => {
+    if (item.node !== null) return null;
+    const ref = replyRefOf(item, item.id, Date.now());
+    return ref ? replyReference(ref) : null;
+  };
   // The drawer is the active profile's, so Telegram is this conversation's
   // when it talks to whichever profile is active, or was pointed at this one.
   const telegram = channels?.telegram && channelReady(channels.telegram) && (channels.telegram.profileId ?? profile.id) === profile.id ? channels.telegram : null;
@@ -796,6 +810,9 @@ export function KuruDrawer({
    * into the layout (a terminal, a card) and must not close the drawer; only
    * its own close button, the chip, or the keyboard does. Capture phase, so
    * a terminal's own handler taking the press cannot keep the drawer up.
+   * The quote popover over the sheet's own words (`Quote.tsx`) is drawn into
+   * `document.body`, outside the sheet, but a press on it is a press on what
+   * the sheet shows.
    */
   const root = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -803,7 +820,7 @@ export function KuruDrawer({
     const away = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
-      if (root.current?.contains(target) || target.closest(".sb-kuru, .voice-pill, .scrim, .menu-backdrop, .menu")) return;
+      if (root.current?.contains(target) || target.closest(".sb-kuru, .voice-pill, .scrim, .menu-backdrop, .menu, .quote-pop")) return;
       onClose();
     };
     document.addEventListener("pointerdown", away, true);
@@ -994,6 +1011,7 @@ export function KuruDrawer({
                 cardOf={item.node === null ? cardOf : noCards}
                 onCard={onCard}
                 onReplyTo={() => replyTo(item)}
+                quoteRef={quoteRefOf(item)}
                 flash={flash === item.id || (searching && walked === item.id)}
                 onResult={searching ? () => openResult(item) : null}
               />
@@ -1010,6 +1028,7 @@ export function KuruDrawer({
                 replaying={replayingId === item.id}
                 onReplay={onReplay}
                 onReplyTo={() => replyTo(item)}
+                quoteRef={quoteRefOf(item)}
                 folded={foldedOf(item) === true}
                 onFold={() => toggleFold(item)}
                 cardOf={item.node === null ? cardOf : noCards}
@@ -1505,6 +1524,7 @@ function Reply({
   replaying,
   onReplay,
   onReplyTo,
+  quoteRef,
   folded,
   onFold,
   cardOf,
@@ -1521,6 +1541,8 @@ function Reply({
   onReplay: (item: KuruReply) => void;
   /** Reply to this one: the composer quotes it — and starts `@node ` for another node's Kuru. */
   onReplyTo: () => void;
+  /** The reference a quote of its words is written after (`quotable`); null for another node's, which this Kuru cannot find. */
+  quoteRef: string | null;
   folded: boolean;
   /** Fold it to one row, or open it. */
   onFold: () => void;
@@ -1569,7 +1591,7 @@ function Reply({
         <FoldButton folded={line !== null} onFold={onFold} />
       </span>
       {!line && (
-        <p className="kuru-text">
+        <p className="kuru-text" {...(quoteRef ? quotable(quoteRef, "body", "message") : {})}>
           <ReplyWords text={item.text} files={item.files} cardOf={cardOf} onCard={onCard} onFile={onFile} />
         </p>
       )}
@@ -1778,6 +1800,7 @@ function Notice({
   cardOf,
   onCard,
   onReplyTo,
+  quoteRef = null,
   flash = false,
   onResult = null,
 }: {
@@ -1786,6 +1809,8 @@ function Notice({
   cardOf: CardOf;
   onCard: (workspaceId: string | null, cardId: string) => void;
   onReplyTo: () => void;
+  /** The reference a quote of the message's words is written after, as a reply's is. */
+  quoteRef?: string | null;
   flash?: boolean;
   /** It is a search's result, and a press on the line opens it in the chat rather than opening the message under it. */
   onResult?: (() => void) | null;
@@ -1837,7 +1862,7 @@ function Notice({
         <ReplyButton onReply={onReplyTo} />
       </span>
       {open && more && (
-        <p className="kuru-notice-text">
+        <p className="kuru-notice-text" {...(quoteRef ? quotable(quoteRef, "body", "message") : {})}>
           <CardWords text={item.text} cardOf={cardOf} onCard={onCard} />
         </p>
       )}

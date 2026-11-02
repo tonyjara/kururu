@@ -107,6 +107,16 @@ left in the Dock is how a force quit reached a coalition on 2026-10-10.
 
 Kept short on purpose; the detail is in git history.
 
+- **Quoting to Kuru** (2026-11-02), in an isolated instance on :7817 from a
+  scratch copy, driven in the real Electron app with hidden windows and real
+  mouse and key events: a selection in a reply of Kuru's, a kururu notice's
+  message, an open card on the profile's board and a note window's body
+  brought up the mark, its press the field with the words still marked, and
+  Enter put the reference, quote and comment into the box as stacked lines;
+  the note window both on the bridge with `notes.quote` and on one without it
+  (the app a release before quoting has), through `notequote.ts`; Escape
+  closing only the popover; in Kururu, Catppuccin Latte, Grand Prix and
+  Paddock, and in the drawer as a phone-width sheet.
 - **The slot queue** (2026-11-02), in an isolated instance on :7817 from a
   scratch copy, with a stand-in `simctl` (`KURURU_SIMCTL`, simulators in a JSON
   file) and a stand-in load (`KURURU_SLOTS_TEST_READING`), and `sleep` agents
