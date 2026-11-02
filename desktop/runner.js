@@ -72,9 +72,13 @@ function run(command, args) {
 /** The helper beside an app's main binary, or null when `exe` is not one. */
 function helperOf(exe) {
   const found = /^(.+?\.app)\/Contents\/MacOS\/([^/]+)$/.exec(exe);
-  if (!found || found[1].includes(".app/Contents/")) return null;
-  const name = `${found[2]} Helper`;
-  return path.join(found[1], "Contents", "Frameworks", `${name}.app`, "Contents", "MacOS", name);
+  if (!found) return null;
+  // A match has both groups; the casts say so to `noUncheckedIndexedAccess`.
+  const app = /** @type {string} */ (found[1]);
+  const bin = /** @type {string} */ (found[2]);
+  if (app.includes(".app/Contents/")) return null;
+  const name = `${bin} Helper`;
+  return path.join(app, "Contents", "Frameworks", `${name}.app`, "Contents", "MacOS", name);
 }
 
 /**
@@ -447,7 +451,7 @@ class Runner extends EventEmitter {
     if (!child) return Promise.resolve();
     if (this.stopping) return this.stopping;
     record("stop", `${why}: SIGTERM to the runner (pid ${child.pid})`);
-    this.stopping = new Promise((resolve) => {
+    this.stopping = new Promise(/** @param {(value?: unknown) => void} resolve */ (resolve) => {
       const timer = setTimeout(() => {
         try {
           child.kill("SIGKILL");

@@ -195,7 +195,7 @@ if (pid) {
   }
   const unit = unitOf(pid);
   if (unit !== undefined && /^kururu-ptyhost-[0-9a-z]+-\d+\.service$/.test(unit ?? "")) {
-    row("unit", up(unit.replace(/\.service$/, "")), "a transient systemd user unit — stopping or restarting the server's unit reaches nobody in it");
+    row("unit", up(/** @type {string} */ (unit).replace(/\.service$/, "")), "a transient systemd user unit — stopping or restarting the server's unit reaches nobody in it");
   } else if (unit !== undefined) {
     row(
       "unit",

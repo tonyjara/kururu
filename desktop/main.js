@@ -648,7 +648,7 @@ function buildMenu() {
     },
     { role: "windowMenu" },
   ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  Menu.setApplicationMenu(Menu.buildFromTemplate(/** @type {import("electron").MenuItemConstructorOptions[]} */ (template)));
 }
 
 function createWindow() {
@@ -699,8 +699,8 @@ function createWindow() {
     if (!template) return;
     const contents = win.webContents;
     for (const item of template) {
-      if (item.id === "replace") item.click = () => contents.replaceMisspelling(item.word);
-      if (item.id === "learn") item.click = () => contents.session.addWordToSpellCheckerDictionary(item.word);
+      if (item.id === "replace") item.click = () => contents.replaceMisspelling(/** @type {string} */ (item.word));
+      if (item.id === "learn") item.click = () => contents.session.addWordToSpellCheckerDictionary(/** @type {string} */ (item.word));
     }
     Menu.buildFromTemplate(template).popup({ window: win });
   });

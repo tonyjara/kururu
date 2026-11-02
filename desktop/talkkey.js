@@ -488,8 +488,8 @@ class TalkKey extends EventEmitter {
       clearTimeout(this.moveTimer);
       this.moveTimer = setTimeout(() => {
         if (!this.panel || this.panel.isDestroyed()) return;
-        const [x, y] = this.panel.getPosition();
-        const [width, height] = this.panel.getSize();
+        const [x, y] = /** @type {[number, number]} */ (this.panel.getPosition());
+        const [width, height] = /** @type {[number, number]} */ (this.panel.getSize());
         // The display it was actually dropped on, not the one it started
         // from — a drag across two monitors pins it to where most of it landed.
         const display = screen.getDisplayNearestPoint({ x: x + width / 2, y: y + height / 2 });
@@ -568,12 +568,12 @@ class TalkKey extends EventEmitter {
   place(why) {
     const panel = this.panel;
     if (!panel || panel.isDestroyed()) return;
-    const [width, height] = panel.getSize();
+    const [width, height] = /** @type {[number, number]} */ (panel.getSize());
     const displays = realDisplays();
     const saved = this.pillPlace;
     const pinned = saved ? displays.find((d) => d.id === saved.displayId) : undefined;
     const home = pinned ? null : homeDisplay(displays);
-    const display = pinned ?? home.display;
+    const display = pinned ?? /** @type {NonNullable<typeof home>} */ (home).display;
     const area = display.workArea;
     const x = saved ? area.x + saved.x * Math.max(0, area.width - width) : area.x + (area.width - width) / 2;
     const y = saved ? area.y + saved.y * Math.max(0, area.height - height) : area.y + area.height - height - HOME_LIFT;
@@ -597,7 +597,7 @@ class TalkKey extends EventEmitter {
     }
     note("place", {
       why,
-      via: pinned ? "pinned display" : saved ? `pinned display ${saved.displayId} is gone; ${home.via}` : home.via,
+      via: pinned ? "pinned display" : saved ? `pinned display ${saved.displayId} is gone; ${home?.via}` : home?.via,
       display: display.id,
       saved,
       cursor: home?.cursor ?? null,
@@ -615,7 +615,7 @@ class TalkKey extends EventEmitter {
   setPosition(x, y) {
     this.placing = true;
     try {
-      this.panel.setPosition(x, y);
+      /** @type {import("electron").BrowserWindow} */ (this.panel).setPosition(x, y);
     } finally {
       // The `moved` event is delivered after this returns, so the flag is let
       // go a turn later rather than here.

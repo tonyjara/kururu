@@ -70,7 +70,7 @@ if (!slices.length) {
   process.exit(0);
 }
 if (slices.length === 1) {
-  execFileSync("mv", [slices[0], OUT]);
+  execFileSync("mv", [/** @type {string} */ (slices[0]), OUT]);
 } else {
   execFileSync("lipo", ["-create", ...slices, "-output", OUT]);
   for (const slice of slices) rmSync(slice, { force: true });

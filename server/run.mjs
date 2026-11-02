@@ -47,7 +47,7 @@ const watching = process.argv.includes("--watch");
 /** The app's case: a bundle that is already built, somewhere it says. */
 const building = !process.argv.includes("--no-build");
 const entryFlag = process.argv.indexOf("--entry");
-const ENTRY = entryFlag !== -1 && process.argv[entryFlag + 1] ? process.argv[entryFlag + 1] : join(root, "desktop/dist/server.mjs");
+const ENTRY = (entryFlag !== -1 && process.argv[entryFlag + 1]) || join(root, "desktop/dist/server.mjs");
 
 /**
  * The helper beside an app's main binary, or null when this is not running on
@@ -56,9 +56,13 @@ const ENTRY = entryFlag !== -1 && process.argv[entryFlag + 1] ? process.argv[ent
  */
 function helperOf(exe) {
   const found = /^(.+?\.app)\/Contents\/MacOS\/([^/]+)$/.exec(exe);
-  if (!found || found[1].includes(".app/Contents/")) return null;
-  const name = `${found[2]} Helper`;
-  return join(found[1], "Contents", "Frameworks", `${name}.app`, "Contents", "MacOS", name);
+  if (!found) return null;
+  // A match has both groups; the casts say so to `noUncheckedIndexedAccess`.
+  const app = /** @type {string} */ (found[1]);
+  const bin = /** @type {string} */ (found[2]);
+  if (app.includes(".app/Contents/")) return null;
+  const name = `${bin} Helper`;
+  return join(app, "Contents", "Frameworks", `${name}.app`, "Contents", "MacOS", name);
 }
 
 /**
@@ -138,7 +142,7 @@ function saved(files) {
  * sentence is the one the record wants.
  */
 function build() {
-  return new Promise((resolve, reject) => {
+  return new Promise(/** @param {(value?: unknown) => void} resolve */ (resolve, reject) => {
     const child = spawn(NODE, [BUILD], { stdio: ["ignore", "inherit", "pipe"] });
     let said = "";
     child.stderr.on("data", (chunk) => {
@@ -243,7 +247,7 @@ function start(because) {
  * beside, so this waits for the exit and makes sure there is one.
  */
 function stop(child) {
-  return new Promise((resolve) => {
+  return new Promise(/** @param {(value?: unknown) => void} resolve */ (resolve) => {
     if (child.exitCode !== null || child.signalCode !== null) return resolve();
     const timer = setTimeout(() => {
       record("stop", `the old server had not stopped ${STOP_GRACE_MS / 1000}s after SIGTERM, so it was killed`, {

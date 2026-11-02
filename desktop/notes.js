@@ -235,8 +235,8 @@ class NoteWindows extends EventEmitter {
     contents.on("context-menu", (_event, params) => {
       const template = editMenuTemplate(params) ?? [];
       for (const item of template) {
-        if (item.id === "replace") item.click = () => contents.replaceMisspelling(item.word);
-        if (item.id === "learn") item.click = () => contents.session.addWordToSpellCheckerDictionary(item.word);
+        if (item.id === "replace") item.click = () => contents.replaceMisspelling(/** @type {string} */ (item.word));
+        if (item.id === "learn") item.click = () => contents.session.addWordToSpellCheckerDictionary(/** @type {string} */ (item.word));
       }
       if (!params.isEditable && entry.present === "here") {
         if (template.length) template.push({ type: "separator" });
@@ -281,7 +281,7 @@ class NoteWindows extends EventEmitter {
       if (this.open.get(note.cardId) === entry) this.open.delete(note.cardId);
     });
 
-    const entry = { win, loaded: null, present: null, head: NOTE_HEAD, saveTimer: null, shownOnce: false };
+    const entry = { win, loaded: null, present: null, head: NOTE_HEAD, saveTimer: /** @type {NodeJS.Timeout | null} */ (null), shownOnce: false };
     this.open.set(note.cardId, entry);
     this.load(note.cardId);
   }
@@ -324,6 +324,7 @@ class NoteWindows extends EventEmitter {
    * against `anchor`. Popping out a card that is a note already brings that
    * note forward, which is what the person wanted: to see it. Past
    * `OPEN_MAX`, the note up longest is put away.
+   * @param {{ cardId: string, profileKey: string, profileName?: string, title?: string, code?: string, bounds?: any, anchor?: any, fromWindow?: any }} card
    */
   popOut({ cardId, profileKey, profileName, title, code, bounds, anchor, fromWindow }) {
     if (!isCardId(cardId) || typeof profileKey !== "string" || !profileKey) return false;

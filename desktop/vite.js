@@ -104,6 +104,7 @@ class Vite extends EventEmitter {
     this.generation = 0;
   }
 
+  /** @param {string | null} [error] */
   set(status, error = null) {
     this.status = status;
     this.error = error;
@@ -182,6 +183,7 @@ class Vite extends EventEmitter {
     closeSync(log);
     this.child = child;
 
+    /** @type {string | null} */
     let gone = null;
     // Gone by itself, while starting or after: a crash, or a port somebody
     // took between the look above and the bind. Not started again by itself,
@@ -218,7 +220,7 @@ class Vite extends EventEmitter {
     this.pending = null;
     if (this.status !== "off") this.set("off");
     if (!child || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
-    return new Promise((resolve) => {
+    return new Promise(/** @param {(value?: unknown) => void} resolve */ (resolve) => {
       const timer = setTimeout(() => {
         try {
           child.kill("SIGKILL");

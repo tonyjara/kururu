@@ -1,0 +1,31 @@
+{
+  // The JavaScript half: the Electron main process and preload, the runner and
+  // the small CLIs beside it. They stay JavaScript because they run as they
+  // are, with no build step between the file and the process, and the runner
+  // most of all must start even when the TypeScript build is broken. So they
+  // are checked rather than compiled.
+  //
+  // `noImplicitAny` is off because about 440 parameters here carry no JSDoc
+  // and typing them all is a rewrite, not a check; what this does catch is
+  // every call into Electron, Node and each other against their real types,
+  // with `strict`'s null checks. A file that wants more says so with JSDoc.
+  // `useUnknownInCatchVariables` is off for the same reason: a `catch (err)`
+  // reading `err.message` is the house style in these files, and JSDoc cannot
+  // annotate a catch variable.
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "allowJs": true,
+    "checkJs": true,
+    "strict": true,
+    "noImplicitAny": false,
+    "useUnknownInCatchVariables": false,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["desktop/globals.d.ts", "desktop/*.js", "desktop/*.mjs", "desktop/talkkey/*.mjs", "server/*.mjs"]
+}

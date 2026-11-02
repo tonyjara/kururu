@@ -22,6 +22,12 @@
  * attaches the clicks by id.
  */
 
+/**
+ * One row of the menu: Electron's own item, plus the word a spelling row acts
+ * on. A type only — this file still loads nothing of Electron's.
+ * @typedef {import("electron").MenuItemConstructorOptions & { word?: string }} EditItem
+ */
+
 /** As many guesses as the system's own menu shows before it would scroll a reader's eye. */
 const GUESSES = 5;
 
@@ -30,10 +36,12 @@ const GUESSES = 5;
  * `context-menu` event, or null when there is nothing to offer — a right-click
  * on a button or a bare panel, which should go on looking like nothing
  * happened rather than open an empty menu.
+ * @returns {EditItem[] | null}
  */
 function editMenuTemplate(params) {
   const flags = params.editFlags ?? {};
   const selected = typeof params.selectionText === "string" && params.selectionText.trim() !== "";
+  /** @type {EditItem[]} */
   const items = [];
 
   // The spelling half comes first, as it does in TextEdit, because when it is

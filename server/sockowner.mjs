@@ -52,7 +52,7 @@ export function parseSsUnix(out) {
   for (const line of out.split("\n")) {
     const found = /^\s*(?:\S+\s+)?LISTEN\s+\d+\s+\d+\s+(.+?)\s+\d+\s+\*\s+\d+(?:\s+(users:.*))?\s*$/.exec(line);
     if (!found) continue;
-    sockets.push({ path: found[1], pids: pidsOf(found[2]) });
+    sockets.push({ path: /** @type {string} */ (found[1]), pids: pidsOf(found[2]) });
   }
   return sockets;
 }
