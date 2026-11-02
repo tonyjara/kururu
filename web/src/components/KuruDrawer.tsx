@@ -129,7 +129,7 @@ import { Fragment, createContext, useCallback, useContext, useDeferredValue, use
 import { cardCode } from "../../../shared/board";
 import { CHANNEL_NAMES, channelReady, isChannelKind, type TelegramStatus } from "../../../shared/channels";
 import { dropRefusal } from "../../../shared/drops";
-import { KURU_SEEN_MS, addressMatches, addressOf, addressQuery, clipLength, insertWords, mergeNodes, pickAddress, quotedLine, replyRefOf, splitCardCodes, splitCardRefs, typedAddress, type CardRef, type KuruItem, type KuruReply, type NodeKuruItem, type NoticeItem, type PeerKuru, type YouItem } from "../../../shared/kuru";
+import { KURU_SEEN_MS, addressMatches, addressOf, addressQuery, clipLength, insertLine, insertWords, mergeNodes, pickAddress, quotedLine, replyRefOf, splitCardCodes, splitCardRefs, typedAddress, type CardRef, type KuruItem, type KuruReply, type NodeKuruItem, type NoticeItem, type PeerKuru, type YouItem } from "../../../shared/kuru";
 import { matchItem, parseKuruQuery, splitHits, type KuruQuery } from "../../../shared/kurusearch";
 import { splitMentions } from "../../../shared/made";
 import type { AgentSnapshot, MascotConfig, Profile } from "../../../shared/model";
@@ -2061,11 +2061,11 @@ function Composer({
    */
   const { words } = useKuruDrawer();
   const took = useRef(0);
-  const putIn = (words: string) => {
+  const putIn = (words: string, line = false) => {
     const el = field.current;
     const was = el?.value ?? readDraft(profileId);
     const at = el && document.activeElement === el ? { from: el.selectionStart, to: el.selectionEnd } : (carets.get(profileId) ?? { from: was.length, to: was.length });
-    const put = insertWords(was, at.from, at.to, words);
+    const put = (line ? insertLine : insertWords)(was, at.from, at.to, words);
     edit(put.text);
     carets.set(profileId, { from: put.caret, to: put.caret });
     if (el) {
@@ -2077,7 +2077,7 @@ function Composer({
     if (!words || took.current === words.n) return;
     took.current = words.n;
     takeKuruWords(words.n);
-    putIn(words.text);
+    putIn(words.text, words.line);
     // Only new words, not a re-render, touch the draft.
   }, [words?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   /**

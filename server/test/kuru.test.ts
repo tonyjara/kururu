@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentName, envelope, rolePrompt } from "../../shared/harness";
-import { CARD_REF_TITLE_MAX, KURU_RECENT, addressOf, cardPlace, cardReference, clipLength, insertWords, kuruCounts, mergeConversation, plainWords, quotedLine, readPrompt, replyRefOf, splitCardCodes, splitCardRefs, spokenMessage, type KuruItem, type KuruReply, type NoticeItem, type OutboxLike, type YouItem } from "../../shared/kuru";
+import { CARD_REF_TITLE_MAX, KURU_RECENT, QUOTE_MAX, QUOTE_TAKEN_MAX, addressOf, adoptQuote, cardPlace, cardReference, clipLength, insertLine, insertWords, quoteReference, quoteWords, kuruCounts, mergeConversation, plainWords, quotedLine, readPrompt, replyRefOf, splitCardCodes, splitCardRefs, spokenMessage, type KuruItem, type KuruReply, type NoticeItem, type OutboxLike, type YouItem } from "../../shared/kuru";
 import { REPLY_QUOTE_MAX, readableReply, replyClock, replyReference, splitReply, withReply, type ReplyRef } from "../../shared/reply";
 import { viaOf } from "../../shared/store";
 import type { Turn } from "../../shared/store";
@@ -357,6 +357,77 @@ describe("insertWords", () => {
 
   test("a line break after the cursor stays a line break", () => {
     expect(insertWords("one\ntwo", 3, 3, ref)).toEqual({ text: `one ${ref} \ntwo`, caret: `one ${ref} `.length });
+  });
+});
+
+describe("a quote of a card", () => {
+  const card = { code: "ACM-16", title: "Design the checkout", place: "w8", cardId: "c3f9a1e07b2d4" };
+  const ref = cardReference(card);
+
+  test("a short selection is kept whole, on one line, with no quote of its own to end it", () => {
+    expect(quoteWords('  the "pay"\n button  ')).toBe("the 'pay' button");
+  });
+
+  test("a long one keeps both its ends, cut at words, within the length", () => {
+    const words = Array.from({ length: 80 }, (_, i) => `w${i}`).join(" ");
+    const quote = quoteWords(words);
+    expect(quote.length).toBeLessThanOrEqual(QUOTE_MAX);
+    expect(quote.startsWith("w0 w1 ")).toBe(true);
+    expect(quote.endsWith(" w78 w79")).toBe(true);
+    const [head, tail] = quote.split(" … ");
+    expect(words.startsWith(head!)).toBe(true);
+    expect(words.endsWith(tail!)).toBe(true);
+  });
+
+  test("the card's reference, then the quote, then the comment", () => {
+    expect(quoteReference(ref, { part: "body", text: "the pay button", comment: " make it  green " })).toBe(`${ref} [quote "the pay button"] make it green`);
+    expect(quoteReference(ref, { part: "title", text: "checkout", comment: "" })).toBe(`${ref} [quote title "checkout"]`);
+  });
+
+  test("the drawer still finds the card's reference in it", () => {
+    const parts = splitCardRefs(quoteReference(ref, { part: "body", text: "a (b/c) [d]", comment: "why" }));
+    expect(parts[0]).toEqual({ ref: card });
+    expect(parts[1]).toEqual({ text: ' [quote "a (b/c) [d]"] why' });
+  });
+
+  test("the role's own example of a quote is one", () => {
+    const role = rolePrompt({ profile: "main", workspaces: [], launchers: [] });
+    const example = /\[card [^\]]*\)\] \[quote "[^"]*"\]/.exec(role)?.[0] ?? "";
+    expect(example).not.toBe("");
+    expect(splitCardRefs(example).some((part) => "ref" in part)).toBe(true);
+  });
+
+  test("off the bridge only a quote's shape is taken", () => {
+    expect(adoptQuote({ part: "body", text: "x", comment: "y" })).toEqual({ part: "body", text: "x", comment: "y" });
+    expect(adoptQuote({ part: "title", text: "x" })).toEqual({ part: "title", text: "x", comment: "" });
+    for (const value of [null, "x", 3, { part: "head", text: "x" }, { part: "body", text: "  " }, { part: "body", text: 4 }]) {
+      expect(adoptQuote(value)).toBeNull();
+    }
+    expect(adoptQuote({ part: "body", text: "x".repeat(QUOTE_TAKEN_MAX + 5) })?.text.length).toBe(QUOTE_TAKEN_MAX);
+  });
+});
+
+describe("insertLine", () => {
+  const line = "[card ACM-16] [quote \"x\"] hm";
+
+  test("an empty draft is the line and a space to go on typing after", () => {
+    expect(insertLine("", 0, 0, line)).toEqual({ text: `${line} `, caret: line.length + 1 });
+  });
+
+  test("a second one starts the next line, the first's trailing space dropped", () => {
+    const first = insertLine("", 0, 0, line);
+    const second = insertLine(first.text, first.caret, first.caret, line);
+    expect(second).toEqual({ text: `${line}\n${line} `, caret: `${line}\n${line} `.length });
+  });
+
+  test("after words on the same line it breaks the line; before words it breaks after", () => {
+    expect(insertLine("look", 4, 4, line).text).toBe(`look\n${line} `);
+    expect(insertLine("thanks", 0, 0, line)).toEqual({ text: `${line} \nthanks`, caret: line.length + 1 });
+    expect(insertLine("a\nb", 2, 2, line).text).toBe(`a\n${line} \nb`);
+  });
+
+  test("a cursor that is no number is the end", () => {
+    expect(insertLine("hi", Number.NaN, Number.NaN, line).text).toBe(`hi\n${line} `);
   });
 });
 

@@ -42,6 +42,7 @@ import { keymapFrom } from "../../shared/keys";
 import { mascotFor, type AgentSnapshot } from "../../shared/model";
 import { DEFAULT_AGENT_PLACEMENT } from "../../shared/agentpane";
 import { kuruRunningOn } from "../../shared/harness";
+import { adoptQuote, type CardQuote } from "../../shared/kuru";
 import { Dialog, type DialogState } from "./components/Dialog";
 import { FileTree, MARKDOWN } from "./components/FileTree";
 import { ProfileBoard } from "./components/ProfileBoard";
@@ -63,11 +64,12 @@ import { ReloadNotice } from "./components/ReloadNotice";
 import { installReload } from "./reload";
 import { isLoopback } from "./preview";
 import { KuruDrawer } from "./components/KuruDrawer";
-import { closeKuru, kuruLive, leaveKuruSearch, openKuru, referCardIn, searchInKuru, toggleKuru, useKuruDrawer } from "./kuru";
+import { closeKuru, kuruLive, leaveKuruSearch, openKuru, quoteInKuru, referCardIn, searchInKuru, toggleKuru, useKuruDrawer } from "./kuru";
 import { closeNeeds, toggleNeeds, useNeedsDrawer } from "./needs";
 import { arrangedNeeds, useNeedsView } from "./needsorder";
 import { NeedsDrawer } from "./components/NeedsDrawer";
 import { Notes } from "./components/Notes";
+import { QuoteToKuru, quoteUp } from "./components/Quote";
 import { locateCard } from "./notes";
 import { needsOf, type Need } from "../../shared/needs";
 import { nextNeedAcross, nodeNeeds as nodeNeedsOf, parseRemote, qualify, workspacesAcross, type NodeNeed } from "../../shared/remote";
@@ -716,17 +718,29 @@ export function App() {
    * over that box, so it goes, as the board's own row puts it away. The
    * bridge's ask is held for a profile, as `cardAsked` is.
    */
-  const referNote = (cardId: string) => {
-    if (!profile || !referCardIn(profile, cardId, api.nodeNameOf)) return;
+  const referNote = (cardId: string, quote: CardQuote | null = null) => {
+    if (!profile || !referCardIn(profile, cardId, api.nodeNameOf, quote)) return;
     setProfileBoard(false);
     setBoardShow(null);
   };
-  const [referAsked, setReferAsked] = useState<{ cardId: string } | null>(null);
-  useEffect(() => desktop()?.notes?.onReferCard?.((cardId) => setReferAsked({ cardId })), []);
+  /**
+   * Part of a card quoted from this page — a board's card, the profile's
+   * board, a note over the window — by the reference the words were marked
+   * with where they are drawn (`Quote.tsx`), into the same box and out of
+   * the profile board's way as a reference is.
+   */
+  const quoteHere = (cardRef: string, quote: CardQuote) => {
+    quoteInKuru(cardRef, quote);
+    setProfileBoard(false);
+    setBoardShow(null);
+  };
+  const [referAsked, setReferAsked] = useState<{ cardId: string; quote: CardQuote | null } | null>(null);
+  // A note window's quote crosses with its card's id, and is another page's word until `adoptQuote` says it is one.
+  useEffect(() => desktop()?.notes?.onReferCard?.((cardId, quote) => setReferAsked({ cardId, quote: adoptQuote(quote) })), []);
   useEffect(() => {
     if (!referAsked || !profile) return;
     setReferAsked(null);
-    referNote(referAsked.cardId);
+    referNote(referAsked.cardId, referAsked.quote);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [referAsked, profile]);
 
@@ -1276,6 +1290,11 @@ export function App() {
        * |, %, ?) did nothing at all.
        */
       if (isModifier(event)) return;
+
+      // The popover over a selection takes Escape for itself (`Quote.tsx`),
+      // whichever of the two heard it first: it is a step back from a quote,
+      // never the sheet or the drawer under it going away.
+      if (keyName(event) === "escape" && quoteUp()) return;
 
       /**
        * A key aimed at a text field belongs to the field, prefix included:
@@ -1926,6 +1945,8 @@ export function App() {
         }}
         onRefer={referNote}
       />
+      {/* The popover over a selection in a card or a note: one for the page. */}
+      <QuoteToKuru onQuote={quoteHere} />
       {databasesFor && (
         <Databases
           workspaceId={databasesFor}

@@ -598,6 +598,106 @@ export function splitCardRefs(text: string): ({ text: string } | { ref: CardRef 
   return parts;
 }
 
+// ---------------------------------------------------------------------------
+// A part of a card quoted, with a comment on it
+// ---------------------------------------------------------------------------
+
+/**
+ * Which of a card's words were selected: its body, or its title. A note's
+ * body is the card's body drawn as markdown, so a quote from a note is a
+ * quote from the body too.
+ */
+export type QuotePart = "body" | "title";
+
+/** A selection quoted to Kuru, and the comment typed on it in the popover. */
+export interface CardQuote {
+  part: QuotePart;
+  text: string;
+  comment: string;
+}
+
+/** How much of a selection a quote carries before its middle is cut. */
+export const QUOTE_MAX = 160;
+
+/**
+ * The most of a selection, or of a comment, that is taken in at all — off
+ * the note window's bridge too, where it is a string another page sent.
+ * Far more than a quote keeps, so cutting it never moves where the quote's
+ * end is; it only stops a selected chapter being carried about to be cut.
+ */
+export const QUOTE_TAKEN_MAX = 20_000;
+
+/**
+ * A selection as a quote writes it: on one line, a `"` as `'` so it cannot
+ * end the quote early, and — when it is long — its opening and its end with
+ * `…` where the middle was, each cut at a word. Both ends rather than the
+ * opening alone, as `cutQuoted` keeps for a title or a reply, because here
+ * the quote is *which part* the comment is on: the opening says where the
+ * part starts and the end where it stops, and Kuru finds it in the card's
+ * text by the two.
+ */
+export function quoteWords(text: string, max = QUOTE_MAX): string {
+  const flat = text.slice(0, QUOTE_TAKEN_MAX).replace(/\s+/g, " ").replace(/"/g, "'").trim();
+  if (flat.length <= max) return flat;
+  const headMax = Math.round(max * 0.6);
+  const tailMax = max - headMax - 3;
+  let head = flat.slice(0, headMax);
+  const headSpace = flat[headMax] === " " ? headMax : head.lastIndexOf(" ");
+  if (headSpace > headMax / 2) head = head.slice(0, headSpace);
+  let tail = flat.slice(flat.length - tailMax);
+  const tailSpace = flat[flat.length - tailMax - 1] === " " ? 0 : tail.indexOf(" ");
+  if (tailSpace >= 0 && tailSpace < tailMax / 2) tail = tail.slice(tailSpace);
+  return `${head.trimEnd()} … ${tail.trimStart()}`;
+}
+
+/**
+ * A part of a card quoted to Kuru, as words in the composer: the card's own
+ * reference, the one its menu writes, then the quote, then the comment —
+ * `[card ACM-16 "Design the checkout…" (w8/c3f9a1e07b2d4)] [quote "the
+ * button goes … on every page"] make it blue`. The card's reference whole,
+ * so the drawer draws it as the door it draws any reference as, and Kuru's
+ * role reads it as it reads any; the quote after it says which part of that
+ * card, `quote title` when it was the title; and what follows, to the end
+ * of the line, is the comment on that part. Each quote is a line of its own
+ * in the box (`insertLine`), so several read as a review's comments do.
+ */
+export function quoteReference(cardRef: string, quote: CardQuote): string {
+  const comment = quote.comment.slice(0, QUOTE_TAKEN_MAX).replace(/\s+/g, " ").trim();
+  const said = `${cardRef} [quote${quote.part === "title" ? " title" : ""} "${quoteWords(quote.text)}"]`;
+  return comment ? `${said} ${comment}` : said;
+}
+
+/**
+ * A quote as it came across a note window's bridge — any value at all —
+ * held to the shape and the length a quote has, or null for anything that
+ * is not one. The note page's own selection, but another page's word.
+ */
+export function adoptQuote(value: unknown): CardQuote | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { part, text, comment } = value as Record<string, unknown>;
+  if ((part !== "body" && part !== "title") || typeof text !== "string" || !text.trim()) return null;
+  return { part, text: text.slice(0, QUOTE_TAKEN_MAX), comment: typeof comment === "string" ? comment.slice(0, QUOTE_TAKEN_MAX) : "" };
+}
+
+/**
+ * Words put into a draft as a line of their own — a quote and its comment —
+ * over its selection: a line break before them unless they start a line
+ * already, one after them unless what follows is one, and the cursor just
+ * past them and a space, to go on with the comment. The next quote, put in
+ * there, starts the next line, so quotes taken one after another stack up
+ * as the lines of one message. Spaces at the join are dropped, not kept on
+ * either side of a break.
+ */
+export function insertLine(draft: string, from: number, to: number, words: string): { text: string; caret: number } {
+  const start = Number.isFinite(from) ? Math.max(0, Math.min(draft.length, Math.trunc(from))) : draft.length;
+  const end = Number.isFinite(to) ? Math.max(start, Math.min(draft.length, Math.trunc(to))) : start;
+  const before = draft.slice(0, start).replace(/[ \t]+$/, "");
+  const after = draft.slice(end).replace(/^[ \t]+/, "");
+  const head = `${before}${before && !before.endsWith("\n") ? "\n" : ""}${words} `;
+  const tail = after && !after.startsWith("\n") ? `\n${after}` : after;
+  return { text: head + tail, caret: head.length };
+}
+
 /**
  * Words put into a draft over its selection, with a space either side where
  * the draft has none, and where the cursor goes after them: past the space,

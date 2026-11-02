@@ -191,7 +191,10 @@ wait for a touch screen that does not count, and so a double never opens and
 shuts the card under the editor (`web/src/cardclick.ts`). A button, a link, a
 field, the run and dev lines, the made links and the git note keep their own
 clicks; a click with the card's text selected, a modified click and a drag
-do nothing. A card with nothing cut off has nothing to open. Cards are not
+do nothing. A card with nothing cut off opens too, with no "More" or
+"Less" to show for it: open is being read, and an open card's words select
+rather than drag, to quote a part of it to Kuru (`Quote.tsx`, and
+[harness](harness.md#part-of-a-card-quoted-with-a-comment)). Cards are not
 focusable, so the keyboard's way in is the "More" button and the menu's
 Edit, as it was. The profile's board draws its cards the same way; its
 timeline's bars and the Needs drawer's rows have nothing to open, and keep

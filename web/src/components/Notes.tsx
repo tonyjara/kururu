@@ -57,6 +57,7 @@ import {
   type BoardLane,
   type Card,
 } from "../../../shared/board";
+import { cardPlace, cardReference } from "../../../shared/kuru";
 import { mascotFor, type AgentSnapshot, type MascotSet, type Profile, type Workspace } from "../../../shared/model";
 import { colorValue } from "../colors";
 import { drawDiagrams } from "../mermaid";
@@ -85,6 +86,7 @@ import { CardWhen, Composer, dropDraft, endedAgo, RunLine, showCardNext, TreeLin
 import { Icon } from "./Icon";
 import { MadeLinks } from "./MadeLinks";
 import { NeedsByMark } from "./ProfileBoard";
+import { quotable } from "./Quote";
 import { Status } from "./Status";
 
 const EDGE_NAMES: Record<Edge, string> = {
@@ -549,7 +551,13 @@ export function NoteInside({
                 <NoteEditor card={card} workspace={workspace} profile={profile} onDone={stopEditing} />
               </div>
             ) : (
-              <NoteBody card={card} drawn={drawn} scroll={readScroll} onEdit={() => setEditing(true)} />
+              <NoteBody
+                card={card}
+                drawn={drawn}
+                scroll={readScroll}
+                quoteRef={cardReference({ code, title: card.title, place: cardPlace(workspace ? workspace.id : null, api.nodeNameOf), cardId: card.id })}
+                onEdit={() => setEditing(true)}
+              />
             )}
             <NoteFoot
               card={card}
@@ -638,11 +646,14 @@ function NoteBody({
   card,
   drawn,
   scroll,
+  quoteRef,
   onEdit,
 }: {
   card: Card;
   drawn: React.RefObject<string | null>;
   scroll: React.Ref<HTMLDivElement>;
+  /** The card's reference, which makes the body's words quotable to Kuru (`Quote.tsx`). */
+  quoteRef: string;
   onEdit: () => void;
 }) {
   const [html, setHtml] = useState<string | null>(() => drawn.current);
@@ -694,9 +705,11 @@ function NoteBody({
     <div ref={scroll} className="note-body" onDoubleClick={onEdit}>
       {html === null ? (
         // The text as it is, until its markup arrives — or for good, if it cannot.
-        <p className="note-plain">{card.body}</p>
+        <p className="note-plain" {...quotable(quoteRef, "body")}>
+          {card.body}
+        </p>
       ) : (
-        <article ref={article} className="md note-md" dangerouslySetInnerHTML={{ __html: html }} />
+        <article ref={article} className="md note-md" dangerouslySetInnerHTML={{ __html: html }} {...quotable(quoteRef, "body")} />
       )}
       {error && html === null && <p className="note-error">{error}</p>}
     </div>

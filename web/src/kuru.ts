@@ -21,7 +21,7 @@
  */
 import { useSyncExternalStore } from "react";
 import { cardCode } from "../../shared/board";
-import { cardPlace, cardReference, type CardRef, type KuruConversation } from "../../shared/kuru";
+import { cardPlace, cardReference, quoteReference, type CardQuote, type CardRef, type KuruConversation } from "../../shared/kuru";
 import type { AgentSnapshot, Profile } from "../../shared/model";
 import type { MenuItem } from "./components/Menu";
 import { closeNeeds } from "./needs";
@@ -80,7 +80,7 @@ export interface KuruDrawerState {
    * so a drawer closed and opened again does not put them in twice, and they
    * wait here when the drawer was closed, for the composer it mounts.
    */
-  words: { text: string; n: number } | null;
+  words: { text: string; n: number; line?: boolean } | null;
   /** The search was asked for from the keyboard: the drawer opens it and takes this down. */
   search: boolean;
 }
@@ -151,11 +151,13 @@ export function leaveKuruSearch(): boolean {
 /**
  * Open the drawer with words put into its composer at the cursor, unsent,
  * and the keyboard in the box — so what was pointed at is the start of a
- * sentence the user goes on typing.
+ * sentence the user goes on typing. `line` puts them in as a line of their
+ * own (`insertLine`), which is how a quote and its comment go in, so that
+ * several stack up as one message's lines.
  */
-export function insertInKuru(text: string): void {
+export function insertInKuru(text: string, line = false): void {
   closeNeeds();
-  const words = { text, n: ++wordsAsked };
+  const words = { text, n: ++wordsAsked, line };
   // Open already, the list stays where it was being read: only the box changes.
   set(state.open ? { ...state, words } : { open: true, focus: null, asked: state.asked + 1, words, search: state.search });
 }
@@ -184,6 +186,15 @@ export function referItem(ref: CardRef, then?: () => void): MenuItem {
 }
 
 /**
+ * A part of a card quoted to Kuru with a comment on it, from the popover
+ * over a selection (`Quote.tsx`): the card's reference as its menu writes
+ * it, the quote and the comment, as a line of their own in the box.
+ */
+export function quoteInKuru(cardRef: string, quote: CardQuote): void {
+  insertInKuru(quoteReference(cardRef, quote), true);
+}
+
+/**
  * A card known only by its id pointed at as its menu would point at it — a
  * note's, which has the id and no board around it: its own button over this
  * page, and a note window's, which reaches this window across the bridge as
@@ -191,19 +202,21 @@ export function referItem(ref: CardRef, then?: () => void): MenuItem {
  * a card sent to a workspace since its note was popped out is referred to
  * where it is now. False for a card that is not there, and nothing is put in.
  * `nameOf` is `cardPlace`'s, a node's name for a workspace of another node.
+ * With a `quote` — a note window's selection, which crosses the bridge with
+ * the id — it is that part of the card, quoted with its comment.
  */
-export function referCardIn(profile: Profile, cardId: string, nameOf: (nodeId: string) => string | null): boolean {
+export function referCardIn(profile: Profile, cardId: string, nameOf: (nodeId: string) => string | null, quote: CardQuote | null = null): boolean {
   const found = locateCard(profile, cardId);
   if (!found) return false;
   const { card, workspace } = found;
-  insertInKuru(
-    cardReference({
-      code: cardCode(workspace ? workspace.name : profile.name, card.number),
-      title: card.title,
-      place: cardPlace(workspace ? workspace.id : null, nameOf),
-      cardId: card.id,
-    }),
-  );
+  const ref = cardReference({
+    code: cardCode(workspace ? workspace.name : profile.name, card.number),
+    title: card.title,
+    place: cardPlace(workspace ? workspace.id : null, nameOf),
+    cardId: card.id,
+  });
+  if (quote) quoteInKuru(ref, quote);
+  else insertInKuru(ref);
   return true;
 }
 

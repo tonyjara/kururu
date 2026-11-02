@@ -77,8 +77,8 @@ if (isPicker) {
   });
   /** A note's "Reference in Kuru", landed on a window still loading, as `pendingCard` is. */
   let pendingRefer;
-  ipcRenderer.on("kururu:refer-card", (_event, cardId) => {
-    if (ipcRenderer.listenerCount("kururu:refer-card") === 1 && typeof cardId === "string") pendingRefer = cardId;
+  ipcRenderer.on("kururu:refer-card", (_event, cardId, quote) => {
+    if (ipcRenderer.listenerCount("kururu:refer-card") === 1 && typeof cardId === "string") pendingRefer = { cardId, quote };
   });
   contextBridge.exposeInMainWorld("kururu", {
     /** True in the Electron window, absent in a browser or on the phone. */
@@ -243,14 +243,14 @@ if (isPicker) {
         return () => ipcRenderer.removeListener("kururu:show-card", relay);
       },
       onReferCard: (listener) => {
-        const relay = (_event, cardId) => {
-          if (typeof cardId === "string") listener(cardId);
+        const relay = (_event, cardId, quote) => {
+          if (typeof cardId === "string") listener(cardId, quote);
         };
         ipcRenderer.on("kururu:refer-card", relay);
         if (pendingRefer !== undefined) {
-          const cardId = pendingRefer;
+          const { cardId, quote } = pendingRefer;
           pendingRefer = undefined;
-          listener(cardId);
+          listener(cardId, quote);
         }
         return () => ipcRenderer.removeListener("kururu:refer-card", relay);
       },
@@ -270,6 +270,8 @@ if (isPicker) {
       close: () => ipcRenderer.send("kururu:note-close"),
       toBoard: () => ipcRenderer.send("kururu:note-board"),
       refer: () => ipcRenderer.send("kururu:note-refer"),
+      /** Part of the card quoted with a comment: "Reference in Kuru"'s road, with the words beside the id. */
+      quote: (quote) => ipcRenderer.send("kururu:note-refer", quote),
       raiseMain: () => ipcRenderer.send("kururu:note-raise"),
     },
   });

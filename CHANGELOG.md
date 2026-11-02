@@ -21,6 +21,12 @@ shows, so it is written once and read in three places — see
   or part of a word still finds it; a word found only by a typo is underlined
   rather than filled, and the count says how many. Click a message to read it
   where it was said, and press Escape to get back to the chat where you left it.
+- **Quote part of a card to Kuru.** Click a card to open it, or pop it out as a
+  note, and select some of its words: a small box comes up beside them for a
+  comment. Enter (or **Quote to Kuru**) puts the card, the words and your comment into
+  Kuru's box as one line. Do it again for another part, of this card or
+  another, and the lines add up, like review comments, until you send them.
+  Escape or a click elsewhere puts the box away, and ⌘C still copies.
 
 ## [0.6.0] - 2026-10-29
 

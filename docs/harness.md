@@ -166,6 +166,44 @@ menu row all four menus use, `referCardIn` beside it the same words for a
 card known by its id, and `insertInKuru` the door the composer takes the
 words from.
 
+### Part of a card, quoted with a comment
+
+Select words in an open card — a workspace's board or the profile's —
+or in a note's body, and a popover comes up by the selection with a
+field and **Quote to Kuru**. Enter in the field, or the button, puts the
+card's reference, the quote and the comment into the box as a line of
+their own; Escape or a press anywhere else closes it. Several stack up
+as the lines of one message, as a review's comments do, and nothing is
+sent until the user sends it:
+
+```
+[card ACM-16 "Design the checkout…" (w8/c3f9a1e07b2d4)] [quote "the button sits under … on every screen"] make it the first thing
+[card ACM-16 "Design the checkout…" (w8/c3f9a1e07b2d4)] [quote title "Design the checkout"] and the mobile one
+```
+
+The reference is the card's own, whole, so the drawer draws its door and
+the role reads it as any other; the quote names the part — `quote title`
+for the title — and is cut in the middle rather than at the end
+(`quoteWords`), because which part is a matter of both ends. The role's
+"Cards the user points at" says the quote is the part meant and the
+words after it the comment on that part.
+
+There is one popover for the page (`web/src/components/Quote.tsx`),
+listening to the document's selection; the words that can be quoted
+carry the reference as a data attribute where they are drawn
+(`quotable`), so a memoised card draws nothing new for a selection. It
+never takes the keyboard by itself: ⌘C still copies, and what was
+selected is read when it opens, so clicking into the field loses
+nothing. A board card is `draggable`, and a press on a draggable is a
+drag — so only an open card's words select, and only for that press
+(`selectNotDrag`); a closed card is still the thing you drag. A note
+window has no box, so its quote crosses the bridge with the card's id
+on "Reference in Kuru"'s own channel (`notes.quote`), and the window
+writes the reference from its snapshot and puts the quote after it
+(`referCardIn` with a quote, `adoptQuote` for what crossed). The Needs
+drawer draws only a card's first line, inside a button, and quotes
+nothing.
+
 ## A file the user hands it
 
 **A path in the user's message is a file on this computer for Kuru to Read,

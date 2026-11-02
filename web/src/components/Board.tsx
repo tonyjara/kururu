@@ -49,7 +49,7 @@ import {
 } from "../../../shared/board";
 import { today, type Day } from "../../../shared/days";
 import type { Launcher } from "../../../shared/launchers";
-import { cardPlace } from "../../../shared/kuru";
+import { cardPlace, cardReference } from "../../../shared/kuru";
 import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
 import type { WorktreeStatus } from "../../../shared/projects";
 import { isRemote } from "../../../shared/remote";
@@ -68,6 +68,7 @@ import { Dialog } from "./Dialog";
 import { Icon } from "./Icon";
 import { MadeLinks } from "./MadeLinks";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
+import { quotable, selectNotDrag } from "./Quote";
 import { Status } from "./Status";
 
 const CARD_MIME = "application/x-kururu-card";
@@ -796,6 +797,8 @@ const CardView = memo(function CardView({
   const reveal = (agentId: string) => verbs.current.reveal(agentId);
   const opening = useCardOpen(card.title, card.body);
   const click = useCardClick(opening.toggle, () => verbs.current.edit(card.id), CARD_KEEP);
+  // An open card's words can be quoted to Kuru, by the reference its menu writes.
+  const quoteRef = opening.open ? cardReference({ code, title: card.title, place: cardPlace(workspaceId, api.nodeNameOf), cardId: card.id }) : null;
   return (
     <>
       {insertBefore && <span className="board-insert" aria-hidden="true" />}
@@ -811,6 +814,7 @@ const CardView = memo(function CardView({
           .join(" ")}
         data-card={card.id}
         draggable
+        onPointerDown={selectNotDrag}
         onDragStart={(event) => {
           click.cancel();
           event.dataTransfer.setData(CARD_MIME, card.id);
@@ -831,7 +835,7 @@ const CardView = memo(function CardView({
       >
         <div className="board-card-top">
           <span className="board-card-code">{code}</span>
-          <span ref={opening.titleRef} className="board-card-title">
+          <span ref={opening.titleRef} className="board-card-title" {...(quoteRef ? quotable(quoteRef, "title") : {})}>
             {card.title}
           </span>
           <span className="board-card-actions">
@@ -862,7 +866,7 @@ const CardView = memo(function CardView({
             </button>
           </span>
         </div>
-        <CardBody text={card.body} opening={opening} />
+        <CardBody text={card.body} opening={opening} quoteRef={quoteRef} />
         {card.dates && <CardWhen dates={card.dates} now={day} />}
         {card.worktree ? (
           <TreeLine worktree={card.worktree} />
@@ -1097,13 +1101,16 @@ export function CardWhen({ dates, now }: { dates: CardDates; now?: Day }) {
  * the body is, and a card opened to read it that still cut its own title
  * short would not be open. Whether anything is cut off is measured — a
  * `ResizeObserver` on each clamped part, since the same words clamp or don't
- * depending on the column's width — and a card with nothing cut off has
- * nothing to open, so `toggle` leaves it alone rather than putting a "Less"
- * on a card that shows everything already.
+ * depending on the column's width — and a card with nothing cut off opens
+ * without a "Less", since it shows everything already. Opening one still
+ * means something: an open card is one being read, and its words select
+ * rather than drag, to be quoted to Kuru (`Quote.tsx`). `cut` is measured
+ * only while the card is shut, so it still says, once open, whether there
+ * was more to show — which is when the toggle is drawn.
  */
 export interface CardOpen {
   open: boolean;
-  /** Something is cut off while the card is closed, which is when a click or "More" opens it. */
+  /** Something is cut off while the card is closed — measured only then, so once open it says there was — which is when "More" and "Less" are drawn. */
   cut: boolean;
   toggle: () => void;
   titleRef: React.RefObject<HTMLSpanElement | null>;
@@ -1126,9 +1133,7 @@ export function useCardOpen(title: string, body: string): CardOpen {
     return () => observer.disconnect();
   }, [title, body, open]);
 
-  const toggle = () => {
-    if (cut || open) setOpen(!open);
-  };
+  const toggle = () => setOpen(!open);
   return { open, cut, toggle, titleRef, bodyRef };
 }
 
@@ -1138,19 +1143,20 @@ export function useCardOpen(title: string, body: string): CardOpen {
  * the title included, so a card with no body and a long title has one too.
  * Clicks on the toggle stop there: the card underneath it is still draggable
  * and still opens its editor on a double-click, so the toggle must not pass
- * either gesture up to it.
+ * either gesture up to it. `quoteRef`, on an open card, makes the words
+ * quotable to Kuru (`Quote.tsx`).
  */
-export function CardBody({ text, opening }: { text: string; opening: CardOpen }) {
+export function CardBody({ text, opening, quoteRef = null }: { text: string; opening: CardOpen; quoteRef?: string | null }) {
   const { open, cut, toggle, bodyRef } = opening;
-  if (!text && !cut && !open) return null;
+  if (!text && !cut) return null;
   return (
     <div className="board-card-body-wrap">
       {text && (
-        <p ref={bodyRef} className="board-card-body">
+        <p ref={bodyRef} className="board-card-body" {...(quoteRef ? quotable(quoteRef, "body") : {})}>
           {text}
         </p>
       )}
-      {(cut || open) && (
+      {cut && (
         <button
           type="button"
           className="board-card-more"

@@ -58,7 +58,7 @@ import {
   type NeedsBy,
 } from "../../../shared/board";
 import type { Profile } from "../../../shared/model";
-import { cardPlace } from "../../../shared/kuru";
+import { cardPlace, cardReference } from "../../../shared/kuru";
 import { useCardClick } from "../cardclick";
 import { colorValue } from "../colors";
 import { referItem } from "../kuru";
@@ -70,6 +70,7 @@ import { ColorPicker } from "./ColorPicker";
 import { ColumnResizeHandle } from "./ColumnResize";
 import { Icon } from "./Icon";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
+import { quotable, selectNotDrag } from "./Quote";
 import { PROFILE_CARD_MIME as CARD_MIME, Timeline } from "./Timeline";
 import { BoardSearch } from "./Search";
 
@@ -635,6 +636,8 @@ function ProfileCard({
 }) {
   const opening = useCardOpen(card.title, card.body);
   const click = useCardClick(opening.toggle, onEdit, CARD_KEEP);
+  // An open card's words can be quoted to Kuru, by the reference its menu writes.
+  const quoteRef = opening.open ? cardReference({ code, title: card.title, place: cardPlace(null, api.nodeNameOf), cardId: card.id }) : null;
   return (
     <>
       {insertBefore && <span className="board-insert" aria-hidden="true" />}
@@ -642,6 +645,7 @@ function ProfileCard({
         className={`board-card ${shown ? "board-card-shown" : ""} ${opening.open ? "board-card-open" : ""}`}
         data-card={card.id}
         draggable
+        onPointerDown={selectNotDrag}
         onDragStart={(event) => {
           click.cancel();
           event.dataTransfer.setData(CARD_MIME, card.id);
@@ -659,7 +663,7 @@ function ProfileCard({
         <div className="board-card-top">
           <span className="board-card-code">{code}</span>
           {card.column === NEEDS_COLUMN && card.needsBy && <NeedsByMark by={card.needsBy} />}
-          <span ref={opening.titleRef} className="board-card-title">
+          <span ref={opening.titleRef} className="board-card-title" {...(quoteRef ? quotable(quoteRef, "title") : {})}>
             {card.title}
           </span>
           <span className="board-card-actions">
@@ -677,7 +681,7 @@ function ProfileCard({
             </button>
           </span>
         </div>
-        <CardBody text={card.body} opening={opening} />
+        <CardBody text={card.body} opening={opening} quoteRef={quoteRef} />
         {card.dates && <CardWhen dates={card.dates} />}
       </article>
     </>

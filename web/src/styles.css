@@ -8819,6 +8819,17 @@ a.st-btn {
   display: block;
   overflow: visible;
 }
+/* An open card's words are for reading, and a press on them selects rather
+   than drags (`selectNotDrag` in `Quote.tsx`): the cursor says which. The
+   `user-select` is not a default restated: Chromium gives a `draggable`
+   element `user-select: none` as a style of the attribute, its words
+   inherit it, and taking the attribute away at the press is too late for
+   the style the press is judged by. */
+.board-card-open [data-quote-ref] {
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
+}
 .board-card-more {
   padding: 0;
   font-size: var(--fs-xs);
@@ -9863,6 +9874,72 @@ a.st-btn {
    key or a click goes to should not take reading. */
 .note-front {
   box-shadow: var(--elev-dialog);
+}
+
+/* The popover over words selected in a card or a note (`Quote.tsx`): a
+   menu's box, since it is one thing to do with the selection, drawn into
+   `document.body` over the notes and the sheets as a menu is, and as narrow
+   as a note window allows. The quote is clamped to two lines — it is a
+   reminder of what was selected, not the place to read it — and the field
+   is the settings' well, the button their one primary. */
+.quote-pop {
+  position: fixed;
+  z-index: 60;
+  width: min(320px, calc(100vw - 16px));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px;
+  background: var(--chrome);
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elev-menu);
+}
+.quote-pop-quote {
+  margin: 0;
+  padding-left: 7px;
+  border-left: var(--border) var(--border-style) var(--line-high);
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  line-height: 1.4;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.quote-pop-row {
+  display: flex;
+  gap: 6px;
+}
+.quote-pop-field {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 7px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--ui);
+  font-size: var(--fs-md);
+  outline: none;
+}
+.quote-pop-field:focus {
+  border-color: var(--line-high);
+}
+.quote-pop-field::placeholder {
+  color: var(--dimmer);
+}
+.quote-pop-go {
+  flex: none;
+  padding: 4px 9px;
+  border-radius: var(--radius-lg);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: var(--cursor-pointer);
 }
 .note-head {
   flex: none;

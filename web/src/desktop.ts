@@ -9,6 +9,8 @@
  *
  * See `desktop/preload.js`, which is the other half of this file.
  */
+import type { CardQuote } from "../../shared/kuru";
+
 export interface DesktopBridge {
   desktop: true;
   serverUrl(): Promise<string>;
@@ -134,9 +136,10 @@ export interface DesktopNotes {
    * The window: a note pointed Kuru at its card, which goes into the
    * drawer's box here, as the card's menu puts it. Held for the first
    * listener as `onShowCard` is. Optional, like `refer`: an app from before
-   * it never asks.
+   * it never asks. With a `quote` — any value, until `adoptQuote` has read
+   * it — the note quoted part of its card (`quote`).
    */
-  onReferCard?(listener: (cardId: string) => void): () => void;
+  onReferCard?(listener: (cardId: string, quote?: unknown) => void): () => void;
   /** A note window's page only, here and below: which card it is, or null for any other page. */
   self(): Promise<NoteSelf | null>;
   onSelf(listener: (self: NoteSelf) => void): () => void;
@@ -155,6 +158,13 @@ export interface DesktopNotes {
    * to hear the press.
    */
   refer?(): void;
+  /**
+   * Part of the card quoted with a comment, into Kuru's box in the window
+   * as `refer` puts the card there, and by the same road: the window writes
+   * the card's reference from its id. Optional for `refer`'s reason, and a
+   * note window without it opens no popover over a selection.
+   */
+  quote?(quote: CardQuote): void;
   /** The window brought up, for something the note did there — an agent revealed, a file opened. */
   raiseMain(): void;
 }

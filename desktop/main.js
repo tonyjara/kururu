@@ -817,10 +817,27 @@ function showCard(cardId) {
  * and nothing else. Kuru's box is the window's — a note has no drawer — and
  * the words that go into it are written there from the window's own
  * snapshot, by the code the card's menu uses (`referCardIn`), so what Kuru
- * is handed cannot be anything a note's page made up.
+ * is handed cannot be anything a note's page made up. A quote — part of the
+ * card selected in the note, with a comment — is the one thing the page's
+ * own words add, and it is the user's selection and the user's typing,
+ * written into the box after the card's reference and sent by nobody.
  */
-function referCard(cardId) {
-  tellWindow(openWindow(), "kururu:refer-card", cardId);
+function referCard(cardId, quote) {
+  tellWindow(openWindow(), "kururu:refer-card", cardId, quoteOf(quote));
+}
+
+/**
+ * A note's quote — part of its card selected, with a comment — as it came
+ * from the note's page: kept only as the plain strings it should be, at no
+ * more than a quote is ever taken in at (`QUOTE_TAKEN_MAX` in
+ * `shared/kuru.ts`, which the window holds it to again), and nothing at all
+ * for anything else, which leaves a plain reference to the card.
+ */
+function quoteOf(quote) {
+  if (!quote || typeof quote !== "object") return undefined;
+  const { part, text, comment } = quote;
+  if ((part !== "body" && part !== "title") || typeof text !== "string" || !text.trim()) return undefined;
+  return { part, text: text.slice(0, 20000), comment: typeof comment === "string" ? comment.slice(0, 20000) : "" };
 }
 
 /** Send the window a message once its page is there to hear it — see `openKuru`. */
@@ -964,12 +981,12 @@ ipcMain.on("kururu:note-board", (event) => {
   const cardId = notes.cardOf(event.sender);
   if (cardId) showCard(cardId);
 });
-ipcMain.on("kururu:note-refer", (event) => {
+ipcMain.on("kururu:note-refer", (event, quote) => {
   const cardId = notes.cardOf(event.sender);
-  if (cardId) referCard(cardId);
+  if (cardId) referCard(cardId, quote);
 });
 // The same, from a note's right-click, which `notes.js` builds for the note it is on.
-notes.on("refer", referCard);
+notes.on("refer", (cardId) => referCard(cardId));
 // A note's run line or made link acted in the window — an agent revealed, a
 // file opened — so the window is what comes up.
 ipcMain.on("kururu:note-raise", (event) => {
