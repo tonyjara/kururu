@@ -42,6 +42,7 @@ import type { SnapshotDelta } from "./snapdelta";
 import type { LaunchSettings } from "./launchers";
 import type { ReloadAsk, ReloadHold, ReloadPage } from "./reload";
 import type { OpenRouterStatus } from "./openrouter";
+import type { SlotsView } from "./slots";
 import type { WebStatus } from "./web";
 import type { ChannelKind, ChannelsStatus } from "./channels";
 import type { BackupStatus } from "./backup";
@@ -460,6 +461,13 @@ export type ServerMessage =
    * nothing. Never carries the key — see `shared/openrouter.ts`.
    */
   | { type: "openrouter"; openrouter: OpenRouterStatus | null }
+  /**
+   * The slot queue and the machine's load: the footer's chip, the line under
+   * a pane, and Needs past ten minutes' wait. Sent on connect and whenever
+   * any of it moves, the load rounded so it does not move every tick. See
+   * `shared/slots.ts`.
+   */
+  | { type: "slots"; slots: SlotsView }
   /**
    * The web for agents, as Settings → Web draws it: the providers in their
    * order, each with its switch, its fields (a secret only as its hint), its
@@ -952,6 +960,8 @@ export type ClientMessage =
    * back to the profile. See `Profile.agentPlacement`.
    */
   | { type: "set-agent-placement"; profileId: string; workspaceId?: string; placement: AgentPlacement | null }
+  /** Whether a workspace builds a mobile app, and so its card runs start with the slot queue's paragraph. See `Workspace.mobile`. */
+  | { type: "set-workspace-mobile"; profileId: string; workspaceId: string; on: boolean }
 
   /**
    * Put the server back on current source. It owns no ptys, so this costs a

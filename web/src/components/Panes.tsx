@@ -40,6 +40,7 @@
  * rebuilds anything now.
  */
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { agentSlotLines } from "../../../shared/slots";
 import { keysByAction, type Action } from "../../../shared/keys";
 import {
   activeAgent,
@@ -53,6 +54,7 @@ import {
   panes,
   rects,
   soloPane,
+  terminalsOf,
   type Divider,
   type LayoutNode,
   type PaneState,
@@ -80,6 +82,7 @@ import { keyLabel, PREFIX_LABEL } from "../keys";
 import { remoteHost, remoteNote, shortenPath, tabLabel } from "../labels";
 import { useLongPress } from "../longpress";
 import * as api from "../session";
+import { useKururu } from "../session";
 import { ReaderView, readingLine } from "./Reader";
 import { BoardView } from "./Board";
 import { Icon } from "./Icon";
@@ -169,6 +172,11 @@ interface Props {
    * is on that node's disk — is said rather than read.
    */
   remote: RemotePanes | null;
+  /**
+   * Whether this workspace builds a mobile app (`Workspace.mobile`), which
+   * gives its agents' panes the slot queue's line. See `SlotLine`.
+   */
+  mobile?: boolean;
 }
 
 /** A normalized rect as the four percentages CSS wants. */
@@ -203,6 +211,7 @@ export function Panes({
   chips,
   lead,
   remote,
+  mobile = false,
 }: Props) {
   const area = useRef<HTMLDivElement>(null);
   const [resizing, setResizing] = useState(false);
@@ -381,6 +390,7 @@ export function Panes({
               chips={pane.id === chipsPane ? chips : null}
               lead={pane.id === leadPane ? lead : null}
               remote={remote}
+              slotLine={mobile && !remote && pane.forAgents === true}
             />
           </div>
         );
@@ -740,6 +750,7 @@ function Pane({
   chips,
   lead,
   remote,
+  slotLine,
 }: {
   pane: PaneState;
   focused: boolean;
@@ -770,6 +781,8 @@ function Pane({
   /** The sidebar's toggle and the workspace's name, in the top-left strip while the sidebar is away. */
   lead: ReactNode;
   remote: RemotePanes | null;
+  /** Whether the slot queue's line goes under this pane. */
+  slotLine: boolean;
 }) {
   const showing = activeAgent(pane);
   const dragging = useDragging();
@@ -1097,7 +1110,43 @@ function Pane({
         {takesZones && <DropZones paneId={pane.id} />}
         {refused && <DropRefused text={refused} />}
       </div>
+      {slotLine && <SlotLine agentIds={terminalsOf(pane.agentIds)} />}
     </section>
+  );
+}
+
+/**
+ * What this pane's agents hold and wait for in the slot queue, one line
+ * each — "P5 · waiting for build behind P2 (14m in)" — under the agents'
+ * pane of a workspace marked mobile.
+ *
+ * Always there in such a pane, saying "nothing held" when it has nothing to
+ * say, because a line that came and went with the leases would be a pty
+ * resized each time one started or ended: the terminal above it is laid out
+ * in what is left. Only under a pane marked as the agents' (`forAgents`),
+ * which is a mark and not a reading of what the pane is showing, so the
+ * line does not move between panes when a tab is switched.
+ */
+function SlotLine({ agentIds }: { agentIds: readonly string[] }) {
+  const { slots } = useKururu();
+  const [now, setNow] = useState(() => Date.now());
+  const ids = new Set(agentIds);
+  const lines = agentSlotLines(slots, ids, now);
+  const live = lines.length > 0;
+  useEffect(() => {
+    if (!live) return;
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, [live]);
+  const waiting = (slots?.waiting ?? []).some((w) => w.agentId !== null && ids.has(w.agentId));
+  const elsewhere = slots ? slots.waiting.length + slots.leases.length : 0;
+  const text = live
+    ? `${lines[0]}${lines.length > 1 ? ` · and ${lines.length - 1} more` : ""}`
+    : `Slot queue: nothing held here${elsewhere > 0 ? ` · ${slots!.leases.length} held, ${slots!.waiting.length} waiting on this Mac` : ""}`;
+  return (
+    <div className="pane-slots" title={live ? lines.join("\n") : "The slot queue: the builds, simulators and test runs this Mac's agents take in turn"}>
+      <span className={`pane-slot ${waiting ? "pane-slot-wait" : ""}`}>{text}</span>
+    </div>
   );
 }
 

@@ -51,6 +51,7 @@ import {
   sees,
   send,
   sleeper,
+  slots,
   state,
   store,
   turnStart,
@@ -487,6 +488,7 @@ export function harnessFeatures(): HarnessFeatures {
     telegram: telegram.enabled || channelReady(telegram),
     machines: machinesSnapshot().length > 0,
     speak: voice.speaks(),
+    slots: (slots?.inUse() ?? false) || workspaces.all().some((profile) => profile.workspaces.some((w) => w.mobile)),
   };
 }
 

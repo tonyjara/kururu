@@ -45,6 +45,7 @@ import type { LaunchSettings } from "../../shared/launchers";
 import type { MergeReply, MergeResolution, ProjectSettings, WorktreeOutcome, WorktreeStatus } from "../../shared/projects";
 import type { NotifySettings } from "../../shared/notify";
 import type { OpenRouterStatus } from "../../shared/openrouter";
+import type { SlotsView } from "../../shared/slots";
 import type { WebStatus } from "../../shared/web";
 import type { ChannelKind, ChannelsStatus, TelegramStatus } from "../../shared/channels";
 import type { BackupStatus } from "../../shared/backup";
@@ -111,6 +112,8 @@ export interface KururuState {
   secrets: SecretsView;
   /** The OpenRouter account, or null when no key has been given. See `shared/openrouter.ts`. */
   openrouter: OpenRouterStatus | null;
+  /** The slot queue and the Mac's load, or null until the server has said. See `shared/slots.ts`. */
+  slots: SlotsView | null;
   /** The web for the agents — its providers in order — or null until the server has said. Never a key. See `shared/web.ts`. */
   web: WebStatus | null;
   /** Where the backups stand, or null until the server has said. See `shared/backup.ts`. */
@@ -158,6 +161,7 @@ let state: KururuState = {
   nodes: null,
   secrets: EMPTY_SECRETS,
   openrouter: null,
+  slots: null,
   web: null,
   backup: null,
   databases: [],
@@ -371,6 +375,9 @@ function connect(): void {
         break;
       case "openrouter":
         set({ openrouter: msg.openrouter });
+        break;
+      case "slots":
+        set({ slots: msg.slots });
         break;
       case "web":
         set({ web: msg.web });
@@ -1884,6 +1891,10 @@ export function setAgentsKururuMcpOnly(profileId: string, on: boolean): void {
 /** Where a card's and Kuru's agents open, for a profile — or for one workspace of it, where null goes back to the profile's. */
 export function setAgentPlacement(profileId: string, placement: AgentPlacement | null, workspaceId?: string): void {
   send({ type: "set-agent-placement", profileId, placement, ...(workspaceId ? { workspaceId } : {}) });
+}
+
+export function setWorkspaceMobile(profileId: string, workspaceId: string, on: boolean): void {
+  send({ type: "set-workspace-mobile", profileId, workspaceId, on });
 }
 
 // ---------------------------------------------------------------------------

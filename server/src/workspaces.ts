@@ -218,6 +218,7 @@ function adopt(profile: Profile): Profile {
       machine: adoptPin(workspace.machine),
       // Absent before a workspace could say otherwise than its profile.
       agentPlacement: isAgentPlacement(workspace.agentPlacement) ? workspace.agentPlacement : null,
+      mobile: workspace.mobile === true,
     }))),
   };
 }
@@ -1474,6 +1475,13 @@ export class Workspaces {
     this.mutate(profileId, workspaceId, (w) => ({ ...w, agentPlacement: placement }));
   }
 
+  /** Whether a workspace builds a mobile app — see `Workspace.mobile`. */
+  setWorkspaceMobile(profileId: string, workspaceId: string, on: boolean): void {
+    const workspace = this.workspaceIn(profileId, workspaceId);
+    if (!workspace || workspace.mobile === on) return;
+    this.mutate(profileId, workspaceId, (w) => ({ ...w, mobile: on }));
+  }
+
   /** Whether this profile's agents load only kururu's MCP servers — see `Profile.agentsKururuMcpOnly`. Read at each launch, so it reaches the next agent started. */
   setAgentsKururuMcpOnly(profileId: string, on: boolean): void {
     const profile = this.profile(profileId);
@@ -1934,6 +1942,7 @@ export class Workspaces {
       board: null,
       machine: null,
       agentPlacement: null,
+      mobile: false,
     };
   }
 

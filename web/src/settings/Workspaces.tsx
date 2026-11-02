@@ -1,7 +1,7 @@
 /**
  * Settings → General → Workspaces: where a workspace's shells run, where the
- * agents kururu starts in it open, and what a card's worktree gets, for the
- * repository each workspace is in.
+ * agents kururu starts in it open, whether it builds a mobile app, and what a
+ * card's worktree gets, for the repository each workspace is in.
  *
  * Drawn per workspace and stored per repository: a person thinks in
  * workspaces, so that is the list, and under the one chosen is the repository
@@ -23,7 +23,7 @@ import type { WorkspaceProject } from "../../../shared/wire";
 import * as api from "../session";
 import { useKururu } from "../session";
 import { PLACEMENT_OPTIONS } from "./Agents";
-import { Bullets, Choice, Danger, Details, Empty, Field, Group, Mono, Outcome, P, plural, Readout, Row, Segments } from "./ui";
+import { Bullets, Choice, Danger, Details, Empty, Field, Group, Mono, Outcome, P, plural, Readout, Row, Segments, Toggle } from "./ui";
 
 export function WorkspacesPage({
   profileId,
@@ -60,6 +60,7 @@ export function WorkspacesPage({
 
       {shown && <RunsOn key={shown.id} workspace={shown} />}
       {shown && <AgentsHere profileId={profileId} workspace={shown} profilePlacement={agentPlacement} />}
+      {shown && <Mobile profileId={profileId} workspace={shown} />}
 
       {shown && !root && (
         <Group title="Repository">
@@ -129,6 +130,29 @@ function AgentsHere({ profileId, workspace, profilePlacement }: { profileId: str
         value={workspace.agentPlacement ?? "profile"}
         onChange={(value) => api.setAgentPlacement(profileId, value === "profile" ? null : value, workspace.id)}
         options={[["profile", "Profile", `As the profile says: ${said}`] as const, ...PLACEMENT_OPTIONS]}
+      />
+    </Group>
+  );
+}
+
+/**
+ * Whether this workspace builds a mobile app, and so shares the Mac's builds
+ * and simulators with the other agents through the slot queue. Ticked, a
+ * card run here is told how before its own words, and the queue's line sits
+ * under the agents' pane. What the paragraph says is kururu's unless
+ * `~/.config/kururu/slots-brief.md` says otherwise; see `docs/slots.md`.
+ */
+function Mobile({ profileId, workspace }: { profileId: string; workspace: Workspace }) {
+  return (
+    <Group
+      title="Mobile"
+      foot="A card run here starts with a paragraph on queueing for builds, simulators and test runs (the slot queue), and a line under the agents' pane says what its agents hold and wait for. Your own paragraph goes in ~/.config/kururu/slots-brief.md."
+    >
+      <Toggle
+        label="Builds a mobile app"
+        hint={workspace.machine ? "Only card runs on this Mac are told; a run on a machine has no slot queue there." : undefined}
+        on={workspace.mobile}
+        onChange={(on) => api.setWorkspaceMobile(profileId, workspace.id, on)}
       />
     </Group>
   );

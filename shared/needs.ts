@@ -22,9 +22,16 @@
  * is never counted: Kuru asking is the status bar's chip, and one subject
  * per control is the rule that put it there.
  *
+ * An agent that has waited ten minutes in the slot queue is one too
+ * (`queued`): it will move on its own in the end, but a wait that long is
+ * the queue jammed, a lane held by something forgotten, or the user waiting
+ * on it without anybody having said so — each of which only they can see to.
+ * That is the one fact here the snapshot does not carry; it comes in as an
+ * argument, from the `slots` message, and the server's clock decides "ten
+ * minutes" so that every window agrees.
+ *
  * Pure, on `layout.ts`'s terms: the window draws the answer, the sidebar
- * marks a row with it, and the harness could say it in words. Nothing new
- * crosses the wire for it.
+ * marks a row with it, and the harness could say it in words.
  */
 import type { AgentSnapshot, Profile, Workspace } from "./model";
 import { panes, terminalsOf } from "./layout";
@@ -34,7 +41,14 @@ import { columnCards, NEEDS_COLUMN, type Card } from "./board";
  * Why a thing needs you. `asking` outranks the rest: a prompt is the one
  * kind that holds a turn up, where the others wait as long as you let them.
  */
-export type NeedKind = "asking" | "review" | "unseen" | "stalled";
+export type NeedKind = "asking" | "queued" | "review" | "unseen" | "stalled";
+
+/** A long wait in the slot queue, by agent: what it waits for, since when, and why it has not had it. See `shared/slots.ts`. */
+export interface QueuedWait {
+  lane: string;
+  since: number;
+  reason: string;
+}
 
 export interface Need {
   kind: NeedKind;
@@ -49,6 +63,8 @@ export interface Need {
    * a question the board asks in its own dialog, and is sent there.
    */
   plainDone: boolean;
+  /** For `queued`: the wait. */
+  wait?: QueuedWait;
 }
 
 /**
@@ -92,7 +108,7 @@ export interface ProfileNeeds {
  */
 const CLAIMING = new Set(["doing", "review"]);
 
-export function needsOf(profile: Profile, agents: readonly AgentSnapshot[]): ProfileNeeds {
+export function needsOf(profile: Profile, agents: readonly AgentSnapshot[], queued: ReadonlyMap<string, QueuedWait> = new Map()): ProfileNeeds {
   const harness = profile.harness?.agentId ?? null;
   const byId = new Map<string, AgentSnapshot>();
   for (const agent of agents) if (!agent.exited && agent.id !== harness) byId.set(agent.id, agent);
@@ -118,18 +134,19 @@ export function needsOf(profile: Profile, agents: readonly AgentSnapshot[]): Pro
   const workspaces: WorkspaceNeeds[] = profile.workspaces.map((workspace) => {
     const needs: Need[] = [];
     for (const card of workspace.board?.cards ?? []) {
-      const need = cardNeed(workspace.id, card, byId);
+      const need = cardNeed(workspace.id, card, byId, queued);
       if (need) needs.push(need);
     }
     const here = agents.filter((agent) => byId.has(agent.id) && home.get(agent.id) === workspace.id);
     for (const agent of here) {
       if (claimed.has(agent.id)) continue;
-      const kind = agentNeed(agent);
-      if (kind) needs.push({ kind, workspaceId: workspace.id, agent, card: null, plainDone: false });
+      const kind = agentNeed(agent, queued);
+      if (kind) needs.push({ kind, workspaceId: workspace.id, agent, card: null, plainDone: false, ...(kind === "queued" ? { wait: queued.get(agent.id)! } : {}) });
     }
     // Stable, so that among the asking the order is still the board's and the sidebar's.
     needs.sort((a, b) => Number(b.kind === "asking") - Number(a.kind === "asking"));
-    const working = here.filter((agent) => agent.status === "working");
+    // A queued agent is "working" by its status — its command is running, waiting — and is said once, as what it is.
+    const working = here.filter((agent) => agent.status === "working" && !queued.has(agent.id));
     const band: Band = needs.length ? "needs" : working.length ? "working" : "quiet";
     return { workspace, band, needs, working };
   });
@@ -148,7 +165,7 @@ export function needsOf(profile: Profile, agents: readonly AgentSnapshot[]): Pro
  * An agent that went to sleep went on purpose and finished first, and its
  * card, if it still wants anybody, is in Review.
  */
-function cardNeed(workspaceId: string, card: Card, agents: ReadonlyMap<string, AgentSnapshot>): Need | null {
+function cardNeed(workspaceId: string, card: Card, agents: ReadonlyMap<string, AgentSnapshot>, queued: ReadonlyMap<string, QueuedWait>): Need | null {
   if (!CLAIMING.has(card.column)) return null;
   const agent = (card.run?.agentId && agents.get(card.run.agentId)) || null;
   const need = (kind: NeedKind): Need => ({
@@ -159,6 +176,8 @@ function cardNeed(workspaceId: string, card: Card, agents: ReadonlyMap<string, A
     plainDone: kind !== "asking" && doneRefusal(card, agent) === null,
   });
   if (agent?.status === "blocked") return need("asking");
+  const wait = agent ? queued.get(agent.id) : undefined;
+  if (wait) return { ...need("queued"), wait };
   if (card.column === "review") return need("review");
   if (agent?.unread) return need("unseen");
   if (card.run && card.run.state === "ended") return need("stalled");
@@ -190,8 +209,9 @@ export function doneRefusal(card: Card, agent: AgentSnapshot | null): string | n
  * that finished an `ls` off screen earns the same mark for nothing, which
  * is why the row has to have held an agent.
  */
-function agentNeed(agent: AgentSnapshot): NeedKind | null {
+function agentNeed(agent: AgentSnapshot, queued: ReadonlyMap<string, QueuedWait>): NeedKind | null {
   if (agent.status === "blocked") return "asking";
+  if (queued.has(agent.id)) return "queued";
   if (agent.unread && (agent.agent || agent.lastAgent)) return "unseen";
   return null;
 }

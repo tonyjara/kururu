@@ -15,14 +15,14 @@ import { dirname, join } from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { type WebSocket, WebSocketServer } from "ws";
-import { cardPrompt } from "../../shared/board";
+import { cardCode, cardPrompt } from "../../shared/board";
 import { remoteShellOf } from "../../shared/machines";
 import { countsAsAgent, type Profile } from "../../shared/model";
 import { parseRolloutListing } from "../../shared/sessions";
 import { bindProblem, fromLoopback, isShared, learnTailnetName, listenAddresses, loopbackTokenRequired, token, verdict } from "./access";
 import { Backup } from "./backup";
 import { stopDev } from "./carddev";
-import { cardDoneFor, runCardAt } from "./cards";
+import { cardDoneFor, cardRunPrompt, runCardAt } from "./cards";
 import { Channels } from "./channels";
 import { codexUsageSnapshot } from "./codexusage";
 import { configDir } from "./config";
@@ -59,6 +59,7 @@ import {
   send,
   sendState,
   sleeper,
+  slots,
   snapshot,
   snapshots,
   state,
@@ -103,6 +104,7 @@ import { closeAllPreviews } from "./proxy";
 import { databasesOfWorkspace, workspaceDirs } from "./repostatus";
 import { Secrets } from "./secrets";
 import { Sleeper } from "./sleep";
+import { Slots, writeSlotCommand } from "./slots";
 import { specsSnapshot } from "./specs";
 import { dataDir, dbPath, Store } from "./store";
 import { pollAccountUsage, pollOpenRouterAccount, pollServers, stopSweeps, wakeProcesses, web } from "./sweeps";
@@ -328,6 +330,7 @@ function admitClient(ws: WebSocket, watcher: string | null, deltas: boolean): vo
   send(ws, { type: "nodes", nodes: nodes.view() });
   send(ws, { type: "secrets", secrets: secrets.view() });
   send(ws, { type: "openrouter", openrouter: openRouterSnapshot() });
+  send(ws, { type: "slots", slots: slots.view() });
   send(ws, { type: "web", web: web.status() });
   send(ws, { type: "voice", voice: voice.status() });
   send(ws, voice.hush());
@@ -361,6 +364,23 @@ for (const each of servers) {
 // ---------------------------------------------------------------------------
 
 /**
+ * What a lease taken without `--who` is called: the card the agent was
+ * handed, by its code — which is what the queue's lines are read by — or,
+ * for an agent no card claims, the name it was given or set itself.
+ */
+function slotWhoOf(agentId: string): string | null {
+  const profileId = workspaces.profileOf(agentId);
+  const profile = profileId ? workspaces.profile(profileId) : undefined;
+  for (const w of profile?.workspaces ?? []) {
+    const card = w.board?.cards.find((k) => k.run?.agentId === agentId);
+    if (card) return cardCode(w.name, card.number);
+  }
+  const agent = host.find(agentId);
+  const name = agent?.titleOverride || agent?.title || null;
+  return name ? name.replace(/\s+/g, " ").trim().slice(0, 40) : agentId;
+}
+
+/**
  * Attach to the pty host, work out what the window is supposed to look like,
  * and only then start serving.
  *
@@ -383,6 +403,8 @@ export async function attach(port: Port): Promise<void> {
     // said something on its way out has still been heard.
     noticeStatuses();
     reapExited();
+    // A lease taken in a terminal that has gone ends now, not at a poll.
+    slots?.onAgents();
     pushSnapshot();
   };
   host.onOutput = onOutput;
@@ -496,6 +518,10 @@ export async function attach(port: Port): Promise<void> {
     agentCommand: agentCommandFor,
     kuruCommand: kuruCommandFor,
     features: harnessFeatures,
+    slots: {
+      status: (nameOf) => slots?.statusForKuru(nameOf) ?? null,
+      prioritize: (agentId, ms) => slots.prioritize(`agent:${agentId}`, ms),
+    },
     spawned: noteLaunch,
     webTools: () => web.active(),
     openTerminal: openTerminalAt,
@@ -554,7 +580,12 @@ export async function attach(port: Port): Promise<void> {
   provide("sleeper", new Sleeper({
     host,
     settings: () => ({ on: launch.sleepIdle, minutes: launch.sleepMinutes }),
-    cards: () => workspaces.cardRuns().map((at) => ({ ...at, prompt: cardPrompt(at.card) })),
+    cards: () =>
+      workspaces.cardRuns().map((at) => {
+        const workspace = workspaces.workspaceIn(at.profileId, at.workspaceId);
+        const local = !remoteShellOf(host.find(at.card.run.agentId ?? "")?.command)?.agent;
+        return { ...at, prompt: workspace ? cardRunPrompt(workspace, at.card, local) : cardPrompt(at.card) };
+      }),
     taken: () => workspaces.cardSessions(),
     grid: ownedGrid,
     isHarness: (agentId) => harness.isHarness(agentId) !== null,
@@ -574,6 +605,15 @@ export async function attach(port: Port): Promise<void> {
     },
   }));
   sleeper.start();
+  provide("slots", new Slots({
+    agentAlive: (agentId) => host.isLive(agentId),
+    whoOf: slotWhoOf,
+    changed: (view) => broadcast({ type: "slots", slots: view }),
+    watched: () => windows() > 0,
+    store,
+  }));
+  writeSlotCommand();
+  slots.start();
   provide("voice", new Voice({
     broadcast,
     index: { load: () => store.loadMissed(), save: (list) => store.saveMissed(list) },
@@ -1153,6 +1193,7 @@ export function shutdown(): Promise<void> {
   if (stopping) return stopping;
   stopping = (async () => {
     stopSweeps();
+    slots?.stop();
     // The arrangement outlives this process either way; flush it while it is
     // whole, to the host as well, since a restart is what reads that copy.
     if (keepTimer) keepNow();

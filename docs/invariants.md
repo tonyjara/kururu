@@ -474,3 +474,16 @@ event tap (Input Monitoring, nothing else) whose events go to the panel's
 webContents and no other; the window's `voice.ts` forwards its gestures
 there (`setVoiceRemote`) so a key both saw fires once. A chord — another
 key during the hold — drops the clip. → [voice](voice.md#the-talk-key-everywhere)
+
+## The slot queue
+
+**A lease ends with the terminal it was taken in, and nothing but the server
+holds the line.** `server/src/slots.ts` keeps leases and waiters in
+`slots.json` and ends a lease the moment `host.onAgents` says its terminal
+exited, or its process (pid and start time) is gone, or `--max` passes; a
+waiter is granted only while its CLI is asking, so a Ctrl-C'd one never holds
+a lane. The rule is `shared/slots.ts`, the script's lanes and gates unchanged.
+`xcrun` runs only once somebody asks about a simulator, and the nightly sweep
+only once a pool exists, never on a lent simulator or a checkout a build
+names. Nothing of it is the pty host's. → [slots](slots.md)
+

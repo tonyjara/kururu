@@ -102,6 +102,24 @@ describe("what needs you", () => {
     expect(needs.workspaces[0]!.working.map((a) => a.id)).toEqual(["a"]);
   });
 
+  it("counts an agent that has waited long in the slot queue, after one asking, and not as working", () => {
+    const p = profile([workspace("w1", ["a", "b"])]);
+    const queued = new Map([["a", { lane: "build", since: 5, reason: "lane is full (width 1)" }]]);
+    const needs = needsOf(p, [agent("a", { status: "working" }), agent("b", { status: "blocked" })], queued);
+    expect(needs.workspaces[0]!.needs.map((n) => [n.kind, n.agent?.id])).toEqual([
+      ["asking", "b"],
+      ["queued", "a"],
+    ]);
+    expect(needs.workspaces[0]!.needs[1]!.wait).toEqual({ lane: "build", since: 5, reason: "lane is full (width 1)" });
+    expect(needs.workspaces[0]!.working).toEqual([]);
+  });
+
+  it("puts a card whose agent waits long in the queue ahead of Review", () => {
+    const p = profile([workspace("w1", ["a"], cardOn("a", "working", "review"))]);
+    const needs = needsOf(p, [agent("a", { status: "working" })], new Map([["a", { lane: "build", since: 0, reason: "" }]]));
+    expect(needs.workspaces[0]!.needs.map((n) => [n.kind, n.card?.id])).toEqual([["queued", "c1"]]);
+  });
+
   it("ignores a shell that finished a command off screen", () => {
     const p = profile([workspace("w1", ["s"])]);
     const needs = needsOf(p, [agent("s", { agent: null, lastAgent: null, unread: true, status: "done" } as Partial<AgentSnapshot>)]);

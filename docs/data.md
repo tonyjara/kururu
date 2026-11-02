@@ -71,10 +71,11 @@ search still finds their cards.
 | `voice_messages`, `missed_replies` | the outbox's list and the missed list, keyed by profile key; delivered messages past the newest 100 per profile are let go |
 | `cards_fts`, `turns_fts` | FTS5 over titles, bodies and turns, accents folded |
 | `meta` | the file's own facts; nothing reads it today |
+| `sim_pool` | each project's simulators for the slot queue: what `simctl` cannot say — booted since, the fingerprint installed, the lease, when last used. Never exported: a udid means nothing on another Mac. See [slots](slots.md#simulators) |
 
-`turns_at` and the `cards_au` trigger's `when` are kept by `keepShape` on
-every open rather than by a numbered migration, so the version does not
-move and the installed app's older server still opens the file.
+`turns_at`, the `cards_au` trigger's `when` and `sim_pool` are kept by
+`keepShape` on every open rather than by a numbered migration, so the version
+does not move and the installed app's older server still opens the file.
 
 ## Write-through, and refuse rather than diverge
 

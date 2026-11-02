@@ -73,6 +73,7 @@ in a pane of *that* workspace (`devPane(workspaceId)`), never the one on screen.
 | `cards`, `add_card`, `edit_card`, `move_card`, `run_card`, `send_card_to_workspace` | the boards, workspace and profile; `cards` lists the live columns whole and Done as its count and five most recent, `column` one column whole, `card` one card with its whole body, and cuts from the end, never the start; `add_card` with `run` is the robot; `run_card` on a card whose last agent has gone (asleep, crashed, closed) resumes its conversation on its launcher unless `fresh`, refuses one whose agent is still open, and says why when it could not resume — see [layout](layout.md#idle-card-agents). Without a workspace, column `needs` is the profile board's **Needs you** — see below |
 | `new_workspace` | a project, without switching the user to it |
 | `reload_window` | the user's window and the floating pill reloaded the way ⌘R does, each once it is safe; waits, and says whether each came back or what held it — for an agent that would otherwise ask the user to press ⌘R. See [architecture](architecture.md#reloading-the-window) |
+| `prioritize_agent` | the user is waiting on that agent: its takes go first in every lane of the slot queue, skip the load gate and may boot one simulator more, for `minutes`; `off` takes it back. `kururu_status` has a slots section while anything is held or waiting. See [slots](slots.md) |
 | `say`, `play_missed` | one line aloud mid-turn; every reply of its own the user never heard to the end, said again — see [voice](voice.md#what-you-missed) |
 | `search`, `card_history` | full text over the profile's cards and its conversations, and a card's history of moves and runs with who made each — see [data](data.md#search) |
 | `ask_kuru`, `read_kuru` | another node's Kuru: a message typed into it as `[kuru@mac] …`, through its own outbox, and with `wait` its reply; its recent conversation, off what it last sent. `node` on `cards`, `add_card`, `edit_card` and `move_card` acts on that node's boards directly — never a run. See [nodes](nodes.md#kurus-as-peers) |
@@ -84,7 +85,9 @@ own context is the scarce thing, and the role prompt tells it so.
 **Only what is set up.** `tools/list` is `harnessTools(features)`: the node
 tools (`ask_kuru`, `read_kuru`, `move_workspace`, `lend_secrets`) only with a
 node linked, `send_telegram_photo` only with a Telegram bot that could be
-switched on, `say` and `play_missed` only with "speak replies" on. The role's
+switched on, `say` and `play_missed` only with "speak replies" on, `prioritize_agent`
+only where the slot queue is in use (a pool, a lease, a waiter, or a workspace
+marked mobile) — and the role's **The slot queue** section with it. The role's
 **Machines**, **Nodes** and **Telegram** sections follow the same switches
 (`HarnessFeatures`, read by `harnessFeatures` in `terminals.ts`), and with replies
 off **Your voice** shrinks to what `[voice]` means and says nothing is read

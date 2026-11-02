@@ -227,6 +227,14 @@ export interface HarnessDeps {
   /** The database: full text over the profile's cards and conversations, and a card's history. See `store.ts`. */
   search: (profileId: string, query: string, scope: SearchScope, limit: number) => SearchHit[];
   cardHistory: (cardId: string) => { card: Card; workspaceName: string | null; deleted: boolean; events: CardEvent[] } | null;
+  /**
+   * The slot queue: what `kururu_status` says about it, named the way this
+   * module names agents, and `prioritize_agent`. See `slots.ts`.
+   */
+  slots?: {
+    status: (nameOf: (agentId: string) => string) => string | null;
+    prioritize: (agentId: string, ms: number) => string;
+  };
   /** Reload the user's pages on this Mac once each is safe, and say what happened. See `reload.ts`. */
   reloadWindow: (why: string, timeoutMs: number) => Promise<ReloadOutcome>;
   /** The links under an agent's row: what its last turn made. See `shared/made.ts`. */
@@ -1115,6 +1123,15 @@ export class Harness {
       return ok(await this.deps.sendPicture(profileId, agent?.id ?? null, path, str(args.caption) || null));
     },
 
+    prioritize_agent: ({ args, agentArg }) => {
+      const agent = agentArg();
+      if (!this.deps.slots) return fail("The slot queue is not up yet.");
+      const minutes = int(args.minutes) ?? 60;
+      if (minutes < 1 || minutes > 1440) return fail("minutes is from 1 to 1440.");
+      const said = this.deps.slots.prioritize(agent.id, args.off === true ? 0 : minutes * 60_000);
+      return ok(args.off === true ? `${this.name(agent)} waits its turn again.` : `${this.name(agent)} goes first in every lane for ${minutes} minutes (${said.replace(/^.* until /, "until ")}).`);
+    },
+
     rename_agent: ({ args, agentArg }) => {
       const agent = agentArg();
       const to = str(args.name);
@@ -1821,6 +1838,8 @@ export class Harness {
       }
     }
     if (!any) out.push("  (none)");
+    const slots = this.deps.slots?.status((id) => this.nameOf(id));
+    if (slots) out.push("", slots);
     if (this.deps.nodes) out.push(...nodesText(this.deps.nodes()));
     out.push("", "launchers:");
     for (const launcher of visibleLaunchers(this.deps.launch())) out.push(`  - ${launcher.id}: ${launcher.label}`);

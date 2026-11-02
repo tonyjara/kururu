@@ -116,6 +116,9 @@ await bundle("server/src/index.ts", "dist/server.mjs");
 // What a Claude Code hook runs. Beside the server so `hooks.ts` can find it, and
 // bundled so the packaged app can run it with no checkout and no `bun`.
 await bundle("server/src/report-cli.ts", "dist/report.mjs");
+// `slot`, the agents' door into the slot queue. Beside the server so `slots.ts`
+// can point `~/.local/state/kururu/bin/slot` at it, for the reason above.
+await bundle("server/src/slot-cli.ts", "dist/slot.mjs");
 // Kokoro, which the server starts as a process of its own rather than loading:
 // see `server/src/kokoro.ts`. Beside the server because that is where
 // `voice.ts` looks, and inside `dist` so the app ships it with no new rule.

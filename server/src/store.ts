@@ -82,6 +82,7 @@ import {
   mintWorkspaceKey,
 } from "../../shared/store";
 import { randomHex } from "../../shared/text";
+import type { SimRow } from "./slots";
 
 // ---------------------------------------------------------------------------
 // Where
@@ -253,7 +254,18 @@ const MIGRATIONS: readonly (string | ((db: DatabaseSync) => void))[] = [SCHEMA, 
  *   `body` on every write, a run's state moving included, and `after update
  *   of` fires on a column being *set*, not on it changing — so every status
  *   change re-indexed the card's text.
+ * - `sim_pool`: the simulators each project lends out of its pool
+ *   (`server/src/slots.ts`) — a table nothing older names, so an app from
+ *   before it opens the database as it always did. Not in the export: a
+ *   simulator's udid means nothing on another Mac, and the rows are rebuilt
+ *   from `simctl` the first time anybody asks for one.
  */
+const SIM_POOL = `create table if not exists sim_pool (
+  udid text primary key, project text not null, name text not null, runtime text not null,
+  state text not null, booted_since integer, fingerprint text, lease_id text, lease_who text,
+  last_used_at integer, seen_at integer not null
+)`;
+
 const CARDS_AU = `create trigger cards_au after update of title, body on cards
   when old.title is not new.title or old.body is not new.body begin
   insert into cards_fts(cards_fts, rowid, title, body) values ('delete', old.rowid, old.title, old.body);
@@ -262,6 +274,7 @@ end`;
 
 function keepShape(db: DatabaseSync): void {
   db.exec("create index if not exists turns_at on turns(at, id)");
+  db.exec(SIM_POOL);
   const trigger = db.prepare("select sql from sqlite_master where type = 'trigger' and name = 'cards_au'").get() as { sql?: string } | undefined;
   if (trigger?.sql && /\bwhen\b/i.test(trigger.sql)) return;
   db.exec("drop trigger if exists cards_au");
@@ -565,6 +578,38 @@ export class Store {
   // -------------------------------------------------------------------------
 
   /** How big the file is, for the About page. */
+  /** Every simulator a project's pool keeps, by project and name. See `server/src/slots.ts`. */
+  simPool(): SimRow[] {
+    const rows = this.stmt("select * from sim_pool order by project, name").all() as Row[];
+    return rows.map((r) => ({
+      udid: String(r.udid),
+      project: String(r.project),
+      name: String(r.name),
+      runtime: String(r.runtime),
+      state: String(r.state),
+      bootedSince: typeof r.booted_since === "number" ? r.booted_since : null,
+      fingerprint: typeof r.fingerprint === "string" ? r.fingerprint : null,
+      leaseId: typeof r.lease_id === "string" ? r.lease_id : null,
+      leaseWho: typeof r.lease_who === "string" ? r.lease_who : null,
+      lastUsedAt: typeof r.last_used_at === "number" ? r.last_used_at : null,
+      seenAt: Number(r.seen_at),
+    }));
+  }
+
+  putSim(row: SimRow): void {
+    this.stmt(
+      `insert into sim_pool (udid, project, name, runtime, state, booted_since, fingerprint, lease_id, lease_who, last_used_at, seen_at)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       on conflict(udid) do update set project = excluded.project, name = excluded.name, runtime = excluded.runtime,
+         state = excluded.state, booted_since = excluded.booted_since, fingerprint = excluded.fingerprint,
+         lease_id = excluded.lease_id, lease_who = excluded.lease_who, last_used_at = excluded.last_used_at, seen_at = excluded.seen_at`,
+    ).run(row.udid, row.project, row.name, row.runtime, row.state, row.bootedSince, row.fingerprint, row.leaseId, row.leaseWho, row.lastUsedAt, row.seenAt);
+  }
+
+  dropSim(udid: string): void {
+    this.stmt("delete from sim_pool where udid = ?").run(udid);
+  }
+
   bytes(): number {
     try {
       return statSync(this.path).size + (existsSync(`${this.path}-wal`) ? statSync(`${this.path}-wal`).size : 0);

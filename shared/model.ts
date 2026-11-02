@@ -678,6 +678,13 @@ export interface Workspace {
    * the profile says", which is every workspace until somebody picks.
    */
   agentPlacement: AgentPlacement | null;
+  /**
+   * Whether this workspace builds a mobile app, and so shares the Mac's
+   * builds and simulators through the slot queue: a card run here starts
+   * with the paragraph that says how (`shared/slots.ts`, `DEFAULT_BRIEF`).
+   * A preference, set in Settings → Workspaces; false until somebody ticks it.
+   */
+  mobile: boolean;
 }
 
 /** Long enough for a client's name and a word; a group heading is one line of a narrow column. */

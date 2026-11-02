@@ -107,6 +107,25 @@ left in the Dock is how a force quit reached a coalition on 2026-10-10.
 
 Kept short on purpose; the detail is in git history.
 
+- **The slot queue** (2026-11-02), in an isolated instance on :7817 from a
+  scratch copy, with a stand-in `simctl` (`KURURU_SIMCTL`, simulators in a JSON
+  file) and a stand-in load (`KURURU_SLOTS_TEST_READING`), and `sleep` agents
+  as holders: a take granted at once and the second taker handed the lane in
+  the same second its holder's terminal was closed; `sim` lending the booted
+  simulator, booting the next for a second waiter and refusing an unknown
+  project with 4; `run` passing its command's exit code; the load gate, the
+  lane width and another agent's simulator each holding a waiter with the
+  script's sentence; `prioritize` and the harness's `prioritize_agent`;
+  `kururu_status`'s section; leases, waiters and a priority across a server
+  restart with the waiting CLIs riding it out; a Ctrl-C'd waiter gone at the
+  next tick; the sweep removing DerivedData of a gone workspace only; the
+  migration shim, through to `slot` and falling back after exit 6. The footer
+  chip, its popover, the pane line, the Settings switch and a ten-minute wait in
+  Needs (the chip, the drawer's row, the workspace's dot) in the real page in
+  headless Chrome — the pane line with its `forAgents` gate lifted in the copy,
+  since only a real card run sets the mark. Never against real simulators, a
+  real build or a real card run.
+
 - **The snapshot as deltas** (2026-11-02), in isolated instances on :7817 from
   scratch copies of origin/main and the change, on a copy of the real
   `kururu.db` (23 boards, 1.34 MB snapshot) under 4 hook reports a second and

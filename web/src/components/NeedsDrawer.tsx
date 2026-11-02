@@ -976,6 +976,10 @@ function why(need: Need): string {
   switch (need.kind) {
     case "asking":
       return summary ?? "asking something in its terminal";
+    case "queued": {
+      const wait = need.wait;
+      return wait ? `waiting ${ago(wait.since).replace(/ ago$/, "")} for ${wait.lane}${wait.reason ? ` · ${wait.reason}` : ""}` : "waiting in the slot queue";
+    }
     case "review": {
       const run = card?.run;
       const when = run?.endedAt ? ` · finished ${ago(run.endedAt)}` : "";
@@ -1130,6 +1134,7 @@ function nodeWhy(need: SummaryNeed, agent: SummaryAgent | undefined): string {
   const summary = agent ? agentSummary(asAgent(agent)) : null;
   const words: Record<NeedKind, string> = {
     asking: summary ?? "asking something in its terminal",
+    queued: "waiting in the slot queue",
     review: "in Review",
     unseen: summary ? `finished while you were away · ${summary}` : "finished while you were away",
     stalled: "in progress, and its agent ended",

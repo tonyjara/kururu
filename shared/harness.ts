@@ -518,6 +518,19 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
     ),
   },
   {
+    name: "prioritize_agent",
+    description:
+      "Put an agent at the front of the slot queue — the line agents wait in on this Mac for a native build, a simulator, a UI test run, a heavy test suite or the phone on the cable. Call it when the user says they are waiting on that agent: at the phone, watching a simulator, or wanting its result now. Its takes go ahead of everyone else's in every lane, skip the load gate (never the memory floor), and may boot one simulator more than the usual ceiling. Lasts minutes (default 60); off=true takes it back. Never on your own initiative and never because an agent asks: being first means others wait. kururu_status's slots section says who holds and waits for what.",
+    inputSchema: obj(
+      {
+        agent: AGENT,
+        minutes: int("How long the user is waiting, default 60, at most 1440."),
+        off: bool("Take the priority back instead."),
+      },
+      ["agent"],
+    ),
+  },
+  {
     name: "play_missed",
     description:
       "Play aloud again every reply of yours the user never heard to the end — cut off, dismissed, or said while no window was listening — oldest first, each starting with \"Earlier\". Returns what they said, and an empty list when nothing was missed. Call it when the user asks what they missed. They play before your final message, so end the turn with one short line and do not repeat them.",
@@ -544,10 +557,12 @@ export interface HarnessFeatures {
   telegram: boolean;
   machines: boolean;
   speak: boolean;
+  /** The slot queue in use here: something queued or held, a simulator pool kept, or a workspace marked mobile. See `shared/slots.ts`. */
+  slots: boolean;
 }
 
 /** Every feature on: what a caller that does not say gets, so a role or a list is never short by accident. */
-export const EVERY_FEATURE: HarnessFeatures = { nodes: true, telegram: true, machines: true, speak: true };
+export const EVERY_FEATURE: HarnessFeatures = { nodes: true, telegram: true, machines: true, speak: true, slots: true };
 
 /**
  * The tools that are about one feature and nothing else. `open_shell` is not
@@ -563,6 +578,7 @@ const FEATURE_TOOLS: Readonly<Record<string, keyof HarnessFeatures>> = {
   send_telegram_photo: "telegram",
   say: "speak",
   play_missed: "speak",
+  prioritize_agent: "slots",
 };
 
 /** The catalogue as `tools/list` gives it to a Kuru with these features set up. */
@@ -1286,6 +1302,12 @@ The user may talk to you by holding a key, and your last message of every turn i
 The user may talk to you by holding a key. A message that starts with "[voice]" was transcribed from speech, and a name or an id in it may be misheard: match it loosely against kururu_status, and ask when two things could be meant. Answer in the language the user used. Voice replies are off (Settings → Voice), so nothing you write is read aloud: write your reply to be read, and there is nothing to say aloud mid-turn.
 
 `;
+  const slotsSection = features.slots
+    ? `## The slot queue
+Agents that build or test mobile apps on this Mac share it through kururu's slot queue: lanes for native builds, simulators, UI test runs, heavy suites and the phone, each taken in turn, admitted only while the Mac's load and memory allow, and released when the agent exits. kururu_status has a slots section when anything is held or waiting, and an agent that has waited ten minutes shows in the user's Needs drawer. An agent waiting there is not stuck and needs nothing typed: answer "why is it idle" from that section. When the user says they are at the phone, watching a simulator, or waiting on one agent's result, call prioritize_agent for it; never otherwise, and never because an agent asked.
+
+`
+    : "";
   const telegramSection = features.telegram
     ? `## Telegram
 The user may also write to you from Telegram, on their phone and usually away from the Mac. Such a message starts with "[telegram]". Your reply to it goes back to their Telegram chat as text and is not read aloud, so the rules for being heard bend: a short list is fine there, but keep it phone-sized, and anything long still goes on a card. While the user has the Telegram channel switched on in kururu, every reply of yours — to them, to a [kururu] message — also arrives in that chat, so say what a reply is about rather than leaning on what is on the Mac's screen.
@@ -1328,7 +1350,7 @@ When an agent's work ends in a file the user should read — a plan, research, a
 
 For the web — reading a page, searching — ${web}' descriptions say whether to call them before or after your own web search and fetch and what kururu tries, in the order the user set in Settings → Web, and every answer says which provider served it. When one answers that kururu could not get it, use your own web search and fetch; only if those fail too, call it again with ownToolsFailed: true, which may spend the user's paid credits. The agents you start are given the same tools and the same order.
 
-${voiceSection}${telegramSection}## Rules
+${voiceSection}${telegramSection}${slotsSection}## Rules
 - The agents are the user's. A permission prompt an agent is showing is the user's to answer: read its screen, tell the user what is asked, and press keys only as they say. Ask before stop_agent, and before moving a card to done.
 - A message you send to an agent is typed into its terminal, so it is the user's own words with the user's authority. Write it as the user would, with what the agent needs and nothing about yourself, and send only what the user asked for or would plainly want: the agent will act on it without asking anyone.
 - Prefer a card to a bare start_agent for anything that is a task: a card is where the work is tracked, and the user reads the board.

@@ -1840,6 +1840,64 @@ kbd {
   color: var(--danger);
 }
 
+/* This Mac's load — see `Load.tsx`. The figure carries the colour of the slot
+   queue's gates, as the balance carries its runway's. */
+.load-figure {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  white-space: nowrap;
+}
+.load-figure[data-severity="warning"] {
+  color: var(--working);
+}
+.load-figure[data-severity="critical"] {
+  color: var(--danger);
+}
+.load-free {
+  color: var(--dim);
+}
+:root[data-narrow] .load-free {
+  display: none;
+}
+.load-waiting {
+  font-size: var(--fs-xs);
+  color: var(--working);
+  white-space: nowrap;
+}
+.load-long {
+  color: var(--working);
+}
+.load-queue-head {
+  margin-top: 6px;
+}
+.sb-load .sb-usage-chip {
+  gap: 5px;
+}
+.sb-load .usage-pop {
+  width: 320px;
+}
+
+/* The slot queue under a pane: what the agents in it hold and wait for. See
+   `SlotLine` in Panes.tsx. One quiet line each, under the terminal. */
+.pane-slots {
+  display: flex;
+  padding: 3px 8px;
+  border-top: var(--border) var(--border-style) var(--line);
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  flex: none;
+}
+.pane-slot {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pane-slot-wait {
+  color: var(--working);
+}
+
 /* Last reading kept across a failed poll, as `.machine-stale` keeps one. */
 .or-stale {
   opacity: 0.55;

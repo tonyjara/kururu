@@ -98,6 +98,7 @@ bun run kill-ptyhosts  # THE destructive one: ends every agent. --list to dry-ru
 bun run reload-window --why "…"  # an agent's ⌘R: waits for a safe moment, says what happened
 bun run backup         # a backup now, through the server when one is up; --check lists what goes
 bun run share          # the phone's link and its QR code in the terminal, for a box with no window; --rotate, --url
+bun run slot status    # the slot queue agents share for builds and simulators; agents run ~/.local/state/kururu/bin/slot
 bun run restore <repo> # a new Mac put back from the backup; refuses while a server is up
 bun run typecheck      # root tsconfig + web tsconfig + the JS half (tsconfig.js.json)
 bun test               # pure functions only — see docs/testing.md
@@ -245,6 +246,9 @@ The load-bearing invariants, one line each, with the argument behind the link:
 - **An agent's reload is asked for, and the page picks the moment** (`reloadHolds`
   in `shared/reload.ts`); the pty host never hears of it. →
   [more](docs/invariants.md#reloading-the-window)
+- **A slot lease ends with the terminal it was taken in, and only the server holds
+  the line** (`server/src/slots.ts`); `xcrun` only once a simulator is asked
+  about. → [more](docs/invariants.md#the-slot-queue)
 - **While the talk key is hooked system-wide, the floating pill is the only voice
   client on this Mac** — a listen-only tap, and a key both saw fires once. →
   [more](docs/invariants.md#the-talk-key-everywhere)

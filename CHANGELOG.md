@@ -15,6 +15,17 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **A queue for builds and simulators.** Agents building and testing mobile
+  apps on one Mac take turns instead of running six builds at once: `slot run
+  build -- xcodebuild …`, `slot sim <project>` for a booted simulator and a
+  Metro port, and lanes for test runs, heavy suites and the phone. A turn ends
+  the moment its agent does, and nothing starts while the Mac's load or memory
+  says it would only slow everything down. The load sits on the bottom bar with
+  the queue behind it, a line under the agents' pane says who is waiting for
+  what, a wait past ten minutes shows in Needs, and Kuru can put the agent
+  you are waiting on first. Mark a workspace in Settings → Workspaces as
+  building a mobile app and its card runs are told how. See `docs/slots.md`.
+
 - **Search in Kuru's chat.** The magnifier in the drawer's header, ⌘F while the
   drawer is open, or `C-a /` from anywhere. The chat narrows to the messages
   with those words, across the whole history, with the words highlighted. A typo

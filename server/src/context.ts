@@ -51,6 +51,7 @@ import { WindowReloads } from "./reload";
 import { Secrets } from "./secrets";
 import type { Grid } from "./sizing";
 import { Sleeper } from "./sleep";
+import type { Slots } from "./slots";
 import { Store } from "./store";
 import { readLibrary } from "./styles";
 import { Launches } from "./usage/attribute";
@@ -202,6 +203,8 @@ export let channels!: Channels;
 export let screens!: OnScreen;
 /** Ends a card's agent that has sat idle, once its conversation is made sure of. See `sleep.ts`. */
 export let sleeper!: Sleeper;
+/** The build and simulator queue agents share. See `slots.ts`. */
+export let slots!: Slots;
 /** The database: boards, conversations and the voice's lists. Opened in `attach()`, before anything is served. See `store.ts`. */
 export let store!: Store;
 /** The usage ledger's reader, or null when its file would not open. See `usage/sweep.ts`. */
@@ -826,6 +829,7 @@ interface Provided {
   channels: typeof channels;
   screens: typeof screens;
   sleeper: typeof sleeper;
+  slots: typeof slots;
   store: typeof store;
   usageReader: UsageReader | null;
   usageLaunches: Launches | null;
@@ -877,6 +881,9 @@ const assigners: { [K in keyof Provided]: (value: Provided[K]) => void } = {
   },
   sleeper: (value) => {
     sleeper = value;
+  },
+  slots: (value) => {
+    slots = value;
   },
   store: (value) => {
     store = value;

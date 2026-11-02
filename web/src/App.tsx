@@ -70,6 +70,7 @@ import { Notes } from "./components/Notes";
 import { QuoteToKuru, quoteUp } from "./components/Quote";
 import { locateCard } from "./notes";
 import { needsOf, type Need } from "../../shared/needs";
+import { longWaits } from "../../shared/slots";
 import { nextNeedAcross, nodeNeeds as nodeNeedsOf, parseRemote, qualify, workspacesAcross, type NodeNeed } from "../../shared/remote";
 import { nodesNeedCount, WATCH_READS, type NodesView } from "../../shared/nodes";
 import { visibleLaunchers } from "../../shared/launchers";
@@ -264,7 +265,7 @@ function resumedSettings(): SettingsTab | null {
 }
 
 export function App() {
-  const { snapshot, connected, projects, voice, machines, kuru, nodes } = useKururu();
+  const { snapshot, connected, projects, voice, machines, kuru, nodes, slots } = useKururu();
   const voiceUi = useVoiceUi();
   /**
    * The Kuru drawer: open or not, and the reply to open at. Module state
@@ -474,9 +475,12 @@ export function App() {
   /**
    * What needs you across this profile's workspaces — `shared/needs.ts`,
    * once per snapshot, for the three places that draw it: the status bar's
-   * tray, the drawer behind it, and the dot on a workspace's row.
+   * tray, the drawer behind it, and the dot on a workspace's row. An agent
+   * that has waited ten minutes in the slot queue is one of them, which the
+   * `slots` message says and the snapshot does not.
    */
-  const needs = useMemo(() => (profile ? needsOf(profile, agents) : null), [profile, agents]);
+  const queued = useMemo(() => longWaits(slots), [slots]);
+  const needs = useMemo(() => (profile ? needsOf(profile, agents, queued) : null), [profile, agents, queued]);
   /**
    * The same, in the order this device's drawer was sorted into
    * (`needsorder.ts`) — what the drawer draws and so what Next walks, since
@@ -1478,6 +1482,7 @@ export function App() {
           <Panes
             node={onScreen.layout}
             workspaceId={onScreen.id}
+            mobile={!remote && workspace.mobile}
             workspaceName={onScreen.name}
             board={onScreen.board}
             focusedPaneId={onScreen.focusedPaneId}

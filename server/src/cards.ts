@@ -65,6 +65,7 @@ import {
 } from "./terminals";
 import { devOpen, startDev, stopDev } from "./carddev";
 import { claudeTranscriptPath } from "./sessions";
+import { slotBrief } from "./slots";
 import {
   commitAll,
   ensureWorktree,
@@ -107,6 +108,18 @@ interface CardRunResult {
   agentId: string;
   resumed: boolean;
   why: string | null;
+}
+
+/**
+ * A card's prompt as its run is given it: in a workspace marked mobile, the
+ * slot queue's paragraph first (`slotBrief`), so every agent there is told
+ * how this Mac's builds and simulators are shared without Kuru pasting it.
+ * Only on this Mac: a run on a pinned machine has no `slot` to call. The
+ * sleeper asks for the same words, since a Codex run's rollout is found by
+ * its first message.
+ */
+export function cardRunPrompt(workspace: { mobile: boolean }, card: Card, local: boolean): string {
+  return workspace.mobile && local ? `${slotBrief()}\n\n${cardPrompt(card)}` : cardPrompt(card);
 }
 
 /**
@@ -218,7 +231,8 @@ export async function runCardAt(
   const line = remote ? launcherCommand(launcher, launch) : await agentCommandFor(launcher, profileId, sessionId);
   // A card that has run before says so to the new conversation, which
   // otherwise starts from the card's words as if nothing had been done.
-  const prompt = last ? `${cardPrompt(found.card)}\n\n${priorRunNote(last, wake.why)}` : cardPrompt(found.card);
+  const opening = cardRunPrompt(workspace, found.card, !remote);
+  const prompt = last ? `${opening}\n\n${priorRunNote(last, wake.why)}` : opening;
   // Claude's id is a `--session-id`; OpenCode already has its corresponding
   // `--session` in `agentCommandFor`. Its positional argument is a directory,
   // so its opening card text must be the `--prompt` value instead.

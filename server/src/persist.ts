@@ -93,6 +93,8 @@ interface StoredWorkspace {
   machine?: MachinePin;
   /** Where its agents go when it says otherwise than its profile — see `Workspace.agentPlacement`. */
   agentPlacement?: AgentPlacement;
+  /** Whether it builds a mobile app — see `Workspace.mobile`. Absent is no. */
+  mobile?: boolean;
   /**
    * The workspace's cards, from a file written before boards lived in the
    * database — or by a build from before it, run against this one. Only
@@ -213,6 +215,7 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
         group: workspace.group,
         ...(workspace.machine ? { machine: workspace.machine } : {}),
         ...(workspace.agentPlacement ? { agentPlacement: workspace.agentPlacement } : {}),
+        ...(workspace.mobile ? { mobile: true } : {}),
         layout: strip(workspace.layout),
       })),
     })),
@@ -407,6 +410,7 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
         board: adoptBoard(w.board),
         machine: adoptPin(w.machine),
         agentPlacement: isAgentPlacement(w.agentPlacement) ? w.agentPlacement : null,
+        mobile: w.mobile === true,
       };
       workspaces.push(workspace);
     }

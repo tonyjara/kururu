@@ -15,7 +15,8 @@
  * there too, so the bar reads as one cluster against the edge the drawers open
  * from rather than a row of odd bits spread across the window. The exception
  * is the left end's gauges — the Claude and Codex allowances (`Usage.tsx`),
- * the machines (`Machines.tsx`) and the OpenRouter balance (`OpenRouter.tsx`),
+ * this Mac's load and its slot queue (`Load.tsx`), the machines
+ * (`Machines.tsx`) and the OpenRouter balance (`OpenRouter.tsx`),
  * down from the sidebar on 2026-10-18:
  * things of a different kind, whose detail opens upwards over the panes
  * rather than the drawers.
@@ -41,6 +42,7 @@
  */
 import type { ReactNode } from "react";
 import { countsAsAgent, type AgentSnapshot } from "../../../shared/model";
+import { LoadChip } from "./Load";
 import { MachinesChip } from "./Machines";
 import { OpenRouterChip } from "./OpenRouter";
 import { UsageChips } from "./Usage";
@@ -112,6 +114,8 @@ export function StatusBar({
           opens its detail on a hover or a tap. See `Usage.tsx`,
           `Machines.tsx` and `OpenRouter.tsx`. */}
       <UsageChips onDetails={onUsage} />
+      {/* This Mac's load and the slot queue it admits by. See `Load.tsx`. */}
+      <LoadChip />
       <MachinesChip onSettings={onSettings} />
       <OpenRouterChip onSettings={() => onSettings("openrouter")} />
       <span className="sb-spacer" />
