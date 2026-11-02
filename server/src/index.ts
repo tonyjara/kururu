@@ -63,7 +63,7 @@ import type {
   WorkspaceBranch,
   WorkspaceProject,
 } from "../../shared/wire";
-import { COMMIT_MESSAGE_MAX, GIT_ACTIONS, GIT_STATUS_MS, type UsageLimit } from "../../shared/wire";
+import { COMMIT_MESSAGE_MAX, GIT_ACTIONS, GIT_STATUS_MS, parseClientMessage, type UsageLimit } from "../../shared/wire";
 import { DB_ROW_CAP, DB_SQL_MAX, type WorkspaceDatabase } from "../../shared/databases";
 import { DROP_MAX_BYTES } from "../../shared/drops";
 import { isPictureName } from "../../shared/pictures";
@@ -84,6 +84,7 @@ import {
   fromLoopback,
   hasToken,
   isShared,
+  learnTailnetName,
   rotateToken,
   setShare,
   sharing,
@@ -248,7 +249,7 @@ import {
   type WorktreeStatus,
 } from "../../shared/projects";
 import { hookSettingsFlag } from "./hooks";
-import { Harness } from "./harness";
+import { Harness, type SayOutcome } from "./harness";
 import { mcpAnswer } from "./mcp";
 import { claudeDirFor, codexDirFor, lentClaudeEnv, lentGhEnv, loginDir, loginEnv, scanLogins } from "./logins";
 import {
@@ -2520,14 +2521,16 @@ function recordTurn(agentId: string, report: { status?: string; message?: string
  * named for the utterance it was said as, so a line that was cut off shows as
  * unheard beside the reply it preceded and can be played again from there.
  */
-function sayAside(profileId: string, text: string): void {
+function sayAside(profileId: string, text: string): SayOutcome {
   const profile = workspaces.profile(profileId);
   const key = profile?.key ?? "";
-  // Not aloud in a turn that answers only a channel, for the reason its reply
-  // is not (`replySpoken`); in the chat either way, as it is in the drawer.
-  const utterance = !key || channels.speaks(key) ? voice.speak(key, text) : null;
+  // Not aloud with "speak replies" off, which `aside` asks; and not in a turn
+  // that answers only a channel, for the reason its reply is not
+  // (`replySpoken`). In the chat and the drawer either way.
+  const outcome: SayOutcome = !voice.speaks() ? "voice-off" : key && !channels.speaks(key) ? "channel" : "spoken";
+  const utterance = outcome === "spoken" ? voice.aside(key, text) : null;
   if (key) channels.aside(key, text);
-  if (!profile?.harness) return;
+  if (!profile?.harness) return outcome;
   try {
     store.recordTurn({
       conversationId: harnessConversation(profile.harness),
@@ -2545,6 +2548,7 @@ function sayAside(profileId: string, text: string): void {
   } catch (err) {
     console.error(`kururu: a said line could not be written down: ${err instanceof Error ? err.message : String(err)}`);
   }
+  return outcome;
 }
 
 /**
@@ -4792,17 +4796,34 @@ async function replyAsync(ws: WebSocket, id: number, run: () => Promise<unknown>
   }
 }
 
+/**
+ * One frame off a client's socket. Everything past the gate is trusted to be
+ * the user, not to be well formed: `JSON.parse("null")` succeeds, and a verb
+ * read off it threw outside any try — `ws.on("message")` has none — which is
+ * an uncaught exception, and a server that under `bun run dev` stays down
+ * until the next save. So the shape is checked before anything reads it, and
+ * a verb that throws on a field it was not sent is logged and answered,
+ * never the end of the process.
+ */
 function handleMessage(ws: WebSocket, raw: string): void {
   const st = clients.get(ws);
   if (!st) return;
-
-  let msg: ClientMessage;
-  try {
-    msg = JSON.parse(raw) as ClientMessage;
-  } catch {
+  const msg = parseClientMessage(raw);
+  if (!msg) {
+    // Its length and not its words: a frame from a terminal can be typing.
+    console.error(`kururu: dropped a client message that is not one (${raw.length} characters)`);
     return;
   }
+  try {
+    dispatchMessage(ws, st, msg);
+  } catch (err) {
+    console.error(`kururu: a "${msg.type}" message failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
+    const id = (msg as { id?: unknown }).id;
+    if (typeof id === "number" && Number.isFinite(id)) send(ws, { type: "reply", id, ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+}
 
+function dispatchMessage(ws: WebSocket, st: ClientState, msg: ClientMessage): void {
   // The user typing or moving about, from any client, is what an Auto Swap
   // waits for or gives way to — see `handsOf`. Before the verb runs, so that a
   // switch somebody just made is never followed by a swap that was waiting.
@@ -8320,6 +8341,9 @@ async function attach(port: Port): Promise<void> {
      * read `access.json` before the first request would find none.
      */
     if (isShared() || loopbackTokenRequired()) token();
+    // This machine's MagicDNS name, the one `ts.net` origin the gate lets in;
+    // asked now so the phone's first page does not wait on it. See `access.ts`.
+    void learnTailnetName();
     const built = existsSync(join(WEB_DIST, "index.html"));
     // The address it can be reached at, which on a child is not localhost.
     const [first] = listenAddresses();

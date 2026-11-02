@@ -417,7 +417,12 @@ argument that keeps `tailscale` commands out of kururu.
   the configuration that looks safest. Absent means not a browser and is
   allowed. Present must be one of ours: same origin, loopback (vite forwards the
   browser's `Origin` untouched while rewriting `Host`, so the two cannot be
-  compared in development), this machine's own addresses, and `*.ts.net`. It is
+  compared in development), this machine's own addresses, and this machine's
+  own MagicDNS name — never `*.ts.net` as a whole, because anyone can publish a
+  public page on a `ts.net` name with Funnel, and loopback asks for no token.
+  The name is a reverse lookup of the tailnet address asked of MagicDNS at
+  100.100.100.100, never of `tailscale`; `KURURU_ALLOWED_ORIGINS` names any
+  other origin, whole. It is
   checked **before** the token, because a foreign page holding a token it got
   hold of is precisely the case where the first check is the only one left.
 - **The token is exchanged for a cookie, once, by the client.** It arrives as

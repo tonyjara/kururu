@@ -26,6 +26,7 @@
  * ending and nothing more being queued; `wait_agent` reports the first and the
  * orchestrator is told to look before trusting it.
  */
+import { boardLanes, type Board, type Card } from "./board";
 import type { HarnessCli } from "./launchers";
 import type { AgentSnapshot, AgentStatus, HarnessState } from "./model";
 import type { ClientMessage } from "./wire";
@@ -316,8 +317,13 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "cards",
     description:
-      "The board of a workspace: its cards by column (todo, doing, review, done), each with its id, number, title, body, and the run on it if an agent has been handed it. Without a workspace, the profile's own board — the inbox of cards not yet sent to a workspace, and its Needs you column (needs) of things for the user to do, each saying whether the user or Kuru put it there. With node, another node's board, read over the link.",
-    inputSchema: obj({ workspace: str("A workspace id; on another node, the workspace's name. Omit for the profile's board."), node: NODE }),
+      "The board of a workspace: its cards by column (todo, doing, review, done), each with its id, number, title, the start of its body, and the run on it if an agent has been handed it. Done is summarised — its count and five most recent — unless column=done asks for it; column lists one column, card reads one card whole. Without a workspace, the profile's own board — the inbox of cards not yet sent to a workspace, and its Needs you column (needs) of things for the user to do, each saying whether the user or Kuru put it there. With node, another node's board, read over the link.",
+    inputSchema: obj({
+      workspace: str("A workspace id; on another node, the workspace's name. Omit for the profile's board."),
+      node: NODE,
+      column: str("One column's id — todo, doing, review, done, or a profile board's own — to list that column alone and whole. Without it, every live column is listed whole and Done as its count and five most recent."),
+      card: str("One card, by id or code (KUR-12, #12), to read alone with its whole body. Wins over column."),
+    }),
   },
   {
     name: "add_card",
@@ -451,7 +457,7 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "say",
     description:
-      "Say one short line aloud to the user right now, mid-turn — for example that you are starting three agents and it will take a minute. Your final message of every turn is read aloud anyway, so use this only for something worth hearing before the turn ends. Plain words, one or two sentences, in the user's language.",
+      "Say one short line aloud to the user right now, mid-turn — for example that you are starting three agents and it will take a minute. Your final message of every turn is read aloud anyway, so use this only for something worth hearing before the turn ends. Plain words, one or two sentences, in the user's language. When the user has voice replies switched off, nothing is said and the answer says so: write it in your reply instead.",
     inputSchema: obj({ text: str("What to say. At most 300 characters.") }, ["text"]),
   },
   {
@@ -981,6 +987,70 @@ export class SwapGate<T> {
 /** Cut a read to `READ_MAX`, keeping the end, which is the newest part. */
 export function clip(text: string, max = READ_MAX): string {
   return text.length > max ? `…[${text.length - max} characters before this were cut]\n${text.slice(-max)}` : text;
+}
+
+/**
+ * Cut a read to `READ_MAX`, keeping the start. A board is read top down —
+ * the live columns first, and each column with its newest card on top — so
+ * the end is the part to lose, where for a screen it is the part to keep.
+ */
+export function clipHead(text: string, max = READ_MAX, hint = ""): string {
+  return text.length > max ? `${text.slice(0, max)}\n…[${text.length - max} characters after this were cut${hint ? `; ${hint}` : ""}]` : text;
+}
+
+/** How many of Done's cards `cards` lists by default: the most recent, which Done keeps on top. */
+export const DONE_SHOWN = 5;
+
+/**
+ * A card named by Kuru: its id, or its number as the code it is read by —
+ * `KUR-12`, `#12`, `12`. Null when the board has none such.
+ */
+export function boardCardOf(board: Board, ref: string): Card | null {
+  const byId = board.cards.find((card) => card.id === ref);
+  if (byId) return byId;
+  const number = /^(?:[A-Za-z][\w]*-|#)?(\d+)$/.exec(ref.trim())?.[1];
+  return number === undefined ? null : (board.cards.find((card) => card.number === Number(number)) ?? null);
+}
+
+/** What the `cards` tool was asked for. */
+export interface BoardAsk {
+  /** One column, whole. */
+  column?: string;
+  /** One card, with its whole body. */
+  card?: string;
+}
+
+/**
+ * The `cards` tool's text, from the board and the line each card is drawn as
+ * (`full` for a card asked for by name, whose body is not cut).
+ *
+ * The default is what the work is: every live column whole, then Done as a
+ * count and its five most recent. It used to be every column whole, cut by
+ * `clip` — which keeps the end — so on any board past `READ_MAX` the live
+ * work was what went and Done was what Kuru read; Done is most of a board's
+ * text once it has a history. The whole of Done, or any one column, is asked
+ * for by `column`; one card by `card`. Pure, for the test.
+ */
+export function boardListing(board: Board, title: string, line: (card: Card, full: boolean) => string, ask: BoardAsk = {}): { ok: boolean; text: string } {
+  const lanes = boardLanes(board);
+  if (ask.card) {
+    const card = boardCardOf(board, ask.card);
+    if (!card) return { ok: false, text: `No card ${ask.card} on ${title}.` };
+    const lane = lanes.find((l) => l.id === card.column);
+    return { ok: true, text: clipHead(`${title}, in ${lane?.name ?? card.column} (${card.column}):\n  ${line(card, true)}`) };
+  }
+  if (ask.column && !lanes.some((lane) => lane.id === ask.column)) {
+    return { ok: false, text: `${title} has no column ${ask.column}; its columns are ${lanes.map((lane) => lane.id).join(", ")}.` };
+  }
+  const out = [`${title}:`];
+  for (const lane of lanes) {
+    if (ask.column && lane.id !== ask.column) continue;
+    const cards = board.cards.filter((card) => card.column === lane.id);
+    const summarised = !ask.column && lane.id === "done" && cards.length > DONE_SHOWN;
+    out.push(`  ${lane.name} (${lane.id}) — ${cards.length}${summarised ? `; the ${DONE_SHOWN} most recent, and column=done lists them all` : ""}`);
+    for (const card of summarised ? cards.slice(0, DONE_SHOWN) : cards) out.push(`    ${line(card, false)}`);
+  }
+  return { ok: true, text: clipHead(out.join("\n"), READ_MAX, ask.column ? "card=<id> reads one" : "column=<id> lists one column whole") };
 }
 
 /**

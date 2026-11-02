@@ -67,6 +67,7 @@ import {
   agentName,
   harnessCliOf,
   harnessRunFlags,
+  boardListing,
   clip,
   due,
   inboxFrames,
@@ -112,6 +113,21 @@ export interface Inbox {
   socket: string;
   token: string | null;
 }
+
+/**
+ * What became of a line Kuru asked to `say`. Spoken; kept off the speaker
+ * because the turn answers only a channel; or not said because the user has
+ * "speak replies" off — which Kuru is told in so many words, so it puts the
+ * line in its written reply instead of reaching for the tool again.
+ */
+export type SayOutcome = "spoken" | "channel" | "voice-off";
+
+export const SAY_ANSWERS: Record<SayOutcome, string> = {
+  spoken: "Said.",
+  channel: "Not said aloud: this turn answers a channel, so the line went to the chat as text.",
+  "voice-off":
+    "Not said: voice replies are off (Settings → Voice), so nothing of yours is read aloud. The line is in the drawer as text; put anything the user needs in your written reply, and do not call say again while it is off.",
+};
 
 /** What `index.ts` lends this module. Functions rather than the module, because `index.ts` exports nothing and should not start to. */
 export interface HarnessDeps {
@@ -189,8 +205,8 @@ export interface HarnessDeps {
   ) => Promise<{ agentId: string; resumed: boolean; why: string | null }>;
   /** A card to Done takes its dev server with it, as the client's move does. */
   stopDev: (workspaceId: string, cardId: string) => void;
-  /** Say a line aloud to the user, as this profile's harness. See `voice.ts`. */
-  say: (profileId: string, text: string) => void;
+  /** Say a line aloud to the user, as this profile's harness, and whether it was. See `voice.ts`. */
+  say: (profileId: string, text: string) => SayOutcome;
   /** Play the profile's missed replies again; what was queued. See `Voice.replay`. */
   replayMissed: (profileId: string) => MissedReply[];
   /** The database: full text over the profile's cards and conversations, and a card's history. See `store.ts`. */
@@ -1004,9 +1020,14 @@ export class Harness {
 
       case "cards": {
         const workspaceId = workspaceArg(false);
-        if (!workspaceId) return ok(this.boardText(profile.board, "the profile's board", null));
+        const ask = { column: str(args.column) || undefined, card: str(args.card) || undefined };
+        const listed = (board: Board, title: string, workspaceName: string | null) => {
+          const listing = boardListing(board, title, (card, full) => this.cardLine(card, workspaceName, full), ask);
+          return listing.ok ? ok(listing.text) : fail(listing.text);
+        };
+        if (!workspaceId) return listed(profile.board, "the profile's board", null);
         const workspace = ws.workspaceIn(profileId, workspaceId)!;
-        return ok(workspace.board ? this.boardText(workspace.board, `${workspace.name}'s board`, workspace.name) : `${workspace.name} has no board yet — add_card makes one.`);
+        return workspace.board ? listed(workspace.board, `${workspace.name}'s board`, workspace.name) : ok(`${workspace.name} has no board yet — add_card makes one.`);
       }
 
       case "add_card": {
@@ -1198,8 +1219,7 @@ export class Harness {
       case "say": {
         const text = str(args.text);
         if (!text) return fail("Nothing to say.");
-        this.deps.say(profileId, text.slice(0, 300));
-        return ok("Said.");
+        return ok(SAY_ANSWERS[this.deps.say(profileId, text.slice(0, 300))]);
       }
 
       case "play_missed": {
@@ -1724,19 +1744,10 @@ export class Harness {
     return `on the user's screen: ${where}, on another node${focused}. Its agents are ${shown.name}'s: read_agent reads them, ask_kuru ${shown.name} acts on them.${away}`;
   }
 
-  private boardText(board: Board, title: string, workspaceName: string | null): string {
-    const out = [`${title}:`];
-    for (const lane of boardLanes(board)) {
-      const cards = board.cards.filter((card) => card.column === lane.id);
-      out.push(`  ${lane.name} (${lane.id}) — ${cards.length}`);
-      for (const card of cards) out.push(`    ${this.cardLine(card, workspaceName)}`);
-    }
-    return clip(out.join("\n"));
-  }
-
-  private cardLine(card: Card, workspaceName: string | null): string {
+  /** One card as `cards` lists it: the body's start, or with `full` — one card asked for by name — the whole of it. */
+  private cardLine(card: Card, workspaceName: string | null, full = false): string {
     const code = workspaceName ? cardCode(workspaceName, card.number) : `#${card.number}`;
-    const body = card.body ? ` — ${card.body.replace(/\s+/g, " ").slice(0, 200)}${card.body.length > 200 ? "…" : ""}` : "";
+    const body = !card.body ? "" : full ? `\n${card.body}` : ` — ${card.body.replace(/\s+/g, " ").slice(0, 200)}${card.body.length > 200 ? "…" : ""}`;
     const run = card.run ? ` [${card.run.label}: ${card.run.state}${runLive(card.run) ? `, agent ${card.run.agentId}` : ""}]` : "";
     const by = card.needsBy ? ` [put here by ${card.needsBy === "kuru" ? "Kuru" : "the user"}]` : "";
     return `${code} ${card.id} "${card.title}"${by}${run}${card.isolate ? " [worktree]" : ""}${madeLine(card.made ?? [])}${body}`;

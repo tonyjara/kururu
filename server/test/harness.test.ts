@@ -30,9 +30,14 @@ import {
   SWAP_TOOLS,
   SwapGate,
   TYPE_PIECE,
+  DONE_SHOWN,
+  READ_MAX,
   adoptHarness,
   agentName,
+  boardCardOf,
+  boardListing,
   clip,
+  clipHead,
   due,
   envelope,
   handsOf,
@@ -54,9 +59,10 @@ import {
   typingPieces,
 } from "../../shared/harness";
 import { countsAsAgent, type AgentSnapshot } from "../../shared/model";
-import { Harness, screenText, type HarnessDeps } from "../src/harness";
+import { Harness, SAY_ANSWERS, screenText, type HarnessDeps, type SayOutcome } from "../src/harness";
 import { Workspaces } from "../src/workspaces";
-import { NEEDS_COLUMN } from "../../shared/board";
+import { NEEDS_COLUMN, addCard, moveCard, type Board } from "../../shared/board";
+
 
 describe("the tool catalogue", () => {
   it("has unique names Claude Code can prefix, and schemas that have what they require", () => {
@@ -893,5 +899,143 @@ describe("Needs you, from the harness", () => {
     expect(refused.text).toContain(NEEDS_COLUMN);
     expect(ws.active.board.cards[0]!.column).toBe(NEEDS_COLUMN);
     expect((await call("move_card", { card: "nope", column: "done" })).isError).toBe(true);
+  });
+});
+
+/**
+ * `cards` on a board with a history. It listed every column and cut with
+ * `clip`, which keeps the end, so past `READ_MAX` the live work was cut and
+ * Done was what Kuru read — four times in its transcript before the review
+ * found it. And it took `column` and `card` without reading either.
+ */
+describe("cards, on a big board", () => {
+  /** A profile board with a few live cards and a Done far past `READ_MAX`. */
+  function bigBoard(): Board {
+    let board: Board = { cards: [], next: 1 } as unknown as Board;
+    const now = Date.now();
+    board = addCard(board, { title: "Live: ship the gate fix", body: "The gate.", column: "todo" }, "c-live-1", now);
+    board = addCard(board, { title: "Live: the cards tool", column: "doing" }, "c-live-2", now);
+    for (let i = 0; i < 200; i++) {
+      board = addCard(board, { title: `Old work ${i}`, body: "x".repeat(300) }, `c-old-${i}`, now);
+      board = moveCard(board, `c-old-${i}`, "done");
+    }
+    return board;
+  }
+  const line = (card: { id: string; title: string; body: string }, full: boolean) => `${card.id} "${card.title}"${full ? `\n${card.body}` : ` — ${card.body.slice(0, 200)}`}`;
+
+  it("lists the live columns whole and Done as a count and its most recent", () => {
+    const board = bigBoard();
+    expect(board.cards.length).toBe(202);
+    const { ok, text } = boardListing(board, "the board", line);
+    expect(ok).toBe(true);
+    expect(text).toContain("Live: ship the gate fix");
+    expect(text).toContain("Live: the cards tool");
+    expect(text).toContain("— 200; the 5 most recent");
+    // Done keeps its newest on top, so the five shown are the last five done.
+    expect(text).toContain("Old work 199");
+    expect(text).toContain(`Old work ${200 - DONE_SHOWN}`);
+    expect(text).not.toContain(`Old work ${199 - DONE_SHOWN}"`);
+    expect(text.length).toBeLessThan(READ_MAX);
+  });
+
+  it("lists one column whole when asked, cut from the end and never the start", () => {
+    const { ok, text } = boardListing(bigBoard(), "the board", line, { column: "done" });
+    expect(ok).toBe(true);
+    expect(text).not.toContain("Live:");
+    expect(text).toContain("Old work 199");
+    expect(text).toContain("characters after this were cut");
+    expect(text.length).toBeLessThan(READ_MAX + 200);
+  });
+
+  it("refuses a column the board does not have, by name", () => {
+    const { ok, text } = boardListing(bigBoard(), "the board", line, { column: "nonsense" });
+    expect(ok).toBe(false);
+    expect(text).toContain("todo");
+  });
+
+  it("reads one card whole, by id or by code", () => {
+    const board = bigBoard();
+    const number = board.cards.find((c) => c.id === "c-live-1")!.number;
+    for (const ref of ["c-live-1", `#${number}`, `KUR-${number}`, String(number)]) {
+      const { ok, text } = boardListing(board, "the board", line, { card: ref });
+      expect(ok).toBe(true);
+      expect(text).toContain("Live: ship the gate fix");
+      expect(text).toContain("in To do (todo)");
+      expect(text).not.toContain("Old work");
+    }
+    expect(boardCardOf(board, "KUR-99999")).toBeNull();
+    expect(boardListing(board, "the board", line, { card: "nope" }).ok).toBe(false);
+  });
+
+  it("keeps the start of what it cuts", () => {
+    expect(clipHead("abcdef", 3)).toBe("abc\n…[3 characters after this were cut]");
+    expect(clipHead("abc", 3)).toBe("abc");
+  });
+
+  it("does all of it through the tool, as Kuru calls it", async () => {
+    const ws = new Workspaces();
+    const profileId = ws.active.id;
+    const harness = new Harness({
+      workspaces: ws,
+      host: { isLive: () => false, find: () => undefined },
+      activity: new Map<string, string>(),
+      launch: () => ({ bypassClis: [] }),
+      madeOf: () => [],
+    } as unknown as HarnessDeps);
+    const call = (args: Record<string, unknown>) => harness.call(profileId, null, "cards", args);
+    await harness.call(profileId, null, "add_card", { title: "Live: ship the gate fix", body: "The whole body." });
+    for (let i = 0; i < 120; i++) await harness.call(profileId, null, "add_card", { title: `Old work ${i}`, body: "x".repeat(300), column: "done" });
+    const all = await call({});
+    expect(all.text).toContain("Live: ship the gate fix");
+    expect(all.text).toContain("the 5 most recent");
+    const done = await call({ column: "done" });
+    expect(done.text).not.toContain("Live:");
+    expect(done.text).toContain("Old work");
+    const live = ws.active.board.cards.find((c) => c.title.startsWith("Live"))!;
+    const one = await call({ card: live.id });
+    expect(one.text).toContain("The whole body.");
+    expect(one.text).not.toContain("Old work");
+    expect((await call({ column: "nonsense" })).isError).toBe(true);
+    // The schema says it takes both, so a call with them is not one Kuru is guessing at.
+    const schema = HARNESS_TOOLS.find((t) => t.name === "cards")!.inputSchema as { properties: Record<string, unknown> };
+    expect(Object.keys(schema.properties)).toEqual(expect.arrayContaining(["column", "card"]));
+  });
+});
+
+/**
+ * `say` with voice replies off. The speaker is `index.ts`'s and `Voice.aside`
+ * is held by its own test; what this holds is that Kuru is told, so it writes
+ * the line instead of reaching for the tool again.
+ */
+describe("say, and what Kuru is told", () => {
+  function rig(outcome: SayOutcome) {
+    const ws = new Workspaces();
+    const said: string[] = [];
+    const harness = new Harness({
+      workspaces: ws,
+      host: { isLive: () => false, find: () => undefined },
+      activity: new Map<string, string>(),
+      launch: () => ({ bypassClis: [] }),
+      madeOf: () => [],
+      say: (_profileId: string, text: string) => {
+        said.push(text);
+        return outcome;
+      },
+    } as unknown as HarnessDeps);
+    return { said, call: (text: string) => harness.call(ws.active.id, null, "say", { text }) };
+  }
+
+  it("says Said. when it was", async () => {
+    const { said, call } = rig("spoken");
+    expect((await call("Starting three agents.")).text).toBe(SAY_ANSWERS.spoken);
+    expect(said).toEqual(["Starting three agents."]);
+  });
+
+  it("says voice replies are off, and to write it instead, when they are", async () => {
+    const { call } = rig("voice-off");
+    const answer = await call("Starting three agents.");
+    expect(answer.isError).toBeFalsy();
+    expect(answer.text).toContain("voice replies are off");
+    expect(answer.text).toContain("written reply");
   });
 });

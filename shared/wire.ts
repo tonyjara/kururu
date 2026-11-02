@@ -606,6 +606,23 @@ export type ServerMessage =
    */
   | { type: "remote-said"; node: string; text: string };
 
+/**
+ * A client's frame, if it is shaped like a message at all: an object with a
+ * string `type`. Not a validation of the verb's fields — each case reads its
+ * own, and the dispatch is guarded for the ones that throw — but the floor
+ * under all of them, because `null`, `[]` and `"x"` are all valid JSON.
+ */
+export function parseClientMessage(raw: string): ClientMessage | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  return typeof (value as { type?: unknown }).type === "string" ? (value as ClientMessage) : null;
+}
+
 export type ClientMessage =
   // --- terminals -----------------------------------------------------------
   /**

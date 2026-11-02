@@ -24,7 +24,7 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "kururu-access-"));
 process.env.KURURU_BIND = "0.0.0.0";
 delete process.env.KURURU_ALLOWED_ORIGINS;
 
-const { chooseBind, decide, hasToken, isShared, listenAddressesFor, originAllowed, token, verdict } = await import("../src/access");
+const { chooseBind, decide, hasToken, isShared, listenAddressesFor, originAllowed, originOk, tailnetNamesOf, token, verdict } = await import("../src/access");
 
 /** Enough of a request for the gate, which reads two headers and one address. */
 function req(headers: Record<string, string>, remoteAddress = "192.168.1.50"): IncomingMessage {
@@ -61,8 +61,37 @@ describe("originAllowed", () => {
     expect(originAllowed(req({ origin: "http://localhost:5173", host: "127.0.0.1:7717" }))).toBe(true);
   });
 
-  it("allows the phone pointed at vite over the tailnet", () => {
-    expect(originAllowed(req({ origin: "http://frog.tail1234.ts.net:5173", host: "127.0.0.1:7717" }))).toBe(true);
+  /** This machine, as `originAllowed` would see it once MagicDNS has named it. */
+  const own = { addresses: ["192.168.1.139", "100.101.102.103"], names: ["frog.tail1234.ts.net"], extra: [] };
+
+  it("allows the phone pointed at vite over the tailnet, by this machine's own name", () => {
+    expect(originOk("http://frog.tail1234.ts.net:5173", "127.0.0.1:7717", own)).toBe(true);
+    expect(originOk("http://100.101.102.103:5173", "127.0.0.1:7717", own)).toBe(true);
+  });
+
+  /**
+   * The hole this used to be. Any Tailscale account can publish a public page
+   * on a `ts.net` name with Funnel, and opened in a browser on this Mac it
+   * reached a loopback kururu that asks loopback for no token.
+   */
+  it("refuses a page on somebody else's ts.net name", () => {
+    expect(originOk("https://anything.tail0000.ts.net", "127.0.0.1:7717", own)).toBe(false);
+    expect(originOk("https://frog.tail9999.ts.net", "127.0.0.1:7717", own)).toBe(false);
+    expect(originOk("https://evil.ts.net", "127.0.0.1:7717", own)).toBe(false);
+    // Before the name is learned, no `ts.net` origin is ours.
+    expect(originOk("http://frog.tail1234.ts.net:5173", "127.0.0.1:7717", { ...own, names: [] })).toBe(false);
+    // And through the real gate, in a process that has learned no name.
+    expect(originAllowed(req({ origin: "https://anything.tail0000.ts.net", host: "127.0.0.1:7717" }))).toBe(false);
+    expect(verdict(req({ origin: "https://anything.tail0000.ts.net", host: "127.0.0.1:7717" }, "127.0.0.1"), at("/ws"))).toBe("cross-origin");
+  });
+
+  it("still allows a ts.net page that is this server's own origin, which is tailscale serve", () => {
+    expect(originAllowed(req({ origin: "https://frog.tail1234.ts.net", host: "frog.tail1234.ts.net" }))).toBe(true);
+  });
+
+  it("allows an origin named in KURURU_ALLOWED_ORIGINS, whole", () => {
+    expect(originOk("https://dev.example:8443", "127.0.0.1:7717", { ...own, extra: ["https://dev.example:8443"] })).toBe(true);
+    expect(originOk("https://dev.example", "127.0.0.1:7717", { ...own, extra: ["https://dev.example:8443"] })).toBe(false);
   });
 
   /**
@@ -77,12 +106,19 @@ describe("originAllowed", () => {
 
   it("is not fooled by a name that merely ends in one of ours", () => {
     expect(originAllowed(req({ origin: "https://notlocalhost", host: "127.0.0.1:7717" }))).toBe(false);
-    // `.ts.net` is allowed; a domain that only *contains* it is not.
     expect(originAllowed(req({ origin: "https://ts.net.evil.example" }))).toBe(false);
+    expect(originOk("https://frog.tail1234.ts.net.evil.example", "127.0.0.1:7717", own)).toBe(false);
   });
 
   it("refuses an Origin it cannot parse rather than letting it through", () => {
     expect(originAllowed(req({ origin: "not a url" }))).toBe(false);
+  });
+});
+
+describe("tailnetNamesOf", () => {
+  it("keeps MagicDNS's answer as a hostname compares, and nothing outside ts.net", () => {
+    expect(tailnetNamesOf(["Frog.Tail1234.ts.net.", "frog.tail1234.ts.net", "frog.local", "ts.net.evil.example."])).toEqual(["frog.tail1234.ts.net"]);
+    expect(tailnetNamesOf([])).toEqual([]);
   });
 });
 

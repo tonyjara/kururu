@@ -63,6 +63,7 @@
  * somebody's work.
  */
 import { randomBytes } from "node:crypto";
+import { Resolver } from "node:dns/promises";
 import type { IncomingMessage } from "node:http";
 import type { Sharing } from "../../shared/wire";
 import { readConfigFile, writeConfigFile } from "./config";
@@ -314,36 +315,119 @@ export function hasToken(req: IncomingMessage, url: URL): boolean {
 }
 
 /**
+ * This machine's own MagicDNS name, the one `*.ts.net` origin that is ours.
+ *
+ * Every other name under `ts.net` is somebody else's machine — and with
+ * Funnel, somebody else's *public web page*, which anyone with a Tailscale
+ * account can publish. The rule used to be the whole suffix, and that let such
+ * a page, opened in a browser on this Mac, open the WebSocket to `127.0.0.1`
+ * and pass a gate that asks loopback for no token: the exact attack the
+ * `Origin` check exists for, reached by clicking a link.
+ *
+ * The name is learned the way `reach.ts` learns the address, without running
+ * `tailscale`: a reverse lookup of this machine's tailnet address, asked of
+ * MagicDNS itself at 100.100.100.100, which answers it whenever tailscaled is
+ * up. Asked at start (`learnTailnetName`, from `index.ts`) and again — at
+ * most every half minute — when a `ts.net` origin arrives that it does not
+ * know, so tailscale coming up after the server does is caught by the
+ * phone's next reconnect rather than by a restart. The rejected alternative
+ * was trusting the `Host` header of whatever arrived on the tailnet address,
+ * which is a header; the lookup is MagicDNS's own word.
+ */
+const MAGIC_DNS = "100.100.100.100";
+const RELEARN_MS = 30_000;
+let tailnetNames: string[] = [];
+let learnedAt = 0;
+let learning: Promise<void> | null = null;
+
+/** `nyto-mpro-3.tail8e465.ts.net.` as `nyto-mpro-3.tail8e465.ts.net`: lower case, no root dot, and only names under `ts.net`. Pure, for the test. */
+export function tailnetNamesOf(names: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const raw of names) {
+    const name = raw.trim().toLowerCase().replace(/\.$/, "");
+    if (name.endsWith(".ts.net") && !out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+export function learnTailnetName(): Promise<void> {
+  if (learning) return learning;
+  learnedAt = Date.now();
+  const address = reach(0).tailscale;
+  if (!address) {
+    tailnetNames = [];
+    return Promise.resolve();
+  }
+  const resolver = new Resolver({ timeout: 2_000, tries: 1 });
+  resolver.setServers([MAGIC_DNS]);
+  learning = resolver
+    .reverse(address)
+    .then((names) => {
+      tailnetNames = tailnetNamesOf(names);
+    })
+    .catch(() => {
+      // MagicDNS off, or tailscaled between states: no name, so no `ts.net`
+      // origin passes until one is learned. Closed is the direction to fail.
+    })
+    .finally(() => {
+      learning = null;
+    });
+  return learning;
+}
+
+/** What `originOk` compares an origin against: this machine's, as far as it knows. */
+export interface OwnPlaces {
+  /** This machine's LAN and tailnet addresses. */
+  addresses: readonly string[];
+  /** Its MagicDNS name, when it has been learned. */
+  names: readonly string[];
+  /** `KURURU_ALLOWED_ORIGINS`, whole origins. */
+  extra: readonly string[];
+}
+
+/**
  * Is the page making this request one of ours?
  *
  * The allowances are every arrangement kururu is actually run in, and nothing
- * else. Same origin covers the built app and the desktop window. Loopback covers
- * vite in front of the server in development, which forwards the browser's
- * `Origin` untouched while rewriting `Host` to the upstream — so the two do not
- * match and cannot be compared. This machine's own addresses and `*.ts.net`
- * cover the phone pointed at vite over the tailnet, which is the same case
- * arriving by a name instead of by loopback.
+ * else. Same origin covers the built app, the desktop window, the phone on the
+ * address or the name it scanned, and `tailscale serve`, which forwards the
+ * browser's `Host`. Loopback covers vite in front of the server in
+ * development, which forwards the browser's `Origin` untouched while rewriting
+ * `Host` to the upstream — so the two do not match and cannot be compared.
+ * This machine's own addresses and its own MagicDNS name cover the phone
+ * pointed at vite over the tailnet, which is the same case arriving by a name
+ * instead of by loopback. Another node never sends an `Origin` at all — the
+ * links refuse one — so nothing here is for them. Pure, for the test.
  */
-export function originAllowed(req: IncomingMessage): boolean {
-  const origin = req.headers.origin;
+export function originOk(origin: string | undefined, hostHeader: string | undefined, own: OwnPlaces): boolean {
   if (!origin || origin === "null") return true;
 
-  let host: string;
+  let parsed: URL;
   try {
-    host = new URL(origin).hostname;
+    parsed = new URL(origin);
   } catch {
     return false;
   }
+  const host = parsed.hostname;
 
   if (isLoopbackAddress(host)) return true;
-  if (req.headers.host && new URL(origin).host === req.headers.host) return true;
-  if (host.endsWith(".ts.net")) return true;
+  if (hostHeader && parsed.host === hostHeader.toLowerCase()) return true;
+  if (own.addresses.includes(host) || own.names.includes(host)) return true;
+  return own.extra.includes(origin);
+}
 
+export function originAllowed(req: IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  if (!origin || origin === "null") return true;
   const here = reach(0);
-  if (here.lan.includes(host) || here.tailscale === host) return true;
-
-  const extra = (process.env.KURURU_ALLOWED_ORIGINS ?? "").split(",").map((entry) => entry.trim());
-  return extra.includes(origin);
+  const own: OwnPlaces = {
+    addresses: here.tailscale ? [...here.lan, here.tailscale] : here.lan,
+    names: tailnetNames,
+    extra: (process.env.KURURU_ALLOWED_ORIGINS ?? "").split(",").map((entry) => entry.trim()).filter(Boolean),
+  };
+  const allowed = originOk(origin, req.headers.host, own);
+  if (!allowed && Date.now() - learnedAt > RELEARN_MS && /\.ts\.net(:\d+)?$/i.test(origin)) void learnTailnetName();
+  return allowed;
 }
 
 export type Verdict = "ok" | "cross-origin" | "no-token";

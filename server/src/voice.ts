@@ -573,6 +573,24 @@ export class Voice {
   }
 
   /**
+   * A line Kuru says mid-turn through its `say` tool, if replies are spoken.
+   * The second door into the speaker, and it answers to the same switch as
+   * `spoke`: "speak replies" off means nothing of Kuru's is said aloud, not
+   * only its last message. It used to go to `speak` directly and talked over
+   * a switch the user had turned off. Null when replies are not spoken, or
+   * there was nothing to say.
+   */
+  aside(profileKey: string, text: string): string | null {
+    if (!this.settings.speak) return null;
+    return this.speak(profileKey, text);
+  }
+
+  /** Whether replies are said aloud at all — Settings → Voice's "speak replies". */
+  speaks(): boolean {
+    return this.settings.speak;
+  }
+
+  /**
    * Say something, as the profile's harness. Resolves to the utterance id
    * once it is queued, not once it is said: the sentences are announced on
    * the socket as each is made. `choice` overrides the voice the language
