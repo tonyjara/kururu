@@ -23,7 +23,6 @@ import {
   newFolderSentence,
   planText,
   projectsFolder,
-  tilde,
   workspaceName,
   type MoveInput,
 } from "../../shared/move";
@@ -32,6 +31,7 @@ import { judgeFolder, moveId, Mover } from "../src/move";
 import type { NodeHost } from "../src/nodes";
 import { Store } from "../src/store";
 import { Workspaces } from "../src/workspaces";
+import { abbreviateHome } from "../../shared/text";
 
 let dir: string;
 beforeEach(() => {
@@ -142,7 +142,7 @@ describe("what the dialog says", () => {
     expect(projectsFolder(["/home/me/src/a", "/home/me/src/b", "/home/me/Projects/c"], home, () => false)).toBe("/home/me/src");
     expect(projectsFolder(["/home/me"], home, (p) => p === "/home/me/Projects")).toBe("/home/me/Projects");
     expect(projectsFolder([], home, () => false)).toBe(home);
-    expect(tilde("/home/me/Projects/x", home)).toBe("~/Projects/x");
+    expect(abbreviateHome("/home/me/Projects/x", home)).toBe("~/Projects/x");
   });
 });
 

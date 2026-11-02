@@ -22,7 +22,7 @@
  * for every input, so they catch a break in a case nobody wrote down.
  */
 import { describe, expect, it } from "bun:test";
-import { qrMatrix } from "../src/qr";
+import { qrMatrix } from "../../shared/qr";
 
 /** `#` dark, `.` light — a matrix is only readable written out. */
 function render(matrix: boolean[][]): string[] {

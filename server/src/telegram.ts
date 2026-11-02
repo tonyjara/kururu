@@ -56,8 +56,7 @@
  * On the restartable side: it holds no pty, and a restart costs a poll.
  */
 import { randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import {
@@ -111,6 +110,7 @@ import { LEAD_BUSY_MS, LEAD_HANDLED_MAX, isNodeId, type LeadHeld, type LeadState
 import { ALBUM_MAX, ALBUM_QUIET_MS, PICTURE_IN_MAX, photoRefusedForShape, pictureWords, splitCaption, type SendAs, type TelegramPicture } from "../../shared/pictures";
 import { readConfigFile, removeConfigFile, writeConfigFile } from "./config";
 import { PictureRefused, dropStaged, keepIncoming, type StagedPicture } from "./pictures";
+import { stateDir, writeAtomic } from "./fsutil";
 
 const FILE = "telegram.json";
 
@@ -261,7 +261,7 @@ const EMPTY_STATE: ChannelState = {
 };
 
 function statePath(): string {
-  const state = process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
+  const state = stateDir();
   return join(state, FILE);
 }
 
@@ -1866,8 +1866,7 @@ export class TelegramChannel {
     const path = this.deps.stateFile ?? statePath();
     try {
       mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(`${path}.tmp`, `${JSON.stringify(this.state)}\n`, { mode: 0o600 });
-      renameSync(`${path}.tmp`, path);
+      writeAtomic(path, `${JSON.stringify(this.state)}\n`, { mode: 0o600 });
     } catch {
       // See above.
     }

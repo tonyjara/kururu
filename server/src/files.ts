@@ -13,6 +13,7 @@
  */
 import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { resolve, sep } from "node:path";
+import { inside } from "./fsutil";
 
 /** Directories never worth showing: build output, dependencies, caches. */
 const SKIP_DIRS = new Set([
@@ -60,11 +61,6 @@ export function allowRoot(dir: string | undefined): void {
 
 export function allowedRoots(): string[] {
   return [...roots].sort();
-}
-
-/** Is `full` at or below `base`? The `sep` matters: without it "/a/bc" passes as inside "/a/b". */
-function inside(base: string, full: string): boolean {
-  return full === base || full.startsWith(base + sep);
 }
 
 /**

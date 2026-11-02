@@ -43,12 +43,13 @@
  * the size cap, with a name that is a name — the same three questions `files.ts`
  * asks, for the same reason.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Mascot, MascotSet } from "../../shared/model";
 import { adoptMascots, DEFAULT_MASCOT, isSheetName } from "../../shared/model";
 import { configDir, readConfigFile, writeConfigFile } from "./config";
+import { writeAtomic } from "./fsutil";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -236,9 +237,7 @@ export function importSheet(name: string, bytes: Buffer): ImportResult {
   const path = join(sheetsDir(), `${name}.png`);
   try {
     mkdirSync(sheetsDir(), { recursive: true });
-    const temp = `${path}.tmp`;
-    writeFileSync(temp, bytes);
-    renameSync(temp, path);
+    writeAtomic(path, bytes);
   } catch {
     return { ok: false, error: "could not write to the sheets directory" };
   }

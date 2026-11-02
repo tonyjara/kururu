@@ -22,11 +22,12 @@
  * one's links. A card's agent writes the same list onto the card as well
  * (`Workspaces.setMade`), which is how a link outlives the agent.
  */
-import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { adoptMade, isBinary, mentionsIn, nextMade, sameMade, withPinned, type Located, type MadeFile, type Mention } from "../../shared/made";
 import { locate } from "./files";
+import { writeAtomic } from "./fsutil";
 
 /** Past this a file is not something to open from a sidebar — `files.ts`'s own limit for reading one. */
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -206,9 +207,7 @@ export class MadeFiles {
     for (const [id, entry] of this.agents) agents[id] = entry;
     try {
       mkdirSync(dirname(this.path), { recursive: true });
-      const temp = `${this.path}.tmp`;
-      writeFileSync(temp, `${JSON.stringify({ version: 1, agents }, null, 2)}\n`, "utf8");
-      renameSync(temp, this.path);
+      writeAtomic(this.path, `${JSON.stringify({ version: 1, agents }, null, 2)}\n`);
     } catch (err) {
       console.error(`kururu: could not write ${this.path}: ${err instanceof Error ? err.message : String(err)}`);
     }

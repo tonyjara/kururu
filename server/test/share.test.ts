@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "bun:test";
 import { qrLines, shareUrl, type ReachAnswer } from "../src/share-cli";
-import { qrMatrix } from "../../web/src/qr";
+import { qrMatrix } from "../../shared/qr";
 
 const base: ReachAnswer = { port: 7717, lan: ["192.168.1.20"], tailscale: "100.101.102.103", shared: true, wanted: true, token: "t0k/en", restartable: true };
 

@@ -18,10 +18,10 @@
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { tilde } from "../../shared/move";
 import { kindOf, NEVER_SHARED, webKind, type SecretsView } from "../../shared/secrets";
 import { envNames, isVercelDir, NEVER_LABELS, vercelTeam, type VaultEnvFile, type VaultKey, type VaultLogin, type VaultView, type VaultWorkspace } from "../../shared/vaultview";
 import { findEnvFiles, ghAccountsHere, hostsMentioned, readEnvSource, remoteOwnerOf, sshHosts } from "./vault";
+import { abbreviateHome } from "../../shared/text";
 
 /** The hints kururu's own keys' pages already hold, off their modules: nothing here reads a key to make one. */
 export interface VaultHints {
@@ -66,7 +66,7 @@ function readJson(path: string, max: number): unknown {
 /** Kururu's own keys: the ones it lends, then the files that never leave this node. */
 function keys(deps: VaultDeps): VaultKey[] {
   const { configDir, home, secrets } = deps;
-  const where = (file: string) => tilde(join(configDir, file), home);
+  const where = (file: string) => abbreviateHome(join(configDir, file), home);
   const changed = (file: string) => changedAt(join(configDir, file));
   const heldFrom = (kind: string) => (secrets.heldFrom && secrets.held.some((h) => h.kind === kind) ? secrets.heldFrom : null);
   const never = (file: string) => NEVER_SHARED.find((n) => n.file === file)?.why ?? null;
@@ -156,7 +156,7 @@ function workspaces(deps: VaultDeps): VaultWorkspace[] {
         id: w.id,
         name: w.name,
         profile: w.profile,
-        checkout: tilde(w.root, home),
+        checkout: abbreviateHome(w.root, home),
         env: found.env,
         ssh,
         github: owner ? { account: owner, signedIn: accounts.includes(owner.toLowerCase()) } : null,
@@ -179,14 +179,14 @@ function logins(deps: VaultDeps): VaultLogin[] {
     account: c.account,
     team: null,
     signedIn: c.signedAt !== null,
-    where: tilde(c.dir ?? join(home, ".claude"), home),
+    where: abbreviateHome(c.dir ?? join(home, ".claude"), home),
     changed: c.signedAt,
     profiles: c.profiles,
     kind: null,
   }));
   for (const c of deps.codex) {
     const at = changedAt(join(c.home, "auth.json"));
-    out.push({ tool: "codex", name: c.name, account: null, team: null, signedIn: at !== null, where: tilde(c.home, home), changed: at, profiles: c.profiles, kind: `codex-auth:${c.login}` });
+    out.push({ tool: "codex", name: c.name, account: null, team: null, signedIn: at !== null, where: abbreviateHome(c.home, home), changed: at, profiles: c.profiles, kind: `codex-auth:${c.login}` });
   }
   const vercel: { name: string; dir: string }[] = [];
   // The CLI's own global directory, which is where a plain `vercel login` goes, on either system.
@@ -203,7 +203,7 @@ function logins(deps: VaultDeps): VaultLogin[] {
   }
   for (const v of vercel.sort((a, b) => a.name.localeCompare(b.name))) {
     const at = changedAt(join(v.dir, "auth.json"));
-    out.push({ tool: "vercel", name: v.name, account: null, team: vercelTeam(readJson(join(v.dir, "config.json"), 64 * 1024)), signedIn: at !== null, where: tilde(v.dir, home), changed: at, profiles: [], kind: null });
+    out.push({ tool: "vercel", name: v.name, account: null, team: vercelTeam(readJson(join(v.dir, "config.json"), 64 * 1024)), signedIn: at !== null, where: abbreviateHome(v.dir, home), changed: at, profiles: [], kind: null });
   }
   return out;
 }

@@ -36,6 +36,8 @@ in this folder.
 | `firecrawl.ts` | Firecrawl's API as two providers speak it: the key, the cloud's daily budget, request bodies, its answers read, a self-hosted address, `crawlNext`. Pure, tested |
 | `nodes.ts` | Every kururu as a node: the roster and its signature, `adoptRoster`, who dials and who leads, the pairing code, an address, the summary another node draws, `LinkHandshake` as a state machine, `LeadGate` (which node reads the Telegram chat, and when that moves) and the handover's shape, and `watchRefusal` (who may watch whom). Pure, tested. See [nodes](nodes.md) |
 | `remote.ts` | Another node's things on this window: the one grammar of a qualified id (`n:<node>:<id>`), the child's workspace, agents and disk roots qualified, `route` (which node a client's verb is for, ids bare, or why it goes nowhere), a node's hue, the walk `C-a N`, `C-a P` and `C-a w` take across nodes (`workspacesAcross`, `stepAcross`), what a drop target says to the other machine's thing (`dropRefusal`), and `containsQualified`, which the never-written test reads with. Pure, tested. See [nodes](nodes.md#remote-workspaces) |
+| `text.ts` | `shq` (one POSIX shell argument, control characters dropped), `abbreviateHome`, `randomHex`. `model.ts` keeps its own hex, being in the host |
+| `qr.ts` | A QR code, encoded here — for the Share dialog and `bun run share` both. Pure |
 | `move.ts` | Moving a workspace to another node: what is refused, what the dialog says goes and stays, and the shapes the two nodes trade over the link. Pure, tested. See [nodes](nodes.md) |
 | `secrets.ts` | The secrets the parent lends a child: the kinds (what part of which file travels, its hint, where it lands), the envelope's header, grant states and `plan`, the one rule for what to push and take back, and `NEVER_SHARED`. Pure, tested. See [nodes](nodes.md#lending-secrets) |
 | `vault.ts` | A project's own secrets as text: which env files are offered, an ssh config's `Host` blocks and which of their lines travel, `known_hosts` lines plain and hashed, a key's type and passphrase from its preamble, gh's accounts, the entry, `Include` line and gh files a child writes, and the guesses at what a project needs. Pure, tested. See [nodes](nodes.md#lending-a-projects-secrets) |
@@ -83,6 +85,7 @@ in this folder.
 | file | |
 |---|---|
 | `src/index.ts` | The entry point, and only the order of start-up: the modules that load first, the sweeps, the link to the host awaited, what a dropped link means, `attach`, the signals |
+| `src/fsutil.ts` | `writeAtomic` (temp, `chmod` for a mode, rename), `stateDir`, `inside`. `hostsock.ts` keeps its own state directory, being in the host |
 | `src/preamble.ts` | What runs before any other module: crash recording, the process name, the port, the restart exit code, where the web app is |
 | `src/context.ts` | What every part shares: the subsystems `attach` fills through `provide`, the clients, `send`/`broadcast`, the snapshot and the deltas, and the settings and per-agent state a snapshot is made of |
 | `src/boot.ts` | Listening, the WebSocket upgrade, a client admitted, the host found or started, `attach`, a restart asked for, `shutdown` |
@@ -227,7 +230,6 @@ in this folder.
 | `src/docs.ts` | The document list, reduced to the three decisions it makes |
 | `src/disk.ts` | Which disk a read goes to: `/api/…` for this node's roots, `/api/node/<id>/…` for a qualified one |
 | `src/preview.ts` | Where to send a browser for a dev server. Pure |
-| `src/qr.ts` | A QR code, encoded here. Pure |
 | `src/access.ts` | The token in the address, exchanged once for a cookie. Five lines |
 | `src/zoom.ts` | How big the reader's type is, per device |
 | `src/place.ts` | Where the voice pill was dragged to, as a share of the window rather than pixels. Pure |

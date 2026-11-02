@@ -40,7 +40,6 @@ import {
   newFolderOk,
   newFolderSentence,
   projectsFolder,
-  tilde,
   workspaceName,
   type FolderProblem,
   type MoveCheck,
@@ -54,6 +53,8 @@ import type { Actor } from "../../shared/store";
 import type { NodeHost } from "./nodes";
 import type { Store } from "./store";
 import type { Workspaces } from "./workspaces";
+import { abbreviateHome } from "../../shared/text";
+import { inside } from "./fsutil";
 
 /** The folder check: a stat or two on the other side. */
 const CHECK_MS = 10_000;
@@ -138,7 +139,7 @@ export class Mover {
       ...this.refusalInput(profileId, workspace, only),
       node: node.name,
       here: this.deps.nodes.name(),
-      folder: here ? tilde(here, this.deps.home) : null,
+      folder: here ? abbreviateHome(here, this.deps.home) : null,
       databases: this.deps.databasesOf(workspaceId),
       deleted: this.deps.store.deletedOn(profileKey, workspace.key),
       machine: this.deps.machineOf(workspace),
@@ -269,7 +270,7 @@ export class Mover {
     const { path, problem } = judgeFolder(folder, home);
     const profile = this.deps.workspaces.active;
     const name = typeof ask.workspaceName === "string" ? ask.workspaceName.trim() : "";
-    return { folder: path, shown: tilde(path, home), problem, profile: profile.name, clash: profile.workspaces.some((w) => w.name === name) };
+    return { folder: path, shown: abbreviateHome(path, home), problem, profile: profile.name, clash: profile.workspaces.some((w) => w.name === name) };
   }
 
   /**
@@ -283,7 +284,7 @@ export class Mover {
     if (typeof ask.folder !== "string" || !ask.folder.trim()) throw new Error("which folder?");
     const home = this.deps.home;
     const { path, problem } = judgeFolder(ask.folder, home);
-    const shown = tilde(path, home);
+    const shown = abbreviateHome(path, home);
     if (!newFolderOk(problem)) throw new Error(newFolderSentence(problem, this.deps.nodes.name(), shown));
     const ws = this.deps.workspaces;
     const profile = ws.active;
@@ -308,7 +309,7 @@ export class Mover {
     const again = this.deps.store.moveAnswered(offer.move);
     if (again) return Promise.resolve({ ...again, again: true });
     const { path, problem } = judgeFolder(offer.folder, this.deps.home);
-    if (problem) return Promise.reject(new Error(folderSentence(problem, this.deps.nodes.name(), tilde(path, this.deps.home))));
+    if (problem) return Promise.reject(new Error(folderSentence(problem, this.deps.nodes.name(), abbreviateHome(path, this.deps.home))));
     const ws = this.deps.workspaces;
     const profile = ws.active;
     const id = ws.as("import", () => ws.newWorkspaceIn(profile.id, offer.workspace.name, path));
@@ -349,8 +350,7 @@ export function judgeFolder(raw: string, home: string): { path: string; problem:
   const expanded = text === "~" ? home : text.startsWith("~/") ? join(home, text.slice(2)) : text;
   if (!isAbsolute(expanded) || expanded.includes("\0")) return { path: expanded, problem: "relative" };
   const path = resolve(expanded);
-  const inside = (p: string, root: string) => p === root || p.startsWith(`${root}/`);
-  if (!inside(path, home)) return { path, problem: "outside" };
+  if (!inside(home, path)) return { path, problem: "outside" };
   if (!existsSync(path)) return { path, problem: "missing" };
   let real: string;
   let realHome: string;
@@ -360,7 +360,7 @@ export function judgeFolder(raw: string, home: string): { path: string; problem:
   } catch {
     return { path, problem: "missing" };
   }
-  if (!inside(real, realHome)) return { path, problem: "outside" };
+  if (!inside(realHome, real)) return { path, problem: "outside" };
   try {
     if (!statSync(real).isDirectory()) return { path, problem: "not-dir" };
   } catch {

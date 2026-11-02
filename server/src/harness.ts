@@ -111,6 +111,7 @@ import { findOpencode, prepareOpencodeHome } from "./opencode";
 import type { HostLink } from "./hostlink";
 import type { Workspaces } from "./workspaces";
 import type { RemoteScreen } from "./nodewatch";
+import { shq } from "../../shared/text";
 
 /** A Claude session's inbox, as its hook reported it. The token is what makes a message count as the session's own. */
 export interface Inbox {
@@ -1463,11 +1464,11 @@ export class Harness {
       resume ? "--resume" : "--session-id",
       sessionId!,
       "--mcp-config",
-      quote(mcpConfig(this.deps.port(), profileId, sessionId!, this.deps.tokenInPtys())),
+      shq(mcpConfig(this.deps.port(), profileId, sessionId!, this.deps.tokenInPtys())),
       "--allowedTools",
       `mcp__${HARNESS_SERVER}`,
       "--append-system-prompt",
-      quote(role),
+      shq(role),
       ...harnessRunFlags(),
     ];
     // The tool-call ceiling, as an environment variable on the line rather than
@@ -1954,10 +1955,6 @@ export async function screenText(data: string, cols: number, rows: number, lines
   }
 }
 
-/** Single-quoted for `sh`, the same spelling `withPrompt` uses. */
-function quote(value: string): string {
-  return `'${value.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").replaceAll("'", `'\\''`)}'`;
-}
 
 function ok(text: string): McpResult {
   return { text: text.length > READ_MAX ? clip(text) : text };

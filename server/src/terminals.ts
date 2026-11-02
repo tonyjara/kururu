@@ -79,6 +79,7 @@ import { usageSnapshot } from "./usage";
 import type { LaunchNote } from "./usage/attribute";
 import { readRetention, usageReport } from "./usage/report";
 import type { UsageReader } from "./usage/sweep";
+import { abbreviateHome } from "../../shared/text";
 
 /**
  * The layout goes two places, and they are not the same thing.
@@ -551,7 +552,7 @@ export function usageReportFor(reader: UsageReader, range: UsageRange, by: Usage
       const workspace = key ? liveIn.find((w) => w.key === key) : undefined;
       return workspace ? { workspaceId: workspace.id } : null;
     },
-    folder: (path) => (path === home ? "~" : path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path),
+    folder: (path) => abbreviateHome(path, home),
   };
   const claude = usageSnapshot();
   const weekly = (limits: readonly UsageLimit[] | undefined) => {

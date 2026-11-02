@@ -23,6 +23,7 @@ import { openTerminal } from "./terminals";
 import { locateMentions, stillThere as madeStillThere } from "./made";
 import { nvimCommand } from "./nvim";
 import { PictureRefused, stageOutgoing, wholePath } from "./pictures";
+import { inside } from "./fsutil";
 
 /**
  * A turn's start and end, as the links under an agent's row hear of them.
@@ -272,7 +273,7 @@ function rootAllowed(root: string): boolean {
  * names none. The projects are the branch walk's (`pollBranches`).
  */
 function workspaceOfRoot(root: string): string | null {
-  const holds = (dir: string) => root === dir || root.startsWith(`${dir}/`);
+  const holds = (dir: string) => inside(dir, root);
   const here = state.projects.find((p) => p.workspaceId === workspaces.activeWorkspace.id);
   if (here && [here.root, ...here.choices].some(holds)) return here.workspaceId;
   return state.projects.find((p) => [p.root, ...p.choices].some(holds))?.workspaceId ?? null;

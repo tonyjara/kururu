@@ -262,10 +262,6 @@ export async function openInEditor(
   return { agentId: agent.id };
 }
 
-/** One argument for a POSIX shell, whatever is in it. */
-export function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
 
 // ---------------------------------------------------------------------------
 // Every nvim on the machine, and ending them

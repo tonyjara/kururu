@@ -42,7 +42,7 @@
  * being broken rather than as a download that needs retrying.
  */
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { MascotConfig } from "../../shared/model";
 import type { Skin } from "../../shared/skin";
@@ -72,6 +72,7 @@ import { isStyleId } from "../../shared/skin";
 import type { Theme } from "../../shared/theme";
 import { configPath } from "./config";
 import { importSheet, removeSheet, sheets } from "./mascot";
+import { writeAtomic } from "./fsutil";
 
 /**
  * Where the registry is.
@@ -156,9 +157,7 @@ export function writeRecords(list: InstalledStyle[]): void {
   const path = configPath(INSTALLED);
   try {
     mkdirSync(stylesDir(), { recursive: true });
-    const temp = `${path}.tmp`;
-    writeFileSync(temp, `${JSON.stringify(list, null, 2)}\n`, "utf8");
-    renameSync(temp, path);
+    writeAtomic(path, `${JSON.stringify(list, null, 2)}\n`);
   } catch {
     // `config.ts`'s reasoning: a record that could not be written is still live
     // in this session, and the next start is the one that forgets it.

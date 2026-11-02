@@ -36,6 +36,7 @@ import { existsSync, lstatSync, mkdirSync, realpathSync, renameSync, statSync, w
 import { cp } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, sep } from "node:path";
 import { resolveInRoot } from "./files";
+import { inside } from "./fsutil";
 
 export type FileOp =
   | { op: "mkdir"; root: string; dir: string; name: string }
@@ -125,11 +126,6 @@ export function copyName(name: string, taken: (candidate: string) => boolean): s
     const candidate = `${stem} copy${n === 1 ? "" : ` ${n}`}${ext}`;
     if (!taken(candidate)) return candidate;
   }
-}
-
-/** Is `full` at or below `base`? */
-function inside(base: string, full: string): boolean {
-  return full === base || full.startsWith(base + sep);
 }
 
 /** Does anything — file, directory, dangling symlink — already sit at this path? */

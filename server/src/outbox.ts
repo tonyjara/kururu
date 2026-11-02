@@ -60,9 +60,8 @@
  * The words keep their address on this list, so a restart knows where they
  * were going without anything kept beside them.
  */
-import { mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { open, stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { channelOfMessage, channelWords } from "../../shared/channels";
@@ -81,6 +80,7 @@ import {
 } from "../../shared/voice";
 import type { ServerMessage } from "../../shared/wire";
 import { sweep } from "./sweep";
+import { stateDir, writeAtomic } from "./fsutil";
 
 /** How long Kuru may sit between turns with a typed message it never took before that message is typed again. Its prompt hook takes a moment; a turn starting is a status change. */
 const CONFIRM_MS = 15_000;
@@ -150,7 +150,7 @@ export interface OutboxDeps {
 
 /** Where the audio is kept: the state directory, since a clip is a thing kururu wants back and nobody chose. */
 export function outboxDir(): string {
-  const state = process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
+  const state = stateDir();
   return join(state, "outbox");
 }
 
@@ -712,8 +712,7 @@ export class Outbox {
   private writeAudio(id: string, wav: Buffer): void {
     mkdirSync(outboxDir(), { recursive: true });
     const path = this.audioPath(id);
-    writeFileSync(`${path}.tmp`, wav);
-    renameSync(`${path}.tmp`, path);
+    writeAtomic(path, wav);
   }
 
   private removeAudio(id: string): void {

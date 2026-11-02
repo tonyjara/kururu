@@ -35,11 +35,11 @@
  * On the restartable side, with nothing near a pty: a lent Claude token
  * and a lent GitHub login reach a pty through `logins.ts`, read at spawn.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isLoginKey } from "../../shared/model";
-import { tilde, type MoveCheck } from "../../shared/move";
+import { type MoveCheck } from "../../shared/move";
 import type { LinkMessage } from "../../shared/nodes";
 import {
   adoptEnvLends,
@@ -106,6 +106,8 @@ import {
   sshStamp,
   stampOf,
 } from "./vault";
+import { abbreviateHome } from "../../shared/text";
+import { writeAtomic } from "./fsutil";
 
 /** How often the parent looks at its secret files. A stat each; "within seconds" is the promise for a rotated key. */
 const LOOK_MS = 2_000;
@@ -544,7 +546,7 @@ export class Secrets {
     return {
       node,
       workspace: input.workspace,
-      from: root ? tilde(root, this.home) : null,
+      from: root ? abbreviateHome(root, this.home) : null,
       check: input.check,
       checkError: input.checkError,
       env,
@@ -571,7 +573,7 @@ export class Secrets {
       if (!root) throw new Error("This workspace is in no checkout here, so it has no env files to lend.");
       if (!to) throw new Error(`Which folder on ${member.name}? Its env files go into the project's checkout there.`);
       const found = new Set(findEnvFiles(root));
-      for (const file of ask.env) if (!found.has(file)) throw new Error(`${file} is not an env file in ${tilde(root, this.home)}.`);
+      for (const file of ask.env) if (!found.has(file)) throw new Error(`${file} is not an env file in ${abbreviateHome(root, this.home)}.`);
       for (const [kind, lend] of Object.entries(this.envLends)) if (lend.node === nodeId && lend.from === root) this.envLends[kind] = { ...lend, to };
       for (const file of ask.env) {
         const kind = envKind(nodeId, root, file);
@@ -842,10 +844,7 @@ export class Secrets {
     const path = join(home, "auth.json");
     if (existsSync(path) && !this.placedHere(path)) throw new Error(`this node has a Codex login of its own in ${path}; run codex logout there first, or leave it unticked`);
     mkdirSync(home, { recursive: true, mode: 0o700 });
-    const temp = `${path}.kururu-tmp`;
-    writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-    chmodSync(temp, 0o600);
-    renameSync(temp, path);
+    writeAtomic(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, suffix: ".kururu-tmp" });
     return path;
   }
 
@@ -959,7 +958,7 @@ export class Secrets {
           follows: spec.follows,
           hint: this.sources.get(kind)?.hint ?? null,
           note: hosts.get(kind)?.note ?? null,
-          project: lend ? { node: lend.node, workspace: lend.workspace, file: lend.file, from: tilde(lend.from, this.home), to: lend.to } : null,
+          project: lend ? { node: lend.node, workspace: lend.workspace, file: lend.file, from: abbreviateHome(lend.from, this.home), to: lend.to } : null,
         });
       }
       for (const [login, entry] of Object.entries(readLends().tokens)) lends.push({ login, account: entry.account, hint: `…${entry.token.slice(-4)}`, at: entry.at });

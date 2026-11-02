@@ -6,7 +6,7 @@
  * to show one in. Its token is in `access.json`, which is a thing to read
  * once and not a thing to type into a phone, so this asks the server what the
  * dialog asks it (`/api/reach`) and draws the same code the dialog draws
- * (`web/src/qr.ts`), in half-blocks with their colours set outright, so it
+ * (`shared/qr.ts`), in half-blocks with their colours set outright, so it
  * scans off a dark terminal and a light one alike.
  *
  * Asked of the server rather than worked out here, because which address the
@@ -19,7 +19,7 @@
  *   bun run share --rotate  a new token first, which is "that phone is not mine any more"
  */
 import type { Reach, Sharing } from "../../shared/wire";
-import { qrMatrix } from "../../web/src/qr";
+import { qrMatrix } from "../../shared/qr";
 import { tokenHeaders } from "../localtoken.mjs";
 
 const PORT = Number(process.env.KURURU_PORT ?? 7717);

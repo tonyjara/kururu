@@ -27,6 +27,7 @@ import { join } from "node:path";
 import { HARNESS_AGENTS_MD, HARNESS_CLAUDE_MD, kuruMcpServers, kuruSettings, memoryIndexFor, memoryOrigin, projectDirName, withCompactSection } from "../../shared/harness";
 import { isStoreKey } from "../../shared/store";
 import { dataDir } from "./store";
+import { stateDir } from "./fsutil";
 
 /** How much of a transcript's head is read to learn whether it was a harness session: the title is written in its first records. */
 const TITLE_HEAD = 64 * 1024;
@@ -77,7 +78,7 @@ export async function prepareHarnessHome(home: string, claudeDir: string, previo
  * change, and a stale server file is removed rather than left to be read.
  */
 export async function kuruLaunchFlags(claudeDir: string, profileKey: string, hooks: object | null, own: readonly string[]): Promise<string> {
-  const dir = join(process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu"), "kuru");
+  const dir = join(stateDir(), "kuru");
   await mkdir(dir, { recursive: true, mode: 0o700 });
   const settingsFile = join(dir, `${profileKey}-settings.json`);
   const serversFile = join(dir, `${profileKey}-mcp.json`);

@@ -49,9 +49,8 @@
  * (`localCaller`); the argument for both is in `docs/web.md`.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentCli } from "../../../shared/launchers";
 import {
@@ -91,6 +90,8 @@ import { readConfigFile, writeConfigFile } from "../config";
 import type { McpResult, McpTool } from "../mcp";
 import { webProviderDefs, type ProviderDeps, type StepAnswer, type WebProvider } from "./provider";
 import { sweep } from "../sweep";
+import { shq } from "../../../shared/text";
+import { stateDir, writeAtomic } from "../fsutil";
 
 const SETTINGS_FILE = "web.json";
 const RECENT_FILE = "web-usage.json";
@@ -115,9 +116,6 @@ const STREAM_PING_MS = 30_000;
 const STALE_STREAM_MS = 10_000;
 const LIST_CHANGED = `event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", method: "notifications/tools/list_changed" })}\n\n`;
 
-function stateDir(): string {
-  return process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
-}
 
 /** Where the chain keeps what it must remember. The files in the server; memory in the tests. */
 export interface ChainStore {
@@ -145,8 +143,7 @@ export const fileStore: ChainStore = {
     const path = join(stateDir(), RECENT_FILE);
     try {
       mkdirSync(stateDir(), { recursive: true });
-      writeFileSync(`${path}.tmp`, `${JSON.stringify({ recent }, null, 2)}\n`, "utf8");
-      renameSync(`${path}.tmp`, path);
+      writeAtomic(path, `${JSON.stringify({ recent }, null, 2)}\n`);
     } catch {
       // The list is still right in memory; the next start is the one that forgets it.
     }
@@ -192,10 +189,6 @@ export function callerAgent(req: IncomingMessage): string | null {
   return typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value) ? value : null;
 }
 
-/** Single-quoted for `sh -c`. */
-function quote(value: string): string {
-  return `'${value.replaceAll("'", `'\\''`)}'`;
-}
 
 class Timeout extends Error {}
 
@@ -677,7 +670,7 @@ export class WebChain {
       // Written now, because the port in it moves with the server.
       mkdirSync(stateDir(), { recursive: true });
       writeFileSync(path, `${JSON.stringify(claudeWebConfig(this.options.port(), withToken), null, 2)}\n`, "utf8");
-      return ` --mcp-config=${quote(path)}`;
+      return ` --mcp-config=${shq(path)}`;
     } catch {
       return "";
     }

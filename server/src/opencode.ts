@@ -52,6 +52,7 @@ import {
   opencodeVersion,
   type OpencodeHarnessArgs,
 } from "../../shared/opencode";
+import { stateDir } from "./fsutil";
 
 /** How long `opencode --version` may take before that copy is passed over. It answers in a twentieth of a second. */
 const VERSION_TIMEOUT_MS = 5000;
@@ -114,7 +115,7 @@ export async function findOpencode(candidates = opencodeCandidates(homedir(), pr
 
 /** The plugin's folder, under kururu's state directory beside `claude-hooks.json`. */
 function pluginDir(): string {
-  const state = process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
+  const state = stateDir();
   return join(state, "opencode-plugin");
 }
 
@@ -388,7 +389,7 @@ export function prepareOpencodeHome(home: string, args: Omit<OpencodeHarnessArgs
 /** Write one ordinary agent's private config outside its project and return its path. */
 export function prepareOpencodeAgent(sessionId: string, args: { port: number; withToken: boolean; model: string; web: boolean }): string {
   const plugin = writeOpencodePlugin();
-  const state = process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
+  const state = stateDir();
   const dir = join(state, "opencode-agents", sessionId);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "opencode.json");

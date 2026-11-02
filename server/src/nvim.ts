@@ -37,6 +37,7 @@ import { execFile } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { childIndex, readProcTable, type ProcInfo, type ProcTable } from "./agents/procs";
+import { shq } from "../../shared/text";
 
 /** An editor kururu has found, and the socket it answers on. */
 export interface NvimInstance {
@@ -384,10 +385,6 @@ export async function endHard(pids: number[]): Promise<void> {
   if (left.length > 0) send(left, "SIGKILL");
 }
 
-/** One argument for a POSIX shell, whatever is in it. */
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
 
 /** What every nvim tab's command line starts with, a file or not. */
 const NVIM_TAB = `printf '\\033]2;nvim\\007'; nvim`;
@@ -409,7 +406,7 @@ export function nvimCommand(path?: string, line?: number | null): string {
   // `+N` before the `--`, where nvim still reads options: what a link to
   // `index.ts:120` opens at. Only a whole positive number reaches the line.
   const at = path && line && Number.isInteger(line) && line > 0 ? ` +${line}` : "";
-  const arg = path ? `${at} -- ${shellQuote(path)}` : "";
+  const arg = path ? `${at} -- ${shq(path)}` : "";
   return `${NVIM_TAB}${arg}; exec "\${SHELL:-/bin/sh}" -l`;
 }
 

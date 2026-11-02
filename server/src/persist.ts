@@ -21,8 +21,7 @@
  * same reason: anything that does not parse is ignored and kururu starts fresh
  * rather than refusing to start.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Profile, Workspace } from "../../shared/model";
 import { groupName, isLoginKey, mintLoginKey } from "../../shared/model";
@@ -34,6 +33,7 @@ import { DEFAULT_AGENT_PLACEMENT, isAgentPlacement, type AgentPlacement } from "
 import type { HarnessState } from "../../shared/model";
 import { isStoreKey, mintProfileKey, mintWorkspaceKey } from "../../shared/store";
 import { nextId } from "./workspaces";
+import { stateDir, writeAtomic } from "./fsutil";
 
 /** Bumped when the shape below changes; an older file is ignored, not migrated. */
 const VERSION = 1;
@@ -146,10 +146,7 @@ interface StoredSession {
  * program wants back next time but which are not configuration and not a cache.
  */
 export function snapshotPath(): string {
-  const dir =
-    process.env.KURURU_STATE_DIR ||
-    join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
-  return join(dir, "session.json");
+  return join(stateDir(), "session.json");
 }
 
 // ---------------------------------------------------------------------------
@@ -226,9 +223,7 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
     mkdirSync(dirname(path), { recursive: true });
     // Same directory, so the rename is atomic; a crash mid-write leaves the
     // previous snapshot intact rather than half of this one.
-    const temp = `${path}.tmp`;
-    writeFileSync(temp, JSON.stringify(session, null, 2), "utf8");
-    renameSync(temp, path);
+    writeAtomic(path, JSON.stringify(session, null, 2));
   } catch (err) {
     // A layout that could not be saved is not worth failing a launch over,
     // but it is worth a line: the next start restores the last one that was.

@@ -19,9 +19,10 @@
  * write that fails is not worth failing anything over either: the setting is
  * live in this session, and the next start is the one that forgets it.
  */
-import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { writeAtomic } from "./fsutil";
 
 /**
  * Read per call rather than captured, so a test can move it. `KURURU_CONFIG_DIR`
@@ -51,20 +52,14 @@ export function readConfigFile(name: string): unknown {
  * is: the alternative to an atomic write is a truncated JSON file where the
  * settings used to be, and the moment that matters is a crash mid-save.
  *
- * `mode` is for the one file in here that holds a secret (`openrouter.ts`). Set
- * on the temporary file before the rename, so there is no moment at which the
- * real path exists with the umask's permissions — and by `chmod` rather than
- * `writeFileSync`'s own option, which only applies when the file is created and
- * so would not apply to a temp left behind by a crash.
+ * `mode` is for the files in here that hold a secret; `writeAtomic` says how
+ * it is applied, and why by `chmod`.
  */
 export function writeConfigFile(name: string, value: unknown, mode?: number): boolean {
   const path = configPath(name);
   try {
     mkdirSync(configDir(), { recursive: true });
-    const temp = `${path}.tmp`;
-    writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode });
-    if (mode !== undefined) chmodSync(temp, mode);
-    renameSync(temp, path);
+    writeAtomic(path, `${JSON.stringify(value, null, 2)}\n`, { mode });
     return true;
   } catch (err) {
     // Settings that could not be saved are still settings for now — but only

@@ -14,9 +14,10 @@ import { BOARD_TAB, paneWithAgent, showsDoc } from "../../shared/layout";
 import { projectSettingsFor } from "../../shared/projects";
 import { worktreeOf } from "./cards";
 import { host, projects, workspaces } from "./context";
-import { shellQuote } from "./editors";
+
 import { killAll, openTerminal, openTerminalAt } from "./terminals";
 import { copyEnvFiles, worktreePresent } from "./worktree";
+import { shq } from "../../shared/text";
 
 /**
  * A port nothing is listening on, from the kernel: bind port 0, read what it
@@ -96,7 +97,7 @@ export async function startDev(
   await copyEnvFiles(worktree.root, worktree.path);
   const port = await freePort();
   const wait = ready
-    ? `echo 'waiting for the setup line in the agent’s terminal…'; until [ -e ${shellQuote(ready)} ]; do sleep 1; done; rm -f ${shellQuote(ready)}; `
+    ? `echo 'waiting for the setup line in the agent’s terminal…'; until [ -e ${shq(ready)} ]; do sleep 1; done; rm -f ${shq(ready)}; `
     : "";
   const options = { cwd: worktree.path, command: `${wait}export PORT=${port}; ${dev}`, kind: "shell" as const };
   const agent =

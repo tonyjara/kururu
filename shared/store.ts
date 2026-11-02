@@ -28,6 +28,7 @@ import type { Board, BoardLane, Card, CardDates, CardRun, CardWorktree, NeedsBy 
 import { channelOfPrompt, readPeerMark, type ChannelKind } from "./channels";
 import { sameMade } from "./made";
 import type { VoiceLang } from "./voice";
+import { randomHex } from "./text";
 
 // ---------------------------------------------------------------------------
 // Keys
@@ -41,9 +42,7 @@ export function isStoreKey(value: unknown): value is string {
 }
 
 function mintKey(prefix: "pk" | "wk"): string {
-  const bytes = new Uint8Array(6);
-  globalThis.crypto.getRandomValues(bytes);
-  return `${prefix}${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+  return `${prefix}${randomHex(6)}`;
 }
 
 export function mintProfileKey(): string {

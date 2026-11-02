@@ -29,6 +29,7 @@ import { imageKindOf } from "../../shared/drops";
 import { PICTURE_IN_MAX, PICTURE_OUT_MAX, pictureFileName, placeRefusal, sendAs, type SendAs } from "../../shared/pictures";
 import { allowedRoots } from "./files";
 import { dataDir } from "./store";
+import { inside } from "./fsutil";
 
 const run = promisify(execFile);
 
@@ -104,11 +105,6 @@ function rmQuiet(path: string): void {
   } catch {
     // Already gone.
   }
-}
-
-/** Is `full` at or below `base`? With the separator, so "/a/bc" is not inside "/a/b". */
-function inside(base: string, full: string): boolean {
-  return full === base || full.startsWith(base + sep);
 }
 
 /**

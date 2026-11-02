@@ -27,6 +27,7 @@
 import { dayAt, dayNumber, type Day } from "./days";
 import { adoptMade, sameMade, type MadeFile } from "./made";
 import { isWorkspaceColor, WORKSPACE_COLORS, type WorkspaceColor } from "./model";
+import { randomHex } from "./text";
 
 /**
  * Four columns, fixed. `review` is the one that is not the usual three, and it
@@ -200,9 +201,7 @@ function firstLane(board: Board): string {
 }
 
 export function mintLaneId(): string {
-  const bytes = new Uint8Array(4);
-  globalThis.crypto.getRandomValues(bytes);
-  return `k${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+  return `k${randomHex(4)}`;
 }
 
 /**
@@ -419,9 +418,7 @@ export function emptyProfileBoard(): Board {
 }
 
 export function mintCardId(): string {
-  const bytes = new Uint8Array(6);
-  globalThis.crypto.getRandomValues(bytes);
-  return `c${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+  return `c${randomHex(6)}`;
 }
 
 /** A card's text as a string off the wire: trimmed, capped, and refused if it is not text. */

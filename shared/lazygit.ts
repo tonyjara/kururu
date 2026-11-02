@@ -23,6 +23,7 @@
  */
 
 import { checkName } from "./machines";
+import { shq } from "./text";
 
 /**
  * Whether the program is there, with its command, its name and the place as
@@ -37,14 +38,10 @@ export const LAZYGIT_CHECK = [
   `command -v "$c" >/dev/null 2>&1 || { echo; echo "kururu: $n is not installed on $m. There is no $c on the PATH here."; echo "kururu: install it in this tab, then open it again."; exit 127; }`,
 ].join("; ");
 
-/** One argument for a POSIX shell, whatever is in it. */
-function quote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
 
 /** The check, as the start of a line: it fails, and nothing after `&&` runs, when there is no LazyGit. */
 function checked(where: string): string {
-  return `sh -c ${quote(LAZYGIT_CHECK)} kururu lazygit LazyGit ${quote(where)}`;
+  return `sh -c ${shq(LAZYGIT_CHECK)} kururu lazygit LazyGit ${shq(where)}`;
 }
 
 /**

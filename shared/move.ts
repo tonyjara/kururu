@@ -339,10 +339,6 @@ export function projectsFolder(dirs: readonly string[], home: string, exists: (p
   return home;
 }
 
-/** A path with the home folder as `~`, as the dialog shows it. */
-export function tilde(path: string, home: string): string {
-  return path === home ? "~" : path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
-}
 
 /** The last part of a folder, which the guess on the other side is made of. */
 export function basename(path: string | null): string {

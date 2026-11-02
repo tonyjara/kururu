@@ -58,15 +58,15 @@ export function text(res: ServerResponse, body: string, status = 200): void {
  */
 export const IMPORT_LIMIT = 2 * 1024 * 1024;
 
-/** The body, as bytes. What `readJsonBody` is built on, minus the parse. */
-export function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
+/** The body, as bytes. What `readJsonBody` is built on, minus the parse; `tooBig` is the sentence a body past the cap is refused with. */
+export function readBody(req: IncomingMessage, limit: number, tooBig = "that file is far too big"): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
     req.on("data", (chunk: Buffer) => {
       size += chunk.length;
       if (size > limit) {
-        reject(new Error("that file is far too big"));
+        reject(new Error(tooBig));
         req.destroy();
         return;
       }
@@ -104,28 +104,13 @@ export function readClip(req: IncomingMessage, limit: number): Promise<Buffer> {
 }
 
 /** Read a JSON request body, with a cap — this endpoint is tailnet-reachable. */
-export function readJsonBody(req: IncomingMessage, limit = 64 * 1024): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    req.on("data", (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > limit) {
-        reject(new Error("body too large"));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => {
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-      } catch {
-        reject(new Error("body is not JSON"));
-      }
-    });
-    req.on("error", reject);
-  });
+export async function readJsonBody(req: IncomingMessage, limit = 64 * 1024): Promise<unknown> {
+  const body = await readBody(req, limit, "body too large");
+  try {
+    return JSON.parse(body.toString("utf8"));
+  } catch {
+    throw new Error("body is not JSON");
+  }
 }
 
 export function serveStatic(res: ServerResponse, rel: string): void {

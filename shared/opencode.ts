@@ -35,6 +35,7 @@
  */
 import { HARNESS_COMPACT_AT, HARNESS_SERVER, MCP_TIMEOUT_MS, OPENCODE_SESSION_ID } from "./harness";
 import { AGENT_HEADER, WEB_SERVER, WEB_TIMEOUT_MS, webUrl } from "./web";
+import { shq } from "./text";
 
 const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
@@ -89,10 +90,6 @@ export function opencodeVersion(output: string): [number, number, number] | null
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
 }
 
-/** One argument for a POSIX shell, whatever is in it. */
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
 
 /**
  * The line that starts Kuru on OpenCode. `--auto` approves OpenCode's own
@@ -106,14 +103,14 @@ function shellQuote(value: string): string {
 export function opencodeHarnessCommand(bin: string, sessionId: string, auto: boolean): string {
   if (!bin.startsWith("/")) throw new Error("OpenCode's path must be absolute");
   if (!OPENCODE_SESSION_ID.test(sessionId)) throw new Error("not an OpenCode session id");
-  return [shellQuote(bin), "--standalone", "--session", sessionId, ...(auto ? ["--auto"] : [])].join(" ");
+  return [shq(bin), "--standalone", "--session", sessionId, ...(auto ? ["--auto"] : [])].join(" ");
 }
 
 /** The private OpenCode process used for an ordinary agent. */
 export function opencodeAgentCommand(bin: string, config: string, sessionId: string, auto: boolean): string {
   if (!bin.startsWith("/") || !config.startsWith("/")) throw new Error("OpenCode paths must be absolute");
   if (!OPENCODE_SESSION_ID.test(sessionId)) throw new Error("not an OpenCode session id");
-  return `OPENCODE_CONFIG=${shellQuote(config)} ${opencodeHarnessCommand(bin, sessionId, auto)}`;
+  return `OPENCODE_CONFIG=${shq(config)} ${opencodeHarnessCommand(bin, sessionId, auto)}`;
 }
 
 /** A model as OpenCode's session API takes one: `anthropic/claude-opus-5-5#high` in its parts. */

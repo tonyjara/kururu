@@ -43,7 +43,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { SESSION_ID } from "../../shared/board";
@@ -65,6 +64,7 @@ import {
   type UsageLog,
 } from "../../shared/machines";
 import { readConfigFile, writeConfigFile } from "./config";
+import { stateDir } from "./fsutil";
 
 const FILE = "vps.json";
 
@@ -93,7 +93,7 @@ const TIMEOUT_MS = 25_000;
  * and the temp directory there is most of that already.
  */
 function controlPath(): string {
-  const dir = process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
+  const dir = stateDir();
   try {
     mkdirSync(dir, { recursive: true });
   } catch {

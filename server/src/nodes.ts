@@ -31,7 +31,7 @@
  * restart is a reconnect for the links, as it is for every window.
  */
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { join } from "node:path";
 import { WebSocket } from "ws";
@@ -90,6 +90,7 @@ import type { MoveCheck, MoveDone, NewWorkspaceMade } from "../../shared/move";
 import { readConfigFile, writeConfigFile } from "./config";
 import { safeMirrorPath } from "./export";
 import { becomeParent, challenge, identity, rosterSigner, signAsNode, signRoster, stopBeingParent, verifySigned, type Identity } from "./nodekeys";
+import { writeAtomic } from "./fsutil";
 
 const FILE = "nodes.json";
 /** What was last heard from each node, kept across a restart so a child that restarts while the Mac sleeps still says since when. In the state directory: it is rebuilt by the next summary. */
@@ -1270,8 +1271,7 @@ export class NodeHost {
     try {
       mkdirSync(this.deps.stateDir, { recursive: true });
       const path = join(this.deps.stateDir, SEEN);
-      writeFileSync(`${path}.tmp`, JSON.stringify(out));
-      renameSync(`${path}.tmp`, path);
+      writeAtomic(path, JSON.stringify(out));
     } catch {
       // A cache.
     }

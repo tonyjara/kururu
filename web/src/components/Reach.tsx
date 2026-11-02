@@ -40,7 +40,7 @@
 import { useEffect, useState } from "react";
 import type { Reach as ReachInfo, Sharing } from "../../../shared/wire";
 import { REACH_POLL_MS } from "../../../shared/wire";
-import { qrMatrix } from "../qr";
+import { qrMatrix } from "../../../shared/qr";
 import type { NodeStatus, NodesView } from "../../../shared/nodes";
 import { nodeState } from "../nodes";
 import { useKururu } from "../session";

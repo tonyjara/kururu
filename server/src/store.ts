@@ -81,6 +81,7 @@ import {
   mintProfileKey,
   mintWorkspaceKey,
 } from "../../shared/store";
+import { randomHex } from "../../shared/text";
 
 // ---------------------------------------------------------------------------
 // Where
@@ -407,9 +408,7 @@ function runOf(row: RunRow): CardRun {
 }
 
 function mintBoardId(): string {
-  const bytes = new Uint8Array(6);
-  globalThis.crypto.getRandomValues(bytes);
-  return `b${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+  return `b${randomHex(6)}`;
 }
 
 /** One board's change, as `workspaces.ts` hands it over. `before` is null for a board being made. */

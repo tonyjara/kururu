@@ -23,8 +23,7 @@
  * directory, because this server restarts on every save under `bun run dev`
  * and a budget that reset on each one would be no budget.
  */
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   DAILY_CREDITS_MAX,
@@ -45,6 +44,7 @@ import type { WebCall, WebCapability, WebHealth, WebReadout } from "../../../../
 import { readConfigFile, writeConfigFile } from "../../config";
 import { FirecrawlClient, firecrawlTimeout } from "../firecrawlapi";
 import { registerWebProvider, type ProviderDeps, type ProviderView, type RunContext, type StepAnswer, type WebProvider } from "../provider";
+import { stateDir, writeAtomic } from "../../fsutil";
 
 const ID = "firecrawl-cloud";
 const LABEL = "Cloud Firecrawl";
@@ -71,9 +71,6 @@ const AFTER_CALL_MS = 5_000;
 /** The test page: tiny, stable, and nobody's business. */
 const TEST_URL = "https://example.com/";
 
-function stateDir(): string {
-  return process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
-}
 
 interface Stored {
   apiKey?: unknown;
@@ -105,8 +102,7 @@ function writeDay(day: FirecrawlDay | null): void {
   const path = join(stateDir(), USAGE_FILE);
   try {
     mkdirSync(stateDir(), { recursive: true });
-    writeFileSync(`${path}.tmp`, `${JSON.stringify({ day }, null, 2)}\n`, "utf8");
-    renameSync(`${path}.tmp`, path);
+    writeAtomic(path, `${JSON.stringify({ day }, null, 2)}\n`);
   } catch {
     // The count is still right in memory; the next start is the one that forgets it.
   }

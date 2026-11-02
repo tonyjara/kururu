@@ -37,6 +37,8 @@ import {
   type LifeWhat,
   type LifecycleReport,
 } from "../../shared/lifecycle";
+import { abbreviateHome } from "../../shared/text";
+import { stateDir } from "./fsutil";
 
 /** How many lines the About page is sent. Enough to see the last restart and what came before it. */
 const REPORT_EVENTS = 12;
@@ -45,10 +47,6 @@ const SUPERVISOR_CHECK_MS = 5_000;
 /** How much of `ptyhost.log` to read: its own lines are short and few, and a stack fits. */
 const HOST_LOG_TAIL = 16 * 1024;
 
-/** Beside `session.json`, by the rule `persist.ts` uses, so an isolated instance keeps its own record. */
-function stateDir(): string {
-  return process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
-}
 
 export function lifecyclePath(): string {
   return join(stateDir(), LIFECYCLE_FILE);
@@ -190,7 +188,7 @@ export function recentLife(count: number): LifeEvent[] {
 export function lifecycleReport(): LifecycleReport {
   const home = homedir();
   const file = lifecyclePath();
-  return { ...lifeNow(), events: recentLife(REPORT_EVENTS), file: file.startsWith(home) ? `~${file.slice(home.length)}` : file };
+  return { ...lifeNow(), events: recentLife(REPORT_EVENTS), file: abbreviateHome(file, home) };
 }
 
 // ---------------------------------------------------------------------------

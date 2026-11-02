@@ -53,6 +53,7 @@
  * both halves import.
  */
 import { AGENT_CLIS, type AgentCli } from "./launchers";
+import { shq } from "./text";
 
 /** One machine as the user entered it. Kept in `~/.config/kururu/vps.json`. */
 export interface MachineEntry {
@@ -530,10 +531,6 @@ export const LOOP_SCRIPT = [
 /** What a remote tab's command line starts with, and what `remoteShellOf` looks for. */
 const MARK = "kururu-remote";
 
-/** One argument for a POSIX shell, whatever is in it. */
-function quote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
 
 /** A string as base64, in a way a browser and Node agree on — `Buffer` is the server's only. */
 function base64(text: string): string {
@@ -576,9 +573,9 @@ export function remoteShellCommand(options: { host: string; session?: string; di
     const dir = validRemoteDir(options.dir ?? "~");
     if (dir === null) throw new Error(`not a folder kururu will put in a command line: ${String(options.dir)}`);
     const run = options.run ? base64(options.run) : "";
-    remote = `exec sh -c ${quote(REMOTE_SCRIPT)} kururu ${quote(session)} ${quote(dir)} ${quote(run)}${agent ? ` ${agent}` : ""}`;
+    remote = `exec sh -c ${shq(REMOTE_SCRIPT)} kururu ${shq(session)} ${shq(dir)} ${shq(run)}${agent ? ` ${agent}` : ""}`;
   }
-  return `exec /bin/sh -c ${quote(LOOP_SCRIPT)} ${MARK} ${quote(host)} ${quote(session ?? "")} ${quote(remote)}${agent ? ` ${quote(agent)}` : ""}`;
+  return `exec /bin/sh -c ${shq(LOOP_SCRIPT)} ${MARK} ${shq(host)} ${shq(session ?? "")} ${shq(remote)}${agent ? ` ${shq(agent)}` : ""}`;
 }
 
 /**
@@ -597,7 +594,7 @@ export function remoteShellCommand(options: { host: string; session?: string; di
  */
 export function remoteAgentRun(cli: AgentCli, command: string, where: string): string {
   if (!AGENT_CLIS.includes(cli)) throw new Error(`not an agent kururu starts: ${String(cli)}`);
-  return `sh -c ${quote(AGENT_CHECK)} kururu ${cli} ${quote(checkName(where))} && ${command.replace(/\t/g, "  ")}`;
+  return `sh -c ${shq(AGENT_CHECK)} kururu ${cli} ${shq(checkName(where))} && ${command.replace(/\t/g, "  ")}`;
 }
 
 /** What a check typed on a machine calls it: its name, cut to characters no shell quotes. */

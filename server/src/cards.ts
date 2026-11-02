@@ -49,7 +49,7 @@ import {
 import type { Actor } from "../../shared/store";
 import { host, launch, overlay, projects, state, workspaces } from "./context";
 import { web } from "./sweeps";
-import { shellQuote } from "./editors";
+
 import { repoFor } from "./repostatus";
 import { claudeDirOf } from "./lending";
 import { agentCommandFor, agentOn, cwdForPaneIn, hooksFor, killAll, kururuMcpOnly, noteLaunch, openTerminal, openTerminalAt, pinOf } from "./terminals";
@@ -67,6 +67,7 @@ import {
   worktreePresent,
   worktreeStatus,
 } from "./worktree";
+import { shq } from "../../shared/text";
 
 /**
  * A member's Needs drawer asking for one of this node's cards to go to Done
@@ -234,7 +235,7 @@ export async function runCardAt(
    * started into a checkout the setup gave up on.
    */
   if (checkout?.fresh && checkout.setup) {
-    command = `${checkout.setup} && ${ready ? `touch ${shellQuote(ready)} && ` : ""}${command}`;
+    command = `${checkout.setup} && ${ready ? `touch ${shq(ready)} && ` : ""}${command}`;
   }
   /*
    * The server's terminal is opened before the agent's, so that when both land

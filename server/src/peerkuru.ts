@@ -38,7 +38,7 @@
  * On the restartable side, with nothing near a pty.
  */
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { cleanText, peerReplySpoken, peerWords, readPeerMark, type TurnOrigin } from "../../shared/channels";
@@ -48,6 +48,7 @@ import { asBoard, asBoardDone, asKuruTurns, asReplied, asSay, asSayState, isNode
 import { VOICE_PREFIX } from "../../shared/store";
 import type { OutboxEntry, StoredMissed } from "../../shared/voice";
 import type { McpResult } from "./mcp";
+import { writeAtomic } from "./fsutil";
 
 /** How long `ask_kuru` waits for the other node to say it has the message. A node on the tailnet answers in milliseconds or is not there. */
 const TAKEN_MS = 10_000;
@@ -485,8 +486,7 @@ export class PeerKurus {
     try {
       mkdirSync(this.deps.stateDir, { recursive: true });
       const path = join(this.deps.stateDir, CACHE);
-      writeFileSync(`${path}.tmp`, JSON.stringify(out));
-      renameSync(`${path}.tmp`, path);
+      writeAtomic(path, JSON.stringify(out));
     } catch {
       // A cache.
     }

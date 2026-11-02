@@ -243,7 +243,7 @@ class Runner extends EventEmitter {
     const checkout = this.effectiveCheckout();
     if (!checkout) return "running from this app";
     const home = homedir();
-    const shown = checkout.startsWith(home) ? `~${checkout.slice(home.length)}` : checkout;
+    const shown = checkout === home ? "~" : checkout.startsWith(`${home}/`) ? `~${checkout.slice(home.length)}` : checkout;
     return `running from ${shown}, watching`;
   }
 

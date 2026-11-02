@@ -34,9 +34,10 @@
  * path in it moves when the server does and the write is a few hundred bytes.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { shq } from "../../shared/text";
+import { stateDir } from "./fsutil";
 
 /** Claude Code's event, and the status `report-cli.ts` is told for it. */
 const EVENTS: [event: string, status: string | null][] = [
@@ -96,14 +97,10 @@ export function asksNothing(payload: Record<string, unknown> | null): boolean {
   return payload.message === IDLE_MESSAGE;
 }
 
-/** Single-quoted for `sh`, which is what runs a hook's command. */
-function quote(value: string): string {
-  return `'${value.replaceAll("'", `'\\''`)}'`;
-}
 
 /** The settings layered over a Claude Code launch. Pure, for the test. */
 export function hookSettings(runtime: string, script: string): object {
-  const base = `ELECTRON_RUN_AS_NODE=1 ${quote(runtime)} ${quote(script)}`;
+  const base = `ELECTRON_RUN_AS_NODE=1 ${shq(runtime)} ${shq(script)}`;
   const hooks: Record<string, unknown> = {};
   for (const [event, status] of EVENTS) {
     const command = `${status ? `${base} ${status}` : base} >/dev/null 2>&1 || true`;
@@ -120,7 +117,7 @@ export function hookSettings(runtime: string, script: string): object {
 export function hookSettingsFile(): string | null {
   const script = reportScript();
   if (!existsSync(script)) return null;
-  const dir = process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu");
+  const dir = stateDir();
   const path = join(dir, "claude-hooks.json");
   try {
     mkdirSync(dir, { recursive: true });
@@ -176,7 +173,7 @@ export function runsReporter(settings: unknown, script: string): boolean {
 export function hookSettingsFlag(claudeDir: string): string {
   if (runsOwnReporter(claudeDir)) return "";
   const file = hookSettingsFile();
-  return file ? ` --settings ${quote(file)}` : "";
+  return file ? ` --settings ${shq(file)}` : "";
 }
 
 /**

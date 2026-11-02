@@ -21,7 +21,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { isEnvFile } from "../../shared/databases";
 import type { EnvLend, EnvValue } from "../../shared/secrets";
@@ -57,6 +57,7 @@ import {
   type SshValue,
 } from "../../shared/vault";
 import { judgeFolder } from "./move";
+import { inside, writeAtomic } from "./fsutil";
 
 /** How long `gh auth token` may take before the token is taken to be unreadable. */
 const GH_TIMEOUT_MS = 10_000;
@@ -83,14 +84,9 @@ export function stampOf(path: string): string {
   }
 }
 
-const inside = (path: string, root: string) => path === root || path.startsWith(`${root}/`);
-
 /** Write a file `0600` beside itself and rename it in, so a reader never sees half of it. */
 function writePrivate(path: string, text: string): void {
-  const temp = `${path}.kururu-tmp`;
-  writeFileSync(temp, text, { mode: 0o600 });
-  chmodSync(temp, 0o600);
-  renameSync(temp, path);
+  writeAtomic(path, text, { mode: 0o600, suffix: ".kururu-tmp" });
 }
 
 // ---------------------------------------------------------------------------
@@ -131,7 +127,7 @@ export function findEnvFiles(root: string): string[] {
 function envSourcePath(lend: EnvLend): string | null {
   const path = join(lend.from, lend.file);
   try {
-    if (!inside(realpathSync(path), realpathSync(lend.from))) return null;
+    if (!inside(realpathSync(lend.from), realpathSync(path))) return null;
   } catch {
     return null;
   }
@@ -177,7 +173,7 @@ export function placeEnv(value: EnvValue, home: string, ours: (path: string) => 
   } catch {
     throw new Error(`the checkout has no ${relative(folder, parent)} folder`);
   }
-  if (!inside(realParent, realpathSync(folder))) throw new Error(`${relative(folder, parent)} leads out of the checkout`);
+  if (!inside(realpathSync(folder), realParent)) throw new Error(`${relative(folder, parent)} leads out of the checkout`);
   const target = join(realParent, value.file.split("/").pop()!);
   let info: ReturnType<typeof lstatSync> | null = null;
   try {
@@ -292,10 +288,7 @@ function rewriteConfig(home: string, change: (text: string) => string): void {
   else if (!after.trim()) rmSync(path, { force: true });
   else {
     const mode = existsSync(path) ? statSync(path).mode & 0o777 : 0o600;
-    const temp = `${path}.kururu-tmp`;
-    writeFileSync(temp, after, { mode });
-    chmodSync(temp, mode);
-    renameSync(temp, path);
+    writeAtomic(path, after, { mode, suffix: ".kururu-tmp" });
   }
 }
 

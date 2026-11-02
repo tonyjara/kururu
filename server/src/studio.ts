@@ -41,12 +41,13 @@
  * the ways the validator will name when the pull request is opened.
  */
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { BASE_ICONS, ICON_NAMES, isStyleId, skinFor, type IconName, type Skin, type SkinTokens } from "../../shared/skin";
 import { isAssetName, isVersion, STYLES_SCHEMA, type InstalledStyle, type StyleLibrary } from "../../shared/styles";
 import { entryDir, measureImage, PNG_MAGIC, readRecords, writeRecords } from "./styles";
+import { writeAtomic } from "./fsutil";
 
 /** A megabyte, the registry's own cap, so what the studio accepts the registry will too. */
 const FILE_LIMIT = 1024 * 1024;
@@ -149,9 +150,7 @@ function writeManifestFile(id: string, manifest: Record<string, unknown>): boole
   const path = join(localDir(id), "skin.json");
   try {
     mkdirSync(localDir(id), { recursive: true });
-    const temp = `${path}.tmp`;
-    writeFileSync(temp, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-    renameSync(temp, path);
+    writeAtomic(path, `${JSON.stringify(manifest, null, 2)}\n`);
     return true;
   } catch {
     return false;
@@ -337,9 +336,7 @@ export function putLocalAsset(
 
   const path = join(localDir(id), file);
   try {
-    const temp = `${path}.tmp`;
-    writeFileSync(temp, bytes);
-    renameSync(temp, path);
+    writeAtomic(path, bytes);
   } catch {
     return { ok: false, error: "could not write to the skin's directory" };
   }

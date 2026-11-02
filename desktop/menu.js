@@ -348,7 +348,8 @@ function trim(text, max) {
 }
 
 function shortPath(full, home) {
-  return home && full.startsWith(home) ? `~${full.slice(home.length)}` : full;
+  if (!home) return full;
+  return full === home ? "~" : full.startsWith(`${home}/`) ? `~${full.slice(home.length)}` : full;
 }
 
 /**
