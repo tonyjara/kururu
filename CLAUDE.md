@@ -285,21 +285,12 @@ The load-bearing invariants, one line each, with the argument behind the link:
   qualified one; a session one road has read, the other leaves alone. →
   [data](docs/data.md#other-computers)
 - **The OpenRouter key is one of the credentials kururu stores — a
-  channel's bot token, the web providers' keys and the Anthropic Admin key,
-  below, are the others —
+  channel's bot token and the web providers' keys, below, are the others —
   and it only comes in, or goes out sealed to a node it is lent to.** A
   management key, pasted once in Settings, kept 0600 in
   `~/.config/kururu/openrouter.json`, read per fetch and used for GETs only.
   A client is sent its `hint` and dollars, never the key. →
   `shared/openrouter.ts`
-- **The Anthropic API credit is an estimate, and says so.** Anthropic has no
-  balance endpoint; the chip is a balance the user read off the Console less
-  what has gone since — Anthropic's cost report with an Admin key, or else
-  OpenRouter's BYOK totals off the management key it already has — counted
-  only from baselines taken when the balance was set. The Admin key is kept
-  on the OpenRouter key's terms in `~/.config/kururu/anthropic.json`, GETs to
-  the cost report only, and is never lent to a node (`NEVER_SHARED`): it can
-  run the whole organisation. → `shared/anthropiccredit.ts`
 - **The web is lent to agents through a chain, never a key.** Every agent
   kururu starts on this Mac — the + menu, a card's robot, the harness and
   its `start_agent`, a card picked back up — gets four MCP tools served at

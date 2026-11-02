@@ -151,7 +151,7 @@ describe("the page, off a scratch home", () => {
     home,
     configDir: config,
     role: "parent",
-    hints: { openrouter: keyHint(OPENROUTER), telegram: null, anthropic: null, web: [{ id: "firecrawl-cloud", label: "Firecrawl", hint: null }] },
+    hints: { openrouter: keyHint(OPENROUTER), telegram: null, web: [{ id: "firecrawl-cloud", label: "Firecrawl", hint: null }] },
     secrets: { ...EMPTY_SECRETS, lends: [{ login: "machine", account: "someone@example.com", hint: "…tokn", at: 1_700_000_000_000 }] },
     workspaces: [
       { id: "w1", name: "storefront", profile: "Work", root: join(home, "code", "storefront"), pinned: null },
@@ -182,8 +182,6 @@ describe("the page, off a scratch home", () => {
     expect(keys.find((k) => k.id === "telegram.json")).toMatchObject({ set: false, hint: null, changed: null, kind: "telegram" });
     expect(keys.find((k) => k.id === "firecrawl.json")).toMatchObject({ label: "Firecrawl key", set: false, kind: "firecrawl-cloud", page: "web" });
     expect(keys.find((k) => k.id === "claude-token:machine")).toMatchObject({ set: true, hint: "…tokn · someone@example.com", kind: "claude-token:machine" });
-    // The Admin key is listed whether or not it is set; the records that never leave only once they exist.
-    expect(keys.find((k) => k.id === "anthropic.json")).toMatchObject({ set: false, kind: null, never: expect.stringContaining("Admin key") });
     expect(keys.find((k) => k.id === "node.json")).toMatchObject({ label: "This node's keys", set: true, hint: null, kind: null });
     expect(keys.find((k) => k.id === "access.json")).toMatchObject({ label: "Share token", page: null });
     expect(keys.find((k) => k.id === "grants.json")).toBeUndefined();

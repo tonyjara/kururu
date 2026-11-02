@@ -700,7 +700,7 @@ directory and each `~/.config/vercel-<name>`, by team).
 The page is told names, counts, places, times and hints, never a value, not
 even masked. Nothing is read for it that kururu would not read anyway: a
 key's hint is the one its module already holds (`openRouterSnapshot`, the
-Telegram status, the web providers' fields, the credit's `adminHint`); a
+Telegram status and the web providers' fields); a
 private key, a gh token, a Codex login and a Vercel login are listed by their
 files being there; an env file is read through `readEnvSource` and only its
 names kept; Vercel's `config.json` is read for its team and `auth.json`

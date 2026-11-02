@@ -42,7 +42,6 @@
 import type { ReactNode } from "react";
 import { countsAsAgent, type AgentSnapshot } from "../../../shared/model";
 import { MachinesChip } from "./Machines";
-import { AnthropicCreditChip } from "./AnthropicCredit";
 import { OpenRouterChip } from "./OpenRouter";
 import { UsageChips } from "./Usage";
 import { useKururu } from "../session";

@@ -43,15 +43,6 @@ export interface OpenRouterReading {
    * mid-month takes its spend with it; OpenRouter does not keep it per key.
    */
   spend: OpenRouterSpend | null;
-  /**
-   * What every key on the account spent of *other* providers' credit through
-   * OpenRouter — bring-your-own-key, where OpenRouter's own cost is nothing
-   * and the provider bills the key it was lent. Null when the key list could
-   * not be read, or when any key on it did not say: a sum with a key missing
-   * undercounts, and `shared/anthropiccredit.ts` subtracts this from a
-   * balance, where an undercount is a balance drawn as more than is there.
-   */
-  byok: OpenRouterByok | null;
 }
 
 export interface OpenRouterSpend {
@@ -60,16 +51,8 @@ export interface OpenRouterSpend {
   month: number;
 }
 
-/** BYOK spend over the key's life, beside the same three windows. */
-export interface OpenRouterByok extends OpenRouterSpend {
-  total: number;
-}
 
-/**
- * The part of a reading a balance and its pace are worked out from — a
- * reading itself, or `shared/anthropiccredit.ts`'s estimate, which is a
- * starting balance in `credits` and what has gone since in `used`.
- */
+/** The part of a reading a balance and its pace are worked out from. */
 export type Ledger = Pick<OpenRouterReading, "credits" | "used" | "spend">;
 
 /**
@@ -143,35 +126,6 @@ export function keyPageFrom(body: unknown): OpenRouterSpend[] | null {
     out.push({ day, week, month });
   }
   return out;
-}
-
-/**
- * One page of `/keys` as each key's BYOK totals, or null when the page is not
- * a list or any key on it lacks one of the four. Stricter than
- * `keyPageFrom`, which skips such a key: that figure is a breakdown, and
- * this one is subtracted from a balance.
- */
-export function byokPageFrom(body: unknown): OpenRouterByok[] | null {
-  const data = (body as { data?: unknown } | null)?.data;
-  if (!Array.isArray(data)) return null;
-  const out: OpenRouterByok[] = [];
-  for (const item of data) {
-    const row = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
-    const total = dollars(row.byok_usage);
-    const day = dollars(row.byok_usage_daily);
-    const week = dollars(row.byok_usage_weekly);
-    const month = dollars(row.byok_usage_monthly);
-    if (total === null || day === null || week === null || month === null) return null;
-    out.push({ total, day, week, month });
-  }
-  return out;
-}
-
-export function sumByok(rows: OpenRouterByok[]): OpenRouterByok {
-  return rows.reduce(
-    (a, b) => ({ total: a.total + b.total, day: a.day + b.day, week: a.week + b.week, month: a.month + b.month }),
-    { total: 0, day: 0, week: 0, month: 0 },
-  );
 }
 
 export function sumSpend(rows: OpenRouterSpend[]): OpenRouterSpend {

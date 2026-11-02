@@ -369,8 +369,6 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
       return <WebPage />;
     case "openrouter":
       return <OpenRouterPage />;
-    case "anthropic":
-      return <AnthropicCreditPage />;
     case "backups":
       return <BackupsPage />;
     case "notify":
@@ -390,7 +388,7 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
  * glance at whether Telegram is listening, and this is.
  */
 function usePill(tab: Tab): { text: string; tone: Tone } | null {
-  const { channels, web, openrouter, credit, backup, nodes, secrets } = useKururu();
+  const { channels, web, openrouter, backup, nodes, secrets } = useKururu();
   switch (tab) {
     case "nodes": {
       if (!nodes) return null;
@@ -422,10 +420,6 @@ function usePill(tab: Tab): { text: string; tone: Tone } | null {
       if (!openrouter) return null;
       if (openrouter.error) return { text: "Error", tone: "bad" };
       return openrouter.reading ? { text: "Connected", tone: "ok" } : { text: "Connecting", tone: "busy" };
-    case "anthropic":
-      if (!credit?.anchor) return credit?.adminHint || credit?.byokSeen ? { text: "Not set up", tone: "off" } : null;
-      if (credit.error) return { text: "Error", tone: "bad" };
-      return credit.reading ? { text: "Counting", tone: "ok" } : { text: "Connecting", tone: "busy" };
     case "backups":
       if (!backup?.settings.url) return null;
       if (backup.error) return { text: "Error", tone: "bad" };

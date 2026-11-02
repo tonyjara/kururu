@@ -35,7 +35,7 @@ import { grantText, kindOf, type GrantView, type SecretsView } from "./secrets";
 // ---------------------------------------------------------------------------
 
 /** The Settings pages a key is set on. Named here because `shared/` cannot see the web's list; the page checks they are its own. */
-export type VaultPage = "openrouter" | "channels" | "web" | "anthropic" | "agents" | "nodes";
+export type VaultPage = "openrouter" | "channels" | "web" | "agents" | "nodes";
 
 /** One of kururu's own keys, or a file of kururu's that holds one. */
 export interface VaultKey {
@@ -143,7 +143,6 @@ export const NEVER_LABELS: Readonly<Record<string, string>> = {
   "nodes.json": "The roster",
   "grants.json": "What each node was lent",
   "secrets-held.json": "What this node holds",
-  "anthropic.json": "Anthropic Admin key",
 };
 
 // ---------------------------------------------------------------------------

@@ -27,7 +27,6 @@ import { findEnvFiles, ghAccountsHere, hostsMentioned, readEnvSource, remoteOwne
 export interface VaultHints {
   openrouter: string | null;
   telegram: string | null;
-  anthropic: string | null;
   /** The web providers that keep a key, with the hint their page draws for it. */
   web: { id: string; label: string; hint: string | null }[];
 }
@@ -80,7 +79,6 @@ function keys(deps: VaultDeps): VaultKey[] {
     lent("openrouter", "OpenRouter management key", deps.hints.openrouter, "openrouter"),
     lent("telegram", "Telegram bot token", deps.hints.telegram, "channels"),
     ...deps.hints.web.map((p) => lent(webKind(p.id), `${p.label} key`, p.hint, "web")),
-    { id: "anthropic.json", label: "Anthropic Admin key", set: deps.hints.anthropic !== null, hint: deps.hints.anthropic, where: where("anthropic.json"), changed: changed("anthropic.json"), page: "anthropic", kind: null, never: never("anthropic.json"), heldFrom: null },
   ];
 
   // One file, a token per Mac login; a row per token, or one saying there is none.
