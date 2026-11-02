@@ -240,7 +240,12 @@ with it the only record of what that session spent, so the ledger keeps the
 numbers and leaves the words: one row per billed API message (`messages`), a
 rollup per local day and key that a page can draw (`daily`), what Claude Code
 itself says a session spent (`session_totals`), and whose each session was
-(`sessions`). No column can hold a sentence, and
+(`sessions`). `daily` and `session_days` are kept as messages are written —
+each upserted row read before and after, the difference added in the same
+transaction — and a whole day is rebuilt only for a session that changed
+whose it was, or a node's numbers replaced: rebuilding every touched day on
+every pass was ~15–20 ms of the server's thread every few seconds on a busy
+day, and adding is ~0.3 ms. No column can hold a sentence, and
 `server/test/usageledger.test.ts` writes a transcript through it and fails if a
 marked word comes out, on any table or in the raw file.
 

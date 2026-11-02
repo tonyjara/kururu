@@ -15,11 +15,15 @@
  * full of a marked word through it and fails if the word comes out.
  *
  * **`daily` is what a page draws**, O(days × keys) however many messages are
- * behind it. It is rebuilt for each day a batch touched, in the transaction
- * that wrote the batch, so the two tables cannot be seen to disagree and a
- * crash between them does not exist. Whole days rather than the touched keys
- * because a day is a few thousand rows and a few milliseconds, and because a
- * session that changes attribution moves between keys without any new row.
+ * behind it. It is kept in the transaction that wrote the batch, so the two
+ * tables cannot be seen to disagree and a crash between them does not exist.
+ * A message is added to its cell as it is written — its row read before and
+ * after the upsert, the difference added — because rebuilding each day a
+ * batch touched cost a busy day's thousands of messages every pass, every
+ * few seconds, on the server's one thread (the 2026-11-02 review, §2.4). A
+ * whole day is still rebuilt where adding cannot be right: a session that
+ * changed attribution moves its old messages between keys with no new row,
+ * and what a node said is replaced, never added to.
  * The empty string stands for "none" in its keys, since SQLite treats two
  * NULLs in a primary key as different and the conflict would never fire.
  *
@@ -263,6 +267,37 @@ export class LedgerBatch {
 
 type Row = Record<string, unknown>;
 
+/** The rollups' number columns, in the order `MessageCell.sums` holds them. */
+const SUM_COLUMNS = ["messages", "input", "cache_write_5m", "cache_write_1h", "cache_read", "output", "thinking", "cost_est", "unpriced"] as const;
+
+interface MessageCell {
+  day: string;
+  sessionId: string;
+  model: string;
+  /** `daily`'s keys but the day and the model — profile, workspace, card, kind, program, node — or null for a session `sessions` has no row for. */
+  keys: string[] | null;
+  sums: number[];
+}
+
+/** What one batch moved, by `daily` cell and by `session_days` cell, before it is added in. */
+class CellMoves {
+  readonly daily = new Map<string, { day: string; keys: string[]; model: string; sums: number[] }>();
+  readonly sessions = new Map<string, { day: string; sessionId: string; model: string; sums: number[] }>();
+
+  add(cell: MessageCell, sign: 1 | -1): void {
+    if (cell.keys) {
+      const key = JSON.stringify([cell.day, cell.model, ...cell.keys]);
+      let held = this.daily.get(key);
+      if (!held) this.daily.set(key, (held = { day: cell.day, keys: cell.keys, model: cell.model, sums: SUM_COLUMNS.map(() => 0) }));
+      for (let i = 0; i < held.sums.length; i++) held.sums[i]! += sign * cell.sums[i]!;
+    }
+    const key = JSON.stringify([cell.day, cell.sessionId, cell.model]);
+    let held = this.sessions.get(key);
+    if (!held) this.sessions.set(key, (held = { day: cell.day, sessionId: cell.sessionId, model: cell.model, sums: SUM_COLUMNS.map(() => 0) }));
+    for (let i = 0; i < held.sums.length; i++) held.sums[i]! += sign * cell.sums[i]!;
+  }
+}
+
 export class Ledger {
   private readonly statements = new Map<string, StatementSync>();
 
@@ -292,6 +327,11 @@ export class Ledger {
     db.exec("pragma journal_mode = wal");
     // A row lost to a power cut is read again from its offset, so a commit is not worth an fsync.
     db.exec("pragma synchronous = normal");
+    // 16 MB rather than the default 2: the rebuilds that remain, the Usage
+    // page's reads and a reattribution walk `messages_at`, which the default
+    // thrashed on a busy day (the 2026-11-02 review, §2.4). A cap, not an
+    // allocation — pages are cached as they are read.
+    db.exec("pragma cache_size = -16384");
     const ledger = new Ledger(path, db);
     ledger.migrate();
     return ledger;
@@ -388,25 +428,103 @@ export class Ledger {
   flush(batch: LedgerBatch, facts: AttributionFacts, at = Date.now()): void {
     if (!batch.size) return;
     this.tx(() => {
+      // The days rebuilt whole, and the sessions whose messages go to them.
       const days = new Set<string>();
-      for (const session of batch.sessions.values()) this.writeSession(session, facts, days);
+      const rekeyed = new Set<string>();
+      for (const session of batch.sessions.values()) if (this.writeSession(session, facts, days)) rekeyed.add(session.id);
+      const moved = new CellMoves();
       for (const row of batch.messages.values()) {
-        days.add(dayOf(row.at));
+        const before = this.cellOf(row.sessionId, row.messageId);
         this.writeMessage(row);
+        if (rekeyed.has(row.sessionId)) {
+          days.add(dayOf(row.at));
+          if (before) days.add(before.day);
+          continue;
+        }
+        if (before) moved.add(before, -1);
+        moved.add(this.cellOf(row.sessionId, row.messageId)!, 1);
       }
       for (const row of batch.totals.values()) this.writeTotals(row);
       for (const row of batch.limits.values()) this.writeLimit(row);
       for (const file of batch.files.values()) this.writeFile(file, at);
       this.writeSkipped(batch.skipped, at);
       for (const day of days) this.rollup(day);
+      this.addMoves(moved, days);
     });
   }
 
-  private writeSession(session: SessionSighting, facts: AttributionFacts, days: Set<string>): void {
+  /**
+   * One message as the rollups count it: the day and keys of its cells, and
+   * its numbers. The session's keys are null when it has no row in
+   * `sessions`, which `daily` does not count and `session_days` does.
+   */
+  private cellOf(sessionId: string, messageId: string): MessageCell | null {
+    const row = this.stmt(
+      `select m.at, m.model, m.input, m.cache_write_5m, m.cache_write_1h, m.cache_read, m.output, m.thinking, m.cost_est,
+         s.id is not null as known, coalesce(s.profile_key, '') as profile_key, coalesce(s.workspace_key, '') as workspace_key,
+         coalesce(s.card_id, '') as card_id, s.kind, s.program, coalesce(s.node, '') as node
+       from messages m left join sessions s on s.id = m.session_id
+       where m.session_id = ? and m.message_id = ?`,
+    ).get(sessionId, messageId) as Row | undefined;
+    if (!row) return null;
+    const cost = row.cost_est as number | null;
+    return {
+      day: dayOf(row.at as number),
+      sessionId,
+      model: row.model as string,
+      keys: row.known ? [row.profile_key, row.workspace_key, row.card_id, row.kind, row.program, row.node].map(String) : null,
+      sums: [
+        1,
+        row.input as number,
+        row.cache_write_5m as number,
+        row.cache_write_1h as number,
+        row.cache_read as number,
+        row.output as number,
+        row.thinking as number,
+        cost ?? 0,
+        cost === null ? 1 : 0,
+      ],
+    };
+  }
+
+  /**
+   * What a batch added, into `daily` and `session_days`, except on the days
+   * rebuilt whole, which already have it. A cell left with no messages goes,
+   * as a rebuild would not have made it.
+   */
+  private addMoves(moved: CellMoves, rebuilt: ReadonlySet<string>): void {
+    const sets = SUM_COLUMNS.map((c) => `${c} = %t.${c} + excluded.${c}`).join(", ");
+    const values = SUM_COLUMNS.map(() => "?").join(", ");
+    for (const { day, keys, model, sums } of moved.daily.values()) {
+      if (rebuilt.has(day) || sums.every((n) => n === 0)) continue;
+      const pk = [day, ...keys.slice(0, 3), keys[3]!, keys[4]!, model, keys[5]!];
+      this.stmt(
+        `insert into daily(day, profile_key, workspace_key, card_id, kind, program, model, node, ${SUM_COLUMNS.join(", ")})
+         values (?, ?, ?, ?, ?, ?, ?, ?, ${values})
+         on conflict(day, profile_key, workspace_key, card_id, kind, program, model, node) do update set ${sets.replaceAll("%t", "daily")}`,
+      ).run(...pk, ...sums);
+      this.stmt(
+        `delete from daily where day = ? and profile_key = ? and workspace_key = ? and card_id = ? and kind = ? and program = ? and model = ? and node = ?
+           and messages <= 0`,
+      ).run(...pk);
+    }
+    for (const { day, sessionId, model, sums } of moved.sessions.values()) {
+      if (rebuilt.has(day) || sums.every((n) => n === 0)) continue;
+      this.stmt(
+        `insert into session_days(day, session_id, model, ${SUM_COLUMNS.join(", ")}) values (?, ?, ?, ${values})
+         on conflict(day, session_id, model) do update set ${sets.replaceAll("%t", "session_days")}`,
+      ).run(day, sessionId, model, ...sums);
+      this.stmt("delete from session_days where day = ? and session_id = ? and model = ? and messages <= 0").run(day, sessionId, model);
+    }
+  }
+
+  /** Writes the session's row, and says whether its messages are counted under other keys now — or under none before — which only a rebuild can move. */
+  private writeSession(session: SessionSighting, facts: AttributionFacts, days: Set<string>): boolean {
     const read = attributionFor(session.id, session.seen, facts);
     const held = this.attributionOf(session.id);
     const attribution = held ? strongerAttribution(held, read) : read;
-    if (held && !sameRollupKeys(held, attribution)) this.addDaysOf(session.id, days);
+    const rekeyed = !held || !sameRollupKeys(held, attribution);
+    if (rekeyed) this.addDaysOf(session.id, days);
     this.stmt(
       `insert into sessions(id, program, profile_key, login_dir, cwd, project_dir, workspace_key, card_id, run_id, agent_id, kind,
          machine, started_at, last_at, parent_session, version, attributed_by)
@@ -440,6 +558,7 @@ export class Ledger {
       session.version,
       attribution.attributedBy,
     );
+    return rekeyed;
   }
 
   private attributionOf(id: string): Attribution | null {
