@@ -167,7 +167,10 @@ import { closeDatabasePools, dbCatalog, dbQuery, dbRows, scanDatabases, type Dat
 import { allowedRoots, allowRoot, findDocs, listDir, listDirs, readBytes, readFile, resolveInRoot } from "./files";
 import { parseFileOp, runFileOp } from "./fileops";
 import { renderMarkdown } from "./markdown";
-import { scanMemory } from "./memory";
+import { measureMemory } from "./memory";
+import { delivery, liveness, PING_MS, SNAPSHOT_HOLD } from "./backpressure";
+import { Gap } from "./gap";
+import { readProcRows, type ProcRows } from "./proctable";
 import {
   childIndex as footChildren,
   findNvims,
@@ -345,7 +348,7 @@ import {
   watchSupervisor,
 } from "./lifecycle";
 import { MouseEncoding } from "./mouseencoding";
-import { adoptReaders, readSnapshot, snapshotPath, writeSnapshot } from "./persist";
+import { adoptReaders, hostBlob, readSnapshot, snapshotPath, writeSnapshot } from "./persist";
 import { closeAllPreviews, closePreview, openPreview, openPreviews } from "./proxy";
 import { reach } from "./reach";
 import { smallestGrid, type Grid } from "./sizing";
@@ -510,6 +513,17 @@ interface ClientState {
    * the setup wizard waits for. See `docs/plans/remote-workspaces.md`.
    */
   watcher: string | null;
+  /**
+   * Whether anything has come back on this socket since the last ping: a
+   * pong, or any message. See `checkLiveness`.
+   */
+  heard: boolean;
+  /**
+   * A snapshot this client was owed while it was too far behind to be sent
+   * one, which it gets — the latest, not every one it missed — once its
+   * buffer drains. See `deliver`.
+   */
+  owedSnapshot: boolean;
 }
 
 /**
@@ -653,23 +667,109 @@ const state = {
   databases: [] as WorkspaceDatabase[],
 };
 
-function send(ws: WebSocket, msg: ServerMessage): void {
+/**
+ * One frame out — or held, or the client cut off, by `delivery`
+ * (`backpressure.ts`). Everything to a client goes through here; `send` and
+ * `broadcast` are only the stringifying.
+ */
+function deliver(ws: WebSocket, payload: string, snapshot = false): void {
+  const verdict = delivery(ws.bufferedAmount, snapshot);
+  if (verdict === "cut") {
+    // `terminate`, not `close`: a close handshake would queue behind the
+    // same megabytes. The close event drops the client as any other does.
+    ws.terminate();
+    return;
+  }
+  const st = verdict === "hold" ? clients.get(ws) : undefined;
+  if (st) {
+    st.owedSnapshot = true;
+    holdSnapshots();
+    return;
+  }
   try {
-    ws.send(JSON.stringify(msg));
+    ws.send(payload);
   } catch {
     // client went away mid-send; the close handler will clean up
   }
 }
 
+/**
+ * A snapshot still waiting to go is sent ahead of anything else but output.
+ * The throttle in `pushSnapshot` delays it, and a message that follows a
+ * verb — a notice about an agent, a spawned terminal's answer — must not
+ * reach a window before the snapshot that has the thing it is about.
+ */
+function snapshotFirst(msg: ServerMessage): void {
+  if (snapshots.pending && msg.type !== "output" && msg.type !== "snapshot") snapshots.flush();
+}
+
+function send(ws: WebSocket, msg: ServerMessage): void {
+  snapshotFirst(msg);
+  deliver(ws, JSON.stringify(msg), msg.type === "snapshot");
+}
+
 function broadcast(msg: ServerMessage): void {
+  snapshotFirst(msg);
   const payload = JSON.stringify(msg);
   const watchers = forWatcher(msg);
+  const snapshot = msg.type === "snapshot";
   for (const [ws, st] of clients) {
     if (st.watcher && !watchers) continue;
+    deliver(ws, payload, snapshot);
+  }
+}
+
+/**
+ * The clients owed a snapshot, looked at until each has drained enough to be
+ * sent the current one. A timer only while somebody is owed, since nearly
+ * always nobody is.
+ */
+let snapshotHold: ReturnType<typeof setInterval> | null = null;
+function holdSnapshots(): void {
+  if (snapshotHold) return;
+  snapshotHold = setInterval(releaseSnapshots, 250);
+  snapshotHold.unref?.();
+}
+
+function releaseSnapshots(): void {
+  let payload: string | null = null;
+  let owed = 0;
+  for (const [ws, st] of clients) {
+    if (!st.owedSnapshot) continue;
+    if (ws.bufferedAmount > SNAPSHOT_HOLD) {
+      owed++;
+      continue;
+    }
+    st.owedSnapshot = false;
+    payload ??= JSON.stringify({ type: "snapshot", snapshot: snapshot() } satisfies ServerMessage);
+    deliver(ws, payload);
+  }
+  if (!owed && snapshotHold) {
+    clearInterval(snapshotHold);
+    snapshotHold = null;
+  }
+}
+
+/**
+ * Whether each client is still there (`liveness`, every `PING_MS`). `/ws`
+ * had no liveness at all: a phone that left the tailnet without a FIN stayed
+ * in `clients` until the kernel gave up on it, holding a size vote, a voice
+ * seat and everything sent to it in the meantime. Now it goes thirty to sixty
+ * seconds after it went. A phone that only locked its screen loses its socket
+ * the same way, which iOS takes from a suspended page anyway, and reconnects
+ * when it wakes as it did then.
+ */
+function checkLiveness(): void {
+  for (const [ws, st] of clients) {
+    if (liveness(st.heard) === "drop") {
+      ws.terminate();
+      continue;
+    }
+    st.heard = false;
     try {
-      ws.send(payload);
+      ws.ping();
     } catch {
-      // ditto
+      // Closing already.
     }
   }
 }
@@ -709,18 +809,32 @@ function reloaderOf(agentId: string | null, given: string | null): string {
  * has to avoid sending the same thing twice itself: several things can change in
  * one turn of the event loop (a pty exits, its status settles, its program
  * disappears) and each of them calls onChange.
+ *
+ * And, for what nobody at a window did, at most one per `SNAPSHOT_GAP_MS`
+ * (`gap.ts`). Coalescing within one turn of the loop was not enough, because
+ * the things that change most often arrive as separate requests: every hook
+ * report of every agent — each PreToolUse — is its own `/api/report` and was
+ * its own 1.2 MB snapshot to every client, with ~25 ms of stringify here and a
+ * ~21 ms parse in each window. So a change inside the gap waits for its end
+ * and goes out as the state then is; the first after a quiet spell still goes
+ * at the end of its turn.
+ *
+ * A client's own verb is not held: a split, a tab switch, a divider being
+ * dragged are drawn off the snapshot they cause, and the drag at four frames
+ * a second was the cost of holding them. The message handler flushes at the
+ * end of its turn whatever it pushed (`admitClient`), which is what every
+ * change did before. Boards out of the snapshot is the other half of this
+ * (review item 10); this one only stops the reports multiplying it.
  */
-let snapshotQueued = false;
+const SNAPSHOT_GAP_MS = 250;
+const snapshots = new Gap(SNAPSHOT_GAP_MS, () => {
+  broadcast({ type: "snapshot", snapshot: snapshot() });
+  // Every change a snapshot carries is a change the other nodes' summary
+  // of this one may carry too; `queueSummary` coalesces and compares.
+  nodes?.queueSummary();
+});
 function pushSnapshot(): void {
-  if (snapshotQueued) return;
-  snapshotQueued = true;
-  queueMicrotask(() => {
-    snapshotQueued = false;
-    broadcast({ type: "snapshot", snapshot: snapshot() });
-    // Every change a snapshot carries is a change the other nodes' summary
-    // of this one may carry too; `queueSummary` coalesces and compares.
-    nodes?.queueSummary();
-  });
+  snapshots.push();
 }
 
 /** The nodes view to every client, once per turn of the loop however many things moved. */
@@ -1810,15 +1924,40 @@ function announce(agent: AgentSnapshot, event: NotifyEvent): void {
 /**
  * The layout goes two places, and they are not the same thing.
  *
- * The host gets it *immediately*, whole, agent ids and all — that is what makes
+ * The host gets it within `KEEP_GAP_MS`, agent ids and all — that is what makes
  * restarting this process invisible, and it never touches a disk. The file gets
- * it on a delay and with the processes stripped out, because that copy is for
- * surviving a quit, and dragging a divider changes the layout sixty times a
- * second while none of those are worth a write.
+ * it on a longer delay and with the processes stripped out, because that copy
+ * is for surviving a quit, and dragging a divider changes the layout sixty
+ * times a second while none of those are worth a write.
+ *
+ * Neither carries the boards. They are the database's (`store.ts`), and
+ * `Store.attach` replaces whatever boards a blob brings with the rows, so
+ * every card in the blob was 1.27 MB of a line the host had to parse — on the
+ * thread that flushes every pty — for nothing, once per change, a divider
+ * drag being sixty of those a second, each queued on the one socket ahead of
+ * keystrokes. Without them the blob is the arrangement, it is sent at most
+ * once per gap, and not at all when it is what the host already holds.
  */
+const KEEP_GAP_MS = 100;
+let keepTimer: ReturnType<typeof setTimeout> | null = null;
+let keptBlob: string | null = null;
+
+function keepNow(): void {
+  if (keepTimer) clearTimeout(keepTimer);
+  keepTimer = null;
+  if (!workspaces) return;
+  const blob = hostBlob(workspaces.all(), workspaces.active.id);
+  if (blob === keptBlob) return;
+  keptBlob = blob;
+  host.keep(blob);
+}
+
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 function queueSave(): void {
-  host.keep(JSON.stringify({ profiles: workspaces.all(), activeProfileId: workspaces.active.id }));
+  if (!keepTimer) {
+    keepTimer = setTimeout(keepNow, KEEP_GAP_MS);
+    keepTimer.unref?.();
+  }
   if (saveTimer) return;
   saveTimer = setTimeout(() => {
     saveTimer = null;
@@ -3581,11 +3720,14 @@ function dropClient(ws: WebSocket): void {
 function onOutput(agentId: string, data: string): void {
   recordOutput(agentId, data);
   mouseEncodingOf(agentId).read(data);
+  // Stringified once for every client that gets it, and only if one does:
+  // this is the hottest path in the process.
+  let payload: string | null = null;
   for (const [ws, st] of clients) {
     if (!sees(st, agentId)) continue;
     const pending = st.awaiting.get(agentId);
     if (pending) pending.queued.push(data);
-    else send(ws, { type: "output", agentId, data });
+    else deliver(ws, (payload ??= JSON.stringify({ type: "output", agentId, data } satisfies ServerMessage)));
   }
 }
 
@@ -3671,9 +3813,9 @@ let lastDevJson = "";
 let devScansStarted = 0;
 let devScanShown = 0;
 
-async function pollDevServers(): Promise<void> {
+async function pollDevServers(procs?: ProcRows): Promise<void> {
   const scan = ++devScansStarted;
-  const servers = await scanDevServers({ pid: process.pid, webDir: WEB_SOURCE });
+  const servers = await scanDevServers({ pid: process.pid, webDir: WEB_SOURCE }, procs);
   /**
    * Never an older reading over a newer one. Stopping a server asks for a scan
    * at once, so the row goes when the server does, and a timer scan that began
@@ -4379,18 +4521,6 @@ function shellQuote(value: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * How often memory is measured.
- *
- * Slower than everything else out here on purpose. A process growing raises no
- * event, so this has to be a poll like the other two — but it is the only one
- * whose answer nobody acts on within a second: you look at it when a fan comes
- * on, not while you type. Five seconds is inside the attention span of "which of
- * these is the heavy one" and well outside the rate at which a `ps` is worth
- * running.
- */
-const MEM_SCAN_MS = 5000;
-
-/**
  * Which pids to add up from: every live pty, and deliberately not the filtered
  * set the dev scan walks.
  *
@@ -4418,8 +4548,8 @@ function memRoots(): Array<[string, number]> {
  * agent changes every poll, and a snapshot every five seconds for the life of a
  * session is a lot of bytes to spend redrawing `390 MB` as `390 MB`.
  */
-async function pollMemory(): Promise<void> {
-  const found = await scanMemory(memRoots());
+async function pollMemory(procs: ProcRows): Promise<void> {
+  const found = measureMemory(memRoots(), procs);
   let changed = false;
   for (const [agentId, bytes] of found) {
     if (memory.get(agentId) !== bytes) changed = true;
@@ -4794,20 +4924,63 @@ function webAgentName(agentId: string): string | null {
  * Each goes through `sweep`, which catches and logs, because a rejection here
  * is an unhandled one and Node ends the server over it.
  */
-const sweepDevServers = sweep("dev servers", pollDevServers);
 const sweepBranches = sweep("branches", pollBranches);
+
+/**
+ * The dev-server scan and the memory column, off one `ps` (`proctable.ts`),
+ * on one timer: every `DEV_SCAN_MS` while anybody is connected, and every
+ * `PROC_IDLE_MS` while nobody is — the answers go to windows, and a Mac with
+ * none open was spending its share of a core on a list nobody was shown. A
+ * card's dev server is found within that slower beat even so, and the first
+ * client back is not made to wait for it: `wakeProcesses` reads at once.
+ *
+ * Memory used to be read every five seconds rather than three, as the one
+ * answer nobody acts on within a second; it rides along now because the read
+ * is shared, and a figure that changes only on a 10 MB step costs nothing
+ * extra to look at more often.
+ */
+const PROC_IDLE_MS = 30_000;
+const sweepProcesses = sweep("processes", async () => {
+  const procs = await readProcRows();
+  // Separately caught, so that one failing does not cost the other its turn.
+  await Promise.all([sweep("dev servers", () => pollDevServers(procs))(), sweep("memory", () => pollMemory(procs))()]);
+});
+let procTimer: ReturnType<typeof setTimeout> | null = null;
+let procRunning = false;
+/** Set by `shutdown`, which this cannot read `stopping` for: that is declared below the top-level `await`, and this runs during it. */
+let procHalted = false;
+async function procTick(): Promise<void> {
+  if (procTimer) clearTimeout(procTimer);
+  procTimer = null;
+  if (procRunning) return;
+  procRunning = true;
+  try {
+    await sweepProcesses();
+  } finally {
+    procRunning = false;
+    if (!procHalted) {
+      procTimer = setTimeout(() => void procTick(), clients.size > 0 ? DEV_SCAN_MS : PROC_IDLE_MS);
+      procTimer.unref?.();
+    }
+  }
+}
+
+/** A client arrived to a server that was reading slowly: read now, and at the fast beat from here. */
+function wakeProcesses(): void {
+  if (!procRunning) void procTick();
+}
+
 const timers = [
-  setInterval(sweepDevServers, DEV_SCAN_MS),
   setInterval(sweepBranches, GIT_SCAN_MS),
   setInterval(sweep("editors", pollEditors), NVIM_SCAN_MS),
-  setInterval(sweep("memory", pollMemory), MEM_SCAN_MS),
+  setInterval(checkLiveness, PING_MS),
   setInterval(sweep("usage bar", pollAccountUsage), USAGE_POLL_MS),
   setInterval(sweep("machines", pollServers), MACHINE_POLL_MS),
   setInterval(sweep("OpenRouter", pollOpenRouterAccount), OPENROUTER_POLL_MS),
   setInterval(sweep("made links", sweepMade), MADE_SWEEP_MS),
 ];
 
-void sweepDevServers();
+void procTick();
 void sweepBranches();
 
 // ---------------------------------------------------------------------------
@@ -7752,7 +7925,18 @@ function onRequest(req: IncomingMessage, res: ServerResponse): void {
 const servers = listenAddresses().map(() => createServer(onRequest));
 const server = servers[0]!;
 
-const wss = new WebSocketServer({ noServer: true });
+/**
+ * Compressed, because a snapshot is JSON of every card on every board and
+ * deflates to under a third — 1.2 MB to the phone over the tailnet is the
+ * case it is for. Level 1, since the ratio on text this repetitive barely
+ * moves past it and the cost is per client; and nothing under 4 KB, which
+ * is every keystroke's echo and most output, where deflating would only add
+ * latency. The compressing runs on libuv's pool, off this thread.
+ */
+const wss = new WebSocketServer({
+  noServer: true,
+  perMessageDeflate: { threshold: 4096, zlibDeflateOptions: { level: 1 } },
+});
 
 /**
  * When a client last connected from anywhere but this machine, or null. It is
@@ -7866,8 +8050,23 @@ function admitClient(ws: WebSocket, watcher: string | null): void {
     looking: true,
     awaiting: new Map(),
     watcher,
+    heard: true,
+    owedSnapshot: false,
   });
-  ws.on("message", (data) => handleMessage(ws, data.toString()));
+  const heard = () => {
+    const st = clients.get(ws);
+    if (st) st.heard = true;
+  };
+  ws.on("pong", heard);
+  // The first one in after a quiet spell, when the process table is being
+  // read at the idle beat: read it now rather than up to half a minute on.
+  if (clients.size === 1) wakeProcesses();
+  ws.on("message", (data) => {
+    heard();
+    handleMessage(ws, data.toString());
+    // What a verb changed is drawn at once, gap or no gap: see `pushSnapshot`.
+    if (snapshots.pending) queueMicrotask(() => snapshots.flush());
+  });
   ws.on("close", () => dropClient(ws));
   ws.on("error", () => dropClient(ws));
   send(ws, { type: "snapshot", snapshot: snapshot() });
@@ -8750,7 +8949,11 @@ export function shutdown(): Promise<void> {
   if (stopping) return stopping;
   stopping = (async () => {
     for (const timer of timers) clearInterval(timer);
-    // The arrangement outlives this process either way; flush it while it is whole.
+    procHalted = true;
+    if (procTimer) clearTimeout(procTimer);
+    // The arrangement outlives this process either way; flush it while it is
+    // whole, to the host as well, since a restart is what reads that copy.
+    if (keepTimer) keepNow();
     if (saveTimer) clearTimeout(saveTimer);
     if (workspaces) writeSnapshot(workspaces.all(), workspaces.active.id);
     closeAllPreviews();

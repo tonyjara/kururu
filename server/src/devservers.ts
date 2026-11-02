@@ -216,7 +216,7 @@ const MAX_ANCESTORS = 4;
  */
 export function resolveDevCommand(
   pid: number,
-  table: Map<number, ProcInfo>,
+  table: ReadonlyMap<number, ProcInfo>,
 ): { program: string; command: string; pid: number } | null {
   let current = table.get(pid);
   for (let hop = 0; current && hop <= MAX_ANCESTORS; hop++) {
@@ -229,7 +229,7 @@ export function resolveDevCommand(
 }
 
 /** Every process at or under `root`, root first. */
-function subtree(root: number, table: Map<number, ProcInfo>): number[] {
+function subtree(root: number, table: ReadonlyMap<number, ProcInfo>): number[] {
   const children = new Map<number, number[]>();
   for (const proc of table.values()) {
     const siblings = children.get(proc.ppid);
@@ -278,7 +278,7 @@ function subtree(root: number, table: Map<number, ProcInfo>): number[] {
  */
 export function stopTargets(
   listener: number,
-  table: Map<number, ProcInfo>,
+  table: ReadonlyMap<number, ProcInfo>,
   spare: ReadonlySet<number>,
 ): number[] | null {
   if (!table.has(listener)) return null;
@@ -361,9 +361,13 @@ async function listeners(pid?: number): Promise<Map<number, number[]>> {
  * Every dev server listening right now, lowest port first — ports are what the
  * user recognises ("the one on 5173"), so that is the sort.
  */
-export async function scanDevServers(self: Self): Promise<DevServer[]> {
-  const [listening, psOut] = await Promise.all([listeners(), run(["ps", "-eo", "pid=,ppid=,args="])]);
-  const table = parseProcTable(psOut);
+export async function scanDevServers(self: Self, procs?: ReadonlyMap<number, ProcInfo>): Promise<DevServer[]> {
+  // The table is the caller's when it has one, which the server's poll does:
+  // the same read answers the memory column (`proctable.ts`).
+  const [listening, table] = await Promise.all([
+    listeners(),
+    procs ?? run(["ps", "-eo", "pid=,ppid=,args="]).then(parseProcTable),
+  ]);
 
   const found: DevServer[] = [];
   for (const [pid, ports] of listening) {
@@ -457,7 +461,7 @@ function signal(pids: number[], sig: NodeJS.Signals): { sent: number; denied: nu
 export async function stopDevServer(
   port: number,
   pid: number,
-  spare: (table: Map<number, ProcInfo>) => ReadonlySet<number>,
+  spare: (table: ReadonlyMap<number, ProcInfo>) => ReadonlySet<number>,
 ): Promise<number[]> {
   const [listening, psOut] = await Promise.all([listeners(pid), run(["ps", "-eo", "pid=,ppid=,args="])]);
   if (!listening.get(pid)?.includes(port)) {

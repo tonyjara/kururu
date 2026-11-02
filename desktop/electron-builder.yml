@@ -60,9 +60,13 @@ extraResources:
   - from: dist
     to: server
   # The supervisor, so the app runs the same one `bun run dev` does. Plain
-  # JavaScript with no imports outside node, run on the app's own binary.
+  # JavaScript with no imports outside node, run on the app's own binary —
+  # and its restart policy beside it, which it loads with a fallback, so a
+  # build that left it out still starts and only never restarts a crash.
   - from: ../server/run.mjs
     to: server/run.mjs
+  - from: ../server/restart.mjs
+    to: server/restart.mjs
   - from: ../web/dist
     to: web
   - from: ../assets

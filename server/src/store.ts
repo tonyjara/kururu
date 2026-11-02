@@ -232,6 +232,53 @@ function NEEDS_BY_COLUMN(db: DatabaseSync): void {
 const MIGRATIONS: readonly (string | ((db: DatabaseSync) => void))[] = [SCHEMA, unwrapPastedTurns, MADE_COLUMN, WIDTHS_COLUMN, NEEDS_BY_COLUMN];
 
 /**
+ * What every build from this one on keeps true of the database, whatever its
+ * version, applied on every open rather than as a step of `MIGRATIONS`.
+ *
+ * Both are things an older build cannot tell are there: an index it never
+ * names, and a trigger that does what it did with less work. A numbered step
+ * would have stepped `user_version` past what the installed app knows, and
+ * that app's server refuses a database newer than itself — so a checkout
+ * running ahead of the app for a day would have left the app unable to start
+ * on the boards. Idempotent, so it costs a lookup in `sqlite_master` after the
+ * first open, and safe on any version from the first.
+ *
+ * - `turns_at`: the drawer's newest-first page over every harness
+ *   conversation (`harnessTurns`) walked `turns_conversation` and sorted the
+ *   lot in a temporary tree, on every change Kuru makes: 6.65 ms at 5k turns,
+ *   ~193 ms at a year's 85k. Read newest first off this index it is a third of
+ *   a millisecond, at any size.
+ * - `cards_au` only when the words change: `updateCard` sets `title` and
+ *   `body` on every write, a run's state moving included, and `after update
+ *   of` fires on a column being *set*, not on it changing — so every status
+ *   change re-indexed the card's text.
+ */
+const CARDS_AU = `create trigger cards_au after update of title, body on cards
+  when old.title is not new.title or old.body is not new.body begin
+  insert into cards_fts(cards_fts, rowid, title, body) values ('delete', old.rowid, old.title, old.body);
+  insert into cards_fts(rowid, title, body) values (new.rowid, new.title, new.body);
+end`;
+
+function keepShape(db: DatabaseSync): void {
+  db.exec("create index if not exists turns_at on turns(at, id)");
+  const trigger = db.prepare("select sql from sqlite_master where type = 'trigger' and name = 'cards_au'").get() as { sql?: string } | undefined;
+  if (trigger?.sql && /\bwhen\b/i.test(trigger.sql)) return;
+  db.exec("drop trigger if exists cards_au");
+  db.exec(CARDS_AU);
+}
+
+/**
+ * How many delivered voice messages each profile keeps a row for. The list
+ * itself keeps `OUTBOX_KEEP` (`shared/voice.ts`), and nothing reads a row
+ * past what the list holds — a turn already carries its own words and
+ * language, and `recordTurn` links against the newest twenty — so the table
+ * grew by every message ever sent, ~36 a day, for nobody. A margin over the
+ * list rather than exactly it, so a row is never gone while anything could
+ * still be about to link to it.
+ */
+const VOICE_ROWS_KEPT = 100;
+
+/**
  * Every turn of yours already on disk, reporting what Claude Code's own
  * `UserPromptSubmit` hook wrapped a paste in before the prompt hook learned
  * to ask for it unwrapped — see `stripPastedContent`. `via` is recomputed
@@ -463,6 +510,7 @@ export class Store {
     db.exec("pragma journal_mode = wal");
     const store = new Store(path, db);
     store.migrate();
+    store.tx(() => keepShape(db));
     return store;
   }
 
@@ -1106,6 +1154,24 @@ export class Store {
     return { turns: rows.slice(0, limit).reverse().map(turnOf), more };
   }
 
+  /**
+   * Every harness turn of a profile, oldest first, a page at a time: the
+   * `limit` after `after`, which is the last turn of the page before. Keyset
+   * on `(at, id)` rather than an offset, so each page is a seek on `turns_at`
+   * and two turns at one millisecond are never split or read twice. What the
+   * drawer's search reads the history through (`Kuru.search`).
+   */
+  harnessTurnsFrom(profileKey: string, after: { at: number; id: number } | null, limit: number): Turn[] {
+    // A row value, which SQLite seeks on; the same test spelled out as an
+    // `or` scanned the index from the start on every page.
+    const rows = this.stmt(
+      `select t.* from turns t join conversations v on v.id = t.conversation_id
+       where v.profile_key = ? and v.kind = 'harness' and (t.at, t.id) > (?, ?)
+       order by t.at, t.id limit ?`,
+    ).all(profileKey, after?.at ?? -Infinity, after?.id ?? -Infinity, limit) as Row[];
+    return rows.map(turnOf);
+  }
+
   /** The turns right after a moment, oldest first: the other way from `harnessTurns`, for reading on from a line a search jumped to. */
   harnessTurnsAfter(profileKey: string, after: number, limit: number): { turns: Turn[]; more: boolean } {
     const rows = this.stmt(
@@ -1145,7 +1211,11 @@ export class Store {
     }));
   }
 
-  /** Every entry written as it is. Rows are never dropped here: a delivered message is a turn's provenance. */
+  /**
+   * Every entry written as it is, and the delivered past `VOICE_ROWS_KEPT`
+   * per profile let go. Only delivered ones: a message on its way or failed is
+   * on the list, and the list is what this saves.
+   */
   saveOutbox(entries: readonly StoredOutboxEntry[]): void {
     this.tx(() => {
       const upsert = this.stmt(
@@ -1155,6 +1225,11 @@ export class Store {
            note = excluded.note, attempts = excluded.attempts, typings = excluded.typings, transcript = excluded.transcript`,
       );
       for (const e of entries) upsert.run(e.id, e.profileKey, e.at, e.ms, e.state, e.text, e.lang, e.typedAt, e.note, e.n, e.attempts, e.typings, e.transcript);
+      this.stmt(
+        `delete from voice_messages where id in (
+           select id from (select id, row_number() over (partition by profile_key order by n desc) as r from voice_messages where state = 'delivered')
+           where r > ?)`,
+      ).run(VOICE_ROWS_KEPT);
     });
   }
 

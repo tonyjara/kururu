@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LOGIN_KEY } from "../../shared/model";
 import { BOARD_TAB, docTab, panes, type LayoutNode } from "../../shared/layout";
-import { adoptReaders, readSnapshot, snapshotPath, writeSnapshot } from "../src/persist";
+import { adoptReaders, hostBlob, readSnapshot, snapshotPath, writeSnapshot } from "../src/persist";
 import { Workspaces } from "../src/workspaces";
 
 let dir: string;
@@ -297,5 +297,35 @@ describe("boards and the layout file", () => {
     const old = readSnapshot()!;
     expect(old.profiles[0]!.key).toMatch(/^pk[0-9a-f]{12}$/);
     expect(old.profiles[0]!.workspaces[0]!.board!.cards.map((c) => c.title)).toEqual(["from an older server"]);
+  });
+});
+
+/**
+ * The pty host's copy (`hostBlob`): the live tree, agent ids and all, without
+ * the boards, which `Store.attach` would replace with the database's rows
+ * anyway. What a restarted server builds from it is the same arrangement with
+ * empty boards for the database to fill.
+ */
+describe("the host's blob", () => {
+  it("carries the arrangement and the agents, and no card", () => {
+    const workspaces = new Workspaces();
+    workspaces.addTab("a1");
+    workspaces.openBoard(workspaces.focusedPaneId);
+    const withCards = workspaces.all().map((p) => ({
+      ...p,
+      board: { ...p.board, cards: [{ id: "c9", number: 9, title: "a profile card", body: "", column: "todo", createdAt: 1, updatedAt: 1 }] },
+      workspaces: p.workspaces.map((w) => ({ ...w, board: { next: 2, cards: [{ id: "c1", number: 1, title: "a workspace card", body: "", column: "todo", createdAt: 1, updatedAt: 1 }] } })),
+    })) as unknown as ReturnType<Workspaces["all"]>;
+    const blob = hostBlob(withCards, workspaces.active.id);
+    expect(blob).not.toContain("a workspace card");
+    expect(blob).not.toContain("a profile card");
+    const kept = JSON.parse(blob) as { profiles: ReturnType<Workspaces["all"]>; activeProfileId: string };
+    expect(kept.activeProfileId).toBe(workspaces.active.id);
+    expect(kept.profiles[0]!.key).toBe(workspaces.active.key);
+    const again = new Workspaces(adoptReaders(kept.profiles));
+    expect(again.allAgents()).toContain("a1");
+    expect(again.active.workspaces[0]!.key).toBe(workspaces.active.workspaces[0]!.key);
+    expect(again.active.workspaces[0]!.board).toBeNull();
+    expect(again.active.board.cards).toEqual([]);
   });
 });

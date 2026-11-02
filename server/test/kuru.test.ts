@@ -687,6 +687,54 @@ describe("Kuru", () => {
 });
 
 /**
+ * The drawer's search, read a page of turns at a time: lines found on every
+ * page and in the outbox's own leftovers come back in time order, a message
+ * linked to a turn is that turn and not a second line, and a typo still
+ * finds its word — which is why it does not go through `turns_fts`.
+ */
+describe("Kuru.search", () => {
+  let dir: string;
+  let store: Store;
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "kururu-kurusearch-"));
+    store = Store.open(join(dir, "kururu.db"));
+  });
+  afterAll(() => {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("finds lines on every page, in order, once each", async () => {
+    const key = "pk000000000004";
+    const base = { conversationId: "c4", profileKey: key, kind: "harness" as const, launcher: "claude", cwd: null };
+    // More than two pages of turns.
+    for (let n = 0; n < 1_200; n++) {
+      const text = n === 3 || n === 701 || n === 1_150 ? `about the deployment, line ${n}` : `nothing to see, line ${n}`;
+      store.recordTurn({ ...base, role: n % 2 ? "kuru" : "you", text: n % 2 ? text : `[voice] ${text}`, at: 1_000 + n * 10, voiceId: n === 1_150 ? "clip-late" : undefined });
+    }
+    const entry = (id: string, at: number, state: StoredOutboxEntry["state"], text: string): StoredOutboxEntry => ({
+      id, profileKey: key, at, ms: 3_000, state, text, lang: "en", typedAt: null, note: null, n: at, attempts: 0, typings: 1, transcript: null,
+    });
+    const outbox = [entry("clip-late", 1_000 + 1_150 * 10 - 500, "delivered", "about the deployment, line 1150"), entry("clip-failed", 1_000 + 500 * 10 + 5, "failed", "the deployment failed to send")];
+    const kuru = new Kuru({ store, profiles: () => [{ id: "p4", key }], outbox: () => outbox, missed: () => [], broadcast: () => {} });
+    const exact = await kuru.search(key, "deployment");
+    expect(exact.items.map((item) => item.kind === "you" || item.kind === "kuru" ? item.text : item.kind)).toEqual([
+      "about the deployment, line 3",
+      "the deployment failed to send",
+      "about the deployment, line 701",
+      "about the deployment, line 1150",
+    ]);
+    expect(exact).toMatchObject({ total: 4, exact: 4 });
+    // The delivered clip is its turn's, not a line of its own.
+    expect(exact.items.at(-1)).toMatchObject({ kind: "you", outboxId: "clip-late", ms: 3_000 });
+    const typo = await kuru.search(key, "delpoyment");
+    expect(typo).toMatchObject({ total: 4, exact: 0 });
+    // A search nobody is waiting for any more stops.
+    expect((await kuru.search(key, "deployment", () => true)).items).toEqual([]);
+  });
+});
+
+/**
  * The outbox's typed road: a line from the drawer joins the list queued, with
  * its words made and no audio, and goes to Kuru without the voice's prefix.
  * The deps are stubs; what is checked is what the outbox hands over.

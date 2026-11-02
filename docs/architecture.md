@@ -106,7 +106,10 @@ Anything that would make `ptyhost.ts` need editing belongs on the server side.
   process it is running in. The server exits 75 and `server/run.mjs` reads that
   as "start me again" — distinguishable from a crash, which is left down on
   purpose, because a supervisor that resurrects a server which cannot start is
-  a loop that fills a terminal with one error forever. Under `--watch` the
+  a loop that fills a terminal with one error forever. The exception is a
+  server that had been up over a minute (`server/restart.mjs`): that is a bug
+  met at 3 a.m. with only the phone connected, and it is started again after
+  1 s, then 5, 15, 30 and 60 s for each further crash in ten minutes. Under `--watch` the
   runner stays and watches, so the save that finishes a half-made edit brings
   the server back, as it does after a failed build. Without `--watch`, or on
   exit 0, the runner leaves. Unsupervised, `restart-server` says so rather
@@ -145,6 +148,17 @@ Anything that would make `ptyhost.ts` need editing belongs on the server side.
   stripped. Neither is trusted blindly — a tab pointing at a terminal the host
   does not have is dropped, and an agent the host has that no layout mentions
   is placed, because otherwise it is running with nothing pointing at it.
+  The blob carries no boards (`hostBlob` in `persist.ts`): the database's
+  rows replace them at attach anyway, and 1.27 MB of cards on every layout
+  change was a line the host parsed on the thread that flushes every pty. It
+  goes at most once per 100 ms, and not at all when it is what the host holds.
+- **Snapshots are paced, and a client that falls behind is let go.** A
+  change no client made — a hook report, a host event, a memory step — goes
+  out at most once per 250 ms (`gap.ts`); a client's own verb is drawn at
+  the end of its turn as ever. `/ws` is compressed above 4 KB, pinged every
+  30 s, and a socket silent since the last ping is dropped; one more than a
+  megabyte behind is held to the newest snapshot, and one 16 MB behind is
+  cut off to reconnect and rebuild (`backpressure.ts`).
 - **A restored profile is adopted, not trusted** (`adopt()` in `workspaces.ts`).
   The blob was written by the previous server, which across a rebuild may be a
   previous *version*, so a field added since is simply not there. `undefined`

@@ -68,9 +68,13 @@ search still finds their cards.
 | `card_runs` | every run a card ever had, not only the last; the live agent id, checked against the host at start |
 | `card_events` | the history: `created`, `moved`, `edited`, `sent`, `run`, `deleted`, `restored`, `imported`, each with who — `user`, `harness`, `automation`, `import` |
 | `conversations`, `turns` | the harness conversation by session id: what you typed or said and what Kuru answered; every agent's final reply too, as its own conversation |
-| `voice_messages`, `missed_replies` | the outbox's list and the missed list, keyed by profile key |
+| `voice_messages`, `missed_replies` | the outbox's list and the missed list, keyed by profile key; delivered messages past the newest 100 per profile are let go |
 | `cards_fts`, `turns_fts` | FTS5 over titles, bodies and turns, accents folded |
 | `meta` | the file's own facts; nothing reads it today |
+
+`turns_at` and the `cards_au` trigger's `when` are kept by `keepShape` on
+every open rather than by a numbered migration, so the version does not
+move and the installed app's older server still opens the file.
 
 ## Write-through, and refuse rather than diverge
 

@@ -10,10 +10,12 @@
  *
  * So the supervisor is here, next to the thing it supervises, and it is
  * deliberately the smallest one that works: spawn, wait, start again if the exit
- * code asked for it. What it must never do is reach for the pty host. That
- * process is not this one's child and not this one's business — it holds the
- * ptys, it outlives every server, and the entire reason a restart is cheap is
- * that nothing in this file can touch it.
+ * code asked for it — or if the server crashed after a minute up, which is a
+ * bug met in the field rather than a server that cannot start (`restart.mjs`).
+ * What it must never do is reach for the pty host. That process is not this
+ * one's child and not this one's business — it holds the ptys, it outlives
+ * every server, and the entire reason a restart is cheap is that nothing in
+ * this file can touch it.
  *
  * It also writes down what it does. Every start, restart and stop it causes or
  * sees goes into `lifecycle.log` in the state directory, beside the server's own
@@ -96,6 +98,28 @@ const RESTART_EXIT_CODE = 75;
  * costs is a layout change made in the last second, not yet saved.
  */
 const STOP_GRACE_MS = 5000;
+
+/**
+ * Whether a crash is started again (`restart.mjs`). Loaded rather than
+ * imported, and with a fallback that never restarts, which is how this
+ * behaved before: the runner is the one file that must start even when
+ * something beside it is broken or missing — an app packaged without it.
+ */
+const { restartDelay } = await import("./restart.mjs").catch(() => ({
+  /** @type {(exit: { upMs: number, code: number | null, signal: string | null, crashes: readonly number[], now: number }) => number | null} */
+  restartDelay: () => null,
+}));
+
+/** When each crash that was started again happened, for the wait before the next. */
+const crashes = [];
+/** A start again that is waiting out its backoff; any other start cancels it. */
+let restartTimer = null;
+
+/** Seconds or minutes, for a sentence. */
+function lasted(ms) {
+  const s = Math.round(ms / 1000);
+  return s < 120 ? `${s}s` : s < 7200 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h`;
+}
 
 // --- the record ---------------------------------------------------------------
 
@@ -184,6 +208,7 @@ function start(because) {
     },
   });
   server = child;
+  const startedAt = Date.now();
 
   child.on("exit", (code, signal) => {
     /**
@@ -202,10 +227,35 @@ function start(because) {
       return;
     }
     /**
-     * Anything else is the server deciding to stop, and it is left stopped. A
-     * supervisor that resurrects a process which cannot start — a port already
-     * taken, a bad build — is a loop that fills a terminal with the same error
-     * forever, and the error is the useful part.
+     * A crash after the server had been up a while is a bug met in the field,
+     * not a server that cannot start, and it is started again after a wait
+     * that grows with each one (`restart.mjs`). Under `--watch` too: an edit
+     * half saved dies on its first request, well inside the minute, and is
+     * still left for the next save below.
+     */
+    const now = Date.now();
+    const upMs = now - startedAt;
+    const delay = restartDelay({ upMs, code, signal, crashes, now });
+    if (delay !== null) {
+      crashes.push(now);
+      while (crashes.length > 20) crashes.shift();
+      record("crash", `the server ${ended(code, signal)} after ${lasted(upMs)} up; starting it again in ${lasted(delay)}`, {
+        server: child.pid,
+        code,
+        signal,
+      });
+      console.error(`kururu: the server ${ended(code, signal)} after ${lasted(upMs)} up — starting it again in ${lasted(delay)}`);
+      restartTimer = setTimeout(() => {
+        restartTimer = null;
+        void cycle({ why: `it crashed after ${lasted(upMs)} up`, server: child.pid });
+      }, delay);
+      return;
+    }
+    /**
+     * Anything else is the server deciding to stop, or one that died young,
+     * and it is left stopped. A supervisor that resurrects a process which
+     * cannot start — a port already taken, a bad build — is a loop that fills
+     * a terminal with the same error forever, and the error is the useful part.
      *
      * Left stopped is not the same as left alone, though. Under `--watch` the
      * crash is nearly always an edit still in progress: an agent renames a
@@ -308,6 +358,11 @@ let pending = null;
  * it, which is all it ever needed: the next build sees every save at once.
  */
 function cycle(reason) {
+  // A start already waiting out a crash's backoff is this one now.
+  if (restartTimer) {
+    clearTimeout(restartTimer);
+    restartTimer = null;
+  }
   if (cycling) {
     pending = pending ? { ...reason, files: [...new Set([...(pending.files ?? []), ...(reason.files ?? [])])] } : reason;
     return cycling;

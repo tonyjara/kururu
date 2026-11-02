@@ -304,6 +304,24 @@ function readerTabs(stored: { root: string; path: string; docs?: unknown }): { a
 }
 
 /**
+ * What the pty host keeps for the next server: the live tree, agent ids and
+ * all, without the boards. `Store.attach` replaces any board a blob carries
+ * with the database's rows, so a card in here was only bytes on the host's
+ * one socket and its parse on the host's one thread; `Workspaces` reads a
+ * missing board the way it reads one from before boards existed, empty,
+ * until the database fills it a moment later. See `queueSave` in `index.ts`.
+ */
+export function hostBlob(profiles: readonly Profile[], activeProfileId: string): string {
+  return JSON.stringify({
+    profiles: profiles.map(({ board: _board, ...profile }) => ({
+      ...profile,
+      workspaces: profile.workspaces.map(({ board: _wsBoard, ...workspace }) => workspace),
+    })),
+    activeProfileId,
+  });
+}
+
+/**
  * Bring a host blob's readers up to the current shape.
  *
  * The blob is a live tree handed across a restart verbatim, so unlike the file

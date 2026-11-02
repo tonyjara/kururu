@@ -39,8 +39,13 @@ import type { Store } from "./store";
 const COALESCE_MS = 25;
 /** How many lines a search compares before it lets the terminals have the event loop back. */
 const SEARCH_BATCH = 200;
-/** More turns than one conversation will ever hold; the read is one query however many there are. */
-const ALL_TURNS = 10_000_000;
+/**
+ * How many turns a search reads at a time. It used to read the whole history
+ * in one query and merge it before comparing a word: 20 ms of held event loop
+ * now and ~1 s and ~50 MB at a year of turns, in the process that relays every
+ * terminal. A page is a seek on `turns_at` and a few hundred KB.
+ */
+const SEARCH_PAGE = 500;
 
 export interface KuruDeps {
   store: Store;
@@ -128,22 +133,61 @@ export class Kuru {
    *
    * Only the lines going back get their files looked for: that is a look at the
    * disk per line, and most of the history is not coming back.
+   *
+   * The history is read a page at a time (`SEARCH_PAGE`), oldest first, and
+   * each page merged with the messages and replies its turns name; whatever
+   * on the two lists no turn names is merged on its own at the end, which is
+   * where the whole merge would have put it too. Not through `turns_fts`,
+   * though the review that asked for this suggested it: that index has no
+   * typos and no middle of a word, which are the two things this search is
+   * for (`shared/kurusearch.ts`), and a prefilter through it would have
+   * quietly dropped every line only they find.
    */
   async search(profileKey: string, words: string, gone: () => boolean = () => false): Promise<KuruSearchAnswer> {
     const query = parseKuruQuery(words);
     const answer: KuruSearchAnswer = { raw: query?.raw ?? "", items: [], total: 0, exact: 0 };
     if (!query) return answer;
-    const { turns } = this.deps.store.harnessTurns(profileKey, null, ALL_TURNS);
-    const items = mergeConversation({ turns, outbox: this.deps.outbox(profileKey), missed: this.deps.missed(profileKey) });
+    const outbox = this.deps.outbox(profileKey);
+    const missed = this.deps.missed(profileKey);
+    const merged = new Set<string>();
     const found: { item: KuruItem; tier: HitTier }[] = [];
-    for (let at = 0; at < items.length; at += SEARCH_BATCH) {
-      await new Promise((resume) => setImmediate(resume));
-      if (gone()) return answer;
-      for (const item of items.slice(at, at + SEARCH_BATCH)) {
-        const tier = matchItem(query, item);
-        if (tier) found.push({ item, tier });
+    const judge = async (items: readonly KuruItem[]): Promise<boolean> => {
+      for (let at = 0; at < items.length; at += SEARCH_BATCH) {
+        await new Promise((resume) => setImmediate(resume));
+        if (gone()) return false;
+        for (const item of items.slice(at, at + SEARCH_BATCH)) {
+          const tier = matchItem(query, item);
+          if (tier) found.push({ item, tier });
+        }
       }
+      return true;
+    };
+    let after: { at: number; id: number } | null = null;
+    for (;;) {
+      const turns = this.deps.store.harnessTurnsFrom(profileKey, after, SEARCH_PAGE);
+      const last = turns.at(-1);
+      if (!last) break;
+      after = { at: last.at, id: last.id };
+      // An entry goes to the first page that names it and no other, so it is
+      // never drawn twice; a second turn naming the same one is still found
+      // by its own words, which are all a search reads.
+      const linked = linkedBy(turns);
+      const named = (entry: { id: string }) => linked.has(entry.id) && !merged.has(entry.id);
+      const pageOutbox = outbox.filter(named);
+      const pageMissed = missed.filter(named);
+      for (const entry of [...pageOutbox, ...pageMissed]) merged.add(entry.id);
+      if (!(await judge(mergeConversation({ turns, outbox: pageOutbox, missed: pageMissed })))) return answer;
+      if (turns.length < SEARCH_PAGE) break;
     }
+    const rest = mergeConversation({
+      turns: [],
+      outbox: outbox.filter((entry) => !merged.has(entry.id)),
+      missed: missed.filter((entry) => !merged.has(entry.id)),
+    });
+    if (!(await judge(rest))) return answer;
+    // Pages come oldest first already; the rest is put in among them by time.
+    // A stable sort, so lines at one instant keep the merge's order.
+    if (rest.length) found.sort((a, b) => a.item.at - b.item.at);
     return {
       raw: query.raw,
       items: this.linked(profileKey, pickHits(found)),

@@ -20,20 +20,21 @@
  * between them and starving the machine. This number finds the process that is
  * big right now. It cannot find the one that got big an hour ago.
  *
- * It reads its own `ps` rather than sharing the dev scan's next door, for two
- * reasons that point the same way. The column it wants is a number where that
- * scan's line is a kilobyte of argv, so the narrow read is a twentieth of the
- * output; and they are not the same question — this asks about every terminal,
- * while `devRoots` deliberately withholds the ones with an agent in them, which
- * are exactly the rows this gets drawn on.
+ * It used to read its own `ps` rather than share the dev scan's, because the
+ * column it wants is a number where that scan's line is a kilobyte of argv.
+ * That was the smaller read and the more expensive choice: what a `ps` costs is
+ * the fork and the walk of every process on the machine, not the bytes, and two
+ * of them on two timers were most of a few per cent of a core. So the read is
+ * one now (`proctable.ts`), and only the *questions* stay apart: this asks
+ * about every terminal, while `devRoots` deliberately withholds the ones with
+ * an agent in them, which are exactly the rows this gets drawn on.
  *
  * Server-side like `activity` and `lastAgent`, and for the reason both of those
  * are: it is learnt from the process table rather than from a pty, so the half
  * of kururu that cannot be restarted never has to hear about it, and improving
- * it costs nobody a running agent. A restart forgets it and the next poll, five
- * seconds later, fills it back in.
+ * it costs nobody a running agent. A restart forgets it and the next poll, a
+ * few seconds later, fills it back in.
  */
-import { execFile } from "node:child_process";
 
 /** One process, as much of it as adding up memory needs. */
 export interface ProcMem {
@@ -43,11 +44,11 @@ export interface ProcMem {
   rss: number;
 }
 
-export type MemTable = Map<number, ProcMem>;
+export type MemTable = ReadonlyMap<number, ProcMem>;
 
 /** `ps -eo pid=,ppid=,rss=` into pid → {ppid, rss}. */
 export function parseProcMem(out: string): MemTable {
-  const byPid: MemTable = new Map();
+  const byPid = new Map<number, ProcMem>();
   for (const line of out.split("\n")) {
     const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/.exec(line);
     if (!m) continue;
@@ -134,7 +135,7 @@ const MB = 1024 * 1024;
  *
  * Memory never holds still. A working agent moves by megabytes between polls and
  * every `git` it forks is a blip, so a map keyed on the exact byte count would
- * broadcast a snapshot to every client every five seconds for the rest of the
+ * broadcast a snapshot to every client on every poll for the rest of the
  * session, to redraw digits nobody could see change. Rounding here rather than
  * in the browser is what makes "has it changed" answerable on the side that
  * decides whether to send — two figures is what the sidebar draws (`390 MB`,
@@ -144,28 +145,4 @@ export function coarsen(bytes: number): number {
   if (bytes <= 0) return 0;
   const step = bytes >= 1024 * MB ? 100 * MB : bytes >= 100 * MB ? 10 * MB : MB;
   return Math.round(bytes / step) * step;
-}
-
-/**
- * `ps -eo pid=,ppid=,rss=` over a busy machine is about 25 KB, which is nowhere
- * near execFile's default ceiling — but the ceiling kills the child rather than
- * truncating, and a scan that silently found nothing is the worst shape a poll
- * can fail in. The dev scan says the same thing about a much bigger read.
- */
-const MAX_BUFFER = 8 * 1024 * 1024;
-
-/** The whole table. Empty when ps fails — a failed poll is not an error. */
-export function readProcMem(): Promise<MemTable> {
-  return new Promise((resolve) => {
-    execFile("ps", ["-eo", "pid=,ppid=,rss="], { maxBuffer: MAX_BUFFER }, (err, stdout) => {
-      resolve(err && !stdout ? new Map() : parseProcMem(stdout));
-    });
-  });
-}
-
-/** What each of those terminals is holding, in bytes, rounded to what is drawn. */
-export async function scanMemory(
-  roots: Iterable<[string, number]> = [],
-): Promise<Map<string, number>> {
-  return measureMemory(roots, await readProcMem());
 }

@@ -450,7 +450,8 @@ never stopped.
 A host restart goes *through the server* (`POST /api/host/restart`: SIGTERM
 the socket's holder, exit 75 when the link drops) so either runner comes
 back to a fresh host; the tray's dialog names the agent count and defaults
-to no. Where the server runs from is `~/.config/kururu/desktop.json`.
+to no. A crash after a minute up is started again with backoff
+(`server/restart.mjs`); one sooner is left down. Where the server runs from is `~/.config/kururu/desktop.json`.
 → [architecture](architecture.md#the-runner-and-the-menu-bar)
 
 ## Reloading the window

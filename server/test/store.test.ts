@@ -454,6 +454,83 @@ describe("the store", () => {
     store.close();
   });
 
+  it("lets go of delivered voice rows past a hundred per profile, and never one still on its way", () => {
+    const store = Store.open();
+    const entry = (n: number, profileKey: string, state: "delivered" | "failed" | "queued") => ({
+      id: `${profileKey}-${n}`, profileKey, at: n, ms: 1000, state, text: `m${n}`, lang: "en" as const, typedAt: null, note: null, n, attempts: 0, typings: 0, transcript: null,
+    });
+    const other = "pk000000000009";
+    store.saveOutbox([
+      ...Array.from({ length: 130 }, (_, n) => entry(n, PK, "delivered")),
+      entry(200, PK, "failed"),
+      entry(201, PK, "queued"),
+      ...Array.from({ length: 5 }, (_, n) => entry(n, other, "delivered")),
+    ]);
+    const rows = store.loadOutbox();
+    const mine = rows.filter((r) => r.profileKey === PK);
+    expect(mine.filter((r) => r.state === "delivered").map((r) => r.n)).toEqual(Array.from({ length: 100 }, (_, n) => n + 30));
+    expect(mine.filter((r) => r.state !== "delivered").map((r) => r.id)).toEqual([`${PK}-200`, `${PK}-201`]);
+    expect(rows.filter((r) => r.profileKey === other)).toHaveLength(5);
+    store.close();
+  });
+
+  it("pages the harness history oldest first by (at, id), never splitting or repeating a millisecond", () => {
+    const store = Store.open();
+    const base = { conversationId: "h1", profileKey: PK, kind: "harness" as const, launcher: "claude", cwd: null };
+    // Three turns at one instant, which a page boundary falls among.
+    for (const [n, at] of [[1, 10], [2, 20], [3, 20], [4, 20], [5, 30]] as const) store.recordTurn({ ...base, role: n % 2 ? "you" : "kuru", text: `turn ${n}`, at });
+    store.recordTurn({ conversationId: "a1", profileKey: PK, kind: "agent", launcher: null, cwd: null, role: "agent", text: "not Kuru's", at: 15 });
+    const seen: string[] = [];
+    let after: { at: number; id: number } | null = null;
+    for (;;) {
+      const page = store.harnessTurnsFrom(PK, after, 2);
+      for (const turn of page) seen.push(turn.text);
+      const last = page.at(-1);
+      if (!last) break;
+      after = { at: last.at, id: last.id };
+    }
+    expect(seen).toEqual(["turn 1", "turn 2", "turn 3", "turn 4", "turn 5"]);
+    expect(store.harnessTurnsFrom("pk000000000009", null, 10)).toEqual([]);
+    store.close();
+  });
+
+  it("gives an older database the turns index and the quieter card trigger, without stepping its version", () => {
+    const store = Store.open();
+    store.close();
+    // As a build from before this one left it.
+    const raw = new DatabaseSync(dbPath());
+    raw.exec("drop index turns_at");
+    raw.exec("drop trigger cards_au");
+    raw.exec(`create trigger cards_au after update of title, body on cards begin
+      insert into cards_fts(cards_fts, rowid, title, body) values ('delete', old.rowid, old.title, old.body);
+      insert into cards_fts(rowid, title, body) values (new.rowid, new.title, new.body);
+    end`);
+    const version = (raw.prepare("pragma user_version").get() as { user_version: number }).user_version;
+    raw.close();
+
+    const again = Store.open();
+    const p0 = profile(PK, "Work", [workspace(WK, "Kururu", addCard(emptyBoard(), { title: "find the flaky test", body: "on CI" }, "c1", 1))]);
+    again.syncProfile(null, p0, "user", 1);
+    again.close();
+    const db = new DatabaseSync(dbPath());
+    expect((db.prepare("pragma user_version").get() as { user_version: number }).user_version).toBe(version);
+    expect(db.prepare("select name from sqlite_master where type = 'index' and name = 'turns_at'").get()).toBeTruthy();
+    // A write that sets the words to what they were leaves the index alone:
+    // FTS5 writes a segment for every delete and insert, so a count that
+    // holds is a trigger that did not fire.
+    const segments = () => (db.prepare("select count(*) as n from cards_fts_data").get() as { n: number }).n;
+    const before = segments();
+    db.prepare("update cards set title = title, body = body, column_id = 'doing' where id = 'c1'").run();
+    expect(segments()).toBe(before);
+    db.prepare("update cards set title = 'find the flaky build' where id = 'c1'").run();
+    expect(segments()).toBeGreaterThan(before);
+    db.close();
+    const last = Store.open();
+    expect(last.search("build", "cards", PK).map((h) => (h.kind === "card" ? h.title : null))).toEqual(["find the flaky build"]);
+    expect(last.search("test", "cards", PK)).toEqual([]);
+    last.close();
+  });
+
   it("refuses a change the disk cannot take, whole", () => {
     const store = Store.open();
     const p0 = profile(PK, "Work", [workspace(WK, "Kururu", addCard(emptyBoard(), { title: "x" }, "c1", 1))]);
