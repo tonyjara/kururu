@@ -45,6 +45,7 @@ const { fetchNodes, nodeChoices, whyNot } = require("./nodes");
 const { TalkKey } = require("./talkkey");
 const { createTray } = require("./tray");
 const { editMenuTemplate } = require("./editmenu");
+const { QuitGate, listenForSignals } = require("./quit");
 
 const DEV = process.env.KURURU_DEV === "1";
 /**
@@ -999,6 +1000,8 @@ function launchedAtLogin() {
 let tray = null;
 
 app.whenReady().then(async () => {
+  stopOnSignals();
+
   /**
    * A dev server that sends X-Frame-Options would otherwise refuse to render in
    * the preview iframe. The same thing `proxy.ts` does for the phone, done here
@@ -1109,22 +1112,22 @@ app.on("window-all-closed", () => {
  * is only raised when this app is the thing holding the server *and* there is
  * something running — pointed at a machine in a cupboard, or beside a
  * `bun run dev` of your own, quitting is a window closing and has nothing to
- * ask about.
+ * ask about. And a signal is not somebody leaving, so it is never asked:
+ * `quit.js` has why that took a module.
  */
-let quitting = false;
+const quit = new QuitGate();
 
 app.on("before-quit", (event) => {
   stopSweeping();
   stopWatchingServer();
 
-  if (quitting) return;
+  if (quit.quitting) return;
   // Nothing to ask about, and nothing to wait for: vite goes on SIGTERM.
   if (!runner.child) {
     void runner.vite.stop();
     return;
   }
-  event.preventDefault();
-  void confirmQuit();
+  if (!quit.beforeQuit(confirmQuit)) event.preventDefault();
 });
 
 async function confirmQuit() {
@@ -1153,7 +1156,7 @@ async function confirmQuit() {
 }
 
 function finishQuit(alsoAgents) {
-  quitting = true;
+  quit.quitting = true;
   talk.dispose();
   notes.dispose();
   tray?.destroy();
@@ -1295,7 +1298,7 @@ async function downloadUpdate() {
  */
 function installUpdate() {
   if (update.status !== "ready") return;
-  quitting = true;
+  quit.quitting = true;
   stopSweeping();
   stopWatchingServer();
   talk.dispose();
@@ -1309,10 +1312,15 @@ ipcMain.handle("kururu:update-state", () => (updatable() ? update : { status: "u
 ipcMain.on("kururu:update-download", () => void downloadUpdate());
 ipcMain.on("kururu:update-install", () => installUpdate());
 
-for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => {
-    // A signal is not somebody choosing, so it is not asked a question.
-    quitting = true;
+/**
+ * A signal is not somebody choosing, so it is not asked a question. Called from
+ * `whenReady` and only there: Electron's own handler for these signals goes in
+ * after this file has run, and whichever is installed last is the one the
+ * signal reaches — see `quit.js`.
+ */
+function stopOnSignals() {
+  listenForSignals((signal) => {
+    quit.quitting = true;
     talk.dispose();
     notes.dispose();
     void runner.stop(`the app was stopped by ${signal}`).finally(() => app.quit());

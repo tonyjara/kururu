@@ -408,6 +408,18 @@ Kept short on purpose; the detail is in git history.
   stopped the runner and the server and left the host holding its socket, which
   `kill-ptyhosts /tmp/k2` then cleared; the real host on 7717 was never
   touched. The menu's sentences are `desktop/test/menu.test.js`.
+- **SIGTERM to a signed app with an agent up** (KUR-179, 2026-11-02): a signed,
+  notarized build from the branch, copied to scratch and started as a launchd
+  job of its own on 7817 with every `KURURU_*` directory isolated; a stand-in
+  `claude` (`sh claude.sh`, which sleeps) typed into its shell made
+  `liveAgents` 1. `kill -TERM` on the main pid: the app was gone in about
+  three seconds with no dialog, `lifecycle.log` read *the app was stopped by
+  SIGTERM* then the runner and the server stopping, and the host and the
+  stand-in were still running. Before the fix the same signal reached
+  Electron's handler and put up "1 agent is still running" — reproduced on
+  Electron's own binary with a windowless app, where a `process.on("SIGTERM")`
+  at load never ran and one inside `whenReady` did. The ordering is
+  `desktop/test/quit.test.js`; ⌘Q's dialog was not pressed in the signed build.
 - **Agents on a machine**, in an isolated instance on 7817 whose `PATH` held a
   fake `ssh` (it runs the far side here, under `/bin/sh`), a fake `claude`
   that draws Claude Code 2.1's working, done and permission screens, and a
