@@ -41,7 +41,7 @@ import { remoteShellOf } from "../../shared/machines";
 import { claudeLastReply, codexLastReply, parseRolloutListing, pickCodexRollout } from "../../shared/sessions";
 import { commandRunning, draftAfter, notIdle, SLEEP_TICK_MS, stillWanted } from "../../shared/sleep";
 import { childIndex, readFootTable, readTree, type FootTable } from "./footprint";
-import { screenText } from "./harness";
+import { screenRows } from "./onscreen";
 import type { HostLink } from "./hostlink";
 import { codexRolloutsOn, sessionTailOn } from "./machines";
 import { claudeTranscriptPath, codexRolloutPath, findCodexRollout, readTail } from "./sessions";
@@ -250,10 +250,8 @@ export class Sleeper {
 
   /** What its screen shows, as a remote agent's status is read; null when it could not be had. */
   private async screenOf(agent: AgentSnapshot): Promise<ReturnType<typeof readScreen>["phase"] | null> {
-    const data = await this.deps.host.backlog(agent.id).catch(() => null);
-    if (data === null) return null;
-    const { cols, rows } = this.deps.grid(agent.id);
-    return readScreen(await screenText(data, cols, rows, rows)).phase;
+    const text = await screenRows(this.deps.host, agent.id, this.deps.grid(agent.id));
+    return text === null ? null : readScreen(text).phase;
   }
 
   /**

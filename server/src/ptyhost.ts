@@ -168,6 +168,14 @@ export function createPtyHost(): PtyHost {
         void replyAsync(msg.id, async () => (await host.backlog(msg.agentId)) ?? "");
         return;
 
+      case "text": {
+        // A number off the wire, and a clamp is not a check: NaN would make
+        // `end - lines` NaN and the loop read nothing, silently.
+        const lines = Number.isFinite(msg.lines) ? Math.max(1, Math.min(1000, Math.floor(msg.lines))) : 40;
+        void replyAsync(msg.id, async () => (await host.text(msg.agentId, lines)) ?? "");
+        return;
+      }
+
       case "kill":
         try {
           host.kill(msg.agentId);

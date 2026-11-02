@@ -981,8 +981,10 @@ switch rather than a field per profile because the only thing per profile to set
 is which of kururu's own directories it uses. **It waits for the host.** An old pty host drops the `env` on the floor and
 opens the terminal as the machine's own account with nothing to say so — the one
 failure this must not have — so `loginsActive()` in `lending.ts` is the switch
-*and* `HostInfo.current`, the usage bar follows the same answer, and the Profiles
-page says when it is on and not yet in force.
+*and* `HostInfo.env`, the usage bar follows the same answer, and the Profiles
+page says when it is on and not yet in force. It was `HostInfo.current` until
+protocol 3, which would have switched it off on every host from protocol 2,
+all of which apply an `env`.
 
 **Switching a profile is a menu; editing one is a page.** This has been all three
 things a switcher can be. It was a pick dialog; then renaming and deleting moved

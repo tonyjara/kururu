@@ -28,6 +28,18 @@ shows, so it is written once and read in three places — see
   another, and the lines add up, like review comments, until you send them.
   Escape or a click elsewhere puts the box away, and ⌘C still copies.
 
+### Changed
+
+- **A reconnect asks less of the pty host, and so does an agent on another
+  machine.** When the window or the phone comes back, every pane asks for its
+  terminal's history, and the host now builds that once and hands the same
+  copy to every pane that asks about a screen that has not changed. The status
+  of an agent on another machine is read off the host's own screen every two
+  seconds, rather than off a whole history rebuilt in the server. Both are pty
+  host code, so they take effect when the host is next restarted, which ends
+  every agent; until then everything works as it did, and Settings → About
+  says the host is behind.
+
 ## [0.6.0] - 2026-10-29
 
 Nothing in this release needs the pty host restarted, and the database, the

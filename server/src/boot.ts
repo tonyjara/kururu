@@ -78,7 +78,7 @@ import { mirrorFiles } from "./export";
 import { allowRoot } from "./files";
 import { Harness } from "./harness";
 import { hostEnv, hostJobRunning, hostRuntime, launchHost, launchHostSystemd, unitOf } from "./hostlaunch";
-import { HOST_PROTOCOL, HostLink, type Port } from "./hostlink";
+import { HOST_PROTOCOL, HOST_SINCE, HostLink, type Port } from "./hostlink";
 import { connectToHost, hostSocketPath, type SocketPort } from "./hostsock";
 import { text } from "./http/respond";
 import { handleRequest } from "./http/router";
@@ -388,7 +388,7 @@ export async function attach(port: Port): Promise<void> {
   host.onOutput = onOutput;
 
   const state = await host.hello();
-  provide("hostInfo", { version: state.version, current: state.protocol >= HOST_PROTOCOL });
+  provide("hostInfo", { version: state.version, current: state.protocol >= HOST_PROTOCOL, env: state.protocol >= HOST_SINCE.env });
   provide("hostProtocol", state.protocol);
   if (!hostInfo.current) {
     // Said once, here, because the host's log is the only other place it could

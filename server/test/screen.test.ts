@@ -20,6 +20,7 @@ import { describe, expect, it } from "bun:test";
 import { Terminal } from "@xterm/headless";
 import { scanCursor } from "../../shared/cursor";
 import { Screen } from "../src/agents/screen";
+import { screenText } from "../src/harness";
 
 /** What a terminal holds, as the rows a person would see. */
 function grid(term: Terminal): string[] {
@@ -276,6 +277,135 @@ describe("a title a program sets", () => {
     screen.write(osc2("~/code/kururu"));
     await settle(screen);
     expect(screen.title).toBe("~/code/kururu");
+  });
+});
+
+/**
+ * The cache in front of the serializer (review §2.6). A server restart has
+ * every pane in every client ask for its backlog inside a second, and almost
+ * all of them ask about a screen nothing has written to since the last ask.
+ * What must hold is that the cache is never read stale: any write, and any
+ * resize that changes the grid, has to serialize afresh.
+ */
+describe("a backlog asked for twice", () => {
+  /** Count the serializations a Screen does, by wrapping its addon's one call. */
+  function counted(screen: Screen): { count: number } {
+    const seen = { count: 0 };
+    const serializer = (screen as unknown as { serializer: { serialize: (o: unknown) => string } }).serializer;
+    const real = serializer.serialize.bind(serializer);
+    serializer.serialize = (options) => {
+      seen.count++;
+      return real(options);
+    };
+    return seen;
+  }
+
+  it("serializes once when nothing changed in between", async () => {
+    const screen = new Screen();
+    const seen = counted(screen);
+    // Which asks for one itself, once everything is written.
+    await drawSession(screen, screen.cols, screen.rows);
+    const first = await screen.backlog();
+    const second = await screen.backlog();
+    expect(second).toBe(first);
+    expect(seen.count).toBe(1);
+  });
+
+  it("shares one serialization between asks that wait on the same writes", async () => {
+    const screen = new Screen();
+    const seen = counted(screen);
+    screen.write("one line\r\n");
+    const asks = await Promise.all([screen.backlog(), screen.backlog(), screen.backlog(), screen.backlog()]);
+    expect(new Set(asks).size).toBe(1);
+    expect(seen.count).toBe(1);
+    expect(asks[0]).toContain("one line");
+  });
+
+  it("serializes again after a write, and has the write in it", async () => {
+    const screen = new Screen();
+    screen.write("before\r\n");
+    const before = await screen.backlog();
+    screen.write("after\r\n");
+    const after = await screen.backlog();
+    expect(before).not.toContain("after");
+    expect(after).toContain("after");
+  });
+
+  it("serializes again after a resize, laid out at the new width", async () => {
+    const screen = new Screen();
+    await drawSession(screen, screen.cols, screen.rows);
+    const wide = await screen.backlog();
+    screen.resize(80, 24);
+    const narrow = await screen.backlog();
+    expect(narrow).not.toBe(wide);
+    const client = await rebuild(narrow, 80, 24);
+    expect(grid(client)).toEqual(grid(screenTerminal(screen)));
+  });
+
+  it("serializes again when only the cursor changed, which a write does", async () => {
+    const screen = new Screen();
+    screen.write("prompt> ");
+    const shown = await screen.backlog();
+    screen.write("\x1b[?25l");
+    const hidden = await screen.backlog();
+    expect(shown.endsWith("\x1b[?25l")).toBe(false);
+    expect(hidden.endsWith("\x1b[?25l")).toBe(true);
+  });
+});
+
+/**
+ * The text verb (review §2.7) has to say what the road it replaces said: the
+ * backlog, read back through a fresh emulator at the same grid by
+ * `screenText`. If the two ever differ, a remote agent's status reads one way
+ * on an old host and another on a new one.
+ */
+describe("a screen as text", () => {
+  async function both(screen: Screen): Promise<[string, string]> {
+    const { cols, rows } = screen;
+    return [await screen.text(rows), await screenText(await screen.backlog(), cols, rows, rows)];
+  }
+
+  it("matches the backlog read back, for an agent's screen", async () => {
+    const screen = new Screen();
+    await drawSession(screen, screen.cols, screen.rows);
+    const [text, readBack] = await both(screen);
+    expect(text).toBe(readBack);
+    expect(text).toContain("me@mac ~/code/kururu % claude");
+  });
+
+  it("matches it with history scrolled off the top", async () => {
+    const screen = new Screen();
+    screen.resize(60, 10);
+    for (let i = 0; i < 50; i++) screen.write(`line ${i} ${"x".repeat(i)}\r\n`);
+    screen.write("$ ");
+    const [text, readBack] = await both(screen);
+    expect(text).toBe(readBack);
+    expect(text.split("\n").at(-1)?.trimEnd()).toBe("$");
+  });
+
+  it("matches it on a near-empty screen, where the last rows of history count", async () => {
+    const screen = new Screen();
+    screen.resize(60, 10);
+    for (let i = 0; i < 30; i++) screen.write(`old ${i}\r\n`);
+    screen.write("\x1b[2J\x1b[Hfresh\r\n");
+    const [text, readBack] = await both(screen);
+    expect(text).toBe(readBack);
+  });
+
+  it("matches it on the alternate screen, which has no history", async () => {
+    const screen = new Screen();
+    screen.resize(60, 10);
+    screen.write("shell history\r\n");
+    screen.write("\x1b[?1049h\x1b[H\x1b[2J");
+    screen.write("\x1b[3;5H╭── tui ──╮\x1b[4;5H│ ready  │\x1b[5;5H╰────────╯");
+    const [text, readBack] = await both(screen);
+    expect(text).toBe(readBack);
+    expect(text).not.toContain("shell history");
+    expect(text).toContain("│ ready  │");
+  });
+
+  it("is empty for a screen nothing has been written to", async () => {
+    expect(await new Screen().text(40)).toBe("");
   });
 });
 

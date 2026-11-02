@@ -185,6 +185,16 @@ until something resynchronises.
   saves the backlog is that replacing a whole screen dirties the whole screen.
   Anything that changes how the screen *looks* without writing to it — a palette
   swap is the one that exists — has to force the repaint itself.
+- **A backlog is cached until its screen changes** (`Screen.cached`). Every
+  pane of every client asks for one when its socket comes back, and under
+  `--watch` that is dozens of server restarts a day; nearly all of them ask
+  about a screen nothing has written to since the last ask, at the grid the
+  server already settled. The first serializes and the rest get its string.
+  It is *dropped* on a write or a resize, never compared, so it cannot be read
+  stale and a busy agent holds no copy; the cursor's look and visibility change
+  only through a write, so the suffix is covered by the same rule. Sixteen asks
+  at once of a `cat` with 3,000 lines went from 151 ms of host thread to 11.
+  Protocol 3, but nothing is gated on it: an older host serializes each time.
 - **An exited terminal's screen still reflows.** The host keeps a dead pty listed
   with its screen intact, because it cannot know whether anybody still wants to
   read it; `host.resize` skips only the pty half once `exited` is set. The buffer

@@ -37,7 +37,7 @@ import { vaultView } from "./vaultview";
  * the switch were off, and the Profiles page says why.
  */
 export function loginsActive(): boolean {
-  return launch.loginsPerProfile && hostInfo.current;
+  return launch.loginsPerProfile && hostInfo.env;
 }
 
 /**

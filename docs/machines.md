@@ -189,11 +189,21 @@ way a local agent's does. A shell's session is left alone.
 A remote agent's hooks post to a port on the machine where nothing listens,
 and its bytes are tmux redrawing a pane, so neither of the ways a local
 agent's status is known works. `server/src/onscreen.ts` reads each remote
-agent's screen every two seconds (the host's backlog, rendered the way
-`read_agent` renders it) and `shared/onscreen.ts` turns it into the reports a
-hook would have sent, through `host.report` — so the dot, notifications, the
-card's run, the harness's `[kururu]` messages and `wait_agent` all work
-unchanged:
+agent's screen every two seconds and `shared/onscreen.ts` turns it into the
+reports a hook would have sent, through `host.report` — so the dot,
+notifications, the card's run, the harness's `[kururu]` messages and
+`wait_agent` all work unchanged.
+
+The screen comes from the host's `text` (protocol 3): the last rows with
+anything on them, read off the emulator the host already keeps, about a
+millisecond. An older host is asked for a backlog instead, rendered the way
+`read_agent` renders it — a serialization, the whole of it on the socket and a
+fresh emulator in the server, about ten times that and more off an alternate
+screen, every two seconds per agent. Both give the same lines
+(`server/test/screen.test.ts` holds them to it); `screenRows` picks off the
+protocol the host said it speaks, because a host that does not know `text`
+never answers it. The idle-card sleeper reads a remote card's screen the same
+way. What the rows say, and what is reported for them:
 
 | on the screen, in the last rows that say anything | reported |
 |---|---|

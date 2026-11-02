@@ -550,7 +550,7 @@ export let projects = readProjects();
  * `HOST_PROTOCOL` — or, until it has, what a host from before the handshake
  * says: nothing, which is read as the oldest protocol there is.
  */
-export let hostInfo: HostInfo = { version: null, current: false };
+export let hostInfo: HostInfo = { version: null, current: false, env: false };
 export let hostProtocol = 1;
 
 /**

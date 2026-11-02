@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test";
 
 import { readScreen, ScreenWatch, type ScreenRead } from "../../shared/onscreen";
+import { HostLink, type Port, type ToHost } from "../src/hostlink";
+import { screenRows } from "../src/onscreen";
 
 /**
  * Screens as `screenText` renders them, in the shapes Claude Code 2.1 and
@@ -201,5 +203,50 @@ describe("ScreenWatch", () => {
     // A guess from the bytes is taken back, and the guessing switched off.
     expect(new ScreenWatch().see(read("quiet"), "working")).toBe("idle");
     expect(new ScreenWatch().see(read("working"), "working")).toBe("working");
+  });
+});
+
+/**
+ * Which road a screen is read by. A host that does not know `text` drops it
+ * and never replies, so the one thing that must not happen is an old host
+ * being sent one: the poll would wait on it for good, and every remote agent's
+ * status with it.
+ */
+describe("reading a screen off the host", () => {
+  /** A host on the far end of a port, speaking `protocol`, that answers `hello`, `text` and `backlog`. */
+  async function linked(protocol: number): Promise<{ link: HostLink; sent: ToHost["type"][] }> {
+    const sent: ToHost["type"][] = [];
+    let listener: (event: { data: unknown }) => void = () => {};
+    const port: Port = {
+      postMessage(message) {
+        const msg = message as ToHost & { id?: number };
+        sent.push(msg.type);
+        const result = msg.type === "hello" ? { agents: [], blob: null, version: "x", protocol } : msg.type === "text" ? "from text" : "\x1b[Hfrom backlog";
+        if (msg.id !== undefined) queueMicrotask(() => listener({ data: { type: "reply", id: msg.id, ok: true, result } }));
+      },
+      on(_event, fn) {
+        listener = fn;
+      },
+    };
+    const link = new HostLink(port);
+    await link.hello();
+    return { link, sent };
+  }
+
+  it("asks a host from protocol 3 on for the rows as text", async () => {
+    const { link, sent } = await linked(3);
+    expect(await screenRows(link, "a1", { cols: 80, rows: 24 })).toBe("from text");
+    expect(sent).toEqual(["hello", "text"]);
+  });
+
+  it("asks an older host for a backlog, and reads it back", async () => {
+    const { link, sent } = await linked(2);
+    expect(await screenRows(link, "a1", { cols: 80, rows: 24 })).toBe("from backlog");
+    expect(sent).toEqual(["hello", "backlog"]);
+  });
+
+  it("says null when the host could not answer", async () => {
+    const link = { text: () => Promise.reject(new Error("gone")) } as unknown as HostLink;
+    expect(await screenRows(link, "a1", { cols: 80, rows: 24 })).toBeNull();
   });
 });

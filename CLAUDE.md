@@ -58,9 +58,10 @@ the only thing in kururu that ends an agent by accident. **A host that is behind
 says so:** `hello` carries its version and `HOST_PROTOCOL`, and `/api/health`,
 `bun run status` and Settings → About report a server ahead of its host. Bump
 the protocol when a host change must be restarted into, and gate the feature on
-`HostInfo.current` rather than letting an old host drop the field in silence —
-and only then, because bumping it switches those features off until the
-restart.
+the number it arrived in (`HOST_SINCE` in `hostlink.ts`) rather than letting an
+old host drop the field in silence. Never gate one on `HostInfo.current`: every
+bump makes older hosts not current, so a feature an old host does fine would go
+off until a restart nobody has chosen. `current` says a restart is owed.
 
 **The other thing that ended agents by accident was macOS,** twice on
 2026-10-10, 27 agents. A host spawned detached still sat in the *coalition* of

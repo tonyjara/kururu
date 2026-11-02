@@ -966,6 +966,11 @@ export interface HostInfo {
   version: string | null;
   /** It applies everything this server sends. False means a restart is owed, and every agent with it. */
   current: boolean;
+  /**
+   * It applies a spawn's `env`, which is what logins per profile are made of.
+   * Asked of by itself, because a host can be behind and still do this.
+   */
+  env: boolean;
 }
 
 /**

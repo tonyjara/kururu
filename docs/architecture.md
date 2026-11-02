@@ -183,8 +183,11 @@ Anything that would make `ptyhost.ts` need editing belongs on the server side.
   says neither is at protocol 1. A server ahead of its host warns once, reports
   it in `/api/health` and the snapshot's `host`, and holds back anything the old
   host would silently drop — a `create` with an `env`, which is how profiles
-  keep their own logins. Bump the number when a host change must be restarted
-  into, and only then.
+  keep their own logins, or a `text`, which an old host would never answer.
+  Bump the number when a host change must be restarted into, and only then.
+  Each such feature checks the number it arrived in (`HOST_SINCE`), never
+  `HostInfo.current`: a bump makes every older host not current, and a feature
+  that old host does perfectly well would go off with it.
 - **`adoptSeq` tells the id counter what a restored arrangement already holds.**
   `persist.ts` mints ids as it rebuilds, so the disk path walks the counter past
   its own work for free. The host's blob is the opposite: it carries ids, so a

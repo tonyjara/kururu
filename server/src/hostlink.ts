@@ -46,8 +46,24 @@ import type { AgentReport, AgentSnapshot, PtyKind } from "../../shared/model";
  *
  *   1  everything before the handshake carried one
  *   2  `create` takes `env`; `hello` answers with `version` and `protocol`
+ *   3  `text`, an agent's screen as rows of text; backlogs are cached
+ *
+ * A feature checks the number it arrived in (`HOST_SINCE`), never whether the
+ * host is current. Bumping this makes every older host not current, and a
+ * feature gated on that would go off on the bump and stay off until a restart
+ * the user has not chosen yet — the logins switch did exactly that to a host
+ * that applied `env` perfectly well. `current` is for saying a restart is
+ * owed, which it then is.
  */
-export const HOST_PROTOCOL = 2;
+export const HOST_PROTOCOL = 3;
+
+/** The protocol each thing an older host lacks arrived in. */
+export const HOST_SINCE = {
+  /** `create` applies its `env`, which logins per profile and lent secrets are made of. */
+  env: 2,
+  /** `text` is answered. A host from before ignores it and never replies, so it is not sent one. */
+  text: 3,
+} as const;
 
 /** Anything with `postMessage`/`on("message")` — a MessagePortMain, in practice. */
 export interface Port {
@@ -74,6 +90,11 @@ export type ToHost =
   /** Which terminals anybody is looking at. Output for the rest is never sent. */
   | { type: "watch"; agentIds: string[] }
   | { type: "backlog"; id: number; agentId: string }
+  /**
+   * The last `lines` rows of a screen that have anything on them, as text — a
+   * remote agent's status is read off them. Protocol 3; see `Screen.text`.
+   */
+  | { type: "text"; id: number; agentId: string; lines: number }
   /**
    * The arrangement, as the server last had it, for the host to hold on to.
    *
@@ -115,6 +136,9 @@ export class HostLink {
 
   /** Latest agent list, pushed by the host. Read synchronously all over index.ts. */
   agents: AgentSnapshot[] = [];
+
+  /** The protocol the host said it speaks in its `hello`; the oldest until it has. */
+  protocol = 1;
 
   /** Called when the agent list changes. */
   onAgents: () => void = () => {};
@@ -173,14 +197,15 @@ export class HostLink {
   async hello(): Promise<HostState> {
     const state = await this.request<Partial<HostState>>((id) => ({ type: "hello", id }));
     this.agents = state.agents ?? [];
+    // Read as anything off the link is. A host from before the handshake
+    // carried these sends neither, and that absence is the whole reading: it
+    // speaks the first protocol, whatever build it is.
+    this.protocol = Number.isInteger(state.protocol) && (state.protocol as number) >= 1 ? (state.protocol as number) : 1;
     return {
       agents: this.agents,
       blob: typeof state.blob === "string" ? state.blob : null,
-      // Read as anything off the link is. A host from before the handshake
-      // carried these sends neither, and that absence is the whole reading: it
-      // speaks the first protocol, whatever build it is.
       version: typeof state.version === "string" ? state.version : null,
-      protocol: Number.isInteger(state.protocol) && (state.protocol as number) >= 1 ? (state.protocol as number) : 1,
+      protocol: this.protocol,
     };
   }
 
@@ -217,6 +242,16 @@ export class HostLink {
 
   backlog(agentId: string): Promise<string> {
     return this.request<string>((id) => ({ type: "backlog", id, agentId }));
+  }
+
+  /**
+   * An agent's screen as text, or null when this host cannot be asked: one from
+   * before protocol 3 would drop the request and leave the promise waiting for
+   * good. The caller then does what was done before, a backlog read back.
+   */
+  text(agentId: string, lines: number): Promise<string> | null {
+    if (this.protocol < HOST_SINCE.text) return null;
+    return this.request<string>((id) => ({ type: "text", id, agentId, lines }));
   }
 
   kill(agentId: string): void {

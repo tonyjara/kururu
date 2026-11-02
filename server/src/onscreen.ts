@@ -14,9 +14,10 @@
  *
  * A poll and not the output stream, because the server is only sent the
  * bytes of terminals somebody is looking at, and a remote agent's status
- * matters most when nobody is. A backlog is the host's emulator serialized,
- * which for a tab attached to tmux is tmux's one screen and little else, and
- * one reading is a few kilobytes parsed. Only kururu's own remote agent tabs
+ * matters most when nobody is. A host from protocol 3 on is asked for the
+ * rows as text (`screenRows`), which it reads off the emulator it already
+ * keeps; an older one is asked for a backlog, which is read back through a
+ * fresh emulator here, as it always was. Only kururu's own remote agent tabs
  * are read — a line `remoteShellCommand` built with an agent on it — and one
  * at a time, so a slow host never has a queue of them.
  */
@@ -29,6 +30,28 @@ import { sweep } from "./sweep";
 
 /** Often enough that a turn's end is heard about in seconds, seldom enough to cost nothing. */
 const POLL_MS = 2000;
+
+/**
+ * An agent's screen as `readScreen` reads it, the cheapest way this host can
+ * give it; null when it could not be had.
+ *
+ * The backlog road costs a serialization in the host, the whole of it on the
+ * socket and a new xterm `Terminal` here, about 27 ms an agent for a tmux tab
+ * and several times that off an alternate screen, every two seconds. The text
+ * road is the host walking forty rows. Both say the same thing, because the
+ * fallback renders the backlog at the grid the host's emulator is at, and the
+ * choice is made off the protocol the host said it speaks, never off a timeout:
+ * a host that does not know the verb never answers it at all.
+ */
+export async function screenRows(host: HostLink, agentId: string, grid: { cols: number; rows: number }): Promise<string | null> {
+  try {
+    const asked = host.text(agentId, grid.rows);
+    if (asked) return await asked;
+    return await screenText(await host.backlog(agentId), grid.cols, grid.rows, grid.rows);
+  } catch {
+    return null;
+  }
+}
 
 export interface OnScreenDeps {
   host: HostLink;
@@ -62,10 +85,9 @@ export class OnScreen {
       for (const agent of this.deps.host.agents) {
         if (agent.exited || agent.kind !== "agent" || !remoteShellOf(agent.command)?.agent) continue;
         live.add(agent.id);
-        const data = await this.deps.host.backlog(agent.id).catch(() => null);
-        if (data === null) continue;
-        const { cols, rows } = this.deps.grid(agent.id);
-        const read = readScreen(await screenText(data, cols, rows, rows));
+        const text = await screenRows(this.deps.host, agent.id, this.deps.grid(agent.id));
+        if (text === null) continue;
+        const read = readScreen(text);
         let held = this.watches.get(agent.id);
         if (!held) this.watches.set(agent.id, (held = { watch: new ScreenWatch(), detail: null }));
         // The status as it is now rather than as it was a backlog ago: a

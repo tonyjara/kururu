@@ -105,6 +105,8 @@ function world(w: World = {}) {
   const slept: { at: CardAt; agent: AgentSnapshot }[] = [];
   const host = {
     find: (id: string) => (agent && id === agent.id ? agent : undefined),
+    // A host from before protocol 3, so the screen is read off a backlog.
+    text: () => null,
     backlog: async () => {
       if (w.screen === null) throw new Error("gone");
       return w.screen ?? QUIET_SCREEN;

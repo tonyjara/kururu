@@ -38,7 +38,7 @@ export function ProfilesPage({
     <>
       {/* On and not in force is a state, not an error: the host outlives the
           app and keeps the code it started with. */}
-      {launch.loginsPerProfile && !host.current && (
+      {launch.loginsPerProfile && !host.env && (
         <Banner>Logins per profile is on, but the pty host running now predates it. Restart the host to make it take effect, which ends every agent.</Banner>
       )}
 

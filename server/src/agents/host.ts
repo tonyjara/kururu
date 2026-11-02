@@ -351,6 +351,14 @@ export class AgentHost {
     return this.agents.get(id)?.screen.backlog() ?? null;
   }
 
+  /**
+   * Its last `lines` rows with anything on them, as text — what a remote
+   * agent's status is read from. Null for an agent this host has never heard of.
+   */
+  text(id: string, lines: number): Promise<string> | null {
+    return this.agents.get(id)?.screen.text(lines) ?? null;
+  }
+
   has(id: string): boolean {
     return this.agents.has(id);
   }

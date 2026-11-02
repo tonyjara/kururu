@@ -58,6 +58,27 @@ export class Screen {
   private drained: (() => void)[] = [];
 
   /**
+   * The last backlog, until the screen it was serialized from changes.
+   *
+   * Every pane in every client asks for a backlog when its socket comes back,
+   * and under `--watch` the server comes back dozens of times a day: four
+   * clients with four panes each is sixteen asks inside a second, each one a
+   * serialization of up to 1,500 lines on this thread, which is the thread
+   * every agent's output goes through. Almost all of them ask for the same
+   * thing — the same agent, at the grid the server already settled on, with no
+   * output in between — so the first one serializes and the rest are handed
+   * its string.
+   *
+   * Dropped rather than compared: a write or a resize clears it, so it can
+   * never be read stale and a busy agent holds no copy of a screen that has
+   * already moved on. The two pieces of state a backlog carries beside the
+   * screen, the cursor's look and whether it is hidden, change only through a
+   * write, so they are covered by the same rule. What this keeps is one string
+   * per quiet terminal, the size of what a pane would have been sent anyway.
+   */
+  private cached: string | null = null;
+
+  /**
    * What the program in this pty last called itself, cleaned. Kept here rather
    * than in the host because the title arrives the same way everything else
    * does — as an escape sequence in the stream — and this is the only thing in
@@ -113,6 +134,7 @@ export class Screen {
   }
 
   write(data: string): void {
+    this.cached = null;
     const scan = scanCursor(data, this.cursorCarry);
     this.cursorCarry = scan.carry;
     if (scan.shape !== undefined) this.cursor.shape = scan.shape;
@@ -132,6 +154,7 @@ export class Screen {
    */
   resize(cols: number, rows: number): void {
     if (cols === this.term.cols && rows === this.term.rows) return;
+    this.cached = null;
     this.term.resize(cols, rows);
   }
 
@@ -191,18 +214,53 @@ export class Screen {
    * sent, and `shared/cursor.ts` is the one thing that interprets them.
    */
   async backlog(): Promise<string> {
-    if (this.pending > 0) await new Promise<void>((resolve) => this.drained.push(resolve));
+    await this.settled();
+    if (this.cached !== null) return this.cached;
     const screen = this.serializer.serialize({ scrollback: BACKLOG_LINES });
     const { shape, color } = this.cursor;
-    return (
+    const backlog =
       screen +
       (shape ? decscusr(shape) : "") +
       (color ? osc12(color) : "") +
-      (this.cursorHidden ? "\x1b[?25l" : "")
-    );
+      (this.cursorHidden ? "\x1b[?25l" : "");
+    this.cached = backlog;
+    return backlog;
+  }
+
+  /**
+   * The screen as text: the last `lines` rows that have anything on them,
+   * read straight off this emulator.
+   *
+   * This is what `screenText` in the server makes of a backlog, and it is here
+   * because of who asks. A remote agent's status is read off its screen every
+   * two seconds (`server/src/onscreen.ts`), and the way there was a full
+   * backlog — serialized here, sent over the socket, parsed into a brand-new
+   * emulator in the server and read back — to look at forty rows that this
+   * emulator already holds as rows. The answer is the same by construction:
+   * the server's emulator was given this one's grid and this one's screen, so
+   * the lines wrap where these do. Trailing blank rows are the unused bottom of
+   * the grid and are left off, as there; rows above the top of the screen are
+   * included when the screen is that empty, as there, because that is where
+   * the last thing an agent said is when it has said little since a clear.
+   */
+  async text(lines: number): Promise<string> {
+    await this.settled();
+    const buffer = this.term.buffer.active;
+    const row = (y: number) => buffer.getLine(y)?.translateToString(true) ?? "";
+    let end = buffer.length;
+    while (end > 0 && !row(end - 1).trim()) end--;
+    const out: string[] = [];
+    for (let y = Math.max(0, end - lines); y < end; y++) out.push(row(y));
+    return out.join("\n");
+  }
+
+  /** Once everything written so far is in the buffer — see `pending`. */
+  private async settled(): Promise<void> {
+    if (this.pending > 0) await new Promise<void>((resolve) => this.drained.push(resolve));
   }
 
   dispose(): void {
+    this.cached = null;
     this.serializer.dispose();
     this.term.dispose();
   }
