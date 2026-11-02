@@ -498,12 +498,12 @@ export class Workspaces {
    * while it waited.
    */
   hasPane(paneId: string): boolean {
-    return findPane(this.activeWorkspace.layout, paneId) !== null;
+    return this.hasPaneIn(this.active.id, this.activeWorkspace.id, paneId);
   }
 
   /** Where a new tab in this pane should start, as far as the layout knows. */
   cwdFor(paneId: string): string | undefined {
-    return findPane(this.activeWorkspace.layout, paneId)?.cwd;
+    return this.cwdForIn(this.active.id, this.activeWorkspace.id, paneId);
   }
 
   /**
@@ -662,10 +662,7 @@ export class Workspaces {
    * tree a `~` nobody chose.
    */
   addTab(agentId: string, cwd: string | undefined, paneId = this.focusedPaneId): void {
-    this.mutateWorkspace(this.activeWorkspace.id, (w) => ({
-      ...w,
-      layout: addTab(w.layout, paneId, agentId, cwd),
-    }));
+    this.addTabIn(this.activeId, this.activeWorkspace.id, paneId, agentId, cwd);
   }
 
   /**
@@ -1230,11 +1227,7 @@ export class Workspaces {
 
   /** Change the active workspace's board. A workspace with none is left without one. */
   editBoard(workspaceId: string, fn: (board: Board) => Board): void {
-    const workspace = this.active.workspaces.find((w) => w.id === workspaceId);
-    if (!workspace?.board) return;
-    const next = fn(workspace.board);
-    if (next === workspace.board) return;
-    this.mutateWorkspace(workspaceId, (w) => ({ ...w, board: next }));
+    this.editBoardIn(this.activeId, workspaceId, fn);
   }
 
   /**

@@ -333,6 +333,25 @@ const DIED_STARTING_MS = 60_000;
 /** How much of a Kuru's screen that died starting is quoted to the drawer. The tab has the rest. */
 const DIED_QUOTE = 400;
 
+/**
+ * A tool call as each tool sees it: the call, and what `Harness.call` checked
+ * and made once for all of them — the profile, the node a board verb names,
+ * and the argument checks that also tell Auto Swap which agent to follow.
+ */
+interface ToolCall {
+  profileId: string;
+  selfId: string | null;
+  name: string;
+  args: Record<string, unknown>;
+  actor: Actor;
+  ws: HarnessDeps["workspaces"];
+  profile: NonNullable<ReturnType<HarnessDeps["workspaces"]["profile"]>>;
+  node: string;
+  follow: (agentId: string) => void;
+  agentArg: () => AgentSnapshot;
+  workspaceArg: (required: boolean) => string | null;
+}
+
 export class Harness {
   private readonly inboxes = new Map<string, Inbox>();
   private readonly transcripts = new Map<string, string>();
@@ -874,451 +893,460 @@ export class Harness {
       return id;
     };
 
-    switch (name) {
-      case "kururu_status":
-        return ok(this.status(profileId, selfId));
-
-      case "read_agent": {
-        if (this.remoteId(args)) return this.readRemote(args);
-        const agent = agentArg();
-        // An agent on a machine has no reply or transcript here — its hooks do
-        // not reach kururu — so its screen is the only answer to give.
-        const source = str(args.source) || (remoteShellOf(agent.command)?.agent ? "screen" : "reply");
-        if (source === "screen") return ok(await this.screen(agent, int(args.lines) ?? SCREEN_LINES));
-        if (source === "transcript") return ok(await this.transcript(agent, int(args.turns) ?? TRANSCRIPT_TURNS));
-        const reply = this.replies.get(agent.id);
-        if (reply) return ok(clip(reply));
-        const doing = this.deps.activity.get(agent.id);
-        return ok(
-          `${this.name(agent)} has not finished a turn since kururu started watching it${doing ? ` — it was last told: ${doing}` : ""}. Try source=screen${this.transcripts.has(agent.id) ? " or source=transcript" : ""}.`,
-        );
-      }
-
-      case "send_agent": {
-        const agent = agentArg();
-        const text = str(args.text);
-        if (!text) return fail("Nothing to send.");
-        const when = (WHENS as readonly string[]).includes(str(args.when)) ? (str(args.when) as When) : "next";
-        const was = agent.status;
-        if ((await this.speak(agent.id, text, when)) === "typed") {
-          await this.settled(agent.id);
-          const midTurn = was === "working" && tellsHarness(agent);
-          return ok(`Typed into ${this.name(agent)}'s terminal and pressed Enter${midTurn ? "; it was mid-turn, so it reads this between its tool calls" : ""}. It is now ${this.deps.host.find(agent.id)?.status ?? "gone"}.`);
-        }
-        const now = this.deps.host.find(agent.id);
-        const why =
-          (this.keys.get(agent.id) ?? 0) + SWAP_QUIET_MS > Date.now()
-            ? "the user is typing in its terminal; it goes in when they stop"
-            : now?.status === "blocked"
-              ? "it is showing a prompt, and the Enter would answer it; it goes in once its turn ends. The prompt is the user's: read its screen and tell them what it asks"
-              : isCommand(text)
-                ? "a slash command runs only between turns; it goes in when this turn ends"
-                : `it is mid-turn; it goes in when this turn ends${when === "now" ? "" : " (when=now would have put it in between its tool calls)"}`;
-        return ok(`Not typed yet into ${this.name(agent)}: ${why}. kururu holds it until then, and a server restart before then loses it.`);
-      }
-
-      case "press_keys": {
-        const agent = agentArg();
-        const keys = Array.isArray(args.keys) ? args.keys.filter((k): k is string => typeof k === "string") : [];
-        if (!keys.length) return fail("No keys given.");
-        const bytes = keyBytes(keys);
-        if ("bad" in bytes) return fail(`Not a key: ${bytes.bad}. Use enter, escape, tab, up, down, left, right, backspace, space, ctrl-c, ctrl-d, or a single character.`);
-        this.deps.host.write(agent.id, bytes.data);
-        await sleep(ENTER_DELAY_MS);
-        return ok(`Pressed ${keys.join(", ")} in ${this.name(agent)}. Read its screen to see what happened.`);
-      }
-
-      case "wait_agent": {
-        const ids = Array.isArray(args.agents) ? args.agents.filter((a): a is string => typeof a === "string") : [];
-        if (!ids.length) return fail("Name at least one agent.");
-        for (const id of ids) {
-          const there = parseRemote(id);
-          if (there) return fail(this.notHere(there.node));
-          if (ws.profileOf(id) !== profileId) return fail(`No agent ${id} in this profile.`);
-        }
-        const wanted = new Set<WaitState>(
-          (Array.isArray(args.states) ? args.states : ["done", "blocked", "exited"]).filter(
-            (s): s is WaitState => s === "done" || s === "blocked" || s === "exited",
-          ),
-        );
-        if (!wanted.size) return fail("states must name done, blocked or exited.");
-        if (args.include_current !== false) {
-          for (const id of ids) {
-            const agent = this.deps.host.find(id);
-            const state: WaitState | null = !agent || agent.exited ? "exited" : agent.status === "done" || agent.status === "blocked" ? agent.status : null;
-            if (state && wanted.has(state)) return ok(this.arrived(id, state, this.nameOf(id)));
-          }
-        }
-        const seconds = Math.min(WAIT_MAX_S, Math.max(1, int(args.timeout_s) ?? WAIT_DEFAULT_S));
-        const hit = await new Promise<Hit | null>((resolve) => {
-          const waiter: Waiter = { agents: new Set(ids), states: wanted, resolve };
-          this.waiters.add(waiter);
-          setTimeout(() => {
-            if (this.waiters.delete(waiter)) resolve(null);
-          }, seconds * 1000).unref();
-        });
-        if (!hit) return ok(`Nothing happened in ${seconds}s. ${ids.map((id) => `${this.nameOf(id)}: ${this.deps.host.find(id)?.status ?? "gone"}`).join("; ")}. Call again to keep waiting.`);
-        return ok(this.arrived(hit.agent, hit.state, hit.name));
-      }
-
-      case "start_agent": {
-        const workspaceId = workspaceArg(true)!;
-        const workspace = ws.workspaceIn(profileId, workspaceId)!;
-        const prompt = str(args.prompt);
-        if (!prompt) return fail("A prompt is needed.");
-        const launcher = this.launcher(str(args.launcher));
-        // It starts where it always did, and its tab goes to the workspace's
-        // agents' pane — decided last, so that a refusal leaves no empty one
-        // behind. See `agentPaneIn` and `cwdPaneIn`.
-        const fromPane = ws.cwdPaneIn(profileId, workspaceId);
-        if (!fromPane) return fail("Nowhere to put a terminal in that workspace.");
-        const into = (): string => {
-          const pane = ws.agentPaneIn(profileId, workspaceId);
-          if (!pane) throw new Error("Nowhere to put a terminal in that workspace.");
-          return pane;
-        };
-        const place = this.place(str(args.machine), workspace, str(args.cwd));
-        if ("error" in place) return fail(place.error);
-        let agent: AgentSnapshot;
-        let where: string;
-        // Named now, as a card's run is, so the ledger knows whose it is from its first word.
-        const sessionId = launcher.cli === "claude" ? randomUUID() : null;
-        const sessionFlag = sessionId ? ` --session-id ${sessionId}` : "";
-        if (place.machine) {
-          // The launcher's own line, without the hooks a local agent gets:
-          // they name files on this Mac. See `remoteAgentRun`.
-          const line = launcher.cli === "opencode"
-            ? withOpencodePrompt(launcherCommand(launcher, this.deps.launch()), prompt)
-            : withPrompt(launcherCommand(launcher, this.deps.launch()) + sessionFlag, prompt);
-          const command = await this.deps.agentOn(place.machine, workspace.name, place.folder, launcher.cli, line);
-          agent = await this.deps.openTerminal(profileId, workspaceId, into(), { command, kind: "agent" });
-          this.deps.spawned?.(agent.id, profileId, workspaceId, { program: launcher.cli, sessionId, machine: place.machine.name, cwd: place.folder });
-          where = `on ${place.machine.name}, in ${place.folder}`;
-        } else {
-          const asked = str(args.cwd);
-          if (asked && !asked.startsWith("/")) return fail("On this Mac, cwd must be an absolute path.");
-          const cwd = asked || (await this.deps.cwdFor(profileId, workspaceId, fromPane));
-          const agentCommand = await this.deps.agentCommand(launcher, profileId);
-          const command = launcher.cli === "opencode"
-            ? withOpencodePrompt(agentCommand, prompt)
-            : withPrompt(agentCommand + sessionFlag, prompt);
-          agent = await this.deps.openTerminal(profileId, workspaceId, into(), { cwd, command, kind: "agent" });
-          this.deps.spawned?.(agent.id, profileId, workspaceId, { program: launcher.cli, sessionId, cwd: agent.cwd });
-          where = `in ${agent.cwd}`;
-        }
-        const nameFor = str(args.name);
-        if (nameFor) this.deps.host.rename(agent.id, nameFor.slice(0, 80));
-        follow(agent.id);
-        const started = this.deps.host.find(agent.id) ?? agent;
-        const remote = place.machine
-          ? ` On a machine kururu reads its status off its screen, as nothing there reports back: done and blocked can come a few seconds late, a prompt it does not recognise is not seen as blocked, and there is no transcript — read it with source=screen. If ${launcher.cli === "claude" ? "Claude Code" : "Codex"} is not installed or not logged in there, the tab says so and it is reported as blocked.`
-          : "";
-        return ok(`Started ${launcher.label} as ${this.name(started)}, ${where}. It is working on the prompt; wait_agent or a message from kururu will tell you when it finishes.${remote}${nameFor ? "" : " It has no name yet — rename_agent gives it one the user can call it by."}`);
-      }
-
-      case "open_shell": {
-        const workspaceId = workspaceArg(true)!;
-        const workspace = ws.workspaceIn(profileId, workspaceId)!;
-        const pane = ws.paneBesideBoardIn(profileId, workspaceId);
-        if (!pane) return fail("Nowhere to put a terminal in that workspace.");
-        const dir = str(args.dir).trim();
-        const place = this.place(str(args.machine), workspace, dir);
-        if ("error" in place) return fail(place.error);
-        const machine = place.machine;
-        const run = str(args.run);
-        let agent: AgentSnapshot;
-        let where: string;
-        if (machine) {
-          const folder = place.folder;
-          const command = await this.deps.shellOn(machine, workspace.name, folder, run || undefined);
-          agent = await this.deps.openTerminal(profileId, workspaceId, pane, { command, kind: "shell" });
-          where = `on ${machine.name}, in ${folder} (tmux session ${remoteShellOf(command)?.session ?? "?"})`;
-        } else {
-          if (dir && !dir.startsWith("/")) return fail("On this Mac, dir must be an absolute path.");
-          agent = await this.deps.openTerminal(profileId, workspaceId, pane, { cwd: dir || undefined, kind: "shell", local: true });
-          where = `on this Mac, in ${agent.cwd}`;
-          if (run) {
-            await this.drawn(agent.id);
-            await this.speak(agent.id, run, "now");
-          }
-        }
-        const nameFor = str(args.name);
-        if (nameFor) this.deps.host.rename(agent.id, nameFor.slice(0, 80));
-        follow(agent.id);
-        const opened = this.deps.host.find(agent.id) ?? agent;
-        const said = run ? ` Ran: ${run.length > 160 ? `${run.slice(0, 159)}…` : run}.` : "";
-        return ok(`Opened ${this.name(opened)} ${where}.${said} read_agent source=screen shows what it prints; reveal_agent puts it in front of the user.`);
-      }
-
-      case "stop_agent": {
-        const agent = agentArg();
-        if (agent.id === selfId) return fail("That is you. The user closes the harness from its tab.");
-        this.deps.stopTerminal(agent.id);
-        return ok(`Ending ${this.name(agent)}. Its terminal closes once the process is gone.`);
-      }
-
-      case "reveal_agent": {
-        const agent = agentArg();
-        if (!ws.reveal(agent.id)) return fail("That agent is in no pane.");
-        // On purpose, so Auto Swap neither undoes it with a swap that was
-        // waiting nor follows it with another before it has been seen.
-        this.swaps.moved(Date.now());
-        return ok(`Showing ${this.name(agent)} to the user.`);
-      }
-
-      case "show_file": {
-        const path = str(args.path);
-        if (!path) return fail("A path is needed.");
-        const open = args.open === true;
-        const agent = str(args.agent) ? agentArg() : null;
-        if (!agent && !open) return fail("Name the agent whose row the link goes on, or pass open=true to only open the file.");
-        const line = int(args.line);
-        return ok(await this.deps.showFile(profileId, agent?.id ?? null, path, line !== undefined && line > 0 ? line : null, open));
-      }
-
-      case "send_telegram_photo": {
-        const path = str(args.path);
-        if (!path) return fail("A path is needed.");
-        const agent = str(args.agent) ? agentArg() : null;
-        return ok(await this.deps.sendPicture(profileId, agent?.id ?? null, path, str(args.caption) || null));
-      }
-
-      case "rename_agent": {
-        const agent = agentArg();
-        const to = str(args.name);
-        if (!to) return fail("A name is needed.");
-        const was = this.name(agent);
-        this.deps.host.rename(agent.id, to.slice(0, 80));
-        return ok(`Renamed ${was} to "${to.slice(0, 80)}".`);
-      }
-
-      case "cards": {
-        const workspaceId = workspaceArg(false);
-        const ask = { column: str(args.column) || undefined, card: str(args.card) || undefined };
-        const listed = (board: Board, title: string, workspaceName: string | null) => {
-          const listing = boardListing(board, title, (card, full) => this.cardLine(card, workspaceName, full), ask);
-          return listing.ok ? ok(listing.text) : fail(listing.text);
-        };
-        if (!workspaceId) return listed(profile.board, "the profile's board", null);
-        const workspace = ws.workspaceIn(profileId, workspaceId)!;
-        return workspace.board ? listed(workspace.board, `${workspace.name}'s board`, workspace.name) : ok(`${workspace.name} has no board yet — add_card makes one.`);
-      }
-
-      case "add_card": {
-        const title = str(args.title);
-        if (!title) return fail("A title is needed.");
-        const workspaceId = workspaceArg(false);
-        const id = mintCardId();
-        const fields = { title, body: str(args.body), column: str(args.column) || undefined, isolate: typeof args.isolate === "boolean" ? args.isolate : undefined };
-        if (!workspaceId) {
-          ws.as(actor, () => ws.editProfileBoard(profileId, (board) => addCard(board, fields, id, Date.now())));
-          const board = ws.profile(profileId)?.board;
-          const lane = board && boardLanes(board).find((l) => l.id === board.cards.find((c) => c.id === id)?.column);
-          if (!lane) return fail("The card was refused — an empty title.");
-          // The column said back, since one that is not one lands in the first.
-          return ok(`Added card ${id} "${title}" to the profile's board, in ${lane.name}${lane.id === NEEDS_COLUMN ? ", where the user sees it in their Needs drawer" : ""}.`);
-        }
-        ws.as(actor, () => {
-          ws.ensureBoardIn(profileId, workspaceId);
-          ws.editBoardIn(profileId, workspaceId, (board) => addCard(board, fields, id, Date.now()));
-        });
-        if (!ws.findCardIn(profileId, workspaceId, id)) return fail("The card was refused — an empty title, or a column that is not one.");
-        if (args.run === true) {
-          const launcher = this.launcher(str(args.launcher));
-          const { agentId } = await this.deps.runCard(profileId, workspaceId, id, launcher.id, false);
-          follow(agentId);
-          return ok(`Added card ${id} "${title}" and handed it to ${launcher.label}: ${this.nameOf(agentId)}.`);
-        }
-        return ok(`Added card ${id} "${title}".`);
-      }
-
-      case "edit_card": {
-        const cardId = str(args.card);
-        if (!cardId) return fail("A card id is needed.");
-        const fields = { title: args.title === undefined ? undefined : str(args.title), body: args.body === undefined ? undefined : str(args.body) };
-        const workspaceId = workspaceArg(false);
-        ws.as(actor, () => {
-          if (workspaceId) ws.editBoardIn(profileId, workspaceId, (board) => editCard(board, cardId, fields));
-          else ws.editProfileBoard(profileId, (board) => editCard(board, cardId, fields));
-        });
-        return ok(`Edited card ${cardId}.`);
-      }
-
-      case "move_card": {
-        const cardId = str(args.card);
-        const column = str(args.column);
-        if (!cardId || !column) return fail("A card id and a column are needed.");
-        const workspaceId = workspaceArg(false);
-        if (workspaceId) {
-          ws.as(actor, () => ws.editBoardIn(profileId, workspaceId, (board) => moveCard(board, cardId, column)));
-          if (column === "done") this.deps.stopDev(workspaceId, cardId);
-        } else {
-          const board = profile.board;
-          if (!board.cards.some((c) => c.id === cardId)) return fail(`No card ${cardId} on the profile's board.`);
-          const lane = boardLanes(board).find((l) => l.id === column);
-          if (!lane) return fail(`The profile's board has no column ${column}. Its columns: ${boardLanes(board).map((l) => l.id).join(", ")}.`);
-          ws.as(actor, () => ws.editProfileBoard(profileId, (b) => moveCard(b, cardId, column)));
-          return ok(`Moved card ${cardId} to ${lane.name}${lane.id === NEEDS_COLUMN ? ", where the user sees it in their Needs drawer" : ""}.`);
-        }
-        return ok(`Moved card ${cardId} to ${column}.`);
-      }
-
-      case "run_card": {
-        const workspaceId = workspaceArg(true)!;
-        const cardId = str(args.card);
-        if (!cardId) return fail("A card id is needed.");
-        const fresh = args.fresh === true;
-        const last = ws.findCardIn(profileId, workspaceId, cardId)?.card.run ?? null;
-        /*
-         * A card whose agent is still in its terminal — its turn finished and
-         * nobody closed it — is talked to, not run again: a second agent there
-         * is a new conversation beside the one that has the whole context,
-         * which is never what running the card was for.
-         */
-        if (!fresh && last?.agentId && this.deps.host.isLive(last.agentId)) {
-          return fail(`Card ${cardId}'s agent, ${this.nameOf(last.agentId)}, is still open. send_agent gives it more to do; fresh=true starts a second conversation beside it.`);
-        }
-        // The launcher it last ran on when none is named, so that leaving it
-        // out resumes on the model it had rather than on Claude's default.
-        const named = str(args.launcher) || (last && findLauncher(last.launcher) ? last.launcher : undefined);
-        const launcher = this.launcher(named);
-        const { agentId, resumed, why } = await this.deps.runCard(profileId, workspaceId, cardId, launcher.id, fresh);
-        follow(agentId);
-        const name = this.nameOf(agentId);
-        if (resumed) return ok(`Resumed card ${cardId}'s conversation, with its context, on ${launcher.label}: ${name}.`);
-        if (!last) return ok(`Handed card ${cardId} to ${launcher.label}: ${name}.`);
-        // Said loudly, because a fresh start on a card with work behind it is
-        // the thing that rereads the card and redoes what is done.
-        const because = fresh ? "as asked" : `because ${why ?? "its last conversation could not be found"}`;
-        return ok(
-          `Handed card ${cardId} to ${launcher.label}: ${name}, in a NEW conversation, ${because}. Its earlier work is not in this agent's context; it was told the card has run before and to check what is done before starting.`,
-        );
-      }
-
-      case "send_card_to_workspace": {
-        const cardId = str(args.card);
-        const workspaceId = workspaceArg(true)!;
-        if (!cardId) return fail("A card id is needed.");
-        ws.as("harness", () => ws.sendProfileCard(profileId, cardId, workspaceId));
-        return ok(`Sent card ${cardId} to the workspace's To do.`);
-      }
-
-      case "new_workspace": {
-        const nameFor = str(args.name);
-        if (!nameFor) return fail("A name is needed.");
-        const id = ws.newWorkspaceIn(profileId, nameFor.slice(0, 60));
-        return id ? ok(`Made workspace ${id} "${nameFor}".`) : fail("Could not make it.");
-      }
-
-      case "move_workspace": {
-        const workspaceId = workspaceArg(true)!;
-        const nodeName = str(args.node);
-        const node = this.deps.nodes?.().find((n) => n.name === nodeName);
-        if (!node) return fail(`No node ${nodeName || "(none)"}. kururu_status lists them under nodes.`);
-        if (!this.deps.movePlan || !this.deps.moveWorkspace) return fail("This kururu cannot move workspaces.");
-        const plan = await this.deps.movePlan(profileId, workspaceId, node.id, str(args.folder) || null);
-        if (args.confirm !== true) return ok(planText(plan));
-        if (plan.refusal) return fail(plan.refusal);
-        if (!plan.check) return fail(`Could not ask ${node.name} about the folder: ${plan.checkError ?? "no answer"}`);
-        if (plan.check.problem) return fail(folderSentence(plan.check.problem, node.name, plan.check.shown));
-        const moved = await this.deps.moveWorkspace(profileId, workspaceId, node.id, plan.check.folder);
-        return ok(
-          `Moved ${plan.workspace.name} to ${moved.node}${moved.done.again ? " (it had arrived already)" : ""}: workspace ${moved.done.name} in ${plan.check.shown}, ${moved.done.cards} cards, in ${moved.done.profile}. It is gone from this list, and its board here is in Search → Deleted. ${moved.node}'s own Kuru drives it from now on.`,
-        );
-      }
-
-      case "lend_secrets": {
-        const workspaceId = workspaceArg(true)!;
-        const nodeName = str(args.node);
-        const node = this.deps.nodes?.().find((n) => n.name === nodeName);
-        if (!node) return fail(`No node ${nodeName || "(none)"}. kururu_status lists them under nodes.`);
-        if (!this.deps.lendOffer || !this.deps.lendSecrets) return fail("This kururu cannot lend secrets.");
-        const folder = str(args.folder) || null;
-        const offer = await this.deps.lendOffer(profileId, workspaceId, node.id, folder);
-        if (args.confirm !== true) return ok(lendableText(offer));
-        const names = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
-        const env = names(args.env);
-        const ask: LendAsk = {
-          env: env.includes("all") ? offer.env.filter((c) => !c.note).map((c) => c.name) : env,
-          ssh: names(args.ssh),
-          github: str(args.github) || null,
-        };
-        // Only what the preview offered: a name it did not list is a guess, and a guess is not lent.
-        const offered = (list: Lendable["env"], wanted: string[]) => wanted.filter((name) => !list.some((c) => c.name === name && !c.note));
-        const unknown = [...offered(offer.env, ask.env), ...offered(offer.ssh, ask.ssh), ...(ask.github ? offered(offer.github, [ask.github]) : [])];
-        if (unknown.length) return fail(`Not offered for ${offer.workspace.name}: ${unknown.join(", ")}. Call lend_secrets without confirm to see what is.`);
-        if (!ask.env.length && !ask.ssh.length && !ask.github) return fail("Name what to lend: env, ssh or github.");
-        const { lent, to } = await this.deps.lendSecrets(profileId, workspaceId, node.id, folder, ask);
-        const where = to ? ` Env files go into ${to} there.` : "";
-        return ok(`Lent ${node.name} ${lent.join(", ")}: sealed to it and sent now, or when it next links.${where} Settings → Nodes on this Mac shows when it holds each, and takes each back.`);
-      }
-
-      case "search": {
-        const query = str(args.query);
-        if (!query) return fail("Words to look for are needed.");
-        const scope = args.scope === "cards" || args.scope === "turns" ? args.scope : "all";
-        const hits = this.deps.search(profileId, query, scope, Math.min(50, int(args.limit) ?? 20));
-        if (!hits.length) return ok(`Nothing matches "${query}".`);
-        return ok(hits.map((hit) => this.hitLine(hit)).join("\n"));
-      }
-
-      case "card_history": {
-        const cardId = str(args.card);
-        if (!cardId) return fail("A card id is needed.");
-        const found = this.deps.cardHistory(cardId);
-        if (!found) return fail(`No card ${cardId} in the database.`);
-        const where = found.workspaceName ? `${found.workspaceName}'s board` : "the profile's board";
-        const head = `${found.workspaceName ? cardCode(found.workspaceName, found.card.number) : `#${found.card.number}`} "${found.card.title}" on ${where}, now in ${laneName(found.card.column)}${found.deleted ? " (deleted)" : ""}:`;
-        const lines = found.events.map((event) => `- ${stamp(event.at)} ${eventLine(event)}`);
-        return ok([head, ...lines].join("\n"));
-      }
-
-      case "ask_kuru": {
-        if (!this.deps.peers) return fail("This kururu is not linked with any other node.");
-        const to = str(args.node);
-        const message = str(args.message);
-        if (!to || !message) return fail("A node and a message are needed.");
-        if (to.toLowerCase() === this.deps.peers.self().toLowerCase()) return fail("That is this node, and you are its Kuru.");
-        const seconds = Math.min(WAIT_MAX_S, Math.max(1, int(args.timeout_s) ?? WAIT_DEFAULT_S));
-        return this.deps.peers.ask(to, message, args.wait === true, seconds);
-      }
-
-      case "read_kuru": {
-        if (!this.deps.peers) return fail("This kururu is not linked with any other node.");
-        const to = str(args.node);
-        if (!to) return fail("A node is needed.");
-        return this.deps.peers.read(to, Math.max(1, Math.min(40, int(args.turns) ?? TRANSCRIPT_TURNS)));
-      }
-
-      case "say": {
-        const text = str(args.text);
-        if (!text) return fail("Nothing to say.");
-        return ok(SAY_ANSWERS[this.deps.say(profileId, text.slice(0, 300))]);
-      }
-
-      case "play_missed": {
-        // The words go back to the model as well as out of the speaker, so it
-        // knows what was just played and does not say it a third time.
-        const queued = this.deps.replayMissed(profileId);
-        if (!queued.length) return ok("Nothing was missed: every reply you gave was heard to the end, or is playing now.");
-        const lines = queued.map((entry) => `- ${new Date(entry.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}: ${entry.text}`);
-        return ok(`Playing ${queued.length} missed ${queued.length === 1 ? "reply" : "replies"}, oldest first:\n${lines.join("\n")}`);
-      }
-
-      case "reload_window": {
-        // Waits for the answer, as `wait_agent` does: the harness is the one
-        // that tells the agent which asked whether its change is on screen.
-        const why = oneLine(str(args.why), WHY_MAX);
-        if (!why) return fail("Say why: the window shows it in the notice after the reload.");
-        const seconds = int(args.seconds);
-        const timeoutMs = seconds === undefined ? RELOAD_TIMEOUT_MS : Math.max(RELOAD_TIMEOUT_MIN_MS, Math.min(RELOAD_TIMEOUT_MAX_MS, seconds * 1000));
-        return ok(outcomeText(await this.deps.reloadWindow(why, timeoutMs)));
-      }
-
-      default:
-        return fail(`No such tool: ${name}`);
-    }
+    const tool = Object.hasOwn(this.toolCalls, name) ? this.toolCalls[name] : undefined;
+    if (!tool) return fail(`No such tool: ${name}`);
+    return tool({ profileId, selfId, name, args, actor, ws, profile, node, follow, agentArg, workspaceArg });
   }
+
+  /**
+   * Every tool, by name: what it does once `call` has checked the profile,
+   * sent a board verb for another node over the link, and made the
+   * argument checks they share. A table rather than a `switch`, so a tool is
+   * found by its name and the catalogue in `shared/harness.ts` can be held
+   * against it. Each entry takes only what it uses of the call.
+   */
+  private readonly toolCalls: Record<string, (call: ToolCall) => McpResult | Promise<McpResult>> = {
+    kururu_status: ({ profileId, selfId }) => {
+      return ok(this.status(profileId, selfId));
+    },
+
+    read_agent: async ({ args, agentArg }) => {
+      if (this.remoteId(args)) return this.readRemote(args);
+      const agent = agentArg();
+      // An agent on a machine has no reply or transcript here — its hooks do
+      // not reach kururu — so its screen is the only answer to give.
+      const source = str(args.source) || (remoteShellOf(agent.command)?.agent ? "screen" : "reply");
+      if (source === "screen") return ok(await this.screen(agent, int(args.lines) ?? SCREEN_LINES));
+      if (source === "transcript") return ok(await this.transcript(agent, int(args.turns) ?? TRANSCRIPT_TURNS));
+      const reply = this.replies.get(agent.id);
+      if (reply) return ok(clip(reply));
+      const doing = this.deps.activity.get(agent.id);
+      return ok(
+        `${this.name(agent)} has not finished a turn since kururu started watching it${doing ? ` — it was last told: ${doing}` : ""}. Try source=screen${this.transcripts.has(agent.id) ? " or source=transcript" : ""}.`,
+      );
+    },
+
+    send_agent: async ({ args, agentArg }) => {
+      const agent = agentArg();
+      const text = str(args.text);
+      if (!text) return fail("Nothing to send.");
+      const when = (WHENS as readonly string[]).includes(str(args.when)) ? (str(args.when) as When) : "next";
+      const was = agent.status;
+      if ((await this.speak(agent.id, text, when)) === "typed") {
+        await this.settled(agent.id);
+        const midTurn = was === "working" && tellsHarness(agent);
+        return ok(`Typed into ${this.name(agent)}'s terminal and pressed Enter${midTurn ? "; it was mid-turn, so it reads this between its tool calls" : ""}. It is now ${this.deps.host.find(agent.id)?.status ?? "gone"}.`);
+      }
+      const now = this.deps.host.find(agent.id);
+      const why =
+        (this.keys.get(agent.id) ?? 0) + SWAP_QUIET_MS > Date.now()
+          ? "the user is typing in its terminal; it goes in when they stop"
+          : now?.status === "blocked"
+            ? "it is showing a prompt, and the Enter would answer it; it goes in once its turn ends. The prompt is the user's: read its screen and tell them what it asks"
+            : isCommand(text)
+              ? "a slash command runs only between turns; it goes in when this turn ends"
+              : `it is mid-turn; it goes in when this turn ends${when === "now" ? "" : " (when=now would have put it in between its tool calls)"}`;
+      return ok(`Not typed yet into ${this.name(agent)}: ${why}. kururu holds it until then, and a server restart before then loses it.`);
+    },
+
+    press_keys: async ({ args, agentArg }) => {
+      const agent = agentArg();
+      const keys = Array.isArray(args.keys) ? args.keys.filter((k): k is string => typeof k === "string") : [];
+      if (!keys.length) return fail("No keys given.");
+      const bytes = keyBytes(keys);
+      if ("bad" in bytes) return fail(`Not a key: ${bytes.bad}. Use enter, escape, tab, up, down, left, right, backspace, space, ctrl-c, ctrl-d, or a single character.`);
+      this.deps.host.write(agent.id, bytes.data);
+      await sleep(ENTER_DELAY_MS);
+      return ok(`Pressed ${keys.join(", ")} in ${this.name(agent)}. Read its screen to see what happened.`);
+    },
+
+    wait_agent: async ({ profileId, args, ws }) => {
+      const ids = Array.isArray(args.agents) ? args.agents.filter((a): a is string => typeof a === "string") : [];
+      if (!ids.length) return fail("Name at least one agent.");
+      for (const id of ids) {
+        const there = parseRemote(id);
+        if (there) return fail(this.notHere(there.node));
+        if (ws.profileOf(id) !== profileId) return fail(`No agent ${id} in this profile.`);
+      }
+      const wanted = new Set<WaitState>(
+        (Array.isArray(args.states) ? args.states : ["done", "blocked", "exited"]).filter(
+          (s): s is WaitState => s === "done" || s === "blocked" || s === "exited",
+        ),
+      );
+      if (!wanted.size) return fail("states must name done, blocked or exited.");
+      if (args.include_current !== false) {
+        for (const id of ids) {
+          const agent = this.deps.host.find(id);
+          const state: WaitState | null = !agent || agent.exited ? "exited" : agent.status === "done" || agent.status === "blocked" ? agent.status : null;
+          if (state && wanted.has(state)) return ok(this.arrived(id, state, this.nameOf(id)));
+        }
+      }
+      const seconds = Math.min(WAIT_MAX_S, Math.max(1, int(args.timeout_s) ?? WAIT_DEFAULT_S));
+      const hit = await new Promise<Hit | null>((resolve) => {
+        const waiter: Waiter = { agents: new Set(ids), states: wanted, resolve };
+        this.waiters.add(waiter);
+        setTimeout(() => {
+          if (this.waiters.delete(waiter)) resolve(null);
+        }, seconds * 1000).unref();
+      });
+      if (!hit) return ok(`Nothing happened in ${seconds}s. ${ids.map((id) => `${this.nameOf(id)}: ${this.deps.host.find(id)?.status ?? "gone"}`).join("; ")}. Call again to keep waiting.`);
+      return ok(this.arrived(hit.agent, hit.state, hit.name));
+    },
+
+    start_agent: async ({ profileId, args, ws, follow, workspaceArg }) => {
+      const workspaceId = workspaceArg(true)!;
+      const workspace = ws.workspaceIn(profileId, workspaceId)!;
+      const prompt = str(args.prompt);
+      if (!prompt) return fail("A prompt is needed.");
+      const launcher = this.launcher(str(args.launcher));
+      // It starts where it always did, and its tab goes to the workspace's
+      // agents' pane — decided last, so that a refusal leaves no empty one
+      // behind. See `agentPaneIn` and `cwdPaneIn`.
+      const fromPane = ws.cwdPaneIn(profileId, workspaceId);
+      if (!fromPane) return fail("Nowhere to put a terminal in that workspace.");
+      const into = (): string => {
+        const pane = ws.agentPaneIn(profileId, workspaceId);
+        if (!pane) throw new Error("Nowhere to put a terminal in that workspace.");
+        return pane;
+      };
+      const place = this.place(str(args.machine), workspace, str(args.cwd));
+      if ("error" in place) return fail(place.error);
+      let agent: AgentSnapshot;
+      let where: string;
+      // Named now, as a card's run is, so the ledger knows whose it is from its first word.
+      const sessionId = launcher.cli === "claude" ? randomUUID() : null;
+      const sessionFlag = sessionId ? ` --session-id ${sessionId}` : "";
+      if (place.machine) {
+        // The launcher's own line, without the hooks a local agent gets:
+        // they name files on this Mac. See `remoteAgentRun`.
+        const line = launcher.cli === "opencode"
+          ? withOpencodePrompt(launcherCommand(launcher, this.deps.launch()), prompt)
+          : withPrompt(launcherCommand(launcher, this.deps.launch()) + sessionFlag, prompt);
+        const command = await this.deps.agentOn(place.machine, workspace.name, place.folder, launcher.cli, line);
+        agent = await this.deps.openTerminal(profileId, workspaceId, into(), { command, kind: "agent" });
+        this.deps.spawned?.(agent.id, profileId, workspaceId, { program: launcher.cli, sessionId, machine: place.machine.name, cwd: place.folder });
+        where = `on ${place.machine.name}, in ${place.folder}`;
+      } else {
+        const asked = str(args.cwd);
+        if (asked && !asked.startsWith("/")) return fail("On this Mac, cwd must be an absolute path.");
+        const cwd = asked || (await this.deps.cwdFor(profileId, workspaceId, fromPane));
+        const agentCommand = await this.deps.agentCommand(launcher, profileId);
+        const command = launcher.cli === "opencode"
+          ? withOpencodePrompt(agentCommand, prompt)
+          : withPrompt(agentCommand + sessionFlag, prompt);
+        agent = await this.deps.openTerminal(profileId, workspaceId, into(), { cwd, command, kind: "agent" });
+        this.deps.spawned?.(agent.id, profileId, workspaceId, { program: launcher.cli, sessionId, cwd: agent.cwd });
+        where = `in ${agent.cwd}`;
+      }
+      const nameFor = str(args.name);
+      if (nameFor) this.deps.host.rename(agent.id, nameFor.slice(0, 80));
+      follow(agent.id);
+      const started = this.deps.host.find(agent.id) ?? agent;
+      const remote = place.machine
+        ? ` On a machine kururu reads its status off its screen, as nothing there reports back: done and blocked can come a few seconds late, a prompt it does not recognise is not seen as blocked, and there is no transcript — read it with source=screen. If ${launcher.cli === "claude" ? "Claude Code" : "Codex"} is not installed or not logged in there, the tab says so and it is reported as blocked.`
+        : "";
+      return ok(`Started ${launcher.label} as ${this.name(started)}, ${where}. It is working on the prompt; wait_agent or a message from kururu will tell you when it finishes.${remote}${nameFor ? "" : " It has no name yet — rename_agent gives it one the user can call it by."}`);
+    },
+
+    open_shell: async ({ profileId, args, ws, follow, workspaceArg }) => {
+      const workspaceId = workspaceArg(true)!;
+      const workspace = ws.workspaceIn(profileId, workspaceId)!;
+      const pane = ws.paneBesideBoardIn(profileId, workspaceId);
+      if (!pane) return fail("Nowhere to put a terminal in that workspace.");
+      const dir = str(args.dir).trim();
+      const place = this.place(str(args.machine), workspace, dir);
+      if ("error" in place) return fail(place.error);
+      const machine = place.machine;
+      const run = str(args.run);
+      let agent: AgentSnapshot;
+      let where: string;
+      if (machine) {
+        const folder = place.folder;
+        const command = await this.deps.shellOn(machine, workspace.name, folder, run || undefined);
+        agent = await this.deps.openTerminal(profileId, workspaceId, pane, { command, kind: "shell" });
+        where = `on ${machine.name}, in ${folder} (tmux session ${remoteShellOf(command)?.session ?? "?"})`;
+      } else {
+        if (dir && !dir.startsWith("/")) return fail("On this Mac, dir must be an absolute path.");
+        agent = await this.deps.openTerminal(profileId, workspaceId, pane, { cwd: dir || undefined, kind: "shell", local: true });
+        where = `on this Mac, in ${agent.cwd}`;
+        if (run) {
+          await this.drawn(agent.id);
+          await this.speak(agent.id, run, "now");
+        }
+      }
+      const nameFor = str(args.name);
+      if (nameFor) this.deps.host.rename(agent.id, nameFor.slice(0, 80));
+      follow(agent.id);
+      const opened = this.deps.host.find(agent.id) ?? agent;
+      const said = run ? ` Ran: ${run.length > 160 ? `${run.slice(0, 159)}…` : run}.` : "";
+      return ok(`Opened ${this.name(opened)} ${where}.${said} read_agent source=screen shows what it prints; reveal_agent puts it in front of the user.`);
+    },
+
+    stop_agent: ({ selfId, agentArg }) => {
+      const agent = agentArg();
+      if (agent.id === selfId) return fail("That is you. The user closes the harness from its tab.");
+      this.deps.stopTerminal(agent.id);
+      return ok(`Ending ${this.name(agent)}. Its terminal closes once the process is gone.`);
+    },
+
+    reveal_agent: ({ ws, agentArg }) => {
+      const agent = agentArg();
+      if (!ws.reveal(agent.id)) return fail("That agent is in no pane.");
+      // On purpose, so Auto Swap neither undoes it with a swap that was
+      // waiting nor follows it with another before it has been seen.
+      this.swaps.moved(Date.now());
+      return ok(`Showing ${this.name(agent)} to the user.`);
+    },
+
+    show_file: async ({ profileId, args, agentArg }) => {
+      const path = str(args.path);
+      if (!path) return fail("A path is needed.");
+      const open = args.open === true;
+      const agent = str(args.agent) ? agentArg() : null;
+      if (!agent && !open) return fail("Name the agent whose row the link goes on, or pass open=true to only open the file.");
+      const line = int(args.line);
+      return ok(await this.deps.showFile(profileId, agent?.id ?? null, path, line !== undefined && line > 0 ? line : null, open));
+    },
+
+    send_telegram_photo: async ({ profileId, args, agentArg }) => {
+      const path = str(args.path);
+      if (!path) return fail("A path is needed.");
+      const agent = str(args.agent) ? agentArg() : null;
+      return ok(await this.deps.sendPicture(profileId, agent?.id ?? null, path, str(args.caption) || null));
+    },
+
+    rename_agent: ({ args, agentArg }) => {
+      const agent = agentArg();
+      const to = str(args.name);
+      if (!to) return fail("A name is needed.");
+      const was = this.name(agent);
+      this.deps.host.rename(agent.id, to.slice(0, 80));
+      return ok(`Renamed ${was} to "${to.slice(0, 80)}".`);
+    },
+
+    cards: ({ profileId, args, ws, profile, workspaceArg }) => {
+      const workspaceId = workspaceArg(false);
+      const ask = { column: str(args.column) || undefined, card: str(args.card) || undefined };
+      const listed = (board: Board, title: string, workspaceName: string | null) => {
+        const listing = boardListing(board, title, (card, full) => this.cardLine(card, workspaceName, full), ask);
+        return listing.ok ? ok(listing.text) : fail(listing.text);
+      };
+      if (!workspaceId) return listed(profile.board, "the profile's board", null);
+      const workspace = ws.workspaceIn(profileId, workspaceId)!;
+      return workspace.board ? listed(workspace.board, `${workspace.name}'s board`, workspace.name) : ok(`${workspace.name} has no board yet — add_card makes one.`);
+    },
+
+    add_card: async ({ profileId, args, actor, ws, follow, workspaceArg }) => {
+      const title = str(args.title);
+      if (!title) return fail("A title is needed.");
+      const workspaceId = workspaceArg(false);
+      const id = mintCardId();
+      const fields = { title, body: str(args.body), column: str(args.column) || undefined, isolate: typeof args.isolate === "boolean" ? args.isolate : undefined };
+      if (!workspaceId) {
+        ws.as(actor, () => ws.editProfileBoard(profileId, (board) => addCard(board, fields, id, Date.now())));
+        const board = ws.profile(profileId)?.board;
+        const lane = board && boardLanes(board).find((l) => l.id === board.cards.find((c) => c.id === id)?.column);
+        if (!lane) return fail("The card was refused — an empty title.");
+        // The column said back, since one that is not one lands in the first.
+        return ok(`Added card ${id} "${title}" to the profile's board, in ${lane.name}${lane.id === NEEDS_COLUMN ? ", where the user sees it in their Needs drawer" : ""}.`);
+      }
+      ws.as(actor, () => {
+        ws.ensureBoardIn(profileId, workspaceId);
+        ws.editBoardIn(profileId, workspaceId, (board) => addCard(board, fields, id, Date.now()));
+      });
+      if (!ws.findCardIn(profileId, workspaceId, id)) return fail("The card was refused — an empty title, or a column that is not one.");
+      if (args.run === true) {
+        const launcher = this.launcher(str(args.launcher));
+        const { agentId } = await this.deps.runCard(profileId, workspaceId, id, launcher.id, false);
+        follow(agentId);
+        return ok(`Added card ${id} "${title}" and handed it to ${launcher.label}: ${this.nameOf(agentId)}.`);
+      }
+      return ok(`Added card ${id} "${title}".`);
+    },
+
+    edit_card: ({ profileId, args, actor, ws, workspaceArg }) => {
+      const cardId = str(args.card);
+      if (!cardId) return fail("A card id is needed.");
+      const fields = { title: args.title === undefined ? undefined : str(args.title), body: args.body === undefined ? undefined : str(args.body) };
+      const workspaceId = workspaceArg(false);
+      ws.as(actor, () => {
+        if (workspaceId) ws.editBoardIn(profileId, workspaceId, (board) => editCard(board, cardId, fields));
+        else ws.editProfileBoard(profileId, (board) => editCard(board, cardId, fields));
+      });
+      return ok(`Edited card ${cardId}.`);
+    },
+
+    move_card: ({ profileId, args, actor, ws, profile, workspaceArg }) => {
+      const cardId = str(args.card);
+      const column = str(args.column);
+      if (!cardId || !column) return fail("A card id and a column are needed.");
+      const workspaceId = workspaceArg(false);
+      if (workspaceId) {
+        ws.as(actor, () => ws.editBoardIn(profileId, workspaceId, (board) => moveCard(board, cardId, column)));
+        if (column === "done") this.deps.stopDev(workspaceId, cardId);
+      } else {
+        const board = profile.board;
+        if (!board.cards.some((c) => c.id === cardId)) return fail(`No card ${cardId} on the profile's board.`);
+        const lane = boardLanes(board).find((l) => l.id === column);
+        if (!lane) return fail(`The profile's board has no column ${column}. Its columns: ${boardLanes(board).map((l) => l.id).join(", ")}.`);
+        ws.as(actor, () => ws.editProfileBoard(profileId, (b) => moveCard(b, cardId, column)));
+        return ok(`Moved card ${cardId} to ${lane.name}${lane.id === NEEDS_COLUMN ? ", where the user sees it in their Needs drawer" : ""}.`);
+      }
+      return ok(`Moved card ${cardId} to ${column}.`);
+    },
+
+    run_card: async ({ profileId, args, ws, follow, workspaceArg }) => {
+      const workspaceId = workspaceArg(true)!;
+      const cardId = str(args.card);
+      if (!cardId) return fail("A card id is needed.");
+      const fresh = args.fresh === true;
+      const last = ws.findCardIn(profileId, workspaceId, cardId)?.card.run ?? null;
+      /*
+       * A card whose agent is still in its terminal — its turn finished and
+       * nobody closed it — is talked to, not run again: a second agent there
+       * is a new conversation beside the one that has the whole context,
+       * which is never what running the card was for.
+       */
+      if (!fresh && last?.agentId && this.deps.host.isLive(last.agentId)) {
+        return fail(`Card ${cardId}'s agent, ${this.nameOf(last.agentId)}, is still open. send_agent gives it more to do; fresh=true starts a second conversation beside it.`);
+      }
+      // The launcher it last ran on when none is named, so that leaving it
+      // out resumes on the model it had rather than on Claude's default.
+      const named = str(args.launcher) || (last && findLauncher(last.launcher) ? last.launcher : undefined);
+      const launcher = this.launcher(named);
+      const { agentId, resumed, why } = await this.deps.runCard(profileId, workspaceId, cardId, launcher.id, fresh);
+      follow(agentId);
+      const name = this.nameOf(agentId);
+      if (resumed) return ok(`Resumed card ${cardId}'s conversation, with its context, on ${launcher.label}: ${name}.`);
+      if (!last) return ok(`Handed card ${cardId} to ${launcher.label}: ${name}.`);
+      // Said loudly, because a fresh start on a card with work behind it is
+      // the thing that rereads the card and redoes what is done.
+      const because = fresh ? "as asked" : `because ${why ?? "its last conversation could not be found"}`;
+      return ok(
+        `Handed card ${cardId} to ${launcher.label}: ${name}, in a NEW conversation, ${because}. Its earlier work is not in this agent's context; it was told the card has run before and to check what is done before starting.`,
+      );
+    },
+
+    send_card_to_workspace: ({ profileId, args, ws, workspaceArg }) => {
+      const cardId = str(args.card);
+      const workspaceId = workspaceArg(true)!;
+      if (!cardId) return fail("A card id is needed.");
+      ws.as("harness", () => ws.sendProfileCard(profileId, cardId, workspaceId));
+      return ok(`Sent card ${cardId} to the workspace's To do.`);
+    },
+
+    new_workspace: ({ profileId, args, ws }) => {
+      const nameFor = str(args.name);
+      if (!nameFor) return fail("A name is needed.");
+      const id = ws.newWorkspaceIn(profileId, nameFor.slice(0, 60));
+      return id ? ok(`Made workspace ${id} "${nameFor}".`) : fail("Could not make it.");
+    },
+
+    move_workspace: async ({ profileId, args, workspaceArg }) => {
+      const workspaceId = workspaceArg(true)!;
+      const nodeName = str(args.node);
+      const node = this.deps.nodes?.().find((n) => n.name === nodeName);
+      if (!node) return fail(`No node ${nodeName || "(none)"}. kururu_status lists them under nodes.`);
+      if (!this.deps.movePlan || !this.deps.moveWorkspace) return fail("This kururu cannot move workspaces.");
+      const plan = await this.deps.movePlan(profileId, workspaceId, node.id, str(args.folder) || null);
+      if (args.confirm !== true) return ok(planText(plan));
+      if (plan.refusal) return fail(plan.refusal);
+      if (!plan.check) return fail(`Could not ask ${node.name} about the folder: ${plan.checkError ?? "no answer"}`);
+      if (plan.check.problem) return fail(folderSentence(plan.check.problem, node.name, plan.check.shown));
+      const moved = await this.deps.moveWorkspace(profileId, workspaceId, node.id, plan.check.folder);
+      return ok(
+        `Moved ${plan.workspace.name} to ${moved.node}${moved.done.again ? " (it had arrived already)" : ""}: workspace ${moved.done.name} in ${plan.check.shown}, ${moved.done.cards} cards, in ${moved.done.profile}. It is gone from this list, and its board here is in Search → Deleted. ${moved.node}'s own Kuru drives it from now on.`,
+      );
+    },
+
+    lend_secrets: async ({ profileId, name, args, workspaceArg }) => {
+      const workspaceId = workspaceArg(true)!;
+      const nodeName = str(args.node);
+      const node = this.deps.nodes?.().find((n) => n.name === nodeName);
+      if (!node) return fail(`No node ${nodeName || "(none)"}. kururu_status lists them under nodes.`);
+      if (!this.deps.lendOffer || !this.deps.lendSecrets) return fail("This kururu cannot lend secrets.");
+      const folder = str(args.folder) || null;
+      const offer = await this.deps.lendOffer(profileId, workspaceId, node.id, folder);
+      if (args.confirm !== true) return ok(lendableText(offer));
+      const names = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+      const env = names(args.env);
+      const ask: LendAsk = {
+        env: env.includes("all") ? offer.env.filter((c) => !c.note).map((c) => c.name) : env,
+        ssh: names(args.ssh),
+        github: str(args.github) || null,
+      };
+      // Only what the preview offered: a name it did not list is a guess, and a guess is not lent.
+      const offered = (list: Lendable["env"], wanted: string[]) => wanted.filter((name) => !list.some((c) => c.name === name && !c.note));
+      const unknown = [...offered(offer.env, ask.env), ...offered(offer.ssh, ask.ssh), ...(ask.github ? offered(offer.github, [ask.github]) : [])];
+      if (unknown.length) return fail(`Not offered for ${offer.workspace.name}: ${unknown.join(", ")}. Call lend_secrets without confirm to see what is.`);
+      if (!ask.env.length && !ask.ssh.length && !ask.github) return fail("Name what to lend: env, ssh or github.");
+      const { lent, to } = await this.deps.lendSecrets(profileId, workspaceId, node.id, folder, ask);
+      const where = to ? ` Env files go into ${to} there.` : "";
+      return ok(`Lent ${node.name} ${lent.join(", ")}: sealed to it and sent now, or when it next links.${where} Settings → Nodes on this Mac shows when it holds each, and takes each back.`);
+    },
+
+    search: ({ profileId, args }) => {
+      const query = str(args.query);
+      if (!query) return fail("Words to look for are needed.");
+      const scope = args.scope === "cards" || args.scope === "turns" ? args.scope : "all";
+      const hits = this.deps.search(profileId, query, scope, Math.min(50, int(args.limit) ?? 20));
+      if (!hits.length) return ok(`Nothing matches "${query}".`);
+      return ok(hits.map((hit) => this.hitLine(hit)).join("\n"));
+    },
+
+    card_history: ({ args }) => {
+      const cardId = str(args.card);
+      if (!cardId) return fail("A card id is needed.");
+      const found = this.deps.cardHistory(cardId);
+      if (!found) return fail(`No card ${cardId} in the database.`);
+      const where = found.workspaceName ? `${found.workspaceName}'s board` : "the profile's board";
+      const head = `${found.workspaceName ? cardCode(found.workspaceName, found.card.number) : `#${found.card.number}`} "${found.card.title}" on ${where}, now in ${laneName(found.card.column)}${found.deleted ? " (deleted)" : ""}:`;
+      const lines = found.events.map((event) => `- ${stamp(event.at)} ${eventLine(event)}`);
+      return ok([head, ...lines].join("\n"));
+    },
+
+    ask_kuru: ({ args }) => {
+      if (!this.deps.peers) return fail("This kururu is not linked with any other node.");
+      const to = str(args.node);
+      const message = str(args.message);
+      if (!to || !message) return fail("A node and a message are needed.");
+      if (to.toLowerCase() === this.deps.peers.self().toLowerCase()) return fail("That is this node, and you are its Kuru.");
+      const seconds = Math.min(WAIT_MAX_S, Math.max(1, int(args.timeout_s) ?? WAIT_DEFAULT_S));
+      return this.deps.peers.ask(to, message, args.wait === true, seconds);
+    },
+
+    read_kuru: ({ args }) => {
+      if (!this.deps.peers) return fail("This kururu is not linked with any other node.");
+      const to = str(args.node);
+      if (!to) return fail("A node is needed.");
+      return this.deps.peers.read(to, Math.max(1, Math.min(40, int(args.turns) ?? TRANSCRIPT_TURNS)));
+    },
+
+    say: ({ profileId, args }) => {
+      const text = str(args.text);
+      if (!text) return fail("Nothing to say.");
+      return ok(SAY_ANSWERS[this.deps.say(profileId, text.slice(0, 300))]);
+    },
+
+    play_missed: ({ profileId }) => {
+      // The words go back to the model as well as out of the speaker, so it
+      // knows what was just played and does not say it a third time.
+      const queued = this.deps.replayMissed(profileId);
+      if (!queued.length) return ok("Nothing was missed: every reply you gave was heard to the end, or is playing now.");
+      const lines = queued.map((entry) => `- ${new Date(entry.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}: ${entry.text}`);
+      return ok(`Playing ${queued.length} missed ${queued.length === 1 ? "reply" : "replies"}, oldest first:\n${lines.join("\n")}`);
+    },
+
+    reload_window: async ({ args }) => {
+      // Waits for the answer, as `wait_agent` does: the harness is the one
+      // that tells the agent which asked whether its change is on screen.
+      const why = oneLine(str(args.why), WHY_MAX);
+      if (!why) return fail("Say why: the window shows it in the notice after the reload.");
+      const seconds = int(args.seconds);
+      const timeoutMs = seconds === undefined ? RELOAD_TIMEOUT_MS : Math.max(RELOAD_TIMEOUT_MIN_MS, Math.min(RELOAD_TIMEOUT_MAX_MS, seconds * 1000));
+      return ok(outcomeText(await this.deps.reloadWindow(why, timeoutMs)));
+    },
+  };
 
   /**
    * A board verb another node's Kuru asked for, over the link, on this
