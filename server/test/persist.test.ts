@@ -98,6 +98,24 @@ describe("Auto Swap on disk", () => {
   });
 });
 
+/** The same rule for "agents load only kururu's MCP": a preference, written only when on, off for a file from before it. */
+describe("Agents with kururu's MCP only, on disk", () => {
+  it("is off for a new profile, comes back on for one that had it on, and reads anything but true as off", () => {
+    const workspaces = new Workspaces();
+    workspaces.newProfile("work");
+    const [first, second] = workspaces.all();
+    expect(first!.agentsKururuMcpOnly).toBe(false);
+    workspaces.setAgentsKururuMcpOnly(second!.id, true);
+    writeSnapshot(workspaces.all(), workspaces.active.id);
+    expect(readSnapshot()!.profiles.map((p) => p.agentsKururuMcpOnly)).toEqual([false, true]);
+    const session = JSON.parse(readFileSync(snapshotPath(), "utf8"));
+    expect(session.profiles[0].agentsKururuMcpOnly).toBeUndefined();
+    session.profiles[1].agentsKururuMcpOnly = "yes";
+    writeFileSync(snapshotPath(), JSON.stringify(session));
+    expect(readSnapshot()!.profiles[1]!.agentsKururuMcpOnly).toBe(false);
+  });
+});
+
 /**
  * Where agents open is a preference, so it survives a cold start; so does
  * the agents' pane's mark, though not what was in the pane, because the

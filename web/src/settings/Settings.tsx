@@ -157,6 +157,7 @@ export function Settings({
   logins,
   activeProfileId,
   autoSwap,
+  agentsKururuMcpOnly,
   kuruOn,
   agentPlacement,
   workspaces,
@@ -184,6 +185,7 @@ export function Settings({
   logins: LoginSummary[];
   activeProfileId: string;
   autoSwap: boolean;
+  agentsKururuMcpOnly: boolean;
   /** The program the profile's Kuru is running on, or null when it is not running. */
   kuruOn: HarnessCli | null;
   agentPlacement: AgentPlacement;
@@ -268,6 +270,7 @@ export function Settings({
                       logins,
                       activeProfileId,
                       autoSwap,
+                      agentsKururuMcpOnly,
                       kuruOn,
                       agentPlacement,
                       workspaces,
@@ -309,6 +312,7 @@ type PageProps = {
   logins: LoginSummary[];
   activeProfileId: string;
   autoSwap: boolean;
+  agentsKururuMcpOnly: boolean;
   kuruOn: HarnessCli | null;
   agentPlacement: AgentPlacement;
   workspaces: Workspace[];
@@ -353,6 +357,7 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
           profileId={p.activeProfileId}
           profileName={p.profiles.find((x) => x.id === p.activeProfileId)?.name ?? "this profile"}
           autoSwap={p.autoSwap}
+          agentsKururuMcpOnly={p.agentsKururuMcpOnly}
           kuruOn={p.kuruOn}
           agentPlacement={p.agentPlacement}
         />

@@ -1967,6 +1967,7 @@ export function App() {
           logins={snapshot.logins}
           activeProfileId={profile.id}
           autoSwap={profile.autoSwap}
+          agentsKururuMcpOnly={profile.agentsKururuMcpOnly === true}
           kuruOn={kuruRunningOn(profile.harness, agents)}
           agentPlacement={profile.agentPlacement ?? DEFAULT_AGENT_PLACEMENT}
           workspaces={profile.workspaces}

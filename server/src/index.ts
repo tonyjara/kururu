@@ -96,7 +96,7 @@ import { dump as dumpRecording, forget as forgetRecording, recordBacklog, record
 import { processCwd, processCwds } from "./cwd";
 import { scanDevServers, stopDevServer } from "./devservers";
 import { DropRefused, keepDrop } from "./drops";
-import { harnessHome } from "./harnesshome";
+import { harnessHome, kuruLaunchFlags } from "./harnesshome";
 import { PictureRefused, stageOutgoing, wholePath } from "./pictures";
 import { readHead, repoAt } from "./git";
 import { accountEmail, claudeSignedIn, claudeSignedInAt, pollUsage, usageSnapshot } from "./usage";
@@ -113,7 +113,7 @@ import { Kuru } from "./kuru";
 import { Channels } from "./channels";
 import { KURU_PAGE, KURU_SAY_MAX, type KuruFile } from "../../shared/kuru";
 import { mentionsIn, readsInReader, type MadeFile } from "../../shared/made";
-import { isChannelKind, nodeSubject, type ChannelKind } from "../../shared/channels";
+import { channelReady, isChannelKind, nodeSubject, type ChannelKind } from "../../shared/channels";
 import { Backup } from "./backup";
 import { mirrorFiles } from "./export";
 import { NodeHost, nodeRequestRefusal } from "./nodes";
@@ -205,7 +205,8 @@ import {
 } from "./mascot";
 import { readKeys, writeKeys } from "./keys";
 import { agentLabel, agentSummary, basename } from "../../shared/labels";
-import { handsOf, harnessConversation, OPENCODE_SESSION_ID } from "../../shared/harness";
+import { HARNESS_SERVER, handsOf, harnessConversation, OPENCODE_SESSION_ID, type HarnessFeatures } from "../../shared/harness";
+import { WEB_SERVER } from "../../shared/web";
 import {
   adoptNotify,
   isNotifyEvent,
@@ -248,7 +249,7 @@ import {
   type WorktreeOutcome,
   type WorktreeStatus,
 } from "../../shared/projects";
-import { hookSettingsFlag } from "./hooks";
+import { hookSettingsFlag, hookSettingsFor } from "./hooks";
 import { Harness, type SayOutcome } from "./harness";
 import { initializes, mcpAnswer } from "./mcp";
 import { claudeDirFor, codexDirFor, lentClaudeEnv, lentGhEnv, loginDir, loginEnv, scanLogins } from "./logins";
@@ -2147,7 +2148,47 @@ async function agentCommandFor(launcher: Launcher, profileId: string, sessionId?
     const config = prepareOpencodeAgent(id, { port: PORT, withToken: tokenInPtys(), model: launcher.model ?? launch.opencodeModel, web: web.active() });
     return opencodeAgentCommand(found.path, config, id, launch.bypassClis.includes("opencode") || launch.bypassClis.includes("claude"));
   }
-  return launcherCommand(launcher, launch) + hooksFor(launcher, profileId) + web.launchFlags(launcher.cli);
+  return launcherCommand(launcher, launch) + hooksFor(launcher, profileId) + web.launchFlags(launcher.cli) + kururuMcpOnly(launcher, profileId);
+}
+
+/**
+ * ` --strict-mcp-config` for a Claude agent in a profile that keeps its agents
+ * to kururu's MCP servers, or nothing — see `Profile.agentsKururuMcpOnly`.
+ * kururu's own reach the agent through `--mcp-config`, which the flag keeps.
+ * Claude Code only: Codex and OpenCode are handed their servers in config
+ * kururu writes, and have no flag that drops the rest.
+ */
+function kururuMcpOnly(launcher: Launcher, profileId: string): string {
+  return launcher.cli === "claude" && workspaces.profile(profileId)?.agentsKururuMcpOnly ? " --strict-mcp-config" : "";
+}
+
+/**
+ * Kuru's line on Claude Code: the launcher's, kururu's web tools, and
+ * `kuruLaunchFlags` — strict MCP, the user's own servers, the plugins and
+ * synced skills off, and the hooks folded into the one `--settings` rather
+ * than passed as a second (`hooksFor`), which would replace it.
+ */
+async function kuruCommandFor(launcher: Launcher, profileId: string): Promise<string> {
+  const key = workspaces.keyOf(profileId);
+  if (!key) throw new Error("that profile has no key yet");
+  const dir = claudeDirOf(profileId);
+  const kuru = await kuruLaunchFlags(dir, key, hookSettingsFor(dir), [HARNESS_SERVER, WEB_SERVER]);
+  return launcherCommand(launcher, launch) + web.launchFlags(launcher.cli) + kuru;
+}
+
+/**
+ * Which of the features Kuru's role and tools have parts about are set up on
+ * this node — see `HarnessFeatures`. Telegram counts once it could be
+ * switched on, and while it is on, whichever node set it up.
+ */
+function harnessFeatures(): HarnessFeatures {
+  const telegram = channels.status().telegram;
+  return {
+    nodes: nodes.statuses().length > 0,
+    telegram: telegram.enabled || channelReady(telegram),
+    machines: machinesSnapshot().length > 0,
+    speak: voice.speaks(),
+  };
 }
 
 /** Everything the usage ledger keeps about a launch: what the road that started it said, and what can be looked up. */
@@ -2878,7 +2919,7 @@ async function resumeCardAt(
   if (!command) throw new Error("there is no conversation on this card to resume");
   const options = remote
     ? { command: await agentOn(remote.machine, remote.workspaceName, remote.dir, launcher.cli, command), kind: "agent" as const }
-    : { cwd, command: launcher.cli === "opencode" ? command : command + hooksFor(launcher, profileId) + web.launchFlags(launcher.cli), kind: "agent" as const };
+    : { cwd, command: launcher.cli === "opencode" ? command : command + hooksFor(launcher, profileId) + web.launchFlags(launcher.cli) + kururuMcpOnly(launcher, profileId), kind: "agent" as const };
   const target = workspaces.agentPaneIn(profileId, workspaceId);
   if (!target) throw new Error("nowhere to put the agent");
   const agent = onScreen
@@ -5302,6 +5343,11 @@ function dispatchMessage(ws: WebSocket, st: ClientState, msg: ClientMessage): vo
       workspaces.setAutoSwap(msg.profileId, msg.on === true);
       return;
 
+    case "set-agents-kururu-mcp-only":
+      if (typeof msg.profileId !== "string") return;
+      workspaces.setAgentsKururuMcpOnly(msg.profileId, msg.on === true);
+      return;
+
     case "set-agent-placement":
       // Refused rather than defaulted, `set-profile-column-color`'s line: a word
       // that is not one of the three is not a choice to round to the nearest.
@@ -6921,7 +6967,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     const selfId = harness.selfFor(profileId, url.searchParams.get("session") ?? "");
     try {
       const body = await readJsonBody(req, 256 * 1024);
-      const answer = await mcpAnswer(body, harness.tools(), (name, args) => harness.call(profileId, selfId, name, args), {
+      const answer = await mcpAnswer(body, harness.tools(profileId), (name, args) => harness.call(profileId, selfId, name, args), {
         name: "kururu",
         version: VERSION,
       });
@@ -8006,6 +8052,8 @@ async function attach(port: Port): Promise<void> {
     activity,
     claudeDir: claudeDirOf,
     agentCommand: agentCommandFor,
+    kuruCommand: kuruCommandFor,
+    features: harnessFeatures,
     spawned: noteLaunch,
     webTools: () => web.active(),
     openTerminal: openTerminalAt,

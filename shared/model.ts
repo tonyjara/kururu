@@ -842,6 +842,19 @@ export interface Profile {
    */
   autoSwap: boolean;
   /**
+   * Whether the Claude Code agents kururu starts in this profile load only
+   * kururu's MCP servers (`--strict-mcp-config`), leaving out claude.ai's
+   * connectors, the plugins' servers and the login's own. Their names and
+   * instructions ride along on every call an agent makes — about 15k tokens,
+   * on a couple of thousand calls a day — and most agents never call them.
+   * The user's to decide, since some agents need them, so a switch in
+   * Settings → Agents, off unless turned on. It leaves the login's plugins and
+   * their skills alone: a plugin switched off in the login stays off, and one
+   * left on still brings its skills. Kuru is kept to kururu's whatever this
+   * says — see `kuruLaunchFlags`.
+   */
+  agentsKururuMcpOnly: boolean;
+  /**
    * Where the agents kururu starts on its own go — a card's robot, a card
    * run or resumed, Kuru's `start_agent`: a tab in the workspace's bottom
    * pane, made if there is none, or the top one, or `off` for beside the

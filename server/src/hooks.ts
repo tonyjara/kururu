@@ -174,12 +174,30 @@ export function runsReporter(settings: unknown, script: string): boolean {
  * cost of that guess is a doubled report, and the cost of the other is no ring.
  */
 export function hookSettingsFlag(claudeDir: string): string {
-  try {
-    const own: unknown = JSON.parse(readFileSync(join(claudeDir, "settings.json"), "utf8"));
-    if (runsReporter(own, reportScript())) return "";
-  } catch {
-    // No settings yet, which is how every profile starts.
-  }
+  if (runsOwnReporter(claudeDir)) return "";
   const file = hookSettingsFile();
   return file ? ` --settings ${quote(file)}` : "";
+}
+
+/**
+ * The same decision as the settings themselves, for a launch that writes one
+ * `--settings` file of its own and has to put the hooks in it — Kuru's
+ * (`kuruLaunchFlags`), since a second `--settings` on a line replaces the
+ * first. Null when the directory runs the reporter already, or there is no
+ * script to point at.
+ */
+export function hookSettingsFor(claudeDir: string): object | null {
+  if (runsOwnReporter(claudeDir)) return null;
+  const script = reportScript();
+  return existsSync(script) ? hookSettings(process.execPath, script) : null;
+}
+
+function runsOwnReporter(claudeDir: string): boolean {
+  try {
+    const own: unknown = JSON.parse(readFileSync(join(claudeDir, "settings.json"), "utf8"));
+    return runsReporter(own, reportScript());
+  } catch {
+    // No settings yet, which is how every profile starts.
+    return false;
+  }
 }

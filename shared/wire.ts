@@ -925,6 +925,8 @@ export type ClientMessage =
    * because it is the user's screen — see `Profile.autoSwap`.
    */
   | { type: "set-auto-swap"; profileId: string; on: boolean }
+  /** Whether a profile's agents load only kururu's MCP servers. See `Profile.agentsKururuMcpOnly`. */
+  | { type: "set-agents-kururu-mcp-only"; profileId: string; on: boolean }
   /**
    * Where the agents kururu starts go — a profile's choice, or one
    * workspace's when `workspaceId` names it, where null hands the choice

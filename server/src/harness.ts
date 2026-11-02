@@ -52,8 +52,9 @@ import { CHANNEL_NAMES, isChannelKind } from "../../shared/channels";
 import {
   HARNESS_NAME,
   HARNESS_SERVER,
-  HARNESS_TOOLS,
   MCP_TIMEOUT_MS,
+  NOTICE_BATCH_MS,
+  NoticeBatch,
   READ_MAX,
   REPLY_MAX,
   SCREEN_LINES,
@@ -67,6 +68,7 @@ import {
   agentName,
   harnessCliOf,
   harnessRunFlags,
+  harnessTools,
   boardListing,
   clip,
   due,
@@ -74,6 +76,7 @@ import {
   isCommand,
   keyBytes,
   mcpConfig,
+  quotedReply,
   rolePrompt,
   tellsHarness,
   projectDirName,
@@ -81,6 +84,7 @@ import {
   turnsFrom,
   typingPieces,
   type Hands,
+  type HarnessFeatures,
   type Held,
   type ModeClass,
   type When,
@@ -146,6 +150,16 @@ export interface HarnessDeps {
   claudeDir: (profileId: string) => string;
   /** A launcher's full command line as a terminal in that profile would get it: flags, hooks and all. */
   agentCommand: (launcher: Launcher, profileId: string) => Promise<string>;
+  /**
+   * The same for Kuru on Claude Code, kept to kururu's MCP servers and the
+   * user's own, with the plugins and synced skills off (`kuruLaunchFlags`).
+   * Its own function rather than flags added to `agentCommand`'s line,
+   * because that line can carry a `--settings` of its own, and a second one
+   * would replace it.
+   */
+  kuruCommand: (launcher: Launcher, profileId: string) => Promise<string>;
+  /** Which of the features the role and the tools have parts about are set up now. See `HarnessFeatures`. */
+  features: () => HarnessFeatures;
   /** An agent has been started, for the usage ledger to know whose it is. See `usage/attribute.ts`. */
   spawned?: (agentId: string, profileId: string, workspaceId: string | null, note: LaunchNote) => void;
   /** Whether kururu's web tools are on, which an OpenCode harness is given in its config rather than on its line. See `web/chain.ts`. */
@@ -288,8 +302,6 @@ const TRUST_POLL_MS = 300;
 const SEND_SETTLE_MS = 2000;
 /** The same throttle `notify.ts` applies to a person: one posting per agent per little while. */
 const TELL_THROTTLE_MS = 4000;
-/** What a posted notification quotes of a reply. The rest is a read away. */
-const TELL_QUOTE = 1500;
 /** How long words wait for a harness that was just started to report in before they are typed anyway. */
 const WAKE_TIMEOUT_MS = 30_000;
 /**
@@ -326,6 +338,8 @@ export class Harness {
   private readonly replies = new Map<string, string>();
   private readonly waiters = new Set<Waiter>();
   private readonly told = new Map<string, { status: string; at: number }>();
+  /** Done notices waiting to go to each profile's Kuru as one message, and the timer that sends them. See `NOTICE_BATCH_MS`. */
+  private readonly batches = new Map<string, { notices: NoticeBatch; timer: NodeJS.Timeout | null }>();
   /**
    * Messages waiting to be typed, by agent id, in the order they were sent —
    * see `due` for until when. In memory only: a server restart forgets them,
@@ -635,6 +649,8 @@ export class Harness {
       if (tells) this.tell(agent, "exited");
       return;
     }
+    // Back at work before its done was sent: the next done says more.
+    if (status === "working") this.resumed(agent.id);
     if (!isNotifyEvent(status)) return;
     // A turn ending is what `next` and `later` were waiting for. Typed
     // before the harness is told, so what it reads back is the new turn.
@@ -651,35 +667,86 @@ export class Harness {
     }
   }
 
-  /** Post a transition to the profile's harness, if one is running and can be reached. */
+  /**
+   * Tell the profile's harness of a transition, if one is running and can be
+   * reached: a done into the batch, to go with whatever else finishes within
+   * `NOTICE_BATCH_MS`; a block or an exit at once, taking the batch with it,
+   * oldest first, so one wake carries everything that was waiting.
+   */
   private tell(agent: AgentSnapshot, status: "done" | "blocked" | "exited"): void {
     const profileId = this.deps.workspaces.profileOf(agent.id);
     const profile = profileId ? this.deps.workspaces.profile(profileId) : null;
     const self = profile?.harness?.agentId;
-    if (!profile?.harness || !self || self === agent.id || !this.deps.host.isLive(self)) return;
+    if (!profileId || !profile?.harness || !self || self === agent.id || !this.deps.host.isLive(self)) return;
     // OpenCode has no inbox: the notice is typed, at the end of Kuru's turn,
     // on its own, and the role says it is kururu's and not the user's.
-    const typed = harnessCliOf(profile.harness) === "opencode";
-    const inbox = this.inboxes.get(self);
-    if (!inbox && !typed) return;
+    if (harnessCliOf(profile.harness) !== "opencode" && !this.inboxes.has(self)) return;
     const last = this.told.get(agent.id);
     const now = Date.now();
     if (last && last.status === status && now - last.at < TELL_THROTTLE_MS) return;
     this.told.set(agent.id, { status, at: now });
     const lost = status === "exited" ? (this.held.get(agent.id)?.length ?? 0) : 0;
+    const reply = this.replies.get(agent.id);
     const said =
       status === "done"
-        ? `finished its turn${this.replies.has(agent.id) ? `. It said:\n${this.replies.get(agent.id)!.slice(0, TELL_QUOTE)}` : "."}${madeLine(this.deps.madeOf(agent.id), "\n\nIts links in kururu:")}`
+        ? `finished its turn${reply ? `. ${quotedReply(reply)}` : "."}${madeLine(this.deps.madeOf(agent.id), "\n\nIts links in kururu:")}`
         : status === "blocked"
           ? `is blocked — it is asking something or waiting on a permission prompt${this.deps.activity.has(agent.id) ? `: ${this.deps.activity.get(agent.id)}` : ""}. Read its screen to see what.${this.held.has(agent.id) ? " What you sent it is waiting until the prompt is answered." : ""}`
           : `exited.${lost ? ` ${lost === 1 ? "A message you sent it was" : `${lost} messages you sent it were`} still waiting and never reached it.` : ""}`;
     const notice = `[kururu] ${this.name(agent)} ${said}`;
-    if (typed) {
-      this.hold(self, { text: notice, when: "next", alone: true });
+    const batch = this.batchOf(profileId);
+    if (status === "done") {
+      batch.notices.add(agent.id, notice);
+      if (!batch.timer) {
+        batch.timer = setTimeout(() => this.flush(profileId), NOTICE_BATCH_MS);
+        batch.timer.unref();
+      }
+      return;
+    }
+    this.flush(profileId, notice);
+  }
+
+  private batchOf(profileId: string): { notices: NoticeBatch; timer: NodeJS.Timeout | null } {
+    let batch = this.batches.get(profileId);
+    if (!batch) this.batches.set(profileId, (batch = { notices: new NoticeBatch(), timer: null }));
+    return batch;
+  }
+
+  /** An agent went back to work: its done, if it was still waiting, is not sent, and its next one is not taken for a repeat. */
+  private resumed(agentId: string): void {
+    for (const [profileId, batch] of this.batches) {
+      if (!batch.notices.drop(agentId)) continue;
+      this.told.delete(agentId);
+      if (!batch.notices.size) {
+        clearTimeout(batch.timer ?? undefined);
+        this.batches.delete(profileId);
+      }
+    }
+  }
+
+  /**
+   * Send what the batch holds, and `last` after it, as one message. The
+   * harness is looked up again rather than remembered from when the first
+   * notice was held, since it may have restarted in the minute between: a
+   * Kuru that is gone gets nothing, as it would have then.
+   */
+  private flush(profileId: string, last?: string): void {
+    const batch = this.batches.get(profileId);
+    if (batch) {
+      clearTimeout(batch.timer ?? undefined);
+      this.batches.delete(profileId);
+    }
+    const message = batch ? batch.notices.take(last) : (last ?? null);
+    const harness = this.deps.workspaces.profile(profileId)?.harness;
+    const self = harness?.agentId;
+    if (!message || !harness || !self || !this.deps.host.isLive(self)) return;
+    if (harnessCliOf(harness) === "opencode") {
+      this.hold(self, { text: message, when: "next", alone: true });
       void this.pump(self);
       return;
     }
-    if (inbox) void this.post(inbox, notice, "next").catch(() => {});
+    const inbox = this.inboxes.get(self);
+    if (inbox) void this.post(inbox, message, "next").catch(() => {});
   }
 
   // ---------------------------------------------------------------------------
@@ -750,8 +817,14 @@ export class Harness {
   // The tools
   // ---------------------------------------------------------------------------
 
-  tools() {
-    return HARNESS_TOOLS;
+  /**
+   * What `tools/list` gives a profile's harness: the catalogue, less the
+   * tools of features that are not set up (`harnessTools`). Profile-blind for
+   * now — every feature in it is this node's, not a profile's — but asked per
+   * profile, since it answers one.
+   */
+  tools(_profileId: string) {
+    return harnessTools(this.deps.features());
   }
 
   /**
@@ -1382,6 +1455,7 @@ export class Harness {
       profile: profile.name,
       workspaces: profile.workspaces.map((w) => ({ id: w.id, name: w.name })),
       launchers: visibleLaunchers(this.deps.launch()).map((l) => ({ id: l.id, label: l.label })),
+      features: this.deps.features(),
     });
     const flags = [
       "--name",
@@ -1400,7 +1474,7 @@ export class Harness {
     // in the pty's env, which only a current host applies: `sh -c` takes it
     // either way, and a wait that was cut off at the default would be a wait
     // that lied.
-    const command = `MCP_TOOL_TIMEOUT=${MCP_TIMEOUT_MS} ${await this.deps.agentCommand(launcher, profileId)} ${flags.join(" ")}`;
+    const command = `MCP_TOOL_TIMEOUT=${MCP_TIMEOUT_MS} ${await this.deps.kuruCommand(launcher, profileId)} ${flags.join(" ")}`;
     const agent = await this.deps.openTerminal(profileId, workspaceId, pane, { cwd, command, kind: "agent", apart: true });
     // No workspace: Kuru's pane sits in one, and its spending is nobody's but Kuru's.
     this.deps.spawned?.(agent.id, profileId, null, { program: "claude", sessionId: sessionId!, kind: "harness", cwd });
@@ -1446,6 +1520,7 @@ export class Harness {
       workspaces: profile.workspaces.map((w) => ({ id: w.id, name: w.name })),
       launchers: visibleLaunchers(launch).map((l) => ({ id: l.id, label: l.label })),
       cli: "opencode",
+      features: this.deps.features(),
     });
     prepareOpencodeHome(
       cwd,

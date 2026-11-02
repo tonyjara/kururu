@@ -127,6 +127,8 @@ interface StoredProfile {
   harness?: HarnessState;
   /** Auto Swap, written only when on. See `Profile.autoSwap`. */
   autoSwap?: boolean;
+  /** Agents with kururu's MCP only, written only when on. See `Profile.agentsKururuMcpOnly`. */
+  agentsKururuMcpOnly?: boolean;
   /** Where its agents go — see `Profile.agentPlacement`. Absent in a file from before it, which reads as the default. */
   agentPlacement?: AgentPlacement;
   workspaces: StoredWorkspace[];
@@ -199,6 +201,7 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
       // A preference rather than a process, so it survives the cold start
       // the rest of this file is careful about.
       ...(profile.autoSwap ? { autoSwap: true } : {}),
+      ...(profile.agentsKururuMcpOnly ? { agentsKururuMcpOnly: true } : {}),
       // Written always, the default included, so that a default changed in
       // some later version moves nobody who had chosen.
       agentPlacement: profile.agentPlacement,
@@ -415,6 +418,7 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
       hiddenAgents: [],
       harness: adoptHarness(stored.harness),
       autoSwap: stored.autoSwap === true,
+      agentsKururuMcpOnly: stored.agentsKururuMcpOnly === true,
       agentPlacement: isAgentPlacement(stored.agentPlacement) ? stored.agentPlacement : DEFAULT_AGENT_PLACEMENT,
     });
   }

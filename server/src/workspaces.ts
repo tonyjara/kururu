@@ -185,6 +185,8 @@ function adopt(profile: Profile): Profile {
     harness: adoptHarness(profile.harness),
     // Absent before Auto Swap existed, which is off.
     autoSwap: profile.autoSwap === true,
+    // Absent before the switch existed, which is off.
+    agentsKururuMcpOnly: profile.agentsKururuMcpOnly === true,
     // Absent before agents had a pane of their own, which is the default —
     // the feature is on unless somebody turned it off.
     agentPlacement: isAgentPlacement(profile.agentPlacement) ? profile.agentPlacement : DEFAULT_AGENT_PLACEMENT,
@@ -1479,6 +1481,13 @@ export class Workspaces {
     this.mutate(profileId, workspaceId, (w) => ({ ...w, agentPlacement: placement }));
   }
 
+  /** Whether this profile's agents load only kururu's MCP servers — see `Profile.agentsKururuMcpOnly`. Read at each launch, so it reaches the next agent started. */
+  setAgentsKururuMcpOnly(profileId: string, on: boolean): void {
+    const profile = this.profile(profileId);
+    if (!profile || profile.agentsKururuMcpOnly === on) return;
+    this.replaceProfile(profileId, (p) => ({ ...p, agentsKururuMcpOnly: on }));
+  }
+
   /** Whether the screen follows what this profile's harness acts on — see `Profile.autoSwap`. */
   setAutoSwap(profileId: string, on: boolean): void {
     const profile = this.profile(profileId);
@@ -1952,6 +1961,7 @@ export class Workspaces {
       hiddenAgents: [],
       harness: null,
       autoSwap: false,
+      agentsKururuMcpOnly: false,
       agentPlacement: DEFAULT_AGENT_PLACEMENT,
     };
   }

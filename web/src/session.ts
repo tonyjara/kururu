@@ -1852,6 +1852,11 @@ export function setAutoSwap(profileId: string, on: boolean): void {
   send({ type: "set-auto-swap", profileId, on });
 }
 
+/** Whether a profile's Claude agents load only kururu's MCP servers. Read at each launch, so it changes the next agent started, not the ones running. */
+export function setAgentsKururuMcpOnly(profileId: string, on: boolean): void {
+  send({ type: "set-agents-kururu-mcp-only", profileId, on });
+}
+
 /** Where a card's and Kuru's agents open, for a profile — or for one workspace of it, where null goes back to the profile's. */
 export function setAgentPlacement(profileId: string, placement: AgentPlacement | null, workspaceId?: string): void {
   send({ type: "set-agent-placement", profileId, placement, ...(workspaceId ? { workspaceId } : {}) });

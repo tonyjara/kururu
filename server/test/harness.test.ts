@@ -22,7 +22,12 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  EVERY_FEATURE,
+  HARNESS_COMPACT_HEADING,
   HARNESS_TOOLS,
+  NOTICE_BATCH_MS,
+  NoticeBatch,
+  REPLY_MAX,
   SWAP_DWELL_MS,
   SWAP_GATHER_MS,
   SWAP_QUIET_MS,
@@ -44,19 +49,25 @@ import {
   harnessCliOf,
   harnessConversation,
   harnessRunFlags,
+  harnessTools,
   inboxFrames,
   isCommand,
   keyBytes,
+  kuruMcpServers,
   kuruRunningOn,
+  kuruSettings,
   mcpConfig,
   memoryIndexFor,
   memoryOrigin,
   projectDirName,
+  quotedReply,
   rolePrompt,
   tellsHarness,
   trustAnswer,
   turnsFrom,
   typingPieces,
+  withCompactSection,
+  HARNESS_AGENTS_MD,
 } from "../../shared/harness";
 import { countsAsAgent, type AgentSnapshot } from "../../shared/model";
 import { Harness, SAY_ANSWERS, screenText, type HarnessDeps, type SayOutcome } from "../src/harness";
@@ -103,6 +114,126 @@ describe("the tool catalogue", () => {
     expect(prompt).toContain("Screenshot\\ 2026-10-25\\ at\\ 1.55.16\\ PM.png");
     expect(prompt).toMatch(/Read it — a picture too/);
     expect(prompt).toMatch(/leave the backslashes out when you Read/);
+  });
+});
+
+describe("what Kuru is told about, by what is set up", () => {
+  const none = { nodes: false, telegram: false, machines: false, speak: false };
+
+  it("lists every tool when everything is set up, and leaves out each feature's own when it is not", () => {
+    expect(harnessTools(EVERY_FEATURE)).toEqual(HARNESS_TOOLS);
+    const names = harnessTools(none).map((t) => t.name);
+    for (const gone of ["ask_kuru", "read_kuru", "move_workspace", "lend_secrets", "send_telegram_photo", "say", "play_missed"]) expect(names).not.toContain(gone);
+    // A machine-less Mac still opens shells, and the board verbs stay.
+    for (const kept of ["open_shell", "kururu_status", "cards", "add_card", "send_agent"]) expect(names).toContain(kept);
+    expect(harnessTools({ ...none, speak: true }).map((t) => t.name)).toContain("say");
+    expect(harnessTools({ ...none, nodes: true }).map((t) => t.name)).toContain("ask_kuru");
+    expect(harnessTools({ ...none, telegram: true }).map((t) => t.name)).toContain("send_telegram_photo");
+  });
+
+  it("has every section when nothing says otherwise", () => {
+    const prompt = rolePrompt({ profile: "main", workspaces: [], launchers: [] });
+    for (const heading of ["## Machines", "## Nodes", "## Telegram", "## Your voice"]) expect(prompt).toContain(heading);
+    expect(prompt).toContain("read aloud to them");
+  });
+
+  it("leaves out the sections of features that are not set up, and says replies are not read aloud when they are not", () => {
+    const prompt = rolePrompt({ profile: "main", workspaces: [], launchers: [], features: none });
+    for (const heading of ["## Machines", "## Nodes", "## Telegram"]) expect(prompt).not.toContain(heading);
+    expect(prompt).toContain("## Your voice");
+    expect(prompt).toContain("Voice replies are off");
+    expect(prompt).not.toContain("read aloud to them");
+    expect(prompt).not.toContain("play_missed");
+    // What [voice] means stays: the talk key works with replies off.
+    expect(prompt).toContain('"[voice]"');
+    // The sections around them are untouched and still in order.
+    expect(prompt.indexOf("## Messages the user replies to")).toBeLessThan(prompt.indexOf("## How you hear from them"));
+    expect(prompt.indexOf("## How you hear from them")).toBeLessThan(prompt.indexOf("## Rules"));
+    expect(prompt.length).toBeLessThan(rolePrompt({ profile: "main", workspaces: [], launchers: [] }).length - 4000);
+  });
+
+  it("tells Kuru notices come gathered and that a cut quote says so", () => {
+    const prompt = rolePrompt({ profile: "main", workspaces: [], launchers: [] });
+    expect(prompt).toContain("told in one message, a [kururu] line each");
+    expect(prompt).toContain("quoted to 1,500 characters");
+  });
+});
+
+describe("a done notice's quote", () => {
+  it("is the reply whole when it fits", () => {
+    expect(quotedReply("All green.")).toBe("It said:\nAll green.");
+  });
+
+  it("says how much of the reply it is when it was cut", () => {
+    const said = quotedReply("x".repeat(4210));
+    expect(said).toStartWith("It said (the first 1,500 of 4,210 characters; read_agent has the rest):\n");
+    expect(said).toEndWith(`${"x".repeat(10)}…`);
+    expect(said.length).toBeLessThan(1600);
+  });
+
+  it("says over when the report had cut the reply already", () => {
+    expect(quotedReply("y".repeat(REPLY_MAX))).toContain("of over 20,000 characters");
+  });
+});
+
+describe("a batch of done notices", () => {
+  it("keeps an agent's newest only, in the order they came, and can drop one", () => {
+    const batch = new NoticeBatch();
+    batch.add("a1", "[kururu] one finished");
+    batch.add("a2", "[kururu] two finished");
+    batch.add("a1", "[kururu] one finished again");
+    expect(batch.size).toBe(2);
+    expect(batch.drop("a2")).toBe(true);
+    expect(batch.drop("a2")).toBe(false);
+    batch.add("a3", "[kururu] three finished");
+    expect(batch.take("[kururu] four is blocked")).toBe("[kururu] one finished again\n\n[kururu] three finished\n\n[kururu] four is blocked");
+    expect(batch.size).toBe(0);
+    expect(batch.take()).toBeNull();
+    expect(new NoticeBatch().take("[kururu] alone")).toBe("[kururu] alone");
+  });
+});
+
+describe("Kuru's launch settings", () => {
+  it("switches off every plugin the login enables, hides the synced skills, and carries the hooks", () => {
+    const settings = kuruSettings({
+      userSettings: { enabledPlugins: { "a@m": true, "b@m": false, "c@m": { version: "^1" } }, model: "opus" },
+      synced: ["docs", "pdf"],
+      hooks: { hooks: { Stop: [] } },
+    });
+    expect(settings).toEqual({
+      hooks: { Stop: [] },
+      enabledPlugins: { "a@m": false, "c@m": false },
+      skillOverrides: { "anthropic-skills:docs": "off", docs: "off", "anthropic-skills:pdf": "off", pdf: "off" },
+    });
+  });
+
+  it("is empty for a login with nothing to switch off", () => {
+    expect(kuruSettings({ userSettings: null, synced: [], hooks: null })).toEqual({});
+  });
+
+  it("keeps the login's own user-scope servers, never a copy of kururu's", () => {
+    const json = { mcpServers: { platform: { type: "stdio", command: "node" }, kururu: { type: "http" }, kururu_web: { type: "http" }, junk: 3 }, projects: {} };
+    expect(kuruMcpServers(json, ["kururu", "kururu_web"])).toEqual({ mcpServers: { platform: { type: "stdio", command: "node" } } });
+    expect(kuruMcpServers({ mcpServers: { kururu: {} } }, ["kururu"])).toBeNull();
+    expect(kuruMcpServers({}, [])).toBeNull();
+    expect(kuruMcpServers(null, [])).toBeNull();
+  });
+});
+
+describe("Kuru's compaction instructions", () => {
+  it("are in a new folder's AGENTS.md, under the heading Claude Code's summariser looks for", () => {
+    expect(HARNESS_AGENTS_MD).toContain(HARNESS_COMPACT_HEADING);
+    expect(HARNESS_AGENTS_MD).toContain("5,000 tokens or less");
+    expect(withCompactSection(HARNESS_AGENTS_MD)).toBe(HARNESS_AGENTS_MD);
+  });
+
+  it("are added once to an AGENTS.md written before them, and an edited section is left as edited", () => {
+    const old = "# Kuru's folder\n\n- Keep this file short.\n";
+    const added = withCompactSection(old);
+    expect(added).toStartWith("# Kuru's folder\n\n- Keep this file short.\n\n## Compact Instructions\n");
+    expect(withCompactSection(added)).toBe(added);
+    const edited = `${old}\n## Compact Instructions\n\nKeep it to a paragraph.\n`;
+    expect(withCompactSection(edited)).toBe(edited);
   });
 });
 
@@ -558,7 +689,7 @@ describe("the feed", () => {
     while (!check() && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 10));
   }
 
-  it("posts an agent's turn and its exit, and nothing about a shell's", async () => {
+  it("posts an agent's turn and its exit as one message, and nothing about a shell's", async () => {
     const nvim = terminal("a8", "shell", null, "nvim");
     const claude = terminal("a9", "agent", "claude", "Migrate orders");
     const { harness, heard, close } = await rig([nvim, claude]);
@@ -567,15 +698,15 @@ describe("the feed", () => {
     harness.noticed({ ...nvim, exited: true }, "done", true);
     harness.noticed(claude, "done", false);
     harness.noticed({ ...claude, exited: true }, "done", true);
-    await until(() => heard.length >= 2);
+    await until(() => heard.length >= 1);
     // Long enough for a shell's post to have landed, had one been sent.
     await new Promise((resolve) => setTimeout(resolve, 100));
     await close();
-    expect(heard).toHaveLength(2);
-    expect(heard.join("")).not.toContain("a8");
+    // The done was held for the batch, and the exit took it along.
+    expect(heard).toHaveLength(1);
+    expect(heard[0]).not.toContain("a8");
     expect(heard[0]).toContain("Migrate orders");
-    expect(heard[0]).toContain("finished its turn");
-    expect(heard.some((text) => text.includes("exited."))).toBe(true);
+    expect(heard[0]!.indexOf("finished its turn")).toBeLessThan(heard[0]!.indexOf("exited."));
   });
 
   it("types a notice into an OpenCode harness, which has no inbox, once its turn is over", async () => {
@@ -602,7 +733,10 @@ describe("the feed", () => {
     } as unknown as HarnessDeps);
     harness.noticed(claude, "done", false);
     await elapse(50);
-    // Mid-turn: held, as a `next` is.
+    // Gathered for the batch, and then — mid-turn — held, as a `next` is.
+    expect(typed).toHaveLength(0);
+    jest.advanceTimersByTime(NOTICE_BATCH_MS);
+    await elapse(50);
     expect(typed).toHaveLength(0);
     all.set("h", { ...kuru, status: "done" });
     harness.report("h", { status: "done" });
@@ -611,6 +745,91 @@ describe("the feed", () => {
     expect(typed.join("")).toContain('[kururu] "Migrate orders"');
     expect(typed.join("")).toContain("finished its turn");
   }
+
+  /** An OpenCode Kuru that is between turns, so whatever is sent it is typed at once; and what it was typed, joined. */
+  function typedKuru(terminals: AgentSnapshot[]) {
+    const kuru = terminal("h", "agent", "opencode");
+    const all = new Map([kuru, ...terminals].map((t) => [t.id, t]));
+    const typed: string[] = [];
+    const profile = { id: "p", harness: { agentId: "h", cli: "opencode" }, workspaces: [] };
+    const harness = new Harness({
+      workspaces: { profileOf: () => "p", profile: (id: string) => (id === "p" ? profile : undefined), agentsInWorkspace: () => [] },
+      host: { isLive: () => true, find: (id: string) => all.get(id), write: (_id: string, data: string) => typed.push(data) },
+      activity: new Map<string, string>(),
+      launch: () => ({ bypassClis: [] }),
+      madeOf: () => [],
+    } as unknown as HarnessDeps);
+    return { harness, typed: () => typed.join("") };
+  }
+
+  it("gathers the agents that finish within the batch into one message", async () => {
+    jest.useFakeTimers();
+    try {
+      const one = terminal("a1", "agent", "claude", "Migrate orders");
+      const two = terminal("a2", "agent", "claude", "Fix the header");
+      const { harness, typed } = typedKuru([one, two]);
+      harness.report("a1", { reply: "Done with the orders." });
+      harness.noticed(one, "done", false);
+      jest.advanceTimersByTime(NOTICE_BATCH_MS / 2);
+      harness.noticed(two, "done", false);
+      await elapse(100);
+      expect(typed()).toBe("");
+      jest.advanceTimersByTime(NOTICE_BATCH_MS / 2);
+      await untilFaked(() => typed().endsWith("\r"));
+      const said = typed();
+      expect(said).toContain('[kururu] "Migrate orders"');
+      expect(said).toContain("It said:\nDone with the orders.");
+      expect(said.indexOf("Migrate orders")).toBeLessThan(said.indexOf("Fix the header"));
+      // One message: typed with one Enter.
+      expect(said.split("\r")).toHaveLength(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("drops a done whose agent went back to work, and hears its next one", async () => {
+    jest.useFakeTimers();
+    try {
+      const one = terminal("a1", "agent", "claude", "Migrate orders");
+      const { harness, typed } = typedKuru([one]);
+      harness.report("a1", { reply: "First pass done." });
+      harness.noticed(one, "done", false);
+      harness.noticed({ ...one, status: "working" }, "working", false);
+      jest.advanceTimersByTime(NOTICE_BATCH_MS);
+      await elapse(100);
+      expect(typed()).toBe("");
+      // Back within the throttle's seconds, and still told.
+      harness.report("a1", { reply: "Second pass done." });
+      harness.noticed(one, "done", false);
+      jest.advanceTimersByTime(NOTICE_BATCH_MS);
+      await untilFaked(() => typed().endsWith("\r"));
+      expect(typed()).toContain("Second pass done.");
+      expect(typed()).not.toContain("First pass done.");
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("never holds a blocked agent, and sends the waiting dones ahead of it", async () => {
+    jest.useFakeTimers();
+    try {
+      const one = terminal("a1", "agent", "claude", "Migrate orders");
+      const two = terminal("a2", "agent", "claude", "Fix the header");
+      const { harness, typed } = typedKuru([one, two]);
+      harness.noticed(one, "done", false);
+      harness.noticed({ ...two, status: "blocked" }, "blocked", false);
+      await untilFaked(() => typed().endsWith("\r"));
+      const said = typed();
+      expect(said).toContain("is blocked");
+      expect(said.indexOf("finished its turn")).toBeLessThan(said.indexOf("is blocked"));
+      // Nothing left for the timer to send.
+      jest.advanceTimersByTime(NOTICE_BATCH_MS);
+      await elapse(100);
+      expect(typed().split("\r")).toHaveLength(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 
   it("says why a Kuru died starting, keeps its tab for it, and lets go once another starts", async () => {
     const all = new Map([["h1", terminal("h1", "agent", "opencode")]]);

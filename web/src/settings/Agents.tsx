@@ -53,6 +53,7 @@ export function AgentsPage({
   profileId,
   profileName,
   autoSwap,
+  agentsKururuMcpOnly,
   kuruOn,
   agentPlacement,
 }: {
@@ -60,6 +61,7 @@ export function AgentsPage({
   profileId: string;
   profileName: string;
   autoSwap: boolean;
+  agentsKururuMcpOnly: boolean;
   /** The program this profile's Kuru is running on, or null when it is not running. */
   kuruOn: HarnessCli | null;
   agentPlacement: AgentPlacement;
@@ -81,6 +83,16 @@ export function AgentsPage({
               {/* Above the models because it applies to all of them, and it
                   changes the next launch only. */}
               <Toggle label="Bypass permissions" hint={<Mono>{BYPASS_FLAG[cli]}</Mono>} on={launch.bypassClis.includes(cli)} onChange={(next) => toggleBypass(cli, next)} />
+              {/* Claude only: Codex and OpenCode get their servers in config
+                  kururu writes, with no flag that drops the rest. */}
+              {cli === "claude" && (
+                <Toggle
+                  label="Only kururu's MCP servers"
+                  hint={`For ${profileName}'s agents, from the next one started: no claude.ai connectors, no plugins' servers, none of your own. Saves their names and instructions on every call. Kuru is kept to kururu's and your own either way.`}
+                  on={agentsKururuMcpOnly}
+                  onChange={(on) => api.setAgentsKururuMcpOnly(profileId, on)}
+                />
+              )}
               <SwitchMenu
                 label="Models"
                 items={LAUNCHERS.filter((launcher) => launcher.cli === cli).map((launcher) => {

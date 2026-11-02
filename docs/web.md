@@ -170,8 +170,9 @@ loopback too, which is why the forwarding headers are refused.
 
 `WebChain.launchFlags` is appended to every local agent's command line while any
 provider other than the hand-back is on and set up (`active`) — in
-`agentCommandFor` (the + menu, a card's robot, the harness's `start_agent`, the
-harness itself) and in a card picked back up (`resumeCardAt`):
+`agentCommandFor` (the + menu, a card's robot, the harness's `start_agent`), in
+the harness's own line (`kuruCommandFor`) and in a card picked back up
+(`resumeCardAt`):
 
 - **Claude Code:** `--mcp-config='<state>/web-mcp.json'`, a file rewritten at each
   launch because the port in it moves with the server. Spelt with `=` on
@@ -180,6 +181,20 @@ harness itself) and in a card picked back up (`resumeCardAt`):
 - **Codex:** three `-c` overrides (`mcp_servers.kururu_web.url`,
   `tool_timeout_sec`, `env_http_headers`), which change the launch and never
   `~/.codex/config.toml`.
+
+**Only kururu's servers, when a profile says so.** Settings → Agents → Claude
+Code → **Only kururu's MCP servers** (`Profile.agentsKururuMcpOnly`, off by
+default, per profile) adds `--strict-mcp-config` to a Claude agent's line,
+a resumed card's included (`kururuMcpOnly` in `index.ts`), so these tools are the only MCP server it
+loads: no claude.ai connectors, no plugins' servers, none of the login's own.
+Their names and instructions were about 15k tokens on each of a couple of
+thousand agent calls a day — the largest saving the 2026-11-02 review found,
+and the user's call, since some agents use them. It reaches the next agent
+started. Plugins and their skills are left alone: a plugin switched off in
+the login's `enabledPlugins` stays off. Codex and OpenCode are not covered —
+their servers are in config kururu writes, with no flag that drops the rest.
+Kuru is kept to kururu's (and the user's own) either way; see
+[harness](harness.md#only-kururus-tools-and-the-users-own).
 
 The agent names itself in an `x-kururu-agent` header from `KURURU_AGENT_ID`, which
 every kururu pty has. Both CLIs time an MCP call out at a minute by default,

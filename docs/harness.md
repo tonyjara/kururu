@@ -81,6 +81,18 @@ in a pane of *that* workspace (`devPane(workspaceId)`), never the one on screen.
 Reads are capped (`READ_MAX`) and default small, on purpose: the orchestrator's
 own context is the scarce thing, and the role prompt tells it so.
 
+**Only what is set up.** `tools/list` is `harnessTools(features)`: the node
+tools (`ask_kuru`, `read_kuru`, `move_workspace`, `lend_secrets`) only with a
+node linked, `send_telegram_photo` only with a Telegram bot that could be
+switched on, `say` and `play_missed` only with "speak replies" on. The role's
+**Machines**, **Nodes** and **Telegram** sections follow the same switches
+(`HarnessFeatures`, read by `harnessFeatures` in `index.ts`), and with replies
+off **Your voice** shrinks to what `[voice]` means and says nothing is read
+aloud — it used to promise every reply was, which is half of why Kuru kept
+calling `say` into silence. About 1.9k tokens a call for a profile with none
+of them. Read at Kuru's start: a feature set up later reaches it at the next
+one, and a tool left out of the list still answers if called.
+
 ## What it calls an agent
 
 By what it is and where — "the Acme migration agent" — and never by its
@@ -460,7 +472,22 @@ the inbox of the profile's harness, if one runs and is not the agent itself:
 `[kururu] "<name>" (<program> in <workspace>, card …; id <id>) finished its turn. It said: …`.
 Throttled per agent like the notification gate. So the orchestrator reacts to
 the afternoon instead of polling it; `wait_agent` is for when it has nothing
-else to do. The prompt hook records each notice as a user turn. The drawer
+else to do.
+
+**Dones are gathered; blocks are not.** Every notice was a wake, and a wake
+re-reads all of Kuru's context — some 145k tokens — mostly to say "noted":
+144 notices in 19 days came within a minute of another. So a `done` waits in
+the profile's `NoticeBatch` for `NOTICE_BATCH_MS` (45 s) and goes with every
+other done that arrived meanwhile, one paragraph each, each starting
+`[kururu]`, as one message; an agent's second done replaces its first; and a
+done whose agent goes back to `working` before the batch leaves is dropped,
+since the next one says more. A `blocked` or an exit is never held — it goes
+at once and takes the waiting dones with it, ahead of it. The quote of the
+reply is `TELL_QUOTE` (1,500) characters, and a cut one says so — `It said
+(the first 1,500 of 4,210 characters; read_agent has the rest):` — where it
+used to stop mid-word: 386 cut quotes and 170 `read_agent`s in 19 days.
+
+The prompt hook records each notice as a user turn. The drawer
 reads it back into its parts (`readPrompt` in `shared/kuru.ts`, held to this
 format by a round-trip test) and draws it as kururu's own line, never as a
 message from you. So **a change to this line's shape is a change to that
@@ -517,14 +544,35 @@ gone, resume its conversation; never started, start it. `C-a a` and Kuru's chip
 where the conversation is — every prompt you gave and every reply, out of the
 database — and the terminal is for the tool calls and the prompts. See
 [voice](voice.md#the-drawer).
-The command line is the plain Claude launcher (bypass flag and hooks as the
-profile has them, never a launcher's `--model`) plus `--name harness`,
+The command line is the plain Claude launcher (bypass flag as the profile has
+it, never a launcher's `--model`) and the web tools' `--mcp-config`, then
+`kuruLaunchFlags` (below), then `--name harness`,
 `--session-id` or `--resume`, `--mcp-config` naming `/mcp?profile=…&session=…`
 with a per-server timeout above Claude Code's one-minute default,
 `--allowedTools mcp__kururu`, `--append-system-prompt` with the role, and
 last, so they win, `harnessRunFlags`: `--model claude-opus-5-5 --effort high
 --autocompact 233k`. Its tab goes into the profile's active workspace, in the
 pane beside the board; its directory is its own, below.
+
+### Only kururu's tools, and the user's own
+
+`kuruLaunchFlags` (`server/src/harnesshome.ts`) adds `--strict-mcp-config`,
+so the only MCP servers are the ones on the line: kururu's, the web tools',
+and the login's **user-scope** servers (`claude mcp add -s user`), copied
+into `<state>/kuru/<profile key>-mcp.json` — the user named those for every
+session of the login, and Kuru drives some of them. claude.ai's connectors,
+the plugins' servers and a project's `.mcp.json` are gone. And one
+`--settings`, `<state>/kuru/<profile key>-settings.json`, with every plugin
+the login enables set to `false` and every claude.ai-synced skill set `off`
+in `skillOverrides` — `kuruSettings` — plus kururu's hooks when the login
+does not run them, since a second `--settings` would replace the first.
+Both files are 0600 and rewritten at every start; a server can carry a key in
+its `env`. Not `--disable-slash-commands`, which drops `/compact` and
+`/model` with the skills, in a pane the user types into. Measured on
+2026-11-02 against MV's login with `/context` (kururu's own servers aside):
+15.1k → 13.6k tokens of prefix; skills 6.2k → 2.3k (the built-ins are left),
+MCP instructions 1.1k → 0.4k, the Docs connector's tools gone. The review's
+~12k was before posthog's 164 skills were switched off by hand.
 
 ### Its own folder
 
@@ -542,6 +590,17 @@ system prompt.
   harness is and that it is no project; CLAUDE.md is `@AGENTS.md`. The role
   stays appended to the system prompt rather than moving into the file: it
   describes the tools and changes with them, and a file is written once.
+- **Except one section.** `## Compact Instructions` (`HARNESS_COMPACT_SECTION`)
+  is the heading Claude Code's summariser looks for in its context: a summary
+  of 5k tokens or less, finished agents and done cards dropped (the boards and
+  the database keep them), the last summary not copied forward whole. Kuru's
+  summaries had grown 5.7k → 25k over 24 compactions and the floor after one
+  42k → 77k. An AGENTS.md without the heading gets it appended at the next
+  start (`withCompactSection`); one with it is never rewritten, so edit the
+  text, not the heading. In the file rather than the role, because Claude
+  Code records the system prompt once per conversation and resends the
+  record until a compaction — a resumed Kuru would not see a new role until
+  after the compaction it was for.
 - **Memory follows the folder.** The first start there copies the memories
   the harness wrote where it ran before — the folder holding its last
   session's transcript, the files whose `originSessionId` names a session

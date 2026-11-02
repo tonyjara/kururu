@@ -21,9 +21,10 @@
  * screen instead (`Harness.trustHome`), the one time it is asked.
  */
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, open, readdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, open, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
-import { HARNESS_AGENTS_MD, HARNESS_CLAUDE_MD, memoryIndexFor, memoryOrigin, projectDirName } from "../../shared/harness";
+import { HARNESS_AGENTS_MD, HARNESS_CLAUDE_MD, kuruMcpServers, kuruSettings, memoryIndexFor, memoryOrigin, projectDirName, withCompactSection } from "../../shared/harness";
 import { isStoreKey } from "../../shared/store";
 import { dataDir } from "./store";
 
@@ -53,7 +54,86 @@ export async function prepareHarnessHome(home: string, claudeDir: string, previo
       if (err.code !== "EEXIST") throw err;
     });
   }
+  // The one section kururu keeps in a file that is otherwise the user's, added
+  // to a folder made before it existed — see `HARNESS_COMPACT_SECTION`.
+  const agentsMd = join(home, "AGENTS.md");
+  const was = await readFile(agentsMd, "utf8");
+  const now = withCompactSection(was);
+  if (now !== was) await writeFile(agentsMd, now);
   if (previousSession) await carryMemory(home, claudeDir, previousSession);
+}
+
+/**
+ * The flags that keep Kuru to kururu's tools and the user's own: only the
+ * MCP servers on its line (`--strict-mcp-config`), the login's user-scope
+ * servers among them, and one `--settings` with the plugins and synced skills
+ * off and kururu's hooks in it when the login lacks them. See `kuruSettings`
+ * and `kuruMcpServers` for why each.
+ *
+ * Files rather than JSON on the line, because a user-scope server can carry
+ * an API key in its `env`, and a command line is readable by every process on
+ * the Mac; so 0600, in the state directory, which no backup copies. Rewritten
+ * at every start, as the hooks' file is: the login's plugins and servers
+ * change, and a stale server file is removed rather than left to be read.
+ */
+export async function kuruLaunchFlags(claudeDir: string, profileKey: string, hooks: object | null, own: readonly string[]): Promise<string> {
+  const dir = join(process.env.KURURU_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kururu"), "kuru");
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const settingsFile = join(dir, `${profileKey}-settings.json`);
+  const serversFile = join(dir, `${profileKey}-mcp.json`);
+  const settings = kuruSettings({ userSettings: await readJson(join(claudeDir, "settings.json")), synced: await syncedSkills(claudeDir), hooks });
+  await writePrivate(settingsFile, settings);
+  const flags = ["--strict-mcp-config", "--settings", shQuote(settingsFile)];
+  const servers = kuruMcpServers(await readJson(claudeJsonOf(claudeDir)), own);
+  if (servers) {
+    await writePrivate(serversFile, servers);
+    flags.push("--mcp-config", shQuote(serversFile));
+  } else {
+    await rm(serversFile, { force: true });
+  }
+  return ` ${flags.join(" ")}`;
+}
+
+/**
+ * Where a login keeps its user-scope MCP servers: `.claude.json` inside the
+ * config directory when `CLAUDE_CONFIG_DIR` moved it — every profile's own
+ * login — and beside the home directory's `.claude` when it did not.
+ */
+function claudeJsonOf(claudeDir: string): string {
+  const inside = join(claudeDir, ".claude.json");
+  return existsSync(inside) || claudeDir !== join(homedir(), ".claude") ? inside : join(homedir(), ".claude.json");
+}
+
+/** The skills claude.ai syncs into a login, by name: one folder each under `skills/synced/<account>/`. Nothing when there are none or the layout is not that. */
+async function syncedSkills(claudeDir: string): Promise<string[]> {
+  const root = join(claudeDir, "skills", "synced");
+  const names = new Set<string>();
+  for (const account of await readdir(root, { withFileTypes: true }).catch(() => [])) {
+    if (!account.isDirectory()) continue;
+    for (const skill of await readdir(join(root, account.name), { withFileTypes: true }).catch(() => [])) {
+      if (skill.isDirectory() && !skill.name.startsWith(".")) names.add(skill.name);
+    }
+  }
+  return [...names].sort();
+}
+
+async function readJson(path: string): Promise<unknown> {
+  try {
+    return JSON.parse(await readFile(path, "utf8")) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+async function writePrivate(path: string, value: unknown): Promise<void> {
+  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  // The mode on the write applies to a new file only.
+  await chmod(path, 0o600);
+}
+
+/** Single-quoted for the `sh -c` a terminal's command runs under. */
+function shQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
 /**
