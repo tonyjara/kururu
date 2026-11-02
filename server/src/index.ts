@@ -168,8 +168,9 @@ import { allowedRoots, allowRoot, findDocs, listDir, listDirs, readBytes, readFi
 import { parseFileOp, runFileOp } from "./fileops";
 import { renderMarkdown } from "./markdown";
 import { measureMemory } from "./memory";
-import { delivery, liveness, PING_MS, SNAPSHOT_HOLD } from "./backpressure";
+import { delivery, liveness, PING_MS, SNAPSHOT_HOLD, type Delivery } from "./backpressure";
 import { Gap } from "./gap";
+import { diffFrames, Framer, type Frame, type SnapshotDelta } from "../../shared/snapdelta";
 import { readProcRows, type ProcRows } from "./proctable";
 import {
   childIndex as footChildren,
@@ -524,6 +525,19 @@ interface ClientState {
    * buffer drains. See `deliver`.
    */
   owedSnapshot: boolean;
+  /**
+   * Whether this client opened its socket with `?delta=1`, and so is sent
+   * what changed rather than the whole snapshot each time. See
+   * `shared/snapdelta.ts`.
+   */
+  deltas: boolean;
+  /**
+   * The state this client was last sent, which the next is diffed against —
+   * for a client of deltas, and for one of snapshots so that an unchanged
+   * one is not sent again. Null until the first, and whenever one was not
+   * delivered, so the next is whole. See `sendState`.
+   */
+  sent: Frame | null;
 }
 
 /**
@@ -672,25 +686,26 @@ const state = {
  * (`backpressure.ts`). Everything to a client goes through here; `send` and
  * `broadcast` are only the stringifying.
  */
-function deliver(ws: WebSocket, payload: string, snapshot = false): void {
+function deliver(ws: WebSocket, payload: string, snapshot = false): Delivery {
   const verdict = delivery(ws.bufferedAmount, snapshot);
   if (verdict === "cut") {
     // `terminate`, not `close`: a close handshake would queue behind the
     // same megabytes. The close event drops the client as any other does.
     ws.terminate();
-    return;
+    return verdict;
   }
   const st = verdict === "hold" ? clients.get(ws) : undefined;
   if (st) {
     st.owedSnapshot = true;
     holdSnapshots();
-    return;
+    return verdict;
   }
   try {
     ws.send(payload);
   } catch {
     // client went away mid-send; the close handler will clean up
   }
+  return verdict;
 }
 
 /**
@@ -700,7 +715,7 @@ function deliver(ws: WebSocket, payload: string, snapshot = false): void {
  * reach a window before the snapshot that has the thing it is about.
  */
 function snapshotFirst(msg: ServerMessage): void {
-  if (snapshots.pending && msg.type !== "output" && msg.type !== "snapshot") snapshots.flush();
+  if (snapshots.pending && msg.type !== "output" && msg.type !== "snapshot" && msg.type !== "delta") snapshots.flush();
 }
 
 function send(ws: WebSocket, msg: ServerMessage): void {
@@ -732,7 +747,7 @@ function holdSnapshots(): void {
 }
 
 function releaseSnapshots(): void {
-  let payload: string | null = null;
+  const due: [WebSocket, ClientState][] = [];
   let owed = 0;
   for (const [ws, st] of clients) {
     if (!st.owedSnapshot) continue;
@@ -741,12 +756,67 @@ function releaseSnapshots(): void {
       continue;
     }
     st.owedSnapshot = false;
-    payload ??= JSON.stringify({ type: "snapshot", snapshot: snapshot() } satisfies ServerMessage);
-    deliver(ws, payload);
+    // What it was owed was never sent, so what it holds is older than any
+    // delta would be from: the whole snapshot.
+    st.sent = null;
+    due.push([ws, st]);
   }
+  if (due.length) sendState(due, snapshot());
   if (!owed && snapshotHold) {
     clearInterval(snapshotHold);
     snapshotHold = null;
+  }
+}
+
+/**
+ * Builds each client's frame. One for the server's life, so that a board's
+ * frame outlives the snapshot it was first seen in — see `Framer`.
+ */
+const framer = new Framer();
+
+/**
+ * The state, to some clients: to each what changed since what it was last
+ * sent (`ClientState.sent`), as a `delta` to a client that asked for them and
+ * as the whole `snapshot` to one that did not, or to one that holds nothing
+ * yet. Nothing at all to a client for which nothing changed.
+ *
+ * Most clients were sent the same frame last, so each distinct delta is
+ * worked out and stringified once, and the whole snapshot — still a megabyte
+ * and a half, still ~25 ms — only when somebody is to be sent it.
+ *
+ * `now` is taken rather than read here because `snapshot()` is also when
+ * the server notes what is running where (`rememberAgents`), and the
+ * broadcast must read it whether or not anybody is connected.
+ */
+function sendState(targets: Iterable<readonly [WebSocket, ClientState]>, now: SessionSnapshot): void {
+  let frame: Frame | null = null;
+  let whole: string | null = null;
+  const diffs = new Map<Frame, SnapshotDelta | null>();
+  const payloads = new Map<Frame, string>();
+  for (const [ws, st] of targets) {
+    if (st.owedSnapshot) continue;
+    frame ??= framer.frame(now);
+    let payload: string;
+    const sent = st.sent;
+    if (sent) {
+      if (!diffs.has(sent)) diffs.set(sent, diffFrames(sent, frame));
+      const delta = diffs.get(sent)!;
+      if (!delta) {
+        st.sent = frame;
+        continue;
+      }
+      if (st.deltas) {
+        let cached = payloads.get(sent);
+        if (!cached) {
+          cached = JSON.stringify({ type: "delta", delta } satisfies ServerMessage);
+          payloads.set(sent, cached);
+        }
+        payload = cached;
+      } else payload = whole ??= JSON.stringify({ type: "snapshot", snapshot: now } satisfies ServerMessage);
+    } else payload = whole ??= JSON.stringify({ type: "snapshot", snapshot: now } satisfies ServerMessage);
+    // A held delta is a hole in what the client holds, as a held snapshot
+    // was a stale one: either way the next it is sent is whole.
+    st.sent = deliver(ws, payload, true) === "send" ? frame : null;
   }
 }
 
@@ -823,12 +893,13 @@ function reloaderOf(agentId: string | null, given: string | null): string {
  * dragged are drawn off the snapshot they cause, and the drag at four frames
  * a second was the cost of holding them. The message handler flushes at the
  * end of its turn whatever it pushed (`admitClient`), which is what every
- * change did before. Boards out of the snapshot is the other half of this
- * (review item 10); this one only stops the reports multiplying it.
+ * change did before. What a broadcast sends each client is what changed
+ * since the last it was sent (`sendState`, `shared/snapdelta.ts`); this
+ * only stops the reports multiplying even that.
  */
 const SNAPSHOT_GAP_MS = 250;
 const snapshots = new Gap(SNAPSHOT_GAP_MS, () => {
-  broadcast({ type: "snapshot", snapshot: snapshot() });
+  sendState(clients, snapshot());
   // Every change a snapshot carries is a change the other nodes' summary
   // of this one may carry too; `queueSummary` coalesces and compares.
   nodes?.queueSummary();
@@ -5195,6 +5266,12 @@ function dispatchMessage(ws: WebSocket, st: ClientState, msg: ClientMessage): vo
       return;
     }
 
+    case "resync": {
+      st.sent = null;
+      if (!st.owedSnapshot) sendState([[ws, st]], snapshot());
+      return;
+    }
+
     case "looking": {
       /**
        * Somebody arrived at this screen, or left it. The proposals are kept
@@ -8006,7 +8083,7 @@ function onUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
             record("watch", `${name} stopped watching`);
             nodes.noteWatcher(peer, false);
           });
-          admitClient(ws, peer);
+          admitClient(ws, peer, url.searchParams.get("delta") === "1");
         },
         (reason) => console.log(`kururu: refused a watch: ${reason}`),
       ),
@@ -8033,7 +8110,7 @@ function onUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
   }
   wss.handleUpgrade(req, socket, head, (ws) => {
     if (!fromLoopback(req)) remoteClientAt = new Date().toISOString();
-    admitClient(ws, null);
+    admitClient(ws, null, url.searchParams.get("delta") === "1");
   });
 }
 
@@ -8042,8 +8119,8 @@ function onUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
  * the parent has proved itself: the same client, with a watcher sent only
  * what it relays and starting nothing a window starts.
  */
-function admitClient(ws: WebSocket, watcher: string | null): void {
-  clients.set(ws, {
+function admitClient(ws: WebSocket, watcher: string | null, deltas: boolean): void {
+  const st: ClientState = {
     watching: new Set(),
     warm: new Set(),
     proposals: new Map(),
@@ -8052,7 +8129,10 @@ function admitClient(ws: WebSocket, watcher: string | null): void {
     watcher,
     heard: true,
     owedSnapshot: false,
-  });
+    deltas,
+    sent: null,
+  };
+  clients.set(ws, st);
   const heard = () => {
     const st = clients.get(ws);
     if (st) st.heard = true;
@@ -8069,7 +8149,9 @@ function admitClient(ws: WebSocket, watcher: string | null): void {
   });
   ws.on("close", () => dropClient(ws));
   ws.on("error", () => dropClient(ws));
-  send(ws, { type: "snapshot", snapshot: snapshot() });
+  // A change already waiting goes to everybody first, this client whole with it.
+  if (snapshots.pending) snapshots.flush();
+  if (!st.sent) sendState([[ws, st]], snapshot());
   send(ws, { type: "projects", projects: state.projects });
   // The listeners went first: a watcher is admitted from inside the frame that
   // proved it, and the parent's first `watch` may be the next frame in the

@@ -166,6 +166,9 @@ The load-bearing invariants, one line each, with the argument behind the link:
 - **The socket binds loopback and the `Origin` header is checked**, the second
   before the token; loopback is exempt unless `loopbackToken` says otherwise, and
   the token never goes on a command line. → [more](docs/invariants.md#access)
+- **A page is sent the snapshot once and then what changed** (`shared/snapdelta.ts`),
+  and a board's change is seen by its identity: replace a board, never edit one
+  in place. → [architecture](docs/architecture.md#restarting)
 - **Anything that takes a number off the wire gets `Number.isFinite`.** A clamp is
   not a check, because NaN loses every comparison it is in. →
   [layout](docs/layout.md#numbers-off-the-wire)

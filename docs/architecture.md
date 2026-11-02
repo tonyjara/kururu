@@ -159,6 +159,20 @@ Anything that would make `ptyhost.ts` need editing belongs on the server side.
   30 s, and a socket silent since the last ping is dropped; one more than a
   megabyte behind is held to the newest snapshot, and one 16 MB behind is
   cut off to reconnect and rebuild (`backpressure.ts`).
+- **A page is sent the snapshot once, and then what changed**
+  (`shared/snapdelta.ts`). A client that opens `/ws?delta=1` — every page
+  since 2026-11-02, and a parent's watch of a child — gets the whole
+  snapshot on connect and then `delta`s: the fields whose JSON moved, the
+  profile without its boards, each changed agent, each changed card, a board
+  that arrived whole or went as null; nothing at all when nothing moved. The
+  server keeps the frame it last sent each client to diff against, and a
+  board's frame by the board's identity, which holds because boards are
+  replaced and never edited in place — **keep it that way**: a card changed
+  in place is a card no page is told about. A delta that does not fit is a
+  `resync` and the whole snapshot again. A client that does not ask — a page
+  from before, a parent on an older kururu — is sent whole snapshots as it
+  always was. Under 4 hook reports a second on 23 boards that was 5.5 MB/s
+  to each window before and 2.4 KB/s after.
 - **A restored profile is adopted, not trusted** (`adopt()` in `workspaces.ts`).
   The blob was written by the previous server, which across a rebuild may be a
   previous *version*, so a field added since is simply not there. `undefined`

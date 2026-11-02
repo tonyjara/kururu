@@ -107,6 +107,17 @@ left in the Dock is how a force quit reached a coalition on 2026-10-10.
 
 Kept short on purpose; the detail is in git history.
 
+- **The snapshot as deltas** (2026-11-02), in isolated instances on :7817 from
+  scratch copies of origin/main and the change, on a copy of the real
+  `kururu.db` (23 boards, 1.34 MB snapshot) under 4 hook reports a second and
+  a card edit every 3 s: 5.5 MB/s to a client before, 2.4 KB/s to a delta
+  client after, a legacy client unchanged. The real page in headless Chrome
+  and the real desktop app hidden (its window through the copy's vite) drew a
+  card edited, a card added, three reports and a workspace switch from one
+  snapshot and the deltas, no resync. Two nodes paired on this Mac in all
+  three pairings — both new, a new parent with an old child, an old parent
+  with a new child — relayed a child's card edit and report to the parent's
+  client. Not on the real Mac↔omarchy pair, nor a phone.
 - **Search in Kuru's chat** (2026-11-01), in a real hidden Electron window as its
   own launchd job, against an isolated instance on :7817 from a scratch copy, with
   a copy of the real `kururu.db` (3,896 harness turns) and lines seeded with a tag,

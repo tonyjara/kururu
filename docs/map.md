@@ -9,6 +9,7 @@ in this folder.
 |---|---|
 | `model.ts` | Agents and the hierarchy they live in. Not a mirror of anything |
 | `wire.ts` | The browser↔server protocol, and the timer intervals |
+| `snapdelta.ts` | The snapshot as what changed: the server's frames of what each client was last sent and their diff, the client's `applyDelta`. Boards travel by key, agents and cards as keyed patches. Pure, tested. See [architecture](architecture.md#restarting) |
 | `layout.ts` | The split tree and every pure operation on it. Both halves use it |
 | `agentpane.ts` | Where the agents kururu starts go: the bottom (or top) pane by geometry, the mark that keeps them in one, the word to split when there is none. Pure, tested. See [layout](layout.md#the-agents-pane) |
 | `harness.ts` | The harness's vocabulary: the MCP tool catalogue, the role prompt, key and paste grammar, when a waiting message may be typed, the frames of a notice, transcript turns, its model, effort and compaction point, its folder's two files. Pure, tested |
@@ -110,7 +111,7 @@ in this folder.
 | `src/record.ts` | Rolling raw-stream tape per agent, for bugs you can't reproduce |
 | `src/transcript.ts` | How full a Claude Code window is, off its transcript. Ported |
 | `src/usage.ts` | The plan allowance, off a Claude credential — the machine's or the profile's. Read, never written |
-| `src/usage/store.ts` | The usage ledger, `usage.db`: one row per billed message and the daily rollup, written with their offsets in one transaction. Holds numbers and never words. See [data](data.md#the-usage-ledger) |
+| `src/usage/store.ts` | The usage ledger, `usage.db`: one row per billed message and the daily rollup, written with their offsets in one transaction, the rollup added to rather than rebuilt. Holds numbers and never words. See [data](data.md#the-usage-ledger) |
 | `src/usage/tail.ts` | Following a file from an offset: a chunk at a time, a byte search before any string, half the loop at most |
 | `src/usage/claude.ts` | A Claude Code transcript's billed messages and `cost-state`, each field checked; which config directories are read |
 | `src/usage/codex.ts` | A Codex rollout's billed calls, one `token_count` at a time, and the allowance windows riding on them; the session id is read off the file's name |

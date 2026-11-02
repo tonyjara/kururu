@@ -61,6 +61,7 @@ import { EMPTY_SECRETS, type Lendable, type LendAsk, type SecretsView } from "..
 import type { VaultView } from "../../shared/vaultview";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { ReloadAsk, ReloadHold, ReloadPage } from "../../shared/reload";
+import { applyDelta } from "../../shared/snapdelta";
 import type { Grid } from "./grid";
 import { claimAccess } from "./access";
 
@@ -171,6 +172,8 @@ let state: KururuState = {
 const listeners = new Set<() => void>();
 let socket: WebSocket | null = null;
 let attempt = 0;
+/** A `resync` has been asked for and the whole snapshot is not here yet. */
+let resyncing = false;
 let nextRequestId = 1;
 const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 
@@ -278,8 +281,10 @@ function deliver(to: () => void): void {
 
 function connect(): void {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(`${proto}//${location.host}/ws`);
+  // `delta=1`: the snapshot once, then only what changed — see `shared/snapdelta.ts`.
+  const ws = new WebSocket(`${proto}//${location.host}/ws?delta=1`);
   socket = ws;
+  resyncing = false;
 
   ws.onopen = () => {
     attempt = 0;
@@ -316,8 +321,27 @@ function connect(): void {
     }
     switch (msg.type) {
       case "snapshot":
+        resyncing = false;
         set({ snapshot: msg.snapshot });
         break;
+      case "delta": {
+        // Until the whole snapshot asked for arrives, every delta is from a
+        // state this page does not hold.
+        if (resyncing) break;
+        const before = state.snapshot;
+        let after: SessionSnapshot | null = null;
+        try {
+          if (before) after = applyDelta(before, msg.delta);
+        } catch (err) {
+          console.error("kururu: a snapshot delta did not fit; asking for the whole", err);
+        }
+        if (after) set({ snapshot: after });
+        else {
+          resyncing = true;
+          send({ type: "resync" });
+        }
+        break;
+      }
       case "dev-servers":
         set({ devServers: msg.servers });
         break;

@@ -38,6 +38,7 @@ import type { Direction } from "./layout";
 import type { AgentPlacement } from "./agentpane";
 import type { Action } from "./keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
+import type { SnapshotDelta } from "./snapdelta";
 import type { LaunchSettings } from "./launchers";
 import type { ReloadAsk, ReloadHold, ReloadPage } from "./reload";
 import type { OpenRouterStatus } from "./openrouter";
@@ -382,8 +383,19 @@ export interface Notification {
 }
 
 export type ServerMessage =
-  /** Sent on connect and whenever anything about any agent changes. Complete, never a delta. */
+  /**
+   * The whole state: on connect, after a `resync`, to a client that has
+   * fallen behind, and — every time anything changes — to a client that did
+   * not open its socket with `?delta=1`, which is every client from before
+   * deltas.
+   */
   | { type: "snapshot"; snapshot: SessionSnapshot }
+  /**
+   * What changed since the last `snapshot` or `delta` this client was sent,
+   * to a client that asked for deltas. Never sent when nothing did. See
+   * `shared/snapdelta.ts`.
+   */
+  | { type: "delta"; delta: SnapshotDelta }
   /** Sent on connect and whenever the set of listening dev servers changes. */
   | { type: "dev-servers"; servers: DevServer[] }
   /**
@@ -779,6 +791,13 @@ export type ClientMessage =
    * with its screen off is push's job, not this one's.
    */
   | { type: "looking"; looking: boolean }
+  /**
+   * A `delta` did not fit what this client holds: send the whole snapshot
+   * again. A safety net — the server keeps what it sent each client, and a
+   * delta that does not fit is a bug on one side or the other — that costs
+   * one snapshot rather than a window drawn wrong until the next reload.
+   */
+  | { type: "resync" }
   /**
    * Rebuild this terminal. The only thing that produces a `backlog`.
    *

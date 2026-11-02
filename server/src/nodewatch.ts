@@ -72,6 +72,7 @@ import {
   type RemoteView,
 } from "../../shared/remote";
 import type { ClientMessage, ServerMessage, WorkspaceProject } from "../../shared/wire";
+import { applyDelta } from "../../shared/snapdelta";
 import { smallestGrid, type Grid } from "./sizing";
 
 /** A watch nothing on screen wants any more is kept this long, so stepping between a local workspace and a remote one is not a reconnect each way. */
@@ -193,6 +194,13 @@ class NodeWatch {
   since: number | null = null;
   /** The child's latest snapshot, its ids bare, as it sent it. */
   snapshot: SessionSnapshot | null = null;
+  /**
+   * What the child last sent, before `follow` moved its active workspace
+   * here ahead of the child's word: what the child's next delta is from.
+   */
+  private received: SessionSnapshot | null = null;
+  /** A `resync` is asked for and the whole snapshot is not here yet. */
+  private resyncing = false;
   /** Where each of the child's workspaces is on its disk, ids and roots bare, as it sent them. */
   private projects: WorkspaceProject[] = [];
   private failures = 0;
@@ -246,7 +254,11 @@ class NodeWatch {
       return;
     }
     const host = member.address.includes(":") ? `[${member.address}]` : member.address;
-    const ws = new WebSocket(`ws://${host}:${member.port}/link/watch`, { handshakeTimeout: DIAL_MS, maxPayload: MAX_PAYLOAD });
+    // `delta=1` as a page asks (`shared/snapdelta.ts`); a child from before
+    // deltas ignores it and sends whole snapshots, which are read as ever.
+    this.received = null;
+    this.resyncing = false;
+    const ws = new WebSocket(`ws://${host}:${member.port}/link/watch?delta=1`, { handshakeTimeout: DIAL_MS, maxPayload: MAX_PAYLOAD });
     this.ws = ws;
     ws.on("error", (err: Error) => this.deps.log(`watch: ${member.name}: ${err.message}`));
     ws.on("close", () => {
@@ -389,6 +401,18 @@ class NodeWatch {
     this.changed();
   }
 
+  /** The child's state as it sent it, whole or as a delta applied. */
+  private took(snapshot: SessionSnapshot): void {
+    this.received = snapshot;
+    this.snapshot = snapshot;
+    const pending = this.pending;
+    this.pending = null;
+    if (pending && "reveal" in pending) this.toChild({ type: "reveal-agent", agentId: pending.reveal });
+    else if (pending) this.follow(pending.show);
+    this.deps.relayed?.(this.node, snapshot);
+    this.changed();
+  }
+
   private toChild(message: ClientMessage): boolean {
     const ws = this.ws;
     if (!ws || !this.up || ws.readyState !== WebSocket.OPEN) return false;
@@ -411,14 +435,23 @@ class NodeWatch {
       return;
     }
     switch (msg.type) {
-      case "snapshot": {
-        this.snapshot = msg.snapshot;
-        const pending = this.pending;
-        this.pending = null;
-        if (pending && "reveal" in pending) this.toChild({ type: "reveal-agent", agentId: pending.reveal });
-        else if (pending) this.follow(pending.show);
-        this.deps.relayed?.(this.node, msg.snapshot);
-        this.changed();
+      case "snapshot":
+        this.resyncing = false;
+        this.took(msg.snapshot);
+        return;
+      case "delta": {
+        if (this.resyncing) return;
+        let after: SessionSnapshot | null = null;
+        try {
+          if (this.received) after = applyDelta(this.received, msg.delta);
+        } catch (err) {
+          this.deps.log(`watch: ${this.name}: a delta did not fit (${err instanceof Error ? err.message : String(err)}); asking for the whole`);
+        }
+        if (after) this.took(after);
+        else {
+          this.resyncing = true;
+          this.toChild({ type: "resync" });
+        }
         return;
       }
       case "projects": {
