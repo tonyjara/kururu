@@ -582,13 +582,17 @@ or pulled. `pill.log` is how the next try is read.
   exit a SIGABRT and broke `C-a B` (see [gotchas](gotchas.md)). Moving it
   out also took the model load off the server's thread. A test with the old
   arrangement measured a 1.9 s stall; with the process it was 6 ms.
-- **The packaged app's copy of the voice stack is unverified.**
-  `electron-builder.yml` copies `kokoro-js` and its native dependencies
-  into `Resources/node_modules`, Darwin binaries only, but no DMG has been
-  built with it yet. The process is started lazily and a failure to start
-  or load it is caught, so a missing piece costs the voice and not the app:
-  the Mac's voices speak and Settings says Kokoro could not load. `kokoro.mjs`
-  ships in `Resources/server` with the rest of `dist`.
+- **The packaged app's copy of the voice stack** is only what Node loads:
+  `electron-builder.yml` copies `kokoro-js` without its browser bundle,
+  transformers' two node builds, `onnxruntime-node`'s Darwin binaries and
+  `sharp` with its own two dependencies — never `onnxruntime-web`, which the
+  node build compiles out. Up to 0.5.0 the DMG shipped `sharp` without
+  `detect-libc` and `semver`, so Kokoro never loaded in the app ("Cannot find
+  module 'detect-libc'") and the voice was always `say`. Checked on
+  2026-11-02 in a signed arm64 build (notarization skipped): the packaged
+  `kokoro.mjs`, forked from the app's helper as the server forks it, loaded
+  the model offline in 0.7 s and spoke a sentence. A failure to start or
+  load is still caught, so a missing piece costs the voice and not the app.
 - **The microphone in the packaged app** needs the usage string in
   `Info.plist` (`extendInfo`) and the `audio-input` entitlement, both now in
   the builder config, both unverified in a signed build. Without them the

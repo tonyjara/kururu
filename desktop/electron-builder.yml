@@ -93,18 +93,37 @@ extraResources:
   # imports all of this lazily and falls back to the Mac's own voices if any
   # of it is missing, so an incomplete copy costs a voice and not the app.
   # UNVERIFIED in a built DMG as of 0.2.0 — see docs/voice.md.
+  #
+  # Only what Node loads. Under Node, kokoro-js resolves transformers' `node`
+  # export, `dist/transformers.node.mjs`, which imports onnxruntime-node and
+  # has onnxruntime-web compiled out ("onnxruntime-web (ignored)" in the
+  # bundle). So onnxruntime-web is not shipped at all — 90 MB, with a second
+  # onnxruntime-common inside it — and of transformers only its two node
+  # builds travel: not the browser builds, their sourcemaps or the 21 MB of
+  # wasm, which were most of its 47 MB. kokoro-js keeps its voices and drops
+  # its browser bundle. Kokoro speaking from a signed build made this way was
+  # checked on 2026-11-02.
   - from: ../node_modules/kokoro-js
     to: node_modules/kokoro-js
+    filter:
+      - package.json
+      - LICENSE
+      - dist/kokoro.js
+      - dist/kokoro.cjs
+      - voices/**
   - from: ../node_modules/phonemizer
     to: node_modules/phonemizer
   - from: ../node_modules/@huggingface/transformers
     to: node_modules/@huggingface/transformers
+    filter:
+      - package.json
+      - LICENSE
+      - dist/transformers.node.mjs
+      - dist/transformers.node.cjs
   - from: ../node_modules/@huggingface/jinja
     to: node_modules/@huggingface/jinja
   - from: ../node_modules/onnxruntime-common
     to: node_modules/onnxruntime-common
-  - from: ../node_modules/onnxruntime-web
-    to: node_modules/onnxruntime-web
   - from: ../node_modules/onnxruntime-node
     to: node_modules/onnxruntime-node
     filter:
@@ -114,6 +133,15 @@ extraResources:
       - bin/napi-v3/darwin/**
   - from: ../node_modules/sharp
     to: node_modules/sharp
+  # sharp's own two dependencies. Without them transformers' node build
+  # throws at import ("Cannot find module 'detect-libc'"), and every DMG up to
+  # 0.5.0 shipped without them, so Kokoro never loaded there and the voice was
+  # always `say`. The semver is sharp's nested copy, which a bun install puts
+  # under sharp's own node_modules and the packaged copy above does not keep.
+  - from: ../node_modules/detect-libc
+    to: node_modules/detect-libc
+  - from: ../node_modules/sharp/node_modules/semver
+    to: node_modules/semver
   - from: ../node_modules/@img
     to: node_modules/@img
     filter:
