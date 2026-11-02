@@ -15,12 +15,12 @@ the web is now a chain (`server/src/web/chain.ts`) of providers that each say
 what they can do (`server/src/web/provider.ts`), and the vocabulary they share is
 `shared/web.ts`.
 
-**Ours is gone again, since 2026-10-25.** It ran on a VPS whose production
-shares the memory, and about 2.3 GB of it was more than the user wanted to
-give a fetcher with a fallback behind it. So here the chain is
-the hand-back and then the cloud — the order it began with — and the
-self-hosted provider stays in the code, switched off and with no address, for
-anyone who runs one of their own (below).
+**Ours moved twice, and since 2026-11-01 it has a box of its own.** It ran on
+a VPS whose production shares the memory, and about 2.3 GB of it was more than
+the user wanted to give a fetcher with a fallback behind it, so it was switched
+off on 2026-10-25. Now it runs on a small machine at home that houses tools and
+nothing else. The agent's own tools still come first; the point of the box is
+that what comes after them is free before anything costs credits.
 
 ## The order
 
@@ -29,12 +29,12 @@ As Settings → Web lists it here:
 | # | provider | file | costs |
 |---|---|---|---|
 | 1 | **The agent's own web tools** — Claude's WebSearch and WebFetch, Codex's search | `providers/handback.ts` | nothing |
-| 2 | **Cloud Firecrawl** — firecrawl.dev, only with `ownToolsFailed` | `providers/firecrawl-cloud.ts` | credits |
-| — | **Self-hosted Firecrawl** — off, no address | `providers/firecrawl-self.ts` | nothing |
+| 2 | **Self-hosted Firecrawl** — ours, over the tailnet, only with `ownToolsFailed` | `providers/firecrawl-self.ts` | nothing |
+| 3 | **Cloud Firecrawl** — firecrawl.dev, when the box is off or could not read the page | `providers/firecrawl-cloud.ts` | credits |
 
 The default for a first start puts a self-hosted Firecrawl first, because a
 free provider that is set up should be: it is skipped until it has an
-address, so a fresh kururu behaves like the two rows above.
+address, so a fresh kururu has the hand-back and the cloud.
 
 A call goes down the list until something brings back the page. Each step is
 **skipped** (switched off, not set up, cannot do this tool, resting after it
@@ -238,8 +238,8 @@ The URL of every page an agent asks for, or the words of its search:
 - to **firecrawl.dev**, with the key, only when the chain reaches the cloud —
   here, only after the agent says its own tools failed — which caches pages
   for up to two days;
-- to **a self-hosted Firecrawl**, when one is set up (none is here since
-  2026-10-25), over the tailnet, which fetches the page from that box's own
+- to **a self-hosted Firecrawl**, when one is set up (ours is, since
+  2026-11-01), over the tailnet, which fetches the page from that box's own
   connection and searches through whatever it is set up with.
 
 Nothing else of the agent's goes. Addresses on this Mac, the local network or
@@ -252,8 +252,8 @@ every five minutes while a window is open and after calls.
 ## Running your own Firecrawl
 
 The self-hosted provider wants a Firecrawl reachable from this Mac and a key in
-front of it: an address and a key in Settings → Web, and it goes first, free.
-None runs here since 2026-10-25.
+front of it: an address and a key in Settings → Web. It goes first by default,
+free; here it is moved after the hand-back.
 
 **The gate.** A self-hosted Firecrawl has no authentication
 (`USE_DB_AUTHENTICATION=false`; turning it on needs Supabase), so nothing
@@ -268,7 +268,15 @@ enough for a load balancer; the provider's health check is Firecrawl's
 
 **Size it before deploying.** Idle, Firecrawl's own compose with SearXNG beside
 it for search took about 2.5 GB, most of it the API, and the browser more
-under load. That is what retired ours.
+under load. That is what retired ours from the VPS.
+
+**A tailnet-only allowlist needs Tailscale's own firewall rules out of the
+way.** On a box where tailscaled manages netfilter, each restart of it puts its
+chain ahead of Docker's in `FORWARD`, which masquerades what comes off the
+tailnet, so the reverse proxy sees a Docker address and answers 403 to
+everybody, and lets containers out to the tailnet. It works until tailscaled
+next restarts. `tailscale up --netfilter-mode=off`, with a firewall of the box's
+own in its place; test it by restarting tailscaled.
 
 The one we ran — Firecrawl's compose on a Linux box from 2026-10-15, then as a
 Swarm stack behind Traefik on a VPS from 2026-10-24 — is written up in full,

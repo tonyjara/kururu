@@ -302,7 +302,8 @@ The load-bearing invariants, one line each, with the argument behind the link:
   **hand-back** first — a provider like the others that tells the agent to
   use its own WebSearch / WebFetch — then cloud Firecrawl, reached only when
   the agent calls again with `ownToolsFailed`. A self-hosted Firecrawl goes
-  first when one is set up; ours was retired on 2026-10-25, for its memory. A challenge page, a wall or nothing is a failure
+  first by default when one is set up; ours sits on a box of its own since
+  2026-11-01, moved after the hand-back and before the cloud. A challenge page, a wall or nothing is a failure
   like an error or a timeout, and every answer says who served it. A
   provider is one file in `server/src/web/providers/` that registers itself;
   the build imports the directory and the page draws its fields, so nothing
