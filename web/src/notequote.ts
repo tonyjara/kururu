@@ -23,6 +23,23 @@
  * could have selected and typed — and sends nothing. A quote not taken in a
  * few seconds is dropped, so a later plain "Reference in Kuru" for the card
  * is never handed an old one.
+ *
+ * **The channel is not enough on its own, and the quote is also left in
+ * localStorage** (`kururu.note-quote:<card>`), which every page of the origin
+ * shares. The channel reaches only a window whose page is there and listening
+ * at that moment, and on 2026-11-02 every quote from a note window went in as
+ * the card's bare reference: each `[quote "…"]` was dropped without a word,
+ * and quotes of different passages all read the same. A main window that was
+ * closed is one road to that, reproduced — the note waits out `HELD_WAIT_MS`
+ * for a window that is not there, presses `refer`, the app opens a fresh
+ * window, and its page never heard the quote. A page left holding an old copy
+ * of this module after a hot update (`Pill.tsx` has the same story) would be
+ * another. The stored copy is read by whichever page takes the reference, from
+ * whichever copy of this module, and is gone once taken; the window also
+ * waits a moment for it (`awaitNoteQuote`) before it puts in a reference
+ * alone, since the channel's message and the bridge's are two roads that
+ * need not arrive in order. A plain "Reference in Kuru" from the note's bar
+ * forgets a stored quote first (`forgetNoteQuote`), so it is never handed one.
  */
 import { adoptQuote, type CardQuote } from "../../shared/kuru";
 
@@ -31,6 +48,12 @@ const CHANNEL = "kururu.note-quote";
 const HELD_WAIT_MS = 1500;
 /** How long the window keeps a quote for the reference that should follow it. */
 export const HELD_FOR_MS = 5000;
+/** Where a quote is left for a window that was not there to hear it, by card. */
+const STORED = "kururu.note-quote:";
+/** How long a stored quote waits — long enough for a closed window to be opened and its page loaded. */
+export const STORED_FOR_MS = 30_000;
+/** How long the window waits for a quote before it puts the card's reference in alone. */
+export const AWAIT_MS = 400;
 
 type Said = { kind: "quote"; id: string; cardId: string; quote: CardQuote } | { kind: "held"; id: string };
 
@@ -54,6 +77,46 @@ export class HeldQuotes {
 
 const held = new HeldQuotes();
 
+/** A stored quote as read back — pure, for the test: the quote, or null for anything stale, from the future or not a quote. */
+export function storedQuote(raw: string | null, now: number): CardQuote | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as { at?: unknown; quote?: unknown } | null;
+    const at = value?.at;
+    if (typeof at !== "number" || !Number.isFinite(at) || now - at > STORED_FOR_MS || at - now > HELD_WAIT_MS) return null;
+    return adoptQuote(value?.quote);
+  } catch {
+    return null;
+  }
+}
+
+function store(cardId: string, quote: CardQuote): void {
+  try {
+    localStorage.setItem(STORED + cardId, JSON.stringify({ at: Date.now(), quote }));
+  } catch {
+    // The channel still carries it to a window that is there.
+  }
+}
+
+/** A note: forget a stored quote, before a plain reference to its card, which must not be handed one. */
+export function forgetNoteQuote(cardId: string): void {
+  try {
+    localStorage.removeItem(STORED + cardId);
+  } catch {
+    // Nothing was stored.
+  }
+}
+
+function takeStored(cardId: string, now: number): CardQuote | null {
+  try {
+    const raw = localStorage.getItem(STORED + cardId);
+    if (raw !== null) localStorage.removeItem(STORED + cardId);
+    return storedQuote(raw, now);
+  } catch {
+    return null;
+  }
+}
+
 /** The window: hold what note windows say, until `takeNoteQuote`. Returns the stop. */
 export function holdNoteQuotes(): () => void {
   if (typeof BroadcastChannel === "undefined") return () => {};
@@ -69,13 +132,27 @@ export function holdNoteQuotes(): () => void {
   return () => channel.close();
 }
 
-/** The window: the quote a note said for this card, for the reference that just came across the bridge without one. */
+/** The window: the quote a note said for this card, for the reference that just came across the bridge without one — held, or stored. */
 export function takeNoteQuote(cardId: string): CardQuote | null {
-  return held.take(cardId, Date.now());
+  const now = Date.now();
+  const heard = held.take(cardId, now);
+  const stored = takeStored(cardId, now);
+  return heard ?? stored;
+}
+
+/** The window: `takeNoteQuote`, waiting up to `AWAIT_MS` for a quote that is still on its way before settling for none. */
+export async function awaitNoteQuote(cardId: string, ms = AWAIT_MS): Promise<CardQuote | null> {
+  const until = Date.now() + ms;
+  for (;;) {
+    const found = takeNoteQuote(cardId);
+    if (found || Date.now() >= until) return found;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }
 
 /** A note window: say the quote, and press `refer` once the window holds it — or, after a wait, without. */
 export function quoteAcross(cardId: string, quote: CardQuote, refer: () => void): void {
+  store(cardId, quote);
   if (typeof BroadcastChannel === "undefined") {
     refer();
     return;

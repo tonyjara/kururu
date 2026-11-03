@@ -117,6 +117,15 @@ Kept short on purpose; the detail is in git history.
   (the app a release before quoting has), through `notequote.ts`; Escape
   closing only the popover; in Kururu, Catppuccin Latte, Grand Prix and
   Paddock, and in the drawer as a phone-width sheet.
+- **Chips in Kuru's box** (2026-11-02), in an isolated instance on :7817
+  from a scratch copy, in headless Chrome at desktop and 390px: references,
+  quotes and a dropped picture drawn as chips in Kururu, Dracula, Latte and
+  Grand Prix; one Backspace or Delete taking a chip whole, typing, arrows
+  over a chip, undo and redo, copy carrying the words, a paste of HTML and a
+  reference, Shift+Enter, and Enter sending the templated text unchanged
+  (the socket's `kuru-say` caught and dropped). The note window's quote in
+  the real Electron app on the desktop code of the installed build (no
+  `notes.quote`), with the main window open and closed.
 - **The slot queue** (2026-11-02), in an isolated instance on :7817 from a
   scratch copy, with a stand-in `simctl` (`KURURU_SIMCTL`, simulators in a JSON
   file) and a stand-in load (`KURURU_SLOTS_TEST_READING`), and `sleep` agents

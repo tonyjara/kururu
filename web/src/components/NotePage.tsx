@@ -36,7 +36,7 @@ import { useEffect, useRef, useState } from "react";
 import { skinFor } from "../../../shared/skin";
 import { themeFor } from "../../../shared/theme";
 import type { NoteReport, NoteSelf } from "../desktop";
-import { quoteAcross } from "../notequote";
+import { forgetNoteQuote, quoteAcross } from "../notequote";
 import { desktopNotes, locateCard } from "../notes";
 import { installReload } from "../reload";
 import { useKururu } from "../session";
@@ -143,7 +143,14 @@ export function NotePage() {
         }}
         onClose={() => notes?.close()}
         onShowBoard={() => notes?.toBoard()}
-        onRefer={notes?.refer ? () => notes.refer?.() : undefined}
+        onRefer={
+          notes?.refer
+            ? () => {
+                forgetNoteQuote(self.cardId);
+                notes.refer?.();
+              }
+            : undefined
+        }
         onEditing={noKeys}
         onLeave={() => notes?.raiseMain()}
       />

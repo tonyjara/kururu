@@ -135,6 +135,7 @@ import { splitMentions } from "../../../shared/made";
 import type { AgentSnapshot, MascotConfig, Profile } from "../../../shared/model";
 import { REPLY_ME, replyClock, replyReference, splitReply, withReply, type ReplyRef } from "../../../shared/reply";
 import type { OutboxState, VoiceSettings } from "../../../shared/voice";
+import { filesStillIn } from "../chips";
 import { escapePath, handoverFrom, isFileDrag } from "../drop";
 import { kuruLive, kuruWorking, setKuruSearchExit, takeKuruSearch, takeKuruWords, useKuruDrawer, type KuruLive } from "../kuru";
 import { firstLine, foldKeys, foldText, isFolded, isLong, readFolds, useFoldLong, withFold, withFolds, writeFolds, type Folds } from "../kurufold";
@@ -143,6 +144,7 @@ import { isLoopback } from "../preview";
 import * as api from "../session";
 import { useKururu } from "../session";
 import { dismissVoice, talkDown, talkUp, useOutgoing, useVoiceUi, voiceIsRemote, voiceNow } from "../voice";
+import { ChipField, type ChipFieldHandle } from "./ChipField";
 import { Icon } from "./Icon";
 import { MadeInline } from "./MadeLinks";
 import { quotable } from "./Quote";
@@ -1925,6 +1927,31 @@ function writeQuoting(profileId: string, quoting: Quoting | null) {
 }
 
 /**
+ * The paths a drop or a paste put into each profile's draft, which the box
+ * draws as files (`chips.ts`) — remembered beside the draft for the draft's
+ * reason, and only these: a path typed out is words.
+ */
+const FILES_KEY = "kururu.kuru.files:";
+
+function readFiles(profileId: string): string[] {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(FILES_KEY + profileId) ?? "[]");
+    return Array.isArray(raw) ? raw.filter((path): path is string => typeof path === "string" && path.length > 0).slice(0, 200) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeFiles(profileId: string, files: readonly string[]) {
+  try {
+    if (files.length) localStorage.setItem(FILES_KEY + profileId, JSON.stringify(files));
+    else localStorage.removeItem(FILES_KEY + profileId);
+  } catch {
+    // Not remembered past this window; the paths still send, drawn as words.
+  }
+}
+
+/**
  * Typing to Kuru. Enter sends and Shift+Enter is a new line, as every chat
  * box has agreed; Escape gives the keyboard back to the panes. There is no
  * send button, because Enter is one on every keyboard this box is typed on,
@@ -1938,14 +1965,15 @@ function writeQuoting(profileId: string, quoting: Quoting | null) {
  * An `@` at the front offers the other nodes' names as it is typed, and a
  * name that will route is drawn bold — off `typedAddress`, the grammar the
  * server routes on, so the bold cannot promise a route the server will not
- * take. A textarea cannot bold a range, so the bold is a mirror behind it
- * (`.kuru-mirror`) holding only the address, its glyphs stroked to thicken
- * the field's own drawn on top. A real `font-weight` was the obvious choice
- * and was rejected because bold glyphs are wider: the field's text and caret
- * would drift off the mirror's by the end of the name. A contenteditable box
- * would bold for real and was rejected because it gives up everything the
- * textarea does for free — the value, IME, undo, the phone's keyboard — for
- * one word's weight.
+ * take.
+ *
+ * The box is `ChipField`, not a textarea, since 2026-11-02: a card's
+ * reference, a quote and a dropped file are text written for Kuru, and the
+ * box draws each as a chip while keeping that text, to the character, as
+ * what is sent (`chips.ts`). A contenteditable was rejected here once, for
+ * one word's bold, because it gives up what a textarea does for free; chips
+ * are what a textarea cannot draw at all, and `ChipField` takes those things
+ * back by hand.
  *
  * A file dropped on the box puts its path in at the cursor, escaped as a
  * terminal writes it, unsent — Claude Code's own box does the same, and the
@@ -1987,8 +2015,7 @@ function Composer({
   /** The suggestions moved through with the arrows, and the draft Escape closed them on — they open again once it changes. */
   const [chosen, setChosen] = useState(0);
   const [closedOn, setClosedOn] = useState<string | null>(null);
-  const field = useRef<HTMLTextAreaElement>(null);
-  const mirror = useRef<HTMLDivElement>(null);
+  const field = useRef<ChipFieldHandle>(null);
   /** A file held over the box. */
   const [over, setOver] = useState(false);
   /** How many dropped or pasted files are on their way to the server, and why the last one was not taken. */
@@ -1997,10 +2024,24 @@ function Composer({
   const shown = useRef(profileId);
   shown.current = profileId;
   const [quoting, setQuoting] = useState<Quoting | null>(() => readQuoting(profileId));
+  const [files, setFiles] = useState<string[]>(() => readFiles(profileId));
   useEffect(() => {
     setText(readDraft(profileId));
     setQuoting(readQuoting(profileId));
+    setFiles(readFiles(profileId));
   }, [profileId]);
+  /**
+   * Paths the box put in, drawn as files. Kept until the draft is sent, and
+   * not forgotten when one is deleted, so an undo that puts it back puts back
+   * the chip; the ones gone from the draft are let go only as new ones come.
+   */
+  const keepFiles = (draft: string, add: readonly string[]) => {
+    setFiles((was) => {
+      const next = filesStillIn(draft, [...was, ...add.filter((path) => !was.includes(path))]);
+      writeFiles(profileId, next);
+      return next;
+    });
+  };
   const quote = (next: Quoting | null) => {
     setQuoting(next);
     writeQuoting(profileId, next);
@@ -2033,13 +2074,6 @@ function Composer({
   const offered = query ? addressMatches(query.query, names) : [];
   const open = offered.length > 0;
   const active = Math.min(chosen, offered.length - 1);
-  useLayoutEffect(() => {
-    const el = field.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-    if (mirror.current) mirror.current.scrollTop = el.scrollTop;
-  }, [text]);
   const edit = (next: string) => {
     setText(next);
     writeDraft(profileId, next);
@@ -2072,6 +2106,8 @@ function Composer({
     edit("");
     carets.delete(profileId);
     if (quoting) quote(null);
+    setFiles([]);
+    writeFiles(profileId, []);
   };
   // Told once each way, and told off on unmount: a drawer closed with the
   // cursor still in the box must not leave the prefix believing a field has
@@ -2086,11 +2122,12 @@ function Composer({
    */
   const { words } = useKuruDrawer();
   const took = useRef(0);
-  const putIn = (words: string, line = false) => {
+  const putIn = (words: string, line = false, paths: readonly string[] = []) => {
     const el = field.current;
     const was = el?.value ?? readDraft(profileId);
-    const at = el && document.activeElement === el ? { from: el.selectionStart, to: el.selectionEnd } : (carets.get(profileId) ?? { from: was.length, to: was.length });
+    const at = el?.focused ? { from: el.selectionStart, to: el.selectionEnd } : (carets.get(profileId) ?? { from: was.length, to: was.length });
     const put = (line ? insertLine : insertWords)(was, at.from, at.to, words);
+    if (paths.length) keepFiles(put.text, paths);
     edit(put.text);
     carets.set(profileId, { from: put.caret, to: put.caret });
     if (el) {
@@ -2131,12 +2168,15 @@ function Composer({
     const waiting = sends.filter((send) => send instanceof Promise).length;
     const said = () => (refused.length > 1 ? `${refused[0]} (and ${refused.length - 1} more)` : (refused[0] ?? null));
     const finish = (paths: (string | null)[]) => {
-      const words = paths.filter((path): path is string => !!path).map(escapePath).join(" ");
+      const escaped = paths.filter((path): path is string => !!path).map(escapePath);
+      const words = escaped.join(" ");
       if (!words) return;
-      if (shown.current === profileId) putIn(words);
+      if (shown.current === profileId) putIn(words, false, escaped);
       else {
         const was = readDraft(profileId);
-        writeDraft(profileId, insertWords(was, was.length, was.length, words).text);
+        const next = insertWords(was, was.length, was.length, words).text;
+        writeDraft(profileId, next);
+        writeFiles(profileId, filesStillIn(next, [...readFiles(profileId), ...escaped]));
       }
     };
     if (waiting === 0) {
@@ -2236,27 +2276,20 @@ function Composer({
       )}
       <div className={`kuru-box ${over ? "kuru-box-drop" : ""}`}>
         <div className="kuru-write">
-          {address && (
-            <div ref={mirror} className="kuru-mirror" aria-hidden="true">
-              {text.slice(0, address.from)}
-              <b>{text.slice(address.from, address.to)}</b>
-            </div>
-          )}
-          <textarea
+          <ChipField
             ref={field}
             className="kuru-field"
-            rows={1}
             value={text}
+            files={files}
+            bold={address ? { from: address.from, to: address.to } : null}
             placeholder={peers.length ? `Say something to Kuru, or @${peers[0]!.node.name} …` : "Say something to Kuru"}
-            aria-label="A message for Kuru"
-            role="combobox"
-            aria-autocomplete="list"
-            aria-expanded={open}
-            aria-controls={open ? `kuru-suggest-${profileId}` : undefined}
-            aria-activedescendant={open ? `kuru-suggest-${profileId}-${active}` : undefined}
-            onChange={(event) => {
-              edit(event.target.value);
-              setCaret(event.target.selectionStart);
+            ariaLabel="A message for Kuru"
+            ariaExpanded={open}
+            ariaControls={open ? `kuru-suggest-${profileId}` : undefined}
+            ariaActiveDescendant={open ? `kuru-suggest-${profileId}-${active}` : undefined}
+            onChange={(next, at) => {
+              edit(next);
+              setCaret(at);
               setChosen(0);
               if (handing.refused) setHanding((was) => ({ ...was, refused: null }));
             }}
@@ -2267,14 +2300,11 @@ function Composer({
               event.preventDefault();
               take(items);
             }}
-            onSelect={(event) => {
-              const { selectionStart: from, selectionEnd: to } = event.currentTarget;
+            onCaret={(from, to) => {
               setCaret(from);
               carets.set(profileId, { from, to });
             }}
-            onScroll={(event) => {
-              if (mirror.current) mirror.current.scrollTop = event.currentTarget.scrollTop;
-            }}
+            onEnter={send}
             onFocus={() => onEditing(true)}
             onBlur={() => {
               onEditing(false);

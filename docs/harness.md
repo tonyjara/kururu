@@ -161,12 +161,19 @@ profile on screen and builds what its menu would. A note window has no
 drawer, so it brings the main window up and hands it the id across the
 bridge (`notes.refer`), and the window writes the reference itself.
 
-Words and not a chip in the box, because the box is a textarea for the
-reasons `Composer` gives, and because what reaches Kuru is what was typed
-into its terminal — whatever the box drew, Kuru would read the words. So they
-are written for both readers: the code and the title, cut at 32 characters,
-for the person; inside the parentheses, where the card is and which it is,
-for Kuru's tools. Where is a workspace id, `profile` for the profile's own
+Words, because what reaches Kuru is what was typed into its terminal. So
+they are written for both readers: the code and the title, cut at 32
+characters, for the person; inside the parentheses, where the card is and
+which it is, for Kuru's tools. Since 2026-11-02 the box *draws* them as a chip
+— the card's code and title — while keeping the words, to the character, as
+what is sent: `ChipField.tsx` is the box, a contenteditable whose value is
+still the string, and `web/src/chips.ts` reads a draft into words and chips.
+A quote is one chip with its card's reference (a quote mark, its opening
+words and the card's code, or `Kuru 18:42` for a line of the conversation),
+and a file the box put in by a drop or a paste is a picture or file chip with
+its name; a path typed out stays words. One Backspace or Delete takes a chip
+whole, a copy carries the words, a tap opens a chip to show all of it, and
+undo is the box's own. Telegram never sees the box. Where is a workspace id, `profile` for the profile's own
 board, or `omarchy:w3` for another node's workspace on this screen — the
 node's name and its own id, never the `n:…` spelling no tool accepts. The
 role's "Cards the user points at" says how to read it, and that the card id
@@ -230,7 +237,13 @@ card's id: across the bridge on "Reference in Kuru"'s own channel
 only `notes.refer`, which carries the id alone, so the note says the
 quote on a `BroadcastChannel` the two same-origin pages share, waits for
 the window to say it holds it, and then presses `refer`; the window
-takes the held quote for that card (`web/src/notequote.ts`). Either way
+takes the held quote for that card (`web/src/notequote.ts`). The quote is
+also left in localStorage for the card, because the channel reaches only a
+window whose page is there at that moment: on 2026-11-02 every quote from a
+note window went in as the card's bare reference, and a closed main window
+reproduced it. The window takes whichever it finds, waits a moment for one
+still on its way, and the note bar's plain reference forgets a stored quote
+first. Either way
 the window writes the reference from its snapshot and puts the quote
 after it (`referCardIn` with a quote, `adoptQuote` for what crossed).
 The Needs drawer draws only a card's first line, inside a button, and

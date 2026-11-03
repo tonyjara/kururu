@@ -68,7 +68,7 @@ import { arrangedNeeds, useNeedsView } from "./needsorder";
 import { NeedsDrawer } from "./components/NeedsDrawer";
 import { Notes } from "./components/Notes";
 import { QuoteToKuru, quoteUp, type QuoteFrom } from "./components/Quote";
-import { holdNoteQuotes, takeNoteQuote } from "./notequote";
+import { awaitNoteQuote, holdNoteQuotes } from "./notequote";
 import { locateCard } from "./notes";
 import { needsOf, type Need } from "../../shared/needs";
 import { longWaits } from "../../shared/slots";
@@ -644,7 +644,11 @@ export function App() {
     const notes = desktop()?.notes;
     if (!notes?.onReferCard) return;
     const stopHolding = holdNoteQuotes();
-    const stopReferring = notes.onReferCard((cardId, quote) => setReferAsked({ cardId, quote: adoptQuote(quote) ?? takeNoteQuote(cardId) }));
+    const stopReferring = notes.onReferCard((cardId, quote) => {
+      const given = adoptQuote(quote);
+      if (given) setReferAsked({ cardId, quote: given });
+      else void awaitNoteQuote(cardId).then((found) => setReferAsked({ cardId, quote: found }));
+    });
     return () => {
       stopReferring();
       stopHolding();
