@@ -50,6 +50,19 @@ const DEFAULT_KEY = "ControlRight";
 const SETTLE_MS = [600, 2500];
 /** How long the pill page gets to answer a reset before it is taken for wedged and loaded again. */
 const LOCATE_ANSWER_MS = 2000;
+/**
+ * How long the pill page gets to say it heard the talk key go down. It says
+ * `listening` before it so much as asks for the microphone (`open` in
+ * `voice.ts`), so a live page answers in milliseconds and this is generous.
+ */
+const KEY_ANSWER_MS = 1500;
+/**
+ * How long after the last key a page that did not answer is loaded again.
+ * Not at once: a deaf page can still be the one recording — that is the
+ * split a hot update made (`Pill.tsx`) — and the clip it is holding goes out
+ * when the key comes up, so the reload waits for the keys to stop.
+ */
+const DEAF_RELOAD_MS = 15_000;
 /** `pill.log` is moved aside at this size, as `lifecycle.log` is. */
 const LOG_MAX_BYTES = 256 * 1024;
 
@@ -210,6 +223,10 @@ class TalkKey extends EventEmitter {
     this.locateOwed = false;
     /** When the page was last loaded again because its renderer went, so a renderer that dies on load is not loaded forever. */
     this.revivedAt = 0;
+    /** A key went down and the page has not yet said it is listening. */
+    this.keyAnswerTimer = null;
+    /** The page did not answer a key, and is loaded again once the keys stop. */
+    this.deafTimer = null;
   }
 
   state() {
@@ -516,6 +533,10 @@ class TalkKey extends EventEmitter {
     this.locating = false;
     this.locateOwed = false;
     clearTimeout(this.locateTimer);
+    clearTimeout(this.keyAnswerTimer);
+    clearTimeout(this.deafTimer);
+    this.keyAnswerTimer = null;
+    this.deafTimer = null;
     for (const timer of this.settleTimers) clearTimeout(timer);
     this.settleTimers = [];
     if (panel && !panel.isDestroyed()) panel.destroy();
@@ -695,6 +716,46 @@ class TalkKey extends EventEmitter {
     const contents = this.panelContents();
     if (!contents) return;
     contents.send("kururu:talk", ev);
+    if (this.deafTimer) this.reloadDeafLater();
+    if (ev === "down" || ev === "toggle") this.expectAnswer(contents);
+  }
+
+  /**
+   * A key went down, and a page that is driving the pill says `listening`
+   * straight away. One that does not is not driving it, whatever it is
+   * doing with the microphone — and the pill it should be showing is the
+   * thing nobody can see, so nothing on screen would ever say so. It is
+   * written down and the page is loaded again, which is the one cure for
+   * every way a page stops answering: split by a hot update, wedged, or a
+   * renderer that went without saying so.
+   *
+   * Only from idle: a key pressed while the pill is already up is answered by
+   * no change, and a page with nothing loaded has nothing to answer with.
+   */
+  expectAnswer(contents) {
+    if (!this.loaded || this.phase !== "idle") return;
+    clearTimeout(this.keyAnswerTimer);
+    this.keyAnswerTimer = setTimeout(() => {
+      this.keyAnswerTimer = null;
+      if (this.phase !== "idle" || this.locating || this.panelContents() !== contents) return;
+      note("deaf", {
+        why: `the talk key went down and the pill page did not answer in ${KEY_ANSWER_MS} ms; loading it again once the keys stop`,
+        crashed: contents.isCrashed(),
+        url: contents.getURL(),
+        page: this.page,
+      });
+      this.reloadDeafLater();
+    }, KEY_ANSWER_MS);
+  }
+
+  reloadDeafLater() {
+    clearTimeout(this.deafTimer);
+    this.deafTimer = setTimeout(() => {
+      this.deafTimer = null;
+      if (!this.panel || this.phase !== "idle") return;
+      note("deaf", { why: "loading the pill page again" });
+      this.load();
+    }, DEAF_RELOAD_MS);
   }
 
   /**
@@ -707,6 +768,13 @@ class TalkKey extends EventEmitter {
     if (this.debug && state.phase !== this.phase) console.log(`kururu pill: ${state.phase} ${Math.round(state.width)}x${Math.round(state.height)} key=${state.key}`);
     if (typeof state.key === "string") this.setKey(state.key);
     const phase = typeof state.phase === "string" ? state.phase : "idle";
+    // Answered: the page is driving the pill. A deaf page's reload is owed no more.
+    if (phase !== "idle") {
+      clearTimeout(this.keyAnswerTimer);
+      clearTimeout(this.deafTimer);
+      this.keyAnswerTimer = null;
+      this.deafTimer = null;
+    }
     const changed = phase !== this.phase;
     this.phase = phase;
     // Kept apart from the phase, which every window is told: a reset is the

@@ -666,6 +666,24 @@ or pulled. `pill.log` is how the next try is read.
   every display it chose between — beside each display event, reset, drag
   pin, failed load and renderer death. Moved aside at 256 KB, as
   `lifecycle.log` is. The tray's Logs menu opens it.
+- **A hot update split the pill page in two, and that was the invisible
+  pill of 2026-11-02 (KUR-216)**, not its place: an hour of delivered clips
+  and not one line in `pill.log`. Under vite, a save that reaches
+  `session.ts` — any runtime `shared/` import, so most of them — made
+  second copies of `voice.ts` and `session.ts` in the pill page. The
+  bridge's key listener, registered once by `Pill`'s first mount effect
+  (Fast Refresh did not run it again), still drove the first copy, which
+  recorded and posted; `Pill` re-rendered against the second, whose phase
+  never left idle, so it never reported and the panel was never shown.
+  Reset still worked, because its listener sets the component's own state,
+  which made it look like a placement bug. So the pill page holds every
+  update (a `vite:beforeUpdate` listener that never settles; see
+  `Pill.tsx`) and reloads itself once the voice is idle, and the main
+  process takes a key-down that the page does not answer with `listening`
+  within 1.5 s as a page that is not driving the pill. It writes `deaf` to
+  `pill.log` and loads the page again 15 s after the last key, so a clip the
+  deaf page is still holding goes out first. The first half is web-only;
+  the second is in `talkkey.js` and arrives with an app build.
 - **The pill takes the pointer now**, which it did not while it only
   talked. A press on it prevents `mousedown`, the mic button's fix, so
   dragging it or pressing its ✕ never takes the focus off a terminal.

@@ -22,7 +22,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { DEFAULT_VOICE } from "../../../shared/voice";
 import { desktop } from "../desktop";
 import { useKururu } from "../session";
-import { applyTalkGesture, installSpeech, setSpeechVolume, setVoiceProfile, useVoiceUi } from "../voice";
+import { applyTalkGesture, installSpeech, setSpeechVolume, setVoiceProfile, useVoiceUi, voiceNow } from "../voice";
 import { installReload } from "../reload";
 import { VoicePill } from "./VoicePill";
 
@@ -33,6 +33,53 @@ import { VoicePill } from "./VoicePill";
  * where it went and take hold of it.
  */
 const HERE_MS = 5000;
+/** How often a pill holding an update looks for a quiet moment to reload in. */
+const IDLE_POLL_MS = 500;
+
+/**
+ * **The pill page is never hot-updated; it reloads instead, once it is idle.**
+ *
+ * Everything this page is lives in module state: `voice.ts` holds the
+ * microphone, the player and the phase, `session.ts` the socket. A hot update
+ * that reaches them — and almost every save does, since `session.ts` imports
+ * `shared/` at runtime — makes second copies, and the page comes out split:
+ * the bridge's key listener, registered once by the first copy of `Pill`'s
+ * mount effect, which Fast Refresh does not run again, still drives the
+ * first `voice.ts`, which records and posts as before; and `Pill`, rendered
+ * again against the second, reads a phase that never leaves idle. So the
+ * clip is sent and the pill never says so, `report` never asks the panel to
+ * be shown, and it is not — while the tray's Reset still works, since its
+ * listener sets this component's own state, which is the one case that made
+ * it look like a placement bug (KUR-216, 2026-11-02: an hour of recordings
+ * and not one line in `pill.log`).
+ *
+ * The window can take its updates in place; this page cannot, and has no
+ * reason to: it is hidden, small and quick to load. Vite awaits each
+ * `vite:beforeUpdate` and `vite:beforeFullReload` listener before it applies
+ * anything, one message at a time (`handleMessage` and `createHMRHandler` in
+ * `vite/dist/client/client.mjs`, to recheck after a vite upgrade), so a
+ * listener that never settles holds this update and every one after it, and
+ * the page keeps the one consistent copy of itself until it reloads — when
+ * the voice is idle, so no sentence is cut off and no clip is dropped, the
+ * same rule `reloadPanel` keeps in the main process. Registered at module
+ * level, which in a page that holds every update runs exactly once.
+ */
+if (import.meta.hot && typeof location !== "undefined" && new URLSearchParams(location.search).has("pill")) {
+  let reloading = false;
+  const hold = () => {
+    if (!reloading) {
+      reloading = true;
+      const poll = setInterval(() => {
+        if (voiceNow().phase !== "idle") return;
+        clearInterval(poll);
+        location.reload();
+      }, IDLE_POLL_MS);
+    }
+    return new Promise<never>(() => {});
+  };
+  import.meta.hot.on("vite:beforeUpdate", hold);
+  import.meta.hot.on("vite:beforeFullReload", hold);
+}
 
 export function Pill() {
   const { snapshot, voice } = useKururu();
