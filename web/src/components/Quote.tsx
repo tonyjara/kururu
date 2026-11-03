@@ -36,6 +36,15 @@
  * to whatever the press was for, which is what makes a fresh selection
  * elsewhere the next mark rather than this one moved.
  *
+ * **The field is Kuru's own box** (`ChipField`), not an input: it was one,
+ * and a comment longer than its width scrolled out of sight inside it. As
+ * the box does, it wraps, grows with what is written up to its max-height
+ * and scrolls inside past that, shrinks as words are taken out, and takes
+ * Shift+Enter as a new line. The new line is for writing only — a quote is
+ * one line in the box (`quoteLine` folds a comment's whitespace), so it
+ * arrives as a space. The popover is placed again whenever it changes size,
+ * so a field that grows stays inside the window.
+ *
  * **A board card selects only while it is open.** A card is `draggable`,
  * and a press on a draggable is the start of a drag, never of a selection
  * — so a closed card stays the thing you drag, and an open one, which is
@@ -48,6 +57,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CardQuote, QuotePart } from "../../../shared/kuru";
 import { fileReference, placeIn, type FileRef } from "../filequote";
+import { ChipField, type ChipFieldHandle } from "./ChipField";
 
 /**
  * What a quote is of: a card — its title or its body, wherever it is drawn —
@@ -146,6 +156,8 @@ const POP_GAP = 6;
 const MARK = "kururu-quote";
 /** How far into the open field its quote mark's middle is: its padding and half the glyph, as `.quote-pop-write` draws them. */
 const MARK_INSET = 16;
+/** A comment has no files of its own to draw; one array, so the field never sees a new one. */
+const NO_FILES: readonly string[] = [];
 
 /** The selection, when it is some words inside one quotable element. */
 function readSelection(): Selected | null {
@@ -190,6 +202,7 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
   const [comment, setComment] = useState("");
   const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
   const box = useRef<HTMLDivElement>(null);
+  const field = useRef<ChipFieldHandle>(null);
   const open = useRef(false);
   open.current = at !== null;
   const writingNow = useRef(false);
@@ -296,13 +309,24 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
       setPlace((was) => (was && was.left === left && was.top === top ? was : { left, top }));
     };
     fit();
+    // The field grows and shrinks with the comment, and the popover with it,
+    // so its place is worked out again from its new height: one that would
+    // now run past the window's foot goes over the words instead.
+    const sized = box.current && typeof ResizeObserver !== "undefined" ? new ResizeObserver(fit) : null;
+    if (sized && box.current) sized.observe(box.current);
     window.addEventListener("scroll", fit, true);
     window.addEventListener("resize", fit);
     return () => {
+      sized?.disconnect();
       window.removeEventListener("scroll", fit, true);
       window.removeEventListener("resize", fit);
     };
   }, [at, writing]);
+
+  // The keys go to the field when it opens, as the input's `autoFocus` did.
+  useEffect(() => {
+    if (writing) field.current?.focus();
+  }, [writing]);
 
   if (!at) return null;
   const go = () => {
@@ -340,20 +364,24 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
   return createPortal(
     <div ref={box} className="quote-pop quote-pop-write" role="dialog" aria-label="Quote to Kuru" style={style}>
       <QuoteMark />
-      <input
+      <ChipField
+        ref={field}
         className="quote-pop-field"
-        autoFocus
         value={comment}
+        files={NO_FILES}
+        bold={null}
         placeholder="Your comment on this part"
-        aria-label="Your comment on this part"
+        ariaLabel="Your comment on this part"
         enterKeyHint="done"
-        onChange={(event) => setComment(event.target.value)}
+        onChange={(next) => setComment(next)}
+        // Shift+Enter is the field's own new line, and never reaches here.
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.nativeEvent.isComposing) {
             event.preventDefault();
             go();
           }
         }}
+        onEnter={go}
       />
       <button
         type="button"

@@ -32,6 +32,15 @@
  * Nothing is drawn again while an IME is composing — the browser owns the
  * text then — and only when what is on screen differs from what the string
  * says it should be, so ordinary typing is never touched.
+ *
+ * **It is also the quote's comment field** (`Quote.tsx`), which was a
+ * one-line input that scrolled a long comment out of sight. Being this field
+ * rather than a textarea of its own gives it the box's growth (a
+ * contenteditable is as tall as its words, up to `.chip-field`'s
+ * `max-height`) and the box's keys — Enter is the caller's, Shift+Enter a new
+ * line — so the two cannot drift apart. The `@` list is the composer's alone,
+ * which is why the combobox's attributes are optional: a field with no list
+ * is a plain multi-line textbox to a screen reader.
  */
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import { chipAt, piecesOf, type Chip, type Piece } from "../chips";
@@ -53,19 +62,23 @@ interface Props {
   /** The `@node` at the front that will route, drawn bold. */
   bold: { from: number; to: number } | null;
   placeholder: string;
+  /** Added to `chip-field`, which is what makes it grow and wrap. */
   className?: string;
   onChange: (value: string, caret: number) => void;
   /** The cursor moved while the box has the keyboard. */
-  onCaret: (from: number, to: number) => void;
+  onCaret?: (from: number, to: number) => void;
   onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void;
   /** A paste with files in it; the box takes a paste of words itself unless this prevents it. */
-  onPaste: (event: React.ClipboardEvent<HTMLDivElement>) => void;
+  onPaste?: (event: React.ClipboardEvent<HTMLDivElement>) => void;
   /** Enter on a keyboard that sends no key for it — a phone's — which the composer's `onKeyDown` never heard. */
   onEnter: () => void;
-  onFocus: () => void;
-  onBlur: () => void;
+  onFocus?: () => void;
+  onBlur?: () => void;
+  /** What a phone's return key is labelled. */
+  enterKeyHint?: React.HTMLAttributes<HTMLDivElement>["enterKeyHint"];
   ariaLabel: string;
-  ariaExpanded: boolean;
+  /** Whether a list of suggestions is open under the field; left out, the field has no list and is no combobox. */
+  ariaExpanded?: boolean;
   ariaControls?: string;
   ariaActiveDescendant?: string;
 }
@@ -362,8 +375,12 @@ export const ChipField = forwardRef<ChipFieldHandle, Props>(function ChipField(p
   const readBack = () => {
     const el = root.current;
     if (!el || composing.current) return;
-    const value = serialize(el);
-    // An emptied box keeps a stray `<br>` in some browsers, which would hide the placeholder.
+    // An emptied box keeps a stray `<br>` in some browsers — Chrome leaves one
+    // as its only child after everything in it is selected and deleted. It is
+    // the browser's, not a line: read as one, the box kept a second line's
+    // height and hid the placeholder over a box with nothing in it.
+    const only = el.childNodes.length === 1 ? el.firstChild : null;
+    const value = only instanceof HTMLElement && only.tagName === "BR" ? "" : serialize(el);
     if (value === "" && el.childNodes.length > 0) el.replaceChildren();
     const caret = selection().from;
     remember(value, caret, true);
@@ -422,7 +439,7 @@ export const ChipField = forwardRef<ChipFieldHandle, Props>(function ChipField(p
     const onSelectionChange = () => {
       if (document.activeElement !== el) return;
       const { from, to } = selection();
-      now.current.onCaret(from, to);
+      now.current.onCaret?.(from, to);
     };
     el.addEventListener("beforeinput", onBeforeInput);
     document.addEventListener("selectionchange", onSelectionChange);
@@ -470,18 +487,20 @@ export const ChipField = forwardRef<ChipFieldHandle, Props>(function ChipField(p
     if (cut) replace(from, to, "");
   };
 
+  const listed = props.ariaExpanded !== undefined;
   return (
     <div
       ref={root}
-      className={props.className}
+      className={props.className ? `chip-field ${props.className}` : "chip-field"}
       contentEditable
       suppressContentEditableWarning
       spellCheck
+      enterKeyHint={props.enterKeyHint}
       data-placeholder={props.placeholder}
-      role="combobox"
+      role={listed ? "combobox" : "textbox"}
       aria-multiline="true"
       aria-label={props.ariaLabel}
-      aria-autocomplete="list"
+      aria-autocomplete={listed ? "list" : undefined}
       aria-expanded={props.ariaExpanded}
       aria-controls={props.ariaControls}
       aria-activedescendant={props.ariaActiveDescendant}
@@ -514,7 +533,7 @@ export const ChipField = forwardRef<ChipFieldHandle, Props>(function ChipField(p
         props.onKeyDown(event);
       }}
       onPaste={(event) => {
-        props.onPaste(event);
+        props.onPaste?.(event);
         if (event.defaultPrevented) return;
         event.preventDefault();
         const words = event.clipboardData.getData("text/plain").replace(/\r\n?/g, "\n");

@@ -1959,7 +1959,7 @@ function writeFiles(profileId: string, files: readonly string[]) {
  * records, and tapped, it toggles. What is typed
  * and not yet sent survives closing the drawer and reloading the page — a
  * thought half-written must not vanish because the drawer did — and the field
- * grows with it up to `.kuru-field`'s `max-height`, so writing more than one
+ * grows with it up to `.chip-field`'s `max-height`, so writing more than one
  * line does not hide the lines above it.
  *
  * An `@` at the front offers the other nodes' names as it is typed, and a
