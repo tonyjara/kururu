@@ -454,18 +454,9 @@ export function adoptDates(value: unknown): CardDates | null {
 }
 
 /**
- * A new card at the foot of its column, except in Needs you, where it goes to
- * the head. A card with no title is not a card; one whose dates are not dates
- * is a card with none, as one whose column is not a column is a card in the
- * first.
- *
- * Needs you is a queue the user reads from the top — on the board and, in the
- * same order, in the Needs drawer — and a card put there is something just
- * handed to them, so newest-first is the order that keeps the latest in sight.
- * It is decided here rather than in `add_card` so that every road in agrees:
- * Kuru's, another node's Kuru through the link, and the user's own "Add a
- * card" in the column. The other columns keep the foot, beside the composer
- * that wrote the card.
+ * A new card at the foot of its column. A card with no title is not a card;
+ * one whose dates are not dates is a card with none, as one whose column is
+ * not a column is a card in the first.
  */
 export function addCard(
   board: Board,
@@ -488,11 +479,7 @@ export function addCard(
     dev: null,
     dates: adoptDates(fields.dates),
   };
-  const added = { ...board, next: board.next + 1 };
-  if (card.column !== NEEDS_COLUMN) return { ...added, cards: [...board.cards, card] };
-  const head = board.cards.findIndex((c) => c.column === NEEDS_COLUMN);
-  const at = head === -1 ? board.cards.length : head;
-  return { ...added, cards: [...board.cards.slice(0, at), card, ...board.cards.slice(at)] };
+  return { ...board, cards: [...board.cards, card], next: board.next + 1 };
 }
 
 /**
@@ -535,13 +522,9 @@ export function removeCard(board: Board, cardId: string): Board {
 
 /**
  * Put a card in a column, at a place among the cards already there — or at the
- * foot when `index` is absent, except into Done and Needs you, which go to the
- * head: a caller that doesn't name a position wants newest-first there, and a
- * drag that does (even one landing past the last card) always says so with a
- * real index. Needs you is newest-first for `addCard`'s reason. A card already
- * in Needs you that is "moved" there with no index stays where it is: the
- * user may have put it there by hand, and a verb that only names the column
- * has no business reordering it.
+ * foot when `index` is absent, except into Done, which goes to the head: a
+ * caller that doesn't name a position wants newest-first, and a drag that does
+ * (even one landing past the last card) always says so with a real index.
  *
  * The index counts the *destination column's* cards with the moved one taken
  * out, which is what the client can see: it is pointing between two cards in a
@@ -553,11 +536,10 @@ export function moveCard(board: Board, cardId: string, column: unknown, index?: 
   const card = board.cards.find((c) => c.id === cardId);
   if (!card || !hasLane(board, column)) return board;
   if (index !== undefined && (!Number.isInteger(index) || (index as number) < 0)) return board;
-  if (index === undefined && column === NEEDS_COLUMN && card.column === NEEDS_COLUMN) return board;
   const rest = board.cards.filter((c) => c.id !== cardId);
   const moved = { ...card, column };
   const inColumn = rest.filter((c) => c.column === column);
-  const resolvedIndex = index === undefined && (column === "done" || column === NEEDS_COLUMN) ? 0 : index;
+  const resolvedIndex = index === undefined && column === "done" ? 0 : index;
   const before = resolvedIndex === undefined ? undefined : inColumn[resolvedIndex as number];
   if (!before) {
     // The foot of the column: after its last card, or at the end of everything.

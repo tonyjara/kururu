@@ -703,14 +703,14 @@ describe("Needs you", () => {
     const start = addCard(emptyProfileBoard(), { title: "call the bank" }, "c1", 1);
     const kuru = markNeeds(start, moveCard(start, "c1", NEEDS_COLUMN), "kuru");
     expect(kuru.cards[0]!.needsBy).toBe("kuru");
-    // Written straight into the column, by the user — at its head.
+    // Written straight into the column, by the user.
     const both = markNeeds(kuru, addCard(kuru, { title: "try it on the phone", column: NEEDS_COLUMN }, "c2", 2), "user");
-    expect(both.cards.map((c) => c.needsBy)).toEqual(["user", "kuru"]);
+    expect(both.cards.map((c) => c.needsBy)).toEqual(["kuru", "user"]);
     // Dragged up the column by the user, Kuru's card is still Kuru's.
-    const reordered = markNeeds(both, moveCard(both, "c1", NEEDS_COLUMN, 0), "user");
+    const reordered = markNeeds(both, moveCard(both, "c2", NEEDS_COLUMN, 0), "user");
     expect(reordered.cards.map((c) => [c.id, c.needsBy])).toEqual([
-      ["c1", "kuru"],
       ["c2", "user"],
+      ["c1", "kuru"],
     ]);
     const out = markNeeds(reordered, moveCard(reordered, "c1", "done"), "user");
     expect(out.cards.find((c) => c.id === "c1")!.needsBy).toBeUndefined();
@@ -718,28 +718,6 @@ describe("Needs you", () => {
     // Nobody answerable stamps nothing; nothing moved is the same board.
     expect(markNeeds(start, moveCard(start, "c1", NEEDS_COLUMN), null).cards[0]!.needsBy).toBeUndefined();
     expect(markNeeds(both, both, "user")).toBe(both);
-  });
-
-  it("puts the newest card at the head of Needs you, whoever adds or moves it there", () => {
-    const needs = (b: Board) => columnCards(b, NEEDS_COLUMN).map((c) => c.id);
-    let b = addCard(emptyProfileBoard(), { title: "inbox one" }, "t1", 1);
-    b = addCard(b, { title: "first", column: NEEDS_COLUMN }, "n1", 2);
-    b = addCard(b, { title: "second", column: NEEDS_COLUMN }, "n2", 3);
-    expect(needs(b)).toEqual(["n2", "n1"]);
-    // Moved in with no index, as Kuru's move_card and the menu's Move to do.
-    b = moveCard(b, "t1", NEEDS_COLUMN);
-    expect(needs(b)).toEqual(["t1", "n2", "n1"]);
-    // A drag names its place, and keeps it.
-    b = moveCard(b, "t1", NEEDS_COLUMN, 2);
-    expect(needs(b)).toEqual(["n2", "n1", "t1"]);
-    // A card already in the column, moved there again with no index, is left where it is.
-    expect(moveCard(b, "t1", NEEDS_COLUMN)).toBe(b);
-    // Other columns still take a new card at the foot.
-    b = addCard(b, { title: "inbox two" }, "t2", 4);
-    expect(columnCards(b, "todo").map((c) => c.id)).toEqual(["t2"]);
-    b = addCard(b, { title: "inbox three" }, "t3", 5);
-    expect(columnCards(b, "todo").map((c) => c.id)).toEqual(["t2", "t3"]);
-    expect(b.next).toBe(6);
   });
 
   it("drops the mark off a card sent to a workspace, and off a card read back outside the column", () => {
