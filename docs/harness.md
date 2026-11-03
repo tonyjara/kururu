@@ -170,8 +170,9 @@ what is sent: `ChipField.tsx` is the box, a contenteditable whose value is
 still the string, and `web/src/chips.ts` reads a draft into words and chips.
 A quote is one chip with its card's reference (a quote mark, its opening
 words and the card's code, or `Kuru 18:42` for a line of the conversation),
-and a file the box put in by a drop or a paste is a picture or file chip with
-its name; a path typed out stays words. One Backspace or Delete takes a chip
+a file's reference is a file chip with its name, and a file the box put in by
+a drop or a paste is a picture or file chip with its name; a path typed out
+stays words. One Backspace or Delete takes a chip
 whole, a copy carries the words, a tap opens a chip to show all of it, and
 undo is the box's own. Telegram never sees the box. Where is a workspace id, `profile` for the profile's own
 board, or `omarchy:w3` for another node's workspace on this screen — the
@@ -248,6 +249,33 @@ the window writes the reference from its snapshot and puts the quote
 after it (`referCardIn` with a quote, `adoptQuote` for what crossed).
 The Needs drawer draws only a card's first line, inside a button, and
 quotes nothing.
+
+### A markdown file, pointed at or quoted
+
+A document tab's menu has "Reference in Kuru" too, and a passage selected in
+the reader brings up the same quote mark (`quotableFile` on the reader's
+article; since 2026-11-02). The file is named as the project spells it, with
+the project after it in parentheses, as a card's place is; a file in no
+project is written whole from `~`; another node's carries the node's name:
+
+```
+[file docs/terminals.md (~/Desktop/Nyto/kururu)] what is this for
+[file docs/terminals.md:40-52 (~/Desktop/Nyto/kururu) under "The pool"] [quote "Nothing in the client rebuilds … on the next commit."] why never?
+[file ~/Documents/Kururu/reports/x.md:7] [quote "the third option"] go with this
+```
+
+A quote's reference is written when the selection is read, because it says
+where the passage is: the line its first rendered block begins on, the line
+its last one begins on when that is another (`data-line`, off markdown-it's
+map), and the nearest heading above it (`placeIn` in `web/src/filequote.ts`).
+Those are where to start reading; the quote is the text as drawn, without its
+markdown marks, so the role tells Kuru to Read the file and find the passage
+by both of its ends. A home directory is never the project, though a shell
+standing in it makes it one of a workspace's roots. The box draws a file's
+reference as a file chip by its name, and a quote of one as a quote chip with
+the file's name where a card's code would be. There are no file windows to pop
+out — a file is read in a pane — so the reader is the one place it is quoted
+from.
 
 ## A file the user hands it
 

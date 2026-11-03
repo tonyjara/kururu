@@ -15,7 +15,7 @@
  *
  * This is the reading of a draft into words and chips, and nothing else: pure,
  * so the tests can hold it to the formats `cardReference`, `quoteReference`,
- * `replyReference` and `escapePath` write. The patterns are this file's own
+ * `replyReference`, `fileReference` and `escapePath` write. The patterns are this file's own
  * copies rather than imports, because a draft is anything the user typed or
  * pasted and a near miss here costs only a chip not drawn — the words stay
  * words — while a loose pattern would swallow words into a chip.
@@ -50,9 +50,16 @@ export type Piece = { text: string } | { chip: Chip };
 const CARD = String.raw`\[card (?<code>\S+) "(?<title>[^"\n]*)" \((?<place>[^\s()/]+)\/(?<cardId>c[0-9a-f]{12})\)\](?: \[quote(?<cpart> title)? "(?<cquote>[^"\n]*)"\])?`;
 /** A line of the conversation quoted: the reference its reply arrow writes, then the quote. A reply reference alone is the reply bar's, never the draft's, and is left as words. */
 const REPLY = String.raw`\[reply to (?<who>[^"[\]\n]{1,40}?) (?<when>(?:[A-Z][a-z]{2} \d{1,2} )?\d{1,2}:\d{2}) "(?<rwords>[^"\n]*)"(?: \((?<rid>[\w:.-]{1,96})\))?\] \[quote(?<rpart> title)? "(?<rquote>[^"\n]*)"\]`;
+/**
+ * A file's reference, as a reader's tab menu writes it, and the quote that
+ * follows it when it is one (`fileReference` in `filequote.ts`): the path,
+ * the lines on it, the project in parentheses, the heading. The path is lazy
+ * so that the pieces after it are tried at each step; it holds no bracket.
+ */
+const FILE = String.raw`\[file (?<fpath>[^\n[\]]+?)(?::(?<fline>\d+(?:-\d+)?))?(?: \((?<fproject>[^()\n[\]]+)\))?(?: under "(?<fhead>[^"\n]*)")?\](?: \[quote "(?<fquote>[^"\n]*)"\])?`;
 /** A quote with nothing in front of it — pasted, or its reference deleted — is still a quote. */
 const LONE = String.raw`\[quote(?<lpart> title)? "(?<lquote>[^"\n]*)"\]`;
-const TOKEN = new RegExp(`${CARD}|${REPLY}|${LONE}`, "gu");
+const TOKEN = new RegExp(`${CARD}|${REPLY}|${FILE}|${LONE}`, "gu");
 
 const IMAGE = /\.(?:png|jpe?g|gif|webp|heic|heif|avif|bmp|tiff?|svg)$/i;
 
@@ -111,6 +118,11 @@ export function chipsIn(draft: string, files: readonly string[] = []): Chip[] {
     } else if (g.rquote !== undefined) {
       const source = `${g.who} ${g.when}`;
       chips.push({ kind: "quote", from: at, to, label: quoteHint(g.rquote), source, full: `"${g.rquote}" — from ${source}: "${g.rwords}"` });
+    } else if (g.fpath !== undefined) {
+      const where = [`${g.fpath}${g.fline ? `, ${g.fline.includes("-") ? "lines" : "line"} ${g.fline.replace("-", "–")}` : ""}`, g.fproject ? `in ${g.fproject}` : "", g.fhead ? `under "${g.fhead}"` : ""].filter(Boolean).join(" ");
+      const name = fileName(g.fpath.replace(/^[^/:]+:(?=[~/])/, ""));
+      if (g.fquote !== undefined) chips.push({ kind: "quote", from: at, to, label: quoteHint(g.fquote), source: name, full: `"${g.fquote}" — from ${where}` });
+      else chips.push({ kind: "file", from: at, to, label: name, source: "", full: where });
     } else if (g.lquote !== undefined) {
       chips.push({ kind: "quote", from: at, to, label: quoteHint(g.lquote), source: "", full: `"${g.lquote}"` });
     }

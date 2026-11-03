@@ -1906,6 +1906,24 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
+/**
+ * Every root this node's workspaces have, as a file reference looks a file's
+ * project up among them (`filequote.ts`). Its own hook, held to the one
+ * array the store replaces only when the server says the projects moved, so
+ * a reader does not draw again on every message the store takes.
+ */
+function projectRootsOf(projects: readonly WorkspaceProject[]): string[] {
+  return [...new Set(projects.flatMap((p) => [p.root, ...p.choices]))];
+}
+let rootsFor: { projects: readonly WorkspaceProject[]; roots: string[] } | null = null;
+export function projectRootsNow(): string[] {
+  if (rootsFor?.projects !== state.projects) rootsFor = { projects: state.projects, roots: projectRootsOf(state.projects) };
+  return rootsFor.roots;
+}
+export function useProjectRoots(): string[] {
+  return useSyncExternalStore(subscribe, projectRootsNow);
+}
+
 export function useKururu(): KururuState {
   return useSyncExternalStore(subscribe, () => state);
 }

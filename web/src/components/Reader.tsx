@@ -19,10 +19,13 @@
  * check is on the writing side, where the rule can be one setting, rather than
  * here, where it would be a list of tags to keep in step with.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { readUrl } from "../disk";
+import { fileRefOf } from "../filequote";
 import { drawDiagrams } from "../mermaid";
+import { nodeNameOf, useProjectRoots } from "../session";
 import { DocPicker } from "./DocPicker";
+import { quotableFile } from "./Quote";
 
 /**
  * The line each pane's reader is showing, asked for by its tab's "Open in
@@ -94,6 +97,13 @@ export function ReaderView({
   const [error, setError] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const article = useRef<HTMLElement>(null);
+  /**
+   * What a passage selected here is quoted to Kuru as (`Quote.tsx`): the file,
+   * named the way its tab's "Reference in Kuru" names it. The whole document
+   * is one quotable part, since a file has no title apart from its text.
+   */
+  const roots = useProjectRoots();
+  const marks = useMemo(() => (path ? quotableFile(fileRefOf(root, path, roots, nodeNameOf)) : null), [root, path, roots]);
 
   useEffect(() => {
     if (!path) {
@@ -189,6 +199,7 @@ export function ReaderView({
           ref={article}
           className="md"
           dangerouslySetInnerHTML={{ __html: doc?.html ?? "" }}
+          {...marks}
         />
       )}
     </div>

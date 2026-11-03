@@ -84,6 +84,8 @@ import { useLongPress } from "../longpress";
 import * as api from "../session";
 import { useKururu } from "../session";
 import { ReaderView, readingLine } from "./Reader";
+import { fileRefOf, fileReference } from "../filequote";
+import { insertInKuru } from "../kuru";
 import { BoardView } from "./Board";
 import { Icon } from "./Icon";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
@@ -587,6 +589,10 @@ function paneMenu({
  * an nvim already running, because the reader is not an editor and does not
  * know which of them you would mean. Open in Neovim and not just Close,
  * because a tab's ✕ already closes it.
+ *
+ * And the file pointed at in Kuru's box, as a card's menu points at its card
+ * (`filequote.ts`): the start of a question about the document, unsent. A
+ * passage in it is pointed at by selecting it, which quotes it.
  */
 function docMenu(paneId: string, root: string, path: string, line: number | null): MenuItem[] {
   return [
@@ -594,6 +600,11 @@ function docMenu(paneId: string, root: string, path: string, line: number | null
       label: "Open in Neovim",
       hint: line ? `line ${line}` : undefined,
       run: () => void api.openInEditor(root, path, null, { paneId, line }),
+    },
+    {
+      label: "Reference in Kuru",
+      sep: true,
+      run: () => insertInKuru(fileReference(fileRefOf(root, path, api.projectRootsNow(), api.nodeNameOf))),
     },
   ];
 }

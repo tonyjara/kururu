@@ -1,5 +1,5 @@
 /**
- * Part of a card, or of one of Kuru's messages, quoted to Kuru with a
+ * Part of a card, of one of Kuru's messages or of a markdown file, quoted to Kuru with a
  * comment on it: select words, press the quote mark that comes up by them,
  * and write what you have to say about that part — the reference, the quote
  * and the comment go into Kuru's box as a line, as a review's comments go on
@@ -7,10 +7,11 @@
  *
  * **One popover for the whole page, not one per card.** The words that can
  * be quoted are marked where they are drawn — `quotable` on a card's title
- * and body, a note's body, a reply of Kuru's and a notice's message — with
+ * and body, a note's body, a reply of Kuru's and a notice's message, and
+ * `quotableFile` on a reader's document — with
  * the reference to write in front of the quote: the card's own, the words
- * its menu's "Reference in Kuru" writes, or the message's, the words its
- * reply arrow writes. This listens to the document's selection and opens
+ * its menu's "Reference in Kuru" writes, the message's, the words its
+ * reply arrow writes, or the file's, with where in it the words are. This listens to the document's selection and opens
  * over a selection that lies inside one of them. A card memoised on its
  * board (`CardView`) then draws nothing new for a selection, and a board, a
  * note, the profile's board and the drawer all get it from the one mounting.
@@ -46,19 +47,22 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CardQuote, QuotePart } from "../../../shared/kuru";
+import { fileReference, placeIn, type FileRef } from "../filequote";
 
 /**
  * What a quote is of: a card — its title or its body, wherever it is drawn —
- * or a message in Kuru's drawer. Only where it lands differs: a card's quote
- * puts the board and the sheet away to show the box, and a message's is in
- * the drawer already.
+ * a message in Kuru's drawer, or a markdown file in a reader. Only where it
+ * lands differs: a card's quote puts the board and the sheet away to show the
+ * box, and a message's is in the drawer already; a file's is in a pane, which
+ * the drawer opens beside.
  */
-export type QuoteFrom = "card" | "message";
+export type QuoteFrom = "card" | "message" | "file";
 
 interface Marks {
   "data-quote-ref": string;
   "data-quote-part": QuotePart;
-  "data-quote-from"?: "message";
+  "data-quote-from"?: "message" | "file";
+  "data-quote-file"?: string;
 }
 
 /**
@@ -70,6 +74,28 @@ export function quotable(reference: string, part: QuotePart, from: QuoteFrom = "
   return from === "message"
     ? { "data-quote-ref": reference, "data-quote-part": part, "data-quote-from": "message" }
     : { "data-quote-ref": reference, "data-quote-part": part };
+}
+
+/**
+ * The attributes that make a reader's document quotable. A file's reference
+ * is not one string, as a card's is: it says where in the file the quote is
+ * (`filequote.ts`), which is known only once there is a selection, so the
+ * file is marked with what names it and the reference is written as the
+ * selection is read.
+ */
+export function quotableFile(ref: FileRef): Marks {
+  return { "data-quote-ref": fileReference(ref), "data-quote-part": "body", "data-quote-from": "file", "data-quote-file": JSON.stringify(ref) };
+}
+
+/** A file's reference with the place of `range` in it, or null when the mark is not a file's. */
+function fileReferenceAt(host: HTMLElement, range: Range): string | null {
+  try {
+    const ref = JSON.parse(host.dataset.quoteFile ?? "") as FileRef;
+    if (typeof ref?.path !== "string" || (ref.project !== null && typeof ref.project !== "string")) return null;
+    return fileReference(ref, placeIn(host, range));
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -128,12 +154,14 @@ function readSelection(): Selected | null {
   const range = selection.getRangeAt(0);
   const common = range.commonAncestorContainer;
   const host = (common instanceof Element ? common : common.parentElement)?.closest<HTMLElement>("[data-quote-ref]");
-  const reference = host?.dataset.quoteRef;
   const part = host?.dataset.quotePart;
-  if (!reference || (part !== "body" && part !== "title")) return null;
+  if (!host || (part !== "body" && part !== "title")) return null;
+  const from: QuoteFrom = host.dataset.quoteFrom === "message" ? "message" : host.dataset.quoteFrom === "file" ? "file" : "card";
+  const reference = from === "file" ? fileReferenceAt(host, range) : host.dataset.quoteRef;
+  if (!reference) return null;
   const text = selection.toString();
   if (!text.trim()) return null;
-  return { reference, part, from: host?.dataset.quoteFrom === "message" ? "message" : "card", text, range: range.cloneRange() };
+  return { reference, part, from, text, range: range.cloneRange() };
 }
 
 /**

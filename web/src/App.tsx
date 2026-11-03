@@ -622,16 +622,17 @@ export function App() {
     setBoardShow(null);
   };
   /**
-   * Part of a card or of a message quoted from this page — a board's card,
-   * the profile's board, a note over the window, a line in Kuru's drawer —
+   * Part of a card, a message or a file quoted from this page — a board's card,
+   * the profile's board, a note over the window, a line in Kuru's drawer, a reader's file —
    * by the reference the words were marked with where they are drawn
    * (`Quote.tsx`), into the same box. A card's goes out of the profile
    * board's way as a reference does; a message's is in the drawer already,
-   * and leaves whatever is under it alone.
+   * and a file's is in a reader's pane, and both leave whatever is under them
+   * alone.
    */
   const quoteHere = (reference: string, quote: CardQuote, from: QuoteFrom) => {
     quoteInKuru(reference, quote);
-    if (from === "message") return;
+    if (from !== "card") return;
     setProfileBoard(false);
     setBoardShow(null);
   };
