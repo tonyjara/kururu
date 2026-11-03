@@ -373,6 +373,29 @@ words raises the main window and opens the drawer at that reply — or, if the
 window was already in front with the drawer already open, closes it
 (`kururu:raise-main` with the utterance, `kururu:open-kuru` back to the page).
 
+## Saying a quote's comment
+
+A quote's popover (`Quote.tsx`) has a mic beside the mark and beside the
+field. Held, it is this same microphone — `dictate` in `voice.ts`, through
+`open` and `close` with a purpose of `dictation` — and on release the clip goes
+to `POST /api/voice/dictate` instead of the outbox: `Voice.transcribe`, every
+language the user speaks, with the words handed back on the request and the
+clip deleted once it is answered. The words go after anything typed and the
+quote goes into Kuru's box as Enter would put it, unsent. Nothing reaches Kuru
+until the user sends the box.
+
+It is deliberately not the outbox. Kept until heard, a dictation would be a
+message nobody sent; this way, what is kept when the words do not come —
+refused, too short, nothing heard, a recogniser that would not run — is the
+quote, in the field, with why under it. It holds the hush as a clip to Kuru
+does, so a reply is not read into the microphone, and it is taken in this page
+even while the floating pill is the voice client: the pill-only rule is about
+the talk key and Kuru's clips, and these words are for this page.
+
+Checked with headless Chrome's fake microphone fed a `say` WAV, which needs
+`--disable-features=AudioServiceSandbox` or Chrome records silence from a file
+under `/tmp`.
+
 ## Two languages
 
 Kuru is spoken to in English and Spanish, sometimes in one sentence. Three

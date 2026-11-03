@@ -58,6 +58,17 @@
  * socket — which is also how the pill says whether the words got through
  * while Kuru talks over the top of it, rather than losing that line to the
  * first sentence of a reply.
+ *
+ * **Dictation is the same microphone with the words handed back.** A quote's
+ * comment can be spoken (`Quote.tsx`): the recording is this one — `open`,
+ * the worklet, the WAV — and so is the recogniser, on the server, but the clip
+ * is not a message. It goes to `/api/voice/dictate` rather than to the outbox,
+ * the words come back to the page that asked, and nothing reaches Kuru until
+ * they are put into its box as a typed comment would be. It is held only,
+ * never toggled, since the press is on a button that is gone once the quote
+ * is in; and it is taken here even while the pill is the voice client,
+ * because the pill-only rule is about the talk key and Kuru's clips, and
+ * these words are for this page and no other.
  */
 import { useSyncExternalStore } from "react";
 import { CLIP_MIN_MS, CLIP_RATE, CLIP_ROLL_MS, TAP_MS, downsample, encodeWav, type OutboxEntry, type SpeechChunk } from "../../shared/voice";
@@ -147,6 +158,8 @@ export function voiceIsRemote(): boolean {
  * reading out is as much a surprise as the pill reloaded under it.
  */
 export function voiceNow(): { phase: VoicePhase; hushed: boolean } {
+  // A comment being dictated is this page's own, whoever holds Kuru's clips.
+  if (dictation.phase !== "idle") return { phase: dictation.phase === "listening" ? "listening" : "sending", hushed: hushed() };
   return { phase: remote ? remotePhase : ui.phase, hushed: hushed() };
 }
 
@@ -230,7 +243,11 @@ registerProcessor("kururu-pcm", KururuPcm);`;
 
 let workletUrl: string | null = null;
 
+/** What a recording is for: a clip to Kuru, through the outbox, or a dictated comment, handed back to the page. */
+type Purpose = "kuru" | "dictation";
+
 interface Recording {
+  purpose: Purpose;
   ctx: AudioContext;
   stream: MediaStream;
   chunks: Float32Array[];
@@ -253,22 +270,28 @@ export function setVoiceProfile(get: () => string): void {
   profileOf = get;
 }
 
-async function open(): Promise<void> {
+async function open(purpose: Purpose = "kuru"): Promise<void> {
   if (recording || opening) return;
+  /** Why the microphone is not open: on the pill for a clip to Kuru, and back to the page for a dictation. */
+  const failed = (text: string, detail: string) => {
+    if (purpose === "dictation") {
+      dictating?.settle({ ok: false, why: `${text} ${detail}` });
+      return;
+    }
+    set({ phase: "error", text, detail });
+    settle();
+  };
   if (!navigator.mediaDevices?.getUserMedia) {
     // No microphone to hold anything for, but the press still means quiet.
     stopSpeaking();
-    set({
-      phase: "error",
-      text: "No microphone here.",
-      detail: location.protocol === "https:" ? "This browser offers none." : "A browser only opens the microphone over https — see docs/voice.md.",
-    });
-    settle();
+    failed("No microphone here.", location.protocol === "https:" ? "This browser offers none." : "A browser only opens the microphone over https — see docs/voice.md.");
     return;
   }
   beginTalk();
-  setMine(null);
-  set({ phase: "listening", level: 0, text: "", detail: "", toggled: false });
+  if (purpose === "kuru") {
+    setMine(null);
+    set({ phase: "listening", level: 0, text: "", detail: "", toggled: false });
+  } else setDictation({ phase: "listening", level: 0 });
   opening = (async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -294,7 +317,10 @@ async function open(): Promise<void> {
         // recording carries on into the next: a clip is never too long to send.
         if ((held / ctx.sampleRate) * 1000 >= CLIP_ROLL_MS) {
           held = 0;
-          void post(pcmOf(chunks.splice(0), ctx.sampleRate));
+          // A comment is one clip, and five minutes is past any comment:
+          // it stops there and is heard, rather than becoming two.
+          if (purpose === "dictation") void close(true);
+          else void post(pcmOf(chunks.splice(0), ctx.sampleRate));
         }
         // The worklet posts a block every few milliseconds; the meter wants
         // thirty frames a second, and React does not want more.
@@ -303,7 +329,9 @@ async function open(): Promise<void> {
         lastLevelAt = now;
         let sum = 0;
         for (let i = 0; i < block.length; i++) sum += block[i]! * block[i]!;
-        set({ level: Math.min(1, Math.sqrt(sum / block.length) * 6) });
+        const level = Math.min(1, Math.sqrt(sum / block.length) * 6);
+        if (purpose === "dictation") setDictation({ level });
+        else set({ level });
       };
       // A worklet with nowhere to go is a worklet that is never run, so it
       // runs into a muted gain and out: the speakers hear nothing.
@@ -313,15 +341,13 @@ async function open(): Promise<void> {
       source.connect(node);
       node.connect(mute);
       mute.connect(ctx.destination);
-      recording = { ctx, stream, chunks, rate: ctx.sampleRate, startedAt: performance.now() };
+      recording = { purpose, ctx, stream, chunks, rate: ctx.sampleRate, startedAt: performance.now() };
     } catch (err) {
       const refused = err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "SecurityError");
-      set({
-        phase: "error",
-        text: refused ? "The microphone was refused." : "The microphone could not be opened.",
-        detail: refused ? "Allow it for kururu in System Settings → Privacy → Microphone." : err instanceof Error ? err.message : String(err),
-      });
-      settle();
+      failed(
+        refused ? "The microphone was refused." : "The microphone could not be opened.",
+        refused ? "Allow it for kururu in System Settings → Privacy → Microphone." : err instanceof Error ? err.message : String(err),
+      );
       // No recording was made, so no `close` will end this talk.
       endTalk();
     } finally {
@@ -342,18 +368,21 @@ async function close(send: boolean): Promise<void> {
   // Whoever took the recording ends the talk, once, however it goes — and
   // not before the server has the clip, so nothing plays in the gap between
   // the key and the words being safe. From there the outbox holds Kuru quiet
-  // until they reach it.
+  // until they reach it. A dictation's talk ends with the recording: its
+  // words go back to a page, and nothing waits on them to speak.
+  let dictated: Float32Array | null = null;
   try {
     for (const track of rec.stream.getTracks()) track.stop();
     void rec.ctx.close().catch(() => {});
-    if (!send) {
-      set({ ...IDLE });
-      return;
-    }
-    await post(pcmOf(rec.chunks, rec.rate));
+    if (rec.purpose === "dictation") {
+      if (send) dictated = pcmOf(rec.chunks, rec.rate);
+      else dictating?.settle({ ok: false, why: null });
+    } else if (!send) set({ ...IDLE });
+    else await post(pcmOf(rec.chunks, rec.rate));
   } finally {
     endTalk();
   }
+  if (dictated) await hearDictation(dictated);
 }
 
 /** Samples at whatever rate the microphone gave, as one run at the clip's rate. */
@@ -572,6 +601,8 @@ export function talkDown(): void {
     remote("down");
     return;
   }
+  // The microphone is a comment's until its button comes up.
+  if (dictating) return;
   pressedAt = performance.now();
   pressConsumed = false;
   if ((recording || opening) && mode === "toggle") {
@@ -596,7 +627,7 @@ export function talkUp(): void {
     pressConsumed = false;
     return;
   }
-  if (!recording && !opening) return;
+  if (dictating || (!recording && !opening)) return;
   if (performance.now() - pressedAt < TAP_MS) {
     mode = "toggle";
     set({ toggled: true });
@@ -713,6 +744,93 @@ export function installTalkKey(codeOf: () => string): () => void {
     window.removeEventListener("keyup", up, true);
     window.removeEventListener("blur", blur);
   };
+}
+
+// ---------------------------------------------------------------------------
+// Dictation
+// ---------------------------------------------------------------------------
+
+/** A dictation's outcome: the words, or why there are none — `why` null for one let go on purpose (Escape, the popover closed). */
+export type Dictated = { ok: true; text: string } | { ok: false; why: string | null };
+
+export interface DictationUi {
+  phase: "idle" | "listening" | "hearing";
+  /** 0–1, the microphone's level while listening. */
+  level: number;
+}
+
+const DICTATION_IDLE: DictationUi = { phase: "idle", level: 0 };
+let dictation: DictationUi = DICTATION_IDLE;
+const dictationListeners = new Set<() => void>();
+/** The dictation under way, from the press until its outcome is known. */
+let dictating: { settle: (outcome: Dictated) => void } | null = null;
+
+function setDictation(patch: Partial<DictationUi>): void {
+  dictation = { ...dictation, ...patch };
+  for (const listener of dictationListeners) listener();
+}
+
+export function useDictation(): DictationUi {
+  return useSyncExternalStore(
+    (listener) => {
+      dictationListeners.add(listener);
+      return () => dictationListeners.delete(listener);
+    },
+    () => dictation,
+  );
+}
+
+/**
+ * The mic button went down: the microphone opens for a comment, and the
+ * promise is what became of it once `dictateStop` has been called — the
+ * words, or why there are none. A microphone already taking a clip for Kuru
+ * is not taken from it.
+ */
+export function dictate(): Promise<Dictated> {
+  if (dictating) return Promise.resolve({ ok: false, why: null });
+  if (recording || opening) return Promise.resolve({ ok: false, why: "The microphone is taking a message for Kuru." });
+  return new Promise((resolve) => {
+    dictating = {
+      settle: (outcome) => {
+        dictating = null;
+        setDictation(DICTATION_IDLE);
+        resolve(outcome);
+      },
+    };
+    mode = "hold";
+    void open("dictation");
+  });
+}
+
+/** …and came back up: what was said is heard. */
+export function dictateStop(): void {
+  if (dictating && dictation.phase === "listening") void close(true);
+}
+
+/** …or is let go of without being heard. */
+export function dictateCancel(): void {
+  if (!dictating) return;
+  if (dictation.phase === "listening") void close(false);
+  else dictating.settle({ ok: false, why: null });
+}
+
+async function hearDictation(pcm: Float32Array): Promise<void> {
+  const settleWith = dictating?.settle;
+  if (!settleWith) return;
+  if ((pcm.length / CLIP_RATE) * 1000 < CLIP_MIN_MS) {
+    settleWith({ ok: false, why: "That was too short to hear — hold the mic for as long as you speak." });
+    return;
+  }
+  setDictation({ phase: "hearing", level: 0 });
+  try {
+    const text = (await api.dictateClip(encodeWav(pcm, CLIP_RATE))).trim();
+    // Let go of while it was being heard: the page has stopped waiting.
+    if (dictating?.settle !== settleWith) return;
+    settleWith(text ? { ok: true, text } : { ok: false, why: "Nothing was heard in that." });
+  } catch (err) {
+    if (dictating?.settle !== settleWith) return;
+    settleWith({ ok: false, why: `It could not be heard: ${err instanceof Error ? err.message : String(err)}.` });
+  }
 }
 
 // ---------------------------------------------------------------------------

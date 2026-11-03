@@ -6,7 +6,10 @@
  * before them. Each handler is the body of the `if` it was.
  */
 import { randomUUID } from "node:crypto";
-import { CLIP_MAX_BYTES, isClipId } from "../../../shared/voice";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { CLIP_MAX_BYTES, CLIP_RATE, isClipId } from "../../../shared/voice";
 import { outbox, voice, workspaces } from "../context";
 import { legacyHeard } from "../outbox";
 import { soundBytes, sounds } from "../sounds";
@@ -88,6 +91,51 @@ export const voiceRoutes: Route[] = [
         json(res, { error: `the clip could not be kept: ${err instanceof Error ? err.message : String(err)}` }, 500);
       }
       return;
+    },
+  },
+
+  /**
+   * A dictated comment heard, and nothing else (`Quote.tsx`'s mic). The same
+   * recogniser as a clip to Kuru — `Voice.transcribe`, every language the
+   * user speaks — but not the outbox: these words are a comment the page puts
+   * into Kuru's box itself, unsent, so they are handed back on this request
+   * and the clip is gone when it is answered. A clip kept until it was heard,
+   * as the outbox keeps one, would be a second message nobody sent; the
+   * window keeps the quote instead, and says what went wrong.
+   *
+   * Empty words are a 200 with `text: ""` — a clip that held nothing is an
+   * answer — and a recogniser that could not run is a 503 with why.
+   */
+  {
+    path: "/api/voice/dictate",
+    handle: async (req, res) => {
+      if (req.method !== "POST") {
+        text(res, "POST only", 405);
+        return;
+      }
+      let wav: Buffer;
+      try {
+        wav = await readClip(req, CLIP_MAX_BYTES);
+      } catch (err) {
+        json(res, { error: err instanceof Error ? err.message : String(err) }, err instanceof ClipTooLong ? 413 : 400);
+        return;
+      }
+      if (wav.length <= 44) {
+        json(res, { text: "" });
+        return;
+      }
+      const dir = await mkdtemp(join(tmpdir(), "kururu-dictate-"));
+      try {
+        const path = join(dir, "comment.wav");
+        await writeFile(path, wav, { mode: 0o600 });
+        // 16-bit mono at the clip's rate, after a 44-byte header (`encodeWav`).
+        const heard = await voice.transcribe(path, ((wav.length - 44) / 2 / CLIP_RATE) * 1000);
+        json(res, { text: heard?.text ?? "" });
+      } catch (err) {
+        json(res, { error: err instanceof Error ? err.message : String(err) }, 503);
+      } finally {
+        void rm(dir, { recursive: true, force: true });
+      }
     },
   },
 

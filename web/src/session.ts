@@ -1768,6 +1768,19 @@ export async function sendClip(clip: { id: string; profileId: string; at: number
 }
 
 /**
+ * A dictated comment, as a WAV, into words — `/api/voice/dictate`, the
+ * recogniser a clip to Kuru is heard by, with the words handed back and
+ * nothing kept or sent on. Resolves with them, empty for a clip that held
+ * none; rejects with why it could not be heard.
+ */
+export async function dictateClip(wav: ArrayBuffer): Promise<string> {
+  const res = await fetch("/api/voice/dictate", { method: "POST", headers: { "content-type": "audio/wav" }, body: wav });
+  const body = (await res.json().catch(() => ({ error: `the server said ${res.status}` }))) as { text?: unknown; error?: string };
+  if (!res.ok || typeof body.text !== "string") throw new Error(body.error ?? `the server said ${res.status}`);
+  return body.text;
+}
+
+/**
  * A file for Kuru's box that this page cannot name by its path, kept by the
  * server in its `drops/` folder. Resolves with the path of the copy, on the
  * server's computer, which is Kuru's; rejects with why it was not kept. A

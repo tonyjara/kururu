@@ -10073,6 +10073,7 @@ a.st-btn {
 }
 .quote-pop-write {
   align-items: flex-end;
+  flex-wrap: wrap;
   gap: 6px;
   width: min(300px, calc(100vw - 12px));
   padding: 4px 4px 4px 8px;
@@ -10116,9 +10117,70 @@ a.st-btn {
   color: var(--on-accent);
   cursor: var(--cursor-pointer);
 }
+/* The mic beside the mark and beside the field, held to say the comment:
+   Kuru's own mic (`.kuru-mic`), in the danger colour while it listens, with
+   the microphone's level as a ring that swells around it (`--quote-level`, 0–1, off
+   the same meter). Nothing of a long press reaches the page — no scroll, no
+   callout, no selection moved onto it — since the words being quoted are
+   still selected under the thumb. */
+.quote-pop-mic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: var(--radius-lg);
+  color: var(--dim);
+  cursor: var(--cursor-pointer);
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.quote-pop-mic:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+.quote-pop-mic-on,
+.quote-pop-mic-on:hover {
+  color: var(--on-danger);
+  background: var(--danger-bg);
+  box-shadow: 0 0 0 calc(2px + var(--quote-level, 0) * 5px) color-mix(in srgb, var(--danger-bg) 35%, transparent);
+}
+.quote-pop-mic-hearing {
+  color: var(--accent);
+  animation: st-key-wait 1.2s ease-in-out infinite;
+}
+.quote-pop-write > .quote-pop-mic {
+  width: 26px;
+  height: 26px;
+}
+/* What the mic is doing — listening, hearing — beside the mark, and on a line
+   of its own under the field; and, under the field, why a dictation came to
+   nothing, with the quote still in it. */
+.quote-pop-say {
+  padding: 0 6px 0 2px;
+  font-family: var(--ui);
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  white-space: nowrap;
+}
+.quote-pop-say-line {
+  flex-basis: 100%;
+  margin: 0;
+  padding: 0 2px 2px 21px;
+  white-space: normal;
+}
+.quote-pop-say-failed {
+  color: var(--danger);
+}
 /* A finger's size where there are fingers: the mark is pressed over words a
    thumb has just let go of. */
 :root[data-narrow] .quote-pop-btn,
+:root[data-narrow] .quote-pop-mic,
+:root[data-narrow] .quote-pop-write > .quote-pop-mic,
 :root[data-narrow] .quote-pop-go {
   width: 34px;
   height: 34px;

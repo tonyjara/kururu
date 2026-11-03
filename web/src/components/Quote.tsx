@@ -45,6 +45,17 @@
  * arrives as a space. The popover is placed again whenever it changes size,
  * so a field that grows stays inside the window.
  *
+ * **Or the comment is said.** A mic sits by the mark and by the field: held,
+ * it is Kuru's own microphone (`dictate` in `voice.ts` — the same recorder,
+ * and the same recogniser on the server) with the words handed back here
+ * rather than sent to Kuru. Let go, they go after whatever was typed, and
+ * the quote goes into the box with them exactly as Enter would put it,
+ * unsent. Words that do not come — refused, too short, nothing heard, a
+ * recogniser that would not run — leave the quote where it was, in the
+ * field, with why under it. While it listens and while it is heard, a press
+ * elsewhere and the selection going do not close the popover, since what is
+ * on its way is this popover's.
+ *
  * **A board card selects only while it is open.** A card is `draggable`,
  * and a press on a draggable is the start of a drag, never of a selection
  * — so a closed card stays the thing you drag, and an open one, which is
@@ -57,7 +68,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CardQuote, QuotePart } from "../../../shared/kuru";
 import { fileReference, placeIn, type FileRef } from "../filequote";
+import { dictate, dictateCancel, dictateStop, useDictation } from "../voice";
 import { ChipField, type ChipFieldHandle } from "./ChipField";
+import { MicIcon } from "./VoiceIcons";
 
 /**
  * What a quote is of: a card — its title or its body, wherever it is drawn —
@@ -201,12 +214,26 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
   const [writing, setWriting] = useState(false);
   const [comment, setComment] = useState("");
   const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
+  /** Why a dictation came to nothing, said under the field the quote is still in. */
+  const [note, setNote] = useState<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const field = useRef<ChipFieldHandle>(null);
   const open = useRef(false);
   open.current = at !== null;
   const writingNow = useRef(false);
   writingNow.current = writing;
+  // What an answer that arrives later — a dictation's words — is put in with.
+  const atNow = useRef(at);
+  atNow.current = at;
+  const commentNow = useRef(comment);
+  commentNow.current = comment;
+  const onQuoteNow = useRef(onQuote);
+  onQuoteNow.current = onQuote;
+  /** This popover's dictation is under way: from the mic's press until its words, or why there are none, are back. */
+  const speaking = useRef(false);
+  /** The field takes the keys as it opens — after the mark's press, and not after the mic's, whose press a phone's keyboard would only get in the way of. */
+  const focusOnOpen = useRef(false);
+  const dictation = useDictation();
   useEffect(() => {
     up = at !== null;
     return () => {
@@ -217,12 +244,17 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
   const before = useRef<Element | null>(null);
 
   const close = () => {
+    if (speaking.current) {
+      speaking.current = false;
+      dictateCancel();
+    }
     before.current = null;
     markRange(null);
     setAt(null);
     setWriting(false);
     setComment("");
     setPlace(null);
+    setNote(null);
   };
   const closeRef = useRef(close);
   closeRef.current = close;
@@ -232,7 +264,7 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
     let settle = 0;
     const check = () => {
       window.clearTimeout(settle);
-      if (down || writingNow.current) return;
+      if (down || writingNow.current || speaking.current) return;
       const found = readSelection();
       // The mark follows a selection pulled about, and goes with one let go.
       if (found) setAt(found);
@@ -240,7 +272,9 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
     };
     const onDown = (event: PointerEvent) => {
       const inside = event.target instanceof Node && box.current?.contains(event.target);
-      if (inside) return;
+      // A press elsewhere while a comment is being said or heard is not a
+      // reason to lose it: the words are on their way to this popover.
+      if (inside || speaking.current) return;
       down = true;
       if (open.current) closeRef.current();
     };
@@ -253,7 +287,7 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
       settle = window.setTimeout(check, 0);
     };
     const onChange = () => {
-      if (down || writingNow.current) return;
+      if (down || writingNow.current || speaking.current) return;
       window.clearTimeout(settle);
       settle = window.setTimeout(check, SETTLE_MS);
     };
@@ -277,6 +311,10 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
     return () => {
       window.clearTimeout(settle);
       markRange(null);
+      if (speaking.current) {
+        speaking.current = false;
+        dictateCancel();
+      }
       document.removeEventListener("pointerdown", onDown, true);
       document.removeEventListener("pointerup", onUp, true);
       document.removeEventListener("pointercancel", onUp, true);
@@ -325,15 +363,68 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
 
   // The keys go to the field when it opens, as the input's `autoFocus` did.
   useEffect(() => {
-    if (writing) field.current?.focus();
+    if (writing && focusOnOpen.current) field.current?.focus();
   }, [writing]);
 
-  if (!at) return null;
-  const go = () => {
-    onQuote(at.reference, { part: at.part, text: at.text, comment }, at.from);
+  /** The quote, with `said` as its comment, into Kuru's box — unsent, as Enter puts it. */
+  const put = (said: string) => {
+    const quoted = atNow.current;
+    if (!quoted) return;
+    onQuoteNow.current(quoted.reference, { part: quoted.part, text: quoted.text, comment: said }, quoted.from);
     window.getSelection()?.removeAllRanges();
-    close();
+    closeRef.current();
   };
+
+  /**
+   * The mic went down. Its release is listened for on the window rather than
+   * on the button, because a finger slides off a button it is holding and
+   * the button may not be the same one by then; the words, when they are
+   * back, go after whatever was typed and the quote goes in with them. With
+   * no words the quote stays, in the field, with what went wrong under it.
+   */
+  const speak = () => {
+    if (speaking.current) return;
+    if (!writingNow.current) {
+      // From the mark, the selection is read as the mark's own press reads
+      // it, and marked: a phone may let go of it while the button is held.
+      const now = readSelection() ?? atNow.current;
+      if (!now) return;
+      before.current = document.activeElement;
+      markRange(now.range);
+      atNow.current = now;
+      setAt(now);
+    }
+    setNote(null);
+    speaking.current = true;
+    const stop = () => {
+      window.removeEventListener("pointerup", stop, true);
+      window.removeEventListener("pointercancel", stop, true);
+      dictateStop();
+    };
+    window.addEventListener("pointerup", stop, true);
+    window.addEventListener("pointercancel", stop, true);
+    void dictate().then((outcome) => {
+      if (!speaking.current) return;
+      speaking.current = false;
+      stop();
+      if (outcome.ok) {
+        put([commentNow.current.trim(), outcome.text].filter(Boolean).join(" "));
+        return;
+      }
+      if (outcome.why === null) return;
+      if (writingNow.current) field.current?.focus();
+      else {
+        focusOnOpen.current = true;
+        setWriting(true);
+      }
+      setNote(outcome.why);
+    });
+  };
+  const said = speaking.current ? dictation.phase : "idle";
+  const mic = <SayMark phase={said} level={dictation.level} onPress={speak} />;
+
+  if (!at) return null;
+  const go = () => put(comment);
   const style = place ? { left: place.left, top: place.top } : { visibility: "hidden" as const };
   if (!writing) {
     return createPortal(
@@ -348,15 +439,23 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
           onPointerDown={(event) => event.preventDefault()}
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => {
+            if (speaking.current) return;
             const now = readSelection() ?? at;
             before.current = document.activeElement;
             markRange(now.range);
             setAt(now);
+            focusOnOpen.current = true;
             setWriting(true);
           }}
         >
           <QuoteMark />
         </button>
+        {mic}
+        {said !== "idle" && (
+          <span className="quote-pop-say" role="status">
+            {said === "listening" ? "Listening…" : "Hearing…"}
+          </span>
+        )}
       </div>,
       document.body,
     );
@@ -373,28 +472,84 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
         placeholder="Your comment on this part"
         ariaLabel="Your comment on this part"
         enterKeyHint="done"
-        onChange={(next) => setComment(next)}
+        onChange={(next) => {
+          setComment(next);
+          if (note) setNote(null);
+        }}
         // Shift+Enter is the field's own new line, and never reaches here.
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.nativeEvent.isComposing) {
             event.preventDefault();
-            go();
+            if (!speaking.current) go();
           }
         }}
-        onEnter={go}
+        onEnter={() => {
+          if (!speaking.current) go();
+        }}
       />
+      {mic}
       <button
         type="button"
         className="quote-pop-go"
         onMouseDown={(event) => event.preventDefault()}
-        onClick={go}
+        onClick={() => {
+          if (!speaking.current) go();
+        }}
         title="Put this part and your comment into Kuru's box (Enter)"
         aria-label="Quote to Kuru"
       >
         <GoMark />
       </button>
+      {(said !== "idle" || note) && (
+        <p className={`quote-pop-say quote-pop-say-line ${note && said === "idle" ? "quote-pop-say-failed" : ""}`} role="status">
+          {said === "listening" ? "Listening… let go when you are done." : said === "hearing" ? "Hearing…" : `${note} The quote is kept: type your comment, or hold the mic again.`}
+        </p>
+      )}
     </div>,
     document.body,
+  );
+}
+
+/**
+ * The mic, held to say the comment: Kuru's own mic glyph, and its colour
+ * while it listens, with the level as a ring around it. Held only — a tap is
+ * too short to hear, and says so — since the quote goes in when the words
+ * come back, and a toggled recording would leave nothing to let go of.
+ *
+ * A finger's press is kept from the page by a `touchstart` that is not
+ * passive (React's own are): without it a long press scrolls the page,
+ * brings up the callout, or moves a phone's selection — the words being
+ * quoted — onto the button.
+ */
+function SayMark({ phase, level, onPress }: { phase: "idle" | "listening" | "hearing"; level: number; onPress: () => void }) {
+  const button = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const el = button.current;
+    if (!el) return;
+    const hold = (event: TouchEvent) => event.preventDefault();
+    el.addEventListener("touchstart", hold, { passive: false });
+    return () => el.removeEventListener("touchstart", hold);
+  }, []);
+  return (
+    <button
+      ref={button}
+      type="button"
+      className={`quote-pop-mic ${phase === "listening" ? "quote-pop-mic-on" : phase === "hearing" ? "quote-pop-mic-hearing" : ""}`}
+      style={{ "--quote-level": phase === "listening" ? level : 0 } as React.CSSProperties}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        // As the mark's: the selection and the field's keys stay where they are.
+        event.preventDefault();
+        onPress();
+      }}
+      onMouseDown={(event) => event.preventDefault()}
+      onContextMenu={(event) => event.preventDefault()}
+      title="Hold to say your comment"
+      aria-label="Hold to say your comment"
+      aria-pressed={phase === "listening"}
+    >
+      <MicIcon />
+    </button>
   );
 }
 
