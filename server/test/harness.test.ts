@@ -1159,6 +1159,23 @@ describe("Needs you, from the harness", () => {
     expect(ws.active.board.cards[0]!.column).toBe(NEEDS_COLUMN);
     expect((await call("move_card", { card: "nope", column: "done" })).isError).toBe(true);
   });
+
+  it("puts what Kuru adds or moves there at the top of the column, the user's cards left in their order", async () => {
+    const { ws, call } = rig();
+    const ids = () => ws.active.board.cards.filter((c) => c.column === NEEDS_COLUMN).map((c) => c.title);
+    ws.editProfileBoard(ws.active.id, (b) => addCard(addCard(b, { title: "mine, first", column: NEEDS_COLUMN }, "u1", 1), { title: "mine, second", column: NEEDS_COLUMN }, "u2", 2));
+    ws.editProfileBoard(ws.active.id, (b) => moveCard(b, "u1", NEEDS_COLUMN, 1));
+    expect(ids()).toEqual(["mine, second", "mine, first"]);
+    await call("add_card", { title: "Renew the domain", column: NEEDS_COLUMN });
+    expect(ids()).toEqual(["Renew the domain", "mine, second", "mine, first"]);
+    await call("add_card", { title: "Try it on the phone" });
+    const later = ws.active.board.cards.find((c) => c.title === "Try it on the phone")!.id;
+    await call("move_card", { card: later, column: NEEDS_COLUMN });
+    expect(ids()).toEqual(["Try it on the phone", "Renew the domain", "mine, second", "mine, first"]);
+    // Named again with no place, a card already there stays put.
+    await call("move_card", { card: "u1", column: NEEDS_COLUMN });
+    expect(ids()).toEqual(["Try it on the phone", "Renew the domain", "mine, second", "mine, first"]);
+  });
 });
 
 /**

@@ -199,9 +199,10 @@ describe("the profile board's Needs you", () => {
 
   it("counts every card in it, in the column's order, and no other card of the board", () => {
     const needs = needsOf(profile([workspace("w1", ["a"])], null, yours()), [agent("a", { status: "blocked" })]);
+    // The column's order is newest first, so the drawer's is too.
     expect(needs.cards.map((c) => [c.id, c.needsBy])).toEqual([
-      ["c1", "kuru"],
       ["c2", "user"],
+      ["c1", "kuru"],
     ]);
     expect(needs.count).toBe(3);
     // In no workspace: the count of workspaces is the agents' alone.
