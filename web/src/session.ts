@@ -1657,6 +1657,11 @@ export function kuruSeen(profileId: string, utterances: string[]): void {
   send({ type: "kuru-seen", profileId, utterances });
 }
 
+/** Pin a line of the drawer's, or take the pin off. The next `kuru` message says it is done, here and on every other client. */
+export function kuruPin(profileId: string, id: string, pinned: boolean): void {
+  send({ type: "kuru-pin", profileId, id, pinned });
+}
+
 /**
  * Say one reply again, from the drawer's speaker. `text` is the reply as the
  * drawer already shows it, for when the one being replayed is already heard

@@ -293,6 +293,8 @@ export interface TurnHit {
   snippet: string;
   /** The whole turn, capped, for the window to open. */
   text: string;
+  /** It is pinned in Kuru's drawer (`shared/kurupin.ts`). Absent when it is not. */
+  pinned?: boolean;
   profileId?: string | null;
 }
 
@@ -430,7 +432,8 @@ export interface ConversationExport extends Conversation {
   profileName: string;
 }
 
-export type TurnExport = Omit<Turn, "id" | "conversationId">;
+/** A turn as the mirror writes it: without the ids, which a restore mints again, and with when it was pinned in Kuru's drawer, if it was. */
+export type TurnExport = Omit<Turn, "id" | "conversationId"> & { pinnedAt?: number };
 
 /** Every record a mirror tree holds that the database can be rebuilt from. */
 export interface DataExport {

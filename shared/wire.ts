@@ -1685,6 +1685,12 @@ export type ClientMessage =
    */
   | { type: "kuru-seen"; profileId: string; utterances: string[] }
   /**
+   * Pin a line of the drawer's, or take the pin off (`shared/kurupin.ts`):
+   * `id` is the line's, `t<turn>`. Kept in the database, so every client is
+   * told on the next `kuru` message, this one included.
+   */
+  | { type: "kuru-pin"; profileId: string; id: string; pinned: boolean }
+  /**
    * Say one reply again, from the drawer's speaker on that reply. `text` is
    * the reply as the drawer already shows it, for a reply the missed list no
    * longer remembers — one already heard — which has no other copy of its

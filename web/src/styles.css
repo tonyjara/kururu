@@ -5031,7 +5031,8 @@ html.pill-page #root {
    fold beside it is drawn on the same terms, after it, since the arrow has
    already taken the free space. */
 .kuru-reply-btn,
-.kuru-fold-btn {
+.kuru-fold-btn,
+.kuru-pin-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5046,30 +5047,118 @@ html.pill-page #root {
 }
 .kuru-item:hover .kuru-reply-btn,
 .kuru-item:hover .kuru-fold-btn,
+.kuru-item:hover .kuru-pin-btn,
 .kuru-notice:hover .kuru-reply-btn,
+.kuru-notice:hover .kuru-pin-btn,
 .kuru-reply-btn:focus-visible,
-.kuru-fold-btn:focus-visible {
+.kuru-fold-btn:focus-visible,
+.kuru-pin-btn:focus-visible {
   opacity: 1;
 }
 .kuru-reply-btn:hover,
-.kuru-fold-btn:hover {
+.kuru-fold-btn:hover,
+.kuru-pin-btn:hover {
   color: var(--text);
   background: var(--chrome-high);
 }
 @media (hover: none) {
   .kuru-reply-btn,
-  .kuru-fold-btn {
+  .kuru-fold-btn,
+  .kuru-pin-btn {
     opacity: 0.7;
   }
 }
 :root[data-narrow] .kuru-reply-btn,
-:root[data-narrow] .kuru-fold-btn {
+:root[data-narrow] .kuru-fold-btn,
+:root[data-narrow] .kuru-pin-btn {
   width: 28px;
   height: 28px;
   margin-block: -6px;
 }
-.kuru-fold-btn {
+.kuru-fold-btn,
+.kuru-pin-btn {
   margin-left: 0;
+}
+/* A pinned line wears its pin always, in the accent, and that is the mark:
+   no ground or border of its own, since those say who spoke and what became
+   of it. Taken off it is the quiet glyph again. */
+.kuru-pin-btn.kuru-pin-on,
+.kuru-pin-btn.kuru-pin-on:hover {
+  opacity: 1;
+  color: var(--accent);
+}
+/* The list of them, a strip under the header as the search is: a few rows in
+   view and the rest a scroll away, so a long list never pushes the chat off. */
+.kuru-pins {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  max-height: 40%;
+  border-bottom: var(--border) var(--border-style) var(--line);
+}
+.kuru-pins-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px calc(8px + var(--kuru-gutter)) 3px calc(12px + var(--kuru-gutter));
+  color: var(--accent);
+  font-size: var(--fs-sm);
+}
+.kuru-pins-title {
+  flex: 1;
+  color: var(--dim);
+}
+.kuru-pins-list {
+  margin: 0;
+  padding: 0 calc(8px + var(--kuru-gutter)) 6px calc(8px + var(--kuru-gutter));
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.kuru-pins-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.kuru-pins-open {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  text-align: left;
+}
+.kuru-pins-open:hover,
+.kuru-pins-open:focus-visible {
+  background: var(--chrome-high);
+}
+.kuru-pins-who,
+.kuru-pins-open time {
+  flex: none;
+  color: var(--dim);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.kuru-pins-words {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root[data-narrow] .kuru-pins-open {
+  padding-block: 8px;
+}
+/* Unpinning from the list is the quiet ✕ the rows' own buttons are, shown on
+   the row's hover: a column of accent crosses read as a column of warnings. */
+.kuru-pins-row:hover .kuru-pins-unpin {
+  opacity: 1;
+}
+.kuru-pins-btn .kuru-pins-count {
+  font-variant-numeric: tabular-nums;
 }
 .kuru-to {
   margin: 0 0 4px;
@@ -5270,7 +5359,8 @@ html.pill-page #root {
 .kuru-notice-row > .kuru-notice-line {
   flex: 1;
 }
-.kuru-notice-row > .kuru-reply-btn {
+.kuru-notice-row > .kuru-reply-btn,
+.kuru-notice-row > .kuru-pin-btn {
   margin-left: 0;
 }
 .kuru-notice-line {

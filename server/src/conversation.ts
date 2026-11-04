@@ -27,6 +27,38 @@ export function searchFor(profileId: string, query: string, scope: "all" | "card
   });
 }
 
+/**
+ * The profile's pinned lines with Kuru, for its `search` tool's `pinned`
+ * scope, newest said first, as hits the way a search's turns are — so Kuru
+ * reads "what did I pin" in the words it already reads a search in. The
+ * snippet is the opening, since there is no match to mark.
+ */
+export function pinnedFor(profileId: string): SearchHit[] {
+  const key = workspaces.keyOf(profileId);
+  if (!key) return [];
+  return store
+    .pinnedTurns(key)
+    .reverse()
+    .map(({ turn }) => ({
+      kind: "turn" as const,
+      id: turn.id,
+      conversationId: turn.conversationId,
+      conversationKind: "harness" as const,
+      profileKey: key,
+      role: turn.role,
+      via: turn.via,
+      at: turn.at,
+      snippet: turn.text.replace(/\s+/g, " ").trim().slice(0, PINNED_SNIPPET_MAX),
+      text: turn.text.slice(0, PINNED_TEXT_MAX),
+      pinned: true,
+      profileId,
+    }));
+}
+
+/** How much of a pinned line Kuru reads in its listing; the whole of it is a search for its words away. */
+const PINNED_SNIPPET_MAX = 300;
+const PINNED_TEXT_MAX = 2_000;
+
 export function cardHistoryOf(cardId: string): { card: Card; workspaceName: string | null; deleted: boolean; events: import("../../shared/store").CardEvent[] } | null {
   const found = store.findCard(cardId);
   if (!found) return null;

@@ -259,6 +259,12 @@ const MIGRATIONS: readonly (string | ((db: DatabaseSync) => void))[] = [SCHEMA, 
  *   before it opens the database as it always did. Not in the export: a
  *   simulator's udid means nothing on another Mac, and the rows are rebuilt
  *   from `simctl` the first time anybody asks for one.
+ * - `turn_pins`: the lines pinned in Kuru's drawer (`shared/kurupin.ts`), a
+ *   turn's id and when — a table of its own rather than a column on `turns`
+ *   for `sim_pool`'s reason, and because a pin comes and goes while a turn is
+ *   written once. A turn is never deleted, so a pin never names nothing. In
+ *   the export as the turn's `pinnedAt`, since a restore gives every turn a
+ *   new id and a pin by id would come back pinning some other line.
  */
 const SIM_POOL = `create table if not exists sim_pool (
   udid text primary key, project text not null, name text not null, runtime text not null,
@@ -272,9 +278,12 @@ const CARDS_AU = `create trigger cards_au after update of title, body on cards
   insert into cards_fts(rowid, title, body) values (new.rowid, new.title, new.body);
 end`;
 
+const TURN_PINS = "create table if not exists turn_pins (turn_id integer primary key, pinned_at integer not null)";
+
 function keepShape(db: DatabaseSync): void {
   db.exec("create index if not exists turns_at on turns(at, id)");
   db.exec(SIM_POOL);
+  db.exec(TURN_PINS);
   const trigger = db.prepare("select sql from sqlite_master where type = 'trigger' and name = 'cards_au'").get() as { sql?: string } | undefined;
   if (trigger?.sql && /\bwhen\b/i.test(trigger.sql)) return;
   db.exec("drop trigger if exists cards_au");
@@ -1243,6 +1252,31 @@ export class Store {
     return { turns: rows.slice(0, limit).map(turnOf), more };
   }
 
+  /**
+   * Pin one of a profile's lines with Kuru, or take the pin off. Only a turn
+   * of that profile's harness conversations: the id comes off a client, and a
+   * pin on another profile's turn, or an agent's, is a pin nobody's drawer
+   * draws. Says whether anything changed.
+   */
+  pinTurn(profileKey: string, turnId: number, pinned: boolean, at = Date.now()): boolean {
+    const ours = this.stmt(
+      "select 1 as x from turns t join conversations v on v.id = t.conversation_id where t.id = ? and v.profile_key = ? and v.kind = 'harness' and t.role <> 'agent'",
+    ).get(turnId, profileKey);
+    if (!ours) return false;
+    const done = pinned ? this.stmt("insert or ignore into turn_pins(turn_id, pinned_at) values (?, ?)").run(turnId, at) : this.stmt("delete from turn_pins where turn_id = ?").run(turnId);
+    if (Number(done.changes) > 0) this.changes++;
+    return Number(done.changes) > 0;
+  }
+
+  /** A profile's pinned turns, each with when it was pinned, oldest said first. */
+  pinnedTurns(profileKey: string): { turn: Turn; pinnedAt: number }[] {
+    const rows = this.stmt(
+      `select t.*, p.pinned_at as pinned_at from turn_pins p join turns t on t.id = p.turn_id join conversations v on v.id = t.conversation_id
+       where v.profile_key = ? and v.kind = 'harness' order by t.at, t.id`,
+    ).all(profileKey) as Row[];
+    return rows.map((row) => ({ turn: turnOf(row), pinnedAt: row.pinned_at as number }));
+  }
+
   conversations(profileKey: string | null, kind: ConversationKind | null): Conversation[] {
     const rows = this.stmt("select * from conversations where (? is null or profile_key = ?) and (? is null or kind = ?) order by started_at").all(profileKey, profileKey, kind, kind) as Row[];
     return rows.map(conversationOf);
@@ -1370,8 +1404,9 @@ export class Store {
     if (scope !== "cards") {
       const rows = this.stmt(
         `select t.id, t.conversation_id, t.at, t.role, t.via, t.text, v.profile_key, v.kind,
-           snippet(turns_fts, 0, '[', ']', '…', 16) as snip
+           snippet(turns_fts, 0, '[', ']', '…', 16) as snip, p.pinned_at
          from turns_fts join turns t on t.id = turns_fts.rowid join conversations v on v.id = t.conversation_id
+           left join turn_pins p on p.turn_id = t.id
          where turns_fts match ? and (? is null or v.profile_key = ?)
          order by bm25(turns_fts), t.at desc limit ?`,
       ).all(match, profileKey, profileKey, cap) as Row[];
@@ -1387,6 +1422,7 @@ export class Store {
           at: row.at as number,
           snippet: row.snip as string,
           text: (row.text as string).slice(0, HIT_TEXT_MAX),
+          ...(row.pinned_at != null ? { pinned: true } : {}),
         };
         hits.push(hit);
       }
@@ -1465,10 +1501,13 @@ export class Store {
       "select v.*, p.name as profile_name from conversations v join profiles p on p.key = v.profile_key where (? = 1 or v.kind = 'harness') order by v.started_at",
     ).all(options.agents ? 1 : 0) as Row[];
     for (const row of convRows) {
-      const turns = (this.stmt("select * from turns where conversation_id = ? order by at, id").all(row.id as string) as Row[]).map(turnOf);
+      const rows = this.stmt("select t.*, p.pinned_at from turns t left join turn_pins p on p.turn_id = t.id where t.conversation_id = ? order by t.at, t.id").all(row.id as string) as Row[];
       conversations.push({
         header: { version: EXPORT_VERSION, ...conversationOf(row), profileName: row.profile_name as string },
-        turns: turns.map(({ id: _id, conversationId: _c, ...rest }) => rest),
+        turns: rows.map((turnRow) => {
+          const { id: _id, conversationId: _c, ...rest } = turnOf(turnRow);
+          return turnRow.pinned_at != null ? { ...rest, pinnedAt: turnRow.pinned_at as number } : rest;
+        }),
       });
     }
     return { boards, conversations };
@@ -1550,9 +1589,24 @@ export class Store {
           header.startedAt,
         );
         for (const turn of turns) {
-          const dup = this.stmt("select 1 as x from turns where conversation_id = ? and at = ? and role = ? and text = ?").get(header.id, turn.at, turn.role, turn.text);
-          if (dup) continue;
-          this.stmt("insert into turns(conversation_id, at, role, via, text, lang, voice_id) values (?, ?, ?, ?, ?, ?, ?)").run(header.id, turn.at, turn.role, turn.via, turn.text, turn.lang, turn.voiceId);
+          const dup = this.stmt("select id from turns where conversation_id = ? and at = ? and role = ? and text = ?").get(header.id, turn.at, turn.role, turn.text) as Row | undefined;
+          // A pin travels on its turn's line, and a turn already here may
+          // still be missing the pin the mirror has for it.
+          const pinnedAt = typeof turn.pinnedAt === "number" && Number.isFinite(turn.pinnedAt) ? turn.pinnedAt : null;
+          if (dup) {
+            if (pinnedAt !== null) this.stmt("insert or ignore into turn_pins(turn_id, pinned_at) values (?, ?)").run(dup.id as number, pinnedAt);
+            continue;
+          }
+          const inserted = this.stmt("insert into turns(conversation_id, at, role, via, text, lang, voice_id) values (?, ?, ?, ?, ?, ?, ?) returning id").get(
+            header.id,
+            turn.at,
+            turn.role,
+            turn.via,
+            turn.text,
+            turn.lang,
+            turn.voiceId,
+          ) as Row;
+          if (pinnedAt !== null) this.stmt("insert or ignore into turn_pins(turn_id, pinned_at) values (?, ?)").run(inserted.id as number, pinnedAt);
           counts.turns++;
         }
       }

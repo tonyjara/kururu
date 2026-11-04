@@ -21,6 +21,7 @@
  */
 import { channelOfMessage, isChannelKind, readPeerMark, withoutChannelMark, type ChannelKind } from "./channels";
 import { CROSS_SESSION_TAG, NOTICE_SENDER } from "./harness";
+import type { KuruPin } from "./kurupin";
 import type { MadeFile } from "./made";
 import { parseRemote } from "./remote";
 import { REPLY_ME, REPLY_QUOTE_MAX, cutQuoted, replyClock, splitReply, type ReplyRef } from "./reply";
@@ -159,6 +160,8 @@ export interface KuruConversation {
   undelivered: number;
   /** Whether there is anything before `items[0]` to fetch. */
   more: boolean;
+  /** The lines pinned in this conversation, each in full (`shared/kurupin.ts`). Absent from a server older than pins. */
+  pins?: KuruPin[];
 }
 
 /** One page of earlier items, from `/api/kuru`. */

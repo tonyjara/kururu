@@ -364,6 +364,26 @@ them stays unheard.
 Another node's lines are searched only as far as this drawer holds them, its last
 `PEER_RECENT`: its history is on its own disk and `peerItems` is all that crosses.
 
+**A pin** sits after the reply arrow and the fold, shown the way they are, and on
+a pinned line it stays shown, in the accent; pressed again it comes off. Once
+anything is pinned the header has a pin with the count, which opens the list
+under the header: who, when, and the opening words, newest said first, each with
+a ✕ to unpin. A press opens the chat at the line and rings it — scrolled to and
+unfolded when it is loaded, otherwise on a page from `GET /api/kuru/around` kept
+apart from `known` as a result's is, with the server's copy of the line in that
+page whatever the page says, so a line from a session long thrown away is still
+drawn whole. The rules are `shared/kurupin.ts`.
+
+A pin is the database's (`turn_pins`, see [data](data.md)), not this device's as
+a fold is: a fold is how a line reads here, a pin is "come back to this", from the
+phone too. So only a turn takes one — not a clip still on its way, a reply only
+the missed list holds, or another node's line, whose turn is in that node's
+database. `kuru-pin` on the socket sets one; every `kuru` message carries the
+pins, each line in full (`KuruConversation.pins`). Kuru reads them through its
+`search` tool: a pinned hit says `(pinned)`, and `scope: "pinned"` lists them,
+with or without words — chosen over a line in `kururu_status`, which is read on
+nearly every turn and would carry the openings each time.
+
 The live line says what Kuru is doing now — the mascot hopping with
 "Thinking…" and **Stop**, "asking something in its terminal" with **Open
 terminal**, "not running" with **Start** — and the chip says the same in a

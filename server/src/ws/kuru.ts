@@ -10,7 +10,7 @@ import type { WebSocket } from "ws";
 import { KURU_SAY_MAX } from "../../../shared/kuru";
 import { isClipId } from "../../../shared/voice";
 import type { ClientMessage } from "../../../shared/wire";
-import { type ClientState, harness, outbox, voice, workspaces } from "../context";
+import { type ClientState, harness, kuru, outbox, voice, workspaces } from "../context";
 import { nodeOfUtterance, peerKey } from "../peerkuru";
 import { replyAsync } from "./reply";
 
@@ -59,6 +59,12 @@ export function kuruVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): b
         byKey.set(at, [...(byKey.get(at) ?? []), id]);
       }
       for (const [at, some] of byKey) voice.seen(at, some);
+      return true;
+    }
+
+    case "kuru-pin": {
+      const key = typeof msg.profileId === "string" ? workspaces.keyOf(msg.profileId) : null;
+      if (key) kuru.pin(key, msg.id, msg.pinned === true);
       return true;
     }
 

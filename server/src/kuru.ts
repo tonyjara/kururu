@@ -29,6 +29,8 @@
  * On the restartable side, like everything that reads the database.
  */
 import { KURU_PAGE, KURU_RECENT, kuruCounts, mergeConversation, type KuruConversation, type KuruFile, type KuruItem, type KuruPage, type PeerKuru } from "../../shared/kuru";
+import type { KuruPin } from "../../shared/kurupin";
+import { pinnedTurnId } from "../../shared/kurupin";
 import { matchItem, parseKuruQuery, pickHits, type HitTier, type KuruAround, type KuruSearchAnswer } from "../../shared/kurusearch";
 import type { Turn } from "../../shared/store";
 import type { StoredMissed, StoredOutboxEntry } from "../../shared/voice";
@@ -238,7 +240,40 @@ export class Kuru {
       missed: missed.filter((entry) => entry.at >= since || !entry.pending || linked.has(entry.id)),
       launchers: this.launchers(profileKey),
     });
-    return { profileId, items: this.linked(profileKey, items), more, ...kuruCounts(outbox, missed) };
+    return { profileId, items: this.linked(profileKey, items), more, ...kuruCounts(outbox, missed), pins: this.pins(profileKey) };
+  }
+
+  /**
+   * Pin a line of the drawer's, or take its pin off, by the id the drawer
+   * knows it by. Anything but a turn of this profile's is refused in silence:
+   * the button is only drawn on those, so anything else is a stale page.
+   */
+  pin(profileKey: string, id: unknown, pinned: boolean): boolean {
+    const turnId = pinnedTurnId(id);
+    if (turnId === null || !this.deps.store.pinTurn(profileKey, turnId, pinned)) return false;
+    this.changed();
+    return true;
+  }
+
+  /**
+   * Every pinned line, each merged on its own as `around` merges a page —
+   * with whatever on the two lists its turn names, so a message of yours
+   * keeps its length and a reply its fate. A turn the merge drops, a wrapper
+   * that carried nobody's words, has no line to pin, and so no entry.
+   */
+  private pins(profileKey: string): KuruPin[] {
+    const pinned = this.deps.store.pinnedTurns(profileKey);
+    if (!pinned.length) return [];
+    const outbox = this.deps.outbox(profileKey);
+    const missed = this.deps.missed(profileKey);
+    const pins: KuruPin[] = [];
+    for (const { turn, pinnedAt } of pinned) {
+      const linked = linkedBy([turn]);
+      const items = mergeConversation({ turns: [turn], outbox: outbox.filter((entry) => linked.has(entry.id)), missed: missed.filter((entry) => linked.has(entry.id)) });
+      const item = this.linked(profileKey, items).find((line) => line.id === `t${turn.id}`);
+      if (item && item.kind !== "session") pins.push({ id: item.id, pinnedAt, item });
+    }
+    return pins;
   }
 
   /** Each reply with the files it names beside it, for the drawer to draw as links. */

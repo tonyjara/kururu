@@ -73,7 +73,7 @@ import {
   windows,
   workspaces,
 } from "./context";
-import { cardHistoryOf, sayAside, searchFor } from "./conversation";
+import { cardHistoryOf, pinnedFor, sayAside, searchFor } from "./conversation";
 import { closeDatabasePools } from "./databases";
 import { mirrorFiles } from "./export";
 import { allowRoot } from "./files";
@@ -555,6 +555,7 @@ export async function attach(port: Port): Promise<void> {
     say: (profileId, text) => sayAside(profileId, text),
     replayMissed: (profileId) => voice.replay(workspaces.keyOf(profileId) ?? ""),
     search: searchFor,
+    pinned: pinnedFor,
     cardHistory: cardHistoryOf,
     reloadWindow: (why, timeoutMs) => reloads.ask(why, "Kuru", timeoutMs),
     madeOf: (agentId) => madeFiles.of(agentId),

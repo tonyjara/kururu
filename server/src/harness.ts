@@ -226,6 +226,8 @@ export interface HarnessDeps {
   replayMissed: (profileId: string) => MissedReply[];
   /** The database: full text over the profile's cards and conversations, and a card's history. See `store.ts`. */
   search: (profileId: string, query: string, scope: SearchScope, limit: number) => SearchHit[];
+  /** The lines pinned in the profile's drawer, newest said first, as turn hits. See `shared/kurupin.ts`. */
+  pinned?: (profileId: string) => SearchHit[];
   cardHistory: (cardId: string) => { card: Card; workspaceName: string | null; deleted: boolean; events: CardEvent[] } | null;
   /**
    * The slot queue: what `kururu_status` says about it, named the way this
@@ -1304,6 +1306,15 @@ export class Harness {
 
     search: ({ profileId, args }) => {
       const query = str(args.query);
+      // The user's pins: every one, or those with all the words in them.
+      // Not through the full text, which needs words to look for; a person's
+      // pins are few, and plain containment over them is enough.
+      if (args.scope === "pinned") {
+        const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+        const hits = (this.deps.pinned?.(profileId) ?? []).filter((hit) => hit.kind === "turn" && words.every((word) => hit.text.toLowerCase().includes(word)));
+        if (!hits.length) return ok(query ? `No pinned line has "${query}".` : "Nothing is pinned in the drawer.");
+        return ok(hits.slice(0, Math.min(50, int(args.limit) ?? 50)).map((hit) => this.hitLine(hit)).join("\n"));
+      }
       if (!query) return fail("Words to look for are needed.");
       const scope = args.scope === "cards" || args.scope === "turns" ? args.scope : "all";
       const hits = this.deps.search(profileId, query, scope, Math.min(50, int(args.limit) ?? 20));
@@ -1911,7 +1922,7 @@ export class Harness {
         : hit.role === "kuru"
           ? "you (Kuru)"
           : "an agent";
-    return `${who} ${stamp(hit.at)} — ${hit.snippet}`;
+    return `${who} ${stamp(hit.at)}${hit.pinned ? " (pinned)" : ""} — ${hit.snippet}`;
   }
 
   private name(agent: AgentSnapshot): string {

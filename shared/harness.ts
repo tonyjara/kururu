@@ -463,14 +463,14 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "search",
     description:
-      "Full-text search over every card in this profile (titles and bodies, deleted ones included) and over the conversation history: what the user typed or said to you and what you answered, in every session, plus what each agent said when it finished a turn. Use it for \"when did we decide X\" and \"find the card about Y\" before asking the user. Accents are ignored; the last word matches as a prefix. Each hit says what it is, where, and the matching line.",
+      "Full-text search over every card in this profile (titles and bodies, deleted ones included) and over the conversation history: what the user typed or said to you and what you answered, in every session, plus what each agent said when it finished a turn. Use it for \"when did we decide X\" and \"find the card about Y\" before asking the user. Accents are ignored; the last word matches as a prefix. Each hit says what it is, where, and the matching line, and a line the user pinned in the drawer says (pinned). scope=pinned lists the pinned lines, newest first, with or without words — for \"what did I pin\".",
     inputSchema: obj(
       {
-        query: str("Words to look for."),
-        scope: { type: "string", enum: ["all", "cards", "turns"], description: "cards, turns (the conversations), or all. Default all." },
+        query: str("Words to look for. Optional with scope=pinned."),
+        scope: { type: "string", enum: ["all", "cards", "turns", "pinned"], description: "cards, turns (the conversations), pinned (lines the user pinned in the drawer), or all. Default all." },
         limit: int("At most this many hits, default 20, at most 50."),
       },
-      ["query"],
+      [],
     ),
   },
   {

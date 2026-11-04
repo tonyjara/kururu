@@ -72,8 +72,9 @@ search still finds their cards.
 | `cards_fts`, `turns_fts` | FTS5 over titles, bodies and turns, accents folded |
 | `meta` | the file's own facts; nothing reads it today |
 | `sim_pool` | each project's simulators for the slot queue: what `simctl` cannot say — booted since, the fingerprint installed, the lease, when last used. Never exported: a udid means nothing on another Mac. See [slots](slots.md#simulators) |
+| `turn_pins` | the lines pinned in Kuru's drawer: a turn id and when it was pinned. In the export as the turn's `pinnedAt`, since a restore mints new turn ids. See [voice](voice.md#the-drawer) |
 
-`turns_at`, the `cards_au` trigger's `when` and `sim_pool` are kept by
+`turns_at`, the `cards_au` trigger's `when`, `sim_pool` and `turn_pins` are kept by
 `keepShape` on every open rather than by a numbered migration, so the version
 does not move and the installed app's older server still opens the file.
 

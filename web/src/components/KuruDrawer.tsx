@@ -132,6 +132,14 @@
  * quote selects the words as drawn, which is what you saw. Why the reader's
  * renderer is not borrowed is at the top of `kurumd.ts`.
  *
+ * **Any line can be pinned, to come back to.** A pin beside the fold, on the
+ * same terms, and always shown in the accent on a line that is pinned; the
+ * header's pin with a count opens the list of them under it, newest said
+ * first, and a press there opens the chat at the line as a result does —
+ * from what is loaded, or a page around it, or the line alone as the server
+ * keeps it. Pins are the database's, so the phone has them too
+ * (`shared/kurupin.ts`), and only this node's turns take one.
+ *
  * What it draws is the server's `kuru` message (`shared/kuru.ts`), already
  * merged: nothing in here decides what a message's state is or whether a
  * reply was heard. What it adds is this page's own two states for a clip the
@@ -142,6 +150,7 @@ import { cardCode } from "../../../shared/board";
 import { CHANNEL_NAMES, channelReady, isChannelKind, type TelegramStatus } from "../../../shared/channels";
 import { dropRefusal } from "../../../shared/drops";
 import { KURU_SEEN_MS, addressMatches, addressOf, addressQuery, clipLength, insertLine, insertWords, mergeNodes, pickAddress, quotedLine, replyRefOf, splitCardCodes, splitCardRefs, typedAddress, type CardRef, type KuruFile, type KuruItem, type KuruReply, type NodeKuruItem, type NoticeItem, type PeerKuru, type YouItem } from "../../../shared/kuru";
+import { canPin, sortPins, type KuruPin } from "../../../shared/kurupin";
 import { matchItem, parseKuruQuery, splitHits, type KuruQuery } from "../../../shared/kurusearch";
 import { splitMentions } from "../../../shared/made";
 import type { AgentSnapshot, MascotConfig, Profile } from "../../../shared/model";
@@ -160,6 +169,7 @@ import { dismissVoice, talkDown, talkUp, useOutgoing, useVoiceUi, voiceIsRemote,
 import { ChipField, type ChipFieldHandle } from "./ChipField";
 import { Icon } from "./Icon";
 import { KuruInline, KuruMarkdown, type MarkdownDoors } from "./KuruMarkdown";
+import { PinButton, PinsButton, PinsList } from "./KuruPins";
 import { MadeInline } from "./MadeLinks";
 import { quotable } from "./Quote";
 import { Mascot } from "./Status";
@@ -909,6 +919,66 @@ export function KuruDrawer({
     return () => clearTimeout(timer);
   }, [flash]);
 
+  /**
+   * The pins: the server's, with a press not yet answered laid over them, so
+   * the pin turns at once on a phone whose socket is slow. Each press is
+   * forgotten once a message from the server has been read after it.
+   */
+  const serverPins = conversation?.pins;
+  const pins = useMemo(() => sortPins(serverPins ?? []), [serverPins]);
+  const [pinPresses, setPinPresses] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  useEffect(() => setPinPresses(new Map()), [serverPins]);
+  const pinnedIds = useMemo(() => new Set(pins.map((pin) => pin.id)), [pins]);
+  const isPinned = (id: string): boolean => pinPresses.get(id) ?? pinnedIds.has(id);
+  const togglePin = (id: string) => {
+    const next = !isPinned(id);
+    setPinPresses((was) => new Map(was).set(id, next));
+    api.kuruPin(profile.id, id, next);
+  };
+  const pinOf = (item: NodeKuruItem) => (canPin(item) ? { pinned: isPinned(item.id), onPin: () => togglePin(item.id) } : null);
+  const [pinsOpen, setPinsOpen] = useState(false);
+  useEffect(() => setPinsOpen(false), [profile.id]);
+  /**
+   * A pin pressed in the list: the chat at its line, lit for a moment. Out of
+   * a search first, and onto every node or this one, since the line is this
+   * node's. A line already loaded is scrolled to and opened if folded, as a
+   * quote's is; anything older opens on a page around it, kept apart from the
+   * chat's own lines as a search's result is (`openResult`), and with nothing
+   * forced open, so its fold still works. The server's copy of the line is
+   * put among that page whatever it says, so a line it cannot find a page
+   * around is still drawn, whole.
+   */
+  const openPinned = (pin: KuruPin) => {
+    setPinsOpen(false);
+    if (searchOpen) {
+      leaveSearch();
+      putBack.current = false;
+    }
+    if (filter !== null && filter !== selfName) pickNode(null);
+    const item: NodeKuruItem = { ...pin.item, node: null };
+    const show = (smooth: boolean) => {
+      reveal(item, smooth);
+      setFlash(item.id);
+      stuck.current = false;
+    };
+    if (own.some((line) => line.id === item.id)) {
+      show(true);
+      return;
+    }
+    const keepApart = (pages: Map<string, KuruItem>, older: boolean, newer: boolean) => {
+      setViewing({ id: "", pages, older, newer });
+      show(false);
+    };
+    api
+      .fetchKuruAround(profile.id, item.at)
+      .then((page) => {
+        const pages = new Map(page.items.map((line) => [line.id, line] as const));
+        pages.set(item.id, pin.item);
+        keepApart(pages, page.older, page.newer && !page.items.some((line) => known.has(line.id)));
+      })
+      .catch(() => keepApart(new Map([[item.id, pin.item]]), false, false));
+  };
+
   // This page's own clips, before the server has them, and the one being recorded.
   const saving = searching ? [] : outgoing.filter((clip) => clip.profileId === profile.id && !known.has(clip.id));
   const recording = !searching && ui.phase === "listening" && !voiceIsRemote();
@@ -929,6 +999,7 @@ export function KuruDrawer({
         <button type="button" className={`kuru-head-btn kuru-head-icon ${searchOpen ? "kuru-head-btn-on" : ""}`} aria-pressed={searchOpen} aria-label="Search the conversation" title="Search the conversation (⌘F, or C-a /)" onClick={() => (searchOpen ? leaveSearch() : openSearch())}>
           <SearchIcon />
         </button>
+        {pins.length > 0 && <PinsButton count={pins.length} open={pinsOpen} onToggle={() => setPinsOpen((was) => !was)} />}
         {foldable.length > 0 && <FoldAll open={anyOpen} onFold={foldAll} />}
         {voice && <SpeakSwitch settings={voice.settings} />}
         {telegram && <TelegramSwitch status={telegram} />}
@@ -975,6 +1046,8 @@ export function KuruDrawer({
         </div>
       )}
 
+      {pinsOpen && pins.length > 0 && <PinsList pins={pins} onOpen={openPinned} onUnpin={(pin) => togglePin(pin.id)} onClose={() => setPinsOpen(false)} />}
+
       <HitWords.Provider value={lit ?? null}>
         <ol className={`kuru-list ${searching ? "kuru-searching" : ""}`} ref={list} onScroll={onScroll} onClick={onListClick}>
           {moreEarlier && (
@@ -1016,6 +1089,7 @@ export function KuruDrawer({
                     flash={flash === item.id || (searching && walked === item.id)}
                     folded={foldedOf(item) === true}
                     onFold={item.text ? () => toggleFold(item) : null}
+                    pin={pinOf(item)}
                   />
                 );
               })()
@@ -1030,6 +1104,7 @@ export function KuruDrawer({
                 quoteRef={quoteRefOf(item)}
                 flash={flash === item.id || (searching && walked === item.id)}
                 onResult={searching ? () => openResult(item) : null}
+                pin={pinOf(item)}
               />
             ) : (
               <Reply
@@ -1050,6 +1125,7 @@ export function KuruDrawer({
                 cardOf={item.node === null ? cardOf : noCards}
                 onCard={onCard}
                 onFile={onFile}
+                pin={pinOf(item)}
               />
             )),
           )}
@@ -1450,6 +1526,7 @@ function You({
   flash = false,
   folded = false,
   onFold = null,
+  pin = null,
 }: {
   item: YouItem;
   state: RowState;
@@ -1466,6 +1543,8 @@ function You({
   folded?: boolean;
   /** Fold it to one row, or open it. Null for a message with no words to fold. */
   onFold?: (() => void) | null;
+  /** Its pin, or null for a line that cannot take one (`canPin`). */
+  pin?: PinProps | null;
 }) {
   const word = state === "queued" ? (item.typedAt !== null ? "Sent" : STATE_WORD.queued) : STATE_WORD[state];
   const channel = isChannelKind(item.via) ? item.via : null;
@@ -1473,7 +1552,7 @@ function You({
   const line = folded && onFold && text ? firstLine(text) : null;
   return (
     <li
-      className={`kuru-item kuru-you kuru-you-${state} ${line ? "kuru-folded" : ""} ${flash ? "kuru-flash" : ""}`}
+      className={`kuru-item kuru-you kuru-you-${state} ${line ? "kuru-folded" : ""} ${flash ? "kuru-flash" : ""} ${pin?.pinned ? "kuru-pinned" : ""}`}
       data-item={item.id}
       onClick={line && onFold ? opensOnClick(onFold) : undefined}
     >
@@ -1501,6 +1580,7 @@ function You({
         )}
         {onReplyTo && item.text && <ReplyButton onReply={onReplyTo} />}
         {onFold && <FoldButton folded={line !== null} onFold={onFold} />}
+        {pin && <PinButton {...pin} />}
       </span>
       {!line && reply && <Quote quote={reply.ref} node={node ?? to} onOpen={onQuote} />}
       {line ? null : text ? (
@@ -1546,6 +1626,7 @@ function Reply({
   cardOf,
   onCard,
   onFile,
+  pin = null,
 }: {
   item: KuruReply;
   /** Whose Kuru said it, when that is another node's. */
@@ -1566,6 +1647,7 @@ function Reply({
   onCard: (workspaceId: string | null, cardId: string) => void;
   /** A path in the reply was opened. */
   onFile: () => void;
+  pin?: PinProps | null;
 }) {
   const active = replaying || item.fate === "speaking";
   // Parsed once per reply, not per draw: the drawer draws again on every
@@ -1584,7 +1666,7 @@ function Reply({
   );
   return (
     <li
-      className={`kuru-item kuru-reply ${item.aside ? "kuru-aside" : ""} ${item.fate ? `kuru-fate-${item.fate}` : ""} ${line ? "kuru-folded" : ""} ${marked ? "kuru-marked" : ""} ${flash ? "kuru-flash" : ""}`}
+      className={`kuru-item kuru-reply ${item.aside ? "kuru-aside" : ""} ${item.fate ? `kuru-fate-${item.fate}` : ""} ${line ? "kuru-folded" : ""} ${marked ? "kuru-marked" : ""} ${flash ? "kuru-flash" : ""} ${pin?.pinned ? "kuru-pinned" : ""}`}
       data-utterance={item.utterance ?? undefined}
       data-item={item.id}
       onClick={line ? opensOnClick(onFold) : undefined}
@@ -1618,6 +1700,7 @@ function Reply({
         )}
         <ReplyButton onReply={onReplyTo} />
         <FoldButton folded={line !== null} onFold={onFold} />
+        {pin && <PinButton {...pin} />}
       </span>
       {tree && (
         <div className="kuru-text kuru-md" {...(quoteRef ? quotable(quoteRef, "body", "message") : {})}>
@@ -1739,6 +1822,12 @@ function firstInView(el: HTMLElement): { id: string; top: number } | null {
   return null;
 }
 
+/** A line's pin, as the list hands it down: whether it is on, and the press. */
+interface PinProps {
+  pinned: boolean;
+  onPin: () => void;
+}
+
 /**
  * The arrow that answers one line: on hover where there is a pointer, and
  * always, quietly, on a touch screen, where nothing hovers. It keeps the
@@ -1848,6 +1937,7 @@ function Notice({
   quoteRef = null,
   flash = false,
   onResult = null,
+  pin = null,
 }: {
   item: NoticeItem;
   node?: string | null;
@@ -1859,6 +1949,7 @@ function Notice({
   flash?: boolean;
   /** It is a search's result, and a press on the line opens it in the chat rather than opening the message under it. */
   onResult?: (() => void) | null;
+  pin?: PinProps | null;
 }) {
   const [opened, setOpen] = useState(false);
   const query = useContext(HitWords);
@@ -1876,7 +1967,7 @@ function Notice({
   const tree = useMemo(() => (open && more ? replyTree(item.text) : null), [open, more, item.text]);
   const doors = useMemo<MarkdownDoors>(() => ({ leaf: (text) => <CardWords text={text} cardOf={cardOf} onCard={onCard} />, link: () => null }), [cardOf, onCard]);
   return (
-    <li className={`kuru-notice ${item.event === "blocked" ? "kuru-notice-blocked" : ""} ${flash ? "kuru-flash" : ""}`} data-item={item.id}>
+    <li className={`kuru-notice ${item.event === "blocked" ? "kuru-notice-blocked" : ""} ${flash ? "kuru-flash" : ""} ${pin?.pinned ? "kuru-pinned" : ""}`} data-item={item.id}>
       {/* The arrow beside the line rather than in it, since the line is a
           button already, and a button in a button is neither. */}
       <span className="kuru-notice-row">
@@ -1910,6 +2001,7 @@ function Notice({
           <time dateTime={new Date(item.at).toISOString()}>{saidAt(item.at)}</time>
         </button>
         <ReplyButton onReply={onReplyTo} />
+        {pin && <PinButton {...pin} />}
       </span>
       {tree && (
         <div className="kuru-notice-text kuru-md" {...(quoteRef ? quotable(quoteRef, "body", "message") : {})}>
