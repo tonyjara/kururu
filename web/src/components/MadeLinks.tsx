@@ -22,6 +22,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { madeName, readsInReader, type MadeFile } from "../../../shared/made";
 import { nodeOfId } from "../../../shared/remote";
+import { requestJump } from "../readerplace";
 import * as api from "../session";
 import { Icon } from "./Icon";
 import { NodeChip } from "./NodeChip";
@@ -43,6 +44,9 @@ function useOpenMade(workspaceId: string | null, onOpened: (() => void) | undefi
   }, [error]);
   const open = (file: MadeFile) => {
     setError(null);
+    // The server opens a document without its line, which only nvim is
+    // given; the reader that draws it takes the line from here.
+    if (file.line && readsInReader(file.path)) requestJump(file.root, file.path, file.line);
     // A phone draws one pane, so the one the file lands in is the one it
     // should be drawing. `App` says which window this is on <html>.
     const narrow = document.documentElement.hasAttribute("data-narrow");
@@ -129,6 +133,7 @@ export function MadeInline({ file, label, onOpened }: { file: MadeFile; label: R
 
 /** The whole path, and where a click takes it — on which computer, when it is not this one. */
 export function madeTitle(file: MadeFile, node: string | null = null): string {
-  const where = readsInReader(file.path) ? "in the reader" : `in nvim, in a new tab${file.line ? `, at line ${file.line}` : ""}`;
+  const at = file.line ? `, at line ${file.line}` : "";
+  const where = readsInReader(file.path) ? `in the reader${at}` : `in nvim, in a new tab${at}`;
   return `${file.path}\nOpen ${where}${node ? `, on ${node}` : ""}`;
 }

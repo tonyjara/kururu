@@ -126,6 +126,20 @@ line the reader was showing. Every block of the rendered file carries
 in `Reader.tsx` takes the last one at or above the reader's top; a reader not
 scrolled, or a tab that is not the one showing, opens at the top.
 
+**A document keeps its place, per device and per document**
+(`web/src/readerplace.ts`). The reader is unmounted whenever its strip shows a
+terminal, and one view is handed every document a strip shows, so the place
+cannot live in the view; it is kept in `localStorage` by root and path, as a
+block's `data-line` and how far into it — never a `scrollTop`, which the zoom,
+a narrower pane or a late image would all move to another paragraph. The
+view puts the same place back whenever the article changes size. A file that
+changed (a hash of the markup) is entered under the same heading, the same
+number of lines into its section and never past it, else at the same
+fraction. A link that names a line (`MadeLinks.tsx`) leaves a short-lived jump
+for the reader that draws that document, since `open-made` gives the line to
+nvim only; a `#fragment` is matched against GitHub-style slugs of the
+headings, which the renderer gives no ids, and never reaches the app's URL.
+
 `persist.ts` writes a pane's view tabs as `tabs` (the board and documents in
 order) and `showing`, and reads the older `reader`/`board` shape; `adoptReaders`
 turns a host blob's `reader.docs` into tabs, which is how an old server's

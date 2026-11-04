@@ -61,6 +61,17 @@ shows, so it is written once and read in three places — see
   every agent; until then everything works as it did, and Settings → About
   says the host is behind.
 
+### Fixed
+
+- **The reader keeps your place.** Switching to another tab and back no longer
+  puts a document back at its title: each one opens where you left it, after
+  a tab switch, closed and opened again, or a window reload, kept per device as
+  the zoom is. Zooming, or making the pane narrower, keeps the same words at the
+  top. A file that changed while you were away opens in the same section, under
+  the same heading, rather than at the top. Links to a heading in the document
+  (`#section`) now go to it, and a link that names a line — `docs/x.md:40` in
+  Kuru's reply, on an agent's row or a card — opens the document at that line.
+
 ## [0.6.0] - 2026-10-29
 
 Nothing in this release needs the pty host restarted, and the database, the
