@@ -99,6 +99,16 @@ const NOT_THEME = new Set([
   // The Kuru and needs drawers' width, shared between them on the same
   // terms again — see `App.tsx`'s `DRAWER_WIDTH_KEY`.
   "--drawer-w",
+  // The drawer's floor and the panes' beside it, written onto the root by
+  // `App.tsx` from `DRAWER_MIN` and `STAGE_FLOOR` so the drag's clamp and the
+  // layout's are one number each. Constants of the layout, not of a theme.
+  "--drawer-min",
+  "--stage-floor",
+  // The measure the drawer's text is set to and the margin that centres it,
+  // set on `.kuru-drawer` by the stylesheet itself — derived from `--fs-md`,
+  // which a skin does answer, so a skin moves them without naming them.
+  "--kuru-col",
+  "--kuru-gutter",
   // How deep a row of the file tree is, set per row by `FileTree.tsx`. A count,
   // not a length: the stylesheet decides how far one level indents.
   "--depth",

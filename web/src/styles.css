@@ -4810,8 +4810,9 @@ html.pill-page #root {
    dialogs (50) — a card opened from a reply draws its sheet over this. */
 .kuru-drawer {
   position: relative;
-  flex: none;
-  width: min(var(--drawer-w, 420px), 33vw);
+  flex: 0 1 auto;
+  width: var(--drawer-w, 420px);
+  min-width: min(var(--drawer-min, 320px), 25vw);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -4822,8 +4823,38 @@ html.pill-page #root {
   position: fixed;
   inset: 0;
   width: 100%;
+  min-width: 0;
   z-index: 45;
   border-left: none;
+}
+
+/* How wide the drawer may be is the panes' floor, not a ceiling of its own
+   (`STAGE_FLOOR` in `App.tsx` has the argument). The drawer is the one
+   column here that gives: `flex-shrink` with the width it was dragged to as
+   its basis, while the panes, whose `flex: 1` starts from nothing, stop at
+   `--stage-floor` — so a drawer dragged wider than the window allows, or a
+   window made narrower than the drawer, is a drawer drawn as wide as fits,
+   and never panes squeezed to nothing or a tree pushed off the edge. Held
+   to a third of the window as well, for a window so small that even the
+   floor would not fit beside a sidebar and a tree; and only while a drawer
+   is beside the panes, since a phone's sheet is over them, not beside. */
+.app-body:has(> .kuru-drawer:not(.kuru-sheet)) > .stage {
+  min-width: min(var(--stage-floor, 320px), 33vw);
+}
+/* The column the conversation is read in. The drawer is as wide as it was
+   dragged, but a line of Kuru's across fifteen hundred pixels is one the eye
+   loses its way back along, so what is written in it — the list, the live
+   line, the composer, the search, the node chips — keeps a measure set in
+   the type's own size (a skin with larger type keeps the same words to a
+   line), centred, with the drawer's ground either side. `--kuru-gutter` is
+   nothing until the drawer is wider than that: the percentage is resolved
+   where it is used, against the drawer, since every rule using it is on a
+   box the drawer's width is the width of. The head is left the full width,
+   because it is the right end of the window's top band and its buttons
+   belong at the edge the close is at. */
+.kuru-drawer {
+  --kuru-col: calc(56 * var(--fs-md));
+  --kuru-gutter: max(0px, calc((100% - var(--kuru-col)) / 2));
 }
 
 /* The sidebar's and the tree's grip, on the same reasoning: the left edge of
@@ -4953,7 +4984,7 @@ html.pill-page #root {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  padding: 6px 12px;
+  padding: 6px calc(12px + var(--kuru-gutter));
   border-bottom: var(--border) var(--border-style) var(--line);
 }
 .kuru-node-chip {
@@ -5078,7 +5109,7 @@ html.pill-page #root {
   flex: 1;
   min-height: 0;
   margin: 0;
-  padding: 8px 12px;
+  padding: 8px calc(12px + var(--kuru-gutter));
   list-style: none;
   display: flex;
   flex-direction: column;
@@ -5158,7 +5189,7 @@ html.pill-page #root {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 8px 5px 12px;
+  padding: 5px calc(8px + var(--kuru-gutter)) 5px calc(12px + var(--kuru-gutter));
   border-bottom: var(--border) var(--border-style) var(--line);
   color: var(--dim);
 }
@@ -5488,7 +5519,7 @@ button.kuru-quote:hover {
   align-items: center;
   gap: 8px;
   min-height: 34px;
-  padding: 4px 12px;
+  padding: 4px calc(12px + var(--kuru-gutter));
   font-size: var(--fs-base);
   color: var(--dim);
 }
@@ -5510,7 +5541,7 @@ button.kuru-quote:hover {
 }
 .kuru-live-error {
   margin: 0;
-  padding: 0 12px 6px 30px;
+  padding: 0 calc(12px + var(--kuru-gutter)) 6px calc(30px + var(--kuru-gutter));
   max-height: 9em;
   overflow-y: auto;
   font-size: var(--fs-sm);
@@ -5541,7 +5572,7 @@ button.kuru-quote:hover {
 .kuru-composer {
   position: relative;
   flex: none;
-  padding: 8px 10px;
+  padding: 8px calc(10px + var(--kuru-gutter));
   padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
   border-top: var(--border) var(--border-style) var(--line);
 }
@@ -5753,11 +5784,11 @@ button.kuru-quote:hover {
    field rather than to a click. */
 .kuru-suggest {
   position: absolute;
-  left: 10px;
+  left: calc(10px + var(--kuru-gutter));
   bottom: 100%;
   z-index: 3;
   min-width: 156px;
-  max-width: calc(100% - 20px);
+  max-width: calc(100% - 20px - 2 * var(--kuru-gutter));
   max-height: 40vh;
   overflow-y: auto;
   margin: 0 0 4px;

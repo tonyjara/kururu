@@ -149,12 +149,31 @@ const REMOTE_CARD_MS = 15_000;
  * The floor is read off what the drawer is for rather than off the sidebar's
  * names: it holds sentences, Kuru's and yours, and a column dragged narrower
  * than this wraps every line hard enough that reading it costs more than the
- * width it saved. The ceiling leaves the panes most of a laptop screen even
- * dragged all the way out. Per browser, on `SIDEBAR_WIDTH_KEY`'s reasoning.
+ * width it saved. Per browser, on `SIDEBAR_WIDTH_KEY`'s reasoning.
+ *
+ * There is no ceiling of the drawer's own. There was one, 640px and a third of
+ * the window, on the argument that the panes should keep most of a laptop
+ * screen — but a conversation is sometimes the thing being read, with the
+ * agents only glanced at, and then a third of the window was a column of
+ * wrapped lines beside a wall of terminal nobody was looking at. What is kept
+ * instead is the panes' floor, `STAGE_FLOOR`: the drawer may take everything
+ * but that, and the floor is enforced by the layout (`.stage`'s `min-width`
+ * while a drawer is beside it), not by this file, so a window made smaller
+ * than a saved width gives the drawer less and never pushes the panes, or
+ * the drawer's own grip, out of the window. The stored number is what was
+ * asked for and the layout draws what fits; a window made wide again gives it
+ * back. The text inside keeps its own measure however wide the drawer is —
+ * see `--kuru-col` in the stylesheet.
  */
 const DRAWER_DEFAULT = 420;
 const DRAWER_MIN = 320;
-const DRAWER_MAX = 640;
+/**
+ * What the panes keep while a drawer is beside them: room for a terminal still
+ * worth looking at and a pane strip's buttons, and — the reason it cannot be
+ * nothing — something to the left of the grip, so a drawer dragged all the
+ * way out can be dragged back.
+ */
+const STAGE_FLOOR = 320;
 const DRAWER_WIDTH_KEY = "kururu.drawer.width";
 
 /** The pick-list row that means "a new nvim" rather than one that is running. */
@@ -321,7 +340,7 @@ export function App() {
   const [filesSheet, setFilesSheet] = useState(false);
   const [filesWidth, setFilesWidth] = useState(() => storedWidth(FILES_WIDTH_KEY, FILES_DEFAULT, FILES_MIN, FILES_MAX));
   /** Kuru's and the needs drawer's width — one state for the one slot. */
-  const [drawerWidth, setDrawerWidth] = useState(() => storedWidth(DRAWER_WIDTH_KEY, DRAWER_DEFAULT, DRAWER_MIN, DRAWER_MAX));
+  const [drawerWidth, setDrawerWidth] = useState(() => storedWidth(DRAWER_WIDTH_KEY, DRAWER_DEFAULT, DRAWER_MIN, Infinity));
   /** Zen: the focused pane takes the window. A view state, never the server's. */
   const [zen, setZen] = useState(false);
   /**
@@ -669,9 +688,15 @@ export function App() {
   /** Remembered the same way as the tree's. */
   useRemembered(DRAWER_WIDTH_KEY, String(drawerWidth));
 
-  /** A width proposed by either drawer's grip, held between the floor and the ceiling. */
+  /**
+   * A width proposed by either drawer's grip, held above the floor. Held under
+   * the window too, though the layout would draw it no wider anyway: a pointer
+   * captured by the grip goes on reporting past the window's left edge, and a
+   * width nobody could have seen is a poor thing to remember.
+   */
   const resizeDrawer = useCallback((px: number) => {
-    setDrawerWidth(Math.round(Math.min(DRAWER_MAX, Math.max(DRAWER_MIN, px))));
+    const ceiling = Math.max(DRAWER_MIN, window.innerWidth - STAGE_FLOOR);
+    setDrawerWidth(Math.round(Math.min(ceiling, Math.max(DRAWER_MIN, px))));
   }, []);
 
   /** Remember the width for the next time this browser opens kururu. */
@@ -1425,7 +1450,7 @@ export function App() {
        — see `.app-band` in the stylesheet. */
     <div
       className={`app ${zen ? "app-zen" : ""} ${desktop() ? "app-window" : ""} ${sidebarOpen ? "" : "app-sidebar-hidden"} ${!zen && !narrow ? "app-band" : ""}`}
-      style={{ "--sidebar-w": `${sidebarWidth}px`, "--files-w": `${filesWidth}px`, "--drawer-w": `${drawerWidth}px` } as React.CSSProperties}
+      style={{ "--sidebar-w": `${sidebarWidth}px`, "--files-w": `${filesWidth}px`, "--drawer-w": `${drawerWidth}px`, "--drawer-min": `${DRAWER_MIN}px`, "--stage-floor": `${STAGE_FLOOR}px` } as React.CSSProperties}
     >
       {/* Everything but the bottom bar, side by side: the sidebar, the panes,
           a drawer, the tree. A row of its own since 2026-10-18 so that the bar
