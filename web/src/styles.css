@@ -5509,6 +5509,220 @@ button.kuru-quote:hover {
 .kuru-file:hover {
   background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
+/* Kuru's reply as the Markdown it was written in (`kurumd.ts`,
+   `KuruMarkdown.tsx`). Sized for a bubble, not for a page: the reader's `.md`
+   has a document's measure and margins and a heading's rule, and a bubble
+   has one paragraph's worth of room. The bubble was `pre-wrap` when it was
+   one string; a tree draws its own breaks, so the words wrap as words. Every
+   size is relative to the text's, so an aside — drawn a step smaller — keeps
+   its proportions. */
+.kuru-md {
+  white-space: normal;
+}
+.kuru-md > * + * {
+  margin-top: 0.55em;
+}
+.kuru-md p,
+.kuru-md ul,
+.kuru-md ol,
+.kuru-md blockquote,
+.kuru-md pre,
+.kuru-md table {
+  margin: 0;
+}
+/* A step up and bold, never a page's title: the biggest heading in a bubble is
+   a line that leads the paragraph under it. */
+.kuru-md-h {
+  margin: 0;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-strong);
+}
+.kuru-md-h1 {
+  font-size: 1.2em;
+}
+.kuru-md-h2 {
+  font-size: 1.1em;
+}
+.kuru-md-h3,
+.kuru-md-h4,
+.kuru-md-h5,
+.kuru-md-h6 {
+  font-size: 1em;
+}
+.kuru-md-h5,
+.kuru-md-h6 {
+  color: var(--dim);
+}
+.kuru-md > * + .kuru-md-h {
+  margin-top: 0.8em;
+}
+.kuru-md strong {
+  font-weight: 700;
+  color: var(--text-strong);
+}
+.kuru-md s {
+  color: var(--dim);
+}
+.kuru-md ul,
+.kuru-md ol {
+  padding-left: 1.4em;
+}
+.kuru-md li {
+  margin: 0.15em 0;
+}
+.kuru-md li > * + * {
+  margin-top: 0.25em;
+}
+/* A task's box stands where the bullet was; the browser's own box, which every
+   theme's ink reaches through `accent-color`. */
+.kuru-md-task {
+  list-style: none;
+  margin-left: -1.4em;
+  padding-left: 0;
+}
+.kuru-md-task > input {
+  margin: 0 0.45em 0 0;
+  vertical-align: -0.1em;
+  accent-color: var(--accent);
+}
+/* The task's first words stand beside its box, not under it. */
+.kuru-md-task > input + p {
+  display: inline;
+}
+.kuru-md blockquote {
+  padding: 0 0 0 0.8em;
+  border-left: var(--border-thick) var(--border-style) var(--line);
+  color: var(--dim);
+}
+.kuru-md :not(pre) > code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  padding: 0.05em 0.3em;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+  overflow-wrap: anywhere;
+}
+/* A fenced block: the mono face at the reader's ratio, scrolling sideways
+   inside the bubble rather than wrapping a command. It keeps the copy button
+   in its corner, so `position: relative` is for that. */
+.kuru-md pre {
+  position: relative;
+  padding: 8px 10px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  font-family: var(--mono);
+  font-size: 0.9em;
+  line-height: 1.45;
+  overflow-x: auto;
+  white-space: pre;
+}
+.kuru-md pre code {
+  font: inherit;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+/* The copy button: a glyph on hover where there is a pointer, always on a
+   touch screen, with no text in it so a selection across the block takes
+   the code alone. Said copied with the check for a moment. */
+.kuru-md-copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: inline-flex;
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  color: var(--dim);
+  background: var(--chrome);
+  border: var(--border) var(--border-style) var(--line);
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.kuru-md pre:hover > .kuru-md-copy,
+.kuru-md-copy:focus-visible,
+.kuru-md-copied {
+  opacity: 1;
+}
+.kuru-md-copy:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+.kuru-md-copied {
+  color: var(--done);
+}
+@media (pointer: coarse) {
+  .kuru-md-copy {
+    opacity: 1;
+  }
+}
+/* A table wider than the bubble scrolls inside it, never the drawer, the
+   way the reader's does: a block as wide as its content and no wider than
+   the bubble, with its own scroll. */
+.kuru-md table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+/* Words in a cell break at words, not anywhere: the bubble's `anywhere` is for
+   a path in a sentence, and in a table it broke "Workspace" in two on a phone
+   where the table should have scrolled. A path chip in a cell stays whole for
+   the same reason. */
+.kuru-md th,
+.kuru-md td {
+  border: var(--border) var(--border-style) var(--line);
+  padding: 3px 8px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: normal;
+}
+.kuru-md td .kuru-file,
+.kuru-md th .kuru-file {
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+.kuru-md th {
+  font-weight: 600;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+.kuru-md hr {
+  border: 0;
+  border-top: var(--border) var(--border-style) var(--line);
+  margin: 0.5em 0;
+}
+.kuru-md a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+.kuru-md a:hover {
+  text-decoration-color: var(--accent);
+}
+/* A link to nowhere kururu can take you — a path the server did not find, a
+   scheme it will not carry: the words, with where they pointed in the
+   tooltip. */
+.kuru-md-dead {
+  text-decoration: underline dotted;
+  text-decoration-color: var(--dimmer);
+  text-underline-offset: 2px;
+}
+.kuru-md img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+}
+/* A notice's message, a step dimmer than a reply, keeps its ink through the
+   tree. */
+.kuru-notice-text.kuru-md {
+  white-space: normal;
+}
 /* What Kuru is doing now: a line of its own between the list and the
    composer, so it stays in view however far up the list has been read, and
    is over the box the next message goes into. Inset as the list is, so its

@@ -291,6 +291,31 @@ the colours alternate. The socket carries the newest `KURU_RECENT` of each
 profile and everything on the two lists with something to do about it;
 **Show earlier** pages back through `GET /api/kuru`.
 
+**Kuru's replies are drawn as the Markdown they are written in** since
+2026-11-04: tables, lists nested and numbered, task boxes, headings a step up
+and no more, bold, italic, strikethrough, code spans in the mono face, fenced
+blocks with a copy button, quotes, rules and links. `web/src/kurumd.ts` parses a
+reply with markdown-it — the library the reader's server-side renderer uses, with
+the same `html: false` — into a small tree, and `KuruMarkdown.tsx` draws it,
+handing every run of words back to the drawer's own pipeline (`ReplyWords`:
+paths the server found as file doors, card codes as board doors, the search's
+marks), so a path in a table cell or a code span opens as one in a sentence did.
+The reader's renderer is not borrowed because it answers with HTML, and the
+doors and marks are React nodes inside the words; why that is the right split is
+at the top of `kurumd.ts`, and the tree is tested (`web/test/kurumd.test.ts`).
+Raw HTML in a reply is the characters, a `javascript:` or `data:` target is never
+a link, a web link opens outside the app, and a relative image is its alt text.
+A single newline is a line break, as the `pre-wrap` bubble drew it. A bare
+domain is not a link (`plan.md` is a file, not Moldova). A table wider than the
+bubble scrolls inside it, never the drawer. A folded line is the reply's first
+line with its block mark taken off, drawn inline. An agent's reply relayed as a
+notice is drawn the same way behind its tap. Your own messages stay as typed:
+they are what Kuru read, and their references are chips already. A quote or a
+reply's opening are the words as drawn and the raw text respectively, so the
+`[quote …]` and `[reply to …]` Kuru reads are unchanged. Replies do not stream —
+a turn's reply arrives whole from the hook — so a half-written `**` is only
+ever a `**`, and the parse is kept per reply, not per draw.
+
 **The search** is the magnifier in the header, ⌘F while the drawer is open
 (from a terminal too on a Mac, since no ⌘ chord reaches a pty; ctrl+f elsewhere,
 and there only with the keyboard in the drawer, since a terminal wants that one)
@@ -320,9 +345,11 @@ word is underlined and an exact one filled.
 
 Highlighting is strings: `splitHits` cuts a line's text and `Lit` draws each piece,
 at every leaf a line has, so a tag in a message draws as those characters, and a
-path's link or a card's door stays one with the highlight inside. The drawer
-renders no markdown, so there is none to break. A notice whose message has the
-words stands open while it is lit.
+path's link or a card's door stays one with the highlight inside. A reply's
+Markdown is a tree of leaves (below), and the highlight is inside a table cell or
+a code span as it is inside a sentence — a phrase that crosses a `**` is two
+leaves and lights as two. A notice whose message has the words stands open while
+it is lit.
 
 A result clicked (or reached with the arrows and Enter) opens the chat at that line
 with the words still lit. Older than anything loaded, it opens on a page from

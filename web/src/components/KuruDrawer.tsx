@@ -120,6 +120,18 @@
  * Searching opens no fold for good and hears no reply: a reply in view among
  * results has not been read as one of a conversation, so it stays unheard.
  *
+ * **Kuru's words are Markdown, and drawn as such** since 2026-11-04: a
+ * table is a table, a list a list, `code` in the mono face, headings a
+ * step up, a fence a block with a copy button. The parse is `kurumd.ts`
+ * and the drawing `KuruMarkdown.tsx`, and every run of words in the tree
+ * still comes through `ReplyWords` here, so a path in a table cell is the
+ * door it was in a sentence and a search's words are lit inside a code
+ * span. A folded line is its first line with the block mark taken off.
+ * Your own messages are drawn as you typed them: they are what Kuru read,
+ * a `*` you typed is a `*`, and their references are chips already. A
+ * quote selects the words as drawn, which is what you saw. Why the reader's
+ * renderer is not borrowed is at the top of `kurumd.ts`.
+ *
  * What it draws is the server's `kuru` message (`shared/kuru.ts`), already
  * merged: nothing in here decides what a message's state is or whether a
  * reply was heard. What it adds is this page's own two states for a clip the
@@ -129,7 +141,7 @@ import { Fragment, createContext, useCallback, useContext, useDeferredValue, use
 import { cardCode } from "../../../shared/board";
 import { CHANNEL_NAMES, channelReady, isChannelKind, type TelegramStatus } from "../../../shared/channels";
 import { dropRefusal } from "../../../shared/drops";
-import { KURU_SEEN_MS, addressMatches, addressOf, addressQuery, clipLength, insertLine, insertWords, mergeNodes, pickAddress, quotedLine, replyRefOf, splitCardCodes, splitCardRefs, typedAddress, type CardRef, type KuruItem, type KuruReply, type NodeKuruItem, type NoticeItem, type PeerKuru, type YouItem } from "../../../shared/kuru";
+import { KURU_SEEN_MS, addressMatches, addressOf, addressQuery, clipLength, insertLine, insertWords, mergeNodes, pickAddress, quotedLine, replyRefOf, splitCardCodes, splitCardRefs, typedAddress, type CardRef, type KuruFile, type KuruItem, type KuruReply, type NodeKuruItem, type NoticeItem, type PeerKuru, type YouItem } from "../../../shared/kuru";
 import { matchItem, parseKuruQuery, splitHits, type KuruQuery } from "../../../shared/kurusearch";
 import { splitMentions } from "../../../shared/made";
 import type { AgentSnapshot, MascotConfig, Profile } from "../../../shared/model";
@@ -139,6 +151,7 @@ import { filesStillIn } from "../chips";
 import { escapePath, handoverFrom, isFileDrag } from "../drop";
 import { kuruLive, kuruWorking, setKuruSearchExit, takeKuruSearch, takeKuruWords, useKuruDrawer, type KuruLive } from "../kuru";
 import { firstLine, foldKeys, foldText, isFolded, isLong, readFolds, useFoldLong, withFold, withFolds, writeFolds, type Folds } from "../kurufold";
+import { foldInline, replyTree } from "../kurumd";
 import { useKuruSearch } from "../kurusearch";
 import { isLoopback } from "../preview";
 import * as api from "../session";
@@ -146,6 +159,7 @@ import { useKururu } from "../session";
 import { dismissVoice, talkDown, talkUp, useOutgoing, useVoiceUi, voiceIsRemote, voiceNow } from "../voice";
 import { ChipField, type ChipFieldHandle } from "./ChipField";
 import { Icon } from "./Icon";
+import { KuruInline, KuruMarkdown, type MarkdownDoors } from "./KuruMarkdown";
 import { MadeInline } from "./MadeLinks";
 import { quotable } from "./Quote";
 import { Mascot } from "./Status";
@@ -1554,7 +1568,20 @@ function Reply({
   onFile: () => void;
 }) {
   const active = replaying || item.fate === "speaking";
-  const line = folded ? firstLine(item.text) : null;
+  // Parsed once per reply, not per draw: the drawer draws again on every
+  // message of the socket, and a long conversation is hundreds of replies.
+  const tree = useMemo(() => (folded ? null : replyTree(item.text)), [folded, item.text]);
+  const line = useMemo(() => (folded ? foldInline(item.text) : null), [folded, item.text]);
+  const doors = useMemo<MarkdownDoors>(
+    () => ({
+      leaf: (text) => <ReplyWords text={text} files={item.files} cardOf={cardOf} onCard={onCard} onFile={onFile} />,
+      link: (href, label) => {
+        const file = fileNamed(item.files, href);
+        return file ? <MadeInline file={file} label={label} onOpened={onFile} /> : null;
+      },
+    }),
+    [item.files, cardOf, onCard, onFile],
+  );
   return (
     <li
       className={`kuru-item kuru-reply ${item.aside ? "kuru-aside" : ""} ${item.fate ? `kuru-fate-${item.fate}` : ""} ${line ? "kuru-folded" : ""} ${marked ? "kuru-marked" : ""} ${flash ? "kuru-flash" : ""}`}
@@ -1586,19 +1613,35 @@ function Reply({
         ) : null}
         {line && (
           <FoldLine more={line.more}>
-            <ReplyWords text={line.line} files={item.files} cardOf={cardOf} onCard={onCard} onFile={onFile} />
+            <KuruInline nodes={line.children} doors={doors} />
           </FoldLine>
         )}
         <ReplyButton onReply={onReplyTo} />
         <FoldButton folded={line !== null} onFold={onFold} />
       </span>
-      {!line && (
-        <p className="kuru-text" {...(quoteRef ? quotable(quoteRef, "body", "message") : {})}>
-          <ReplyWords text={item.text} files={item.files} cardOf={cardOf} onCard={onCard} onFile={onFile} />
-        </p>
+      {tree && (
+        <div className="kuru-text kuru-md" {...(quoteRef ? quotable(quoteRef, "body", "message") : {})}>
+          <KuruMarkdown blocks={tree} doors={doors} />
+        </div>
       )}
     </li>
   );
+}
+
+/**
+ * The file a link's target names, among the ones the server found in the
+ * reply: by the words as written (`KuruFile.text` is the target as the
+ * reply spelt it), or decoded, since a link has to spell a space `%20`.
+ */
+function fileNamed(files: KuruReply["files"], href: string): KuruFile | null {
+  if (!files?.length) return null;
+  let decoded = href;
+  try {
+    decoded = decodeURIComponent(href);
+  } catch {
+    // Spelt with a stray `%`: the words as written are the only match.
+  }
+  return files.find((file) => file.text === href || file.text === decoded) ?? null;
 }
 
 /**
@@ -1827,6 +1870,11 @@ function Notice({
   // Another node's notice about its agents crosses without the reply it
   // quoted (`peerItems`), so there is nothing behind a tap.
   const more = item.text.trim().length > 0;
+  // An agent's reply relayed as a notice is Markdown as a reply of Kuru's is;
+  // the server finds no files in it, so a path in it is words and a card
+  // code the one door.
+  const tree = useMemo(() => (open && more ? replyTree(item.text) : null), [open, more, item.text]);
+  const doors = useMemo<MarkdownDoors>(() => ({ leaf: (text) => <CardWords text={text} cardOf={cardOf} onCard={onCard} />, link: () => null }), [cardOf, onCard]);
   return (
     <li className={`kuru-notice ${item.event === "blocked" ? "kuru-notice-blocked" : ""} ${flash ? "kuru-flash" : ""}`} data-item={item.id}>
       {/* The arrow beside the line rather than in it, since the line is a
@@ -1863,10 +1911,10 @@ function Notice({
         </button>
         <ReplyButton onReply={onReplyTo} />
       </span>
-      {open && more && (
-        <p className="kuru-notice-text" {...(quoteRef ? quotable(quoteRef, "body", "message") : {})}>
-          <CardWords text={item.text} cardOf={cardOf} onCard={onCard} />
-        </p>
+      {tree && (
+        <div className="kuru-notice-text kuru-md" {...(quoteRef ? quotable(quoteRef, "body", "message") : {})}>
+          <KuruMarkdown blocks={tree} doors={doors} />
+        </div>
       )}
     </li>
   );
