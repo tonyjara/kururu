@@ -309,8 +309,13 @@ A single newline is a line break, as the `pre-wrap` bubble drew it. A bare
 domain is not a link (`plan.md` is a file, not Moldova). A table wider than the
 bubble scrolls inside it, never the drawer. A folded line is the reply's first
 line with its block mark taken off, drawn inline. An agent's reply relayed as a
-notice is drawn the same way behind its tap. Your own messages stay as typed:
-they are what Kuru read, and their references are chips already. A quote or a
+notice is drawn the same way behind its tap. Your own messages are not
+Markdown: they are what Kuru read, and are drawn as the box drew them while you
+wrote them — each card reference, quote and file reference the chip it was
+there (`shared/chips.ts`), a card's chip a door onto the card and a quote of a
+chat line a door back to that line, any other chip opened in place by a press.
+A quote of a line of the chat is that one chip, not the line's opening over the
+whole quote; a reply made with the arrow alone keeps the opening over the words. A quote or a
 reply's opening are the words as drawn and the raw text respectively, so the
 `[quote …]` and `[reply to …]` Kuru reads are unchanged. Replies do not stream —
 a turn's reply arrives whole from the hook — so a half-written `**` is only

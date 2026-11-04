@@ -24,6 +24,7 @@
  * to be shown, with nothing more to ask for.
  */
 import type { KuruItem, NoticeItem, KuruReply, YouItem } from "./kuru";
+import { plainChips } from "./chips";
 import { splitReply } from "./reply";
 
 /** One pinned line, as the drawer is sent it. */
@@ -57,14 +58,15 @@ export function canPin(item: KuruItem & { node?: string | null }): item is (YouI
 /**
  * What a pin's entry says of its line: the words it opens with, on one line,
  * without the reference a reply carries in front (which the line itself draws
- * as a quote), and with the marks of Markdown a reply is written in taken off —
+ * as a quote), a card's reference and a quote spelt as the chips the line
+ * draws (`plainChips`), and with the marks of Markdown a reply is written in taken off —
  * a list's dash, a heading's hashes, the stars and ticks around words — since
  * the entry is one line of plain words and a `##` there is noise.
  */
 export function pinOpening(item: YouItem | KuruReply | NoticeItem, max = PIN_OPENING_MAX): string {
   let words: string;
   if (item.kind === "notice") words = [item.from, item.agent?.name ? `"${item.agent.name}"` : item.agent?.program, item.what].filter(Boolean).join(" · ");
-  else if (item.kind === "you") words = item.text === null ? "" : (splitReply(item.text)?.text ?? item.text);
+  else if (item.kind === "you") words = item.text === null ? "" : plainChips(splitReply(item.text)?.text ?? item.text);
   else words = item.text;
   const plain = words
     .split("\n")

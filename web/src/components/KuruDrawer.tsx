@@ -149,14 +149,14 @@ import { Fragment, createContext, useCallback, useContext, useDeferredValue, use
 import { cardCode } from "../../../shared/board";
 import { CHANNEL_NAMES, channelReady, isChannelKind, type TelegramStatus } from "../../../shared/channels";
 import { dropRefusal } from "../../../shared/drops";
-import { KURU_SEEN_MS, addressMatches, addressOf, addressQuery, clipLength, insertLine, insertWords, mergeNodes, pickAddress, quotedLine, replyRefOf, splitCardCodes, splitCardRefs, typedAddress, type CardRef, type KuruFile, type KuruItem, type KuruReply, type NodeKuruItem, type NoticeItem, type PeerKuru, type YouItem } from "../../../shared/kuru";
+import { KURU_SEEN_MS, addressMatches, addressOf, addressQuery, clipLength, insertLine, insertWords, mergeNodes, pickAddress, quotedLine, replyRefOf, splitCardCodes, typedAddress, type CardRef, type KuruFile, type KuruItem, type KuruReply, type NodeKuruItem, type NoticeItem, type PeerKuru, type YouItem } from "../../../shared/kuru";
 import { canPin, sortPins, type KuruPin } from "../../../shared/kurupin";
 import { matchItem, parseKuruQuery, splitHits, type KuruQuery } from "../../../shared/kurusearch";
 import { splitMentions } from "../../../shared/made";
 import type { AgentSnapshot, MascotConfig, Profile } from "../../../shared/model";
 import { REPLY_ME, replyClock, replyReference, splitReply, withReply, type ReplyRef } from "../../../shared/reply";
 import type { OutboxState, VoiceSettings } from "../../../shared/voice";
-import { filesStillIn } from "../chips";
+import { chipsIn, filesStillIn, piecesOf, type Chip } from "../../../shared/chips";
 import { escapePath, handoverFrom, isFileDrag } from "../drop";
 import { kuruLive, kuruWorking, setKuruSearchExit, takeKuruSearch, takeKuruWords, useKuruDrawer, type KuruLive } from "../kuru";
 import { firstLine, foldKeys, foldText, isFolded, isLong, readFolds, useFoldLong, withFold, withFolds, writeFolds, type Folds } from "../kurufold";
@@ -166,7 +166,7 @@ import { isLoopback } from "../preview";
 import * as api from "../session";
 import { useKururu } from "../session";
 import { dismissVoice, talkDown, talkUp, useOutgoing, useVoiceUi, voiceIsRemote, voiceNow } from "../voice";
-import { ChipField, type ChipFieldHandle } from "./ChipField";
+import { CHIP_ICONS, CHIP_WORD, ChipField, type ChipFieldHandle } from "./ChipField";
 import { Icon } from "./Icon";
 import { KuruInline, KuruMarkdown, type MarkdownDoors } from "./KuruMarkdown";
 import { PinButton, PinsButton, PinsList } from "./KuruPins";
@@ -1085,6 +1085,10 @@ export function KuruDrawer({
                     onCard={onCard}
                     reply={reply}
                     onQuote={quoted ? () => goTo(quoted) : null}
+                    answerOf={(ref) => {
+                      const line = quotedOf(ref, item.node ?? to, item.at);
+                      return line ? () => goTo(line) : null;
+                    }}
                     onReplyTo={() => replyTo(item)}
                     flash={flash === item.id || (searching && walked === item.id)}
                     folded={foldedOf(item) === true}
@@ -1509,8 +1513,12 @@ function TelegramSwitch({ status }: { status: TelegramStatus }) {
  * this one's was addressed to with `@`, on its way there. A reply draws the
  * line it answers as a quote over the words, a door back to that line when
  * `onQuote` found it, and the reference itself — written for Kuru — not at
- * all. Folded, it is the meta line with the first of its words in it, and
- * the quote is behind the fold with the rest.
+ * all. A reply the box drew as a quote's chip — the reference and the words
+ * quoted after it, which is what quoting a line of the chat writes — is drawn
+ * as that chip, the door back to the line, rather than as the line's opening
+ * over the whole of the words quoted: what was sent is what was seen. Folded,
+ * it is the meta line with the first of its words in it, and the quote is
+ * behind the fold with the rest.
  */
 function You({
   item,
@@ -1522,6 +1530,7 @@ function You({
   onCard,
   reply = null,
   onQuote = null,
+  answerOf = noAnswers,
   onReplyTo = null,
   flash = false,
   folded = false,
@@ -1537,6 +1546,8 @@ function You({
   onCard?: (workspaceId: string | null, cardId: string) => void;
   reply?: { ref: ReplyRef; text: string } | null;
   onQuote?: (() => void) | null;
+  /** The door back to a line of the chat a quote in the words is of, or null when that line is not loaded. */
+  answerOf?: AnswerOf;
   /** Reply to this message. Null for a clip still on this page, which has no words to quote. */
   onReplyTo?: (() => void) | null;
   flash?: boolean;
@@ -1548,8 +1559,10 @@ function You({
 }) {
   const word = state === "queued" ? (item.typedAt !== null ? "Sent" : STATE_WORD.queued) : STATE_WORD[state];
   const channel = isChannelKind(item.via) ? item.via : null;
-  const text = reply ? reply.text : item.text;
+  const inline = reply !== null && item.text !== null && quotesAtFront(item.text);
+  const text = reply && !inline ? reply.text : item.text;
   const line = folded && onFold && text ? firstLine(text) : null;
+  const words = (shown: string) => <SentWords text={shown} refOf={refOf} onCard={onCard} answerOf={answerOf} />;
   return (
     <li
       className={`kuru-item kuru-you kuru-you-${state} ${line ? "kuru-folded" : ""} ${flash ? "kuru-flash" : ""} ${pin?.pinned ? "kuru-pinned" : ""}`}
@@ -1575,17 +1588,17 @@ function You({
         {word && <span className={`kuru-state kuru-state-${state}`}>{word}</span>}
         {line && (
           <FoldLine more={line.more}>
-            <RefWords text={line.line} refOf={refOf} onCard={onCard} />
+            {words(line.line)}
           </FoldLine>
         )}
         {onReplyTo && item.text && <ReplyButton onReply={onReplyTo} />}
         {onFold && <FoldButton folded={line !== null} onFold={onFold} />}
         {pin && <PinButton {...pin} />}
       </span>
-      {!line && reply && <Quote quote={reply.ref} node={node ?? to} onOpen={onQuote} />}
+      {!line && reply && !inline && <Quote quote={reply.ref} node={node ?? to} onOpen={onQuote} />}
       {line ? null : text ? (
         <p className="kuru-text">
-          <RefWords text={text} refOf={refOf} onCard={onCard} />
+          {words(text)}
         </p>
       ) : (
         <p className="kuru-text kuru-pending">Not in words yet — the audio is kept.</p>
@@ -1866,35 +1879,69 @@ function Quote({ quote, node, onOpen }: { quote: ReplyRef; node: string | null; 
 
 type CardOf = (code: string) => { workspaceId: string | null; cardId: string } | null;
 type RefOf = (ref: CardRef) => { workspaceId: string | null; cardId: string } | null;
+type AnswerOf = (ref: ReplyRef) => (() => void) | null;
+const noAnswers: AnswerOf = () => null;
 
 /**
- * Your words with each card reference drawn as what you picked — the code,
- * a door onto the card, and the title — and not as the ids in brackets,
- * which were written for Kuru. A reference whose card is gone, or is another
- * node's, keeps the chip's look without being a button.
+ * Whether a message of yours opens with a quote of a line of the chat — the
+ * reference and the quote as one chip (`chipsIn`) — after the `@node` that
+ * routes it, if any. That is a reply drawn as its chip, not over its words.
  */
-function RefWords({ text, refOf, onCard }: { text: string; refOf: RefOf; onCard?: (workspaceId: string | null, cardId: string) => void }) {
+function quotesAtFront(text: string): boolean {
+  const first = chipsIn(text)[0];
+  return first?.answers !== undefined && /^\s*(?:@[\p{L}\p{N}-]+[,:]?\s*)?$/u.test(text.slice(0, first.from));
+}
+
+/**
+ * Your words as Kuru's box drew them while you wrote them: each run written
+ * for Kuru — a card's reference, a quote, a file's reference — as the same
+ * chip (`chips.ts`, `ChipField.tsx`), and the rest as words. A card's chip is
+ * a door onto the card, and the chip of a quote of a line of the chat a door
+ * back to that line, when `answerOf` found it; any other chip opens in place
+ * on a press to show all it stands for, as the box's does on a tap. A card
+ * that is gone, or another node's, keeps its chip without the door.
+ */
+function SentWords({ text, refOf, onCard, answerOf }: { text: string; refOf: RefOf; onCard?: (workspaceId: string | null, cardId: string) => void; answerOf: AnswerOf }) {
+  const pieces = useMemo(() => piecesOf(text), [text]);
   return (
     <>
-      {splitCardRefs(text).map((bit, j) => {
-        if ("text" in bit) return <Lit key={j} text={bit.text} />;
-        const card = onCard ? refOf(bit.ref) : null;
-        return (
-          <Fragment key={j}>
-            {card ? (
-              <button className="kuru-card" onClick={() => onCard!(card.workspaceId, card.cardId)} title="Open the board at this card">
-                <Lit text={bit.ref.code} />
-              </button>
-            ) : (
-              <span className="kuru-card">
-                <Lit text={bit.ref.code} />
-              </span>
-            )}{" "}
-            “<Lit text={bit.ref.title} />”
-          </Fragment>
-        );
+      {pieces.map((piece, j) => {
+        if ("text" in piece) return <Lit key={j} text={piece.text} />;
+        const chip = piece.chip;
+        const card = chip.kind === "card" && chip.card && onCard ? refOf(chip.card) : null;
+        const door = card ? () => onCard!(card.workspaceId, card.cardId) : chip.answers ? answerOf(chip.answers) : null;
+        return <SentChip key={j} chip={chip} door={door} doorTitle={card ? "Open the board at this card" : "Go to the message this answers"} />;
       })}
     </>
+  );
+}
+
+/** One chip in a sent message, drawn as the box draws it (`chipNode` in `ChipField.tsx`), with its door or its press to open. */
+function SentChip({ chip, door, doorTitle }: { chip: Chip; door: (() => void) | null; doorTitle: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <button
+      type="button"
+      className={`kc kc-${chip.kind} ${open ? "kc-open" : ""}`}
+      title={door ? `${chip.full}\n${doorTitle}` : chip.full}
+      aria-label={`${CHIP_WORD[chip.kind]}: ${chip.full}`}
+      aria-expanded={door ? undefined : open}
+      onClick={door ?? (() => setOpen((was) => !was))}
+    >
+      <svg className="kc-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: CHIP_ICONS[chip.kind] }} />
+      {chip.kind === "card" && (
+        <span className="kc-code">
+          <Lit text={chip.source} />
+        </span>
+      )}
+      <span className="kc-label">
+        <Lit text={chip.label} />
+      </span>
+      {chip.kind === "quote" && chip.source && <span className="kc-from">{chip.source}</span>}
+      <span className="kc-full">
+        <Lit text={chip.full} />
+      </span>
+    </button>
   );
 }
 

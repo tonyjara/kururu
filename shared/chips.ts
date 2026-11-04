@@ -13,6 +13,16 @@
  * a quote's opening words and the card it is from, a file's name — and only
  * the drawing changes.
  *
+ * The same reading draws the message once it is sent. A bubble of yours that
+ * showed the quote whole, and the ids beside it, was not the message you had
+ * written: the box showed a chip and the drawer then showed what the chip
+ * stood for. So the drawer reads a sent message here too and draws the chips
+ * the box drew, and the places that can show only text — the echo into
+ * Telegram, a pin's opening words, a quote of your own line — take
+ * `plainChips`, the same chips spelt as short words. What reaches Kuru is
+ * untouched by either. It is in `shared/` for that reason: the server's echo
+ * reads it as the window does.
+ *
  * This is the reading of a draft into words and chips, and nothing else: pure,
  * so the tests can hold it to the formats `cardReference`, `quoteReference`,
  * `replyReference`, `fileReference` and `escapePath` write. The patterns are this file's own
@@ -26,7 +36,18 @@
  * path someone writes out to Kuru is words.
  */
 
+import type { ReplyRef } from "./reply";
+
 export type ChipKind = "card" | "quote" | "image" | "file";
+
+/** A card as a reference names it: what a card chip, or a quote of a card, is a door onto. */
+export interface ChipCard {
+  code: string;
+  title: string;
+  /** A workspace id, `profile`, or `node:wid` for another node's (`cardPlace`). */
+  place: string;
+  cardId: string;
+}
 
 export interface Chip {
   kind: ChipKind;
@@ -39,6 +60,10 @@ export interface Chip {
   source: string;
   /** Everything there is to show, for the hover and for a chip opened by a tap. */
   full: string;
+  /** The card a card's reference or a quote of a card is of, for a sent message's door onto it. */
+  card?: ChipCard;
+  /** The line of the conversation a quote is of, as its `[reply to …]` named it — a sent message's door back to that line. */
+  answers?: ReplyRef;
 }
 
 export type Piece = { text: string } | { chip: Chip };
@@ -109,15 +134,17 @@ export function chipsIn(draft: string, files: readonly string[] = []): Chip[] {
     const to = at + match[0].length;
     if (g.code !== undefined) {
       const title = g.title ?? "";
+      const card = { code: g.code, title, place: g.place ?? "", cardId: g.cardId ?? "" };
       if (g.cquote !== undefined) {
         const what = g.cpart ? "the title" : `"${g.cquote}"`;
-        chips.push({ kind: "quote", from: at, to, label: g.cpart ? `title: ${quoteHint(g.cquote)}` : quoteHint(g.cquote), source: g.code, full: `${what} — from ${g.code} "${title}"` });
+        chips.push({ kind: "quote", from: at, to, label: g.cpart ? `title: ${quoteHint(g.cquote)}` : quoteHint(g.cquote), source: g.code, full: `${what} — from ${g.code} "${title}"`, card });
       } else {
-        chips.push({ kind: "card", from: at, to, label: title, source: g.code, full: `${g.code} "${title}"` });
+        chips.push({ kind: "card", from: at, to, label: title, source: g.code, full: `${g.code} "${title}"`, card });
       }
     } else if (g.rquote !== undefined) {
       const source = `${g.who} ${g.when}`;
-      chips.push({ kind: "quote", from: at, to, label: quoteHint(g.rquote), source, full: `"${g.rquote}" — from ${source}: "${g.rwords}"` });
+      const answers = { who: g.who ?? "", when: g.when ?? "", quote: g.rwords ?? "", id: g.rid ?? null };
+      chips.push({ kind: "quote", from: at, to, label: quoteHint(g.rquote), source, full: `"${g.rquote}" — from ${source}: "${g.rwords}"`, answers });
     } else if (g.fpath !== undefined) {
       const where = [`${g.fpath}${g.fline ? `, ${g.fline.includes("-") ? "lines" : "line"} ${g.fline.replace("-", "–")}` : ""}`, g.fproject ? `in ${g.fproject}` : "", g.fhead ? `under "${g.fhead}"` : ""].filter(Boolean).join(" ");
       const name = fileName(g.fpath.replace(/^[^/:]+:(?=[~/])/, ""));
@@ -156,6 +183,25 @@ export function piecesOf(draft: string, files: readonly string[] = []): Piece[] 
   }
   if (last < draft.length) pieces.push({ text: draft.slice(last) });
   return pieces;
+}
+
+/**
+ * A message with its chips spelt as the short words they show, for a place
+ * that can hold only text: a card as its code and title, a quote as its
+ * opening in quotation marks and what it is from, a file as its name. What
+ * the box would have drawn, so the person reads there what they wrote; Kuru
+ * is never sent this.
+ */
+export function plainChips(text: string): string {
+  return piecesOf(text)
+    .map((piece) => {
+      if ("text" in piece) return piece.text;
+      const chip = piece.chip;
+      if (chip.kind === "card") return `${chip.source} "${chip.label}"`;
+      if (chip.kind === "quote") return chip.source ? `“${chip.label}” (${chip.source})` : `“${chip.label}”`;
+      return chip.label;
+    })
+    .join("");
 }
 
 /**

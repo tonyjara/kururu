@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { escapePath } from "../src/drop";
-import { chipAt, chipsIn, fileName, filesStillIn, piecesOf, quoteHint, unescapePath } from "../src/chips";
+import { chipAt, chipsIn, fileName, filesStillIn, piecesOf, plainChips, quoteHint, unescapePath } from "../../shared/chips";
 import { cardReference, quoteReference } from "../../shared/kuru";
 import { replyReference } from "../../shared/reply";
 
@@ -91,5 +91,82 @@ describe("helpers", () => {
     expect(unescapePath("/a/My\\ File\\(1\\).png")).toBe("/a/My File(1).png");
     expect(fileName("/a/b/c.txt")).toBe("c.txt");
     expect(filesStillIn("x /a.png y", ["/a.png", "/b.png", ""])).toEqual(["/a.png"]);
+  });
+});
+
+/**
+ * A sent message read back into the chips the box drew (`SentWords` in the
+ * drawer) and into their short words (`plainChips`), held to the messages
+ * that really reached Kuru — the text itself is never changed.
+ */
+describe("a sent message", () => {
+  const REPLY_QUOTE = '[reply to Kuru 20:39 "Yes, Omarchy is updated: the box pulled 1e7f437 and its server restarted, and …" (t6339)] [quote "The old Pasapy post — the one with the wrong price — is still up. Should I delete it, or do you want to do it?"] I deleted this';
+  const CARD = '[card JAJ-53 "Check whether…" (w34/c5e803f7ca1c7)] brand was taken';
+
+  test("a quote of a line of the chat is one chip from that line, with the line it answers", () => {
+    const [chip, ...rest] = chipsIn(REPLY_QUOTE);
+    expect(rest).toEqual([]);
+    expect(chip).toMatchObject({ kind: "quote", from: 0, source: "Kuru 20:39", label: "The old Pasapy post —…", answers: { who: "Kuru", when: "20:39", id: "t6339" } });
+    expect(chip!.answers!.quote).toStartWith("Yes, Omarchy is updated");
+    expect(chip!.full).toContain("Should I delete it, or do you want to do it?");
+    expect(REPLY_QUOTE.slice(chip!.to)).toBe(" I deleted this");
+  });
+
+  test("a quote of a line from another day, and one with no id (from Telegram), are chips too", () => {
+    const [a] = chipsIn('[reply to me Oct 24 18:42 "deploy staging" (t9)] [quote "staging"] and prod');
+    expect(a).toMatchObject({ source: "me Oct 24 18:42", label: "staging", answers: { who: "me", when: "Oct 24 18:42", id: "t9" } });
+    const [b] = chipsIn('[reply to Kuru 18:42 "Want me to retry?"] [quote "retry"] yes');
+    expect(b!.answers).toMatchObject({ id: null, quote: "Want me to retry?" });
+  });
+
+  test("a card's reference is its chip with the card it names, the door onto it", () => {
+    const [chip] = chipsIn(CARD);
+    expect(chip).toMatchObject({ kind: "card", source: "JAJ-53", label: "Check whether…", card: { code: "JAJ-53", title: "Check whether…", place: "w34", cardId: "c5e803f7ca1c7" } });
+    expect(chip!.answers).toBeUndefined();
+    const [remote] = chipsIn('[card OM-2 "Fix it" (omarchy:w3/c0123456789ab)] see');
+    expect(remote!.card!.place).toBe("omarchy:w3");
+  });
+
+  test("a quote of a card, of its body and of its title, carries the card", () => {
+    const body = quoteReference(REF, { part: "body", text: "the gap under the box", comment: "still there" });
+    const title = quoteReference(REF, { part: "title", text: "Test the new Platypost build", comment: "" });
+    expect(chipsIn(body)[0]).toMatchObject({ kind: "quote", source: "MV-69", label: "the gap under the box", card: { cardId: "c4f0d4bbf152d" } });
+    expect(chipsIn(title)[0]).toMatchObject({ kind: "quote", label: "title: Test the new Platypost build", card: { code: "MV-69" } });
+  });
+
+  test("several quotes in one message are each their own chip, in order, with the words between kept", () => {
+    const reply = replyReference({ who: "Kuru", when: "18:42", quote: "Two things went wrong", id: "t1" });
+    const text = [
+      quoteReference(REF, { part: "body", text: "the gap under the box", comment: "fix this" }),
+      quoteReference(reply, { part: "body", text: "the build broke", comment: "and this" }),
+      '[quote "a lone one"] last',
+    ].join("\n");
+    const pieces = piecesOf(text);
+    const chips = pieces.flatMap((piece) => ("chip" in piece ? [piece.chip] : []));
+    expect(chips.map((chip) => [chip.kind, chip.source, chip.label])).toEqual([
+      ["quote", "MV-69", "the gap under the box"],
+      ["quote", "Kuru 18:42", "the build broke"],
+      ["quote", "", "a lone one"],
+    ]);
+    expect(pieces.map((piece) => ("text" in piece ? piece.text : text.slice(piece.chip.from, piece.chip.to))).join("")).toBe(text);
+    expect(plainChips(text)).toBe('“the gap under the box” (MV-69) fix this\n“the build broke” (Kuru 18:42) and this\n“a lone one” last');
+  });
+
+  test("a quote holding … and ' — what cutQuoted leaves of a cut and a \" — is read whole", () => {
+    const reply = replyReference({ who: "Kuru", when: "9:05", quote: 'He said "go" and it\'s done, then a long tail that runs past the reference\'s cut at eighty characters', id: "t7" });
+    expect(reply).toContain("…");
+    const text = `${reply} [quote "it's the 'go' … that one"] ok`;
+    const [chip] = chipsIn(text);
+    expect(chip).toMatchObject({ kind: "quote", from: 0, label: "it's the 'go' … that…", answers: { who: "Kuru", when: "9:05" } });
+    expect(chip!.answers!.quote).toEndWith("…");
+    expect(chip!.full).toContain("it's the 'go' … that one");
+    expect(text.slice(chip!.to)).toBe(" ok");
+  });
+
+  test("plainChips spells each chip as its short words and leaves the rest alone", () => {
+    expect(plainChips(CARD)).toBe('JAJ-53 "Check whether…" brand was taken');
+    expect(plainChips(REPLY_QUOTE)).toBe("“The old Pasapy post —…” (Kuru 20:39) I deleted this");
+    expect(plainChips('[file docs/plan.md:40 (kururu) under "Open"] [quote "the preview pane"] next')).toBe("“the preview pane” (plan.md) next");
+    expect(plainChips("no chips [here] at all")).toBe("no chips [here] at all");
   });
 });

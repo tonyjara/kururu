@@ -24,6 +24,7 @@ import { CROSS_SESSION_TAG, NOTICE_SENDER } from "./harness";
 import type { KuruPin } from "./kurupin";
 import type { MadeFile } from "./made";
 import { parseRemote } from "./remote";
+import { plainChips } from "./chips";
 import { REPLY_ME, REPLY_QUOTE_MAX, cutQuoted, replyClock, splitReply, type ReplyRef } from "./reply";
 import type { Turn } from "./store";
 import { VOICE_PREFIX, stripPastedContent, viaOf } from "./store";
@@ -738,7 +739,9 @@ export function insertWords(draft: string, from: number, to: number, words: stri
  *
  * Your message is quoted as the drawer drew it: without a reference of its
  * own, so a reply to a reply quotes what was said rather than what that
- * answered, and with a card reference as its code and title, not its ids.
+ * answered, and with each chip the box drew spelt as its short words
+ * (`plainChips`) — a card as its code and title, a quote as its opening —
+ * not as the ids and the whole quote written for Kuru.
  * A notice from another node crossed without its text (`peerItems`), and is
  * quoted by the line that is left.
  */
@@ -751,10 +754,7 @@ export function replyRefOf(item: YouItem | KuruReply | NoticeItem, id: string, n
   } else if (item.kind === "you") {
     if (item.text === null) return null;
     who = REPLY_ME;
-    const own = splitReply(item.text)?.text ?? item.text;
-    words = splitCardRefs(own)
-      .map((part) => ("text" in part ? part.text : `${part.ref.code} ${part.ref.title}`))
-      .join("");
+    words = plainChips(splitReply(item.text)?.text ?? item.text);
   } else {
     who = item.from;
     const agent = item.agent ? (item.agent.name ?? item.agent.program) : null;

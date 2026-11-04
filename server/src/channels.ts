@@ -19,6 +19,7 @@
  */
 import { channelOfMessage, echoLine, isChannelKind, postedToChat, readPeerMark, spokenHere, type ChannelKind, type ChannelsStatus, type TurnOrigin } from "../../shared/channels";
 import { plainWords, promptPeer, readPrompt, youVia } from "../../shared/kuru";
+import { plainChips } from "../../shared/chips";
 import { readableReply, splitReply } from "../../shared/reply";
 import { viaOf, type TurnVia } from "../../shared/store";
 import type { OutboxEntry } from "../../shared/voice";
@@ -125,7 +126,7 @@ export class Channels {
     const text = read.text;
     const via = viaOf(text);
     this.turn(profileKey).vias.add(via);
-    if (via === "voice" || via === "typed") this.telegram.post(profileKey, echoLine(via, readableReply(plainWords(text))), { silent: true });
+    if (via === "voice" || via === "typed") this.telegram.post(profileKey, echoLine(via, plainChips(readableReply(plainWords(text)))), { silent: true });
   }
 
   /** One of your messages reached Kuru — perhaps mid-turn, where no prompt hook fires — so the turn answers it too. */
@@ -198,7 +199,7 @@ export class Channels {
       if (!this.seeded || entry.state !== "failed" || before === "failed" || !channelOfMessage(entry.id)) continue;
       const profileKey = profileKeyOf(entry.profileId);
       if (!profileKey) continue;
-      const said = entry.text ? (splitReply(entry.text)?.text ?? entry.text) : null;
+      const said = entry.text ? plainChips(splitReply(entry.text)?.text ?? entry.text) : null;
       const words = said ? `"${said.length > 80 ? `${said.slice(0, 80)}…` : said}"` : "Your message";
       this.telegram.warn(profileKey, `⚠️ ${words} did not reach Kuru. ${entry.note ?? ""} Send it again here, or press Resend in the Kuru drawer.`.replace(/\s+/g, " "));
     }

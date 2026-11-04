@@ -43,7 +43,7 @@
  * is a plain multi-line textbox to a screen reader.
  */
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
-import { chipAt, piecesOf, type Chip, type Piece } from "../chips";
+import { chipAt, piecesOf, type Chip, type Piece } from "../../../shared/chips";
 
 export interface ChipFieldHandle {
   readonly value: string;
@@ -183,14 +183,15 @@ function pointAt(root: HTMLElement, at: number): { node: Node; offset: number } 
   return { node: root, offset: end };
 }
 
-const ICONS: Record<Chip["kind"], string> = {
+/** A chip's icon, as the inside of a 24-unit svg — the drawer's sent messages draw the same ones. */
+export const CHIP_ICONS: Record<Chip["kind"], string> = {
   card: '<rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 9h8M8 13h5"/>',
   quote: '<path fill="currentColor" stroke="none" d="M4 17.5c0-4.6 2.2-8.4 6-10.5l1 1.6C8.7 10 7.6 11.8 7.4 13.6H10V19H4v-1.5Zm10 0c0-4.6 2.2-8.4 6-10.5l1 1.6c-2.3 1.4-3.4 3.2-3.6 5H20V19h-6v-1.5Z"/>',
   image: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m20.5 16-5-5-8 8"/>',
   file: '<path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-10Z"/><path d="M14 3.5v5h5"/>',
 };
 
-const KIND_WORD: Record<Chip["kind"], string> = { card: "Card", quote: "Quote", image: "Picture", file: "File" };
+export const CHIP_WORD: Record<Chip["kind"], string> = { card: "Card", quote: "Quote", image: "Picture", file: "File" };
 
 /** One chip, drawn by hand: it lives inside a contenteditable, where React does not. */
 function chipNode(chip: Chip, raw: string): HTMLElement {
@@ -200,7 +201,7 @@ function chipNode(chip: Chip, raw: string): HTMLElement {
   el.draggable = false;
   el.dataset.raw = raw;
   el.title = chip.full;
-  el.setAttribute("aria-label", `${KIND_WORD[chip.kind]}: ${chip.full}`);
+  el.setAttribute("aria-label", `${CHIP_WORD[chip.kind]}: ${chip.full}`);
   const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   icon.setAttribute("viewBox", "0 0 24 24");
   icon.setAttribute("fill", "none");
@@ -210,7 +211,7 @@ function chipNode(chip: Chip, raw: string): HTMLElement {
   icon.setAttribute("stroke-linejoin", "round");
   icon.setAttribute("aria-hidden", "true");
   icon.classList.add("kc-icon");
-  icon.innerHTML = ICONS[chip.kind];
+  icon.innerHTML = CHIP_ICONS[chip.kind];
   el.append(icon);
   if (chip.kind === "card") {
     const code = document.createElement("span");

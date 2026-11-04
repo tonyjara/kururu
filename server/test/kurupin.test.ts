@@ -44,6 +44,8 @@ describe("which lines take a pin", () => {
 describe("a pin's entry", () => {
   test("opens with the words, on one line, without a reply's reference or Markdown's marks", () => {
     expect(pinOpening(you({ text: '[reply to Kuru 18:42 "Shall I merge?" (t9)] yes, merge it' }))).toBe("yes, merge it");
+    expect(pinOpening(you({ text: '[reply to Kuru 18:42 "Shall I merge?" (t9)] [quote "merge the branch into main and push it"] yes' }))).toBe("“merge the branch into main…” yes");
+    expect(pinOpening(you({ text: '[card JAJ-53 "Check whether…" (w34/c5e803f7ca1c7)] brand was taken' }))).toBe('JAJ-53 "Check whether…" brand was taken');
     expect(pinOpening(reply({ text: "## Plan\n\n- **first** the `store`\n- then the drawer" }))).toBe("Plan first the store then the drawer");
     expect(pinOpening(reply({ text: "| a | b |\n|---|---|\n| 1 | 2 |" }))).toBe("| a | b | | 1 | 2 |");
     expect(pinOpening(notice())).toBe('kururu · "Login fix" · finished its turn');

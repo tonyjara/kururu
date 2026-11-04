@@ -167,7 +167,13 @@ characters, for the person; inside the parentheses, where the card is and
 which it is, for Kuru's tools. Since 2026-11-02 the box *draws* them as a chip
 — the card's code and title — while keeping the words, to the character, as
 what is sent: `ChipField.tsx` is the box, a contenteditable whose value is
-still the string, and `web/src/chips.ts` reads a draft into words and chips.
+still the string, and `shared/chips.ts` reads a draft into words and chips.
+Since 2026-11-04 a sent message is read back the same way: the drawer draws
+your bubble with the chips the box drew (`SentWords` in `KuruDrawer.tsx`) — a
+quote's opening and where it is from, a card's code and title — never the
+whole quote and the ids Kuru was sent, and the places that hold only text (the
+Telegram echo, a pin's opening, a quote of your own line) spell those chips as
+short words with `plainChips`.
 A quote is one chip with its card's reference (a quote mark, its opening
 words and the card's code, or `Kuru 18:42` for a line of the conversation),
 a file's reference is a file chip with its name, and a file the box put in by

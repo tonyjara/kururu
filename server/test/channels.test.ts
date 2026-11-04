@@ -895,6 +895,11 @@ describe("Channels", () => {
     // A reply typed in the drawer is echoed as a person reads it, not as the brackets Kuru reads.
     channels.prompted("pk-main", '[reply to Kuru 18:42 "Want me to retry?" (t12)] yes');
     channels.replied("pk-main", "Retrying.");
+    // And a quote, or a card, as the short chip the box drew — not the whole quote, nor the ids.
+    channels.prompted("pk-main", '[reply to Kuru 18:44 "Retrying. The old Pasapy post is gone…" (t14)] [quote "The old Pasapy post is still up on the page, should I do it?"] I deleted this');
+    channels.replied("pk-main", "Thanks.");
+    channels.prompted("pk-main", '[card JAJ-53 "Check whether the brand name…" (w34/c5e803f7ca1c7)] brand was taken');
+    channels.replied("pk-main", "Noted.");
 
     channels.prompted("pk-main", "[telegram] and lint");
     channels.delivered("pk-main", { id: crypto.randomUUID(), ms: 4_000 });
@@ -919,6 +924,8 @@ describe("Channels", () => {
     expect(texts).toContain("🎙 You said: and the tests");
     expect(texts).toContain("They passed too.");
     expect(texts).toContain('⌨️ You typed: ↩ Kuru 18:42: "Want me to retry?"\nyes');
+    expect(texts).toContain('⌨️ You typed: ↩ Kuru 18:44: "Retrying. The old Pasapy post is gone…"\n“The old Pasapy post is…” I deleted this');
+    expect(texts).toContain('⌨️ You typed: JAJ-53 "Check whether the brand name…" brand was taken');
     expect(texts).not.toContain("⌨️ You typed: [telegram] check the build");
     expect(texts.some((t) => t.includes("sk-123") || t.includes("cross-session") || t.includes("task-notification"))).toBe(false);
     channels.close();

@@ -553,9 +553,12 @@ describe("replyRefOf", () => {
     expect(replyRefOf(kuru, "t9", now)).toEqual({ who: "Kuru", when: "18:42", quote: "Want me to tell it to go ahead?", id: "t9" });
   });
 
-  test("yours is yours, as the drawer drew it: no reference of its own, a card by its code and title", () => {
+  test("yours is yours, as the drawer drew it: no reference of its own, a card by its code and title, a quote by its opening", () => {
     const words = `${replyReference({ who: "Kuru", when: "18:40", quote: "Which one?", id: "t5" })} the ${cardReference({ code: "ACM-16", title: "Design the checkout", place: "w8", cardId: "c3f9a1e07b2d4" })} one`;
-    expect(replyRefOf({ ...you, text: words }, "t8", now)).toEqual({ who: "me", when: "18:42", quote: "the ACM-16 Design the checkout one", id: "t8" });
+    expect(replyRefOf({ ...you, text: words }, "t8", now)).toEqual({ who: "me", when: "18:42", quote: "the ACM-16 'Design the checkout' one", id: "t8" });
+    // A quote as its chip's opening, not the whole of it.
+    const quoted = `${replyReference({ who: "Kuru", when: "18:40", quote: "Which one?", id: "t5" })} [quote "the second of the two checkout designs, the one with tabs"] that one`;
+    expect(replyRefOf({ ...you, text: quoted }, "t8", now)?.quote).toBe("“the second of the two…” that one");
     // A clip not yet in words has nothing to quote.
     expect(replyRefOf(you, "t8", now)).toBeNull();
   });

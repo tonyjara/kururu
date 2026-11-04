@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { fileRefOf, fileReference, joinPath, tildePath } from "../src/filequote";
-import { chipsIn } from "../src/chips";
+import { chipsIn } from "../../shared/chips";
 import { quoteReference } from "../../shared/kuru";
 import { qualify } from "../../shared/remote";
 import { rolePrompt } from "../../shared/harness";

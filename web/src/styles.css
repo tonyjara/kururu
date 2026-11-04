@@ -6040,6 +6040,15 @@ button.kuru-quote:hover {
 .kc:hover {
   background: color-mix(in srgb, var(--accent) 24%, transparent);
 }
+/* The same chip in a message already sent (`SentWords` in `KuruDrawer.tsx`),
+   where it is a button — a door, or a press that opens it — and so has to be
+   told to look like the box's span and not like a button. */
+button.kc {
+  border: none;
+  font-family: inherit;
+  font-weight: inherit;
+  text-align: start;
+}
 .kc-icon {
   flex: none;
   align-self: center;
