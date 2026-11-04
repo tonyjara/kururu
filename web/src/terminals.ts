@@ -327,13 +327,98 @@ function copyFromProgram(text: string): void {
 }
 
 /**
- * Give the program the mouse when it has asked for one, hand it back when shift
- * is held — and make a finger a way of scrolling rather than a bad mouse.
+ * Put kururu's own selection on the clipboard, for ⌘C and the menu's Copy.
+ *
+ * Not the `copy` event, which is what this file answered once and which never
+ * came. The selection ghostty-web draws is a picture on a canvas with no DOM
+ * selection behind it, and Chromium decides whether Copy is *enabled* from the
+ * DOM's: with nothing selected in the document `queryCommandEnabled("copy")` is
+ * false, Edit → Copy and ⌘C execute a disabled command, and no `copy` event is
+ * dispatched for a listener to answer. It looked as if it worked in a window
+ * that was not focused, because there ghostty's copy-on-mouseup falls back to
+ * selecting the text in its textarea and leaves that selection lying about.
+ *
+ * So the text is written directly. `navigator.clipboard` wherever there is one,
+ * which in the window and over https is everywhere; a desktop browser on the
+ * tailnet over plain http is not a secure context and has none, and gets the
+ * old route — the text selected in a throwaway field and `execCommand` — which
+ * works there because a key or a menu row is the gesture it needs. Focus goes
+ * back where it was, or the next key would be typed into the throwaway.
+ */
+function copyText(text: string): void {
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).catch((err: unknown) => {
+      console.warn("kururu: a copy from a terminal did not reach the clipboard —", err);
+    });
+    return;
+  }
+  const back = document.activeElement as HTMLElement | null;
+  const field = document.createElement("textarea");
+  field.value = text;
+  field.setAttribute("readonly", "");
+  field.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+  document.body.appendChild(field);
+  field.select();
+  try {
+    document.execCommand("copy");
+  } finally {
+    field.remove();
+    back?.focus();
+  }
+}
+
+/** Somebody asked for a terminal's menu, at this point in the window. */
+export interface TerminalMenuAsk {
+  agentId: string;
+  x: number;
+  y: number;
+}
+
+/**
+ * Who draws a terminal's right-click menu: `Panes.tsx`, which has the menu and
+ * the pane. A terminal is not a React component and its gestures are decided
+ * in `wirePointer`, which is where it is known whether a right-click is the
+ * program's or kururu's — so the decision is made here and the drawing asked
+ * for, rather than a second listener in the pane guessing at the first's answer.
+ */
+const menuListeners = new Set<(ask: TerminalMenuAsk) => void>();
+
+export function onTerminalMenu(listener: (ask: TerminalMenuAsk) => void): () => void {
+  menuListeners.add(listener);
+  return () => menuListeners.delete(listener);
+}
+
+/** What is selected in this terminal, kururu's selection and not a program's; "" for none. */
+export function terminalSelection(agentId: string): string {
+  return pool.get(agentId)?.selection() ?? "";
+}
+
+/** Copy this terminal's selection, if it has one. Says whether it had. */
+export function copyTerminal(agentId: string): boolean {
+  const text = terminalSelection(agentId);
+  if (text) copyText(text);
+  return text !== "";
+}
+
+/**
+ * Paste into this terminal as ⌘V does: through the emulator, so a program that
+ * turned bracketed paste on is told it is a paste rather than seeing it typed.
+ */
+export function pasteTerminal(agentId: string, text: string): void {
+  if (text) pool.get(agentId)?.paste(text);
+}
+
+/**
+ * Give the program the mouse when it has asked for one, hand it back when Shift
+ * or Option is held — and make a finger a way of scrolling rather than a bad
+ * mouse.
  *
  * A terminal cannot both paint a selection and report a drag, and which of them
  * gets the gesture has never been the terminal's decision — the program says, by
  * turning on the tracking modes in `mouse.ts`, and the answer every terminal
- * since xterm has given is that tracking wins and shift is the way back. Kururu
+ * since xterm has given is that tracking wins and a modifier is the way back
+ * (see `local` for which). This is what an agent's pane is: Claude Code run
+ * full screen turns on 1003, so a plain drag there is Claude's. Kururu
  * could not give that answer at all: ghostty-web has a selection manager and no
  * mouse reporting whatsoever, so an nvim in a pane could not be clicked into and
  * the browser painted its own selection over the top of one the editor already
@@ -378,7 +463,18 @@ function wirePointer(
   element: HTMLElement,
   terminalOf: () => Terminal | null,
   send: (data: string) => void,
+  menu: (x: number, y: number) => void,
 ): () => void {
+  /**
+   * The modifiers that take a drag back from a program that has the mouse.
+   *
+   * Shift is xterm's and Ghostty's; Option is iTerm2's and Terminal.app's, and
+   * on a Mac it is the one hands reach for first. Both, because either one
+   * answered with a click reported into Claude Code reads as "selecting does
+   * not work", and neither has a meaning to a program worth keeping: an
+   * alt-click report is something no agent's TUI acts on.
+   */
+  const local = (event: { shiftKey: boolean; altKey: boolean }) => event.shiftKey || event.altKey;
   /** The button a drag is dragging, or null when nothing is held. */
   let held: number | null = null;
   /** The last cell reported, so crossing one cell is one report and not forty. */
@@ -467,15 +563,24 @@ function wirePointer(
   };
 
   const onDown = (event: MouseEvent) => {
-    // Shift is consulted here and nowhere else. It is the way back to a
-    // selection the browser paints — xterm's key for it, and Ghostty's — but
-    // once a button is down the gesture belongs to the program until it comes
-    // up, or the program is left believing it is still being held.
-    if (event.shiftKey || event.button > 2) return;
+    // The modifier is consulted on the way down and not after. It is the way
+    // back to a selection the emulator paints, but once a button is down the
+    // gesture belongs to the program until it comes up, or the program is left
+    // believing it is still being held.
+    if (local(event) || event.button > 2) return;
+    // A right-click on a selection kururu holds is about that selection — it
+    // opens the menu with Copy in it — and the program never drew it, so it
+    // hears nothing of the press either.
+    if (event.button === 2 && terminalOf()?.hasSelection()) return;
     const modes = modesNow();
     const cell = modes && cellOf(event);
     if (!modes || !cell) return;
     claim(event);
+    // A click the program takes is a click away from kururu's selection, as it
+    // is in every terminal. The emulator would clear it itself, but this claim
+    // is what stops it ever hearing the click, and a selection left standing
+    // would be what the next ⌘C copied.
+    if (event.button === 0) terminalOf()?.clearSelection();
     held = event.button;
     lastCell = `${cell.col},${cell.row}`;
     // Among the defaults `claim` just stopped was focusing the emulator's
@@ -491,7 +596,7 @@ function wirePointer(
   };
 
   const onHover = (event: MouseEvent) => {
-    if (held !== null || event.shiftKey) return;
+    if (held !== null || local(event)) return;
     const modes = modesNow();
     if (!modes || modes.tracking !== "any") return;
     const cell = cellOf(event);
@@ -529,13 +634,37 @@ function wirePointer(
   };
 
   /**
-   * The emulator's own answers to these — a context menu, and a word selected by
-   * double-click — are exactly the gestures a program with tracking on has asked
-   * to handle itself. The press underneath each was already reported by
-   * `onDown`; this only stops the second answer arriving on top of it.
+   * The emulator's own answer to this — a word selected by double-click — is
+   * exactly the gesture a program with tracking on has asked to handle itself.
+   * The presses underneath were already reported by `onDown`; this only stops
+   * the second answer arriving on top of them. With the modifier held it is
+   * kururu's double-click, as the drag is.
    */
-  const onSuppress = (event: Event) => {
-    if (modesNow()) claim(event);
+  const onSuppress = (event: MouseEvent) => {
+    if (modesNow() && !local(event)) claim(event);
+  };
+
+  /**
+   * A right-click is the program's while it has the mouse, and kururu's menu
+   * otherwise — and also over a selection kururu holds, or with the modifier
+   * held, which are both somebody reaching past the program for the terminal.
+   *
+   * Claimed either way, and before the emulator's own `contextmenu` on the
+   * canvas, which moves its input textarea under the pointer with the
+   * selection in it so that a *browser's* menu would find text to copy. That
+   * menu is not shown in the window — the preload suppresses it, so Paste never
+   * types into an agent by surprise — and a browser's is not the app's, so the
+   * one menu everywhere is the one `Panes.tsx` draws. A finger is left as it
+   * was: a long press is not a selection, and a phone has no Copy to offer.
+   */
+  const onContext = (event: MouseEvent) => {
+    if (modesNow() && !local(event) && !terminalOf()?.hasSelection()) {
+      claim(event);
+      return;
+    }
+    if (fingerPointer()) return;
+    claim(event);
+    menu(event.clientX, event.clientY);
   };
 
   // -------------------------------------------------------------------------
@@ -647,7 +776,7 @@ function wirePointer(
   element.addEventListener("mousedown", onDown, true);
   element.addEventListener("mousemove", onHover, true);
   element.addEventListener("wheel", onWheel, { capture: true, passive: false });
-  element.addEventListener("contextmenu", onSuppress, true);
+  element.addEventListener("contextmenu", onContext, true);
   element.addEventListener("dblclick", onSuppress, true);
   // `passive: false` spelled out on both, because a listener that cannot
   // `preventDefault` is one that cannot stop the browser scrolling the page or
@@ -662,7 +791,7 @@ function wirePointer(
     element.removeEventListener("mousedown", onDown, true);
     element.removeEventListener("mousemove", onHover, true);
     element.removeEventListener("wheel", onWheel, true);
-    element.removeEventListener("contextmenu", onSuppress, true);
+    element.removeEventListener("contextmenu", onContext, true);
     element.removeEventListener("dblclick", onSuppress, true);
     element.removeEventListener("touchstart", onTouchStart, true);
     element.removeEventListener("touchmove", onTouchMove, true);
@@ -733,6 +862,10 @@ interface Pooled {
   applyCursor(): void;
   /** Hand it the keyboard, if it exists yet. See `setFocused`. */
   focus(): void;
+  /** Kururu's selection in it, "" for none or for no emulator yet. */
+  selection(): string;
+  /** Paste through the emulator, bracketed if the program asked. */
+  paste(text: string): void;
   dispose(): void;
 }
 
@@ -817,7 +950,14 @@ function create(agentId: string): Pooled {
   // Registered now rather than after `open()`, because being the first capture
   // listener on this node is the only thing that lets it take a gesture off the
   // emulator's own handlers. See `wirePointer`.
-  const unwirePointer = wirePointer(element, () => terminal, (data) => input(agentId, data));
+  const unwirePointer = wirePointer(
+    element,
+    () => terminal,
+    (data) => input(agentId, data),
+    (x, y) => {
+      for (const listener of menuListeners) listener({ agentId, x, y });
+    },
+  );
 
   /**
    * On a touch device this element may not hold the keyboard, whoever gave it.
@@ -858,29 +998,6 @@ function create(agentId: string): Pooled {
   };
   element.addEventListener("focus", onFocus);
 
-  /**
-   * ⌘C, and Edit → Copy, which is the same command arriving from the menu.
-   *
-   * The selection ghostty-web draws is a picture on a canvas, not a DOM
-   * selection, so the browser's own copy runs against a focused container with
-   * nothing selected in it and quietly leaves the clipboard alone. ghostty lets
-   * ⌘C through its key handler precisely so that this event fires, and then
-   * nothing on its side answers it — it copies on mouseup instead, which is not
-   * the gesture anybody reaches for. Answering the event rather than the key is
-   * what covers the menu too, and with no selection it stays out of the way.
-   *
-   * It copies kururu's selection and nothing else. One that tmux or nvim drew
-   * while it had the mouse is cells on a screen with nothing behind them to
-   * copy; the program copies that one itself, as an `OSC 52` that
-   * `copyFromProgram` answers, and Shift+drag is how to get one of kururu's
-   * over the top of it.
-   */
-  const onCopy = (event: ClipboardEvent) => {
-    if (!terminal?.hasSelection() || !event.clipboardData) return;
-    event.clipboardData.setData("text/plain", terminal.getSelection());
-    event.preventDefault();
-  };
-  element.addEventListener("copy", onCopy);
 
   const entry: Pooled = {
     agentId,
@@ -897,13 +1014,14 @@ function create(agentId: string): Pooled {
     applyCursor: () => {},
     shown: (on) => frames?.show(on),
     focus: () => terminal?.focus(),
+    selection: () => (terminal?.hasSelection() ? terminal.getSelection() : ""),
+    paste: (text) => terminal?.paste(text),
     dispose: () => {
       if (disposed) return;
       disposed = true;
       if (settle) clearTimeout(settle);
       unwirePointer();
       element.removeEventListener("focus", onFocus);
-      element.removeEventListener("copy", onCopy);
       unsubscribe();
       typed?.dispose();
       observer?.disconnect();
@@ -963,6 +1081,30 @@ function create(agentId: string): Pooled {
      * makes, and the same one every terminal that sends Alt has to make.
      */
     em.attachCustomKeyEventHandler((event) => {
+      /**
+       * ⌘C copies kururu's selection when there is one — see `copyText` for
+       * why the key and not the `copy` event. Taken here, so ghostty prevents
+       * the default and the Edit menu's Copy, which would find nothing, never
+       * runs as well. With no selection it is left exactly as it was: ghostty
+       * lets ⌘C past and nothing reaches the pty, which is what a Mac terminal
+       * does, and Ctrl+C is another key that this never looks at.
+       *
+       * Only plain ⌘C. ⌘⇧C and ⌥⌘C are other things in other apps, and a
+       * selection made in a program's own way — Claude Code's, nvim's — is
+       * not here at all: the program copies that itself, by `OSC 52`.
+       */
+      if (
+        event.type === "keydown" &&
+        event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.code === "KeyC" &&
+        em.hasSelection()
+      ) {
+        copyText(em.getSelection());
+        return true;
+      }
       /**
        * Ctrl+V, which ghostty-web also swallows: `handleKeyDown` returns early
        * on it so the browser can fire a paste, the Windows convention. Nowhere

@@ -92,6 +92,7 @@ import { Menu, type MenuAt, type MenuItem } from "./Menu";
 import { NameField } from "./NameField";
 import { Status } from "./Status";
 import { TerminalView } from "./Terminal";
+import { copyTerminal, onTerminalMenu, pasteTerminal, terminalSelection } from "../terminals";
 import { NodeChip } from "./NodeChip";
 import { dropRefusal, sideOf } from "../../../shared/remote";
 
@@ -231,6 +232,7 @@ export function Panes({
   const [menu, setMenu] = useState<
     | { at: MenuAt; paneId: string; of: "pane" | "new" }
     | { at: MenuAt; paneId: string; of: "tab"; agentId: string }
+    | { at: MenuAt; paneId: string; of: "term"; agentId: string }
     | { at: MenuAt; paneId: string; of: "doc"; root: string; path: string; line: number | null }
     | null
   >(null);
@@ -275,6 +277,24 @@ export function Panes({
    * the same way it already outlives a tab switch or a workspace change.
    */
   const shown = solo ? soloPane(node, focusedPaneId) : null;
+
+  /**
+   * A right-click in a terminal, which `terminals.ts` has already decided is
+   * kururu's rather than the program's. Answered only by the stage that is
+   * showing that terminal: another node's workspace draws a second one of
+   * these, and two menus for one click is one too many. Read through a ref so
+   * the subscription is made once rather than on every snapshot.
+   */
+  const paneOfTerminal = useRef<(agentId: string) => string | null>(() => null);
+  paneOfTerminal.current = (agentId) => all.find((pane) => activeTerminal(pane) === agentId)?.id ?? null;
+  useEffect(
+    () =>
+      onTerminalMenu(({ agentId, x, y }) => {
+        const paneId = paneOfTerminal.current(agentId);
+        if (paneId) setMenu({ at: { x, y }, paneId, of: "term", agentId });
+      }),
+    [],
+  );
 
   /**
    * A terminal tab's menu: the sidebar row's, less the list's Hide — see
@@ -409,6 +429,8 @@ export function Panes({
           items={
             menu.of === "tab"
               ? tabMenu(menu.agentId)
+              : menu.of === "term"
+              ? terminalMenu(menu.agentId)
               : menu.of === "doc"
               ? docMenu(menu.paneId, menu.root, menu.path, menu.line)
               : menu.of === "new"
@@ -594,6 +616,49 @@ function paneMenu({
  * (`filequote.ts`): the start of a question about the document, unsent. A
  * passage in it is pointed at by selecting it, which quotes it.
  */
+/** How the keys are written on this machine, for the terminal menu's hints. */
+const APPLE = typeof navigator !== "undefined" && /Mac|iP(hone|ad)/.test(navigator.platform);
+
+/**
+ * What a right-click in a terminal offers: the selection's Copy and the
+ * clipboard's Paste, as a text field's menu does and nothing else, because a
+ * terminal's other verbs are its tab's and that menu is one click away on the
+ * strip.
+ *
+ * Copy with nothing selected is drawn and greyed rather than left out, saying
+ * how to select, because in an agent's pane a plain drag is Claude Code's and
+ * the way to a selection of kururu's is the one thing here nobody can guess.
+ * Paste goes through the emulator (`pasteTerminal`), so it is bracketed for a
+ * program that asked; a page that cannot read the clipboard — a browser over
+ * plain http — greys it and says ⌘V still works, which it does, since a key's
+ * paste needs no permission.
+ */
+function terminalMenu(agentId: string): MenuItem[] {
+  const selected = terminalSelection(agentId) !== "";
+  const readable = typeof navigator !== "undefined" && typeof navigator.clipboard?.readText === "function";
+  return [
+    {
+      label: "Copy",
+      hint: APPLE ? "⌘C" : undefined,
+      disabled: !selected,
+      title: selected ? undefined : "Nothing selected — drag to select; over an agent, hold Option or Shift while dragging",
+      run: () => copyTerminal(agentId),
+    },
+    {
+      label: "Paste",
+      hint: APPLE ? "⌘V" : undefined,
+      disabled: !readable,
+      title: readable ? undefined : `This page cannot read the clipboard — ${APPLE ? "⌘V" : "the paste key"} still pastes`,
+      run: () => {
+        navigator.clipboard.readText().then(
+          (text) => pasteTerminal(agentId, text),
+          (err: unknown) => console.warn("kururu: the clipboard could not be read for a paste —", err),
+        );
+      },
+    },
+  ];
+}
+
 function docMenu(paneId: string, root: string, path: string, line: number | null): MenuItem[] {
   return [
     {

@@ -265,15 +265,32 @@ Text leaves a pane three ways, and which one applies depends on who has the
 mouse.
 
 - **Kururu's own selection.** A drag paints ghostty-web's selection, and
-  ghostty copies it on mouseup through `navigator.clipboard`. ⌘C and Edit →
-  Copy answer the `copy` event in `terminals.ts`, because the selection is a
-  picture on a canvas and the browser's own copy finds nothing selected.
+  ghostty copies it on mouseup through `navigator.clipboard`. **⌘C is taken
+  in the emulator's key handler** and writes the selection itself (`copyText`);
+  with nothing selected it passes as it always did, and Ctrl+C is another key.
+  It used to answer the `copy` event, and that never came in the window: the
+  selection is a picture on a canvas with no DOM selection behind it, so
+  Chromium holds Copy disabled (`queryCommandEnabled("copy")` is false) and a
+  disabled command dispatches nothing. It passed in a test only because an
+  unfocused window sends ghostty's copy-on-mouseup down its fallback, which
+  leaves the text selected in its textarea. Edit → Copy *from the menu bar*
+  is still that disabled command; the key and the right-click are the roads.
+- **The right-click menu.** Copy and Paste, drawn by `Panes.tsx` with the
+  app's own `Menu`, asked for by `wirePointer` once it has decided the click
+  is kururu's: tracking off, a selection of kururu's under it, or the modifier
+  held. Paste reads `navigator.clipboard` and goes through `Terminal.paste`, so
+  a program with bracketed paste on is told it is a paste. The window's native
+  edit menu stays suppressed over a terminal (`preload.js`), so there is one
+  menu, and no surprise Paste into an agent.
 - **The program has the mouse.** When a program turns tracking on — tmux with
   `mouse on`, nvim, a TUI — a drag is *reported* to it (`wirePointer`), and the
   selection it paints is its own: cells on the screen, which kururu cannot
-  copy and ⌘C does not see. **Shift** takes the drag back for kururu's
-  selection, as in every terminal since xterm. It is read at mousedown only, so
-  a drag that started as the program's stays the program's until release.
+  copy and ⌘C does not see. **Shift or Option** takes the drag back for
+  kururu's selection — Shift as in xterm and Ghostty, Option as in iTerm2 and
+  Terminal.app — and that is every agent pane: Claude Code full screen turns on
+  1003. It is read at mousedown only, so a drag that started as the program's
+  stays the program's until release, and a plain click handed to the program
+  clears kururu's selection, which would otherwise be what the next ⌘C copied.
 - **OSC 52.** The program copies its own selection by writing
   `ESC ] 52 ; c ; <base64> BEL` to its terminal; tmux does it when it copies,
   Claude Code does it beside its own copy, and over ssh it is the only route a

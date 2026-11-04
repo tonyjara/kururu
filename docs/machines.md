@@ -131,8 +131,8 @@ to this Mac's clipboard ([terminals](terminals.md#the-clipboard)).
 - **A drag is tmux's** when tmux has `mouse on` — many a tmux.conf does.
   tmux copies on release and sends the copy out as `OSC 52` under its default
   `set-clipboard external`, because the pty's `TERM=xterm-256color` is in its
-  default `terminal-features` as `clipboard`. **Shift**+drag is kururu's own
-  selection instead, which copies on release and to ⌘C.
+  default `terminal-features` as `clipboard`. **Shift**- or **Option**-drag is
+  kururu's own selection instead, which copies on release and to ⌘C.
 - **Claude Code inside tmux** (2.1) copies three ways at once: `tmux load-buffer -w`,
   a bare `OSC 52`, and one wrapped in tmux's passthrough (`ESC P tmux; …`). The
   wrapped one is dropped unless the pane allows passthrough, so `REMOTE_SCRIPT`

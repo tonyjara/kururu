@@ -18,10 +18,10 @@
  * has a better one of its own.
  *
  * This module is the protocol half and nothing else: which modes mean what, and
- * what a report looks like on the wire. The policy — that shift is the way back
- * to a local selection — is at the call site in `terminals.ts`, because that is
- * a decision about what a pane does with a gesture rather than a fact about the
- * encoding, and the encoding is the part worth testing.
+ * what a report looks like on the wire. The policy — that Shift or Option is
+ * the way back to a local selection — is at the call site in `terminals.ts`,
+ * because that is a decision about what a pane does with a gesture rather than
+ * a fact about the encoding, and the encoding is the part worth testing.
  */
 
 /**
