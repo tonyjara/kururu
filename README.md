@@ -336,8 +336,9 @@ sanitizer.
 
 The strip has **⇄** (lit while the reader follows its editor; click it to stay
 on this file, and again to follow — only on a reader that was opened to follow
-one). The type size is **− / +** in the tree's header, or `-` `+` `0` with the
-keyboard in a reader; it is this device's and never reaches the server.
+one). The type size is **− / +** in the tree's header, or `⌘−` `⌘+` `⌘0` (the
+same keys without ⌘ work too) with the keyboard in a reader, from 50% to 250%;
+it is this device's and never reaches the server. Elsewhere ⌘+ zooms the window.
 
 ### The file tree
 

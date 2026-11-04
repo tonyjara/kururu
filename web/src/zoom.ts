@@ -34,12 +34,14 @@
  * size it landed on last time, and a percentage arrived at by multiplying by 1.1
  * repeatedly is a different number every route in.
  *
- * It is wider upwards than downwards because the two directions are answering
- * different questions. Down is an occasional glance at a wide document on a big
- * screen; up is a phone, where the reader is most of the point and the default
- * step is 13px of prose held at arm's length.
+ * They are the browser's own stops, from half size to two and a half times, and
+ * that is the reason for them rather than a rounder set: ⌘+ and ⌘− mean this in
+ * the reader because they mean it in every page on the machine, and a press that
+ * lands on 110% there and 115% here is two zooms that feel almost alike. Fine
+ * near 100%, where a press is a nudge to a line's length, and coarse at the ends,
+ * where it is a phone at arm's length or a wide document seen whole.
  */
-export const ZOOM_STOPS = [0.8, 0.9, 1, 1.15, 1.3, 1.5, 1.75, 2, 2.4] as const;
+export const ZOOM_STOPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5] as const;
 
 export const DEFAULT_ZOOM = 1;
 
@@ -143,4 +145,73 @@ export function zoomLabel(value: number): string {
 /** Whether there is anywhere further to go, so a button that cannot move says so. */
 export function canZoom(value: number, delta: number): boolean {
   return stepZoom(value, delta) !== value;
+}
+
+/** What a key that resizes the reader asks for: a step either way, or back to 100%. */
+export type ZoomStep = 1 | -1 | "reset";
+
+/** A zoom key, and whether it came with the platform's command modifier. */
+export interface ZoomKey {
+  step: ZoomStep;
+  command: boolean;
+}
+
+interface KeyLike {
+  key: string;
+  code: string;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+}
+
+/**
+ * What a keydown means for the reader's zoom, if anything. `command` names the
+ * platform's own modifier — ⌘ on a Mac, Ctrl elsewhere — because the keys every
+ * browser zooms a page with are the ones that zoom the document while a reader
+ * has the keyboard. Bare +, − and 0 mean the same, as they always have here; the
+ * caller is told which it was, since a bare key typed into a field is a
+ * character and a commanded one never is.
+ *
+ * Read off `key` because that is the character the layout typed, which is what
+ * "plus" means on a keyboard whose plus is not beside the backspace; ⌘= is ⌘+
+ * because it is the same key without Shift, and a zoom that wanted Shift held
+ * for one direction only would be the odd one out on the machine. The keypad is
+ * read off `code`, which is the same whichever layout is on. Alt is never one of
+ * them — ⌥ types another character on a Mac — and neither is the other of the
+ * two modifiers: ⌃⌘= is a chord of somebody else's.
+ *
+ * Pure, and tested, because it is the line between the document's keys and the
+ * window's: a key it takes is one the window's zoom and the terminal never see.
+ */
+export function zoomKey(event: KeyLike, command: "meta" | "ctrl"): ZoomKey | null {
+  if (event.altKey) return null;
+  const held = command === "meta" ? event.metaKey : event.ctrlKey;
+  const other = command === "meta" ? event.ctrlKey : event.metaKey;
+  if (other) return null;
+  const step = stepOf(event);
+  return step === null ? null : { step, command: held };
+}
+
+function stepOf(event: KeyLike): ZoomStep | null {
+  if (event.code === "NumpadAdd") return 1;
+  if (event.code === "NumpadSubtract") return -1;
+  if (event.code === "Numpad0") return "reset";
+  switch (event.key) {
+    case "+":
+    case "=":
+      return 1;
+    case "-":
+    case "_":
+      return -1;
+    case "0":
+      return "reset";
+    default:
+      return null;
+  }
+}
+
+/** A step taken. */
+export function applyZoom(step: ZoomStep): void {
+  if (step === "reset") resetZoom();
+  else zoomBy(step);
 }

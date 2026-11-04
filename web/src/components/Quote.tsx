@@ -69,6 +69,7 @@ import { createPortal } from "react-dom";
 import type { CardQuote, QuotePart } from "../../../shared/kuru";
 import { fileReference, placeIn, type FileRef } from "../filequote";
 import { dictate, dictateCancel, dictateStop, useDictation } from "../voice";
+import { zoomStore } from "../zoom";
 import { ChipField, type ChipFieldHandle } from "./ChipField";
 import { MicIcon } from "./VoiceIcons";
 
@@ -150,6 +151,17 @@ export function selectNotDrag(event: React.PointerEvent<HTMLElement>): void {
 let up = false;
 export function quoteUp(): boolean {
   return up;
+}
+
+/**
+ * What the popover that is up is quoting, or null with none up. The window's
+ * key handler asks, because a comment on a quote of a reader's document is
+ * that reader's field: ⌘+ in it resizes the document, where in Kuru's box or a
+ * card's comment it is left to the window.
+ */
+let upFrom: QuoteFrom | null = null;
+export function quoteFrom(): QuoteFrom | null {
+  return upFrom;
 }
 
 interface Selected {
@@ -236,8 +248,10 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
   const dictation = useDictation();
   useEffect(() => {
     up = at !== null;
+    upFrom = at?.from ?? null;
     return () => {
       up = false;
+      upFrom = null;
     };
   }, [at]);
   /** Where the keyboard was before the field took it, to give it back to on Escape. */
@@ -354,8 +368,15 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
     if (sized && box.current) sized.observe(box.current);
     window.addEventListener("scroll", fit, true);
     window.addEventListener("resize", fit);
+    // A reader's zoom moves the quoted words without scrolling or resizing
+    // anything the two above hear: the same nodes are laid out again at the
+    // new size, so the range is still right and only where it is has changed.
+    // The popover is not inside the reader and keeps its own size, which is
+    // the chrome's, at every zoom.
+    const unzoom = zoomStore.subscribe(fit);
     return () => {
       sized?.disconnect();
+      unzoom();
       window.removeEventListener("scroll", fit, true);
       window.removeEventListener("resize", fit);
     };

@@ -50,7 +50,7 @@ import { Databases } from "./components/Databases";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Keybar } from "./components/Keybar";
 import { Menu, type MenuAt } from "./components/Menu";
-import { resetZoom, zoomBy } from "./zoom";
+import { applyZoom, zoomKey } from "./zoom";
 import { Panes } from "./components/Panes";
 import { hueStyle } from "./components/NodeChip";
 import { RemoteBand, RemoteWaiting, useRemoteSaid } from "./components/RemoteBand";
@@ -67,7 +67,7 @@ import { closeNeeds, toggleNeeds, useNeedsDrawer } from "./needs";
 import { arrangedNeeds, useNeedsView } from "./needsorder";
 import { NeedsDrawer } from "./components/NeedsDrawer";
 import { Notes } from "./components/Notes";
-import { QuoteToKuru, quoteUp, type QuoteFrom } from "./components/Quote";
+import { QuoteToKuru, quoteFrom, quoteUp, type QuoteFrom } from "./components/Quote";
 import { awaitNoteQuote, holdNoteQuotes } from "./notequote";
 import { locateCard } from "./notes";
 import { needsOf, type Need } from "../../shared/needs";
@@ -1284,30 +1284,34 @@ export function App() {
         }
         /**
          * A reader is the one pane with nothing under it that keys belong to, so
-         * the three a document viewer has used since documents had viewers are
-         * free to mean what they mean everywhere else. No prefix, because there
-         * is no pty here to get out of the way of — the prefix exists to settle
-         * a fight over the keyboard and in this pane there is nobody to fight.
+         * the keys a document viewer has used since documents had viewers are
+         * free to mean what they mean everywhere else: + and − resize the text
+         * and 0 puts it back, bare or with ⌘ (`zoomKey`). No prefix, because
+         * there is no pty here to get out of the way of — the prefix exists to
+         * settle a fight over the keyboard and in this pane there is nobody to
+         * fight.
          *
-         * Modifiers are deliberately let through instead: ⌘+ and ⌘0 are
-         * Electron's and zoom the *window*, which is a different and equally
-         * reasonable thing to want, and taking them here would make the two
-         * indistinguishable from the outside.
+         * ⌘ is taken too, which it once was not: ⌘+ and ⌘0 are Electron's, and
+         * zoomed the whole *window* — the sidebar, the strips and every
+         * terminal's grid with them — when what was wanted was the page being
+         * read, the one thing a browser's ⌘+ is for. So while a reader has the
+         * keyboard they zoom its document, and are taken here so that neither
+         * the window's zoom (a menu key on a Mac, which the page hears first and
+         * can keep) nor a terminal's textarea still holding the focus behind it
+         * hears the same press. Anywhere else they fall through to the window
+         * exactly as before.
+         *
+         * A field is where they stop. Kuru's box and a quote's comment are text
+         * the user is typing, and a bare + there is a character, never a zoom —
+         * the reader can be the focused pane while the keys are in the drawer
+         * beside it. ⌘ is the same, out of a field that is not the reader's;
+         * the comment on a quote *of this document* is the reader's, so ⌘+
+         * there resizes the words being quoted, and the popover follows them.
          */
-        if (readerFocused(onScreen) && !event.metaKey && !event.ctrlKey && !event.altKey) {
-          const key = keyName(event);
-          if (key === "+" || key === "=") {
-            take();
-            return zoomBy(1);
-          }
-          if (key === "-" || key === "_") {
-            take();
-            return zoomBy(-1);
-          }
-          if (key === "0") {
-            take();
-            return resetZoom();
-          }
+        const zoom = readerFocused(onScreen) ? zoomKey(event, APPLE ? "meta" : "ctrl") : null;
+        if (zoom && !(inField(event.target) && !(zoom.command && quotesFile(event.target)))) {
+          take();
+          return applyZoom(zoom.step);
         }
         // An empty pane has no pty to own the key, and is the button that opens one.
         if (
@@ -1929,6 +1933,30 @@ function storedSidebarWidth(): number {
     // Storage that refuses to answer is a default width, not an error.
   }
   return SIDEBAR_DEFAULT;
+}
+
+/** Whether ⌘ is the command key here, as it is on a Mac and an iPad's keyboard; Ctrl elsewhere. */
+const APPLE = typeof navigator !== "undefined" && /Mac|iP(hone|ad)/.test(navigator.platform);
+
+/**
+ * Whether a key is aimed at a field somebody is typing in. An `<input>` has
+ * been let go of before this is asked; this is the rest — Kuru's box and a
+ * quote's comment, which are `contenteditable`, and any textarea.
+ *
+ * Except a terminal's, and that is the whole reason this cannot be
+ * `isContentEditable` alone: ghostty-web's host element is itself
+ * `contenteditable`, and it keeps the focus when the pane focus moves off it
+ * by the keyboard, so a reader reached with the prefix would otherwise count
+ * as a field and never zoom.
+ */
+function inField(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement) || target.closest(".term")) return false;
+  return target.isContentEditable || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+}
+
+/** Whether a key is in the comment of a quote of a reader's document — the reader's own field. */
+function quotesFile(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(".quote-pop") !== null && quoteFrom() === "file";
 }
 
 /** The terminal the focused pane is showing, if any. */

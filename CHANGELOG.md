@@ -42,6 +42,15 @@ shows, so it is written once and read in three places — see
 
 ### Changed
 
+- **⌘+ and ⌘− zoom the document in a reader, and ⌘0 puts it back.** With a
+  reader pane focused they resize its text rather than the whole window — the
+  sidebar, the strips and every terminal stay as they were — from 50% to 250%
+  in the browser's own steps, kept per device across files and restarts. ⌘= is
+  ⌘+. Anywhere else they zoom the window as before, and +, − and 0 typed into
+  Kuru's box or a quote's comment are now letters, where beside a focused
+  reader they used to be taken as a zoom. A quote's popover follows the words
+  as they grow.
+
 - **A reconnect asks less of the pty host, and so does an agent on another
   machine.** When the window or the phone comes back, every pane asks for its
   terminal's history, and the host now builds that once and hands the same

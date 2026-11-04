@@ -721,7 +721,7 @@ function Zoom() {
         onClick={() => zoomBy(-1)}
         disabled={!canZoom(zoom, -1)}
         aria-label="Smaller text"
-        title="Smaller text in the reader — or - while a reader has the keyboard"
+        title="Smaller text in the reader — or ⌘− while a reader has the keyboard"
       >
         −
       </button>
@@ -729,7 +729,7 @@ function Zoom() {
         className="reader-zoom"
         onClick={resetZoom}
         disabled={zoom === DEFAULT_ZOOM}
-        title={zoom === DEFAULT_ZOOM ? "The reader's text size" : "Back to 100% — or 0 while a reader has the keyboard"}
+        title={zoom === DEFAULT_ZOOM ? "The reader's text size" : "Back to 100% — or ⌘0 while a reader has the keyboard"}
       >
         {zoomLabel(zoom)}
       </button>
@@ -738,7 +738,7 @@ function Zoom() {
         onClick={() => zoomBy(1)}
         disabled={!canZoom(zoom, 1)}
         aria-label="Larger text"
-        title="Larger text in the reader — or + while a reader has the keyboard"
+        title="Larger text in the reader — or ⌘+ while a reader has the keyboard"
       >
         +
       </button>
