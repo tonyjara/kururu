@@ -35,7 +35,7 @@ conversation's *text*, never its audio; see [channels](channels.md).
 | The drawer | `KuruDrawer.tsx` | The conversation, beside the panes on a desktop (narrowing them, like the sidebar) and the whole screen on a phone: every message of yours with its state, every reply with its fate, a live line over the composer for what Kuru is doing — with **Stop** while it works — and a composer that types to Kuru through the outbox. Opened by the chip, the harness key, a tap on the pill, the floating pill and the menu bar. |
 | The chip | `DrawerChips.tsx` `sb-kuru` | The one door onto the drawer, the second of the two drawer chips (the first is what needs you) — in the top-right pane's tab strip while the drawers are shut, in the open drawer's header, in the bottom bar on a phone. Its mark is what Kuru is doing — a dim dot, the mascot hopping while it thinks, the speaker glyph while it speaks, the blocked ink and "asking" on a prompt, "off" when not running — and its news is text inside it: a red count with the mic for messages that did not get through. In flight and all delivered are not news and get no mark. It carried a count of unheard replies until 2026-10-12; the drawer marks each where it sits, which is all the count led to. |
 | The pill | `VoicePill.tsx` | A level meter and a line, over the panes, zen included. Says which gesture ends the recording, what was heard and where it went, what Kuru is saying. Dragged anywhere in the window by mouse or finger and drawn where this device left it (`web/src/place.ts`); a double click puts it back. Its ✕ is `dismissVoice`: Kuru stops mid-word and the rest of the reply, and what was queued behind it, is marked unheard; a clip being recorded is thrown away; words lingering go. Escape is the same ✕ while Kuru speaks. A plain click — one that travelled less than the drag's own slop, and landed outside the ✕ — toggles the drawer at the reply the pill is showing: open it unless it is already open, in which case this closes it, so a pill that only ever shows its last line is one tap from the whole conversation and one tap back. The pill is the live indicator; the drawer is the record. |
-| The button | `KuruDrawer.tsx` `kuru-mic` | The key for a thumb, in the drawer's composer: held, it records; tapped, it toggles. How a phone talks. It was on the status bar beside the chip until 2026-10-12 — two controls for one conversation, one of them on every device's one strip. |
+| The button | `KuruDrawer.tsx` `kuru-mic` | Dictation into the drawer's composer, not the talk key: held, it listens until the release; tapped, until it is pressed again or Escape. The words go into the box at the cursor, beside the cards, quotes and pictures already there, and the user sends it — see [dictating into Kuru's box](#dictating-into-kurus-box). Until 2026-11-05 it was the talk key for a thumb and sent on release, which left no way to say something about what was in the box. It was on the status bar beside the chip until 2026-10-12 — two controls for one conversation, one of them on every device's one strip. |
 
 ## Never over you
 
@@ -444,6 +444,24 @@ does, so a reply is not read into the microphone, and it is taken in this page
 even while the floating pill is the voice client: the pill-only rule is about
 the talk key and Kuru's clips, and these words are for this page.
 
+## Dictating into Kuru's box
+
+The drawer's mic is the same dictation with Kuru's box as the field. Held, it
+listens until the release; tapped, it listens until the mic is pressed again
+or Escape, and neither throws the words away — nothing is sent by them, and a
+minute of speech lost to a reflex is the worse mistake. A tapped one is not
+ended by the window losing the focus, as a held one is. The words go in at the
+cursor (`putIn`, as a card's reference does), after whatever is already in the
+box, and the user presses send. A line over the box says it is listening and
+how to stop, then "Hearing…", then why if nothing came.
+
+A tap is told from a hold by the pointer events' own `timeStamp`s, not by the
+clock when each is handled: opening the microphone can hold the page for a
+quarter of a second, and a tap whose release waited behind it measured as a
+hold and ended on the spot. A synthetic driver must stamp its events
+(`Input.dispatchMouseEvent`'s `timestamp`) and not wait on the press before
+sending the release, or it measures the same wait.
+
 Checked with headless Chrome's fake microphone fed a `say` WAV, which needs
 `--disable-features=AudioServiceSandbox` or Chrome records silence from a file
 under `/tmp`.
@@ -581,12 +599,12 @@ always has.
 **One voice client on this Mac.** While the hook is live the pill is the page
 that records, posts, plays and reports held and played. The main window's
 `voice.ts` is told so across the bridge (`setVoiceRemote`): its key handler
-stands down, its mic button and its Escape-while-listening are sent to the
-pill, and sentences it would have played are left to the pill — one microphone,
+stands down, its Escape-while-listening is sent to the pill (the drawer's mic
+dictates in the window itself, see below), and sentences it would have played are left to the pill — one microphone,
 one player, one state. That is also what keeps a key the hook *and* a focused
 window both saw from firing twice. The moment the hook is denied, missing or
 dies, the bridge flips and the window's handler is back, so the key never fires
-nowhere. The phone keeps its own button and is unchanged.
+nowhere. The phone's only voice control is the drawer's mic, which dictates.
 
 Two honest edges. Escape is seen, not swallowed, so the one that drops a clip
 or stops Kuru also reaches the app in front — unless that app is Kururu's

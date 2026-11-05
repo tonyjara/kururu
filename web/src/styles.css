@@ -6142,10 +6142,22 @@ button.kc {
   color: var(--text);
   background: var(--chrome-high);
 }
+/* The mic is a pen into the box: in the danger colour while it listens, with
+   the microphone's level as a ring that swells around it (`--mic-level`, 0–1),
+   as the quote's mic does, and waiting in the accent while it is heard. What
+   it is doing is said over the box (`.kuru-dictating`). */
 .kuru-mic-listening,
 .kuru-mic-listening:hover {
   color: var(--on-danger);
   background: var(--danger-bg);
+  box-shadow: 0 0 0 calc(2px + var(--mic-level, 0) * 5px) color-mix(in srgb, var(--danger-bg) 35%, transparent);
+}
+.kuru-mic-hearing {
+  color: var(--accent);
+  animation: st-key-wait 1.2s ease-in-out infinite;
+}
+.kuru-dictating {
+  color: var(--danger);
 }
 /* A thumb's size on a phone, still inside the box. */
 :root[data-narrow] .kuru-mic {

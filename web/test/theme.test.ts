@@ -89,6 +89,8 @@ const NOT_THEME = new Set([
   // The microphone's level while a quote's comment is said, 0–1, written by
   // `Quote.tsx` onto the mic itself as the meter moves: a reading, not a token.
   "--quote-level",
+  // The same reading on Kuru's own mic while it dictates into the box, written by `KuruDrawer.tsx`.
+  "--mic-level",
   // How wide the sidebar has been dragged. A view state this browser holds and
   // `App.tsx` writes onto the root element — a length, not a colour and not a
   // shape, and nothing a theme or a skin has any business having an opinion on.

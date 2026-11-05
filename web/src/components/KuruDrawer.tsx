@@ -145,7 +145,7 @@
  * reply was heard. What it adds is this page's own two states for a clip the
  * server does not have yet — recording, and saving — from the voice module.
  */
-import { Fragment, createContext, useCallback, useContext, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, createContext, useCallback, useContext, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { cardCode } from "../../../shared/board";
 import { CHANNEL_NAMES, channelReady, isChannelKind, type TelegramStatus } from "../../../shared/channels";
 import { dropRefusal } from "../../../shared/drops";
@@ -155,7 +155,7 @@ import { matchItem, parseKuruQuery, splitHits, type KuruQuery } from "../../../s
 import { splitMentions } from "../../../shared/made";
 import type { AgentSnapshot, MascotConfig, Profile } from "../../../shared/model";
 import { REPLY_ME, replyClock, replyReference, splitReply, withReply, type ReplyRef } from "../../../shared/reply";
-import type { OutboxState, VoiceSettings } from "../../../shared/voice";
+import { TAP_MS, type OutboxState, type VoiceSettings } from "../../../shared/voice";
 import { chipsIn, filesStillIn, piecesOf, type Chip } from "../../../shared/chips";
 import { escapePath, handoverFrom, isFileDrag } from "../drop";
 import { kuruLive, kuruWorking, setKuruSearchExit, takeKuruSearch, takeKuruWords, useKuruDrawer, type KuruLive } from "../kuru";
@@ -165,7 +165,7 @@ import { useKuruSearch } from "../kurusearch";
 import { isLoopback } from "../preview";
 import * as api from "../session";
 import { useKururu } from "../session";
-import { dismissVoice, talkDown, talkUp, useOutgoing, useVoiceUi, voiceIsRemote, voiceNow } from "../voice";
+import { dictate, dictateStop, dictateToggled, dismissVoice, useDictation, useOutgoing, useVoiceUi, voiceIsRemote, voiceNow } from "../voice";
 import { CHIP_ICONS, CHIP_WORD, ChipField, type ChipFieldHandle } from "./ChipField";
 import { Icon } from "./Icon";
 import { KuruInline, KuruMarkdown, type MarkdownDoors } from "./KuruMarkdown";
@@ -1162,7 +1162,7 @@ export function KuruDrawer({
 
       <Live live={live} working={working} profileId={profile.id} mascot={mascot} onTerminal={onTerminal} />
 
-      <Composer profileId={profile.id} onEditing={onEditing} talking={ui.phase === "listening"} peers={kuruPeers} replyAsk={replyAsk} />
+      <Composer profileId={profile.id} onEditing={onEditing} peers={kuruPeers} replyAsk={replyAsk} />
 
       {/* The edge you drag, on the sidebar's and the tree's terms: last in the
           tree and absolutely positioned, so it sits over the border rather
@@ -2185,13 +2185,11 @@ function writeFiles(profileId: string, files: readonly string[]) {
 function Composer({
   profileId,
   onEditing,
-  talking,
   peers,
   replyAsk,
 }: {
   profileId: string;
   onEditing: (editing: boolean) => void;
-  talking: boolean;
   /** The other nodes' Kurus, which `@name` at the start of a message is for. */
   peers: PeerKuru[];
   /** A line's reply arrow: quote it, address its node, and take the keyboard. */
@@ -2377,6 +2375,68 @@ function Composer({
       finish(paths);
     });
   };
+  /**
+   * The mic is a pen, not the talk key: what is said goes into the box at the
+   * cursor, after the cards, quotes and pictures already in it, and nothing is
+   * sent — the send is yours, as it is after a quote. Held, it listens until
+   * the release; tapped, until it is pressed again or Escape (`voice.ts`
+   * keeps the words either way). The release is caught on the window, since a
+   * finger slides off a button it holds, and a tap is told from a hold by the
+   * two events' own stamps, not the clock when each is handled: opening the
+   * microphone can hold the page for a few hundred milliseconds, and a tap
+   * whose release waited behind it measured as a hold, ended on the spot and
+   * was too short to hear. `dictatingFor` is whose box the words
+   * are for, so words heard after the drawer moved to another profile go on
+   * the end of the draft they were said into, as a dropped file's do.
+   */
+  const dictation = useDictation();
+  const dictatingFor = useRef<string | null>(null);
+  /** Why the last dictation put nothing in, said over the box until the next press or keystroke. */
+  const [unheard, setUnheard] = useState<string | null>(null);
+  const putInNow = useRef(putIn);
+  putInNow.current = putIn;
+  const said = dictatingFor.current !== null ? dictation.phase : "idle";
+  const speak = (pressed: number) => {
+    if (dictatingFor.current !== null) {
+      // The second press of a tapped dictation; one already being heard has nothing left to stop.
+      dictateStop();
+      return;
+    }
+    setUnheard(null);
+    const forProfile = profileId;
+    dictatingFor.current = forProfile;
+    const up = (event: PointerEvent) => {
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("pointercancel", up, true);
+      if (event.timeStamp - pressed < TAP_MS) dictateToggled();
+      else dictateStop();
+    };
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("pointercancel", up, true);
+    void dictate().then((outcome) => {
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("pointercancel", up, true);
+      if (dictatingFor.current !== forProfile) return;
+      dictatingFor.current = null;
+      if (!outcome.ok) {
+        if (outcome.why) setUnheard(outcome.why);
+        return;
+      }
+      if (field.current && shown.current === forProfile) putInNow.current(outcome.text);
+      else {
+        const was = readDraft(forProfile);
+        writeDraft(forProfile, insertWords(was, was.length, was.length, outcome.text).text);
+      }
+    });
+  };
+  // The drawer closed while it listened: what was said is still heard, and
+  // kept in the draft, rather than a microphone left open with nothing to stop it.
+  useEffect(
+    () => () => {
+      if (dictatingFor.current !== null) dictateStop();
+    },
+    [],
+  );
   return (
     <form
       className="kuru-composer"
@@ -2410,6 +2470,15 @@ function Composer({
           onClick={() => setHanding((was) => ({ ...was, refused: null }))}
         >
           {handing.waiting > 0 ? `Keeping ${handing.waiting === 1 ? "a file" : `${handing.waiting} files`} for Kuru…` : handing.refused}
+        </p>
+      )}
+      {(said !== "idle" || unheard) && (
+        <p className={`kuru-handing ${said === "idle" ? "kuru-handing-refused" : "kuru-dictating"}`} role="status" onClick={() => setUnheard(null)}>
+          {said === "listening"
+            ? "Listening… press the mic again, or Esc, to put it in the box."
+            : said === "hearing"
+              ? "Hearing…"
+              : `${unheard} Hold or tap the mic to try again.`}
         </p>
       )}
       {toPeer && (
@@ -2479,6 +2548,7 @@ function Composer({
               setCaret(at);
               setChosen(0);
               if (handing.refused) setHanding((was) => ({ ...was, refused: null }));
+              if (unheard) setUnheard(null);
             }}
             onPaste={(event) => {
               if (event.clipboardData.files.length === 0) return;
@@ -2528,18 +2598,19 @@ function Composer({
         </div>
         <button
           type="button"
-          className={`kuru-mic ${talking ? "kuru-mic-listening" : ""}`}
+          className={`kuru-mic ${said === "listening" ? "kuru-mic-listening" : said === "hearing" ? "kuru-mic-hearing" : ""}`}
+          style={{ "--mic-level": said === "listening" ? dictation.level : 0 } as CSSProperties}
           onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            // The field keeps the keys and the cursor the words go in at.
             event.preventDefault();
-            talkDown();
+            speak(event.timeStamp);
           }}
-          onPointerUp={talkUp}
-          onPointerCancel={talkUp}
           onMouseDown={(event) => event.preventDefault()}
           onContextMenu={(event) => event.preventDefault()}
-          title="Hold to talk to Kuru, tap to toggle"
-          aria-label="Talk to Kuru"
-          aria-pressed={talking}
+          title={said === "listening" ? "Put what you said in the box (Esc)" : "Dictate into the box — hold, or tap to start and again to stop. Nothing is sent"}
+          aria-label={said === "listening" ? "Stop dictating" : "Dictate into the box"}
+          aria-pressed={said === "listening"}
         >
           <MicIcon />
         </button>

@@ -64,11 +64,17 @@
  * the worklet, the WAV — and so is the recogniser, on the server, but the clip
  * is not a message. It goes to `/api/voice/dictate` rather than to the outbox,
  * the words come back to the page that asked, and nothing reaches Kuru until
- * they are put into its box as a typed comment would be. It is held only,
- * never toggled, since the press is on a button that is gone once the quote
- * is in; and it is taken here even while the pill is the voice client,
- * because the pill-only rule is about the talk key and Kuru's clips, and
- * these words are for this page and no other.
+ * they are put into its box as a typed comment would be. A quote's is held
+ * only, since the press is on a button that is gone once the quote is in.
+ * Kuru's own box dictates too (`KuruDrawer.tsx`): its mic is no longer the
+ * talk key for a thumb but a pen, held or tapped to toggle, and the words go
+ * into the box beside the cards, quotes and pictures already there for you to
+ * send — a toggled dictation is not ended by the window losing the focus,
+ * and Escape ends it with its words kept, since nothing is sent by it and
+ * a minute of speech thrown away by a reflex is the worse mistake. Either is
+ * taken here even while the pill is the voice client, because the pill-only
+ * rule is about the talk key and Kuru's clips, and these words are for this
+ * page and no other.
  */
 import { useSyncExternalStore } from "react";
 import { CLIP_MIN_MS, CLIP_RATE, CLIP_ROLL_MS, TAP_MS, downsample, encodeWav, type OutboxEntry, type SpeechChunk } from "../../shared/voice";
@@ -705,7 +711,7 @@ export function installTalkKey(codeOf: () => string): () => void {
     // pressed on purpose on a bar that exists to reach the terminal, and the
     // pill's ✕ is beside it for Kuru. No talk key ever comes this way.
     if (isSynthetic(event)) return;
-    if (event.key === "Escape" && voiceEscape()) {
+    if (event.key === "Escape" && (dictationEscape() || voiceEscape())) {
       // Immediate, because the prefix handler listens on this same window
       // and would otherwise take the Escape as well and close whatever it
       // thinks it is for — and the terminal is downstream of all of it, and
@@ -800,6 +806,26 @@ export function dictate(): Promise<Dictated> {
     mode = "hold";
     void open("dictation");
   });
+}
+
+/**
+ * The press that started a dictation was a tap: it listens until
+ * `dictateStop`, through the window losing the focus, as a toggled clip to
+ * Kuru does. Only Kuru's box asks for this; a quote's mic is held.
+ */
+export function dictateToggled(): void {
+  if (dictating && dictation.phase === "listening") mode = "toggle";
+}
+
+/**
+ * Escape, while a toggled dictation listens: it stops, and its words go in.
+ * A held one is left to `voiceEscape`, which drops it, as a quote's always
+ * has been — its Escape closes the popover the words were for.
+ */
+function dictationEscape(): boolean {
+  if (!dictating || dictation.phase !== "listening" || mode !== "toggle") return false;
+  dictateStop();
+  return true;
 }
 
 /** …and came back up: what was said is heard. */
