@@ -470,7 +470,9 @@ export const REMOTE_SCRIPT = [
  * see, so that path is looked at by name.
  *
  * Signed in is asked of the CLI itself — `claude auth status`, `codex login
- * status` — because only it knows every way it can be (a subscription, a key
+ * status` — and never of Antigravity's, which has no such question: its
+ * `g` is a line no help prints, so only whether it is installed is checked,
+ * and a CLI that is not signed in says so itself when it starts. Asked because only it knows every way it can be (a subscription, a key
  * in the environment, a key helper, a cloud provider). Each says so when it is
  * not — Codex as "Not logged in", Claude Code as `"loggedIn": false` — and
  * only that is taken as no: a crash, a timeout or a word it did not say is a
@@ -485,7 +487,7 @@ export const REMOTE_SCRIPT = [
  */
 export const AGENT_CHECK = [
   `c=$1; m=$2`,
-  `case $c in claude) n="Claude Code"; g="Usage: claude auth"; set -- auth status; l="Run claude auth login here, or claude and then /login";; *) n=Codex; g="Show login status"; set -- login status; l="Run codex login here";; esac`,
+  `case $c in claude) n="Claude Code"; g="Usage: claude auth"; set -- auth status; l="Run claude auth login here, or claude and then /login";; agy) n="Antigravity CLI"; g="kururu-asks-no-login"; set -- --version; l="Run agy here to sign in";; *) n=Codex; g="Show login status"; set -- login status; l="Run codex login here";; esac`,
   `p=$(command -v "$c" 2>/dev/null) || p=`,
   `[ -n "$p" ] || [ "$c" != claude ] || [ ! -x "$HOME/.claude/local/claude" ] || p=$HOME/.claude/local/claude`,
   `if [ -z "$p" ]; then echo; echo "kururu: $n is not installed on $m. There is no $c on the PATH here."; echo "kururu: install it in this tab, then start it again from the + menu."; exit 127; fi`,

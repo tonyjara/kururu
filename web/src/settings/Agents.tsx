@@ -18,6 +18,7 @@ import { useState } from "react";
 import {
   adoptOpencodeModel,
   AGENT_CLIS,
+  AGY_DEFAULT_MODEL,
   BYPASS_FLAG,
   CLI_LABELS,
   HARNESS_CLI_LABELS,
@@ -33,12 +34,13 @@ import {
 import type { AgentPlacement } from "../../../shared/agentpane";
 import * as api from "../session";
 import { LendLogin } from "./Secrets";
-import { Choice, Danger, Details, Field, Group, Mono, NumField, Outcome, P, SwitchMenu, Toggle } from "./ui";
+import { Choice, Danger, Details, Field, Group, Mono, NumField, Outcome, P, Select, SwitchMenu, Toggle } from "./ui";
 
-/** The two programs, as the segments say them, with what each is billed to as the tooltip. */
+/** The three programs, as the segments say them, with what each is billed to as the tooltip. */
 const HARNESS_OPTIONS = [
   ["claude", HARNESS_CLI_LABELS.claude, "Billed to your Claude subscription"],
   ["opencode", HARNESS_CLI_LABELS.opencode, "Billed to whatever OpenCode is signed in to, usually an API key"],
+  ["agy", HARNESS_CLI_LABELS.agy, "Antigravity's own CLI, agy, billed to your Antigravity plan's quota"],
 ] as const satisfies ReadonlyArray<readonly [HarnessCli, string, string]>;
 
 /** The three answers, as the segments say them; the third's tooltip is what off means. */
@@ -77,7 +79,17 @@ export function AgentsPage({
       {AGENT_CLIS.filter((cli) => cli !== "opencode").map((cli) => {
         const on = !launch.offClis.includes(cli);
         return (
-          <Group key={cli} title={CLI_LABELS[cli]} foot={cli === "codex" ? "The model list is written into kururu and refreshed by the update-models skill." : undefined}>
+          <Group
+            key={cli}
+            title={CLI_LABELS[cli]}
+            foot={
+              cli === "codex"
+                ? "The model list is written into kururu and refreshed by the update-models skill."
+                : cli === "agy"
+                  ? "Antigravity's own CLI, agy, on your Antigravity sign-in. Its models are the ones agy models lists."
+                  : undefined
+            }
+          >
             <Toggle label="In the + menu" on={on} onChange={(next) => toggleCli(cli, next)} />
             <fieldset className="st-sub" disabled={!on}>
               {/* Above the models because it applies to all of them, and it
@@ -183,7 +195,9 @@ function KuruProgram({ launch, profileId, profileName, kuruOn }: { launch: Launc
         hint={
           want === "opencode"
             ? "OpenCode, with its own sign-in: Kuru and every agent use this model and are billed per token."
-            : "Claude Code, on your Claude subscription; agents use the normal Claude and Codex launchers."
+            : want === "agy"
+              ? "Antigravity's agy, on your Antigravity sign-in: Kuru, cards and the Claude rows use this model, on your Antigravity quota."
+              : "Claude Code, on your Claude subscription; agents use the normal Claude and Codex launchers."
         }
         value={want}
         options={HARNESS_OPTIONS}
@@ -203,6 +217,21 @@ function KuruProgram({ launch, profileId, profileName, kuruOn }: { launch: Launc
             if (model) api.setLaunch({ ...launch, opencodeModel: model });
           }}
         />
+      )}
+      {want === "agy" && (
+        <Select
+          label="Antigravity model"
+          hint={<>As agy names it. <Mono>{AGY_DEFAULT_MODEL}</Mono> by default.</>}
+          value={launch.agyModel}
+          ariaLabel="The model Antigravity runs Kuru and the agents on"
+          onChange={(agyModel) => api.setLaunch({ ...launch, agyModel })}
+        >
+          {LAUNCHERS.filter((launcher) => launcher.cli === "agy" && launcher.model).map((launcher) => (
+            <option key={launcher.id} value={launcher.model}>
+              {launcher.label.replace(/^Antigravity /, "")}
+            </option>
+          ))}
+        </Select>
       )}
       {stale && (
         <Danger

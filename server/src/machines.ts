@@ -349,7 +349,8 @@ const REMOTE_TAIL = 300_000;
 
 /**
  * The end of an agent's conversation file on a machine, found by its id —
- * Claude's transcript under any project, Codex's rollout under any day. Null
+ * Claude's transcript under any project, Codex's rollout under any day,
+ * Antigravity's transcript in the folder it keeps per conversation. Null
  * when the machine could not be asked; an empty string when it was, and the
  * file is not there.
  */
@@ -358,7 +359,9 @@ export async function sessionTailOn(host: string, cli: AgentCli, id: string): Pr
   const script =
     cli === "claude"
       ? `tail -c ${REMOTE_TAIL} "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*/${id}.jsonl 2>/dev/null; true`
-      : `f=$(find "\${CODEX_HOME:-$HOME/.codex}/sessions" -name "rollout-*-${id}.jsonl" 2>/dev/null | head -n 1); [ -n "$f" ] && tail -c ${REMOTE_TAIL} "$f"; true`;
+      : cli === "agy"
+        ? `tail -c ${REMOTE_TAIL} "$HOME/.gemini/antigravity-cli/brain/${id}/.system_generated/logs/transcript_full.jsonl" 2>/dev/null; true`
+        : `f=$(find "\${CODEX_HOME:-$HOME/.codex}/sessions" -name "rollout-*-${id}.jsonl" 2>/dev/null | head -n 1); [ -n "$f" ] && tail -c ${REMOTE_TAIL} "$f"; true`;
   const result = await run(host, posix(script));
   return result.ok ? result.text : null;
 }

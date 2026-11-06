@@ -94,6 +94,8 @@ export interface KururuState {
   usage: AccountUsage | null;
   /** What the Codex account has spent, as Codex last wrote it down, or null while Codex is not signed in. */
   codexUsage: CodexUsage | null;
+  /** Antigravity's quota, in Codex's shape. See `server/src/agy.ts`. */
+  agyUsage: CodexUsage | null;
   /** Every machine the sidebar watches, with its last reading. See `shared/machines.ts`. */
   machines: MachineStatus[];
   /** Each machine's kept hardware reading, what was typed beside it and its history, by machine id. See `shared/specs.ts`. */
@@ -156,6 +158,7 @@ let state: KururuState = {
   projects: [],
   usage: null,
   codexUsage: null,
+  agyUsage: null,
   machines: [],
   specs: {},
   nodes: null,
@@ -360,6 +363,9 @@ function connect(): void {
         break;
       case "codex-usage":
         set({ codexUsage: msg.codex });
+        break;
+      case "agy-usage":
+        set({ agyUsage: msg.agy });
         break;
       case "machines":
         set({ machines: msg.machines });

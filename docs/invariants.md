@@ -153,7 +153,20 @@ and no token refresh, because writing that store could log out a running agent
 to draw a bar. `server/src/usage.ts` is the only file that has seen it.
 Codex's allowance beside it reaches nowhere: `server/src/codexusage.ts`
 reads the `rate_limits` Codex writes into its own rollouts, and only stats
-`auth.json` to know it is signed in.
+`auth.json` to know it is signed in. Antigravity's reaches nowhere either:
+it is the quota `agy` hands its own title command, written to a file by
+kururu's reporter without the email beside it (`server/src/agy.ts`).
+
+## Antigravity
+
+**Antigravity's sign-in is never lent.** `agy` runs in a pty as `claude` does,
+on its own sign-in; no token of Antigravity's is read, copied or given to
+another program, and no program is made to pass for Antigravity — the user's
+account is bound by Google's terms. kururu reaches `agy` only through doors it
+documents: `--settings` for one launch (a title command, Kuru's folder
+trusted, Kuru's tools allowed), and `.agents/` in Kuru's own folder. It never
+writes the user's `~/.gemini` config or a project's `.agents/`. See
+[antigravity](antigravity.md).
 
 ## The usage ledger
 

@@ -72,12 +72,13 @@ import { web } from "./sweeps";
 import { claudeDirOf, codexHomeOf, spawnEnv, spawnEnvFor, tokenInPtys } from "./lending";
 import { endSession, findMachine, machinesSnapshot, sessionsEnding, sessionsOn } from "./machines";
 import { findOpencode, prepareOpencodeAgent } from "./opencode";
+import { agyAgentFlags } from "./agy";
 import { hostBlob, writeSnapshot } from "./persist";
 import { PORT } from "./preamble";
 import { forget as forgetRecording, recordBacklog, recordNote, recordOutput } from "./record";
 import { type Grid, smallestGrid } from "./sizing";
 import { usageSnapshot } from "./usage";
-import type { LaunchNote } from "./usage/attribute";
+import type { LaunchNote, LaunchNoteOf } from "./usage/attribute";
 import { readRetention, usageReport } from "./usage/report";
 import type { UsageReader } from "./usage/sweep";
 import { abbreviateHome } from "../../shared/text";
@@ -448,6 +449,10 @@ export async function agentCommandFor(launcher: Launcher, profileId: string, ses
     const config = prepareOpencodeAgent(id, { port: PORT, withToken: tokenInPtys(), model: launcher.model ?? launch.opencodeModel, web: web.active() });
     return opencodeAgentCommand(found.path, config, id, launch.bypassClis.includes("opencode") || launch.bypassClis.includes("claude"));
   }
+  // Antigravity takes no hooks, MCP servers or web tools per launch — only
+  // the session settings that make kururu's reporter its title command.
+  // See `shared/agy.ts`.
+  if (launcher.cli === "agy") return launcherCommand(launcher, launch) + agyAgentFlags();
   return launcherCommand(launcher, launch) + hooksFor(launcher, profileId) + web.launchFlags(launcher.cli) + kururuMcpOnly(launcher, profileId);
 }
 
@@ -515,8 +520,11 @@ function launchRow(agentId: string, profileId: string, workspaceId: string | nul
 }
 
 /** kururu has just started an agent: the ledger is told whose it is. See `usage/attribute.ts`. */
-export function noteLaunch(agentId: string, profileId: string, workspaceId: string | null, note: LaunchNote): void {
-  usageLaunches?.spawned(launchRow(agentId, profileId, workspaceId, note));
+export function noteLaunch(agentId: string, profileId: string, workspaceId: string | null, note: LaunchNoteOf): void {
+  const { program } = note;
+  // Antigravity's conversations are not in the ledger: see `noteReported`.
+  if (program === "agy") return;
+  usageLaunches?.spawned(launchRow(agentId, profileId, workspaceId, { ...note, program }));
 }
 
 /**
@@ -578,6 +586,9 @@ export function usageReportFor(reader: UsageReader, range: UsageRange, by: Usage
 
 /** A hook in one of kururu's terminals named its session, which may be one no launch knew: `/clear`, or a `claude` typed into a shell. */
 export function noteReported(agentId: string, body: Record<string, unknown>): void {
+  // Antigravity's conversations are not in the ledger, which reads Claude's,
+  // Codex's and OpenCode's logs: a row for one would hold nothing.
+  if (body.program === "agy") return;
   const transcript = typeof body.transcript === "string" ? sessionOfTranscript(body.transcript) : null;
   usageLaunches?.reported(transcript ?? body.session, () => {
     const own = harness.isHarness(agentId);

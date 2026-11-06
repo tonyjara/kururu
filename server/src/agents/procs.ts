@@ -26,6 +26,7 @@ export const DEFAULT_AGENT_COMMANDS = [
   "gemini",
   "aider",
   "opencode",
+  "agy",
   "amp",
   "cursor-agent",
   "goose",

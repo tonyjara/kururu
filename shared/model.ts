@@ -894,6 +894,12 @@ export interface HarnessState {
    * conversation up again. Neither program can read the other's.
    */
   opencodeSessionId?: string;
+  /**
+   * Antigravity's conversation, beside the other two for the same reason.
+   * Learned rather than chosen: `agy` names its own, and its first report
+   * says which (`Harness.report`).
+   */
+  agySessionId?: string;
 }
 
 /** What a login key may be: the hex `mintLoginKey` makes, and nothing that could be a path. */

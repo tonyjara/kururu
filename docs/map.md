@@ -13,6 +13,7 @@ in this folder.
 | `layout.ts` | The split tree and every pure operation on it. Both halves use it |
 | `agentpane.ts` | Where the agents kururu starts go: the bottom (or top) pane by geometry, the mark that keeps them in one, the word to split when there is none. Pure, tested. See [layout](layout.md#the-agents-pane) |
 | `harness.ts` | The harness's vocabulary: the MCP tool catalogue, the role prompt, key and paste grammar, when a waiting message may be typed, the frames of a notice, transcript turns, its model, effort and compaction point, its folder's two files. Pure, tested |
+| `agy.ts` | Antigravity's `agy`, the pure half: the title payload read as reports, the transcript's last reply, the quota as the bar's limits, the session settings, Kuru's line, MCP config, hooks and role. See [antigravity](antigravity.md) |
 | `opencode.ts` | Kuru on OpenCode, the pure half: the command line, the config kururu writes into Kuru's folder, the session id it picks, and the map of which Claude Code door each OpenCode one replaces. See [harness](harness.md#on-opencode) |
 | `lifecycle.ts` | The line `lifecycle.log` is made of, and reading it back forgivingly. Three processes write it; two of them are plain JS and keep in step by hand |
 | `usage.ts` | The ledger's rows, the count that refuses a non-count, the Mac's days, and whose a session was: `attributionFor` and which reading wins |
@@ -153,6 +154,8 @@ in this folder.
 | `src/report-cli.ts` | What a Claude Code hook runs. Not in `agents/` on purpose. Also carries the session's inbox socket, transcript path and last reply for the harness |
 | `src/harness.ts` | The harness's hands: kururu's verbs as MCP tools for one profile, a terminal read as text, the user's words typed into a pty when it may take them, the status feed into the harness's inbox. Explicit targets, never `active` (`shared/harness.ts`) |
 | `src/harnesshome.ts` | The folder each profile's harness runs in, under the data directory and no project's: made with its AGENTS.md and CLAUDE.md, and the harness's own memories carried over once from wherever it ran before |
+| `src/agy.ts` | Antigravity's `agy`, the half that touches the disk: each launch's `--settings`, Kuru's `.agents/` folder, the quota file read for the bar. See [antigravity](antigravity.md) |
+| `src/agy-report-cli.ts` | What `agy` runs as its title command, and as Kuru's hooks: bundled to `agyreport.mjs` beside the server. See [antigravity](antigravity.md) |
 | `src/opencode.ts` | Kuru on OpenCode, the half that touches the disk: kururu's plugin, which posts the same `/api/report`s Claude Code's hooks do, and the config and role written into Kuru's folder before each start. See [harness](harness.md#on-opencode) |
 | `src/hooks.ts` | The hooks kururu hands a Claude Code it starts in a profile with a login of its own, whose empty `settings.json` would otherwise run it with none |
 | `src/outbox.ts` | Your words on their way to Kuru, kept on the disk from the moment they arrive until Kuru's own hook says it has them. See [voice](voice.md) |

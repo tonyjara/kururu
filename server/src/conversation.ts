@@ -9,6 +9,7 @@
  */
 import type { Card } from "../../shared/board";
 import { harnessConversation, OPENCODE_SESSION_ID } from "../../shared/harness";
+import { AGY_CONVERSATION } from "../../shared/agy";
 import { type SearchHit, sessionOfTranscript } from "../../shared/store";
 import { channels, harness, host, kuru, store, voice, workspaces } from "./context";
 import type { SayOutcome } from "./harness";
@@ -92,7 +93,8 @@ export function recordTurn(agentId: string, report: { status?: string; message?:
       return turn;
     }
     if (report.status !== "done" || !reply) return null;
-    const reportedSession = typeof body.session === "string" && OPENCODE_SESSION_ID.test(body.session) ? body.session : null;
+    const reportedSession =
+      typeof body.session === "string" && (OPENCODE_SESSION_ID.test(body.session) || (body.program === "agy" && AGY_CONVERSATION.test(body.session))) ? body.session : null;
     const sessionId = sessionOfTranscript(typeof body.transcript === "string" ? body.transcript : null) ?? reportedSession;
     if (!sessionId) return null;
     store.recordTurn({ conversationId: sessionId, profileKey: profile.key, kind: "agent", launcher: null, cwd, role: "agent", text: reply, at });

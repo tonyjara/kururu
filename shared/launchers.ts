@@ -23,13 +23,14 @@
 
 import { SESSION_ID } from "./board";
 
-export const AGENT_CLIS = ["claude", "codex", "opencode"] as const;
+export const AGENT_CLIS = ["claude", "codex", "opencode", "agy"] as const;
 export type AgentCli = (typeof AGENT_CLIS)[number];
 
 export const CLI_LABELS: Record<AgentCli, string> = {
   claude: "Claude",
   codex: "Codex",
   opencode: "OpenCode",
+  agy: "Antigravity",
 };
 
 /** The flag each CLI takes a model on. They agree on the long spelling. */
@@ -37,6 +38,7 @@ const MODEL_FLAG: Record<AgentCli, string> = {
   claude: "--model",
   codex: "--model",
   opencode: "--model",
+  agy: "--model",
 };
 
 /**
@@ -53,6 +55,7 @@ export const BYPASS_FLAG: Record<AgentCli, string> = {
   claude: "--dangerously-skip-permissions",
   codex: "--dangerously-bypass-approvals-and-sandbox",
   opencode: "--auto",
+  agy: "--dangerously-skip-permissions",
 };
 
 export interface Launcher {
@@ -96,11 +99,67 @@ export const LAUNCHERS: readonly Launcher[] = [
   { id: "codex:gpt-5.5", cli: "codex", model: "gpt-5.5", label: "Codex GPT-5.5" },
   { id: "codex:gpt-5.4", cli: "codex", model: "gpt-5.4", label: "Codex GPT-5.4" },
   { id: "codex:gpt-5.4-mini", cli: "codex", model: "gpt-5.4-mini", label: "Codex GPT-5.4-Mini" },
+
+  // Antigravity's CLI names a model and its effort in one id, as `agy models`
+  // lists them. One row a model at its top effort, and Opus at medium too, the
+  // cheaper of the two Claude rows a quota is spent on; the low efforts are
+  // left to the CLI's own `/model`.
+  { id: "agy", cli: "agy", label: "Antigravity" },
+  { id: "agy:claude-opus-5-5-high", cli: "agy", model: "claude-opus-5-5-high", label: "Antigravity Claude Opus 5.5 (High)" },
+  { id: "agy:claude-opus-5-5-medium", cli: "agy", model: "claude-opus-5-5-medium", label: "Antigravity Claude Opus 5.5 (Medium)" },
+  { id: "agy:claude-sonnet-5-5-high", cli: "agy", model: "claude-sonnet-5-5-high", label: "Antigravity Claude Sonnet 5.5 (High)" },
+  { id: "agy:gemini-4-argon-high", cli: "agy", model: "gemini-4-argon-high", label: "Antigravity Gemini 4 Argon (High)" },
+  { id: "agy:gemini-3.8-flash-high", cli: "agy", model: "gemini-3.8-flash-high", label: "Antigravity Gemini 3.8 Flash (High)" },
+  { id: "agy:gpt-oss-120b-medium", cli: "agy", model: "gpt-oss-120b-medium", label: "Antigravity GPT-OSS 120B" },
 ];
 
 /** The OpenCode row is derived from Settings rather than kept in the static model catalogue. */
 export function opencodeLauncher(settings: LaunchSettings): Launcher {
   return { id: `opencode:${settings.opencodeModel}`, cli: "opencode", model: settings.opencodeModel, label: `OpenCode ${settings.opencodeModel}` };
+}
+
+/**
+ * The Antigravity row the program switch puts agents on: the catalogue's row
+ * for `agyModel`, which `adoptAgyModel` has already held to the catalogue.
+ */
+export function agyLauncher(settings: LaunchSettings): Launcher {
+  const id = `agy:${settings.agyModel}`;
+  return LAUNCHERS.find((launcher) => launcher.id === id) ?? { id, cli: "agy", model: settings.agyModel, label: `Antigravity ${settings.agyModel}` };
+}
+
+/** The models the Antigravity rows name, which are what `agyModel` may be. */
+export const AGY_MODELS: readonly string[] = LAUNCHERS.filter((launcher) => launcher.cli === "agy" && launcher.model).map((launcher) => launcher.model!);
+
+/** What `agyModel` starts as: Claude Opus 5.5 at high effort, Claude Code's harness model, so switching programs does not also switch brains. */
+export const AGY_DEFAULT_MODEL = "claude-opus-5-5-high";
+
+/** A model as `agyModel` keeps it — one of the catalogue's — or null. */
+export function adoptAgyModel(value: unknown): string | null {
+  return typeof value === "string" && AGY_MODELS.includes(value) ? value : null;
+}
+
+/**
+ * Whether a card whose last run was on `was` starts fresh on the switch's
+ * program rather than resuming, because the switch has moved away from what
+ * it ran on and no program can read another's conversation.
+ *
+ * Only the programs the switch moves between take part, and only the way the
+ * switch moves them: OpenCode and Antigravity take over Claude's agents, and
+ * Antigravity OpenCode's, but an Antigravity or Codex row somebody chose by
+ * name from the + menu is theirs to keep. Claude's position takes back only
+ * OpenCode, whose rows its menu does not show.
+ */
+export function switchedFrom(settings: LaunchSettings, was: AgentCli | null | undefined): boolean {
+  // The switch's positions are CLIs' names too: Claude Code's is `claude`.
+  return switchedFromCli(settings.harnessCli, was);
+}
+
+/** The same, by the CLI the switch's position runs — what the board knows, from the rows it was sent. */
+export function switchedFromCli(mode: AgentCli, was: string | null | undefined): boolean {
+  if (!was) return false;
+  if (mode === "claude") return was === "opencode";
+  if (mode === "opencode") return was === "claude";
+  return was === "claude" || was === "opencode";
 }
 
 /** What a model name may be made of. Anything else would need quoting. */
@@ -114,10 +173,15 @@ export function findLauncher(id: string): Launcher | undefined {
   return LAUNCHERS.find((launcher) => launcher.id === id);
 }
 
-/** Resolve a request through the global program switch. Claude choices become the configured OpenCode model. */
+/**
+ * Resolve a request through the global program switch. Claude choices become
+ * the configured OpenCode model, or the configured Antigravity one; an
+ * Antigravity or Codex row asked for by name is kept on every position.
+ */
 export function launcherFor(id: string | undefined, settings: LaunchSettings): Launcher | undefined {
   const asked = findLauncher(id || "claude");
   if (settings.harnessCli === "opencode" && (!asked || asked.cli === "claude" || asked.cli === "opencode")) return opencodeLauncher(settings);
+  if (settings.harnessCli === "agy" && (!asked || asked.cli === "claude" || asked.cli === "opencode")) return agyLauncher(settings);
   if (settings.harnessCli === "claude" && asked?.cli === "opencode") return findLauncher("claude");
   return asked;
 }
@@ -160,6 +224,13 @@ export function resumeCommand(
   anyDirectory: boolean,
 ): string | null {
   const flags = launcherCommand(launcher, settings).split(" ").slice(1);
+  if (launcher.cli === "agy") {
+    // Antigravity resumes by the id it reported (`--conversation`), and has
+    // no picker to fall back on: `--continue` takes the newest conversation in
+    // the directory, which in a shared checkout may be somebody else's.
+    if (!sessionId || !SESSION_ID.test(sessionId)) return null;
+    return ["agy", ...flags, "--conversation", sessionId].join(" ");
+  }
   if (launcher.cli === "claude") {
     if (!sessionId || !SESSION_ID.test(sessionId)) return null;
     return ["claude", ...flags, "--resume", sessionId].join(" ");
@@ -197,6 +268,21 @@ export function withPrompt(command: string, prompt: string): string {
 /** OpenCode's only positional argument is a directory; its opening request is `--prompt`. */
 export function withOpencodePrompt(command: string, prompt: string): string {
   return promptArgument(command, prompt, "--prompt");
+}
+
+/**
+ * Antigravity's opening request is `--prompt-interactive`: it starts the
+ * session on it and stays, where `--prompt` would print one reply and exit.
+ */
+export function withAgyPrompt(command: string, prompt: string): string {
+  return promptArgument(command, prompt, "--prompt-interactive");
+}
+
+/** A launcher's line with the card's words on it, by whichever door that CLI takes them. */
+export function withPromptFor(cli: AgentCli, command: string, prompt: string): string {
+  if (cli === "opencode") return withOpencodePrompt(command, prompt);
+  if (cli === "agy") return withAgyPrompt(command, prompt);
+  return withPrompt(command, prompt);
 }
 
 /**
@@ -257,15 +343,22 @@ export interface LaunchSettings {
    * OpenCode takes it from the config kururu writes into Kuru's folder.
    */
   opencodeModel: string;
+  /**
+   * The model Antigravity's CLI runs Kuru and the switched agents on, as
+   * `agy models` names one: the model and its effort in one id. One of the
+   * catalogue's Antigravity rows, since those are the ids known to exist.
+   */
+  agyModel: string;
 }
 
 /** The programs Kuru and, through the same switch, its default agents may run on. */
-export const HARNESS_CLIS = ["claude", "opencode"] as const;
+export const HARNESS_CLIS = ["claude", "opencode", "agy"] as const;
 export type HarnessCli = (typeof HARNESS_CLIS)[number];
 
 export const HARNESS_CLI_LABELS: Record<HarnessCli, string> = {
   claude: "Claude Code",
   opencode: "OpenCode",
+  agy: "Antigravity",
 };
 
 /**
@@ -305,6 +398,7 @@ export const DEFAULT_LAUNCH: LaunchSettings = {
   sleepMinutes: 10,
   harnessCli: "claude",
   opencodeModel: OPENCODE_DEFAULT_MODEL,
+  agyModel: AGY_DEFAULT_MODEL,
 };
 
 /**
@@ -331,8 +425,9 @@ export function adoptLaunch(raw: unknown): LaunchSettings {
     sleepMinutes: sleepMinutes(obj.sleepMinutes),
     // Claude unless OpenCode was chosen: a file from before the choice, or a
     // word this version does not know, keeps Kuru where it always was.
-    harnessCli: obj.harnessCli === "opencode" ? "opencode" : "claude",
+    harnessCli: obj.harnessCli === "opencode" || obj.harnessCli === "agy" ? obj.harnessCli : "claude",
     opencodeModel: adoptOpencodeModel(obj.opencodeModel) ?? OPENCODE_DEFAULT_MODEL,
+    agyModel: adoptAgyModel(obj.agyModel) ?? AGY_DEFAULT_MODEL,
   };
 }
 
@@ -349,6 +444,12 @@ function sleepMinutes(value: unknown): number {
 /** What the new-tab menu shows, in catalogue order. */
 export function visibleLaunchers(settings: LaunchSettings): Launcher[] {
   if (settings.harnessCli === "opencode") return [opencodeLauncher(settings)];
+  if (settings.harnessCli === "agy") {
+    // The switch's own row first, which is what a card is run on by default,
+    // then the other Antigravity rows still switched on.
+    const first = agyLauncher(settings);
+    return [first, ...LAUNCHERS.filter((launcher) => launcher.cli === "agy" && launcher.id !== first.id && !settings.offLaunchers.includes(launcher.id))];
+  }
   return LAUNCHERS.filter(
     (launcher) => !settings.offClis.includes(launcher.cli) && !settings.offLaunchers.includes(launcher.id),
   );

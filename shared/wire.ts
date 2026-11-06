@@ -440,6 +440,13 @@ export type ServerMessage =
   | { type: "usage"; usage: AccountUsage | null }
   | { type: "codex-usage"; codex: CodexUsage | null }
   /**
+   * Antigravity's quota, in Codex's shape for Codex's reason: what the
+   * program last said, as of when it said it — here through kururu's
+   * reporter, which `agy` runs as its title command (`shared/agy.ts`). Null
+   * until an `agy` has run under kururu on this Mac.
+   */
+  | { type: "agy-usage"; agy: CodexUsage | null }
+  /**
    * Sent on connect, after every machine poll, and whenever the list changes:
    * every machine the sidebar watches, with its last reading. Whole, like
    * `branches` — there are a handful, and the list and the numbers travel

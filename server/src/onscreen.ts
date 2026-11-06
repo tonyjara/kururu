@@ -18,10 +18,13 @@
  * rows as text (`screenRows`), which it reads off the emulator it already
  * keeps; an older one is asked for a backlog, which is read back through a
  * fresh emulator here, as it always was. Only kururu's own remote agent tabs
- * are read — a line `remoteShellCommand` built with an agent on it — and one
- * at a time, so a slow host never has a queue of them.
+ * are read — a line `remoteShellCommand` built with an agent on it — and,
+ * on this Mac, an `agy` kururu started, whose own reports cannot say
+ * `blocked` (`shared/agy.ts`); one at a time, so a slow host never has a
+ * queue of them.
  */
 import { readScreen, ScreenWatch } from "../../shared/onscreen";
+import { isAgyLine } from "../../shared/agy";
 import { remoteShellOf } from "../../shared/machines";
 import type { AgentReport, AgentStatus } from "../../shared/model";
 import { screenText } from "./harness";
@@ -61,6 +64,8 @@ export interface OnScreenDeps {
   report: (agentId: string, report: AgentReport) => void;
   /** What the sidebar's second line says the agent is doing: a question, or what is missing. Null clears it. */
   said: (agentId: string, text: string | null) => void;
+  /** Whether a terminal is a profile's Kuru, whose hooks say more than its screen. */
+  isHarness?: (agentId: string) => boolean;
 }
 
 export class OnScreen {
@@ -83,7 +88,12 @@ export class OnScreen {
     try {
       const live = new Set<string>();
       for (const agent of this.deps.host.agents) {
-        if (agent.exited || agent.kind !== "agent" || !remoteShellOf(agent.command)?.agent) continue;
+        if (agent.exited || agent.kind !== "agent") continue;
+        // An agent on a machine, or an Antigravity one here, which reports
+        // through its title but cannot say it is waiting on a prompt.
+        const local = isAgyLine(agent.command);
+        if (!remoteShellOf(agent.command)?.agent && !local) continue;
+        if (local && this.deps.isHarness?.(agent.id)) continue;
         live.add(agent.id);
         const text = await screenRows(this.deps.host, agent.id, this.deps.grid(agent.id));
         if (text === null) continue;

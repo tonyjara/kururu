@@ -47,6 +47,13 @@ const REMEMBERED_MAX = 4096;
 const SESSION = /^[\w.:-]{1,128}$/;
 
 /** What a road that starts an agent adds to what the server can look up for itself. */
+/**
+ * A launch as its road knows it: any CLI kururu starts, Antigravity's among
+ * them, which `noteLaunch` leaves out of the ledger since nothing in it reads
+ * that program's logs.
+ */
+export type LaunchNoteOf = Omit<LaunchNote, "program"> & { program: UsageProgram | "agy" };
+
 export interface LaunchNote {
   program: UsageProgram;
   sessionId: string | null;

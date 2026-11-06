@@ -500,7 +500,7 @@ describe("remoteLaunchers: what a remote pane's + offers", () => {
     expect(remoteLaunchers(rows, { ...DEFAULT_LAUNCH, offClis: ["claude"] })).toEqual(rows as never);
   });
   it("is this node's catalogue under the node's settings for a node from before", () => {
-    const launch = { ...DEFAULT_LAUNCH, offClis: ["codex" as const] };
+    const launch = { ...DEFAULT_LAUNCH, offClis: ["codex" as const, "agy" as const] };
     expect(remoteLaunchers(undefined, launch)).toEqual(visibleLaunchers(launch));
     expect(remoteLaunchers(undefined, launch).every((l) => l.cli === "claude")).toBe(true);
     expect(remoteLaunchers(undefined, null)).toEqual([]);

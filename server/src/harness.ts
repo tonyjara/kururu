@@ -43,6 +43,7 @@
 import { randomUUID } from "node:crypto";
 import { open, stat } from "node:fs/promises";
 import { connect } from "node:net";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { Terminal } from "@xterm/headless";
@@ -68,6 +69,7 @@ import {
   agentName,
   harnessCliOf,
   harnessRunFlags,
+  noticesTyped,
   harnessTools,
   boardListing,
   clip,
@@ -89,7 +91,7 @@ import {
   type ModeClass,
   type When,
 } from "../../shared/harness";
-import { findLauncher, launcherCommand, launcherFor, visibleLaunchers, withOpencodePrompt, withPrompt, type AgentCli, type LaunchSettings, type Launcher } from "../../shared/launchers";
+import { findLauncher, launcherCommand, launcherFor, visibleLaunchers, withPromptFor, type AgentCli, type LaunchSettings, type Launcher } from "../../shared/launchers";
 import { remoteShellOf, validRemoteDir, type MachineEntry, type MachineStatus } from "../../shared/machines";
 import { folderSentence, planText, type MoveDone, type MovePlan } from "../../shared/move";
 import { lendableText, type LendAsk, type Lendable } from "../../shared/secrets";
@@ -106,8 +108,10 @@ import type { Actor, CardEvent, SearchHit, SearchScope } from "../../shared/stor
 import { mintOpencodeSession, opencodeHarnessCommand } from "../../shared/opencode";
 import type { McpResult } from "./mcp";
 import { harnessHome, prepareHarnessHome } from "./harnesshome";
-import type { LaunchNote } from "./usage/attribute";
+import type { LaunchNoteOf } from "./usage/attribute";
 import { findOpencode, prepareOpencodeHome } from "./opencode";
+import { prepareAgyHome } from "./agy";
+import { AGY_CONVERSATION, agyKuruCommand } from "../../shared/agy";
 import type { HostLink } from "./hostlink";
 import type { Workspaces } from "./workspaces";
 import type { RemoteScreen } from "./nodewatch";
@@ -162,9 +166,15 @@ export interface HarnessDeps {
   /** Which of the features the role and the tools have parts about are set up now. See `HarnessFeatures`. */
   features: () => HarnessFeatures;
   /** An agent has been started, for the usage ledger to know whose it is. See `usage/attribute.ts`. */
-  spawned?: (agentId: string, profileId: string, workspaceId: string | null, note: LaunchNote) => void;
+  spawned?: (agentId: string, profileId: string, workspaceId: string | null, note: LaunchNoteOf) => void;
   /** Whether kururu's web tools are on, which an OpenCode harness is given in its config rather than on its line. See `web/chain.ts`. */
   webTools: () => boolean;
+  /**
+   * The server's token, for the one config that has to hold it as itself:
+   * Kuru's on Antigravity, while loopback wants one (`tokenInPtys`). `agy`
+   * documents no substitution in its MCP config. See `shared/agy.ts`.
+   */
+  token?: () => string;
   /**
    * Open a terminal into a pane of a workspace that need not be on screen. A
    * plain shell in a pinned workspace opens on its machine unless `local`.
@@ -326,7 +336,8 @@ const WAKE_SETTLE_MS = 1500;
  * The same for OpenCode, whose plugin reports from its server before the
  * TUI in front of it has drawn: measured at 0.5 s for the report and 1.35 s
  * for the first frame, and keys sent before that frame are lost. The outbox
- * types a lost message again, but fifteen seconds later.
+ * types a lost message again, but fifteen seconds later. Antigravity gets it
+ * too: its title command reports the first idle while its TUI is drawing.
  */
 const WAKE_SETTLE_OPENCODE_MS = 3500;
 /** How long a Stop watches Kuru's screen for the turn to end, and how often it looks. */
@@ -409,7 +420,8 @@ export class Harness {
   // ---------------------------------------------------------------------------
 
   /** The extras on a `/api/report`: where the transcript is, where the inbox is, what was last said. */
-  report(agentId: string, extras: { transcript?: unknown; inbox?: unknown; reply?: unknown; status?: unknown }): void {
+  report(agentId: string, extras: { transcript?: unknown; inbox?: unknown; reply?: unknown; status?: unknown; program?: unknown; session?: unknown }): void {
+    this.learnAgySession(agentId, extras);
     if (typeof extras.transcript === "string" && extras.transcript.startsWith("/")) this.transcripts.set(agentId, extras.transcript);
     const inbox = extras.inbox as { socket?: unknown; token?: unknown } | undefined;
     if (inbox && typeof inbox.socket === "string" && inbox.socket.startsWith("/")) {
@@ -423,7 +435,7 @@ export class Harness {
       this.starting.delete(agentId);
       const profileId = this.isHarness(agentId);
       const harness = profileId ? this.deps.workspaces.profile(profileId)?.harness : null;
-      const settle = harness && harnessCliOf(harness) === "opencode" ? WAKE_SETTLE_OPENCODE_MS : WAKE_SETTLE_MS;
+      const settle = harness && harnessCliOf(harness) !== "claude" ? WAKE_SETTLE_OPENCODE_MS : WAKE_SETTLE_MS;
       // Still waking until it has settled, so words that arrive meanwhile
       // wait with the first rather than being typed ahead of the frame.
       const timer = setTimeout(() => {
@@ -708,9 +720,9 @@ export class Harness {
     const profile = profileId ? this.deps.workspaces.profile(profileId) : null;
     const self = profile?.harness?.agentId;
     if (!profileId || !profile?.harness || !self || self === agent.id || !this.deps.host.isLive(self)) return;
-    // OpenCode has no inbox: the notice is typed, at the end of Kuru's turn,
-    // on its own, and the role says it is kururu's and not the user's.
-    if (harnessCliOf(profile.harness) !== "opencode" && !this.inboxes.has(self)) return;
+    // OpenCode and Antigravity have no inbox: the notice is typed, at the end
+    // of Kuru's turn, on its own, and the role says it is kururu's and not the user's.
+    if (!noticesTyped(profile.harness) && !this.inboxes.has(self)) return;
     const last = this.told.get(agent.id);
     const now = Date.now();
     if (last && last.status === status && now - last.at < TELL_THROTTLE_MS) return;
@@ -770,7 +782,7 @@ export class Harness {
     const harness = this.deps.workspaces.profile(profileId)?.harness;
     const self = harness?.agentId;
     if (!message || !harness || !self || !this.deps.host.isLive(self)) return;
-    if (harnessCliOf(harness) === "opencode") {
+    if (noticesTyped(harness)) {
       this.hold(self, { text: message, when: "next", alone: true });
       void this.pump(self);
       return;
@@ -1029,9 +1041,7 @@ export class Harness {
       if (place.machine) {
         // The launcher's own line, without the hooks a local agent gets:
         // they name files on this Mac. See `remoteAgentRun`.
-        const line = launcher.cli === "opencode"
-          ? withOpencodePrompt(launcherCommand(launcher, this.deps.launch()), prompt)
-          : withPrompt(launcherCommand(launcher, this.deps.launch()) + sessionFlag, prompt);
+        const line = withPromptFor(launcher.cli, launcherCommand(launcher, this.deps.launch()) + sessionFlag, prompt);
         const command = await this.deps.agentOn(place.machine, workspace.name, place.folder, launcher.cli, line);
         agent = await this.deps.openTerminal(profileId, workspaceId, into(), { command, kind: "agent" });
         this.deps.spawned?.(agent.id, profileId, workspaceId, { program: launcher.cli, sessionId, machine: place.machine.name, cwd: place.folder });
@@ -1041,9 +1051,7 @@ export class Harness {
         if (asked && !asked.startsWith("/")) return fail("On this Mac, cwd must be an absolute path.");
         const cwd = asked || (await this.deps.cwdFor(profileId, workspaceId, fromPane));
         const agentCommand = await this.deps.agentCommand(launcher, profileId);
-        const command = launcher.cli === "opencode"
-          ? withOpencodePrompt(agentCommand, prompt)
-          : withPrompt(agentCommand + sessionFlag, prompt);
+        const command = withPromptFor(launcher.cli, agentCommand + sessionFlag, prompt);
         agent = await this.deps.openTerminal(profileId, workspaceId, into(), { cwd, command, kind: "agent" });
         this.deps.spawned?.(agent.id, profileId, workspaceId, { program: launcher.cli, sessionId, cwd: agent.cwd });
         where = `in ${agent.cwd}`;
@@ -1495,6 +1503,7 @@ export class Harness {
       return { agentId: running };
     }
     if (this.deps.launch().harnessCli === "opencode") return this.startOpencode(profileId, options);
+    if (this.deps.launch().harnessCli === "agy") return this.startAgy(profileId, options);
     const launcher = this.launcher("claude");
     const key = ws.keyOf(profileId);
     if (!key) throw new Error("that profile has no key yet");
@@ -1536,9 +1545,17 @@ export class Harness {
     // No workspace: Kuru's pane sits in one, and its spending is nobody's but Kuru's.
     this.deps.spawned?.(agent.id, profileId, null, { program: "claude", sessionId: sessionId!, kind: "harness", cwd });
     this.deps.host.rename(agent.id, HARNESS_NAME);
-    // OpenCode's conversation stays on the record, for a switch back.
-    const { opencodeSessionId } = profile.harness ?? {};
-    ws.setHarness(profileId, { sessionId: sessionId!, launcher: launcher.id, agentId: agent.id, startedAt: Date.now(), cli: "claude", ...(opencodeSessionId ? { opencodeSessionId } : {}) });
+    // The other programs' conversations stay on the record, for a switch back.
+    const { opencodeSessionId, agySessionId } = profile.harness ?? {};
+    ws.setHarness(profileId, {
+      sessionId: sessionId!,
+      launcher: launcher.id,
+      agentId: agent.id,
+      startedAt: Date.now(),
+      cli: "claude",
+      ...(opencodeSessionId ? { opencodeSessionId } : {}),
+      ...(agySessionId ? { agySessionId } : {}),
+    });
     ws.reveal(agent.id);
     void this.trustHome(agent.id);
     return { agentId: agent.id, started: true };
@@ -1596,9 +1613,85 @@ export class Harness {
       startedAt: Date.now(),
       cli: "opencode",
       opencodeSessionId: sessionId,
+      ...(profile.harness?.agySessionId ? { agySessionId: profile.harness.agySessionId } : {}),
     });
     ws.reveal(agent.id);
     return { agentId: agent.id, started: true };
+  }
+
+  /**
+   * The same start on Antigravity's `agy` — see `shared/agy.ts` for which
+   * door replaced which. Its conversation is `agy`'s to name, so the first
+   * start has none and the reporter's first word says which it was
+   * (`learnAgySession`); every start after resumes it with `--conversation`,
+   * while `agy` still has it on disk. The MCP address names Kuru by Claude
+   * Code's session id, which every harness record has and which no other
+   * Kuru runs under while this one does. No trust dialog to answer and no
+   * model flags to add: the folder is trusted and the model named in the
+   * session settings and on the line.
+   */
+  private async startAgy(profileId: string, options: { fresh?: boolean }): Promise<{ agentId: string; started: true }> {
+    const ws = this.deps.workspaces;
+    const profile = ws.profile(profileId)!;
+    const key = ws.keyOf(profileId);
+    if (!key) throw new Error("that profile has no key yet");
+    const workspaceId = profile.activeWorkspaceId;
+    const pane = ws.paneBesideBoardIn(profileId, workspaceId);
+    if (!pane) throw new Error("nowhere to put the harness");
+    const cwd = harnessHome(key);
+    await prepareHarnessHome(cwd, this.deps.claudeDir(profileId), null);
+
+    const sessionId = profile.harness?.sessionId ?? randomUUID();
+    const kept = profile.harness?.agySessionId ?? null;
+    const conversation = !options.fresh && kept && (await agyConversationExists(kept)) ? kept : null;
+    const launch = this.deps.launch();
+    const role = rolePrompt({
+      profile: profile.name,
+      workspaces: profile.workspaces.map((w) => ({ id: w.id, name: w.name })),
+      launchers: visibleLaunchers(launch).map((l) => ({ id: l.id, label: l.label })),
+      cli: "agy",
+      features: this.deps.features(),
+    });
+    const settings = prepareAgyHome(
+      cwd,
+      {
+        port: this.deps.port(),
+        profileId,
+        session: sessionId,
+        token: this.deps.tokenInPtys() ? (this.deps.token?.() ?? null) : null,
+        web: this.deps.webTools(),
+      },
+      role,
+    );
+    const command = agyKuruCommand({ model: launch.agyModel, settings, conversation, bypass: launch.bypassClis.includes("claude") });
+    const agent = await this.deps.openTerminal(profileId, workspaceId, pane, { cwd, command, kind: "agent", apart: true });
+    this.deps.host.rename(agent.id, HARNESS_NAME);
+    ws.setHarness(profileId, {
+      sessionId,
+      launcher: "agy",
+      agentId: agent.id,
+      startedAt: Date.now(),
+      cli: "agy",
+      ...(profile.harness?.opencodeSessionId ? { opencodeSessionId: profile.harness.opencodeSessionId } : {}),
+      // A fresh start forgets the old one, so the first report's id is taken as the new conversation.
+      ...(conversation ? { agySessionId: conversation } : {}),
+    });
+    ws.reveal(agent.id);
+    return { agentId: agent.id, started: true };
+  }
+
+  /**
+   * An Antigravity Kuru's conversation, as its reporter names it, kept on
+   * the profile's record the first time it is heard — before the turn the
+   * report carries is written down, so the drawer files it under the
+   * conversation it belongs to. Only a harness on `agy` is listened to.
+   */
+  private learnAgySession(agentId: string, extras: { program?: unknown; session?: unknown }): void {
+    if (extras.program !== "agy" || typeof extras.session !== "string" || !AGY_CONVERSATION.test(extras.session)) return;
+    const profileId = this.isHarness(agentId);
+    const harness = profileId ? this.deps.workspaces.profile(profileId)?.harness : null;
+    if (!profileId || !harness || harnessCliOf(harness) !== "agy" || harness.agentId !== agentId || harness.agySessionId === extras.session) return;
+    this.deps.workspaces.setHarness(profileId, { ...harness, agySessionId: extras.session });
   }
 
   /**
@@ -2097,4 +2190,20 @@ export type { HarnessState };
 function madeLine(files: readonly MadeFile[], lead = " · links:"): string {
   if (!files.length) return "";
   return `${lead} ${files.map((file) => `${file.path}${file.line ? `:${file.line}` : ""}`).join(", ")}`;
+}
+
+/**
+ * Whether `agy` still has a conversation, by the database it keeps for each
+ * one. A start that named one it no longer has would be a Kuru that stops on
+ * an error instead of starting fresh, as Claude Code's start does when its
+ * transcript has gone.
+ */
+async function agyConversationExists(id: string): Promise<boolean> {
+  if (!AGY_CONVERSATION.test(id)) return false;
+  try {
+    await stat(join(homedir(), ".gemini", "antigravity-cli", "conversations", `${id}.db`));
+    return true;
+  } catch {
+    return false;
+  }
 }

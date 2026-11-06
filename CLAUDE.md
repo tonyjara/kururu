@@ -207,6 +207,10 @@ The load-bearing invariants, one line each, with the argument behind the link:
 - **The web is lent to agents through a chain, never a key** — four MCP tools at
   `POST /mcp/web` for agents on this Mac, the hand-back to their own tools first.
   → [more](docs/invariants.md#the-web-for-agents)
+- **Antigravity's sign-in is never lent** — `agy` runs in a pty on its own
+  login, reached only by `--settings` per launch and `.agents/` in Kuru's own
+  folder; nothing writes `~/.gemini` or a project's `.agents/`. →
+  [more](docs/invariants.md#antigravity)
 - **A database is whatever `DATABASE_URL` says, read when asked and never held** —
   every query in `BEGIN READ ONLY` unless the viewer's switch says otherwise;
   Postgres only. → [more](docs/invariants.md#databases)

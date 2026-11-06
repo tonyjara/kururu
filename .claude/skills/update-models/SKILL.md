@@ -55,7 +55,11 @@ follows the aliases.
   the Codex cache's `list` rows). A merely older model stays unless the user asks.
 - Model names must match `MODEL_NAME` — they are spliced into `sh -c`. If a real
   name does not, stop and tell the user rather than loosening the pattern.
-- Adding a CLI other than Claude or Codex is a feature, not an update: it needs
+- **Antigravity** rows (`agy:<id>`) are read off `agy models`, which lists
+  each model at each effort as one id (`claude-opus-5-5-high`). Keep one row a
+  model at its top effort, plus Opus at medium; `agyModel` in Settings must
+  name one of them (`adoptAgyModel`), so a removed row's default falls back.
+- Adding a CLI other than Claude, Codex or Antigravity is a feature, not an update: it needs
   `AGENT_CLIS`, `CLI_LABELS` and `MODEL_FLAG`. Ask first.
 
 ## The prices

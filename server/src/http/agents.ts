@@ -6,6 +6,7 @@
  * before them. Each handler is the body of the `if` it was.
  */
 import { countsAsAgent } from "../../../shared/model";
+import { AGY_CONVERSATION } from "../../../shared/agy";
 import { isUsageDimension, isUsageRange } from "../../../shared/usagereport";
 import { parseReport } from "../agents/report";
 import { activity, channels, harness, host, kuruKey, MAX_ACTIVITY, outbox, peerKurus, usageReader, voice, workspaces } from "../context";
@@ -96,6 +97,11 @@ export const agentRoutes: Route[] = [
           return;
         }
         host.report(agentId, parsed.report);
+        // Antigravity names its own conversation and says which with its
+        // first word; a card's run keeps it, as a Codex run's is kept once
+        // found on disk (`sleep.ts`), so running the card again resumes it.
+        const named = body as Record<string, unknown>;
+        if (named.program === "agy" && typeof named.session === "string" && AGY_CONVERSATION.test(named.session)) workspaces.noteRunSession(agentId, named.session);
         // The rest of the report is the harness's: where the transcript and the
         // inbox are, and what was last said. See `harness.ts`.
         harness.report(agentId, body as Record<string, unknown>);

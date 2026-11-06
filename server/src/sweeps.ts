@@ -19,6 +19,7 @@ import { panes, terminalsOf } from "../../shared/layout";
 import { DEV_SCAN_MS, GIT_SCAN_MS, MACHINE_POLL_MS, OPENROUTER_POLL_MS, USAGE_POLL_MS } from "../../shared/wire";
 import { PING_MS } from "./backpressure";
 import { codexUsageSnapshot, pollCodexUsage } from "./codexusage";
+import { agyUsageSnapshot, pollAgyUsage } from "./agy";
 import { broadcast, checkLiveness, clients, host, memory, overlay, pushSnapshot, state, usageReader, windows, workspaces } from "./context";
 import { scanDevServers, stopDevServer } from "./devservers";
 import { NVIM_SCAN_MS, nvimCensus, pollEditors } from "./editors";
@@ -278,6 +279,9 @@ export async function pollAccountUsage(): Promise<void> {
   // machine's otherwise — the same rule as the Claude scope below.
   const codexHome = loginsActive() ? codexDirFor(workspaces.active.loginKey) : null;
   if (await pollCodexUsage(codexHome)) broadcast({ type: "codex-usage", codex: codexUsageSnapshot() });
+  // Antigravity's, off the file its reporter last wrote: one account per
+  // machine, whatever the profile, since `agy` keeps one sign-in.
+  if (pollAgyUsage()) broadcast({ type: "agy-usage", agy: agyUsageSnapshot() });
   // The profile's own login when profiles keep them, because that is the
   // account its terminals are spending; otherwise whichever this machine was
   // signed into last, as before.

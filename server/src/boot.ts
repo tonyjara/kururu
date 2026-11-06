@@ -25,6 +25,7 @@ import { stopDev } from "./carddev";
 import { cardDoneFor, cardRunPrompt, runCardAt } from "./cards";
 import { Channels } from "./channels";
 import { codexUsageSnapshot } from "./codexusage";
+import { agyUsageSnapshot } from "./agy";
 import { configDir } from "./config";
 import {
   activity,
@@ -325,6 +326,7 @@ function admitClient(ws: WebSocket, watcher: string | null, deltas: boolean): vo
   send(ws, { type: "databases", databases: state.databases });
   send(ws, { type: "usage", usage: usageSnapshot() });
   send(ws, { type: "codex-usage", codex: codexUsageSnapshot() });
+  send(ws, { type: "agy-usage", agy: agyUsageSnapshot() });
   send(ws, { type: "machines", machines: machinesSnapshot() });
   send(ws, { type: "specs", specs: specsSnapshot(machinesSnapshot()) });
   send(ws, { type: "nodes", nodes: nodes.view() });
@@ -511,6 +513,7 @@ export async function attach(port: Port): Promise<void> {
     version: VERSION,
     port: () => PORT,
     tokenInPtys: () => tokenInPtys(),
+    token: () => token(),
     launch: () => launch,
     grid: ownedGrid,
     activity,
@@ -571,6 +574,7 @@ export async function attach(port: Port): Promise<void> {
     host,
     grid: ownedGrid,
     report: (agentId, report) => host.report(agentId, report),
+    isHarness: (agentId) => harness.isHarness(agentId) !== null,
     said: (agentId, text) => {
       if (text) activity.set(agentId, text.slice(0, MAX_ACTIVITY));
       else activity.delete(agentId);

@@ -32,8 +32,8 @@ import {
   launcherCommand,
   launcherFor,
   resumeCommand,
-  withOpencodePrompt,
-  withPrompt,
+  withPromptFor,
+  switchedFrom,
 } from "../../shared/launchers";
 import { BOARD_TAB, paneWithAgent } from "../../shared/layout";
 import { doneRefusal } from "../../shared/needs";
@@ -66,6 +66,7 @@ import {
 import { devOpen, startDev, stopDev } from "./carddev";
 import { claudeTranscriptPath } from "./sessions";
 import { slotBrief } from "./slots";
+import { agyAgentFlags } from "./agy";
 import {
   commitAll,
   ensureWorktree,
@@ -235,11 +236,11 @@ export async function runCardAt(
   const prompt = last ? `${opening}\n\n${priorRunNote(last, wake.why)}` : opening;
   // Claude's id is a `--session-id`; OpenCode already has its corresponding
   // `--session` in `agentCommandFor`. Its positional argument is a directory,
-  // so its opening card text must be the `--prompt` value instead.
+  // so its opening card text must be the `--prompt` value instead, and
+  // Antigravity's is `--prompt-interactive`. Antigravity names its own
+  // conversation, and its reporter hands the id back with its first word.
   const sessionFlag = launcher.cli === "claude" && sessionId ? ` --session-id ${sessionId}` : "";
-  let command = launcher.cli === "opencode"
-    ? withOpencodePrompt(line, prompt)
-    : withPrompt(line + sessionFlag, prompt);
+  let command = withPromptFor(launcher.cli, line + sessionFlag, prompt);
   /*
    * The dev server starts with the worktree, when the project has a dev line —
    * so that the card's work can be looked at without anybody having to ask.
@@ -327,7 +328,7 @@ export async function runCardAt(
 export async function resumeCard(workspaceId: string, cardId: string): Promise<{ agentId: string }> {
   const run = workspaces.findCardIn(workspaces.active.id, workspaceId, cardId)?.card.run ?? null;
   const was = run ? findLauncher(run.launcher)?.cli : null;
-  if ((launch.harnessCli === "opencode" && was === "claude") || (launch.harnessCli === "claude" && was === "opencode")) {
+  if (switchedFrom(launch, was)) {
     const launcher = launcherFor("claude", launch)!;
     return runCardAt(workspaces.active.id, workspaceId, cardId, launcher.id, true, "user", false);
   }
@@ -377,7 +378,7 @@ async function resumeCardAt(
   if (!command) throw new Error("there is no conversation on this card to resume");
   const options = remote
     ? { command: await agentOn(remote.machine, remote.workspaceName, remote.dir, launcher.cli, command), kind: "agent" as const }
-    : { cwd, command: launcher.cli === "opencode" ? command : command + hooksFor(launcher, profileId) + web.launchFlags(launcher.cli) + kururuMcpOnly(launcher, profileId), kind: "agent" as const };
+    : { cwd, command: launcher.cli === "opencode" ? command : command + resumeExtras(launcher, profileId), kind: "agent" as const };
   const target = workspaces.agentPaneIn(profileId, workspaceId);
   if (!target) throw new Error("nowhere to put the agent");
   const agent = onScreen
@@ -410,6 +411,16 @@ async function resumeCardAt(
  * the day they began, which a resumed run's `startedAt` no longer says — a
  * miss there would be a guess, and `codex resume` says so itself.
  */
+/**
+ * What a resumed line carries besides the CLI's own flags: Claude's hooks and
+ * kururu's MCP servers, or Antigravity's session settings, which are its only
+ * per-launch door. See `agentCommandFor`.
+ */
+function resumeExtras(launcher: Launcher, profileId: string): string {
+  if (launcher.cli === "agy") return agyAgentFlags();
+  return hooksFor(launcher, profileId) + web.launchFlags(launcher.cli) + kururuMcpOnly(launcher, profileId);
+}
+
 async function conversationKept(profileId: string, workspaceId: string, run: CardRun): Promise<boolean> {
   if (!run.sessionId) return false;
   if (run.cwd === null && pinOf(profileId, workspaceId)) return true;

@@ -9,11 +9,18 @@
 import { describe, expect, it } from "bun:test";
 import {
   AGENT_CLIS,
+  AGY_DEFAULT_MODEL,
+  AGY_MODELS,
   LAUNCHERS,
   MODEL_NAME,
   OPENCODE_DEFAULT_MODEL,
+  adoptAgyModel,
   adoptLaunch,
   adoptOpencodeModel,
+  agyLauncher,
+  resumeCommand,
+  switchedFrom,
+  withPromptFor,
   adoptLaunchers,
   findLauncher,
   launcherCommand,
@@ -65,6 +72,7 @@ describe("adoptLaunch", () => {
       sleepMinutes: 10,
       harnessCli: "claude",
       opencodeModel: OPENCODE_DEFAULT_MODEL,
+      agyModel: AGY_DEFAULT_MODEL,
     };
     expect(adoptLaunch(undefined)).toEqual(none);
     expect(adoptLaunch("nonsense")).toEqual(none);
@@ -82,6 +90,7 @@ describe("adoptLaunch", () => {
       sleepMinutes: 10,
       harnessCli: "claude",
       opencodeModel: OPENCODE_DEFAULT_MODEL,
+      agyModel: AGY_DEFAULT_MODEL,
     });
   });
 
@@ -213,3 +222,74 @@ describe("what Kuru runs on", () => {
     expect(adoptLaunch({ opencodeModel: "not a model" }).opencodeModel).toBe(OPENCODE_DEFAULT_MODEL);
   });
 });
+
+describe("Antigravity's agy", () => {
+  it("has a row per model, Opus 5.5 among them, each as agy models names it", () => {
+    const rows = LAUNCHERS.filter((l) => l.cli === "agy");
+    expect(rows.some((l) => l.model === "claude-opus-5-5-high")).toBe(true);
+    expect(rows.find((l) => !l.model)?.id).toBe("agy");
+    expect(AGY_MODELS).toContain(AGY_DEFAULT_MODEL);
+  });
+
+  it("starts with its model flag, and its bypass only when ticked", () => {
+    const row = findLauncher("agy:claude-opus-5-5-high")!;
+    expect(launcherCommand(row)).toBe("agy --model claude-opus-5-5-high");
+    expect(launcherCommand(row, { ...adoptLaunch(undefined), bypassClis: ["claude"] })).toBe("agy --model claude-opus-5-5-high");
+    expect(launcherCommand(row, { ...adoptLaunch(undefined), bypassClis: ["agy"] })).toBe("agy --model claude-opus-5-5-high --dangerously-skip-permissions");
+  });
+
+  it("takes a card's words as --prompt-interactive, quoted whole", () => {
+    expect(withPromptFor("agy", "agy --model m", "it's -done")).toBe(`agy --model m --prompt-interactive 'it'\\''s -done'`);
+    expect(withPromptFor("agy", "agy", "-x")).toBe("agy --prompt-interactive ' -x'");
+  });
+
+  it("resumes by the conversation it reported, and not at all without one", () => {
+    const row = findLauncher("agy:claude-opus-5-5-high")!;
+    const id = "13f042a6-6698-4a14-a210-d71eb5f402eb";
+    expect(resumeCommand(row, undefined, id, false)).toBe(`agy --model claude-opus-5-5-high --conversation ${id}`);
+    expect(resumeCommand(row, undefined, null, false)).toBeNull();
+    expect(resumeCommand(row, undefined, "13f042a6; rm -rf ~", false)).toBeNull();
+  });
+
+  it("keeps its model to the catalogue", () => {
+    expect(adoptAgyModel("claude-opus-5-5-medium")).toBe("claude-opus-5-5-medium");
+    expect(adoptAgyModel("claude-opus-5-5-high; rm")).toBeNull();
+    expect(adoptLaunch({ agyModel: "nonsense" }).agyModel).toBe(AGY_DEFAULT_MODEL);
+    expect(adoptLaunch({ harnessCli: "agy" }).harnessCli).toBe("agy");
+  });
+});
+
+describe("Runs on Antigravity", () => {
+  const settings = { ...adoptLaunch(undefined), harnessCli: "agy" as const, agyModel: "claude-sonnet-5-5-high" };
+
+  it("puts the default and the Claude rows on the configured agy model", () => {
+    expect(launcherFor(undefined, settings)).toEqual(agyLauncher(settings));
+    expect(launcherFor("claude:claude-opus-5-5", settings)?.id).toBe("agy:claude-sonnet-5-5-high");
+    expect(launcherFor("opencode:anthropic/claude-opus-5-5#high", settings)?.cli).toBe("agy");
+  });
+
+  it("leaves a Codex or an Antigravity row asked for by name where it is", () => {
+    expect(launcherFor("codex:gpt-5.6-sol", settings)?.cli).toBe("codex");
+    expect(launcherFor("agy:gemini-4-argon-high", settings)?.id).toBe("agy:gemini-4-argon-high");
+    expect(launcherFor("agy:gemini-4-argon-high", adoptLaunch(undefined))?.id).toBe("agy:gemini-4-argon-high");
+  });
+
+  it("offers the switch's row first, then the other agy rows still on", () => {
+    const shown = visibleLaunchers({ ...settings, offLaunchers: ["agy:gemini-4-argon-high"] });
+    expect(shown[0]?.id).toBe("agy:claude-sonnet-5-5-high");
+    expect(shown.every((l) => l.cli === "agy")).toBe(true);
+    expect(shown.some((l) => l.id === "agy:gemini-4-argon-high")).toBe(false);
+  });
+
+  it("starts a card fresh when the switch moved away from what it ran on, and only then", () => {
+    expect(switchedFrom(settings, "claude")).toBe(true);
+    expect(switchedFrom(settings, "opencode")).toBe(true);
+    expect(switchedFrom(settings, "agy")).toBe(false);
+    expect(switchedFrom(settings, "codex")).toBe(false);
+    const claude = adoptLaunch(undefined);
+    expect(switchedFrom(claude, "agy")).toBe(false);
+    expect(switchedFrom(claude, "opencode")).toBe(true);
+    expect(switchedFrom({ ...claude, harnessCli: "opencode" }, "agy")).toBe(false);
+  });
+});
+

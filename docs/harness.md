@@ -810,6 +810,14 @@ not itself. Memories are Claude Code's and are not carried. And a session
 the user opens by hand in Kuru's TUI (`ctrl+x n`) is not the one kururu
 listens to: the plugin hears only the session it was started on.
 
+## On Antigravity
+
+**Runs on** has a third position, Antigravity's own CLI `agy`, on the user's
+Antigravity sign-in and quota. Kuru's role, tools and hooks go into `.agents/`
+in its folder, its folder is trusted and its tools allowed through
+`--settings` for the launch, and its conversation is the one `agy` names on
+its first report. The whole of it is in [antigravity](antigravity.md#kuru-on-antigravity).
+
 ## What it is not
 
 - **Not a loop.** No Anthropic SDK, no API key, nothing in kururu generates

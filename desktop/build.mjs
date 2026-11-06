@@ -116,6 +116,9 @@ await bundle("server/src/index.ts", "dist/server.mjs");
 // What a Claude Code hook runs. Beside the server so `hooks.ts` can find it, and
 // bundled so the packaged app can run it with no checkout and no `bun`.
 await bundle("server/src/report-cli.ts", "dist/report.mjs");
+// What Antigravity's `agy` runs as its title command, and Kuru's hooks there.
+// Beside the server so `agy.ts` can find it, for the reason above.
+await bundle("server/src/agy-report-cli.ts", "dist/agyreport.mjs");
 // `slot`, the agents' door into the slot queue. Beside the server so `slots.ts`
 // can point `~/.local/state/kururu/bin/slot` at it, for the reason above.
 await bundle("server/src/slot-cli.ts", "dist/slot.mjs");

@@ -48,7 +48,7 @@ import {
   type CardWorktree,
 } from "../../../shared/board";
 import { today, type Day } from "../../../shared/days";
-import type { Launcher } from "../../../shared/launchers";
+import { switchedFromCli, type Launcher } from "../../../shared/launchers";
 import { cardPlace, cardReference } from "../../../shared/kuru";
 import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
 import type { WorktreeStatus } from "../../../shared/projects";
@@ -335,8 +335,13 @@ export function BoardView({
   const robotMenu = (card: Card, at: MenuAt) => {
     const asleep = card.run?.state === "asleep";
     const lastCli = card.run?.launcher.split(":")[0] ?? null;
-    const modeLauncher = launchers.every((launcher) => launcher.cli === "opencode") ? launchers[0] : launchers.find((launcher) => launcher.cli === "claude");
-    const switchedCli = card.run && modeLauncher && (lastCli === "claude" || lastCli === "opencode") && lastCli !== modeLauncher.cli ? modeLauncher : null;
+    // The switch's own row heads the list when it is on OpenCode or Antigravity
+    // (`visibleLaunchers`); on Claude Code it is the Claude row.
+    const modeLauncher =
+      launchers.every((launcher) => launcher.cli === "opencode") || launchers.every((launcher) => launcher.cli === "agy")
+        ? launchers[0]
+        : launchers.find((launcher) => launcher.cli === "claude");
+    const switchedCli = card.run && modeLauncher && switchedFromCli(modeLauncher.cli, lastCli) ? modeLauncher : null;
     const resumeRow: MenuItem[] = canResume(card.run, agentOpen(card))
       ? [
           {

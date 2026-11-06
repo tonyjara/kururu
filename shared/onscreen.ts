@@ -20,6 +20,13 @@
  * screen is read here and turned into the reports a hook would have made, and
  * `server/src/onscreen.ts` is what reads the screens and posts them.
  *
+ * Antigravity's `agy` is read here on this Mac too, because what it can be
+ * told to report through (`shared/agy.ts`) says working and idle but never
+ * that it is waiting on a permission prompt: its title says `tool_use`
+ * before the prompt and after it alike. Its screen says it plainly — a
+ * question, a numbered list, and "↑/↓ Navigate" under it — and its working
+ * footer is a lowercase "esc to cancel" under a braille spinner.
+ *
  * It is a heuristic and is written as one. It looks only at the bottom rows,
  * where both CLIs draw their state, only for words they have drawn for a year,
  * and what it cannot place is `quiet`, which changes nothing by itself. It is
@@ -76,8 +83,16 @@ const QUESTION = /\b(?:Do you want to|Would you like to)\b[^?]{0,200}\?/;
 const CHOICE = /^\s*[❯›]\s*\d+\.\s+\S/;
 /** Under Claude's question tool, which asks in the question's own words. */
 const SELECT_HINT = /\bEnter to select\b/i;
+/** Antigravity's footer while a turn runs: lowercase, at the start of the row, which Claude Code's capitalised "Esc to cancel" in its dialogs is not. */
+const AGY_WORKING = /^esc to cancel\b/;
+/** Antigravity's spinner: a braille glyph, then what it is doing and an ellipsis — `⣽  Generating...`, `⡿  Running command...`. */
+const AGY_SPINNER = /^\s*[\u2800-\u28ff]\s+\S[^.]{0,60}\.\.\.\s*$/;
+/** Under every one of Antigravity's choice dialogs — a permission, the folder's trust. Claude Code's says "to navigate". */
+const AGY_HINT = /↑\/↓ Navigate/;
+/** What Antigravity puts over the command or path it is asking about. */
+const AGY_SUBJECT = /^Requesting permission for:?$/;
 /** What `AGENT_CHECK` prints, expanded — the typed line above it holds the same words with `$n` in them, and must not match. */
-const MISSING = /^kururu: ((?:Claude Code|Codex) is not (?:installed|logged in) on .+?)\.(?:\s|$)/;
+const MISSING = /^kururu: ((?:Claude Code|Codex|Antigravity CLI) is not (?:installed|logged in) on .+?)\.(?:\s|$)/;
 /** What `LOOP_SCRIPT` prints once ssh has failed three times running, waiting on Enter rather than retrying. */
 const UNREACHABLE = /^kururu: (.+? has not answered in \d+ tries running)\.(?:\s|$)/;
 /** Box edges a question may be drawn inside, taken off its ends. */
@@ -91,12 +106,14 @@ export function readScreen(text: string): ScreenRead {
     .filter((line) => line.trim())
     .slice(-BOTTOM);
 
-  const asking = askingIn(lines);
+  const asking = askingIn(lines) ?? agyAskingIn(lines);
   if (asking) return asking;
   // The footer and the spinner are the last few rows, and only those: a reply
   // above them that quotes "esc to interrupt" — an agent working on this file
   // would — is not a turn in progress.
-  if (lines.slice(-FOOTER).some((line) => WORKING.test(line) || SPINNER.test(line))) return { phase: "working", detail: null };
+  if (lines.slice(-FOOTER).some((line) => WORKING.test(line) || SPINNER.test(line) || AGY_WORKING.test(line.trim()) || AGY_SPINNER.test(line))) {
+    return { phase: "working", detail: null };
+  }
   // The check's words, or the loop's giving-up line, then a shell prompt — and
   // tmux's status line — so only the last few rows: an agent started by hand
   // after the CLI was installed draws below them, and a reconnect that got
@@ -134,6 +151,30 @@ function askingIn(lines: string[]): ScreenRead | null {
       return { phase: "asking", detail: null };
     }
     return null;
+  }
+  return null;
+}
+
+/**
+ * Antigravity asking: its hint among the last rows, and the question the
+ * nearest row above it that ends in a question mark — "Run this command?",
+ * "Allow access to this file?", "Do you trust the contents of this
+ * project?". The user's own words in the input above, which start with its
+ * `>` prompt, are passed over. When the dialog names what it asks about under
+ * "Requesting permission for:", that goes after the question, since "Run
+ * this command?" alone says nothing about which.
+ */
+function agyAskingIn(lines: string[]): ScreenRead | null {
+  const tail = lines.slice(-FOOTER);
+  const at = tail.findIndex((line) => AGY_HINT.test(line));
+  if (at < 0) return null;
+  const hint = lines.length - tail.length + at;
+  for (let j = hint - 1; j >= Math.max(0, hint - 14); j--) {
+    const line = lines[j]!.replace(FRAME, "");
+    if (!line.endsWith("?") || line.startsWith(">")) continue;
+    const named = lines.slice(Math.max(0, j - 4), j).findIndex((row) => AGY_SUBJECT.test(row.trim()));
+    const subject = named >= 0 ? lines.slice(Math.max(0, j - 4), j).slice(named + 1).map((row) => row.trim()).find(Boolean) : undefined;
+    return { phase: "asking", detail: `${line}${subject ? ` ${subject}` : ""}`.slice(0, 200) };
   }
   return null;
 }

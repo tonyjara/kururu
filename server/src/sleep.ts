@@ -33,7 +33,10 @@
  * On the restartable side, like `onscreen.ts`: a matter of judgement that will
  * be tuned, and nothing the pty host has to know about.
  */
+import { stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { SESSION_ID, type Card, type CardRun } from "../../shared/board";
+import { agyLastReply, agyTranscriptPaths } from "../../shared/agy";
 import { findLauncher, type AgentCli } from "../../shared/launchers";
 import type { AgentSnapshot, AgentStatus } from "../../shared/model";
 import { readScreen } from "../../shared/onscreen";
@@ -262,18 +265,21 @@ export class Sleeper {
     const run = at.card.run;
     const id = run.sessionId!;
     const cli = cliOf(run);
+    const lastReply = (tail: string) => (cli === "claude" ? claudeLastReply(tail) : cli === "agy" ? agyLastReply(tail) : codexLastReply(tail));
     if (remote !== null) {
       const tail = await sessionTailOn(remote, cli, id);
       if (!tail) return null;
-      return { reply: cli === "claude" ? claudeLastReply(tail) : codexLastReply(tail) };
+      return { reply: lastReply(tail) };
     }
     const path =
       cli === "claude"
         ? await claudeTranscriptPath(this.deps.claudeDir(at.profileId), id, run.cwd, this.deps.transcript(agent.id))
-        : await codexRolloutPath(this.deps.codexHome(at.profileId), id, run.startedAt);
+        : cli === "agy"
+          ? await firstFile(agyTranscriptPaths(homedir(), id))
+          : await codexRolloutPath(this.deps.codexHome(at.profileId), id, run.startedAt);
     const tail = path ? await readTail(path) : null;
     if (tail === null) return null;
-    return { reply: cli === "claude" ? claudeLastReply(tail) : codexLastReply(tail) };
+    return { reply: lastReply(tail) };
   }
 
   /**
@@ -309,6 +315,12 @@ function remoteOf(agent: AgentSnapshot): string | null {
 }
 
 /** Which CLI a run was started on, by its launcher; Claude for one the catalogue no longer has, which is the safer guess of the two. */
+/** The first of some paths that is a file, or null. */
+async function firstFile(paths: string[]): Promise<string | null> {
+  for (const path of paths) if ((await stat(path).catch(() => null))?.isFile()) return path;
+  return null;
+}
+
 function cliOf(run: CardRun): AgentCli {
   return findLauncher(run.launcher)?.cli ?? (run.launcher.startsWith("codex") ? "codex" : "claude");
 }
