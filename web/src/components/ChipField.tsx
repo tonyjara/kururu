@@ -44,6 +44,7 @@
  */
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import { chipAt, piecesOf, type Chip, type Piece } from "../../../shared/chips";
+import { markPictureUrl, markSetGone } from "../marks";
 
 export interface ChipFieldHandle {
   readonly value: string;
@@ -189,9 +190,11 @@ export const CHIP_ICONS: Record<Chip["kind"], string> = {
   quote: '<path fill="currentColor" stroke="none" d="M4 17.5c0-4.6 2.2-8.4 6-10.5l1 1.6C8.7 10 7.6 11.8 7.4 13.6H10V19H4v-1.5Zm10 0c0-4.6 2.2-8.4 6-10.5l1 1.6c-2.3 1.4-3.4 3.2-3.6 5H20V19h-6v-1.5Z"/>',
   image: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m20.5 16-5-5-8 8"/>',
   file: '<path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-10Z"/><path d="M14 3.5v5h5"/>',
+  marks: '<rect x="3.5" y="4.5" width="17" height="13" rx="2"/><path d="M8 21h8"/><circle cx="12" cy="11" r="2.4"/>',
+  mark: '<path d="M12 21s-6-5.4-6-10.5a6 6 0 0 1 12 0C18 15.6 12 21 12 21Z"/><circle cx="12" cy="10.5" r="2"/>',
 };
 
-export const CHIP_WORD: Record<Chip["kind"], string> = { card: "Card", quote: "Quote", image: "Picture", file: "File" };
+export const CHIP_WORD: Record<Chip["kind"], string> = { card: "Card", quote: "Quote", image: "Picture", file: "File", marks: "Marks", mark: "Mark" };
 
 /** One chip, drawn by hand: it lives inside a contenteditable, where React does not. */
 function chipNode(chip: Chip, raw: string): HTMLElement {
@@ -229,12 +232,43 @@ function chipNode(chip: Chip, raw: string): HTMLElement {
     from.textContent = chip.source;
     el.append(from);
   }
+  if (chip.kind === "mark" && chip.source) {
+    const n = document.createElement("span");
+    n.className = "kc-code";
+    n.textContent = chip.source;
+    el.insertBefore(n, label);
+  }
   // Shown when a tap opens the chip — the hover's `title` is a desktop's only.
   const full = document.createElement("span");
   full.className = "kc-full";
   full.textContent = chip.full;
   el.append(full);
+  if (chip.set && (chip.kind === "marks" || chip.kind === "mark")) markChip(el, label, full, chip, chip.set);
   return el;
+}
+
+/**
+ * A set of marks' chip, once the server has said whether the set is still
+ * there: its picture in the opened chip while it is — the crop for a mark,
+ * the view for the set — and "cleaned up" once the thirty days have swept
+ * it, the line's own words being all that is left.
+ */
+function markChip(el: HTMLElement, label: HTMLElement, full: HTMLElement, chip: Chip, set: string): void {
+  void markSetGone(set).then((gone) => {
+    if (gone) {
+      el.classList.add("kc-gone");
+      label.textContent = `${chip.label} · cleaned up`;
+      el.title = `${chip.full} — cleaned up: marks are kept for 30 days`;
+      return;
+    }
+    const picture = document.createElement("img");
+    picture.className = "kc-picture";
+    picture.alt = "";
+    picture.loading = "lazy";
+    picture.src = markPictureUrl(set, chip.kind === "mark" ? chip.n ?? null : null);
+    picture.addEventListener("error", () => picture.remove());
+    full.append(picture);
+  });
 }
 
 /** Text with the bold run in it, as nodes. */

@@ -16,6 +16,7 @@ import { voiceRoutes } from "./voice";
 import { styleRoutes } from "./styles";
 import { fileRoutes } from "./files";
 import { slotRoutes } from "./slots";
+import { markRead, markRoutes } from "./marks";
 
 export async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
@@ -99,6 +100,12 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
    * itself, so nothing here decides what a path means. Reads only: the
    * tree's edits are made on the node, through nvim or its own page.
    */
+  /** A set of marks, or one of its files (`http/marks.ts`). */
+  const onMarks = /^\/api\/marks\/(m[0-9a-f]{12})(?:\/([a-z0-9.-]{1,32}))?$/.exec(url.pathname);
+  if (onMarks) {
+    markRead(req, res, onMarks[1]!, onMarks[2] ?? null);
+    return;
+  }
   const onNode = /^\/api\/node\/(n[0-9a-f]{12})\/([a-z-]+)$/.exec(url.pathname);
   if (onNode) {
     void nodeRead(res, onNode[1]!, onNode[2]!, url.searchParams);
@@ -139,7 +146,7 @@ export interface Route {
  * it is refused here, loudly, before anything is served.
  */
 const ROUTES = new Map<string, Route>();
-for (const route of [...serverRoutes, ...agentRoutes, ...mcpRoutes, ...nodeRoutes, ...kuruRoutes, ...voiceRoutes, ...styleRoutes, ...fileRoutes, ...slotRoutes]) {
+for (const route of [...serverRoutes, ...agentRoutes, ...mcpRoutes, ...nodeRoutes, ...kuruRoutes, ...voiceRoutes, ...styleRoutes, ...fileRoutes, ...slotRoutes, ...markRoutes]) {
   if (ROUTES.has(route.path)) throw new Error(`two routes for ${route.path}`);
   ROUTES.set(route.path, route);
 }

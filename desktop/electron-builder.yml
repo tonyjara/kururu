@@ -49,6 +49,8 @@ files:
   - notelist.js
   - browser.js
   - browserrules.js
+  - marks.js
+  - markscript.js
   - quit.js
   - icon/icon-1024.png
   - icon/trayTemplate.png

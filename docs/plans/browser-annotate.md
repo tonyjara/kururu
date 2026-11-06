@@ -3,7 +3,8 @@
 A plan, first written 2026-11-06 from a read of the tree at `0ce67bd` and of
 the research in [browser-annotate-research.md](browser-annotate-research.md),
 then **revised the same day around the user's answers** to both rounds of
-its questions (see [what the user decided](#what-the-user-decided)). **Nothing was built.**
+its questions (see [what the user decided](#what-the-user-decided)). **Phases 0 and 1 are built** (2026-11-06);
+the rest is not.
 It is written so that an agent can take one phase, read the files it names,
 and know what "done" is.
 
@@ -878,6 +879,14 @@ phases stop well short of that on purpose.
 window, apps or agents.
 
 ### Phase 1: live marking, and the bundle to Kuru's box
+
+**Built 2026-11-06.** As written, with these differences: the redaction runs in
+the server (`redactSet`), not in main, so a body from any client — the
+extension's too — is cleaned the same way; Kuru's role is not yet told about
+`[marks …]` (phase 4's two sentences), though the header names `marks.md`,
+which says everything; a mark's chip opened in the box shows its crop
+(`GET /api/marks/<id>/…` is already there for the "cleaned up" 404). The
+sweep logs as a `sweep` line in `lifecycle.log`.
 
 **Build:**
 

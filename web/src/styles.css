@@ -3769,6 +3769,263 @@ a.button {
 .browser-away-note {
   font-size: var(--fs-sm);
 }
+/* Marking: the Mark button lit while it is on, with the tray's count; the
+   tray under the page (never over it: the page is a native view drawn above
+   the window's DOM); and the comment's popover over the still. */
+.browser-btn-on {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.browser-mark {
+  gap: 3px;
+}
+.browser-mark-count {
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.mark-tray {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  max-height: 34%;
+  min-height: 0;
+  border-top: var(--border) var(--border-style) var(--line);
+  background: var(--chrome);
+}
+.mark-tools {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 6px;
+}
+.mark-tool,
+.mark-shape {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  cursor: var(--cursor-pointer);
+}
+.mark-tool:hover:not(:disabled),
+.mark-shape:hover {
+  color: var(--text);
+  background: var(--line);
+}
+.mark-tool:disabled {
+  opacity: 0.4;
+  cursor: var(--cursor);
+}
+.mark-tool-on,
+.mark-tool-on:hover:not(:disabled) {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.mark-shapes {
+  display: inline-flex;
+  gap: 2px;
+  padding-left: 2px;
+  border-left: var(--border) var(--border-style) var(--line);
+}
+.mark-spacer {
+  flex: 1;
+}
+.mark-count {
+  flex: none;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--dimmer);
+}
+.mark-send {
+  flex: none;
+  padding: 2px 10px;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-sm);
+  cursor: var(--cursor-pointer);
+}
+.mark-send:disabled {
+  opacity: 0.45;
+  cursor: var(--cursor);
+}
+.mark-note {
+  flex: none;
+  padding: 2px 10px 4px;
+  font-size: var(--fs-sm);
+  color: var(--danger);
+}
+.mark-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0 4px 4px;
+  list-style: none;
+  overflow-y: auto;
+}
+.mark-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.mark-row-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: var(--radius-md);
+  text-align: start;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  cursor: var(--cursor-pointer);
+}
+.mark-row-open:hover {
+  background: var(--line);
+}
+.mark-num {
+  flex: none;
+  min-width: 1.6em;
+  padding: 0 4px;
+  border-radius: var(--radius-lg);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  line-height: 1.6;
+}
+.mark-num-lost {
+  background: var(--dimmer);
+}
+.mark-label {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+.mark-lost {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--danger);
+}
+.mark-comment {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mark-comment-none {
+  color: var(--dimmer);
+  font-style: italic;
+}
+.mark-row-drop {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-md);
+  color: var(--dimmer);
+  cursor: var(--cursor-pointer);
+}
+.mark-row-drop:hover {
+  color: var(--text);
+  background: var(--line);
+}
+.mark-pop {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(340px, calc(100vw - 20px));
+  padding: 8px;
+  background: var(--chrome);
+  border: var(--border) var(--border-style) var(--line-high);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elev-menu);
+}
+.mark-pop-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.mark-pop-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+.mark-pop-crop {
+  display: block;
+  max-width: 100%;
+  max-height: 140px;
+  align-self: flex-start;
+  object-fit: contain;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-md);
+}
+.mark-pop-write {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+.mark-pop-write > .quote-pop-mic {
+  width: 26px;
+  height: 26px;
+}
+.mark-pop-field {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 7px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--ui);
+  font-size: var(--fs-md);
+  line-height: 1.4;
+}
+.mark-pop-field:focus {
+  border-color: var(--line-high);
+}
+.mark-pop-say,
+.mark-pop-hint {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--dimmer);
+}
+.mark-pop-say {
+  color: var(--dim);
+}
+/* A set of marks whose folder has been swept: the line's words are all there
+   is, and the chip says so. */
+.kc-gone {
+  opacity: 0.6;
+}
+.kc-gone .kc-icon {
+  color: var(--dimmer);
+}
+.kc-picture {
+  display: block;
+  max-width: min(320px, 100%);
+  max-height: 180px;
+  margin-top: 4px;
+  border-radius: var(--radius-sm);
+}
 
 /* --------------------------------------------------------------------------
    Status bar

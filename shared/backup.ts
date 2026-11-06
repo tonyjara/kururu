@@ -121,6 +121,7 @@ export const EXCLUDED: readonly { what: string; why: string }[] = [
   { what: "usage.db", why: "the raw message rows; a binary growing by megabytes a week. Only its daily rollup, as usage/<month>.jsonl, comes here" },
   { what: "agents' replies", why: "in the database and searchable, but an agent's reply can quote a file that holds a secret" },
   { what: "drops/", why: "the pictures and files pasted or sent from a phone into Kuru's box: a screenshot holds whatever was on the screen" },
+  { what: "marks/", why: "marks made on pages in the browser: their text, markup and pictures are whatever the page showed, and they are swept after 30 days anyway" },
   { what: "telegram/", why: "the pictures sent from the Telegram chat, and copies of those on their way to it" },
 ];
 

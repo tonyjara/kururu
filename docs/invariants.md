@@ -413,6 +413,22 @@ refused, downloads to `~/Downloads` quarantined and never opened. A phone or
 another node's window draws the tab as a placeholder. → [the
 plan](plans/browser-annotate.md)
 
+**Marks are made in the page and written by the server; a comment never
+enters the page.** The marking script (`desktop/markscript.js`) runs in an
+isolated world over the page's debugger (`desktop/marks.js`), draws in a
+closed shadow root in the top layer, and takes the clicks before the page
+does — never the pointer's movement or the wheel, so hover menus and
+scrolling stay live. It holds no Electron, so a content script could run it.
+The comments live in main and the window's popover; the page learns a pin's
+number and nothing more. A set goes to the server the window is connected to
+(`POST /api/marks`), which holds it to its shape and redacts it
+(`shared/marks.ts`: query strings, form values, attributes off the list,
+anything shaped like a secret) before writing `data/marks/<id>/`, 0700 and
+0600, never backed up, and **swept after 30 days** — only a real directory
+named as a set id, read with `lstat`, a line per set in `lifecycle.log`. The
+lines in Kuru's box carry each mark's label and comment, so they still read
+once the set is gone.
+
 ## What an agent made
 
 **A link to what an agent made is read off its last reply, never off

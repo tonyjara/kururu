@@ -1823,6 +1823,19 @@ export async function sendDrop(file: File): Promise<string> {
   return body.path;
 }
 
+/**
+ * A set of marks made in a browser tab, posted whole — the crops and the view
+ * in it as base64 — to the server this window is connected to, which writes
+ * the folder and answers with the lines for Kuru's box (`server/src/marks.ts`).
+ * A fetch for `sendDrop`'s reason: it is megabytes.
+ */
+export async function sendMarks(set: unknown): Promise<{ id: string; path: string; lines: string[] }> {
+  const res = await fetch("/api/marks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(set) });
+  const body = (await res.json().catch(() => ({ error: `the server said ${res.status}` }))) as { id?: unknown; path?: unknown; lines?: unknown; error?: string };
+  if (!res.ok || typeof body.id !== "string" || typeof body.path !== "string" || !Array.isArray(body.lines)) throw new Error(body.error ?? `the server said ${res.status}`);
+  return { id: body.id, path: body.path, lines: body.lines.filter((l): l is string => typeof l === "string") };
+}
+
 /** Where one sentence of an utterance is fetched from. */
 export function speechUrl(utterance: string, seq: number): string {
   return `/api/speech?u=${encodeURIComponent(utterance)}&seq=${seq}`;

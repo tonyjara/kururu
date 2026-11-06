@@ -14,7 +14,7 @@
  * window — the tab is a placeholder: its title, its address, and where it is
  * open, because the layout is shared and the page is not.
  */
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { browserLabel, browserUrl } from "../../../shared/browser";
 import type { WebTabState } from "../../../shared/layout";
 import { useBrowserState } from "../browser";
@@ -22,6 +22,7 @@ import { desktop, type BrowserBox, type BrowserDownload, type DesktopBrowser } f
 import { watchCover } from "../overlays";
 import * as api from "../session";
 import { Icon } from "./Icon";
+import { MarkTray } from "./MarkTray";
 
 /** How often a still is taken again while the page is covered, so a page that moves under a menu does not freeze. */
 const STILL_MS = 1000;
@@ -74,6 +75,11 @@ function LiveBrowser({ bridge, tabId, page }: { bridge: DesktopBrowser; tabId: s
   const addressRef = useRef<HTMLInputElement>(null);
   const [covered, setCovered] = useState(false);
   const coveredRef = useRef(false);
+  /** A mark's comment is being written over the still, which is then to stay the page as it was. */
+  const commentingRef = useRef(false);
+  const onCommenting = useCallback((open: boolean) => {
+    commentingRef.current = open;
+  }, []);
   const [still, setStill] = useState<string | null>(null);
   const [typed, setTyped] = useState<string | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
@@ -127,7 +133,8 @@ function LiveBrowser({ bridge, tabId, page }: { bridge: DesktopBrowser; tabId: s
   useEffect(() => {
     if (!covered) return;
     const timer = setInterval(() => {
-      void bridge.still(tabId).then((picture) => picture && coveredRef.current && setStill(picture));
+      if (commentingRef.current) return;
+      void bridge.still(tabId).then((picture) => picture && coveredRef.current && !commentingRef.current && setStill(picture));
     }, STILL_MS);
     return () => clearInterval(timer);
   }, [bridge, tabId, covered]);
@@ -187,6 +194,8 @@ function LiveBrowser({ bridge, tabId, page }: { bridge: DesktopBrowser; tabId: s
   const zoom = live?.zoom ?? 1;
   const downloads = live?.downloads ?? [];
   const error = refused ?? live?.error ?? null;
+  const marking = bridge.mark ? live?.marking ?? null : null;
+  const marked = marking ? marking.marks.length : 0;
 
   return (
     <div className="browser">
@@ -235,6 +244,18 @@ function LiveBrowser({ bridge, tabId, page }: { bridge: DesktopBrowser; tabId: s
             {Math.round(zoom * 100)}%
           </button>
         )}
+        {marking && (
+          <button
+            className={`browser-btn browser-mark ${marking.on ? "browser-btn-on" : ""}`}
+            onClick={() => void bridge.mark?.(tabId, "mode", !marking.on)}
+            title={marking.on ? "Stop marking (Esc in the page); the marks stay in the tray" : "Mark things on this page, with a comment on each, for Kuru (⌘⇧M in the page)"}
+            aria-label={marking.on ? "Stop marking" : "Mark this page"}
+            aria-pressed={marking.on}
+          >
+            <Icon name="pin" />
+            {marked > 0 && <span className="browser-mark-count">{marked}</span>}
+          </button>
+        )}
         <button className="browser-btn" onClick={() => bridge.go(tabId, "devtools")} title="Open DevTools for this page" aria-label="DevTools">
           <Icon name="code" />
         </button>
@@ -254,6 +275,7 @@ function LiveBrowser({ bridge, tabId, page }: { bridge: DesktopBrowser; tabId: s
         // under an overlay; it is the overlay's to close, not the page's.
         aria-hidden="true"
       />
+      {marking && (marking.on || marking.marks.length > 0 || marking.note) && <MarkTray bridge={bridge} tabId={tabId} marking={marking} stub={stubRef} onCommenting={onCommenting} />}
     </div>
   );
 }

@@ -110,7 +110,38 @@ export interface BrowserPageState {
   zoom?: number;
   error?: string | null;
   downloads?: BrowserDownload[];
+  /** The tab's marks, as main holds them; absent from an app before marking. */
+  marking?: BrowserMarking | null;
 }
+
+/** A mark as the tab's tray draws it: what its label is made of, and its comment — never its pictures. */
+export interface BrowserMarkSummary {
+  n: number;
+  kind: "element" | "region" | "pen" | "text";
+  comment: string;
+  lost: boolean;
+  box: { x: number; y: number; width: number; height: number };
+  text: string;
+  near: string;
+  shape: "" | "free" | "arrow" | "ellipse";
+  hasCrop: boolean;
+  elements: { tag: string; classes: string[]; name: string; text: string; role: string }[];
+}
+
+/** A tab's marking, for its chrome and tray (`desktop/marks.js`). */
+export interface BrowserMarking {
+  on: boolean;
+  tool: "element" | "region" | "pen";
+  shape: "free" | "arrow" | "ellipse";
+  holding: boolean;
+  /** The page's debugger is attached; marking needs it. */
+  ready: boolean;
+  note: string | null;
+  max: number;
+  marks: BrowserMarkSummary[];
+}
+
+export type BrowserMarkVerb = "mode" | "tool" | "selection" | "hold" | "comment" | "drop" | "clear" | "crop" | "bundle" | "focus";
 
 export type BrowserButton =
   | "back"
@@ -147,6 +178,14 @@ export interface DesktopBrowser {
   onOpen(listener: (tabId: string, url: string) => void): () => void;
   /** A page took the keyboard: its pane is the focused one now. */
   onFocused(listener: (tabId: string) => void): () => void;
+  /**
+   * A verb of the tab's marks (`desktop/marks.js`): `bundle` answers with the
+   * set to post, `crop` with a mark's picture as a data URL, the rest with
+   * whether it took. Optional: an app from before marking has none.
+   */
+  mark?(tabId: string, verb: BrowserMarkVerb, a?: boolean | number | string, b?: boolean | number | string): Promise<unknown>;
+  /** A mark just made on the page: its number, and its pin's place in the tab's box, in the window's CSS pixels. */
+  onMarkMade?(listener: (tabId: string, n: number, at: { x: number; y: number }) => void): () => void;
 }
 
 /** What the window asks for when it pops a card out as a window. */

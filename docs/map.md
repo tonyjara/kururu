@@ -11,6 +11,7 @@ in this folder.
 | `wire.ts` | The browser↔server protocol, and the timer intervals |
 | `snapdelta.ts` | The snapshot as what changed: the server's frames of what each client was last sent and their diff, the client's `applyDelta`. Boards travel by key, agents and cards as keyed patches. Pure, tested. See [architecture](architecture.md#restarting) |
 | `layout.ts` | The split tree and every pure operation on it. Both halves use it |
+| `marks.ts` | A set of marks on a page: the body `POST /api/marks` takes, the redaction, the lines for Kuru's box (which `chips.ts` reads back), `marks.md`, and the 30-day sweep's rule. Pure, tested |
 | `browser.ts` | What kururu's browser goes to (`http:`, `https:`, `about:blank`), read the way an address bar reads typing; a page's title and label. Pure, tested. See [the plan](plans/browser-annotate.md) |
 | `dashboard.ts` | The profile's Dashboard: its fixed tabs, the rule that it holds them and nothing else, and its layout made to fit. Pure, tested. See [layout](layout.md#the-dashboard) |
 | `agentpane.ts` | Where the agents kururu starts go: the bottom (or top) pane by geometry, the mark that keeps them in one, the word to split when there is none. Pure, tested. See [layout](layout.md#the-agents-pane) |
@@ -256,7 +257,7 @@ in this folder.
 for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` (the window-wide bottom bar, each information chip behind a switch in Settings → Bottom bar, and `WorkspaceToggle`) · `Usage.tsx` (the Claude and Codex allowances on that bar, and their bars on hover or tap) · `Load.tsx` (this Mac's load and free memory on that bar, in the slot queue's colours, and the queue on hover) · `BarChip.tsx` (a bar chip's hover-and-pin popover, which the allowances and the machines share) · `Machines.tsx` (the machines on that bar: a glyph in the worst load's colour, the connected count, each machine's rings, Shell and Specs in the popover) · `DrawerChips.tsx` ·
 `Status.tsx` (a dot, or the mascot) · `Icon.tsx` (a class name and an
 `aria-hidden` span) · `Dialog.tsx` (while one is up, no key reaches a pty) ·
-`Menu.tsx` (it and `Dialog.tsx` are drawn into `document.body`, so one opened in a pane is over everything; a row may open a list, one level deep, and the menu holds the keyboard while it is open) · `Reader.tsx` (**the thing kururu was built for**; one draggable tab per document) · `BrowserView.tsx` (a browser tab's chrome and the box its page is laid over; a placeholder off the Mac) ·
+`Menu.tsx` (it and `Dialog.tsx` are drawn into `document.body`, so one opened in a pane is over everything; a row may open a list, one level deep, and the menu holds the keyboard while it is open) · `Reader.tsx` (**the thing kururu was built for**; one draggable tab per document) · `BrowserView.tsx` (a browser tab's chrome and the box its page is laid over; a placeholder off the Mac) · `MarkTray.tsx` (a tab's marks: the tools, the tray, the comment's popover over the still, Send to Kuru) ·
 `Board.tsx` (a workspace's cards; the robot hands one to an agent) ·
 `Search.tsx` (the search over every board and the conversations, and the deleted cards, in the profile board's sheet; a card hit is a door to the card) ·
 `ProfileBoard.tsx` (the profile's own cards, the Dashboard's first fixed tab; its own and no other's) · `Dashboard.tsx` (what each of the Dashboard's fixed tabs draws, one entry per tab) ·
@@ -284,6 +285,7 @@ open, and this is how loud the room is; dragged anywhere, ✕ or Esc to stop Kur
 | `tray.js` · `menu.js` | The frog in the menu bar and its clicks; the menu as data, with no Electron in it, so its sentences are tested |
 | `editmenu.js` | The right-click menu of a text field — Cut, Copy, Paste, spelling — as data; `main.js` pops it, the preload keeps it off terminals |
 | `talkkey.js` · `talkkey/talkkey.swift` | The talk key in every app: the native listen-only event tap, its router, and the floating pill's panel window |
+| `marks.js` · `markscript.js` | A browser tab's marks: the debugger on its page, the console ring, the isolated world, crops, held hover and the set for Send; and the marking script that runs in the page, with no Electron in it (its pure pieces tested) |
 | `browser.js` · `browserrules.js` | kururu's browser: a `WebContentsView` per browser tab, pooled by tab id and moved between panes, in `persist:kururu-browser` with every guest handler and the block on kururu's own ports; the rules — which requests are kururu's, which schemes, a download's name, the user agent — as data, tested |
 | `notes.js` · `notelist.js` | Cards popped out as windows over every app: the panel windows and their verbs; their records off `desktop.json` and where a box goes on the screen, as data, tested |
 | `desktop.js` | `desktop.json`: where the server runs from, whether the hook is on, where the pill was left, which cards are note windows and where |

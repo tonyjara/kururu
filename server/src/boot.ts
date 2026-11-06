@@ -88,6 +88,7 @@ import { Kuru } from "./kuru";
 import { TelegramLead } from "./lead";
 import { claudeDirOf, codexHomeOf, lendOffer, lendSecrets, tokenInPtys } from "./lending";
 import { hostEnding, readTail, record, recordStart, socketHolder, supervised } from "./lifecycle";
+import { startMarkSweep } from "./marks";
 import { codexRolloutsOn, findMachine, machinesSnapshot, usageChunkOn, usageFilesOn } from "./machines";
 import { kuruFiles, sendPictureFor, showFileFor } from "./madelinks";
 import { Mover } from "./move";
@@ -916,6 +917,9 @@ export async function attach(port: Port): Promise<void> {
 
   listenOnce(() => {
     recordStart(PORT, VERSION);
+    // Sets of marks past their thirty days, now and daily (`marks.ts`): after
+    // the start's own line, so the log reads in the order it happened.
+    startMarkSweep();
     /**
      * Minted now on a server that will ask for it, rather than when somebody
      * first asks: a child has no Share dialog to ask, and a box whose tools

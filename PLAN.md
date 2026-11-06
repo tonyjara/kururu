@@ -314,10 +314,10 @@ looks like it worked.
    of a terminal, and it is the larger half of giving the phone its own width.
 5. **Push notifications.** Ghosttown's `notifyGate` already decides what is
    worth interrupting you for; the phone is another sink for it.
-6. **The element picker.** Since the proxy is already an origin-level hop, it
-   can inject a script into previewed HTML: long-press an element, capture the
-   selector and source location, send it to the agent as *"the CTA in
-   `src/Hero.tsx:42` wraps at 390px"*. Waits on the preview pane.
+6. **The element picker.** Overtaken by marking in kururu's own browser tab
+   (`docs/plans/browser-annotate.md`, phase 1 built 2026-11-06): the page is a
+   real browser view on the desktop, so no proxy injects anything, and the
+   phone is out of it.
 
 ## The terminal lifecycle rework
 

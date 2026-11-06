@@ -41,11 +41,13 @@ export type LifeWriter = "runner" | "app" | "server";
  * `watch` is the parent's window opening or closing its watch on this
  * node's terminals (`/link/watch`), on either end: a client that is another
  * computer is worth a line a phone is not.
+ * `sweep` is a set of marks removed for its age (`server/src/marks.ts`): a
+ * folder somebody's message names went away, and this says when and why.
  */
-export type LifeWhat = "start" | "restart" | "stop" | "crash" | "down" | "orphaned" | "host" | "telegram" | "watch";
+export type LifeWhat = "start" | "restart" | "stop" | "crash" | "down" | "orphaned" | "host" | "telegram" | "watch" | "sweep";
 
 const WRITERS: readonly LifeWriter[] = ["runner", "app", "server"];
-const WHATS: readonly LifeWhat[] = ["start", "restart", "stop", "crash", "down", "orphaned", "host", "telegram", "watch"];
+const WHATS: readonly LifeWhat[] = ["start", "restart", "stop", "crash", "down", "orphaned", "host", "telegram", "watch", "sweep"];
 
 export interface LifeEvent {
   /** ISO 8601, UTC. A reader turns it into local time; the file never does. */

@@ -1070,6 +1070,18 @@ ipcMain.handle("kururu:browser-still", (event, tabId) => {
   return fromMain(event) && id ? browser.still(id) : null;
 });
 ipcMain.handle("kururu:browser-ids", (event) => (fromMain(event) ? browser.ids() : []));
+/**
+ * A verb of a tab's marks (`marks.js`). The arguments are held to what each
+ * verb takes here, before the pool sees them: a verb by name, a number that
+ * is a whole number, a string cut short, a boolean.
+ */
+const MARK_VERBS = new Set(["mode", "tool", "selection", "hold", "comment", "drop", "clear", "crop", "bundle", "focus"]);
+const markArg = (value) => (typeof value === "boolean" ? value : Number.isInteger(value) ? value : typeof value === "string" ? value.slice(0, 4000) : null);
+ipcMain.handle("kururu:browser-mark", (event, tabId, verb, a, b) => {
+  const id = tabIdOf(tabId);
+  if (!fromMain(event) || !id || typeof verb !== "string" || !MARK_VERBS.has(verb)) return null;
+  return browser.mark(id, verb, markArg(a), markArg(b)).catch(() => null);
+});
 const tellMain = (channel, ...args) => {
   if (win && !win.isDestroyed()) win.webContents.send(channel, ...args);
 };
@@ -1078,6 +1090,7 @@ browser.on("prefix", (tabId) => tellMain("kururu:browser-prefix", tabId));
 browser.on("address", (tabId) => tellMain("kururu:browser-address", tabId));
 browser.on("open", (tabId, url) => tellMain("kururu:browser-open", tabId, url));
 browser.on("focused", (tabId) => tellMain("kururu:browser-focused", tabId));
+browser.on("mark", (tabId, n, at) => tellMain("kururu:browser-mark-made", tabId, n, at));
 
 /**
  * Whether this launch should open a window at all.

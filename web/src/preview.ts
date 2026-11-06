@@ -22,8 +22,9 @@
  * extra one buys nothing — no Host to rewrite for a request already saying
  * localhost, no frame headers to strip outside an iframe. It also means the
  * desktop window keeps working for a dev server the scan found before a proxy
- * had been opened for it. (When the element picker lands it is injected by the
- * proxy, and this is the line that will have to go: the picker is worth a hop.)
+ * had been opened for it. (The element picker PLAN.md once had injected by
+ * the proxy is the browser tab's marking now — docs/plans/browser-annotate.md
+ * — which needs no proxy, so this stays as it is.)
  */
 import type { DevServer } from "../../shared/wire";
 

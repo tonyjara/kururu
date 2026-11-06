@@ -38,7 +38,7 @@
 
 import type { ReplyRef } from "./reply";
 
-export type ChipKind = "card" | "quote" | "image" | "file";
+export type ChipKind = "card" | "quote" | "image" | "file" | "marks" | "mark";
 
 /** A card as a reference names it: what a card chip, or a quote of a card, is a door onto. */
 export interface ChipCard {
@@ -64,6 +64,14 @@ export interface Chip {
   card?: ChipCard;
   /** The line of the conversation a quote is of, as its `[reply to …]` named it — a sent message's door back to that line. */
   answers?: ReplyRef;
+  /**
+   * The set of marks a `marks` header names, and the set a `mark` line
+   * belongs to — the header before it in the same draft — so a chip can say
+   * when its set has been cleaned up (`shared/marks.ts`).
+   */
+  set?: string;
+  /** A mark's number in its set. */
+  n?: number;
 }
 
 export type Piece = { text: string } | { chip: Chip };
@@ -84,7 +92,14 @@ const REPLY = String.raw`\[reply to (?<who>[^"[\]\n]{1,40}?) (?<when>(?:[A-Z][a-
 const FILE = String.raw`\[file (?<fpath>[^\n[\]]+?)(?::(?<fline>\d+(?:-\d+)?))?(?: \((?<fproject>[^()\n[\]]+)\))?(?: under "(?<fhead>[^"\n]*)")?\](?: \[quote "(?<fquote>[^"\n]*)"\])?`;
 /** A quote with nothing in front of it — pasted, or its reference deleted — is still a quote. */
 const LONE = String.raw`\[quote(?<lpart> title)? "(?<lquote>[^"\n]*)"\]`;
-const TOKEN = new RegExp(`${CARD}|${REPLY}|${FILE}|${LONE}`, "gu");
+/**
+ * A set of marks on a page, as `marksMessage` in `shared/marks.ts` writes its
+ * header — how many, on which page, and the `marks.md` that says everything
+ * — and one mark's line, whose comment follows it as words.
+ */
+const MARKS = String.raw`\[marks (?<mcount>\d{1,2}) on (?<mpage>[^\s()[\]]+) \((?<mpath>[^()\n[\]]*?\/(?<mset>m[0-9a-f]{12})\/marks\.md)\)\]`;
+const MARK = String.raw`\[mark (?<mn>\d{1,2}) (?<mlabel>[^[\]\n]{1,240})\]`;
+const TOKEN = new RegExp(`${CARD}|${REPLY}|${FILE}|${LONE}|${MARKS}|${MARK}`, "gu");
 
 const IMAGE = /\.(?:png|jpe?g|gif|webp|heic|heif|avif|bmp|tiff?|svg)$/i;
 
@@ -128,6 +143,8 @@ function isSpace(ch: string | undefined): boolean {
 /** The chips in a draft, in order and never overlapping. `files` are the escaped paths the box put in itself. */
 export function chipsIn(draft: string, files: readonly string[] = []): Chip[] {
   const chips: Chip[] = [];
+  /** The set the last `marks` header named, which the `mark` lines after it belong to. */
+  let set: string | undefined;
   for (const match of draft.matchAll(TOKEN)) {
     const at = match.index ?? 0;
     const g = match.groups ?? {};
@@ -152,6 +169,13 @@ export function chipsIn(draft: string, files: readonly string[] = []): Chip[] {
       else chips.push({ kind: "file", from: at, to, label: name, source: "", full: where });
     } else if (g.lquote !== undefined) {
       chips.push({ kind: "quote", from: at, to, label: quoteHint(g.lquote), source: "", full: `"${g.lquote}"` });
+    } else if (g.mset !== undefined) {
+      set = g.mset;
+      const count = Number(g.mcount);
+      chips.push({ kind: "marks", from: at, to, label: `${count} mark${count === 1 ? "" : "s"}`, source: g.mpage ?? "", full: `${count} mark${count === 1 ? "" : "s"} on ${g.mpage} — ${g.mpath}`, set });
+    } else if (g.mn !== undefined) {
+      const label = g.mlabel ?? "";
+      chips.push({ kind: "mark", from: at, to, label, source: g.mn, full: `Mark ${g.mn}: ${label}`, n: Number(g.mn), ...(set ? { set } : {}) });
     }
   }
   // Each path the box put in, wherever it stands as a word of its own and
@@ -199,6 +223,8 @@ export function plainChips(text: string): string {
       const chip = piece.chip;
       if (chip.kind === "card") return `${chip.source} "${chip.label}"`;
       if (chip.kind === "quote") return chip.source ? `“${chip.label}” (${chip.source})` : `“${chip.label}”`;
+      if (chip.kind === "marks") return `${chip.label} on ${chip.source}`;
+      if (chip.kind === "mark") return `mark ${chip.source}: ${chip.label}`;
       return chip.label;
     })
     .join("");

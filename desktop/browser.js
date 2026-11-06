@@ -38,7 +38,13 @@
  * must reach kururu from anywhere. `before-input-event` sees every key before
  * the page: the prefix hands the focus back to the window and arms it there,
  * and the browser's own ⌘ keys (⌘L, ⌘R, ⌘[, ⌘], ⌘+, ⌘−, ⌘0) are this tab's.
- * Everything else is the page's.
+ * Everything else is the page's — except while marking, when Esc, ↑ and ↓
+ * are the marks', and ⌘⇧M and ⌘⇧H always are (`marks.js`).
+ *
+ * **Marks.** Each page has a `TabMarks` (`marks.js`) beside it from the
+ * moment it is made: the debugger on the page, which keeps its console
+ * errors whether or not anybody marks, and the marking script's world while
+ * somebody does. The window's page drives it through `mark`.
  *
  * Only the main window's page may drive any of this, checked by the sender in
  * `main.js`; a page in a tab has no bridge to call it with.
@@ -58,6 +64,7 @@ const {
   quarantineValue,
   resolvesHere,
 } = require("./browserrules");
+const { TabMarks } = require("./marks");
 
 const PARTITION = "persist:kururu-browser";
 /** A still's quality: enough to read text under a menu, small enough to send every second. */
@@ -195,9 +202,15 @@ class BrowserPool extends EventEmitter {
     view.setBackgroundColor("#ffffff");
     view.setVisible(false);
     /** @type {Tab} */
-    const tab = { id: tabId, view, nav: -1, shown: false, error: null, downloads: [], zoom: 1 };
+    const tab = { id: tabId, view, nav: -1, shown: false, error: null, downloads: [], zoom: 1, marks: /** @type {any} */ (null) };
     this.tabs.set(tabId, tab);
     this.wire(tab);
+    // Before the first load, so the console is kept from the page's first line.
+    tab.marks = new TabMarks(view.webContents, {
+      log: this.log,
+      changed: () => this.report(tab),
+      picked: (n, at) => this.emit("mark", tab.id, n, this.toWindowPixels(tab, at)),
+    });
     const win = this.window();
     if (win && !win.isDestroyed()) win.contentView.addChildView(view);
     if (url && allowedAddress(url, { top: true })) void view.webContents.loadURL(url).catch(() => {});
@@ -268,6 +281,7 @@ class BrowserPool extends EventEmitter {
     const tab = this.tabs.get(tabId);
     if (!tab) return;
     this.tabs.delete(tabId);
+    tab.marks?.dispose();
     const win = this.window();
     if (win && !win.isDestroyed()) win.contentView.removeChildView(tab.view);
     if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
@@ -351,6 +365,51 @@ class BrowserPool extends EventEmitter {
     }
   }
 
+  /**
+   * A verb of the tab's marks, from its chrome: marking on or off, the tool,
+   * the selection, the hover held, a comment kept, a mark dropped, the tray
+   * cleared, and the set for Send. A comment comes in here and goes nowhere
+   * but the set: never into the page.
+   */
+  async mark(tabId, verb, a, b) {
+    const tab = this.tabs.get(tabId);
+    if (!tab || !tab.marks) return null;
+    const marks = tab.marks;
+    switch (verb) {
+      case "mode":
+        return marks.setMode(a === true);
+      case "tool":
+        return marks.setTool(String(a), String(b));
+      case "selection":
+        return marks.markSelection();
+      case "hold":
+        return marks.hold();
+      case "comment":
+        return Number.isInteger(a) ? marks.comment(a, typeof b === "string" ? b : "") : false;
+      case "drop":
+        return Number.isInteger(a) ? marks.drop(a) : false;
+      case "clear":
+        return marks.clear();
+      case "crop":
+        return Number.isInteger(a) ? marks.cropOf(a) : null;
+      case "bundle":
+        return marks.bundle();
+      case "focus":
+        // Back into the page after a comment, so the next pick needs no click to focus it.
+        if (!tab.view.webContents.isDestroyed()) tab.view.webContents.focus();
+        return true;
+      default:
+        return null;
+    }
+  }
+
+  /** A point in a view's own pixels, as the window's page measures: its CSS pixels, at the window's zoom. */
+  toWindowPixels(_tab, at) {
+    const win = this.window();
+    const zoom = win && !win.isDestroyed() ? win.webContents.getZoomFactor() || 1 : 1;
+    return { x: at.x / zoom, y: at.y / zoom };
+  }
+
   // -------------------------------------------------------------------------
   // A page's events
   // -------------------------------------------------------------------------
@@ -421,6 +480,27 @@ class BrowserPool extends EventEmitter {
       event.preventDefault();
       this.toWindow();
       this.emit("prefix", tab.id);
+      return;
+    }
+    // Marking's keys: Esc, ↑ and ↓ while it is on, so the page never sees
+    // them; ⌘⇧M (the selection, or marking on and off) and ⌘⇧H (hold the
+    // hover) whenever.
+    const marks = tab.marks;
+    if (marks && marks.mode && !input.meta && !input.control && !input.alt) {
+      if (key === "escape") {
+        event.preventDefault();
+        void marks.escape();
+        return;
+      }
+      if (key === "arrowup" || key === "arrowdown") {
+        event.preventDefault();
+        void marks.walk(key === "arrowup" ? "up" : "down");
+        return;
+      }
+    }
+    if (marks && command && input.shift && !input.alt && (key === "m" || key === "h")) {
+      event.preventDefault();
+      void (key === "m" ? marks.markKey() : marks.hold());
       return;
     }
     if (!command || input.alt) return;
@@ -535,6 +615,7 @@ class BrowserPool extends EventEmitter {
       zoom: tab.zoom,
       error: tab.error,
       downloads: tab.downloads.map((d) => ({ id: d.id, name: d.name, received: d.received, total: d.total, state: d.state })),
+      marking: tab.marks ? tab.marks.state() : null,
     };
   }
 
@@ -567,7 +648,8 @@ function quarantine(file, log) {
 
 /**
  * @typedef {{ id: string, view: import("electron").WebContentsView, nav: number, shown: boolean, error: string | null,
- *   downloads: { id: number, name: string, path: string, received: number, total: number, state: string }[], zoom: number }} Tab
+ *   downloads: { id: number, name: string, path: string, received: number, total: number, state: string }[], zoom: number,
+ *   marks: import("./marks").TabMarks }} Tab
  */
 
 module.exports = { BrowserPool, PARTITION };

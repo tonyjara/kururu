@@ -87,6 +87,9 @@ if (isPicker) {
     width: Number(rect && rect.width),
     height: Number(rect && rect.height),
   });
+  /** A mark verb's argument: a boolean, a whole number or a string; anything else is nothing. */
+  const markArg = (value) =>
+    typeof value === "boolean" ? value : typeof value === "number" && Number.isInteger(value) ? value : typeof value === "string" ? value.slice(0, 4000) : null;
   /** Listen on a channel from main, and hand back the way to stop. */
   const relayOn = (channel, listener) => {
     const relay = (_event, ...args) => listener(...args);
@@ -257,6 +260,14 @@ if (isPicker) {
       onAddress: (listener) => relayOn("kururu:browser-address", (tabId) => listener(String(tabId))),
       onOpen: (listener) => relayOn("kururu:browser-open", (tabId, url) => listener(String(tabId), String(url))),
       onFocused: (listener) => relayOn("kururu:browser-focused", (tabId) => listener(String(tabId))),
+      /**
+       * Marks (`desktop/marks.js`): one verb by name, with what it takes.
+       * A comment crosses here into main and is kept there; nothing on this
+       * bridge reaches into the page.
+       */
+      mark: (tabId, verb, a, b) => ipcRenderer.invoke("kururu:browser-mark", String(tabId), String(verb), markArg(a), markArg(b)),
+      /** A mark just made on a page: its number, and where its pin is in the tab's box, for the comment's popover. */
+      onMarkMade: (listener) => relayOn("kururu:browser-mark-made", (tabId, n, at) => listener(String(tabId), Number(n), { x: Number(at && at.x), y: Number(at && at.y) })),
     },
     notes: {
       popOut: (ask) => ipcRenderer.invoke("kururu:note-pop", ask && typeof ask === "object" ? ask : {}),
