@@ -2,8 +2,8 @@
 
 A plan, first written 2026-11-06 from a read of the tree at `0ce67bd` and of
 the research in [browser-annotate-research.md](browser-annotate-research.md),
-then **revised the same day around the user's answers** to its open questions
-(see [what the user decided](#what-the-user-decided)). **Nothing was built.**
+then **revised the same day around the user's answers** to both rounds of
+its questions (see [what the user decided](#what-the-user-decided)). **Nothing was built.**
 It is written so that an agent can take one phase, read the files it names,
 and know what "done" is.
 
@@ -139,6 +139,18 @@ Answers given 2026-11-06 to the first draft's questions:
 | which sites | **any website** |
 | tighten `originOk` for every browser | **no**; only the block on the built-in browser's own session |
 | the iPad | **Sidecar, not a web-client iPad**: detach the browser into its own window; weigh a browser extension honestly |
+
+And to the second draft's seven, the same day:
+
+| question | answer |
+|---|---|
+| screenshots to the model | **a crop per mark, plus the visible page at Send** |
+| the React source hook | **on by default for localhost pages** |
+| keeping marks | **cleaned up after about 30 days**, not kept forever |
+| downloads | **saved to `~/Downloads`, with a line in the tab**, not refused |
+| tabs agents open themselves | **in the user's session, with the user's logins** |
+| Send from a detached window | **into Kuru's box in the main window** |
+| the Chrome extension | **only when a Google sign-in, or another login, forces it** |
 
 ## What is there today
 
@@ -410,16 +422,33 @@ order tried:
 4. **Nothing React:** a selector and text only, which Agentation shows is
    enough for an agent to find most things.
 
-**Only on localhost pages, and on by default there** (still open, question 2
-below). A hook in the page's own world is visible to the page and slightly
+**Only on localhost pages, and on by default there** (decided). A hook in the page's own world is visible to the page and slightly
 changes what React does, as React DevTools does. On another site it buys
 nothing (production bundles have no `_debugStack`) and costs a script in
 somebody else's page. Settings has the switch.
 
 ### The bundle and the message
 
-**A mark set** is `data/marks/<id>/`, beside `drops/`, with the same rules:
-0700 and 0600, never backed up, nothing deletes it. It holds:
+**A mark set** is `data/marks/<id>/`, beside `drops/`, with its rules: 0700
+and 0600, never backed up. Unlike `drops/`, **it is cleaned up after about 30
+days** (decided):
+
+- **The sweep.** The server removes a set whose newest file is more than 30
+  days old, at start and once a day after, and writes one line per set swept
+  to `lifecycle.log`. It removes only directories directly under
+  `data/marks/` whose names are set ids it would have made, read with
+  `lstat` and never followed through a link, so nothing else can be swept by
+  mistake. The age rule is a pure function in `shared/` and tested.
+- **What is left behind.** A message, a card or a reply that names a swept
+  set keeps its lines, which carry the label and the comment, so it still
+  reads. The chip draws as "cleaned up" and a crop asked for is a 404 with
+  that word. An agent that Reads a swept `marks.md` gets "no such file",
+  which is honest.
+- **Cards too.** A set a card names is swept on the same clock; the card's
+  lines are what keeps the marks readable, which is why they carry the
+  label and the comment and not only a path.
+
+It holds:
 
 - `marks.md`: everything, written for an agent, in the shape Orca and
   Agentation converged on. A `## Marks on localhost:3000/checkout` heading,
@@ -579,8 +608,8 @@ browser.
 no switch. What there is:
 
 - **A tab an agent opens** is in the same `persist:kururu-browser` session,
-  so its logins are the user's too (assumed from the answer; question 5
-  below).
+  so its logins are the user's too (decided). It opens in the agents' pane,
+  as kururu's own tabs do, so the user sees it.
 - **You can see it happen.** While an agent's action is in flight, the tab's
   chrome shows a badge with the agent's name and a **Stop** that refuses that
   agent's next actions on the tab until pressed again.
@@ -697,8 +726,8 @@ optional later complement for marking only, Safari not planned.**
   not drive.
 - The cost of keeping that door open is a design rule, not code: the marking
   script has no Electron in it and `POST /api/marks` takes a plain body. Build
-  the extension when the built-in browser hits a sign-in it cannot do, or
-  when the user finds themselves marking in Chrome anyway.
+  the extension only when a Google sign-in, or another login, cannot be done
+  in the built-in browser (decided).
 
 ### Security
 
@@ -738,8 +767,16 @@ except for one exact extension origin if phase 7 is built.
   page is the marking script in its isolated world, injected only while
   marking or while pins are shown
 - deny-by-default handlers for permissions, devices and display capture
-- downloads stopped (or saved to `~/Downloads` with a line in the tab; open
-  question)
+- downloads saved to `~/Downloads` (decided), never refused and never opened:
+  - `will-download` sets the path itself, so no save dialog comes up over the
+    panes; a name already taken gets ` (1)`, ` (2)`, never an overwrite
+  - a line in the tab's chrome while it runs and after: the name, the size,
+    progress, **Show in Finder** (`shell.showItemInFolder`), and the agent's
+    name when an agent's action started it
+  - nothing is opened or run automatically; the file carries macOS's
+    quarantine flag, as a Safari or Chrome download does (verify that
+    Electron sets `com.apple.quarantine`, and set it in main if not)
+  - the lines are the tab's and go with it; there is no download manager
 - popups opened as a new browser tab, never a window
 - `http:`, `https:` and `about:blank` only, checked on navigation, frame
   navigation, redirects and in `onBeforeRequest`
@@ -831,6 +868,10 @@ phases stop well short of that on purpose.
   all fail. In a browser outside kururu the same page succeeds, which shows
   the block is what stopped them.
 - A restart brings the tab back unloaded until it is shown.
+- A download from the test page lands in `~/Downloads` with no dialog, a
+  second one of the same name gets ` (1)`, the tab shows its line with
+  **Show in Finder**, nothing opens, and the file carries
+  `com.apple.quarantine`.
 
 **Test** with the desktop app driven hidden ([testing by hand](../testing.md#testing-by-hand)) on an
 [isolated instance](../testing.md#the-isolated-instance), never the user's
@@ -850,6 +891,8 @@ window, apps or agents.
 - the console and network ring buffer
 - `POST /api/marks` and the folder; `marks.md`, `marks.json`, crops and the
   view
+- the 30-day sweep of `data/marks/`, at start and daily, a line per set in
+  `lifecycle.log`, and the "cleaned up" chip and 404 for a swept set
 - the message, into Kuru's box
 - the `mark`/`marks` chips in the box
 
@@ -860,6 +903,7 @@ window, apps or agents.
 - the label and the message's grammar, read back by `chips.ts`
 - the redaction
 - `marks.md`'s writer
+- the sweep's age rule and its test of a set id
 
 **Done when:**
 
@@ -875,6 +919,10 @@ window, apps or agents.
 - A `type=password` value, a `?token=` query and an `Authorization`-looking
   attribute appear nowhere in the folder. A comment's words appear nowhere in
   the page's DOM.
+- On an isolated instance, a set aged past 30 days (its files' times set
+  back) is swept with its line in `lifecycle.log`; a younger set, a symlink
+  and a directory not named like a set are all left alone; the box's chip for
+  the swept set says "cleaned up".
 
 ### Phase 2: a window of its own, and the Pencil on Sidecar
 
@@ -904,8 +952,8 @@ window, apps or agents.
 **Build:**
 
 - road 1 (attributes)
-- road 2 (hook, `_debugStack`, source maps), localhost only, behind its
-  switch
+- road 2 (hook, `_debugStack`, source maps), localhost only, on by default
+  there, with a switch in Settings to turn it off
 - road 3 (the checkout check through `files.ts`), and the confidence on the
   mark
 
@@ -942,7 +990,7 @@ wrapper.
 **Build:**
 
 - `/mcp/browser` and its five tools, `browser_act` included, with no switch
-- tabs agents open, in the same session
+- tabs agents open, in the same session and in the agents' pane
 - the badge, Stop and the action log in the tab's chrome
 - the launch flags beside `/mcp/web`'s
 - the `resolve` drawn on the pin
@@ -974,8 +1022,9 @@ server configured. That is a real limit and the reason this is optional.
 
 ### Phase 7 (optional): a Chrome extension, marking only
 
-Only when the built-in browser meets a sign-in it cannot do, or the user is
-marking in Chrome anyway.
+Only when a Google sign-in, or another login, cannot be done in the built-in
+browser (decided). Until then, nothing of it is built beyond the design rule
+that keeps the marking script and `POST /api/marks` free of Electron.
 
 **Build:**
 
@@ -986,6 +1035,8 @@ marking in Chrome anyway.
 - pairing: a single-use code in Settings, traded for a marks-scoped token;
   the extension's exact origin added to `originOk` for that token only
 - marks from the extension go to the main window's Kuru box
+
+**Left to decide then:** the Web Store, unlisted, or "Load unpacked".
 
 **Not built:** `chrome.debugger`, agents in Chrome (chrome-devtools-mcp's
 `--autoConnect` already does that), Safari.
@@ -1032,22 +1083,8 @@ unpaired extension, and a page, are both refused by `/api/marks`.
 
 ## Questions still open
 
-1. **Screenshots to the model:** a crop per mark plus the view at Send
-   (recommended), or the view only, or ask each time?
-2. **The React hook:** on by default for localhost pages (recommended), or
-   off until asked?
-3. **Keeping marks:** forever like `drops/` (recommended, the folder is
-   yours), or swept after some weeks?
-4. **Downloads:** refused (recommended), or saved to `~/Downloads`?
-5. **Tabs agents open themselves:** in your session with your logins
-   (assumed, from "yes, with my logins"), or a session of their own with
-   none?
-6. **Send from a detached window:** into the main window's Kuru box
-   (recommended), or a small Kuru box in the detached window itself, so the
-   iPad never needs the Mac's screen?
-7. **The extension:** build phase 7 only when a sign-in forces it
-   (recommended), or plan it right after phase 1? Unlisted on the Web Store,
-   or "Load unpacked"?
+None. Every question from both drafts is answered in
+[what the user decided](#what-the-user-decided).
 
 ## Noticed while reading, not part of this
 
