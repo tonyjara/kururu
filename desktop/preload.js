@@ -80,6 +80,19 @@ if (isPicker) {
   ipcRenderer.on("kururu:refer-card", (_event, cardId, quote) => {
     if (ipcRenderer.listenerCount("kururu:refer-card") === 1 && typeof cardId === "string") pendingRefer = { cardId, quote };
   });
+  /** A box as plain numbers, which is all that crosses: a DOMRect is not cloneable as one. */
+  const boxOf = (rect) => ({
+    x: Number(rect && rect.x),
+    y: Number(rect && rect.y),
+    width: Number(rect && rect.width),
+    height: Number(rect && rect.height),
+  });
+  /** Listen on a channel from main, and hand back the way to stop. */
+  const relayOn = (channel, listener) => {
+    const relay = (_event, ...args) => listener(...args);
+    ipcRenderer.on(channel, relay);
+    return () => ipcRenderer.removeListener(channel, relay);
+  };
   contextBridge.exposeInMainWorld("kururu", {
     /** True in the Electron window, absent in a browser or on the phone. */
     desktop: true,
@@ -222,6 +235,29 @@ if (isPicker) {
      * do here is put a card of its own server over the screen, which its
      * menu already does.
      */
+    /**
+     * kururu's browser: a page per browser tab, held by the main process and
+     * drawn over the tab's box (`desktop/browser.js`). The page says where a
+     * tab's box is and whether it shows, presses its chrome's buttons, and
+     * asks for a still to show while one of its own overlays covers the
+     * page. Only the main window's page is listened to; `main.js` checks the
+     * sender. Nothing here can name an address that is not a tab's own, and
+     * the tab's address is the server's, checked there.
+     */
+    browser: {
+      show: (tabId, url, nav, rect) => ipcRenderer.invoke("kururu:browser-show", String(tabId), String(url), Number(nav), boxOf(rect)),
+      place: (tabId, rect) => ipcRenderer.send("kururu:browser-place", String(tabId), boxOf(rect)),
+      hide: (tabId) => ipcRenderer.send("kururu:browser-hide", String(tabId)),
+      close: (tabId) => ipcRenderer.send("kururu:browser-close", String(tabId)),
+      go: (tabId, what, arg) => ipcRenderer.send("kururu:browser-go", String(tabId), String(what), Number(arg)),
+      still: (tabId) => ipcRenderer.invoke("kururu:browser-still", String(tabId)),
+      ids: () => ipcRenderer.invoke("kururu:browser-ids"),
+      onState: (listener) => relayOn("kururu:browser-state", (state) => listener(state)),
+      onPrefix: (listener) => relayOn("kururu:browser-prefix", (tabId) => listener(String(tabId))),
+      onAddress: (listener) => relayOn("kururu:browser-address", (tabId) => listener(String(tabId))),
+      onOpen: (listener) => relayOn("kururu:browser-open", (tabId, url) => listener(String(tabId), String(url))),
+      onFocused: (listener) => relayOn("kururu:browser-focused", (tabId) => listener(String(tabId))),
+    },
     notes: {
       popOut: (ask) => ipcRenderer.invoke("kururu:note-pop", ask && typeof ask === "object" ? ask : {}),
       list: () => ipcRenderer.invoke("kururu:note-list"),

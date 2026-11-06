@@ -2209,6 +2209,27 @@ a.machine-name:hover {
   font-size: var(--fs-base);
   opacity: 0;
 }
+/* The row's way into kururu's browser: quiet until the row is pointed at, as
+   its stop is. */
+.dev-browse {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  color: var(--dim);
+  font-size: var(--fs-base);
+  opacity: 0;
+  cursor: var(--cursor-pointer);
+}
+.dev-list li:hover .dev-browse,
+.dev-browse:focus-visible {
+  opacity: 1;
+}
+.dev-browse:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
 .dev-list li:hover .dev-stop,
 .dev-stop:focus-visible,
 .dev-stop-ask,
@@ -3564,6 +3585,182 @@ a.button {
 
 .pane-empty-keys {
   font-size: var(--fs-base);
+}
+
+/* --------------------------------------------------------------------------
+   The browser
+   -------------------------------------------------------------------------- */
+
+/* A browser tab in the strip: a tab like the board's, labelled by its page. A
+   page that is loading says so by dimming its label rather than with a
+   spinner, which in a strip of agents' mascots would read as one more agent
+   at work. */
+.tab-web-loading .tab-label {
+  opacity: 0.6;
+}
+
+/* The body: its chrome, then the box the page is laid over. The page is a
+   native view drawn by the main process, not anything in here. */
+.browser {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.browser-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 6px;
+  border-bottom: var(--border) var(--border-style) var(--line);
+}
+.browser-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 4px;
+  border-radius: var(--radius-md);
+  color: var(--dimmer);
+  line-height: 1;
+  font-size: var(--fs-md);
+  flex: none;
+  cursor: var(--cursor-pointer);
+}
+.browser-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--line);
+}
+.browser-btn:disabled {
+  opacity: 0.4;
+  cursor: var(--cursor);
+}
+/* Back and forward are the chevron on its side: kururu's icons are a fixed
+   set a skin can redraw, and an arrow pair added for one bar would be two
+   more for every skin to answer for. */
+.browser-back .icon {
+  transform: rotate(90deg);
+}
+.browser-forward .icon {
+  transform: rotate(-90deg);
+}
+.browser-form {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+.browser-address {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 8px;
+  border: var(--border) var(--border-style) var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  outline: none;
+}
+.browser-address:focus {
+  border-color: var(--line-high);
+}
+.browser-address-loading {
+  color: var(--dim);
+}
+/* The page's zoom, drawn only while there is one to come back from — the
+   reader's rule, for the reader's reason. */
+.browser-zoom {
+  flex: none;
+  padding: 0 4px;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+  cursor: var(--cursor-pointer);
+}
+.browser-zoom:hover {
+  color: var(--text);
+}
+.browser-error {
+  flex: none;
+  padding: 4px 10px;
+  border-bottom: var(--border) var(--border-style) var(--line);
+  font-size: var(--fs-sm);
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+/* A download: one line under the bar, the name, how far, and the way to it. */
+.browser-download {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+  border-bottom: var(--border) var(--border-style) var(--line);
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.browser-download-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.browser-download-how {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.browser-download-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  cursor: var(--cursor-pointer);
+}
+.browser-download-btn:hover {
+  color: var(--text);
+  background: var(--line);
+}
+/* The box the page is laid over, and the still of the page while one of
+   kururu's overlays covers it, stretched to the box it was taken at. */
+.browser-stub {
+  flex: 1;
+  min-height: 0;
+  background-color: var(--bg);
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+}
+/* A browser tab where its page cannot be drawn: the phone, a browser, another
+   computer's window. What it is, and where it is open. */
+.browser-away {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 16px;
+  text-align: center;
+  color: var(--dimmer);
+}
+.browser-away-title {
+  font-size: var(--fs-md);
+  color: var(--dim);
+}
+.browser-away-url {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+.browser-away-note {
+  font-size: var(--fs-sm);
 }
 
 /* --------------------------------------------------------------------------

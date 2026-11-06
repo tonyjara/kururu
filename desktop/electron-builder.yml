@@ -47,6 +47,8 @@ files:
   - talkkey.js
   - notes.js
   - notelist.js
+  - browser.js
+  - browserrules.js
   - quit.js
   - icon/icon-1024.png
   - icon/trayTemplate.png

@@ -11,6 +11,7 @@ in this folder.
 | `wire.ts` | The browser↔server protocol, and the timer intervals |
 | `snapdelta.ts` | The snapshot as what changed: the server's frames of what each client was last sent and their diff, the client's `applyDelta`. Boards travel by key, agents and cards as keyed patches. Pure, tested. See [architecture](architecture.md#restarting) |
 | `layout.ts` | The split tree and every pure operation on it. Both halves use it |
+| `browser.ts` | What kururu's browser goes to (`http:`, `https:`, `about:blank`), read the way an address bar reads typing; a page's title and label. Pure, tested. See [the plan](plans/browser-annotate.md) |
 | `agentpane.ts` | Where the agents kururu starts go: the bottom (or top) pane by geometry, the mark that keeps them in one, the word to split when there is none. Pure, tested. See [layout](layout.md#the-agents-pane) |
 | `harness.ts` | The harness's vocabulary: the MCP tool catalogue, the role prompt, key and paste grammar, when a waiting message may be typed, the frames of a notice, transcript turns, its model, effort and compaction point, its folder's two files. Pure, tested |
 | `agy.ts` | Antigravity's `agy`, the pure half: the title payload read as reports, the transcript's last reply, the quota as the bar's limits, the session settings, Kuru's line, MCP config, hooks and role. See [antigravity](antigravity.md) |
@@ -92,7 +93,7 @@ in this folder.
 | `src/preamble.ts` | What runs before any other module: crash recording, the process name, the port, the restart exit code, where the web app is |
 | `src/context.ts` | What every part shares: the subsystems `attach` fills through `provide`, the clients, `send`/`broadcast`, the snapshot and the deltas, and the settings and per-agent state a snapshot is made of |
 | `src/boot.ts` | Listening, the WebSocket upgrade, a client admitted, the host found or started, `attach`, a restart asked for, `shutdown` |
-| `src/ws/dispatch.ts` | A client's message: the shape check, the hands, another node's workspace forwarded, then each area of verbs in `src/ws/` (terminals, panes, workspaces, look, kuru, voice, nodes, machines, services, dbviewer, profiles, board, reader) until one answers. `reply.ts` is how a verb answers |
+| `src/ws/dispatch.ts` | A client's message: the shape check, the hands, another node's workspace forwarded, then each area of verbs in `src/ws/` (terminals, panes, workspaces, look, kuru, voice, nodes, machines, services, dbviewer, profiles, board, reader, browser) until one answers. `reply.ts` is how a verb answers |
 | `src/http/router.ts` | An HTTP request: the node join ahead of the gate, the gate, the cookie, then one lookup in the route tables in `src/http/` (server, agents, mcp, nodes, kuru, voice, styles, files), another node's disk, the static app. `respond.ts` holds the body readers and responders |
 | `src/terminals.ts` | Opening a terminal (here, on a pinned machine, or in a held session) with its launcher's command line; sizes, backlog then output per client, forget and reap; the layout's save |
 | `src/cards.ts` · `src/carddev.ts` | Running and resuming a card and its worktree verbs · a card's dev server |
@@ -237,6 +238,8 @@ in this folder.
 | `src/docs.ts` | The document list, reduced to the three decisions it makes |
 | `src/disk.ts` | Which disk a read goes to: `/api/…` for this node's roots, `/api/node/<id>/…` for a qualified one |
 | `src/preview.ts` | Where to send a browser for a dev server. Pure |
+| `src/browser.ts` | The browser's pages as main tells them (loading, back, a download), where a page went said to the server (`browser-report`), and a page let go of when its tab left the profile |
+| `src/overlays.ts` | Whether something of kururu's covers a browser tab — a drag, a menu, a sheet, anything topmost over it — so the page swaps for its still (`BrowserView.tsx`) |
 | `src/access.ts` | The token in the address, exchanged once for a cookie. Five lines |
 | `src/zoom.ts` | How big the reader's type is, per device |
 | `src/readerplace.ts` | Where you were in each document, per device: a block and how far into it, found again by heading when the file changed. Pure geometry, tested |
@@ -252,7 +255,7 @@ in this folder.
 for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` (the window-wide bottom bar, each information chip behind a switch in Settings → Bottom bar, and `WorkspaceToggle`) · `Usage.tsx` (the Claude and Codex allowances on that bar, and their bars on hover or tap) · `Load.tsx` (this Mac's load and free memory on that bar, in the slot queue's colours, and the queue on hover) · `BarChip.tsx` (a bar chip's hover-and-pin popover, which the allowances and the machines share) · `Machines.tsx` (the machines on that bar: a glyph in the worst load's colour, the connected count, each machine's rings, Shell and Specs in the popover) · `DrawerChips.tsx` ·
 `Status.tsx` (a dot, or the mascot) · `Icon.tsx` (a class name and an
 `aria-hidden` span) · `Dialog.tsx` (while one is up, no key reaches a pty) ·
-`Menu.tsx` (it and `Dialog.tsx` are drawn into `document.body`, so one opened in a pane is over everything; a row may open a list, one level deep, and the menu holds the keyboard while it is open) · `Reader.tsx` (**the thing kururu was built for**; one draggable tab per document) ·
+`Menu.tsx` (it and `Dialog.tsx` are drawn into `document.body`, so one opened in a pane is over everything; a row may open a list, one level deep, and the menu holds the keyboard while it is open) · `Reader.tsx` (**the thing kururu was built for**; one draggable tab per document) · `BrowserView.tsx` (a browser tab's chrome and the box its page is laid over; a placeholder off the Mac) ·
 `Board.tsx` (a workspace's cards; the robot hands one to an agent) ·
 `Search.tsx` (the search over every board and the conversations, and the deleted cards, in the profile board's sheet; a card hit is a door to the card) ·
 `ProfileBoard.tsx` (the profile's own cards, in a sheet over the window; its own and no other's) ·
@@ -280,6 +283,7 @@ open, and this is how loud the room is; dragged anywhere, ✕ or Esc to stop Kur
 | `tray.js` · `menu.js` | The frog in the menu bar and its clicks; the menu as data, with no Electron in it, so its sentences are tested |
 | `editmenu.js` | The right-click menu of a text field — Cut, Copy, Paste, spelling — as data; `main.js` pops it, the preload keeps it off terminals |
 | `talkkey.js` · `talkkey/talkkey.swift` | The talk key in every app: the native listen-only event tap, its router, and the floating pill's panel window |
+| `browser.js` · `browserrules.js` | kururu's browser: a `WebContentsView` per browser tab, pooled by tab id and moved between panes, in `persist:kururu-browser` with every guest handler and the block on kururu's own ports; the rules — which requests are kururu's, which schemes, a download's name, the user agent — as data, tested |
 | `notes.js` · `notelist.js` | Cards popped out as windows over every app: the panel windows and their verbs; their records off `desktop.json` and where a box goes on the screen, as data, tested |
 | `desktop.js` | `desktop.json`: where the server runs from, whether the hook is on, where the pill was left, which cards are note windows and where |
 | `connect.html` | The one page kururu draws itself — the address picker |

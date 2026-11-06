@@ -107,6 +107,24 @@ left in the Dock is how a force quit reached a coalition on 2026-10-10.
 
 Kept short on purpose; the detail is in git history.
 
+- **The browser, phase 0** (2026-11-06), in an isolated instance on :7817
+  from a scratch copy, the real Electron app driven invisibly (windows shown
+  inactive at opacity 0, every `WebContentsView` recorded): a static page, a
+  Vite app with HMR and example.com loaded in tabs; a tab moved between panes
+  and to another workspace as the same view, its load count and a typed
+  value unchanged; the + menu, the pane menu, Settings, the phone dialog,
+  the profiles menu, the profile's board and a drag each swapped the page
+  for its still, and the page came back when they closed, while the Needs
+  drawer docked beside it did not; ctrl+a in the page never reached it and
+  armed kururu's prefix (`?` then opened help); the page's fetches and
+  WebSocket to :7817, :7717, :7800, the checkout's vite and
+  `127.0.0.1.nip.io:7817` all refused, the same page in `defaultSession`
+  reaching every one; `file:` refused, a popup opened as a tab, mic,
+  location and notifications refused, a download saved and quarantined; a
+  window reload kept the pages; a cold start brought four tabs back by id
+  and loaded only the one shown. The focus hand-off itself could not be
+  measured in a window that cannot take focus.
+
 - **Quoting to Kuru** (2026-11-02), in an isolated instance on :7817 from a
   scratch copy, driven in the real Electron app with hidden windows and real
   mouse and key events: a selection in a reply of Kuru's, a kururu notice's

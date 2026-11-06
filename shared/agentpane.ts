@@ -42,7 +42,7 @@
  * Pure, on `layout.ts`'s terms: the server asks it, the test pins it, and a
  * client could draw the mark without asking anything new.
  */
-import { BOARD_TAB, activeAgent, panes, rects, showsDoc, type LayoutNode, type PaneState, type Rect } from "./layout";
+import { BOARD_TAB, activeAgent, isWebTab, panes, rects, showsDoc, type LayoutNode, type PaneState, type Rect } from "./layout";
 
 /** Where the agents kururu starts go: the bottom pane, the top pane, or beside the board as before. */
 export type AgentPlacement = "bottom" | "top" | "off";
@@ -72,9 +72,14 @@ export function onEdge(rect: Rect, side: "bottom" | "top"): boolean {
   return side === "bottom" ? rect.y > EPS && rect.y + rect.h > 1 - EPS : rect.y < EPS && rect.y + rect.h < 1 - EPS;
 }
 
-/** Whether a new tab may be put in front of what a pane is showing: never the board, never a document. */
+/**
+ * Whether a new tab may be put in front of what a pane is showing: never the
+ * board, never a document, never a page — a page in the browser is something
+ * being looked at beside the agents, the same as a document is.
+ */
 export function takesAgent(pane: PaneState): boolean {
-  return !showsDoc(pane) && activeAgent(pane) !== BOARD_TAB;
+  const showing = activeAgent(pane);
+  return !showsDoc(pane) && showing !== BOARD_TAB && !isWebTab(showing);
 }
 
 /** The agents' pane on that edge, by the rule above, or the word to make one. */

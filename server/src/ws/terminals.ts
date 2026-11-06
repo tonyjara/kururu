@@ -9,7 +9,7 @@
 import { randomUUID } from "node:crypto";
 import type { WebSocket } from "ws";
 import { launcherCommand, launcherFor } from "../../../shared/launchers";
-import { activeAgent, BOARD_TAB, findPane, isBoardTab, isDocTab, terminalsOf } from "../../../shared/layout";
+import { activeAgent, BOARD_TAB, findPane, isBoardTab, isDocTab, isWebTab, terminalsOf } from "../../../shared/layout";
 import { lazygitCommand, lazygitRun } from "../../../shared/lazygit";
 import type { ClientMessage } from "../../../shared/wire";
 import { type ClientState, host, launch, pushSnapshot, sendState, sleeper, snapshot, unread, workspaces } from "../context";
@@ -95,6 +95,11 @@ export function terminalVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage
       // mean — since the same one may be open in another pane.
       else if (isDocTab(agentId)) {
         if (focused && !msg.agentId) workspaces.closeDoc(focused.id, focused.activeIdx);
+      } else if (isWebTab(agentId)) {
+        // A page is a view of the window's: closing its tab ends no process
+        // here, and the window that holds the page lets it go when the tab
+        // leaves its layout. The pane goes with its last tab, `reapTab`'s rule.
+        workspaces.reapTab(agentId);
       } else if (agentId) {
         // Closing a pane's last terminal closes the pane (`reapTab`), the same as
         // when its pty ends; the last pane of a workspace stays, empty.
@@ -143,7 +148,7 @@ export function terminalVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage
       return true;
 
     case "rename-tab":
-      if (!isBoardTab(msg.agentId)) host.rename(msg.agentId, msg.name);
+      if (!isBoardTab(msg.agentId) && !isWebTab(msg.agentId)) host.rename(msg.agentId, msg.name);
       return true;
 
     case "input":

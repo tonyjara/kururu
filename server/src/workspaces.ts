@@ -35,7 +35,13 @@ import { isStoreKey, mintProfileKey, mintWorkspaceKey, type Actor } from "../../
 import {
   activeTerminal,
   addTab,
+  addWebTab,
   BOARD_TAB,
+  isWebTab,
+  mintWebTab,
+  setWebTab,
+  webTabOf,
+  type WebTabState,
   closePane,
   isBoardTab,
   isDocTab,
@@ -767,11 +773,13 @@ export class Workspaces {
         layout: moveTabTo(w.layout, agentId, toPaneId, index),
       }));
     } else {
-      // It was somewhere else in this profile; take it out of there first.
+      // It was somewhere else in this profile; take it out of there first —
+      // a page with its address, read before it goes.
+      const page = this.webPage(agentId);
       this.removeTab(agentId);
       this.mutateWorkspace(workspace.id, (w) => ({
         ...w,
-        layout: addTab(w.layout, toPaneId, agentId),
+        layout: addTab(w.layout, toPaneId, agentId, undefined, page),
       }));
       if (index !== undefined) {
         const pane = findPane(this.activeWorkspace.layout, toPaneId);
@@ -821,10 +829,11 @@ export class Workspaces {
 
     if (!source) {
       // From another workspace: it has to be in this tree before it can be split out.
+      const page = this.webPage(agentId);
       this.removeTab(agentId);
       this.mutateWorkspace(workspace.id, (w) => ({
         ...w,
-        layout: addTab(w.layout, paneId, agentId),
+        layout: addTab(w.layout, paneId, agentId, undefined, page),
       }));
     }
     this.mutateWorkspace(this.activeWorkspace.id, (w) => ({
@@ -845,13 +854,81 @@ export class Workspaces {
     if (!target || paneWithAgent(target.layout, agentId)) return;
     const source = this.activeWorkspace;
     const from = paneWithAgent(source.layout, agentId);
+    // A browser tab goes with its address; the page itself is the window's
+    // and is only moved there, never reloaded.
+    const page = this.webPage(agentId);
 
     this.removeTab(agentId);
     this.mutate(profile.id, workspaceId, (w) => ({
       ...w,
-      layout: addTab(w.layout, w.focusedPaneId, agentId),
+      layout: addTab(w.layout, w.focusedPaneId, agentId, undefined, page),
     }));
     if (from) this.pruneEmptied(from.id, undefined);
+  }
+
+  // -------------------------------------------------------------------------
+  // The browser
+  // -------------------------------------------------------------------------
+
+  /** A browser tab's page, in whichever workspace of whichever profile holds it. */
+  webPage(tabId: string): WebTabState | null {
+    if (!isWebTab(tabId)) return null;
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) {
+        const page = webTabOf(workspace.layout, tabId);
+        if (page) return page;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * A new browser tab at `url`, in the active workspace: `paneId` when it is
+   * one of its panes, the agents' pane for `agents`, else the focused pane.
+   * Shown, and the focus goes to it, as an opened document's does. The id is
+   * minted here and random (`mintWebTab`), and never reused. `url` is already
+   * `browserUrl`'s answer; this does not check it again.
+   */
+  openBrowser(url: string, paneId?: string, place?: "agents"): string | null {
+    const workspace = this.activeWorkspace;
+    const into =
+      paneId && findPane(workspace.layout, paneId)
+        ? paneId
+        : place === "agents"
+          ? this.agentPaneIn(this.activeId, workspace.id) ?? this.focusedPaneId
+          : this.focusedPaneId;
+    let tabId = mintWebTab();
+    while (this.webPage(tabId)) tabId = mintWebTab();
+    const opened = tabId;
+    this.mutateWorkspace(this.activeWorkspace.id, (w) => ({
+      ...w,
+      layout: addWebTab(w.layout, into, opened, { url, title: "", nav: 0 }),
+    }));
+    if (!findPane(this.activeWorkspace.layout, into)?.agentIds.includes(opened)) return null;
+    this.focusPane(into);
+    return opened;
+  }
+
+  /** Change a browser tab's page wherever it is. False when there is no such tab. */
+  private editWeb(tabId: string, fn: (page: WebTabState) => WebTabState): boolean {
+    for (const profile of this.profiles) {
+      for (const workspace of profile.workspaces) {
+        if (!webTabOf(workspace.layout, tabId)) continue;
+        this.mutate(profile.id, workspace.id, (w) => ({ ...w, layout: setWebTab(w.layout, tabId, fn) }));
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** The address field's Enter: go to `url`, bumping `nav` so the window loads it. */
+  navigateBrowser(tabId: string, url: string): boolean {
+    return this.editWeb(tabId, (page) => ({ url, title: page.url === url ? page.title : "", nav: page.nav + 1 }));
+  }
+
+  /** The window saying where a page went on its own: the address and title move, `nav` does not. */
+  reportBrowser(tabId: string, url: string, title: string): boolean {
+    return this.editWeb(tabId, (page) => ({ ...page, url, title }));
   }
 
   /**

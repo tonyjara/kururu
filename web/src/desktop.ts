@@ -71,6 +71,82 @@ export interface DesktopBridge {
    * is what a browser and the phone do anyway.
    */
   notes?: DesktopNotes;
+  /**
+   * kururu's browser: the pages of browser tabs, held by the main process
+   * and drawn over each tab's box (`desktop/browser.js`). Optional — a window
+   * from before it, a browser and the phone draw a browser tab as its title
+   * and address and "Open on the Mac", which is all `BrowserView` asks of
+   * them.
+   */
+  browser?: DesktopBrowser;
+}
+
+/** A box of the window's page, in CSS pixels. */
+export interface BrowserBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** A download a page started, as its tab's line draws it. */
+export interface BrowserDownload {
+  id: number;
+  name: string;
+  received: number;
+  total: number;
+  state: "progressing" | "completed" | "cancelled" | "interrupted";
+}
+
+/** A page as the main process sees it, for its tab's chrome. */
+export interface BrowserPageState {
+  tabId: string;
+  gone?: true;
+  url?: string;
+  title?: string;
+  loading?: boolean;
+  canBack?: boolean;
+  canForward?: boolean;
+  zoom?: number;
+  error?: string | null;
+  downloads?: BrowserDownload[];
+}
+
+export type BrowserButton =
+  | "back"
+  | "forward"
+  | "reload"
+  | "stop"
+  | "zoom-in"
+  | "zoom-out"
+  | "zoom-reset"
+  | "devtools"
+  | "external"
+  | "focus"
+  | "reveal"
+  | "dismiss";
+
+export interface DesktopBrowser {
+  /** Show a tab's page at a box; made and loaded the first time. `nav` is the tab's, and a higher one loads `url`. */
+  show(tabId: string, url: string, nav: number, box: BrowserBox): Promise<BrowserPageState | null>;
+  place(tabId: string, box: BrowserBox): void;
+  hide(tabId: string): void;
+  /** The page ended: only for a tab that has left the layout. */
+  close(tabId: string): void;
+  go(tabId: string, what: BrowserButton, arg?: number): void;
+  /** A JPEG of the page as it is, as a data URL, or null. */
+  still(tabId: string): Promise<string | null>;
+  /** The tabs whose pages are up. */
+  ids(): Promise<string[]>;
+  onState(listener: (state: BrowserPageState) => void): () => void;
+  /** The prefix, pressed in a page: the keyboard is the window's again and the prefix is to be armed. */
+  onPrefix(listener: (tabId: string) => void): () => void;
+  /** ⌘L in a page: the tab's address field wants the keyboard. */
+  onAddress(listener: (tabId: string) => void): () => void;
+  /** A popup, or "Open Link in New Tab": a new tab beside the one that asked. */
+  onOpen(listener: (tabId: string, url: string) => void): () => void;
+  /** A page took the keyboard: its pane is the focused one now. */
+  onFocused(listener: (tabId: string) => void): () => void;
 }
 
 /** What the window asks for when it pops a card out as a window. */

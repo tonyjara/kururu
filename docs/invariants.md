@@ -393,6 +393,26 @@ Space, loading `/?note=` — `NotePage.tsx`, which draws the same
 only a note's own page may move, fold or close it. A browser and the
 phone keep the in-page note. → [layout](layout.md#notes)
 
+## The browser
+
+**A browser tab's page is the Mac window's, and the tab is the layout's.**
+A `web:<random>` id in `agentIds` beside the terminals, with its address on
+the pane (`PaneState.web`), carried by every operation that moves a tab and
+dropped by every one that takes one out; `terminalsOf` and `activeTerminal`
+skip it, so nothing kills, watches or types into a page. The page is a
+`WebContentsView` in `desktop/browser.js`, made when its tab is first shown,
+moved — never rebuilt — between panes and workspaces, and ended only when
+its tab closes or the window goes; `persist.ts` keeps the id, address, title
+and `nav`, and loads nothing. **Its session, `persist:kururu-browser`, cannot
+reach kururu**: every request to the server's port, 7717, the preview
+proxies' 7800–7999 or the checkout's vite while it serves is cancelled when
+its host is this Mac by name, by address or by what the name resolves to.
+`originOk` is left as it is, by the user's decision (2026-11-06). No
+preload in a page, `http:`/`https:`/`about:blank` at the top, permissions
+refused, downloads to `~/Downloads` quarantined and never opened. A phone or
+another node's window draws the tab as a placeholder. → [the
+plan](plans/browser-annotate.md)
+
 ## What an agent made
 
 **A link to what an agent made is read off its last reply, never off

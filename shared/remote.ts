@@ -149,6 +149,12 @@ export function qualifyLayout(node: string, layout: LayoutNode): LayoutNode {
         id: qualify(node, pane.id),
         agentIds: pane.agentIds.map((tab) => qualifyTab(node, tab)),
         ...(pane.reader ? { reader: qualifyReader(node, pane.reader) } : {}),
+        // A browser tab is qualified as a terminal is, since its page is that
+        // node's window's and not this one's: the Mac draws it as a
+        // placeholder ("on omarchy"), and its address keyed the same way.
+        ...(pane.web
+          ? { web: Object.fromEntries(Object.entries(pane.web).map(([tab, page]) => [qualify(node, tab), page])) }
+          : {}),
       },
     };
   }

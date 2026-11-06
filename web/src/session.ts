@@ -1957,3 +1957,28 @@ export function useProjectRoots(): string[] {
 export function useKururu(): KururuState {
   return useSyncExternalStore(subscribe, () => state);
 }
+
+// ---------------------------------------------------------------------------
+// The browser
+// ---------------------------------------------------------------------------
+
+/**
+ * A page in kururu's browser, as a new tab — see `open-browser` for where it
+ * lands. Resolves to the tab's id, or rejects with the sentence for an
+ * address the browser does not go to.
+ */
+export async function openBrowser(url: string, where: { paneId?: string; place?: "agents" } = {}): Promise<string> {
+  const result = (await request((id) => ({ type: "open-browser", id, url, ...where }))) as { tabId?: unknown } | null;
+  if (!result || typeof result.tabId !== "string") throw new Error("The page did not open.");
+  return result.tabId;
+}
+
+/** The address field's Enter. */
+export function navigateBrowser(tabId: string, url: string): void {
+  send({ type: "browser-navigate", tabId, url });
+}
+
+/** Where a page went on its own, from the window that shows it. */
+export function reportBrowser(tabId: string, url: string, title: string): void {
+  send({ type: "browser-report", tabId, url, title });
+}

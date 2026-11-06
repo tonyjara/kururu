@@ -41,6 +41,7 @@ const { Runner, hostSocket } = require("./runner");
 const { candidates, forget, normalize, remember } = require("./servers");
 const { boxOnScreen } = require("./notelist");
 const { NoteWindows } = require("./notes");
+const { BrowserPool } = require("./browser");
 const { fetchNodes, nodeChoices, whyNot } = require("./nodes");
 const { TalkKey } = require("./talkkey");
 const { createTray } = require("./tray");
@@ -180,6 +181,29 @@ const notes = new NoteWindows({
   debug: !PACKAGED,
   saved: readDesktop().notes,
   save: (list) => writeDesktop({ notes: list }),
+});
+
+/**
+ * kururu's browser: a page per browser tab, in the main window, pooled by tab
+ * id (`browser.js`). Its session is cut off from kururu's own ports, and these
+ * are the ports: the local server's, the one the window is showing when that
+ * is on this Mac, and vite's while a checkout's vite is up — it serves
+ * kururu's whole UI, and a page that loaded it would be a second window onto
+ * the agents with nobody's say. `KURURU_DOWNLOADS` points an isolated
+ * instance's downloads somewhere that is not the user's folder.
+ */
+const browser = new BrowserPool({
+  window: () => (win && !win.isDestroyed() ? win : null),
+  kururuPorts: () => {
+    // 7717 always, beside the port this app is on: an isolated instance's
+    // browser must not reach the user's own kururu either.
+    const ports = [PORT, 7717];
+    const shown = connected ? Number(new URL(connected).port || 80) : null;
+    if (shown) ports.push(shown);
+    if (DEV || runner.vite.running()) ports.push(runner.vite.port ?? VITE_PORT);
+    return ports;
+  },
+  downloads: process.env.KURURU_DOWNLOADS || undefined,
 });
 
 /**
@@ -756,7 +780,20 @@ function createWindow() {
    * `window-all-closed` cannot be relied on to say: a note or the pill is a
    * window too, and while one is up that event never comes.
    */
+  /**
+   * The window's page going away — ⌘R, a move onto vite, a renderer
+   * brought back — hides every page, since nothing is left to say where
+   * their tabs are; the new page shows them again as it draws them. The
+   * pages themselves are kept: reloading kururu reloads none of them.
+   */
+  win.webContents.on("did-start-navigation", (event) => {
+    if (event.isMainFrame && !event.isSameDocument) browser.hideAll();
+  });
+
   win.on("closed", () => {
+    // The pages were the window's; a window made again starts them afresh
+    // when their tabs are shown.
+    browser.closeAll();
     win = null;
     stopSweeping();
     stopWatchingServer();
@@ -997,6 +1034,52 @@ notes.on("change", (list) => {
 });
 
 /**
+ * The browser, across the bridge. Only the main window's page drives it —
+ * a note, the pill or a page in a tab has no say — and every id and box is
+ * checked again in `browser.js`. What comes back is the page's state for the
+ * tab's chrome, the prefix and ⌘L handed back from a page that had the keys,
+ * and a popup to be opened as a tab beside the one that asked.
+ */
+function fromMain(event) {
+  return Boolean(win && !win.isDestroyed() && event.sender.id === win.webContents.id);
+}
+const tabIdOf = (value) => (typeof value === "string" && /^web:[a-z0-9]{8,32}$/.test(value) ? value : null);
+ipcMain.handle("kururu:browser-show", (event, tabId, url, nav, rect) => {
+  const id = tabIdOf(tabId);
+  if (!fromMain(event) || !id) return null;
+  return browser.show(id, typeof url === "string" ? url : "about:blank", Number(nav), rect);
+});
+ipcMain.on("kururu:browser-place", (event, tabId, rect) => {
+  const id = tabIdOf(tabId);
+  if (fromMain(event) && id) browser.place(id, rect);
+});
+ipcMain.on("kururu:browser-hide", (event, tabId) => {
+  const id = tabIdOf(tabId);
+  if (fromMain(event) && id) browser.hide(id);
+});
+ipcMain.on("kururu:browser-close", (event, tabId) => {
+  const id = tabIdOf(tabId);
+  if (fromMain(event) && id) browser.close(id);
+});
+ipcMain.on("kururu:browser-go", (event, tabId, what, arg) => {
+  const id = tabIdOf(tabId);
+  if (fromMain(event) && id && typeof what === "string") browser.go(id, what, Number(arg));
+});
+ipcMain.handle("kururu:browser-still", (event, tabId) => {
+  const id = tabIdOf(tabId);
+  return fromMain(event) && id ? browser.still(id) : null;
+});
+ipcMain.handle("kururu:browser-ids", (event) => (fromMain(event) ? browser.ids() : []));
+const tellMain = (channel, ...args) => {
+  if (win && !win.isDestroyed()) win.webContents.send(channel, ...args);
+};
+browser.on("state", (state) => tellMain("kururu:browser-state", state));
+browser.on("prefix", (tabId) => tellMain("kururu:browser-prefix", tabId));
+browser.on("address", (tabId) => tellMain("kururu:browser-address", tabId));
+browser.on("open", (tabId, url) => tellMain("kururu:browser-open", tabId, url));
+browser.on("focused", (tabId) => tellMain("kururu:browser-focused", tabId));
+
+/**
  * Whether this launch should open a window at all.
  *
  * Opened at login, the app is the tray and nothing else: the Mac just came
@@ -1018,6 +1101,8 @@ let tray = null;
 
 app.whenReady().then(async () => {
   stopOnSignals();
+  // The browser's session and its refusals, before any window can make a page.
+  browser.init();
 
   /**
    * A dev server that sends X-Frame-Options would otherwise refuse to render in
