@@ -33,6 +33,7 @@ import { measureMemory } from "./memory";
 import { openRouterSnapshot, pollOpenRouter } from "./openrouter";
 import { PORT, WEB_SOURCE } from "./preamble";
 import { type ProcRows, readProcRows } from "./proctable";
+import { programs, programsUnder } from "./programs";
 import { closePreview, openPreview, openPreviews } from "./proxy";
 import { pollBranches } from "./repostatus";
 import { dueForReading, readSpecs, specsSnapshot } from "./specs";
@@ -191,6 +192,20 @@ async function pollMemory(procs: ProcRows): Promise<void> {
     changed = true;
   }
   if (changed) pushSnapshot();
+}
+
+/**
+ * The agent programs the pty host cannot name, read off the same table — see
+ * `programs.ts`. Synchronous, so nothing can replace `host.agents` between the
+ * read and the write back.
+ */
+function pollPrograms(procs: ProcRows): void {
+  // Adopts a list the host has pushed (or `create` appended to) since the last
+  // fill, so the blanks read are the host's current ones.
+  host.agents = programs.apply(host.agents);
+  if (!programs.update(programsUnder(programs.hostList(), procs))) return;
+  host.agents = programs.apply(host.agents);
+  pushSnapshot();
 }
 
 /**
@@ -382,7 +397,11 @@ const PROC_IDLE_MS = 30_000;
 const sweepProcesses = sweep("processes", async () => {
   const procs = await readProcRows();
   // Separately caught, so that one failing does not cost the other its turn.
-  await Promise.all([sweep("dev servers", () => pollDevServers(procs))(), sweep("memory", () => pollMemory(procs))()]);
+  await Promise.all([
+    sweep("dev servers", () => pollDevServers(procs))(),
+    sweep("memory", () => pollMemory(procs))(),
+    sweep("programs", () => pollPrograms(procs))(),
+  ]);
 });
 let procTimer: ReturnType<typeof setTimeout> | null = null;
 let procRunning = false;

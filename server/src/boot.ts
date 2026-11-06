@@ -137,6 +137,7 @@ import { usageSnapshot } from "./usage";
 import { Launches } from "./usage/attribute";
 import { exportUsage, NodeUsage } from "./usage/remote";
 import { openUsageReader } from "./usage/sweep";
+import { programs } from "./programs";
 import { VERSION } from "./version";
 import { Voice } from "./voice";
 import { Workspaces } from "./workspaces";
@@ -397,6 +398,9 @@ function slotWhoOf(agentId: string): string | null {
 export async function attach(port: Port): Promise<void> {
   provide("host", new HostLink(port));
   host.onAgents = () => {
+    // Before anybody reads it: the programs an older host cannot name, filled
+    // in from this server's own reading of the process table (`programs.ts`).
+    host.agents = programs.apply(host.agents);
     // One event, three readers. Notifications want the *transition* and the
     // snapshot carries the state, so this has to run wherever the state is
     // learnt — a second subscription would be a second thing to keep in step
