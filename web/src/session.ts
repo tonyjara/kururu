@@ -871,6 +871,14 @@ export function lastWorkspace(): void {
   send({ type: "last-workspace" });
 }
 
+/**
+ * The profile's Dashboard on screen, with one of its fixed tabs in front
+ * (`shared/dashboard.ts`). Leaving it is any workspace switch.
+ */
+export function openDashboard(tab?: string): void {
+  send({ type: "open-dashboard", ...(tab ? { tab } : {}) });
+}
+
 export function renameWorkspace(workspaceId: string, name: string): void {
   send({ type: "rename-workspace", workspaceId, name });
 }

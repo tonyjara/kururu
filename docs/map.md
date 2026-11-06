@@ -12,6 +12,7 @@ in this folder.
 | `snapdelta.ts` | The snapshot as what changed: the server's frames of what each client was last sent and their diff, the client's `applyDelta`. Boards travel by key, agents and cards as keyed patches. Pure, tested. See [architecture](architecture.md#restarting) |
 | `layout.ts` | The split tree and every pure operation on it. Both halves use it |
 | `browser.ts` | What kururu's browser goes to (`http:`, `https:`, `about:blank`), read the way an address bar reads typing; a page's title and label. Pure, tested. See [the plan](plans/browser-annotate.md) |
+| `dashboard.ts` | The profile's Dashboard: its fixed tabs, the rule that it holds them and nothing else, and its layout made to fit. Pure, tested. See [layout](layout.md#the-dashboard) |
 | `agentpane.ts` | Where the agents kururu starts go: the bottom (or top) pane by geometry, the mark that keeps them in one, the word to split when there is none. Pure, tested. See [layout](layout.md#the-agents-pane) |
 | `harness.ts` | The harness's vocabulary: the MCP tool catalogue, the role prompt, key and paste grammar, when a waiting message may be typed, the frames of a notice, transcript turns, its model, effort and compaction point, its folder's two files. Pure, tested |
 | `agy.ts` | Antigravity's `agy`, the pure half: the title payload read as reports, the transcript's last reply, the quota as the bar's limits, the session settings, Kuru's line, MCP config, hooks and role. See [antigravity](antigravity.md) |
@@ -258,7 +259,7 @@ for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` (the windo
 `Menu.tsx` (it and `Dialog.tsx` are drawn into `document.body`, so one opened in a pane is over everything; a row may open a list, one level deep, and the menu holds the keyboard while it is open) · `Reader.tsx` (**the thing kururu was built for**; one draggable tab per document) · `BrowserView.tsx` (a browser tab's chrome and the box its page is laid over; a placeholder off the Mac) ·
 `Board.tsx` (a workspace's cards; the robot hands one to an agent) ·
 `Search.tsx` (the search over every board and the conversations, and the deleted cards, in the profile board's sheet; a card hit is a door to the card) ·
-`ProfileBoard.tsx` (the profile's own cards, in a sheet over the window; its own and no other's) ·
+`ProfileBoard.tsx` (the profile's own cards, the Dashboard's first fixed tab; its own and no other's) · `Dashboard.tsx` (what each of the Dashboard's fixed tabs draws, one entry per tab) ·
 `ColorPicker.tsx` (a column's colour, from the profile board) ·
 `Notes.tsx` (cards popped out as notes over the window, dragged, resized, folded, edited in place; the card is the snapshot's; `NoteInside` is a note's inside, also a note window's) ·
 `NotePage.tsx` (`/?note=`: a card popped out as a desktop window of its own, over every app) ·

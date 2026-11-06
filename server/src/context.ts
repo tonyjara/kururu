@@ -602,7 +602,7 @@ export function snapshot(): SessionSnapshot {
   rememberAgents();
   const profile = workspaces.active;
   // A local switch, by whatever road, puts the local workspace back on screen.
-  watches?.noteLocal(`${profile.id}/${profile.activeWorkspaceId}`);
+  watches?.noteLocal(`${profile.id}/${profile.onDashboard ? profile.dashboard.id : profile.activeWorkspaceId}`);
   const mine = new Set(workspaces.agentsIn(profile.id));
   // The host holds its terminals in spawn order, which is the default and is
   // only the default: the sidebar's list can be dragged into an order of its

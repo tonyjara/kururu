@@ -159,7 +159,7 @@ interface Props {
   onSettings: () => void;
   /** Opens the phone dialog — the addresses this server answers at, as QR codes. */
   onReach: () => void;
-  /** Opens the profile's own board — see `ProfileBoard`. */
+  /** Opens the profile's Dashboard on its board — see `shared/dashboard.ts`. */
   onBoard: () => void;
   /**
    * The workspaces something is waiting in, by id — `shared/needs.ts`'s
@@ -616,9 +616,9 @@ export function Sidebar({
   const show = (agentId: string) => {
     const at = where.get(agentId);
     if (!at) return;
-    // With another node's workspace on screen, the active local one is not
-    // showing either, and the switch is what puts it back.
-    if (at.workspaceId !== profile.activeWorkspaceId || remoteOn) api.switchWorkspace(at.workspaceId);
+    // With another node's workspace on screen, or the Dashboard, the active
+    // local one is not showing either, and the switch is what puts it back.
+    if (at.workspaceId !== profile.activeWorkspaceId || remoteOn || profile.onDashboard) api.switchWorkspace(at.workspaceId);
     api.focusPane(at.paneId);
     api.selectTab(at.paneId, at.index);
     navigated();
@@ -994,14 +994,18 @@ export function Sidebar({
           <span className="profile-name">{profile.name}</span>
           <Icon name="caret" className="profile-caret" />
         </button>
-        {/* The profile's board, beside the name because it is the profile's and
-            no workspace's. The count is what is not done yet: the number worth
-            glancing at is the pile still waiting to be sent somewhere. */}
+        {/* The profile's Dashboard, on its board — beside the name because it
+            is the profile's and no workspace's, and where the board's sheet was
+            opened before the board became the Dashboard's tab. Lit while the
+            Dashboard is on screen, as a workspace's row is while it is. The
+            count is what is not done yet: the number worth glancing at is the
+            pile still waiting to be sent somewhere. */}
         <button
-          className="profile-board-btn"
+          className={`profile-board-btn ${profile.onDashboard && !remoteOn ? "profile-board-btn-on" : ""}`}
           onClick={onBoard}
-          title="This profile's board"
-          aria-label={`${profile.name}'s board`}
+          title="Dashboard: this profile's board"
+          aria-label={`${profile.name}'s Dashboard`}
+          aria-pressed={profile.onDashboard && !remoteOn}
         >
           <Icon name="board" />
           {openCards > 0 && <span className="profile-board-count">{openCards}</span>}
@@ -1054,7 +1058,7 @@ export function Sidebar({
             {opens && groupHead(group)}
             {!tucked && (
             <li
-              className={`ws-item ${workspace.id === profile.activeWorkspaceId && !remoteOn ? "ws-item-on" : ""} ${
+              className={`ws-item ${workspace.id === profile.activeWorkspaceId && !remoteOn && !profile.onDashboard ? "ws-item-on" : ""} ${
                 overWorkspace === workspace.id ? "ws-over" : ""
               } ${group !== null ? "ws-item-grouped" : ""}`}
               /* The whole row, both lines of it, and not the name's button.
@@ -1136,7 +1140,7 @@ export function Sidebar({
               ) : (
                 <>
                   <button
-                    className={`ws-row ${workspace.id === profile.activeWorkspaceId && !remoteOn ? "ws-row-on" : ""}`}
+                    className={`ws-row ${workspace.id === profile.activeWorkspaceId && !remoteOn && !profile.onDashboard ? "ws-row-on" : ""}`}
                     onDoubleClick={() => setRenaming(workspace.id)}
                     title={index < 9 ? `C-a ${index + 1} \u00b7 double-click to rename` : "Double-click to rename"}
                     draggable

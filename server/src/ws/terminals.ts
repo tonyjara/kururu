@@ -38,6 +38,9 @@ export function terminalVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage
       // there first, as `open-board` goes, so the tab opens where you can see it.
       const fromRow = typeof msg.workspaceId === "string";
       if (typeof msg.workspaceId === "string") workspaces.switchWorkspace(msg.workspaceId);
+      // Nor from the Dashboard, which holds no terminals: the workspace it was
+      // opened over, before the pin below is read off what is on screen.
+      else if (workspaces.onDashboard) workspaces.switchWorkspace(workspaces.active.activeWorkspaceId);
       const paneId = msg.paneId ?? workspaces.focusedPaneId;
       void replyAsync(ws, msg.id, async () => {
         /*
@@ -148,7 +151,7 @@ export function terminalVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage
       return true;
 
     case "rename-tab":
-      if (!isBoardTab(msg.agentId) && !isWebTab(msg.agentId)) host.rename(msg.agentId, msg.name);
+      if (terminalsOf([msg.agentId]).length > 0) host.rename(msg.agentId, msg.name);
       return true;
 
     case "input":

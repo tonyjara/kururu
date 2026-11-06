@@ -819,6 +819,13 @@ kbd {
   color: var(--text);
   background: var(--chrome-high);
 }
+/* On the Dashboard: the button is its row in the sidebar, lit as a
+   workspace's row is while you are in it. */
+.profile-board-btn-on,
+.profile-board-btn-on:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
 .profile-board-count {
   font-variant-numeric: tabular-nums;
 }
@@ -10334,24 +10341,18 @@ a.st-btn {
   image-rendering: auto;
 }
 
-/* The profile's board: a board's columns in a sheet over the window, since it
-   belongs to no workspace's layout — see `ProfileBoard.tsx`. Centred, and the
-   whole screen on a phone, where the columns snap one to a screen as a pane's
-   board does. */
-.profile-board-scrim {
-  align-items: center;
-  padding: 16px;
-}
+/* The profile's board: the Dashboard's fixed tab, filling its pane as a
+   workspace's board does — see `ProfileBoard.tsx`. On a phone the columns
+   snap one to a screen, as a pane's board's do. */
 .profile-board {
-  width: min(1100px, 100%);
-  height: min(760px, 100%);
+  flex: 1;
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
-  background: var(--chrome);
-  border: var(--border) var(--border-style) var(--line);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--elev-dialog);
+  background: var(--bg);
   overflow: hidden;
 }
 .profile-board-head {
@@ -10539,15 +10540,6 @@ a.st-btn {
 .board-col-add:hover {
   color: var(--text);
   border-color: var(--line-high);
-}
-:root[data-narrow] .profile-board-scrim {
-  padding: 0;
-}
-:root[data-narrow] .profile-board {
-  width: 100%;
-  height: 100%;
-  border-radius: 0;
-  border: none;
 }
 
 /* --------------------------------------------------------------------------

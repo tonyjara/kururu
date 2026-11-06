@@ -199,6 +199,11 @@ export async function openTerminal(
   paneId: string,
   options: { cwd?: string; command?: string; kind?: PtyKind; from?: string; local?: boolean } = {},
 ): Promise<AgentSnapshot> {
+  // The Dashboard holds no terminals (`shared/dashboard.ts`). One asked for
+  // there — a key, Settings starting a sign-in — opens in the workspace the
+  // Dashboard was opened over, which comes back on screen to show it; its
+  // focused pane is the one `hasPane` below falls back to.
+  if (workspaces.onDashboard) workspaces.switchWorkspace(workspaces.active.activeWorkspaceId);
   const command = options.command ?? pinnedShell(workspaces.active.id, workspaces.activeWorkspace.id, options);
   const remote = remoteShellOf(command) !== null;
   // A shell on a machine starts where its folder is, over there; here, ssh

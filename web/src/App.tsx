@@ -29,6 +29,7 @@ import {
   paneWithAgent,
   terminalsOf,
   isBoardTab,
+  isDashTab,
   paneInDirection,
   panes,
   parseDocTab,
@@ -46,7 +47,8 @@ import { kuruRunningOn } from "../../shared/harness";
 import { adoptQuote, type CardQuote } from "../../shared/kuru";
 import { Dialog, type DialogState } from "./components/Dialog";
 import { FileTree, MARKDOWN } from "./components/FileTree";
-import { ProfileBoard } from "./components/ProfileBoard";
+import { showProfileCardNext } from "./components/ProfileBoard";
+import { dashboardTabLabel, PROFILE_BOARD_TAB } from "../../shared/dashboard";
 import { Databases } from "./components/Databases";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Keybar } from "./components/Keybar";
@@ -301,11 +303,17 @@ export function App() {
   /** The drawer of things that need you — `needs.ts`, module state for `kuru.ts`'s reason. */
   const needsOpen = useNeedsDrawer();
   /**
-   * A card of the profile's own board, clicked by name — in a reply of
-   * Kuru's — for the sheet to show, lit. A workspace's card goes to its board
-   * in its pane instead (`showCardNext`), and never through here.
+   * The profile's board: its Dashboard on screen with the board's tab in
+   * front, and with a card — one a reply of Kuru's named, a note's, a row in
+   * the Needs drawer — scrolled to and lit there (`showProfileCardNext`). A
+   * workspace's card goes to its board in its pane instead (`showCardNext`),
+   * and never through here. Every door that opened the board's sheet opens
+   * this.
    */
-  const [boardShow, setBoardShow] = useState<string | null>(null);
+  const openProfileBoard = useCallback((cardId: string | null = null) => {
+    if (cardId) showProfileCardNext(cardId);
+    api.openDashboard(PROFILE_BOARD_TAB);
+  }, []);
 
   /**
    * Whether the window is narrow enough that the sidebar stops being a column
@@ -361,8 +369,6 @@ export function App() {
   const [resizeMode, setResizeMode] = useState(false);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [help, setHelp] = useState(false);
-  /** The profile's board, over the window — view state, like the help overlay. */
-  const [profileBoard, setProfileBoard] = useState(false);
   /** The database sheet, over the window, and whose workspace it is showing. Null is closed. */
   const [databasesFor, setDatabasesFor] = useState<string | null>(null);
   /**
@@ -433,7 +439,7 @@ export function App() {
    * exactly where it is and the terminal needs no second handover when hjkl
    * stops moving a divider.
    */
-  const paneKeyboard = !(dialog || editing || settings || help || reach || profileMenu || profileBoard);
+  const paneKeyboard = !(dialog || editing || settings || help || reach || profileMenu);
 
   const profile = snapshot?.profile ?? null;
   const workspace = useMemo(
@@ -448,8 +454,14 @@ export function App() {
    * sidebar, the drawers and the bar stay this node's, since they are.
    */
   const remote = snapshot?.remote ?? null;
-  /** The workspace the panes draw: the remote one while it is on screen — null while its watch has not said what it is — else the local one. */
-  const onScreen = remote ? remote.workspace : workspace;
+  /**
+   * The profile's Dashboard while it is on screen (`shared/dashboard.ts`).
+   * `workspace` stays the one it was opened over, which is what the sidebar,
+   * the mascot and everything about a workspace go on meaning.
+   */
+  const dashboard = profile?.onDashboard ? profile.dashboard : null;
+  /** The workspace the panes draw: the remote one while it is on screen — null while its watch has not said what it is — else the Dashboard while it is up, else the local one. */
+  const onScreen = remote ? remote.workspace : (dashboard ?? workspace);
   /** The agents a pane looks its tabs up in: this node's, and the remote workspace's beside them under their qualified ids. */
   const paneAgents = useMemo(() => (remote ? [...agents, ...remote.agents] : agents), [agents, remote]);
   /** What the server last said it could not send there, while it is fresh enough to show. */
@@ -460,7 +472,8 @@ export function App() {
    * or shut under its qualified id like a local one under its own.
    */
   const treeId = onScreen?.id ?? null;
-  const filesOpen = narrow ? filesSheet : !!treeId && filesOpenIn.has(treeId);
+  // The Dashboard has no folder, so no tree to show.
+  const filesOpen = !remote && dashboard ? false : narrow ? filesSheet : !!treeId && filesOpenIn.has(treeId);
   /** Opens or shuts the tree for the workspace in front of you, and only it. */
   const setFilesOpen = useCallback(
     (next: boolean | ((open: boolean) => boolean)) => {
@@ -626,38 +639,28 @@ export function App() {
     if (where.workspace) {
       showCardNext(where.workspace.id, cardAsked.cardId);
       api.openBoard(undefined, false, where.workspace.id);
-    } else {
-      setBoardShow(cardAsked.cardId);
-      setProfileBoard(true);
-    }
-  }, [cardAsked, profile]);
+    } else openProfileBoard(cardAsked.cardId);
+  }, [cardAsked, profile, openProfileBoard]);
 
   /**
    * A note pointing Kuru at its card — its own button over this page, or a
    * note window's across the bridge — written into the drawer's box by the
-   * card's menu's own words (`referCardIn`). The profile's board is a scrim
-   * over that box, so it goes, as the board's own row puts it away. The
-   * bridge's ask is held for a profile, as `cardAsked` is.
+   * card's menu's own words (`referCardIn`). The bridge's ask is held for a
+   * profile, as `cardAsked` is.
    */
   const referNote = (cardId: string, quote: CardQuote | null = null) => {
-    if (!profile || !referCardIn(profile, cardId, api.nodeNameOf, quote)) return;
-    setProfileBoard(false);
-    setBoardShow(null);
+    if (profile) referCardIn(profile, cardId, api.nodeNameOf, quote);
   };
   /**
    * Part of a card, a message or a file quoted from this page — a board's card,
    * the profile's board, a note over the window, a line in Kuru's drawer, a reader's file —
    * by the reference the words were marked with where they are drawn
-   * (`Quote.tsx`), into the same box. A card's goes out of the profile
-   * board's way as a reference does; a message's is in the drawer already,
-   * and a file's is in a reader's pane, and both leave whatever is under them
-   * alone.
+   * (`Quote.tsx`), into the same box. Whatever it was quoted from stays where
+   * it is: every one of them is beside the drawer now, the profile's board
+   * included, since it is a tab and no longer a sheet over the box.
    */
-  const quoteHere = (reference: string, quote: CardQuote, from: QuoteFrom) => {
+  const quoteHere = (reference: string, quote: CardQuote, _from: QuoteFrom) => {
     quoteInKuru(reference, quote);
-    if (from !== "card") return;
-    setProfileBoard(false);
-    setBoardShow(null);
   };
   const [referAsked, setReferAsked] = useState<{ cardId: string; quote: CardQuote | null } | null>(null);
   // A note window's quote crosses with its card's id, and is another page's
@@ -896,11 +899,12 @@ export function App() {
           return api.stepWorkspace(-1);
         case "last-workspace":
           return api.lastWorkspace();
-        // The workspace on screen is another node's, and these two are about
-        // this node's; doing them to the local one nobody is looking at
-        // would rename or end the wrong thing.
+        // The workspace on screen is another node's, or the Dashboard, and
+        // these two are about the workspace on screen; doing them to the
+        // local one nobody is looking at would rename or end the wrong thing.
+        // The Dashboard itself is neither renamed nor deleted.
         case "rename-workspace":
-          if (!workspace || remote) return;
+          if (!workspace || remote || dashboard) return;
           return setDialog({
             kind: "prompt",
             title: "Rename workspace",
@@ -908,7 +912,7 @@ export function App() {
             onSubmit: (name) => api.renameWorkspace(workspace.id, name),
           });
         case "delete-workspace":
-          if (workspace && !remote) confirmDeleteWorkspace(workspace.id);
+          if (workspace && !remote && !dashboard) confirmDeleteWorkspace(workspace.id);
           return;
         /**
          * This computer's workspaces, then each node's under its name: the
@@ -1033,7 +1037,7 @@ export function App() {
           return setHelp((on) => !on);
       }
     },
-    [workspace, onScreen, remote, nodes, profile, agents, paneAgents, promptNewProfile, confirmDeleteWorkspace, narrow, goNext],
+    [workspace, dashboard, onScreen, remote, nodes, profile, agents, paneAgents, promptNewProfile, confirmDeleteWorkspace, narrow, goNext],
   );
 
   /**
@@ -1262,21 +1266,6 @@ export function App() {
         return;
       }
 
-      // The profile's board is full of fields like Settings is, and modal over
-      // the keyboard for the same reason. Escape inside a composer is the
-      // composer's own way out, so it closes the board only from outside one —
-      // and a column's name field is the same.
-      if (profileBoard) {
-        if (
-          keyName(event) === "escape" &&
-          !(event.target instanceof HTMLElement && event.target.closest(".board-composer, .board-col-input"))
-        ) {
-          take();
-          setProfileBoard(false);
-        }
-        return;
-      }
-
       // The database sheet is modal for the board's reason — a query box is a
       // field, and ctrl+a in it is select-all. Escape in the box leaves the
       // box, so that a second escape closes the sheet rather than the first
@@ -1411,7 +1400,7 @@ export function App() {
 
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [prefixArmed, resizeMode, dialog, editing, help, settings, reach, profileMenu, profileBoard, databasesFor, kuruDrawer.open, needsOpen, workspace, onScreen, keymap, run, arm, disarm]);
+  }, [prefixArmed, resizeMode, dialog, editing, help, settings, reach, profileMenu, databasesFor, kuruDrawer.open, needsOpen, workspace, onScreen, keymap, run, arm, disarm]);
 
   useFileDropGuard();
 
@@ -1516,9 +1505,10 @@ export function App() {
           onSettings={() => setSettings("theme")}
           onReach={() => setReach(true)}
           onBoard={() => {
-            setProfileBoard(true);
-            // On a phone the sidebar is a screen of its own, and the board goes
-            // over the window rather than over it — so it is put away first.
+            openProfileBoard();
+            // On a phone the sidebar is a screen of its own, and the Dashboard
+            // is in the panes behind it — so it is put away, as a workspace's
+            // row puts it away.
             if (narrow) setSidebarOpen(false);
           }}
           onDatabases={(workspaceId) => {
@@ -1571,7 +1561,7 @@ export function App() {
           <Panes
             node={onScreen.layout}
             workspaceId={onScreen.id}
-            mobile={!remote && workspace.mobile}
+            mobile={!remote && !dashboard && workspace.mobile}
             workspaceName={onScreen.name}
             board={onScreen.board}
             focusedPaneId={onScreen.focusedPaneId}
@@ -1581,7 +1571,7 @@ export function App() {
                overlay prints, so the two never disagree about where a split is. */
             keymap={keymap}
             launchers={remote ? remote.launchers : visibleLaunchers(snapshot.launch)}
-            runsOn={remote ? null : runsOn(workspace.machine, machines)}
+            runsOn={remote || dashboard ? null : runsOn(workspace.machine, machines)}
             zen={zen}
             /* One pane at a time once there is no room to tile — the same
                number that turns the sidebar into a screen, for the same
@@ -1608,6 +1598,7 @@ export function App() {
               ) : null
             }
             remote={remote ? { nodeId: remote.node.id, name: remote.node.name } : null}
+            dashboard={!remote && dashboard ? profile : null}
           />
           ) : null}
         </main>
@@ -1660,14 +1651,11 @@ export function App() {
           }
           onCard={(workspaceId, cardId) => {
             // A workspace's card is on its board, in its pane; the profile's
-            // own is in the sheet. Either way the card is scrolled to and lit.
+            // own is on the Dashboard's. Either way the card is scrolled to and lit.
             if (workspaceId) {
               showCardNext(workspaceId, cardId);
               api.openBoard(undefined, false, workspaceId);
-            } else {
-              setBoardShow(cardId);
-              setProfileBoard(true);
-            }
+            } else openProfileBoard(cardId);
             if (narrow) closeKuru();
           }}
         />
@@ -1702,10 +1690,9 @@ export function App() {
             if (narrow) closeNeeds();
           }}
           onProfileCard={(cardId) => {
-            // The sheet goes over the drawer on a desktop, which is still there
-            // once it is closed; on a phone the drawer is a sheet too, and goes.
-            setBoardShow(cardId);
-            setProfileBoard(true);
+            // The Dashboard comes up beside the drawer on a desktop; on a
+            // phone the drawer is a sheet over it, and goes.
+            openProfileBoard(cardId);
             if (narrow) closeNeeds();
           }}
         />
@@ -1761,29 +1748,15 @@ export function App() {
       />
 
       {help && <HelpOverlay keymap={keymap} onClose={() => setHelp(false)} />}
-      {profileBoard && (
-        <ProfileBoard
-          profile={profile}
-          show={boardShow}
-          onClose={() => {
-            setProfileBoard(false);
-            setBoardShow(null);
-          }}
-        />
-      )}
-      {/* Cards popped out as notes. After the profile's board and before
-          every other sheet, at the scrims' height, so a card popped out of
-          the board is in front of it and a dialog is never under a note —
-          see `Notes.tsx`. Kept in zen: a note is one the person put there. */}
+      {/* Cards popped out as notes. Before every other sheet, at the scrims'
+          height, so a dialog is never under a note — see `Notes.tsx`. Kept in
+          zen: a note is one the person put there. */}
       <Notes
         profile={profile}
         agents={agents}
         mascots={snapshot.mascots}
         onEditing={setEditing}
-        onProfileCard={(cardId) => {
-          setBoardShow(cardId);
-          setProfileBoard(true);
-        }}
+        onProfileCard={openProfileBoard}
         onRefer={referNote}
       />
       {/* The popover over a selection in a card, a note or Kuru's drawer: one for the page. */}
@@ -2082,6 +2055,10 @@ function tabsOf(layout: LayoutNode, agents: AgentSnapshot[]): TabEntry[] {
   for (const pane of panes(layout)) {
     pane.agentIds.forEach((id, index) => {
       const at = { key: `${pane.id}:${index}`, id, paneId: pane.id, index };
+      if (isDashTab(id)) {
+        out.push({ ...at, label: dashboardTabLabel(id), hint: "Dashboard", terminal: false });
+        return;
+      }
       if (isBoardTab(id)) {
         out.push({ ...at, label: "board", hint: "", terminal: false });
         return;

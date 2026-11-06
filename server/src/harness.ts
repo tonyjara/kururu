@@ -1909,7 +1909,16 @@ export class Harness {
       const pin = workspace.machine;
       const machine = pin ? this.deps.machines().find((m) => m.id === pin.machineId) : undefined;
       const runsOn = pin && machine ? ` · runs on ${machine.name} in ${pin.dir} (its shells, agents and card runs open there)` : "";
-      const shown = workspace.id === profile.activeWorkspaceId ? (remote ? " · on screen when the user comes back from the other node's" : " · on screen") : "";
+      // The Dashboard is not a workspace and is not listed as one; while it
+      // is up, the workspace it was opened over is behind it, not on screen.
+      const shown =
+        workspace.id === profile.activeWorkspaceId
+          ? remote
+            ? " · on screen when the user comes back from the other node's"
+            : profile.onDashboard
+              ? " · on screen when the user leaves the Dashboard (the profile's board) they are looking at"
+              : " · on screen"
+          : "";
       out.push(`  - ${workspace.name} (${workspace.id}) · ${ids.length} agent${ids.length === 1 ? "" : "s"} · ${counts}${runsOn}${shown}`);
     }
     // By name, which is what open_shell takes and what the user says.

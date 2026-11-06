@@ -148,6 +148,10 @@ The load-bearing invariants, one line each, with the argument behind the link:
   [terminals](docs/terminals.md#no-gpu-context-in-a-pane)
 - **`persist.ts` restores structure, never processes.** Four restored agent tabs
   must not launch four agents. → [layout](docs/layout.md#persistence)
+- **The Dashboard is the profile's, not a workspace** — beside `workspaces`,
+  never in it, holding its fixed tabs once each and nothing else
+  (`fitsDashboard`, kept in `Workspaces.mutate`). →
+  [layout](docs/layout.md#the-dashboard)
 - **The agents kururu starts itself go to the agents' pane** (`agentPaneIn`,
   `shared/agentpane.ts`); the keyboard stays where it was, and the + menu's go
   where they were asked for. → [more](docs/invariants.md#the-agents-pane)

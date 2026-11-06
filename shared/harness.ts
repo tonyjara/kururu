@@ -1081,6 +1081,7 @@ const STEERING: ReadonlySet<ClientMessage["type"]> = new Set<ClientMessage["type
   "workspace-index",
   "step-workspace",
   "last-workspace",
+  "open-dashboard",
   "switch-profile",
   "reveal-agent",
   "open-harness",

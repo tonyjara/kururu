@@ -134,10 +134,10 @@ with ranked hits carrying this session's ids beside the keys, so the window
 can go to the card. Cards first, then turns, each ranked within its kind —
 the two scales are not comparable.
 
-Where it is: the **Search** button on the profile board's sheet. A card hit
-goes to the card, scrolled to and lit — one of the profile's own in the
-sheet, a workspace's on that workspace's board in its pane, with the sheet
-closed — and a turn hit
+Where it is: the **Search** button on the profile board, the Dashboard's tab.
+A card hit goes to the card, scrolled to and lit — one of the profile's own on
+that board, a workspace's on that workspace's board in its pane — and a turn
+hit
 opens its words in place. For the
 harness, two tools: `search` with the same arguments, answering in lines
 like `card KUR-12 "…" (Kururu, Done, moved 2026-10-09 14:02; id c…) — …`,

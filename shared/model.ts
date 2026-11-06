@@ -774,6 +774,21 @@ export interface Profile {
    * always in the sidebar — an empty board behind it costs nothing.
    */
   board: Board;
+  /**
+   * The profile's Dashboard: its fixed tabs, the profile's board first, in
+   * a layout of their own — see `shared/dashboard.ts`. Workspace-shaped so
+   * the panes draw and arrange it, and kept here rather than in `workspaces`
+   * so that nothing that lists workspaces ever lists it.
+   */
+  dashboard: Workspace;
+  /**
+   * Whether the Dashboard is what is on screen. A switch beside
+   * `activeWorkspaceId` rather than that id pointing at the Dashboard, so
+   * that "the workspace you are in" stays a workspace for everything that
+   * asks — the harness, the store, a node's summary — and leaving the
+   * Dashboard is going back to it.
+   */
+  onDashboard: boolean;
   activeWorkspaceId: string;
   /**
    * The workspace you were in before this one — tmux's last-window, which is

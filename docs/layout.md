@@ -219,13 +219,38 @@ the terminal is the work and has its own ✕. Nor does it remove the card's
 worktree, for the same reason and one more: taking a checkout down is the Done
 column's job, and a deleted card has not been through it.
 
+### The Dashboard
+
+**A space of the profile's own, for the tabs that are no workspace's.**
+`Profile.dashboard` is a `Workspace` in shape — a layout, a focus — so the
+panes draw it and every pane verb arranges it, and it is kept beside
+`Profile.workspaces`, never in it, so the sidebar's list, `kururu_status`, the
+Needs drawer, the store and a node's summary all leave it out without knowing
+it exists. `Profile.onDashboard` says it is on screen; `activeWorkspaceId`
+stays the workspace it was opened over, which is where `C-a z` or any switch
+goes back to. Its door is the board icon beside the profile name, and every
+road that opened the profile board's sheet — a card reference with no
+workspace, the Needs drawer's board rows, a note's card — opens it on that tab.
+
+**It holds its fixed tabs, each once, and nothing else** (`fitsDashboard`,
+`shared/dashboard.ts`). `Workspaces.mutate` checks every change to it and
+keeps the old layout when one fails, and refuses any workspace change that
+would hold a fixed tab, so no ✕, close-pane, drag out, terminal dropped in or
+split with nothing to fill it gets through, whichever verb tried. A terminal
+asked for on it (`C-a T`, Settings starting a sign-in) opens in the workspace
+behind it, which comes back on screen; `C-a K` opens that workspace's board.
+The window draws its panes with no ✕ on a tab, no new-tab button, no close on
+the pane and no file tree. A tab is one entry in `DASHBOARD_TABS` and its view
+in `web/src/components/Dashboard.tsx`; a profile from before one gets it in
+its first pane (`dashboardLayout`). `persist.ts` keeps its tree and whether it
+was on screen; the host's blob carries it as it carries the rest.
+
 ### The profile's board
 
 **Cards for no workspace yet, and one road out.** `Profile.board` is a
-`Board` like a workspace's, drawn by `ProfileBoard.tsx` as a sheet over the
-window from the icon beside the profile name — an overlay, not a tab, because
-a tab lives in one workspace's layout and this board is precisely the one that
-is no workspace's. Its columns are its own (`Board.columns`, a `BoardLane` list
+`Board` like a workspace's, drawn by `ProfileBoard.tsx` as the first fixed tab
+of the profile's **Dashboard** (below), opened from the icon beside the profile
+name. Its columns are its own (`Board.columns`, a `BoardLane` list
 that only this board has): it starts with To do, In progress and Done — no
 Review, since nothing on it runs — and a person can add, rename, reorder and
 delete them from the column header. A workspace's four stay fixed because the

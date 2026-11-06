@@ -32,6 +32,7 @@ import { agentsPane, DEFAULT_AGENT_PLACEMENT, isAgentPlacement, placementOf, typ
 import type { HarnessState, Profile, ProfileSummary, Workspace } from "../../shared/model";
 import { gatherGroups, groupName, workspaceUnits, isLoginKey, mintLoginKey } from "../../shared/model";
 import { isStoreKey, mintProfileKey, mintWorkspaceKey, type Actor } from "../../shared/store";
+import { arrangeDashboard, dashboardLayout, dashTabAt, holdsDashTab, makeDashboard } from "../../shared/dashboard";
 import {
   activeTerminal,
   addTab,
@@ -44,6 +45,7 @@ import {
   type WebTabState,
   closePane,
   isBoardTab,
+  isDashTab,
   isDocTab,
   terminalsOf,
   cycleTab,
@@ -141,6 +143,13 @@ function adoptSeq(profiles: Profile[]): void {
       mark(workspace.id);
       walk(workspace.layout);
     }
+    // The Dashboard's ids come from the same counter, and a blob from before
+    // it simply has none — `adopt` makes one after this has run.
+    const dashboard = (profile as Partial<Profile>).dashboard;
+    if (dashboard && typeof dashboard.id === "string" && dashboard.layout) {
+      mark(dashboard.id);
+      walk(dashboard.layout);
+    }
   }
 }
 
@@ -187,6 +196,10 @@ function adopt(profile: Profile): Profile {
     // Absent from every blob written before profiles had a board, which reads
     // as an empty one — see `Profile.board` for why it is never null.
     board: adoptProfileBoard(profile.board),
+    // Absent before the Dashboard, which is a fresh one; and read as anything
+    // out of a blob is, through the rule that says what it may hold.
+    dashboard: adoptDashboard((profile as Partial<Profile>).dashboard),
+    onDashboard: (profile as Partial<Profile>).onDashboard === true,
     // Absent before profiles had a harness, and null is "none started".
     harness: adoptHarness(profile.harness),
     // Absent before Auto Swap existed, which is off.
@@ -373,9 +386,23 @@ export class Workspaces {
     return this.profiles.find((p) => p.id === this.activeId) ?? this.profiles[0]!;
   }
 
+  /**
+   * What is on screen: the Dashboard while it is, else the active workspace.
+   * Every "do it here" verb acts on this, which is what lets the Dashboard's
+   * panes be focused, split off and rearranged by the verbs every workspace
+   * has — and `mutate` is what keeps any of them from putting something in
+   * it that is not a fixed tab. The verbs that start a process ask
+   * `onDashboard` first and go to the workspace instead.
+   */
   get activeWorkspace(): Workspace {
     const profile = this.active;
+    if (profile.onDashboard) return profile.dashboard;
     return profile.workspaces.find((w) => w.id === profile.activeWorkspaceId) ?? profile.workspaces[0]!;
+  }
+
+  /** Whether the active profile's Dashboard is what is on screen. */
+  get onDashboard(): boolean {
+    return this.active.onDashboard;
   }
 
   all(): Profile[] {
@@ -610,7 +637,9 @@ export class Workspaces {
       // split, and then flip between the two.
       lastPaneId: paneId,
     }));
-    return fresh.pane.id;
+    // The Dashboard refuses an empty pane, and a pane that was never made is
+    // not one to open a terminal in.
+    return findPane(this.activeWorkspace.layout, fresh.pane.id) ? fresh.pane.id : null;
   }
 
   /** prefix+r then hjkl: move the divider the focused pane's edge sits against. */
@@ -763,6 +792,10 @@ export class Workspaces {
     // A document is addressed by where it is, not by what it is — it can be
     // open in two panes. `moveDoc` is its verb.
     if (isDocTab(agentId)) return;
+    // Refused before anything is taken out of where it was: a terminal off
+    // the sidebar dropped on the Dashboard would otherwise leave its
+    // workspace and be refused by the Dashboard, and be in neither.
+    if (!this.mayLand(agentId)) return;
     const workspace = this.activeWorkspace;
     if (!findPane(workspace.layout, toPaneId)) return;
     const source = paneWithAgent(workspace.layout, agentId);
@@ -822,6 +855,7 @@ export class Workspaces {
   /** Drop on a pane's edge: divide it and put the terminal in the new half. */
   splitWith(agentId: string, paneId: string, dir: "row" | "col", before: boolean): void {
     if (isDocTab(agentId)) return;
+    if (!this.mayLand(agentId)) return;
     const workspace = this.activeWorkspace;
     if (!findPane(workspace.layout, paneId)) return;
     const source = paneWithAgent(workspace.layout, agentId);
@@ -847,8 +881,9 @@ export class Workspaces {
   /** Send a terminal to another workspace, into whatever pane has focus there. */
   moveTabToWorkspace(agentId: string, workspaceId: string): void {
     // The board is this workspace's cards; carried into another it would be
-    // showing somebody else's list under the wrong name.
-    if (isBoardTab(agentId) || isDocTab(agentId)) return;
+    // showing somebody else's list under the wrong name. A Dashboard tab is
+    // the profile's, and stays on the Dashboard.
+    if (isBoardTab(agentId) || isDocTab(agentId) || isDashTab(agentId)) return;
     const profile = this.active;
     const target = profile.workspaces.find((w) => w.id === workspaceId);
     if (!target || paneWithAgent(target.layout, agentId)) return;
@@ -1767,25 +1802,63 @@ export class Workspaces {
       workspaces: [...p.workspaces, workspace],
       lastWorkspaceId: p.activeWorkspaceId,
       activeWorkspaceId: workspace.id,
+      onDashboard: false,
     }));
     return workspace.id;
   }
 
+  /**
+   * Put a workspace on screen. From the Dashboard that is leaving it, even
+   * for the workspace it was opened from — which is then not a move between
+   * workspaces, and leaves the way back where it was.
+   */
   switchWorkspace(workspaceId: string): void {
     const profile = this.active;
-    if (profile.activeWorkspaceId === workspaceId) return;
     if (!profile.workspaces.some((w) => w.id === workspaceId)) return;
+    if (profile.activeWorkspaceId === workspaceId) {
+      if (profile.onDashboard) this.replaceProfile(profile.id, (p) => ({ ...p, onDashboard: false }));
+      return;
+    }
     this.replaceProfile(profile.id, (p) => ({
       ...p,
       lastWorkspaceId: p.activeWorkspaceId,
       activeWorkspaceId: workspaceId,
+      onDashboard: false,
     }));
   }
 
-  /** prefix+z: back to where you came from, which makes it a toggle. */
+  /**
+   * prefix+z: back to where you came from, which makes it a toggle. From the
+   * Dashboard, where you came from is the workspace it was opened over.
+   */
   lastWorkspace(): void {
-    const last = this.active.lastWorkspaceId;
+    const profile = this.active;
+    if (profile.onDashboard) return this.switchWorkspace(profile.activeWorkspaceId);
+    const last = profile.lastWorkspaceId;
     if (last) this.switchWorkspace(last);
+  }
+
+  // -------------------------------------------------------------------------
+  // The Dashboard
+  // -------------------------------------------------------------------------
+
+  /**
+   * Put the profile's Dashboard on screen, and with `tab` that fixed tab in
+   * front: its pane focused, its tab showing. The workspace it was opened
+   * over stays the active one, and is where leaving goes back to.
+   */
+  openDashboard(tab?: string): void {
+    const profile = this.active;
+    if (!profile.onDashboard) this.replaceProfile(profile.id, (p) => ({ ...p, onDashboard: true }));
+    const at = typeof tab === "string" ? dashTabAt(this.active.dashboard.layout, tab) : null;
+    if (!at) return;
+    this.focusPane(at.paneId);
+    this.selectTab(at.paneId, at.index);
+  }
+
+  /** Whether a tab may be put in the pane of what is on screen: only a Dashboard tab in the Dashboard. */
+  private mayLand(agentId: string): boolean {
+    return this.onDashboard ? isDashTab(agentId) : !isDashTab(agentId);
   }
 
   /** prefix+N / prefix+P: along the list, wrapping. */
@@ -2032,6 +2105,8 @@ export class Workspaces {
       loginKey: mintLoginKey(),
       workspaces: [workspace],
       board: emptyProfileBoard(),
+      dashboard: adoptDashboard(null),
+      onDashboard: false,
       activeWorkspaceId: workspace.id,
       lastWorkspaceId: null,
       // Nothing has been dragged yet, which is spawn order — see `orderAgents`.
@@ -2072,11 +2147,29 @@ export class Workspaces {
     }
   }
 
+  /**
+   * Change one workspace — or the Dashboard, which every verb aimed at what
+   * is on screen reaches through here. The one place the two rules about the
+   * Dashboard are kept (`shared/dashboard.ts`): a change to it that would
+   * not fit — a fixed tab closed or carried out, anything else let in, an
+   * empty pane — is not made, and neither is a change to a workspace that
+   * would put a fixed tab in it.
+   */
   private mutate(profileId: string, workspaceId: string, fn: (w: Workspace) => Workspace): void {
-    this.replaceProfile(profileId, (profile) => ({
-      ...profile,
-      workspaces: profile.workspaces.map((w) => (w.id === workspaceId ? this.repair(fn(w)) : w)),
-    }));
+    this.replaceProfile(profileId, (profile) => {
+      if (workspaceId === profile.dashboard.id) {
+        const dashboard = arrangeDashboard(profile.dashboard, fn(profile.dashboard));
+        return dashboard === profile.dashboard ? profile : { ...profile, dashboard };
+      }
+      return {
+        ...profile,
+        workspaces: profile.workspaces.map((w) => {
+          if (w.id !== workspaceId) return w;
+          const next = this.repair(fn(w));
+          return holdsDashTab(next.layout) ? w : next;
+        }),
+      };
+    });
   }
 
   private mutateWorkspace(workspaceId: string, fn: (w: Workspace) => Workspace): void {
@@ -2097,6 +2190,22 @@ export class Workspaces {
 }
 
 export type { LayoutNode };
+
+/**
+ * A profile's Dashboard out of a blob or a file, or a fresh one for a
+ * profile from before it: its id and key kept when they are strings, its
+ * layout made to fit (`dashboardLayout`), and its focus on a pane it has.
+ */
+export function adoptDashboard(stored: Partial<Workspace> | null | undefined): Workspace {
+  const layout = dashboardLayout(stored?.layout, () => nextId("n"));
+  const dashboard = makeDashboard(
+    typeof stored?.id === "string" ? stored.id : nextId("d"),
+    isStoreKey(stored?.key) ? stored!.key! : mintWorkspaceKey(),
+    layout,
+  );
+  const focus = typeof stored?.focusedPaneId === "string" && findPane(layout, stored.focusedPaneId) ? stored.focusedPaneId : dashboard.focusedPaneId;
+  return { ...dashboard, focusedPaneId: focus };
+}
 
 /**
  * A board *pane*, as the first version of the board drew one, turned into a

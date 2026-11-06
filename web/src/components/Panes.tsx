@@ -47,6 +47,7 @@ import {
   activeTerminal,
   BOARD_TAB,
   isBoardTab,
+  isDashTab,
   isWebTab,
   dividers,
   parseDocTab,
@@ -66,7 +67,7 @@ import { browserLabel } from "../../../shared/browser";
 import { basename } from "../../../shared/labels";
 import { emptyBoard, type Board } from "../../../shared/board";
 import type { Launcher } from "../../../shared/launchers";
-import type { AgentSnapshot, MascotConfig } from "../../../shared/model";
+import type { AgentSnapshot, MascotConfig, Profile } from "../../../shared/model";
 import {
   AGENT_MIME,
   DOC_MIME,
@@ -90,6 +91,7 @@ import { ReaderView, readingLine } from "./Reader";
 import { fileRefOf, fileReference } from "../filequote";
 import { insertInKuru } from "../kuru";
 import { BoardView } from "./Board";
+import { DashboardView, dashTabFace } from "./Dashboard";
 import { Icon } from "./Icon";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
 import { NameField } from "./NameField";
@@ -186,6 +188,15 @@ interface Props {
    * gives its agents' panes the slot queue's line. See `SlotLine`.
    */
   mobile?: boolean;
+  /**
+   * The profile whose Dashboard these panes are, or null for a workspace's
+   * (`shared/dashboard.ts`). Its panes hold its fixed tabs and nothing else,
+   * so they are drawn without what would put something else there or take
+   * one away: no ✕ on a tab, no new-tab button, no close on the pane, no
+   * pane menu's splits, and nothing but its own tabs taken on a drop. The
+   * server refuses all of those anyway; this is not offering them.
+   */
+  dashboard?: Profile | null;
 }
 
 /** A normalized rect as the four percentages CSS wants. */
@@ -221,6 +232,7 @@ export function Panes({
   lead,
   remote,
   mobile = false,
+  dashboard = null,
 }: Props) {
   const area = useRef<HTMLDivElement>(null);
   const [resizing, setResizing] = useState(false);
@@ -394,7 +406,9 @@ export function Panes({
                  and is cheaper than a second meaning for the flag. */
               focused={focused}
               solo={solo ? { index: all.indexOf(pane), count: all.length } : null}
-              onMenu={(at) => setMenu({ at, paneId: pane.id, of: "pane" })}
+              /* The Dashboard's pane menu is its list of places and nothing
+                 else, so with one pane it has nothing to offer and is not drawn. */
+              onMenu={dashboard && all.length < 2 ? null : (at) => setMenu({ at, paneId: pane.id, of: "pane" })}
               /* Always a menu now: with every agent switched off it is still a
                  terminal or the board, which is a choice and not a step. */
               onNew={(at) => setMenu({ at, paneId: pane.id, of: "new" })}
@@ -419,6 +433,7 @@ export function Panes({
               lead={pane.id === leadPane ? lead : null}
               remote={remote}
               slotLine={mobile && !remote && pane.forAgents === true}
+              dashboard={dashboard}
             />
           </div>
         );
@@ -446,6 +461,7 @@ export function Panes({
                   all,
                   agents,
                   keymap,
+                  dashboard: dashboard !== null,
                   /* Zen and solo are different states and the same fact here: what
                      this says is "a pane made now would be made off screen", and both
                      of them hide every pane but one. */
@@ -500,11 +516,14 @@ function paneMenu({
   alone,
   filesOpen,
   onToggleFiles,
+  dashboard,
 }: {
   paneId: string;
   all: PaneState[];
   agents: AgentSnapshot[];
   keymap: Record<string, Action>;
+  /** The Dashboard's panes: the places, and none of the actions, which would make or open something it cannot hold. */
+  dashboard: boolean;
   /** The window draws one pane at a time, so anything new opens out of sight. */
   alone: boolean;
   filesOpen: boolean;
@@ -529,6 +548,7 @@ function paneMenu({
           run: () => api.focusPane(p.id),
         }))
       : [];
+  if (dashboard) return places;
   return [
     ...places,
     {
@@ -721,6 +741,8 @@ function newTabMenu(paneId: string, launchers: Launcher[], keymap: Record<string
  */
 function paneLabel(pane: PaneState, agents: AgentSnapshot[]): string {
   if (isBoardTab(activeAgent(pane))) return "board";
+  const shown = activeAgent(pane);
+  if (isDashTab(shown)) return dashTabFace(shown).label;
   const shownPage = webPageOf(pane, activeAgent(pane));
   if (shownPage) return browserLabel(shownPage);
   const doc = showingDoc(pane);
@@ -839,11 +861,13 @@ function Pane({
   lead,
   remote,
   slotLine,
+  dashboard,
 }: {
   pane: PaneState;
   focused: boolean;
   solo: SoloAt | null;
-  onMenu: (at: MenuAt) => void;
+  /** Open the pane's menu, or null where it would have nothing in it. */
+  onMenu: ((at: MenuAt) => void) | null;
   /** Open the new-tab menu here, or null to open a terminal without asking. */
   onNew: ((at: MenuAt) => void) | null;
   /** Open a terminal tab's menu, off its right-click or a long press. */
@@ -871,6 +895,8 @@ function Pane({
   remote: RemotePanes | null;
   /** Whether the slot queue's line goes under this pane. */
   slotLine: boolean;
+  /** The profile whose Dashboard this pane is in, or null — see `Props.dashboard`. */
+  dashboard: Profile | null;
 }) {
   const showing = activeAgent(pane);
   const dragging = useDragging();
@@ -882,7 +908,17 @@ function Pane({
    * file out of the tree, which arrives as a document.
    */
   const refused = useDropRefusal(pane.id);
-  const takesTabs = !refused && (dragging?.kind === "agent" || dragging?.kind === "doc" || dragging?.kind === "file");
+  /**
+   * A Dashboard's tab lands only in the Dashboard, and the Dashboard takes
+   * nothing else — `fitsDashboard`, which the server holds every drop to,
+   * said here before the drop rather than after it.
+   */
+  const dashDrag = dragging?.kind === "agent" && isDashTab(dragging.id);
+  const takesTabs =
+    !refused &&
+    (dashboard
+      ? dashDrag
+      : !dashDrag && (dragging?.kind === "agent" || dragging?.kind === "doc" || dragging?.kind === "file"));
   /** Another pane is in flight, and it is not this one — dropped on this strip, it pours in. */
   const takesPane = !refused && dragging?.kind === "pane" && dragging.id !== pane.id;
   /** Something that can land on this pane's body: any tab, any pane. */
@@ -1000,6 +1036,21 @@ function Pane({
             right, so a strip full of tabs never scrolls it away. */}
         {lead && <span className="strip-lead">{lead}</span>}
         {pane.agentIds.map((agentId, index) => {
+          if (isDashTab(agentId)) {
+            return (
+              <Fragment key={agentId}>
+                {dropAt === index && <span className="tab-insert" aria-hidden="true" />}
+                <DashTab
+                  tabId={agentId}
+                  on={index === pane.activeIdx}
+                  onSelect={() => api.selectTab(pane.id, index)}
+                  onDragOver={(event) => overTab(event, index)}
+                  onDrop={dropOnStrip}
+                  onDragEnd={() => setDropAt(null)}
+                />
+              </Fragment>
+            );
+          }
           if (isBoardTab(agentId)) {
             return (
               <Fragment key={agentId}>
@@ -1133,19 +1184,21 @@ function Pane({
         )}
         {pane.reader?.editor && <FollowButton paneId={pane.id} following={pane.reader.follow !== null} />}
 
-        <button
-          className="tab tab-new"
-          onClick={(event) => {
-            if (!onNew) return void api.newTab({ paneId: pane.id });
-            const box = event.currentTarget.getBoundingClientRect();
-            onNew({ x: box.left, y: box.bottom + 4 });
-          }}
-          title={onNew ? "New tab here: a terminal or an agent" : "New terminal here (C-a T)"}
-          aria-label="New tab"
-          aria-haspopup={onNew ? "menu" : undefined}
-        >
-          <Icon name="add" />
-        </button>
+        {!dashboard && (
+          <button
+            className="tab tab-new"
+            onClick={(event) => {
+              if (!onNew) return void api.newTab({ paneId: pane.id });
+              const box = event.currentTarget.getBoundingClientRect();
+              onNew({ x: box.left, y: box.bottom + 4 });
+            }}
+            title={onNew ? "New tab here: a terminal or an agent" : "New terminal here (C-a T)"}
+            aria-label="New tab"
+            aria-haspopup={onNew ? "menu" : undefined}
+          >
+            <Icon name="add" />
+          </button>
+        )}
 
         <span className="tab-spacer" />
         {/* The pane's own controls, as one block, because the block is what
@@ -1167,20 +1220,25 @@ function Pane({
             keeps clear of them too. */}
         <span className="tab-actions" ref={actionsRef}>
           {chips}
-          <PaneMenuButton solo={solo} onOpen={onMenu} />
-          <button
-            className="pane-btn"
-            onClick={() => api.closePane(pane.id)}
-            title="Close this pane and everything in it (C-a x)"
-            aria-label="Close pane"
-          >
-            <Icon name="close" />
-          </button>
+          {onMenu && <PaneMenuButton solo={solo} onOpen={onMenu} />}
+          {/* A Dashboard pane holds fixed tabs, and closing it would close them. */}
+          {!dashboard && (
+            <button
+              className="pane-btn"
+              onClick={() => api.closePane(pane.id)}
+              title="Close this pane and everything in it (C-a x)"
+              aria-label="Close pane"
+            >
+              <Icon name="close" />
+            </button>
+          )}
         </span>
       </header>
 
       <div className="pane-body">
-        {isBoardTab(showing) ? (
+        {isDashTab(showing) ? (
+          dashboard && <DashboardView tab={showing} profile={dashboard} />
+        ) : isBoardTab(showing) ? (
           <BoardView
             key={workspaceId}
             workspaceId={workspaceId}
@@ -1444,6 +1502,49 @@ function BoardTab({
       >
         <Icon name="close" />
       </span>
+    </button>
+  );
+}
+
+/**
+ * A fixed tab of the Dashboard (`shared/dashboard.ts`). A tab like the
+ * board's, less its ✕: it is not a thing to close, and a ✕ that the server
+ * would refuse is a button that lies. It drags — along its strip, onto
+ * another of the Dashboard's panes, onto an edge for a pane of its own — and
+ * nowhere a Dashboard tab may not go is offered it.
+ */
+function DashTab({
+  tabId,
+  on,
+  onSelect,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+}: {
+  tabId: string;
+  on: boolean;
+  onSelect: () => void;
+  onDragOver: (event: React.DragEvent) => void;
+  onDrop: (event: React.DragEvent) => void;
+  onDragEnd: () => void;
+}) {
+  const face = dashTabFace(tabId);
+  return (
+    <button
+      className={`tab tab-board tab-dash ${on ? "tab-on" : ""}`}
+      onClick={onSelect}
+      title={face.title}
+      draggable
+      onDragStart={(event) => beginDrag(event, "agent", tabId)}
+      onDragEnd={() => {
+        endDrag();
+        onDragEnd();
+      }}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
+      <Icon name={face.icon} />
+      <span className="tab-label">{face.label}</span>
     </button>
   );
 }

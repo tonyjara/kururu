@@ -66,6 +66,12 @@ export function boardVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): 
         workspaces.openBoardFromRow(msg.workspaceId);
         return true;
       }
+      // From the Dashboard, "this workspace's board" is the one behind it.
+      if (workspaces.onDashboard) {
+        workspaces.switchWorkspace(workspaces.active.activeWorkspaceId);
+        workspaces.openBoard(workspaces.focusedPaneId, msg.here === true);
+        return true;
+      }
       workspaces.openBoard(msg.paneId ?? workspaces.focusedPaneId, msg.here === true);
       return true;
 

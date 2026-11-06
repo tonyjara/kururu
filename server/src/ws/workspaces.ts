@@ -42,6 +42,10 @@ export function workspaceVerbs(ws: WebSocket, st: ClientState, msg: ClientMessag
       workspaces.lastWorkspace();
       return true;
 
+    case "open-dashboard":
+      workspaces.openDashboard(msg.tab);
+      return true;
+
     case "rename-workspace":
       workspaces.renameWorkspace(msg.workspaceId, msg.name);
       return true;

@@ -155,6 +155,7 @@ const SHOWS_LOCAL = new Set<ClientMessage["type"]>([
   "new-workspace",
   "switch-profile",
   "reveal-agent",
+  "open-dashboard",
   "open-harness",
   "restart-harness",
   "show-doc",
@@ -614,11 +615,14 @@ class NodeWatch {
     if (!workspaceKey || !this.snapshot) return;
     const profile = this.snapshot.profile;
     const shown = profile.workspaces.find((w) => w.key === workspaceKey);
-    if (shown && profile.activeWorkspaceId !== shown.id) {
+    // A child showing its Dashboard is not in the workspace either, and the
+    // switch is what takes it off (`onDashboard`, absent from a child older
+    // than the Dashboard).
+    if (shown && (profile.activeWorkspaceId !== shown.id || profile.onDashboard === true)) {
       this.toChild({ type: "switch-workspace", workspaceId: shown.id });
       // Said, so the next verb in this breath does not say it again; the
       // child's next snapshot confirms it.
-      this.snapshot = { ...this.snapshot, profile: { ...profile, activeWorkspaceId: shown.id } };
+      this.snapshot = { ...this.snapshot, profile: { ...profile, activeWorkspaceId: shown.id, onDashboard: false } };
     }
   }
 

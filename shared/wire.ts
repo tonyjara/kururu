@@ -905,6 +905,12 @@ export type ClientMessage =
   | { type: "step-workspace"; delta: number }
   /** Back to the one you came from — a toggle, not a walk through the list. */
   | { type: "last-workspace" }
+  /**
+   * Put the profile's Dashboard on screen (`shared/dashboard.ts`), with
+   * `tab` — one of `DASHBOARD_TABS` — in front. Leaving it is any switch to
+   * a workspace, or `last-workspace` back to the one it was opened over.
+   */
+  | { type: "open-dashboard"; tab?: string }
   | { type: "rename-workspace"; workspaceId: string; name: string }
   /**
    * Give a workspace its own mascot, or `null` to hand it back to the default.

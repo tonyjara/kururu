@@ -156,10 +156,11 @@ export function resizeBox(start: Box, edge: Edge, dx: number, dy: number, room: 
 }
 
 /**
- * The profile's board's height at most (`.profile-board`), which a new
- * note is placed below the header of: the sheet is centred, so its ✕ is
- * at the top right of the window's middle, which is where a note popped
- * out of it would otherwise land on it.
+ * The height the profile's board had as a centred sheet, which a new note
+ * is still placed below the header of. The board is a tab now, but the
+ * placement this gives — under the window's top band, clear of a pane's
+ * strip — is still a good one, so the number stays rather than the cascade
+ * moving under everybody's notes.
  */
 const SHEET_H = 760;
 

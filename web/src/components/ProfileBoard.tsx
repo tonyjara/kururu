@@ -1,6 +1,6 @@
 /**
- * The profile's board, drawn over the window: columns of cards that belong to
- * no workspace yet — three to start with, and whatever else a person makes.
+ * The profile's board: columns of cards that belong to no workspace yet —
+ * three to start with, and whatever else a person makes.
  *
  * It exists because a workspace's board is a place for work you know the
  * checkout of, and a lot of work is written down before that is known — "the
@@ -10,12 +10,17 @@
  * gets a board of its own, and the one thing it does that a workspace's board
  * does not is *send* a card to a workspace, where the robot is.
  *
- * An overlay rather than a tab, which is the decision worth defending. A tab
- * lives in a workspace's layout, and this board is precisely the one that is
- * no workspace's: a tab for it would have to be in every workspace or in one
- * arbitrarily, and either way switching workspace would move it. Over the
- * window it is the same board from wherever it is opened, on the phone as on
- * the desktop.
+ * A tab, in the profile's Dashboard, and not in any workspace. It was a sheet
+ * over the window, on the argument that a tab lives in a workspace's layout
+ * and this board is precisely the one that is no workspace's — in every
+ * workspace it would be many boards, in one of them it would move with
+ * whichever was picked. That argument was right about workspaces and wrong
+ * about tabs: what lost was the sheet, which covered the work, held the
+ * keyboard and had to be put away to use anything behind it, for the board
+ * people plan in. The Dashboard (`shared/dashboard.ts`) is a space that is
+ * the profile's, so the board is a fixed tab there — the same board from
+ * wherever it is opened, on the phone as on the desktop, with no ✕ because
+ * it is not a thing to close.
  *
  * Deliberately a smaller thing than `BoardView` rather than that component
  * with half of it switched off. Everything that makes that one long — runs,
@@ -42,7 +47,7 @@
  * since the drawer and Kuru find it by its id, and each card in it wears who
  * put it there (`NeedsByMark`).
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   boardLanes,
   cardCode,
@@ -76,9 +81,9 @@ import { BoardSearch } from "./Search";
 
 /**
  * Which view the board was last left in, so that it opens in it. Out here for
- * the reason `drafts` is in `Board.tsx`: the sheet is unmounted every time it
- * is closed, and somebody who plans by the timeline should not be shown the
- * columns first each time they look.
+ * the reason `drafts` is in `Board.tsx`: the tab is unmounted every time
+ * another is shown or the Dashboard is left, and somebody who plans by the
+ * timeline should not be shown the columns first each time they look.
  */
 type View = "board" | "timeline";
 let lastView: View = "board";
@@ -92,26 +97,36 @@ const NEW_LANE = "\0new";
  */
 const LANE_MIME = "application/x-kururu-lane";
 
-export function ProfileBoard({
-  profile,
-  onClose,
-  show = null,
-}: {
-  profile: Profile;
-  onClose: () => void;
-  /**
-   * A card of this board to show — the one a reply of Kuru's named —
-   * scrolled to and lit, on the columns. A workspace's card is not shown
-   * here: it is on that workspace's board, and goes there (`showCardNext`).
-   */
-  show?: string | null;
-}) {
+/**
+ * A card of this board somebody asked to see — a reply of Kuru's that named
+ * it, a note's button, a row in the Needs drawer — for the board to scroll to
+ * and light once it is drawn, or at once if it is. `Board.tsx`'s
+ * `showCardNext` for the profile's board: module state, because the asker is
+ * not in this tree and the Dashboard may not be on screen yet. Taken once.
+ */
+let wanted: { cardId: string; at: number } | null = null;
+const wantedListeners = new Set<() => void>();
+export function showProfileCardNext(cardId: string): void {
+  wanted = { cardId, at: Date.now() };
+  for (const listener of wantedListeners) listener();
+}
+function useWantedCard(): typeof wanted {
+  return useSyncExternalStore(
+    (listener) => {
+      wantedListeners.add(listener);
+      return () => wantedListeners.delete(listener);
+    },
+    () => wanted,
+  );
+}
+
+export function ProfileBoard({ profile }: { profile: Profile }) {
   const board = profile.board;
   const lanes = boardLanes(board);
   /**
    * The card last asked for by name, lit for a moment on the columns —
    * `Board.tsx`'s `showCardNext`, for this board. The columns, whichever
-   * view the sheet was in: a bar on the timeline is not where a card is
+   * view the board was in: a bar on the timeline is not where a card is
    * looked for. The time is what lets one card be asked for twice.
    */
   const sheet = useRef<HTMLDivElement>(null);
@@ -120,11 +135,14 @@ export function ProfileBoard({
     setView("board");
     setShownCard({ id: cardId, at: Date.now() });
   };
+  const asked = useWantedCard();
   useEffect(() => {
-    if (show) showCard(show);
+    if (!asked) return;
     // Once, on the ask: what is shown afterwards is the person's, and a
     // re-render must not drag it back.
-  }, [show]); // eslint-disable-line react-hooks/exhaustive-deps
+    wanted = null;
+    showCard(asked.cardId);
+  }, [asked]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!shownCard) return;
     if (sheet.current) revealCard(sheet.current, shownCard.id);
@@ -182,11 +200,9 @@ export function ProfileBoard({
       at,
       items: [
         ...profileCardMoves(profile, card, setSent),
-        // The board is a scrim over the window, the drawer's composer
-        // included, so pointing Kuru at a card puts the board away.
-        referItem({ code: cardCode(profile.name, card.number), title: card.title, place: cardPlace(null, api.nodeNameOf), cardId: card.id }, onClose),
-        // The board stays: a note floats over this sheet as over everything,
-        // and cards are often popped out several at a time.
+        referItem({ code: cardCode(profile.name, card.number), title: card.title, place: cardPlace(null, api.nodeNameOf), cardId: card.id }),
+        // A note floats over the board as over everything, and cards are
+        // often popped out several at a time.
         noteItem(card.id),
         { label: "Edit", run: () => setEditing(card.id) },
         ...(card.dates
@@ -296,322 +312,309 @@ export function ProfileBoard({
   const addingList = useComposerInView(adding, adding ? columnCards(board, adding).length : 0);
 
   return (
-    <div className="scrim profile-board-scrim" onPointerDown={onClose}>
-      <div
-        className="profile-board"
-        role="dialog"
-        aria-modal
-        aria-label={`${profile.name}'s board`}
-        onPointerDown={(event) => event.stopPropagation()}
-        ref={sheet}
-      >
-        <header className="profile-board-head">
-          <Icon name="board" />
-          <h2 className="dialog-title">{profile.name}</h2>
-          <span className="board-seg" role="tablist" aria-label="View">
-            {(["board", "timeline"] as const).map((name) => (
-              <button
-                key={name}
-                role="tab"
-                aria-selected={view === name}
-                className={`board-seg-btn ${view === name ? "board-seg-btn-on" : ""}`}
-                onClick={() => setView(name)}
-              >
-                {name === "board" ? "Board" : "Timeline"}
-              </button>
-            ))}
-          </span>
-          <span className="profile-board-note" role="status">
-            {sent ? `Sent: ${sent}` : "Cards for any workspace — send one to its board from the card's menu"}
-          </span>
-          <button
-            className={`board-seg-btn board-search-toggle ${searching ? "board-seg-btn-on" : ""}`}
-            onClick={() => setSearching((on) => !on)}
-            aria-pressed={searching}
-            title="Search every board and the conversations"
-          >
-            Search
-          </button>
-          <button className="sidebar-close" onClick={onClose} aria-label="Close" title="Close">
-            <Icon name="close" />
-          </button>
-        </header>
-        {searching && (
-          <BoardSearch
-            profileId={profile.id}
-            onPickCard={(workspaceId, cardId) => {
-              // A workspace's card is on that workspace's board, in its pane:
-              // the sheet gets out of the way of what it just pointed at. One
-              // of this board's own is here, and is lit on the columns.
-              if (workspaceId) {
-                showCardNext(workspaceId, cardId);
-                api.openBoard(undefined, false, workspaceId);
-                onClose();
-                return;
-              }
-              showCard(cardId);
-              setSearching(false);
-            }}
-          />
-        )}
+    <div className="profile-board" aria-label={`${profile.name}'s board`} ref={sheet}>
+      <header className="profile-board-head">
+        <Icon name="board" />
+        <h2 className="dialog-title">{profile.name}</h2>
+        <span className="board-seg" role="tablist" aria-label="View">
+          {(["board", "timeline"] as const).map((name) => (
+            <button
+              key={name}
+              role="tab"
+              aria-selected={view === name}
+              className={`board-seg-btn ${view === name ? "board-seg-btn-on" : ""}`}
+              onClick={() => setView(name)}
+            >
+              {name === "board" ? "Board" : "Timeline"}
+            </button>
+          ))}
+        </span>
+        <span className="profile-board-note" role="status">
+          {sent ? `Sent: ${sent}` : "Cards for any workspace — send one to its board from the card's menu"}
+        </span>
+        <button
+          className={`board-seg-btn board-search-toggle ${searching ? "board-seg-btn-on" : ""}`}
+          onClick={() => setSearching((on) => !on)}
+          aria-pressed={searching}
+          title="Search every board and the conversations"
+        >
+          Search
+        </button>
+      </header>
+      {searching && (
+        <BoardSearch
+          profileId={profile.id}
+          onPickCard={(workspaceId, cardId) => {
+            // A workspace's card is on that workspace's board, in its pane,
+            // which takes the window off the Dashboard. One of this board's
+            // own is here, and is lit on the columns.
+            if (workspaceId) {
+              showCardNext(workspaceId, cardId);
+              api.openBoard(undefined, false, workspaceId);
+              return;
+            }
+            showCard(cardId);
+            setSearching(false);
+          }}
+        />
+      )}
 
-        {view === "timeline" && (
-          <Timeline profile={profile} editing={editing} onEdit={setEditing} onMenu={cardMenu} draft={draft} />
-        )}
+      {view === "timeline" && (
+        <Timeline profile={profile} editing={editing} onEdit={setEditing} onMenu={cardMenu} draft={draft} />
+      )}
 
-        {view === "board" && (
-          <div className="board profile-board-cols">
-            {lanes.map((lane, laneIndex) => {
-              const column = lane.id;
-              const cards = columnCards(board, column);
-              const shut = lane.collapsed === true;
-              const gap = laneDrag?.gap;
-              const laneClass = [
-                "board-col",
-                shut ? "board-col-shut" : "",
-                dropAt?.column === column ? "board-col-over" : "",
-                laneDrag?.id === column ? "board-col-lifted" : "",
-                gap === laneIndex ? "board-col-before" : "",
-                gap === laneIndex + 1 && laneIndex === lanes.length - 1 ? "board-col-after" : "",
-              ].join(" ");
-              // The same drop target folded or open, so that a folded column
-              // takes a card and a column exactly as it would standing up.
-              const width = board.widths?.[column];
-              const target = {
-                className: laneClass,
-                style: (lane.color || width !== undefined
-                  ? {
-                      ...(lane.color ? { "--tag": colorValue(lane.color) } : {}),
-                      ...(width !== undefined ? { "--col-w": `${width}px` } : {}),
-                    }
-                  : undefined) as React.CSSProperties | undefined,
-                onDragOver: (event: React.DragEvent<HTMLElement>) => {
-                  overLane(laneIndex)(event);
-                  over(column, cards.length, shut)(event);
-                },
-                onDragLeave: (event: React.DragEvent<HTMLElement>) => {
-                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropAt(null);
-                },
-                onDrop: (event: React.DragEvent<HTMLElement>) => {
-                  if (event.dataTransfer.types.includes(LANE_MIME)) {
-                    event.preventDefault();
-                    return dropLane();
+      {view === "board" && (
+        <div className="board profile-board-cols">
+          {lanes.map((lane, laneIndex) => {
+            const column = lane.id;
+            const cards = columnCards(board, column);
+            const shut = lane.collapsed === true;
+            const gap = laneDrag?.gap;
+            const laneClass = [
+              "board-col",
+              shut ? "board-col-shut" : "",
+              dropAt?.column === column ? "board-col-over" : "",
+              laneDrag?.id === column ? "board-col-lifted" : "",
+              gap === laneIndex ? "board-col-before" : "",
+              gap === laneIndex + 1 && laneIndex === lanes.length - 1 ? "board-col-after" : "",
+            ].join(" ");
+            // The same drop target folded or open, so that a folded column
+            // takes a card and a column exactly as it would standing up.
+            const width = board.widths?.[column];
+            const target = {
+              className: laneClass,
+              style: (lane.color || width !== undefined
+                ? {
+                    ...(lane.color ? { "--tag": colorValue(lane.color) } : {}),
+                    ...(width !== undefined ? { "--col-w": `${width}px` } : {}),
                   }
-                  const cardId = event.dataTransfer.getData(CARD_MIME);
-                  const index = dropAt?.column === column ? dropAt.index : undefined;
-                  setDropAt(null);
-                  if (!cardId) return;
+                : undefined) as React.CSSProperties | undefined,
+              onDragOver: (event: React.DragEvent<HTMLElement>) => {
+                overLane(laneIndex)(event);
+                over(column, cards.length, shut)(event);
+              },
+              onDragLeave: (event: React.DragEvent<HTMLElement>) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropAt(null);
+              },
+              onDrop: (event: React.DragEvent<HTMLElement>) => {
+                if (event.dataTransfer.types.includes(LANE_MIME)) {
                   event.preventDefault();
-                  api.moveProfileCard(profile.id, cardId, column, index);
-                },
-              };
-              if (shut)
-                return (
-                  <section key={column} {...target}>
-                    {grip(column)}
-                    {/* The whole strip is the button that opens it again, as
-                        in Jira: the name on its side is the thing to press. */}
-                    <button
-                      className="board-col-open"
-                      title={`Expand ${lane.name}`}
-                      aria-label={`Expand ${lane.name}, ${cards.length} card${cards.length === 1 ? "" : "s"}`}
-                      aria-expanded={false}
-                      onClick={() => api.collapseProfileColumn(profile.id, column, false)}
-                    >
-                      <Icon name="caret" />
-                      <span className="board-col-dot" />
-                      <span className="board-col-count">{cards.length}</span>
-                      <span className="board-col-name">{lane.name}</span>
-                    </button>
-                  </section>
-                );
+                  return dropLane();
+                }
+                const cardId = event.dataTransfer.getData(CARD_MIME);
+                const index = dropAt?.column === column ? dropAt.index : undefined;
+                setDropAt(null);
+                if (!cardId) return;
+                event.preventDefault();
+                api.moveProfileCard(profile.id, cardId, column, index);
+              },
+            };
+            if (shut)
               return (
                 <section key={column} {...target}>
-                  {/* The column's menu off a right-click on its head too, as the
-                      cards' is off theirs — the ⋯ at its end opens the same list. */}
-                  <header
-                    className="board-col-head"
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      laneMenu(lane, { x: event.clientX, y: event.clientY });
-                    }}
+                  {grip(column)}
+                  {/* The whole strip is the button that opens it again, as
+                      in Jira: the name on its side is the thing to press. */}
+                  <button
+                    className="board-col-open"
+                    title={`Expand ${lane.name}`}
+                    aria-label={`Expand ${lane.name}, ${cards.length} card${cards.length === 1 ? "" : "s"}`}
+                    aria-expanded={false}
+                    onClick={() => api.collapseProfileColumn(profile.id, column, false)}
                   >
-                    {grip(column)}
-                    {naming === column ? (
-                      <LaneName
-                        name={lane.name}
-                        onDone={(name) => {
-                          if (name && name !== lane.name) api.renameProfileColumn(profile.id, column, name);
-                          setNaming(null);
-                        }}
-                      />
-                    ) : (
-                      <>
-                        {/* The column's colour, and the way to change it: the
-                            swatch is the thing you would point at to ask. */}
-                        <button
-                          className="board-col-dot"
-                          title="The colour this column's cards wear on the timeline"
-                          aria-label={`Colour: ${lane.color ?? "none"}`}
-                          aria-haspopup="listbox"
-                          onClick={(event) => {
-                            const box = event.currentTarget.getBoundingClientRect();
-                            setPicking({ column, at: { x: box.left, y: box.bottom + 4 } });
-                          }}
-                        />
-                        <span
-                          className="board-col-name"
-                          onDoubleClick={laneFixed(column) ? undefined : () => setNaming(column)}
-                          title={
-                            laneFixed(column)
-                              ? "Yours to do, put here by you or by Kuru — these cards are in the Needs drawer too"
-                              : "Double-click to rename"
-                          }
-                        >
-                          {lane.name}
-                        </span>
-                        <span className="board-col-count">{cards.length}</span>
-                      </>
-                    )}
-                    <button
-                      className="pane-btn board-col-fold"
-                      title="Collapse this column — it still takes a card dropped on it"
-                      aria-label="Collapse column"
-                      aria-expanded
-                      onClick={() => api.collapseProfileColumn(profile.id, column, true)}
-                    >
-                      <Icon name="caret" />
-                    </button>
-                    <button
-                      className="pane-btn"
-                      title={`Add a card to ${lane.name}`}
-                      aria-label="Add a card"
-                      onClick={() => setAdding(column)}
-                    >
-                      <Icon name="add" />
-                    </button>
-                    <button
-                      className="pane-btn"
-                      title={laneFixed(column) ? "Colour, collapse or move this column" : "Rename, move or delete this column"}
-                      aria-label="Column menu"
-                      aria-haspopup="menu"
-                      onClick={(event) => {
-                        const box = event.currentTarget.getBoundingClientRect();
-                        laneMenu(lane, { x: box.left, y: box.bottom + 4 });
-                      }}
-                    >
-                      <Icon name="caret" />
-                    </button>
-                  </header>
-
-                  <div
-                    className="board-cards"
-                    ref={adding === column ? addingList : undefined}
-                    onDragOver={over(column, cards.length)}
-                  >
-                    {cards.map((card, index) =>
-                      editing === card.id ? (
-                        <Composer
-                          key={card.id}
-                          draft={draft(`card\0${card.id}`)}
-                          title={card.title}
-                          body={card.body}
-                          isolate={false}
-                          offerIsolate={false}
-                          dates={card.dates}
-                          offerDates
-                          bodyHint="Details"
-                          submit="Save"
-                          onSubmit={(title, body, _isolate, dates) => {
-                            api.editProfileCard(profile.id, card.id, { title, body, dates });
-                            setEditing(null);
-                          }}
-                          onCancel={() => setEditing(null)}
-                          onPopOut={() => popOutNote(card.id)}
-                        />
-                      ) : (
-                        <ProfileCard
-                          key={card.id}
-                          card={card}
-                          code={cardCode(profile.name, card.number)}
-                          shown={shownCard?.id === card.id}
-                          insertBefore={dropAt?.column === column && dropAt.index === index}
-                          onMenu={(at) => cardMenu(card, at)}
-                          onEdit={() => setEditing(card.id)}
-                          onOver={(event) => {
-                            if (!event.dataTransfer.types.includes(CARD_MIME)) return;
-                            event.preventDefault();
-                            event.stopPropagation();
-                            const box = event.currentTarget.getBoundingClientRect();
-                            setDropAt({ column, index: event.clientY > box.top + box.height / 2 ? index + 1 : index });
-                          }}
-                        />
-                      ),
-                    )}
-                    {dropAt?.column === column && dropAt.index === cards.length && (
-                      <span className="board-insert" aria-hidden="true" />
-                    )}
-                    {adding === column ? (
-                      <Composer
-                        draft={draft(`new\0${column}`)}
-                        title=""
-                        body=""
-                        isolate={false}
-                        offerIsolate={false}
-                        offerDates
-                        bodyHint="Details"
-                        submit="Add"
-                        onSubmit={(title, body, _isolate, dates) => api.addProfileCard(profile.id, title, body, column, dates)}
-                        onCancel={() => setAdding(null)}
-                        keepOpen
-                      />
-                    ) : (
-                      <button className="board-empty" onClick={() => setAdding(column)}>
-                        Add a card
-                      </button>
-                    )}
-                  </div>
-                  <ColumnResizeHandle
-                    onResize={(w) => api.resizeProfileColumn(profile.id, column, w)}
-                    onReset={() => api.resizeProfileColumn(profile.id, column, null)}
-                  />
+                    <Icon name="caret" />
+                    <span className="board-col-dot" />
+                    <span className="board-col-count">{cards.length}</span>
+                    <span className="board-col-name">{lane.name}</span>
+                  </button>
                 </section>
               );
-            })}
-            {lanes.length < LANES_MAX &&
-              (naming === NEW_LANE ? (
-                <section className="board-col board-col-new">
-                  <header className="board-col-head">
+            return (
+              <section key={column} {...target}>
+                {/* The column's menu off a right-click on its head too, as the
+                    cards' is off theirs — the ⋯ at its end opens the same list. */}
+                <header
+                  className="board-col-head"
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    laneMenu(lane, { x: event.clientX, y: event.clientY });
+                  }}
+                >
+                  {grip(column)}
+                  {naming === column ? (
                     <LaneName
-                      name=""
+                      name={lane.name}
                       onDone={(name) => {
-                        if (name) api.addProfileColumn(profile.id, name);
+                        if (name && name !== lane.name) api.renameProfileColumn(profile.id, column, name);
                         setNaming(null);
                       }}
                     />
-                  </header>
-                </section>
-              ) : (
-                <button className="board-col-add" onClick={() => setNaming(NEW_LANE)}>
-                  <Icon name="add" /> Add column
-                </button>
-              ))}
-          </div>
-        )}
+                  ) : (
+                    <>
+                      {/* The column's colour, and the way to change it: the
+                          swatch is the thing you would point at to ask. */}
+                      <button
+                        className="board-col-dot"
+                        title="The colour this column's cards wear on the timeline"
+                        aria-label={`Colour: ${lane.color ?? "none"}`}
+                        aria-haspopup="listbox"
+                        onClick={(event) => {
+                          const box = event.currentTarget.getBoundingClientRect();
+                          setPicking({ column, at: { x: box.left, y: box.bottom + 4 } });
+                        }}
+                      />
+                      <span
+                        className="board-col-name"
+                        onDoubleClick={laneFixed(column) ? undefined : () => setNaming(column)}
+                        title={
+                          laneFixed(column)
+                            ? "Yours to do, put here by you or by Kuru — these cards are in the Needs drawer too"
+                            : "Double-click to rename"
+                        }
+                      >
+                        {lane.name}
+                      </span>
+                      <span className="board-col-count">{cards.length}</span>
+                    </>
+                  )}
+                  <button
+                    className="pane-btn board-col-fold"
+                    title="Collapse this column — it still takes a card dropped on it"
+                    aria-label="Collapse column"
+                    aria-expanded
+                    onClick={() => api.collapseProfileColumn(profile.id, column, true)}
+                  >
+                    <Icon name="caret" />
+                  </button>
+                  <button
+                    className="pane-btn"
+                    title={`Add a card to ${lane.name}`}
+                    aria-label="Add a card"
+                    onClick={() => setAdding(column)}
+                  >
+                    <Icon name="add" />
+                  </button>
+                  <button
+                    className="pane-btn"
+                    title={laneFixed(column) ? "Colour, collapse or move this column" : "Rename, move or delete this column"}
+                    aria-label="Column menu"
+                    aria-haspopup="menu"
+                    onClick={(event) => {
+                      const box = event.currentTarget.getBoundingClientRect();
+                      laneMenu(lane, { x: box.left, y: box.bottom + 4 });
+                    }}
+                  >
+                    <Icon name="caret" />
+                  </button>
+                </header>
 
-        {menu && <Menu at={menu.at} items={menu.items} onClose={() => setMenu(null)} />}
-        {picking && (
-          <ColorPicker
-            at={picking.at}
-            current={lanes.find((lane) => lane.id === picking.column)?.color ?? null}
-            onPick={(color) => {
-              api.colorProfileColumn(profile.id, picking.column, color);
-              setPicking(null);
-            }}
-            onClose={() => setPicking(null)}
-          />
-        )}
-      </div>
+                <div
+                  className="board-cards"
+                  ref={adding === column ? addingList : undefined}
+                  onDragOver={over(column, cards.length)}
+                >
+                  {cards.map((card, index) =>
+                    editing === card.id ? (
+                      <Composer
+                        key={card.id}
+                        draft={draft(`card\0${card.id}`)}
+                        title={card.title}
+                        body={card.body}
+                        isolate={false}
+                        offerIsolate={false}
+                        dates={card.dates}
+                        offerDates
+                        bodyHint="Details"
+                        submit="Save"
+                        onSubmit={(title, body, _isolate, dates) => {
+                          api.editProfileCard(profile.id, card.id, { title, body, dates });
+                          setEditing(null);
+                        }}
+                        onCancel={() => setEditing(null)}
+                        onPopOut={() => popOutNote(card.id)}
+                      />
+                    ) : (
+                      <ProfileCard
+                        key={card.id}
+                        card={card}
+                        code={cardCode(profile.name, card.number)}
+                        shown={shownCard?.id === card.id}
+                        insertBefore={dropAt?.column === column && dropAt.index === index}
+                        onMenu={(at) => cardMenu(card, at)}
+                        onEdit={() => setEditing(card.id)}
+                        onOver={(event) => {
+                          if (!event.dataTransfer.types.includes(CARD_MIME)) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          const box = event.currentTarget.getBoundingClientRect();
+                          setDropAt({ column, index: event.clientY > box.top + box.height / 2 ? index + 1 : index });
+                        }}
+                      />
+                    ),
+                  )}
+                  {dropAt?.column === column && dropAt.index === cards.length && (
+                    <span className="board-insert" aria-hidden="true" />
+                  )}
+                  {adding === column ? (
+                    <Composer
+                      draft={draft(`new\0${column}`)}
+                      title=""
+                      body=""
+                      isolate={false}
+                      offerIsolate={false}
+                      offerDates
+                      bodyHint="Details"
+                      submit="Add"
+                      onSubmit={(title, body, _isolate, dates) => api.addProfileCard(profile.id, title, body, column, dates)}
+                      onCancel={() => setAdding(null)}
+                      keepOpen
+                    />
+                  ) : (
+                    <button className="board-empty" onClick={() => setAdding(column)}>
+                      Add a card
+                    </button>
+                  )}
+                </div>
+                <ColumnResizeHandle
+                  onResize={(w) => api.resizeProfileColumn(profile.id, column, w)}
+                  onReset={() => api.resizeProfileColumn(profile.id, column, null)}
+                />
+              </section>
+            );
+          })}
+          {lanes.length < LANES_MAX &&
+            (naming === NEW_LANE ? (
+              <section className="board-col board-col-new">
+                <header className="board-col-head">
+                  <LaneName
+                    name=""
+                    onDone={(name) => {
+                      if (name) api.addProfileColumn(profile.id, name);
+                      setNaming(null);
+                    }}
+                  />
+                </header>
+              </section>
+            ) : (
+              <button className="board-col-add" onClick={() => setNaming(NEW_LANE)}>
+                <Icon name="add" /> Add column
+              </button>
+            ))}
+        </div>
+      )}
+
+      {menu && <Menu at={menu.at} items={menu.items} onClose={() => setMenu(null)} />}
+      {picking && (
+        <ColorPicker
+          at={picking.at}
+          current={lanes.find((lane) => lane.id === picking.column)?.color ?? null}
+          onPick={(color) => {
+            api.colorProfileColumn(profile.id, picking.column, color);
+            setPicking(null);
+          }}
+          onClose={() => setPicking(null)}
+        />
+      )}
     </div>
   );
 }
@@ -764,7 +767,7 @@ export function NeedsByMark({ by }: { by: NeedsBy }) {
  * A column's name as a field, for making one or renaming it. Enter or leaving
  * the field keeps what was typed, since a name half-typed and clicked away from
  * was still meant; Escape is the one way to change nothing — and is stopped
- * here so it does not close the board too.
+ * here so it means only that.
  */
 function LaneName({ name, onDone }: { name: string; onDone: (name: string) => void }) {
   const [value, setValue] = useState(name);

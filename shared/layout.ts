@@ -12,7 +12,8 @@
  * let a pane be a place you work rather than a slot one process occupies: four
  * agents in one project belong in one pane, not four. A tab is a terminal, the
  * board, a document or a page in the browser, in any mix — see `BOARD_TAB`,
- * `docTab` and `webTab`.
+ * `docTab` and `webTab` — or, in the profile's Dashboard and nowhere else,
+ * one of its fixed tabs (`isDashTab`).
  *
  * Everything here is pure and immutable. An operation returns a new tree, which
  * is what lets the server diff nothing and broadcast whole, and what lets React
@@ -346,9 +347,23 @@ export function mintWebTab(random: () => number = Math.random): string {
   return WEB_PREFIX + out;
 }
 
+/**
+ * A fixed tab of the profile's Dashboard, as a tab: the board's trick a
+ * fourth time, an id no pty can have in the same list as everything else, so
+ * the Dashboard's panes are drawn, split and rearranged by the code every
+ * workspace's are. Which ones exist, and the rule that keeps them where they
+ * are, is `shared/dashboard.ts`; all this file needs is to know one is not a
+ * terminal.
+ */
+const DASH_PREFIX = "dash:";
+
+export function isDashTab(id: unknown): id is string {
+  return typeof id === "string" && id.startsWith(DASH_PREFIX);
+}
+
 /** Only the terminals of a list of tabs — what may be killed, watched or typed into. */
 export function terminalsOf(ids: readonly string[]): string[] {
-  return ids.filter((id) => id !== BOARD_TAB && !isDocTab(id) && !isWebTab(id));
+  return ids.filter((id) => id !== BOARD_TAB && !isDocTab(id) && !isWebTab(id) && !isDashTab(id));
 }
 
 /** A browser tab's page, wherever in the tree it is, or null. */
@@ -409,10 +424,10 @@ export function activeAgent(pane: PaneState): string | null {
   return pane.agentIds[pane.activeIdx] ?? null;
 }
 
-/** The terminal showing in a pane, or null when it is empty or showing the board, a document or a page. */
+/** The terminal showing in a pane, or null when it is empty or showing the board, a document, a page or a Dashboard tab. */
 export function activeTerminal(pane: PaneState): string | null {
   const id = activeAgent(pane);
-  return id === BOARD_TAB || isDocTab(id) || isWebTab(id) ? null : id;
+  return id === BOARD_TAB || isDocTab(id) || isWebTab(id) || isDashTab(id) ? null : id;
 }
 
 /** The document showing in a pane, or null when the active tab is not one. */

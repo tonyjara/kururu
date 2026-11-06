@@ -33,7 +33,8 @@ import { adoptPin, type MachinePin } from "../../shared/machines";
 import { DEFAULT_AGENT_PLACEMENT, isAgentPlacement, type AgentPlacement } from "../../shared/agentpane";
 import type { HarnessState } from "../../shared/model";
 import { isStoreKey, mintProfileKey, mintWorkspaceKey } from "../../shared/store";
-import { nextId } from "./workspaces";
+import { isDashboardTab } from "../../shared/dashboard";
+import { adoptDashboard, nextId } from "./workspaces";
 import { stateDir, writeAtomic } from "./fsutil";
 
 /** Bumped when the shape below changes; an older file is ignored, not migrated. */
@@ -51,7 +52,7 @@ interface StoredPane {
    * restored document comes back pinned, which is the honest answer, because
    * the nvim that was driving it is gone.
    */
-  tabs?: ("board" | ReaderDoc | StoredWeb)[];
+  tabs?: ("board" | ReaderDoc | StoredWeb | DashboardTabId)[];
   showing?: number;
   /**
    * The shape before documents were tabs of any pane: a reader pane's
@@ -79,6 +80,8 @@ interface StoredPane {
 interface StoredWeb {
   web: { id: string; url: string; title?: string; nav?: number };
 }
+/** A fixed tab of the Dashboard, by its id — only ever read back into the Dashboard. */
+type DashboardTabId = string;
 type StoredNode =
   | { type: "pane"; pane: StoredPane }
   | { type: "split"; dir: "row" | "col"; ratio: number; a: StoredNode; b: StoredNode };
@@ -149,6 +152,12 @@ interface StoredProfile {
   workspaces: StoredWorkspace[];
   /** Index rather than id: ids are regenerated on the way back in. */
   activeWorkspace: number;
+  /**
+   * The Dashboard's arrangement, and whether it was on screen — see
+   * `shared/dashboard.ts`. Absent in a file from before it, which reads as a
+   * fresh one; a fixed tab added since joins its first pane on the way in.
+   */
+  dashboard?: { layout: StoredNode; open?: true };
 }
 interface StoredSession {
   version: number;
@@ -171,8 +180,9 @@ export function snapshotPath(): string {
 function strip(node: LayoutNode): StoredNode {
   if (node.type === "pane") {
     const { cwd, agentIds, activeIdx, forAgents, web } = node.pane;
-    const kept = agentIds.flatMap((id, at): { at: number; tab: "board" | ReaderDoc | StoredWeb }[] => {
+    const kept = agentIds.flatMap((id, at): { at: number; tab: "board" | ReaderDoc | StoredWeb | DashboardTabId }[] => {
       if (id === BOARD_TAB) return [{ at, tab: "board" }];
+      if (isDashboardTab(id)) return [{ at, tab: id }];
       const page = isWebTab(id) ? web?.[id] : undefined;
       if (page) return [{ at, tab: { web: { id, url: page.url, title: page.title, nav: page.nav } } }];
       const doc = parseDocTab(id);
@@ -219,6 +229,7 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
       // Written always, the default included, so that a default changed in
       // some later version moves nobody who had chosen.
       agentPlacement: profile.agentPlacement,
+      dashboard: { layout: strip(profile.dashboard.layout), ...(profile.onDashboard ? { open: true as const } : {}) },
       activeWorkspace: Math.max(
         0,
         profile.workspaces.findIndex((w) => w.id === profile.activeWorkspaceId),
@@ -253,11 +264,14 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
 // Reading
 // ---------------------------------------------------------------------------
 
-/** Rebuild a live tree from a stored one, with fresh ids and no processes. */
-function revive(node: StoredNode): LayoutNode {
+/**
+ * Rebuild a live tree from a stored one, with fresh ids and no processes.
+ * `dash` is the Dashboard's tree, the only one a fixed tab is read back into.
+ */
+function revive(node: StoredNode, dash = false): LayoutNode {
   if (node.type === "pane") {
     const cwd = typeof node.pane?.cwd === "string" ? node.pane.cwd : undefined;
-    const { agentIds, activeIdx, web } = storedTabs(node.pane ?? {});
+    const { agentIds, activeIdx, web } = storedTabs(node.pane ?? {}, dash);
     const forAgents = node.pane?.forAgents === true ? { forAgents: true as const } : {};
     const pages = Object.keys(web).length > 0 ? { web } : {};
     return { type: "pane", pane: { id: nextId("n"), agentIds, activeIdx, cwd, ...forAgents, ...pages } };
@@ -268,19 +282,21 @@ function revive(node: StoredNode): LayoutNode {
     id: nextId("s"),
     dir: node.dir === "col" ? "col" : "row",
     ratio,
-    a: revive(node.a),
-    b: revive(node.b),
+    a: revive(node.a, dash),
+    b: revive(node.b, dash),
   };
 }
 
 /** A pane's view tabs off the disk, in either shape it has been written in. */
-function storedTabs(pane: StoredPane): { agentIds: string[]; activeIdx: number; web: Record<string, WebTabState> } {
+function storedTabs(pane: StoredPane, dash = false): { agentIds: string[]; activeIdx: number; web: Record<string, WebTabState> } {
   const web: Record<string, WebTabState> = {};
   if (Array.isArray(pane.tabs)) {
     const agentIds: string[] = [];
     for (const tab of pane.tabs as unknown[]) {
       const page = storedWeb(tab);
-      if (tab === "board") {
+      if (isDashboardTab(tab)) {
+        if (dash && !agentIds.includes(tab)) agentIds.push(tab);
+      } else if (tab === "board") {
         if (!agentIds.includes(BOARD_TAB)) agentIds.push(BOARD_TAB);
       } else if (page) {
         // A page once per file: its id is the window's key, and two tabs
@@ -469,6 +485,10 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
       loginKey: isLoginKey(stored.loginKey) ? stored.loginKey : mintLoginKey(),
       workspaces,
       board: adoptProfileBoard(stored.board),
+      // Its own tree, revived as the workspaces' are, then held to what a
+      // Dashboard may hold — anything a hand edit put in it goes there.
+      dashboard: adoptDashboard({ layout: looksLikeNode(stored.dashboard?.layout) ? revive(stored.dashboard.layout, true) : undefined }),
+      onDashboard: stored.dashboard?.open === true,
       activeWorkspaceId: workspaces[at]!.id,
       lastWorkspaceId: null,
       // Empty, and not because the file is old: the order is a list of agent
