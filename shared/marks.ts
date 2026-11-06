@@ -24,8 +24,12 @@
  * comment is the one free text on the line, written as typed.
  */
 
-/** The version `marks.json` carries, for whoever reads it next. */
-export const MARKS_VERSION = 1;
+/**
+ * The version `marks.json` carries, for whoever reads it next. 2 added
+ * `kind`: a set of marks on a page, or on the screen (`shared/ink.ts`). A set
+ * written before it has no `kind` and is a page's (`setKindOf`).
+ */
+export const MARKS_VERSION = 2;
 
 /** The most marks one set may hold: Orca's rule, and a message that still reads as one. */
 export const MARKS_MAX = 20;
@@ -125,6 +129,7 @@ export interface Mark {
 
 export interface MarkSet {
   v: number;
+  kind: "page";
   url: string;
   title: string;
   viewport: { width: number; height: number; dpr: number };
@@ -228,6 +233,7 @@ export function adoptMarkSet(value: unknown): MarkSet | { refused: string } {
   const viewport = rec(b.viewport);
   return {
     v: MARKS_VERSION,
+    kind: "page",
     url,
     title: str(b.title, 300),
     viewport: { width: Math.max(0, Math.round(num(viewport.width))), height: Math.max(0, Math.round(num(viewport.height))), dpr: num(viewport.dpr, 1) || 1 },
@@ -548,9 +554,14 @@ export function isMarkSetId(name: string): boolean {
   return SET_ID.test(name);
 }
 
-/** The files a set may hold, by name: what a GET may ask for and nothing else. */
+/** The files a set may hold, by name: what a GET may ask for and nothing else. A screen set's whole displays are JPEGs. */
 export function isMarkFile(name: string): boolean {
-  return name === "marks.md" || name === "marks.json" || name === "view.png" || /^mark-(?:[1-9]|1\d|20)\.png$/.test(name);
+  return name === "marks.md" || name === "marks.json" || name === "view.png" || /^mark-(?:[1-9]|1\d|20)\.png$/.test(name) || /^frame-(?:[1-9]|1\d|20)\.jpg$/.test(name);
+}
+
+/** What a `marks.json` is a set of: a page's, unless it says the screen — a set from before version 2 says nothing and is a page's. */
+export function setKindOf(record: unknown): "page" | "screen" {
+  return typeof record === "object" && record !== null && (record as { kind?: unknown }).kind === "screen" ? "screen" : "page";
 }
 
 /** What the sweep knows of one entry of `marks/`, read with `lstat`. */

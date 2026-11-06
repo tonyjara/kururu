@@ -10,7 +10,9 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CLIP_MAX_BYTES, CLIP_RATE, isClipId } from "../../../shared/voice";
+import { isMarkSetId } from "../../../shared/marks";
 import { outbox, voice, workspaces } from "../context";
+import { markSetExists } from "../marks";
 import { legacyHeard } from "../outbox";
 import { soundBytes, sounds } from "../sounds";
 import { ClipTooLong, json, readClip, text } from "./respond";
@@ -81,7 +83,10 @@ export const voiceRoutes: Route[] = [
         return;
       }
       try {
-        const entry = outbox.take(workspaces.keyOf(profileId)!, id, at, wav);
+        // A clip the screen pen drew over names its set, which the window
+        // posted first; one that is not there is a clip like any other.
+        const marks = url.searchParams.get("marks");
+        const entry = outbox.take(workspaces.keyOf(profileId)!, id, at, wav, marks && isMarkSetId(marks) && markSetExists(marks) ? marks : null);
         // A page from before the outbox holds the upload open for the words
         // and reads them in the old shape; it gets both, once they are made.
         if (isClipId(given)) json(res, { entry });

@@ -60,11 +60,12 @@
  * The words keep their address on this list, so a restart knows where they
  * were going without anything kept beside them.
  */
-import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { open, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { channelOfMessage, channelWords } from "../../shared/channels";
+import type { TimedText } from "../../shared/ink";
 import { spokenMessage } from "../../shared/kuru";
 import type { AgentStatus } from "../../shared/model";
 import { VOICE_PREFIX } from "../../shared/store";
@@ -116,8 +117,18 @@ export interface OutboxDeps {
   index: OutboxIndex;
   /** This session's id for a profile key, for the wire; null for a key no profile holds, whose messages are kept but shown to nobody. */
   profileIdOf: (profileKey: string) => string | null;
-  /** The recogniser — `Voice.transcribe`: words and their language, null for a clip that held none, a rejection when it could not run. */
-  transcribe: (path: string, ms: number) => Promise<{ text: string; lang: VoiceLang } | null>;
+  /**
+   * The recogniser — `Voice.transcribe`: words and their language, null for
+   * a clip that held none, a rejection when it could not run. `timed` asks
+   * for each word's time too, for a clip the screen pen drew over.
+   */
+  transcribe: (path: string, ms: number, timed?: boolean) => Promise<{ text: string; lang: VoiceLang; said?: TimedText } | null>;
+  /**
+   * A clip the screen pen drew over, heard: its set's marks put in the words
+   * and the one line for Kuru (`finishScreenSet` in `marks.ts`), or null for
+   * a set that is gone, whose clip then goes as its words alone.
+   */
+  screenWords?: (setId: string, said: TimedText | null) => string | null;
   /**
    * Words to a profile's harness, as the user's — `Harness.hear`, starting
    * it if need be. `typed` is called when they are written into its terminal
@@ -259,7 +270,7 @@ export class Outbox {
    * and sends again does not say it twice. Null for one too short to hold a
    * word, which nothing is kept for.
    */
-  take(profileKey: string, id: string, at: number, wav: Buffer): OutboxEntry | null {
+  take(profileKey: string, id: string, at: number, wav: Buffer, marks: string | null = null): OutboxEntry | null {
     const known = this.entries.find((entry) => entry.id === id);
     if (known) {
       // Listed, but the file went with a server that died between the two
@@ -271,9 +282,17 @@ export class Outbox {
       return this.wire(known);
     }
     const ms = Math.round(clipMs(wav.length));
-    if (ms < CLIP_MIN_MS) return null;
+    // A clip with ink on it is a message however short it is: the marks are
+    // what was meant, and "(nothing said)" still carries them.
+    if (ms < CLIP_MIN_MS && !marks) return null;
     // The audio first and the list second, so the list never names a file
-    // that is not there; a file the list does not name is swept, later.
+    // that is not there; a file the list does not name is swept, later. The
+    // set a clip was drawn over is named in a file beside it, written before
+    // either, since hearing it starts as soon as it is on the list.
+    if (marks) {
+      mkdirSync(outboxDir(), { recursive: true });
+      writeAtomic(this.marksPath(id), marks);
+    }
     this.writeAudio(id, wav);
     const entry: StoredOutboxEntry = {
       id,
@@ -464,10 +483,25 @@ export class Outbox {
   private hear(entry: StoredOutboxEntry): void {
     if (this.hearing.has(entry.id)) return;
     this.hearing.add(entry.id);
+    const setId = this.marksOf(entry.id);
     void (async () => {
       try {
-        const heard = await this.deps.transcribe(this.audioPath(entry.id), entry.ms);
+        const heard = await this.deps.transcribe(this.audioPath(entry.id), entry.ms, setId !== null);
         if (entry.state !== "transcribing") return;
+        if (setId) {
+          // The marks go in the words, or with "(nothing said)" when there
+          // were none; a set that is gone leaves the words as they were.
+          const line = this.deps.screenWords?.(setId, heard ? (heard.said ?? { text: heard.text, words: [] }) : null) ?? null;
+          if (line) {
+            entry.text = line;
+            entry.lang = heard?.lang ?? null;
+            entry.state = "queued";
+            entry.attempts = 0;
+            entry.note = this.ready ? null : "Waiting for the server to find Kuru's terminal.";
+            this.changed();
+            return;
+          }
+        }
         if (!heard) {
           // Silence or noise is not a failure — it never said anything, so
           // there is nothing to resend and no reason for a red mark.
@@ -700,6 +734,20 @@ export class Outbox {
     return join(outboxDir(), `${id}.wav`);
   }
 
+  private marksPath(id: string): string {
+    return join(outboxDir(), `${id}.marks`);
+  }
+
+  /** The screen set a clip was drawn over, as `take` wrote it beside the clip; null for an ordinary clip. */
+  private marksOf(id: string): string | null {
+    try {
+      const set = readFileSync(this.marksPath(id), "utf8").trim();
+      return /^m[0-9a-f]{12}$/.test(set) ? set : null;
+    } catch {
+      return null;
+    }
+  }
+
   private hasAudio(id: string): boolean {
     try {
       return statSync(this.audioPath(id)).isFile();
@@ -717,6 +765,7 @@ export class Outbox {
 
   private removeAudio(id: string): void {
     rmSync(this.audioPath(id), { force: true });
+    rmSync(this.marksPath(id), { force: true });
   }
 
   /** Audio nobody names any more, and only once it is old: one a client is about to send again is renamed over, not swept. */
@@ -727,9 +776,9 @@ export class Outbox {
     } catch {
       return;
     }
-    const kept = new Set(this.entries.filter((e) => e.state !== "delivered").map((e) => `${e.id}.wav`));
+    const kept = new Set(this.entries.filter((e) => e.state !== "delivered").flatMap((e) => [`${e.id}.wav`, `${e.id}.marks`]));
     for (const name of names) {
-      if (!name.endsWith(".wav") && !name.endsWith(".tmp")) continue;
+      if (!name.endsWith(".wav") && !name.endsWith(".tmp") && !name.endsWith(".marks")) continue;
       if (kept.has(name)) continue;
       const path = join(outboxDir(), name);
       try {

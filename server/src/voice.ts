@@ -105,6 +105,7 @@ import {
   type VoiceSettings,
   type VoiceStatus,
 } from "../../shared/voice";
+import { timedTranscript, type TimedText } from "../../shared/ink";
 import type { ServerMessage } from "../../shared/wire";
 import { readConfigFile, writeConfigFile } from "./config";
 import type { FromKokoro, ToKokoro } from "./kokoro";
@@ -347,22 +348,33 @@ export class Voice {
    * not finished downloading says so on stderr and exits non-zero, and the
    * other language's transcript is still an answer; only every locale
    * failing is a failure. Where the words go is the outbox's business.
+   *
+   * `timed` asks for each word's time as well (`--json --word-timestamps`),
+   * which a clip the screen pen drew over needs to put its marks in the
+   * words (`shared/ink.ts`); every other clip keeps `--txt`, unchanged.
    */
-  async transcribe(path: string, ms: number): Promise<{ text: string; lang: VoiceLang } | null> {
+  async transcribe(path: string, ms: number, timed = false): Promise<{ text: string; lang: VoiceLang; said?: TimedText } | null> {
     const yap = findTool("yap");
     if (!yap) {
       this.ears = { ok: false, detail: missingTool("yap") };
       throw new Error(`yap: ${missingTool("yap")}`);
     }
     const failures: string[] = [];
+    const saids = new Map<VoiceLang, TimedText>();
     const candidates = await Promise.all(
       this.settings.languages.map(async (lang): Promise<Transcript | null> => {
         try {
-          const { stdout } = await run(yap, ["transcribe", "--locale", this.settings.locales[lang], path, "--txt"], {
+          const { stdout } = await run(yap, ["transcribe", "--locale", this.settings.locales[lang], path, ...(timed ? ["--json", "--word-timestamps"] : ["--txt"])], {
             // Whole milliseconds: `execFile` throws on a fraction, and a clip's length is one.
             timeout: HEAR_TIMEOUT_MS + Math.ceil(Number.isFinite(ms) ? Math.max(0, ms) : 0),
-            maxBuffer: 4 * 1024 * 1024,
+            maxBuffer: 16 * 1024 * 1024,
           });
+          if (timed) {
+            const said = timedTranscript(stdout);
+            if (!said) throw new Error("yap's JSON could not be read");
+            saids.set(lang, said);
+            return { lang, text: said.text };
+          }
           return { lang, text: stdout.replace(/\s+/g, " ").trim() };
         } catch (err) {
           failures.push(err instanceof Error ? err.message.split("\n")[0]! : String(err));
@@ -373,7 +385,9 @@ export class Voice {
     const ran = candidates.filter((c): c is Transcript => c !== null);
     if (!ran.length) throw new Error(failures[0] ?? "the recogniser did not run");
     const picked = pickTranscript(ran, this.settings.languages);
-    return picked ? { text: picked.text, lang: picked.lang } : null;
+    if (!picked) return null;
+    const said = saids.get(picked.lang);
+    return said ? { text: picked.text, lang: picked.lang, said } : { text: picked.text, lang: picked.lang };
   }
 
   // ---------------------------------------------------------------------------

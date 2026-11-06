@@ -1,6 +1,7 @@
 /**
- * Marks on a page over HTTP: a set posted by the window (or, later, an
- * extension), and a set's files read back for a chip.
+ * Marks over HTTP: a set posted by the window — a browser tab's marks, or
+ * the screen pen's (`kind: "screen"`, `shared/ink.ts`) — and a set's files
+ * read back for a chip.
  *
  * The body is JSON with the pictures in it as base64, because a set is one
  * thing — twenty crops and a view and the record that names them — and two
@@ -65,7 +66,7 @@ export function markRead(req: IncomingMessage, res: ServerResponse, id: string, 
     text(res, found.missing, 404);
     return;
   }
-  const type = file.endsWith(".png") ? "image/png" : file.endsWith(".json") ? "application/json; charset=utf-8" : "text/markdown; charset=utf-8";
+  const type = file.endsWith(".png") ? "image/png" : file.endsWith(".jpg") ? "image/jpeg" : file.endsWith(".json") ? "application/json; charset=utf-8" : "text/markdown; charset=utf-8";
   res.writeHead(200, { "content-type": type, "cache-control": "private, max-age=3600", "x-content-type-options": "nosniff" });
   if (req.method === "HEAD") {
     res.end();

@@ -88,7 +88,7 @@ import { Kuru } from "./kuru";
 import { TelegramLead } from "./lead";
 import { claudeDirOf, codexHomeOf, lendOffer, lendSecrets, tokenInPtys } from "./lending";
 import { hostEnding, readTail, record, recordStart, socketHolder, supervised } from "./lifecycle";
-import { startMarkSweep } from "./marks";
+import { finishScreenSet, startMarkSweep } from "./marks";
 import { codexRolloutsOn, findMachine, machinesSnapshot, usageChunkOn, usageFilesOn } from "./machines";
 import { kuruFiles, sendPictureFor, showFileFor } from "./madelinks";
 import { Mover } from "./move";
@@ -650,7 +650,8 @@ export async function attach(port: Port): Promise<void> {
     },
     index: { load: () => store.loadOutbox(), save: (entries) => store.saveOutbox(entries), remove: (id) => store.removeVoice(id) },
     profileIdOf: (key) => workspaces.profileIdOf(key),
-    transcribe: (path, ms) => voice.transcribe(path, ms),
+    transcribe: (path, ms, timed) => voice.transcribe(path, ms, timed),
+    screenWords: (setId, said) => finishScreenSet(setId, said),
     deliver: (profileKey, text, events) => {
       const profileId = workspaces.profileIdOf(profileKey);
       if (!profileId) return Promise.reject(new Error("that profile is gone"));
