@@ -3,7 +3,9 @@
 A plan, written 2026-11-06 from a read of the tree at `1074bd0` (browser
 phases 0 and 1 built), of `docs/voice.md`, and of the prior art below; the
 user's answers folded in the same day ([what they decided](#what-the-user-decided)).
-**Phase 1 is being built**; nothing after it is.
+**Phase 1 is built** (9833330 server, d404743 desktop and web) and not yet
+pressed in the real app: it needs a rebuilt app and Screen Recording granted.
+Nothing after it is built.
 It is written so that an agent can take one phase, read the files it names,
 and know what "done" is.
 
