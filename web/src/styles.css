@@ -4798,6 +4798,42 @@ html.pill-page #root {
   margin: -6px -10px -6px 0;
   font-size: var(--fs-lg);
 }
+/* The screen pen's buttons on the pill (`VoicePill.tsx`): the pen, in the
+   listening colour while it is down, and Send. The ✕'s shape, so the three
+   read as one row of things to press. */
+.voice-act {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: var(--radius-md);
+  color: var(--dim);
+  font-size: var(--fs-base);
+}
+.voice-act:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+.voice-act-on,
+.voice-act-on:hover {
+  color: var(--on-danger);
+  background: var(--danger-bg);
+}
+.voice-act-send {
+  padding: 0 8px;
+  color: var(--text);
+  background: var(--chrome-high);
+}
+.voice-pill-floating .voice-act {
+  -webkit-app-region: no-drag;
+}
+:root[data-narrow] .voice-act {
+  min-width: 32px;
+  height: 32px;
+}
 
 /* Who reloaded the window and why, for ten seconds after an agent did. The
    voice pill's box, so the two read as the same kind of thing, but in the

@@ -40,11 +40,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { OutboxEntry } from "../../../shared/voice";
 import { desktop } from "../desktop";
+import { hasPen, pillPen, useInk } from "../ink";
 import { toggleKuru } from "../kuru";
 import { adoptPlace, placeAt, type Place } from "../place";
 import { useKururu } from "../session";
-import { dismissVoice, useMine, useOutgoing, useVoiceUi, whereItWent, type Outgoing } from "../voice";
+import { dismissVoice, finishTalk, useMine, useOutgoing, useVoiceUi, voiceIsRemote, whereItWent, type Outgoing } from "../voice";
 import { Icon } from "./Icon";
+import { PenIcon } from "./VoiceIcons";
 
 const BARS = [0.35, 0.6, 0.85, 1, 0.85, 0.6, 0.35];
 
@@ -84,6 +86,7 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
   const mineId = useMine();
   const { outbox } = useKururu();
   const outgoing = useOutgoing();
+  const ink = useInk();
   const mine: OutboxEntry | Outgoing | null = mineId ? (outbox.find((e) => e.id === mineId) ?? outgoing.find((c) => c.id === mineId) ?? null) : null;
   const [place, setPlace] = useState<Place | null>(storedPlace);
   const held = useRef<Held | null>(null);
@@ -104,11 +107,23 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
   }, [place]);
 
   if (ui.phase === "idle") return null;
+  /**
+   * The screen pen, while the microphone is open on this page: a pen for
+   * the recording, or the pen on and off once it has one, and Send — since
+   * with the pen down the talk key may be the only other way to end it, and
+   * the pill is kept over the ink for exactly this (`desktop/ink.js`).
+   */
+  const penHere = ui.phase === "listening" && hasPen() && (floating || !voiceIsRemote());
+  const inked = penHere && ink.state.on && ink.state.voice;
   const label =
     ui.phase === "listening"
-      ? ui.toggled
-        ? "Listening — tap again to send, Esc to drop"
-        : "Listening — let go to send, Esc to drop"
+      ? inked
+        ? ink.state.pen
+          ? "Listening — draw on anything; Send or tap again"
+          : "Listening, pen up — clicks go to the apps"
+        : ui.toggled
+          ? "Listening — tap again to send, Esc to drop"
+          : "Listening — let go to send, Esc to drop"
       : ui.phase === "sending"
         ? sendingLabel(mine)
         : ui.phase === "speaking"
@@ -131,7 +146,7 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
             : null
           : "Dismiss";
 
-  const onClose = (target: EventTarget) => target instanceof Element && target.closest(".voice-close") !== null;
+  const onClose = (target: EventTarget) => target instanceof Element && target.closest(".voice-close, .voice-act") !== null;
 
   const grab = (event: React.PointerEvent<HTMLDivElement>) => {
     held.current = null;
@@ -229,6 +244,22 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
           <span className="voice-text">{ui.phase === "error" ? ui.detail : ui.text}</span>
         )}
       </span>
+      {penHere && (
+        <button
+          className={`voice-act ${inked && ink.state.pen ? "voice-act-on" : ""}`}
+          onClick={pillPen}
+          title={inked ? (ink.state.pen ? "Lift the pen: clicks go to the apps (⌃⌥⌘D, Esc)" : "Put the pen down again (⌃⌥⌘D)") : "Draw on the screen while you talk (⌃⌥⌘D)"}
+          aria-label={inked ? "Pen on or off" : "Draw on the screen"}
+          aria-pressed={inked && ink.state.pen}
+        >
+          <PenIcon />
+        </button>
+      )}
+      {inked && (
+        <button className="voice-act voice-act-send" onClick={finishTalk} title="Send what you said and drew to Kuru">
+          Send
+        </button>
+      )}
       {dismiss && (
         <button className="voice-close" onClick={dismissVoice} title={dismiss} aria-label={dismiss}>
           <Icon name="close" />

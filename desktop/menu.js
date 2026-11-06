@@ -189,6 +189,8 @@ function menuTemplate(view) {
   items.push({ id: "talk-altspace", label: "⌥Space toggles the microphone", type: "checkbox", checked: talk.altSpace });
   // There is no pill to put anywhere while neither of the two things that float one is on.
   items.push({ id: "reset-pill", label: "Reset Pill Position", enabled: talk.on || talk.altSpace });
+  // The screen pen with the voice, as ⌃⌥⌘D starts it: it needs a page to hold the microphone, the pill's or the window's.
+  items.push({ id: "annotate", label: "Draw on the Screen and Talk", accelerator: "Control+Alt+Command+D", registerAccelerator: false, enabled: talk.on || talk.altSpace || view.windowOpen });
   items.push({ type: "separator" });
 
   // --- where it runs from ---------------------------------------------------------

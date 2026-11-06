@@ -58,3 +58,17 @@ export function PlaneIcon() {
     </svg>
   );
 }
+
+/**
+ * A pencil, for the screen pen — the pill's and the Kuru drawer's, beside the
+ * microphone, so the two ways of saying something to Kuru sit together.
+ */
+export function PenIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+      <path d="m14.5 5.5 3 3" />
+    </svg>
+  );
+}

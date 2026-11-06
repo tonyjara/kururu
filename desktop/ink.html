@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'" />
+    <title>Kururu pen</title>
+    <!--
+      The screen pen's overlay (docs/plans/screen-annotate.md): one of these
+      per display, transparent, over everything, while a session is on. It
+      draws the ink as it is drawn, for no lag, and tells the main process
+      each stroke (`ink.js` keeps them and takes the pictures); it fades a
+      burst three seconds after its pen last lifted, since its picture is
+      taken and old ink over a screen that moved on misleads. The display the
+      session began on also carries the toolbar — the pen, Done, ✕ — which is
+      the way out that does not depend on the pill being up.
+
+      A file the app ships and not a page of the web build: nothing here may
+      depend on a server that `bun run dev` restarts on a save, because a
+      stuck overlay is a Mac where nothing can be clicked.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        font: 13px/1.2 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      canvas {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+      }
+      body.pen {
+        cursor: crosshair;
+      }
+      /* Slack's "this screen is live": a thin edge round every display while the pen is down. */
+      body.pen::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        border: 3px solid rgba(255, 46, 84, 0.75);
+        pointer-events: none;
+      }
+      .bar {
+        position: fixed;
+        /* Below the menu bar and a notch, where a display has one. */
+        top: 48px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 6px 6px 12px;
+        border-radius: 999px;
+        background: rgba(28, 28, 30, 0.92);
+        color: #f2f2f7;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+        cursor: default;
+        white-space: nowrap;
+      }
+      .bar[hidden] {
+        display: none;
+      }
+      .hint {
+        opacity: 0.8;
+        margin-right: 4px;
+      }
+      .count {
+        font-variant-numeric: tabular-nums;
+        opacity: 0.8;
+      }
+      button {
+        font: inherit;
+        color: inherit;
+        border: 0;
+        border-radius: 999px;
+        padding: 5px 11px;
+        background: rgba(255, 255, 255, 0.12);
+        cursor: pointer;
+      }
+      button:hover {
+        background: rgba(255, 255, 255, 0.22);
+      }
+      button.on {
+        background: rgba(255, 46, 84, 0.9);
+      }
+      button.done {
+        background: #f2f2f7;
+        color: #1c1c1e;
+      }
+      .toast {
+        position: fixed;
+        top: 98px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 6px 12px;
+        border-radius: 8px;
+        background: rgba(28, 28, 30, 0.92);
+        color: #f2f2f7;
+      }
+      .toast[hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="ink"></canvas>
+    <div class="bar" id="bar" hidden>
+      <span class="hint" id="hint"></span>
+      <span class="count" id="count"></span>
+      <button id="pen" title="The pen on or off: off, clicks go to the app under the ink (⌃⌥⌘D, or Esc to lift it)">Pen</button>
+      <button id="done" class="done"></button>
+      <button id="drop" title="Drop the marks and close the pen" aria-label="Drop">✕</button>
+    </div>
+    <div class="toast" id="toast" hidden></div>
+    <script>
+      "use strict";
+      /** `BURST_GAP_MS` and `FADE_AFTER_MS` in `shared/ink.ts`. */
+      const BURST_GAP_MS = 1200;
+      const FADE_AFTER_MS = 3000;
+      const FADE_MS = 500;
+      const INK = "rgba(255, 46, 84, 0.85)";
+      const WIDTH = 3;
+
+      const query = new URLSearchParams(location.search);
+      const home = query.get("home") === "1";
+      const voice = query.get("voice") === "1";
+      const bridge = window.ink;
+      const canvas = document.getElementById("ink");
+      const ctx = canvas.getContext("2d");
+      const bar = document.getElementById("bar");
+      const toast = document.getElementById("toast");
+      const now = () => performance.timeOrigin + performance.now();
+
+      let pen = true;
+      /** Bursts as drawn here, for the fade: each a list of strokes and when it fades. */
+      const bursts = [];
+      let drawing = null;
+      let lastUp = 0;
+      let pending = [];
+      let frame = 0;
+
+      function size() {
+        const ratio = window.devicePixelRatio || 1;
+        canvas.width = Math.round(innerWidth * ratio);
+        canvas.height = Math.round(innerHeight * ratio);
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+        paint();
+      }
+
+      function paint() {
+        frame = 0;
+        ctx.clearRect(0, 0, innerWidth, innerHeight);
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.lineWidth = WIDTH;
+        ctx.strokeStyle = INK;
+        const t = now();
+        let fading = false;
+        for (let i = bursts.length - 1; i >= 0; i--) {
+          const burst = bursts[i];
+          const alpha = burst.fadeAt === null || t < burst.fadeAt ? 1 : 1 - (t - burst.fadeAt) / FADE_MS;
+          if (alpha <= 0) {
+            bursts.splice(i, 1);
+            continue;
+          }
+          if (burst.fadeAt !== null) fading = true;
+          ctx.globalAlpha = alpha;
+          for (const stroke of burst.strokes) {
+            ctx.beginPath();
+            ctx.moveTo(stroke[0][0], stroke[0][1]);
+            if (stroke.length === 1) ctx.lineTo(stroke[0][0] + 0.1, stroke[0][1]);
+            for (let j = 1; j < stroke.length; j++) ctx.lineTo(stroke[j][0], stroke[j][1]);
+            ctx.stroke();
+          }
+        }
+        ctx.globalAlpha = 1;
+        // Again while anything is fading or waiting to; a still screen costs nothing.
+        if (fading) schedule();
+      }
+
+      function schedule() {
+        if (!frame) frame = requestAnimationFrame(paint);
+      }
+
+      function flush() {
+        if (pending.length) bridge.points(pending);
+        pending = [];
+      }
+
+      function onBar(target) {
+        return target instanceof Element && target.closest(".bar") !== null;
+      }
+
+      window.addEventListener("pointerdown", (event) => {
+        if (!pen || event.button !== 0 || onBar(event.target)) return;
+        event.preventDefault();
+        canvas.setPointerCapture(event.pointerId);
+        const point = [event.clientX, event.clientY];
+        const t = now();
+        let burst = bursts[bursts.length - 1];
+        // A stroke soon after the last one is more of the same mark, and fades with it.
+        if (burst && burst.fadeAt !== null && t - lastUp > BURST_GAP_MS) burst = null;
+        if (!burst) {
+          burst = { strokes: [], fadeAt: null };
+          bursts.push(burst);
+        }
+        burst.fadeAt = null;
+        drawing = { pointerId: event.pointerId, stroke: [point], burst };
+        burst.strokes.push(drawing.stroke);
+        bridge.begin(point, t);
+        schedule();
+      });
+
+      window.addEventListener("pointermove", (event) => {
+        if (!drawing || event.pointerId !== drawing.pointerId) return;
+        // Every sample the pointer gave since the last event, so a fast circle is round.
+        const samples = typeof event.getCoalescedEvents === "function" ? event.getCoalescedEvents() : [event];
+        for (const sample of samples.length ? samples : [event]) {
+          const point = [sample.clientX, sample.clientY];
+          drawing.stroke.push(point);
+          pending.push(point);
+        }
+        if (pending.length > 64) flush();
+        schedule();
+      });
+
+      function lift(event) {
+        if (!drawing || event.pointerId !== drawing.pointerId) return;
+        flush();
+        lastUp = now();
+        drawing.burst.fadeAt = lastUp + FADE_AFTER_MS;
+        drawing = null;
+        bridge.end(lastUp);
+        schedule();
+      }
+      window.addEventListener("pointerup", lift);
+      window.addEventListener("pointercancel", lift);
+      setInterval(() => drawing && flush(), 32);
+
+      // With the pen up the window lets the mouse through, and the main
+      // process forwards moves only: this says when one is over the toolbar,
+      // so a click there is taken instead of reaching the app under it.
+      let hovering = false;
+      window.addEventListener("mousemove", (event) => {
+        const over = home && onBar(event.target);
+        if (over === hovering) return;
+        hovering = over;
+        bridge.hoverBar(over);
+      });
+
+      document.getElementById("pen").addEventListener("click", () => bridge.bar("pen"));
+      document.getElementById("done").addEventListener("click", () => bridge.bar("done"));
+      document.getElementById("drop").addEventListener("click", () => bridge.bar("drop"));
+
+      bridge.onState((state) => {
+        pen = state.pen === true;
+        document.body.classList.toggle("pen", pen);
+        if (!home) return;
+        bar.hidden = state.on !== true;
+        document.getElementById("hint").textContent = voice ? "Talk and draw on anything" : "Draw on anything — the marks go in Kuru's box";
+        const marks = Number(state.marks) || 0;
+        document.getElementById("count").textContent = marks ? `${marks} mark${marks === 1 ? "" : "s"}` : "";
+        const penButton = document.getElementById("pen");
+        penButton.textContent = pen ? "Pen on" : "Pen off";
+        penButton.classList.toggle("on", pen);
+        const done = document.getElementById("done");
+        done.textContent = voice ? "Send" : "Done";
+        done.title = voice ? "Send what you said and drew to Kuru" : "Put the marks in Kuru's box";
+      });
+
+      let toastTimer = 0;
+      bridge.onFull((max) => {
+        toast.textContent = `${max} marks is the most one message takes — Send or Done, then start again.`;
+        toast.hidden = false;
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => (toast.hidden = true), 4000);
+      });
+
+      window.addEventListener("resize", size);
+      size();
+    </script>
+  </body>
+</html>

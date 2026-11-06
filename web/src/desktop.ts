@@ -79,6 +79,61 @@ export interface DesktopBridge {
    * them.
    */
   browser?: DesktopBrowser;
+  /**
+   * The screen pen (`desktop/ink.js`): ink over every display, with one
+   * picture per burst. Optional — the phone, a browser and a window from
+   * before it have no pen, and draw no pencil.
+   */
+  ink?: DesktopInk;
+}
+
+/** The screen pen's session as main holds it. */
+export interface InkState {
+  on: boolean;
+  id: string | null;
+  /** A recording to Kuru goes with it; without, its marks go into the window's Kuru box. */
+  voice: boolean;
+  pen: boolean;
+  marks: number;
+  ending: boolean;
+}
+
+/**
+ * What main tells the pages: the session's state (every page), and — to the
+ * page that owns it only — to start its recording, to send, to drop, or why
+ * there is no pen.
+ */
+export type InkEvent =
+  | ({ ev: "state" } & InkState)
+  | { ev: "start"; id: string; voice: boolean }
+  | { ev: "send"; id: string; voice: boolean }
+  | { ev: "cancel"; id: string; voice: boolean; why?: string }
+  | { ev: "refused"; voice: boolean; why: string };
+
+export interface DesktopInk {
+  /** Start a session: with the voice, as ⌃⌥⌘D does, or without, from the Kuru drawer's pencil. */
+  start(voice: boolean): Promise<InkState>;
+  state(): Promise<InkState>;
+  /** The pen on or off; no argument toggles it. */
+  pen(on?: boolean): void;
+  /** Done: the owner is told to send. */
+  done(): void;
+  /** ✕: the marks dropped, and the owner told to drop its clip. */
+  drop(): void;
+  /** The owner's: the set to post, with every picture in it, and the overlays gone. Null when there was no ink. */
+  finish(id: string): Promise<InkBundle | null>;
+  /** The owner's: let the session go with nothing kept. */
+  cancel(id: string): void;
+  onEvent(listener: (event: InkEvent) => void): () => void;
+}
+
+/** The body `POST /api/marks` takes for a screen set (`adoptScreenSet` in `shared/ink.ts`); the owner fills `audioAt`. */
+export interface InkBundle {
+  kind: "screen";
+  at: number;
+  audioAt: number | null;
+  displays: unknown[];
+  marks: unknown[];
 }
 
 /** A box of the window's page, in CSS pixels. */

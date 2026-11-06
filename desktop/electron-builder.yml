@@ -51,6 +51,10 @@ files:
   - browserrules.js
   - marks.js
   - markscript.js
+  - ink.js
+  - inkshape.js
+  - ink.html
+  - inkpreload.js
   - quit.js
   - icon/icon-1024.png
   - icon/trayTemplate.png

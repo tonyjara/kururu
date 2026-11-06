@@ -24,6 +24,8 @@ export interface StoredClip {
   at: number;
   ms: number;
   wav: ArrayBuffer;
+  /** The screen pen's set this clip was drawn over, already on the server (`voice.ts`). */
+  marks?: string;
 }
 
 const DB = "kururu-voice";

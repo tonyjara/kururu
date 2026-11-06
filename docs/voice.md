@@ -466,6 +466,37 @@ Checked with headless Chrome's fake microphone fed a `say` WAV, which needs
 `--disable-features=AudioServiceSandbox` or Chrome records silence from a file
 under `/tmp`.
 
+## The screen pen
+
+Drawing on the screen while you talk, or without talking — the design and
+its reasons are [the plan](plans/screen-annotate.md); this is how it works.
+
+- **Starting.** ⌃⌥⌘D, the tray's *Draw on the Screen and Talk*, or the pen
+  on the pill while it listens: a session with the voice, owned by the voice
+  client, which opens the microphone in the tap grammar or keeps the one it
+  has. The pencil beside the Kuru drawer's mic: a session with no voice,
+  owned by the window. One session at a time.
+- **During.** An overlay over every display (`desktop/ink.js`,
+  `desktop/ink.html`), a red edge while the pen is down, and a toolbar on the
+  display it started on: the pen, Send or Done, ✕. ⌃⌥⌘D, Escape or the
+  toolbar lift the pen, and then clicks go to the apps again. Strokes less
+  than 1.2 s apart on one display are one mark; at its first pen-down the
+  helper (`desktop/glance/`) takes that display without kururu's windows, and
+  when it is over draws the ink on it and writes a crop and the whole display
+  shrunk. Ink fades three seconds after its pen lifted.
+- **Ending.** With the voice: the talk key's tap, the pill's Send or the
+  toolbar's — the clip's page asks main for the ink, posts it to
+  `/api/marks` (`kind: "screen"`), then posts the clip naming the set, and the
+  outbox hears it with word times and sends Kuru one line with each mark in
+  the words (`shared/ink.ts`'s `alignMarks`). Without: Done or the pencil
+  puts the header and a line per mark into the box as chips. ✕, Escape with
+  the pen up, the owner's page going, or the helper dying end it with
+  nothing kept.
+- **Screen Recording** is asked for on the first pen, with the system's
+  prompt; refused, nothing goes on the screen and the pill or the drawer
+  says why, with System Settings opened at the switch. It is granted to the
+  app that started the helper — Kururu, or the dev shell.
+
 ## Two languages
 
 Kuru is spoken to in English and Spanish, sometimes in one sentence. Three

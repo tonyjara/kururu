@@ -75,10 +75,18 @@
  * taken here even while the pill is the voice client, because the pill-only
  * rule is about the talk key and Kuru's clips, and these words are for this
  * page and no other.
+ *
+ * **A recording can have a pen** (`ink.ts`, `desktop/ink.js`): ⌃⌥⌘D, the
+ * pill's pen or the tray starts one, and this page — the voice client — is
+ * told to open the microphone in the tap grammar, or keeps the one it has.
+ * The clip and its ink end together: whatever ends the clip asks main for
+ * the ink (`finish`) before the clip is posted, posts it to `/api/marks`
+ * first, and the clip then names the set, so the outbox only ever points at
+ * a folder that exists. Dropping the clip drops the ink.
  */
 import { useSyncExternalStore } from "react";
 import { CLIP_MIN_MS, CLIP_RATE, CLIP_ROLL_MS, TAP_MS, downsample, encodeWav, type OutboxEntry, type SpeechChunk } from "../../shared/voice";
-import type { TalkGesture } from "./desktop";
+import { desktop, type TalkGesture } from "./desktop";
 import { isSynthetic } from "./keybar";
 import { audioOutput } from "./notify";
 import * as api from "./session";
@@ -259,6 +267,8 @@ interface Recording {
   chunks: Float32Array[];
   rate: number;
   startedAt: number;
+  /** When the clip being taken began, on `performance.timeOrigin + now()` — the clock the screen pen's strokes are on. Moves on at a roll. */
+  clip: { at: number };
 }
 
 let recording: Recording | null = null;
@@ -314,6 +324,7 @@ async function open(purpose: Purpose = "kuru"): Promise<void> {
       await ctx.audioWorklet.addModule(workletUrl);
       const node = new AudioWorkletNode(ctx, "kururu-pcm", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
       const chunks: Float32Array[] = [];
+      const clip = { at: performance.timeOrigin + performance.now() };
       let held = 0;
       node.port.onmessage = (event: MessageEvent<Float32Array>) => {
         const block = event.data;
@@ -326,7 +337,11 @@ async function open(purpose: Purpose = "kuru"): Promise<void> {
           // A comment is one clip, and five minutes is past any comment:
           // it stops there and is heard, rather than becoming two.
           if (purpose === "dictation") void close(true);
-          else void post(pcmOf(chunks.splice(0), ctx.sampleRate));
+          else {
+            const at = clip.at;
+            clip.at = performance.timeOrigin + performance.now();
+            void post(pcmOf(chunks.splice(0), ctx.sampleRate), at);
+          }
         }
         // The worklet posts a block every few milliseconds; the meter wants
         // thirty frames a second, and React does not want more.
@@ -347,7 +362,7 @@ async function open(purpose: Purpose = "kuru"): Promise<void> {
       source.connect(node);
       node.connect(mute);
       mute.connect(ctx.destination);
-      recording = { purpose, ctx, stream, chunks, rate: ctx.sampleRate, startedAt: performance.now() };
+      recording = { purpose, ctx, stream, chunks, rate: ctx.sampleRate, startedAt: performance.now(), clip };
     } catch (err) {
       const refused = err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "SecurityError");
       failed(
@@ -383,8 +398,10 @@ async function close(send: boolean): Promise<void> {
     if (rec.purpose === "dictation") {
       if (send) dictated = pcmOf(rec.chunks, rec.rate);
       else dictating?.settle({ ok: false, why: null });
-    } else if (!send) set({ ...IDLE });
-    else await post(pcmOf(rec.chunks, rec.rate));
+    } else if (!send) {
+      dropInk();
+      set({ ...IDLE });
+    } else await post(pcmOf(rec.chunks, rec.rate), rec.clip.at);
   } finally {
     endTalk();
   }
@@ -409,17 +426,98 @@ function pcmOf(chunks: readonly Float32Array[], rate: number): Float32Array {
  * server has it or the first try has failed — which is when the talk may end,
  * the clip being safe either way.
  */
-async function post(pcm: Float32Array): Promise<void> {
+async function post(pcm: Float32Array, audioAt: number): Promise<void> {
   const ms = (pcm.length / CLIP_RATE) * 1000;
-  if (ms < CLIP_MIN_MS) {
-    if (ui.phase === "listening") set({ ...IDLE });
+  // The ink first: it ends with this clip, and the clip names its set. The
+  // pill says "sending" meanwhile, since the microphone is already shut.
+  if (inkId && !isListening()) set({ phase: "sending", level: 0, text: "", detail: "", toggled: false });
+  const ink = await keepInk(audioAt);
+  const marks = ink && "id" in ink ? ink.id : null;
+  if (ms < CLIP_MIN_MS && !marks) {
+    if (ui.phase === "listening" || ui.phase === "sending") set({ ...IDLE });
     return;
   }
-  const clip: StoredClip = { id: clipId(), profileId: profileOf(), at: Date.now(), ms, wav: encodeWav(pcm, CLIP_RATE) };
+  const clip: StoredClip = { id: clipId(), profileId: profileOf(), at: Date.now(), ms, wav: encodeWav(pcm, CLIP_RATE), ...(marks ? { marks } : {}) };
   setMine(clip.id);
   // A clip rolled over mid-recording leaves the pill listening.
   if (!isListening()) set({ phase: "sending", level: 0, text: "", detail: "", toggled: false });
   await hold(clip);
+  // Said once the words are safe, so nothing after it covers it up.
+  if (ink && "lost" in ink) voiceError("Your drawing did not reach the server; what you said went without it.", ink.lost);
+}
+
+// ---------------------------------------------------------------------------
+// The screen pen's ink, with the clip it was drawn over
+// ---------------------------------------------------------------------------
+
+/** The pen session the recording under way has, by main's id. */
+let inkId: string | null = null;
+/** How many times a set is posted before the clip goes without it. */
+const MARKS_TRIES = [0, 1000, 3000];
+
+/**
+ * Main says a pen session started with the voice: the microphone opens in
+ * the tap grammar — it stays open until the talk key's tap, the pill's Send
+ * or the overlay's — unless it is already open, which then just gains a pen.
+ * A microphone that will not open ends the pen with it.
+ */
+export function penTalk(id: string): void {
+  if (dictating) {
+    desktop()?.ink?.cancel(id);
+    return;
+  }
+  inkId = id;
+  if (recording || opening) return;
+  mode = "toggle";
+  pressConsumed = false;
+  void open().then(() => {
+    if (recording) set({ toggled: true });
+    else if (inkId === id) dropInk();
+  });
+}
+
+/** Send what there is now: the pill's Send, and the overlay's. */
+export function finishTalk(): void {
+  if (recording || opening) void close(true);
+}
+
+/** The pill says why something did not happen, as it says a refused microphone. */
+export function voiceError(text: string, detail: string): void {
+  set({ phase: "error", text, detail });
+  settle(FAILED_LINGER_MS);
+}
+
+/** The clip was dropped: so is its ink. */
+function dropInk(): void {
+  const id = inkId;
+  inkId = null;
+  if (id) desktop()?.ink?.cancel(id);
+}
+
+/**
+ * The ink of the clip about to be posted, kept on the server: its set's id,
+ * or null for a clip with no pen or no ink. A set that cannot be kept after
+ * a few tries is `lost`, with why, and the clip goes without it — the words
+ * are the part that must not be lost.
+ */
+async function keepInk(audioAt: number): Promise<{ id: string } | { lost: string } | null> {
+  const id = inkId;
+  inkId = null;
+  const ink = desktop()?.ink;
+  if (!id || !ink) return null;
+  const bundle = await ink.finish(id).catch(() => null);
+  if (!bundle) return null;
+  bundle.audioAt = audioAt;
+  let why = "";
+  for (const wait of MARKS_TRIES) {
+    if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+    try {
+      return { id: (await api.sendMarks(bundle)).id };
+    } catch (err) {
+      why = err instanceof Error ? err.message : String(err);
+    }
+  }
+  return { lost: why };
 }
 
 // ---------------------------------------------------------------------------

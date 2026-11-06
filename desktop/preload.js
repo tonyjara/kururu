@@ -269,6 +269,24 @@ if (isPicker) {
       /** A mark just made on a page: its number, and where its pin is in the tab's box, for the comment's popover. */
       onMarkMade: (listener) => relayOn("kururu:browser-mark-made", (tabId, n, at) => listener(String(tabId), Number(n), { x: Number(at && at.x), y: Number(at && at.y) })),
     },
+    /**
+     * The screen pen (`desktop/ink.js`): ink over every display, one picture
+     * per burst. The window starts a session with no voice, whose marks go
+     * into its Kuru box; the window or the pill gives a recording a pen. The
+     * page that owns the session is told to send or drop (`onEvent`) and
+     * asks for the bundle, which it posts to its server. Nothing here names a
+     * file or a window: main holds the pictures, and checks every sender.
+     */
+    ink: {
+      start: (voice) => ipcRenderer.invoke("kururu:ink-start", voice === true),
+      state: () => ipcRenderer.invoke("kururu:ink-state"),
+      pen: (on) => ipcRenderer.send("kururu:ink-pen", typeof on === "boolean" ? on : null),
+      done: () => ipcRenderer.send("kururu:ink-done"),
+      drop: () => ipcRenderer.send("kururu:ink-drop"),
+      finish: (id) => ipcRenderer.invoke("kururu:ink-finish", String(id)),
+      cancel: (id) => ipcRenderer.send("kururu:ink-cancel", String(id)),
+      onEvent: (listener) => relayOn("kururu:ink", (event) => listener(event && typeof event === "object" ? event : {})),
+    },
     notes: {
       popOut: (ask) => ipcRenderer.invoke("kururu:note-pop", ask && typeof ask === "object" ? ask : {}),
       list: () => ipcRenderer.invoke("kururu:note-list"),

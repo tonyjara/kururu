@@ -227,6 +227,13 @@ class TalkKey extends EventEmitter {
     this.keyAnswerTimer = null;
     /** The page did not answer a key, and is loaded again once the keys stop. */
     this.deafTimer = null;
+    /**
+     * Asked about every Escape the hook hears before it goes to the pill:
+     * true when the key was the screen pen's, which lifts the pen with it
+     * (`Ink.takeEscape`) and must not also drop the clip.
+     * @type {(() => boolean) | null}
+     */
+    this.escapeFilter = null;
   }
 
   state() {
@@ -378,6 +385,8 @@ class TalkKey extends EventEmitter {
         this.helperHeld = false;
         break;
       case "escape":
+        if (this.escapeFilter?.()) return;
+        break;
       case "chord":
         break;
       default:

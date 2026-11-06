@@ -23,6 +23,7 @@ import { DEFAULT_VOICE } from "../../../shared/voice";
 import { desktop } from "../desktop";
 import { useKururu } from "../session";
 import { applyTalkGesture, installSpeech, setSpeechVolume, setVoiceProfile, useVoiceUi, voiceNow } from "../voice";
+import { installInk, useInk } from "../ink";
 import { installReload } from "../reload";
 import { VoicePill } from "./VoicePill";
 
@@ -84,6 +85,7 @@ if (import.meta.hot && typeof location !== "undefined" && new URLSearchParams(lo
 export function Pill() {
   const { snapshot, voice } = useKururu();
   const ui = useVoiceUi();
+  const ink = useInk();
   const profileRef = useRef("");
   profileRef.current = snapshot?.profile.id ?? "";
   const voiceRef = useRef(voice);
@@ -96,6 +98,8 @@ export function Pill() {
     setVoiceProfile(() => profileRef.current);
     setSpeechVolume(() => voiceRef.current?.settings.volume ?? DEFAULT_VOICE.volume);
     const stopSpeech = installSpeech();
+    // The screen pen's sessions with the voice are this page's while it is the voice client.
+    const stopInk = installInk();
     // Reloaded with the window when an agent asks, only while it is idle and
     // so hidden: this page is where the voice module runs, and an old copy of
     // it left behind by a hot update is the one that kept the microphone.
@@ -112,6 +116,7 @@ export function Pill() {
     console.log(`up${desktop()?.voice ? "" : ", with no bridge"}`);
     return () => {
       stopSpeech();
+      stopInk();
       stopReload();
       stopKeys();
       stopLocate();
@@ -132,7 +137,8 @@ export function Pill() {
     const pill = root.current?.querySelector(".voice-pill");
     const box = pill?.getBoundingClientRect();
     bridge.report({ phase: ui.phase, width: box?.width ?? 0, height: box?.height ?? 0, key, locating: here });
-  }, [ui.phase, ui.text, ui.detail, ui.toggled, key, here]);
+    // The pen's buttons come and go with its session, and the panel is sized to them.
+  }, [ui.phase, ui.text, ui.detail, ui.toggled, key, here, ink.state.on, ink.state.pen]);
 
   return (
     <div className="pill-page-root" ref={root}>

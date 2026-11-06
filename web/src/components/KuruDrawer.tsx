@@ -158,6 +158,7 @@ import { REPLY_ME, replyClock, replyReference, splitReply, withReply, type Reply
 import { TAP_MS, type OutboxState, type VoiceSettings } from "../../../shared/voice";
 import { chipsIn, filesStillIn, piecesOf, type Chip } from "../../../shared/chips";
 import { escapePath, handoverFrom, isFileDrag } from "../drop";
+import { clearInkNote, hasPen, pencil, useInk } from "../ink";
 import { kuruLive, kuruWorking, setKuruSearchExit, takeKuruSearch, takeKuruWords, useKuruDrawer, type KuruLive } from "../kuru";
 import { firstLine, foldKeys, foldText, isFolded, isLong, readFolds, useFoldLong, withFold, withFolds, writeFolds, type Folds } from "../kurufold";
 import { foldInline, replyTree } from "../kurumd";
@@ -174,7 +175,7 @@ import { PinButton, PinsButton, PinsList } from "./KuruPins";
 import { MadeInline } from "./MadeLinks";
 import { quotable } from "./Quote";
 import { Mascot } from "./Status";
-import { MicIcon, PlaneIcon, SpeakerIcon, SpeakerOffIcon } from "./VoiceIcons";
+import { MicIcon, PenIcon, PlaneIcon, SpeakerIcon, SpeakerOffIcon } from "./VoiceIcons";
 import { hueStyle } from "./NodeChip";
 
 /** How close to the foot the list has to be for a new item to keep it there. Reading something older must not be yanked away. */
@@ -2454,6 +2455,24 @@ function Composer({
       }
     });
   };
+  /**
+   * The pencil beside the mic: the screen pen with no voice, for when the
+   * user cannot talk. Pressed, the pen goes down over every display; the
+   * marks made with it come into this box as chips when it is pressed again
+   * or the overlay's Done is — `ink.ts` puts them in through
+   * `insertInKuru`, the road a browser tab's marks take — and the user
+   * writes about them and sends. With the pen down the overlay is over this
+   * window too, so the line says how to get back to it.
+   */
+  const ink = useInk();
+  const penOn = ink.state.on && !ink.state.voice;
+  const penSaid = penOn
+    ? ink.state.pen
+      ? `Drawing on the screen${ink.state.marks ? ` — ${ink.state.marks} mark${ink.state.marks === 1 ? "" : "s"}` : ""}. Done on the screen puts them here; Esc or ⌃⌥⌘D lifts the pen.`
+      : "The pen is up. Press the pencil, or Done on the screen, to put the marks here."
+    : ink.keeping
+      ? "Keeping the marks…"
+      : ink.note;
   // The drawer closed while it listened: what was said is still heard, and
   // kept in the draft, rather than a microphone left open with nothing to stop it.
   useEffect(
@@ -2504,6 +2523,11 @@ function Composer({
             : said === "hearing"
               ? "Hearing…"
               : `${unheard} Hold or tap the mic to try again.`}
+        </p>
+      )}
+      {penSaid && (
+        <p className={`kuru-handing ${penOn || ink.keeping ? "kuru-dictating" : "kuru-handing-refused"}`} role="status" onClick={clearInkNote}>
+          {penSaid}
         </p>
       )}
       {toPeer && (
@@ -2639,6 +2663,26 @@ function Composer({
         >
           <MicIcon />
         </button>
+        {hasPen() && (
+          <button
+            type="button"
+            className={`kuru-mic ${penOn ? "kuru-mic-listening" : ""}`}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={pencil}
+            disabled={ink.state.on && ink.state.voice}
+            title={
+              penOn
+                ? "Put the marks in the box"
+                : ink.state.on
+                  ? "The pen is with a recording; send it first"
+                  : "Draw on the screen, without talking — the marks come into this box for you to write about"
+            }
+            aria-label={penOn ? "Put the marks in the box" : "Draw on the screen"}
+            aria-pressed={penOn}
+          >
+            <PenIcon />
+          </button>
+        )}
       </div>
     </form>
   );

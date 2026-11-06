@@ -198,6 +198,7 @@ function createTray({ runner, talk, notes, version, packaged, actions }) {
     "talk-permission": () => talk.openInputMonitoring(),
     "talk-altspace": () => talk.setAltSpace(!talk.altSpace),
     "reset-pill": () => talk.resetPlace(),
+    annotate: () => actions.annotate(),
     "notes-show-all": () => notes.showAll(),
     "notes-hide-all": () => notes.hideAll(),
     "source-app": () => switchSource({ source: "app", checkout: readDesktop().checkout }),

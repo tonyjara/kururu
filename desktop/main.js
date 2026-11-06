@@ -44,6 +44,7 @@ const { NoteWindows } = require("./notes");
 const { BrowserPool } = require("./browser");
 const { fetchNodes, nodeChoices, whyNot } = require("./nodes");
 const { TalkKey } = require("./talkkey");
+const { Ink } = require("./ink");
 const { createTray } = require("./tray");
 const { editMenuTemplate } = require("./editmenu");
 const { QuitGate, listenForSignals } = require("./quit");
@@ -170,6 +171,29 @@ const talk = new TalkKey({
   saved: readDesktop(),
   save: writeDesktop,
 });
+
+/**
+ * The screen pen (`ink.js`): ink over every display while a session is on,
+ * one picture per burst through the helper (`glance/`), built beside the
+ * talk key's hook into `dist/` and shipped with it. A session with the voice
+ * belongs to the voice client — the pill's page while the hook or ⌥Space
+ * floats one, the window's otherwise — and one without to the window, whose
+ * Kuru box the marks go into. `KURURU_GLANCE` points an isolated instance at
+ * another build of the helper, or at nothing.
+ */
+const ink = new Ink({
+  helperPath:
+    process.env.KURURU_GLANCE || (PACKAGED ? path.join(process.resourcesPath, "server", "glance") : path.join(__dirname, "dist", "glance")),
+  pagePath: path.join(__dirname, "ink.html"),
+  preloadPath: path.join(__dirname, "inkpreload.js"),
+  // The pill's page while it is the voice client — the hook live, or ⌥Space — as `wiring.ts` decides it for the window.
+  voiceClient: () => ((talk.status === "live" || talk.altSpace) && talk.panelContents()) || (win && !win.isDestroyed() ? win.webContents : null),
+  mainWindow: () => (win && !win.isDestroyed() ? win.webContents : null),
+  pill: () => (talk.panel && !talk.panel.isDestroyed() ? talk.panel : null),
+  debug: !PACKAGED,
+});
+// The hook hears every Escape, and one that lifted the pen is not the pill's to drop a clip with.
+talk.escapeFilter = () => ink.takeEscape();
 
 /**
  * The cards popped out as windows over every application. Their pages come
@@ -975,6 +999,40 @@ talk.on("change", (state) => {
 });
 
 /**
+ * The screen pen, across the bridge. A session with the voice may be asked
+ * for by the window or the pill (its pen button gives a recording a pen);
+ * one without only by the window, whose box it fills. Only the session's
+ * owner takes the bundle or drops it; the window, the pill and the overlays
+ * may press the pen, Done and ✕. The overlays' own channel (`ink:*`) is
+ * checked in `ink.js` against the overlays of the session that is on.
+ */
+ipcMain.handle("kururu:ink-start", (event, voice) => {
+  if (voice === true) return ink.isOurs(event.sender) ? ink.start({ voice: true }) : ink.state();
+  if (!win || win.isDestroyed() || event.sender.id !== win.webContents.id) return ink.state();
+  return ink.start({ voice: false, asker: event.sender });
+});
+ipcMain.handle("kururu:ink-state", () => ink.state());
+ipcMain.on("kururu:ink-pen", (event, on) => {
+  if (ink.isOurs(event.sender) && ink.session) ink.setPen(typeof on === "boolean" ? on : !ink.session.pen);
+});
+ipcMain.on("kururu:ink-done", (event) => ink.send(event.sender));
+ipcMain.on("kururu:ink-drop", (event) => ink.drop(event.sender));
+ipcMain.handle("kururu:ink-finish", (event, id) => ink.finish(event.sender, String(id)));
+ipcMain.on("kururu:ink-cancel", (event, id) => {
+  if (ink.session && event.sender.id === ink.session.owner.id) ink.cancel(String(id), null);
+});
+ipcMain.on("ink:begin", (event, raw) => ink.begin(event.sender, raw));
+ipcMain.on("ink:points", (event, raw) => ink.points(event.sender, raw));
+ipcMain.on("ink:end", (event, raw) => ink.lift(event.sender, raw));
+ipcMain.on("ink:hover-bar", (event, on) => ink.hoverBar(event.sender, on === true));
+ipcMain.on("ink:bar", (event, what) => {
+  if (!ink.overlayOf(event.sender) || !ink.session) return;
+  if (what === "pen") ink.setPen(!ink.session.pen);
+  else if (what === "done") ink.send(event.sender);
+  else if (what === "drop") ink.drop(event.sender);
+});
+
+/**
  * The notes, across the bridge. Only the main window pops a card out, and
  * only a card of the server the notes come from, since that is the page a
  * note loads — the window on another server keeps its notes in the page,
@@ -1152,6 +1210,8 @@ app.whenReady().then(async () => {
         if (result.error) dialog.showErrorBox("Kururu could not open that node", result.error);
       },
       quit: () => app.quit(),
+      // ⌃⌥⌘D's start, for whoever would rather find it in a menu.
+      annotate: () => void ink.start({ voice: true }),
       serverChanged: () => {
         pointPill();
         void followPage();
@@ -1165,6 +1225,7 @@ app.whenReady().then(async () => {
     },
   });
   runner.startProbing();
+  ink.register();
 
   // The hook and the pill come up with the app if they were on when it last quit.
   if (talk.enabled || talk.altSpace) {
@@ -1272,6 +1333,7 @@ async function confirmQuit() {
 
 function finishQuit(alsoAgents) {
   quit.quitting = true;
+  ink.dispose();
   talk.dispose();
   notes.dispose();
   tray?.destroy();
@@ -1281,6 +1343,7 @@ function finishQuit(alsoAgents) {
 }
 
 app.on("will-quit", () => {
+  ink.dispose();
   talk.dispose();
   notes.dispose();
 });
@@ -1416,6 +1479,7 @@ function installUpdate() {
   quit.quitting = true;
   stopSweeping();
   stopWatchingServer();
+  ink.dispose();
   talk.dispose();
   notes.dispose();
   tray?.destroy();
@@ -1436,6 +1500,7 @@ ipcMain.on("kururu:update-install", () => installUpdate());
 function stopOnSignals() {
   listenForSignals((signal) => {
     quit.quitting = true;
+    ink.dispose();
     talk.dispose();
     notes.dispose();
     void runner.stop(`the app was stopped by ${signal}`).finally(() => app.quit());

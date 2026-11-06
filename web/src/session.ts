@@ -1780,8 +1780,8 @@ export function downloadVoiceModel(): void {
  * why it was not taken: the server down or restarting, or refusing it.
  * Sending the same id twice is the same message, so a retry is always safe.
  */
-export async function sendClip(clip: { id: string; profileId: string; at: number; wav: ArrayBuffer }): Promise<OutboxEntry | null> {
-  const query = new URLSearchParams({ profile: clip.profileId, id: clip.id, at: String(clip.at) });
+export async function sendClip(clip: { id: string; profileId: string; at: number; wav: ArrayBuffer; marks?: string }): Promise<OutboxEntry | null> {
+  const query = new URLSearchParams({ profile: clip.profileId, id: clip.id, at: String(clip.at), ...(clip.marks ? { marks: clip.marks } : {}) });
   const res = await fetch(`/api/voice/hear?${query}`, {
     method: "POST",
     headers: { "content-type": "audio/wav" },

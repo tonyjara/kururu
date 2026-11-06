@@ -18,6 +18,7 @@ import { desktop } from "./desktop";
 import { isFileDrag } from "./drop";
 import { drawerChord, type Action } from "./keys";
 import { announce, primeAudio, primeNotifyPermission } from "./notify";
+import { installInk } from "./ink";
 import { installReload } from "./reload";
 import { isLoopback } from "./preview";
 import * as api from "./session";
@@ -201,6 +202,9 @@ export function useVoiceWiring(voice: VoiceStatus | null, profileId: string): vo
     setSpeechVolume(() => voiceRef.current?.settings.volume ?? DEFAULT_VOICE.volume);
     const stopKey = installTalkKey(() => voiceRef.current?.settings.talkKey ?? DEFAULT_VOICE.talkKey);
     const stopSpeech = installSpeech();
+    // The screen pen: this window owns a session with no voice, and one with
+    // the voice while it is the voice client (`ink.ts`).
+    const stopInk = installInk();
     /**
      * In the desktop window, whether the key is hooked system-wide. While it
      * is, the floating pill is the voice client and this page hands its
@@ -217,6 +221,7 @@ export function useVoiceWiring(voice: VoiceStatus | null, profileId: string): vo
     return () => {
       stopKey();
       stopSpeech();
+      stopInk();
       stopGlobal();
       setVoiceRemote(null);
     };
