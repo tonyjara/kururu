@@ -15,15 +15,14 @@
  * you want depends on where you are, which this cannot know — so it shows both
  * and lets the phone choose by which one it can reach.
  *
- * **The URL is built from `window.location`, not from the server's port**, and
- * that is the one decision in here worth the paragraph. In dev the window is
- * loaded from vite on 5173 and the kururu server is on 7717 behind it; the phone
- * pointed at 7717 would get `web/dist`, which in dev is whatever was last built
- * — a stale app, talking to a live server, with nothing on screen to say so. So
- * the code encodes *the page you are looking at*, at somebody else's address,
- * and the phone gets what the desktop has. `reach.port` is still fetched, and is
- * drawn as a note when the two differ, because "why is my phone a commit
- * behind" is otherwise a long afternoon.
+ * **The URL is built from the server's port, never from `window.location`.**
+ * In dev the window is loaded from vite on 5173, and vite listens on loopback
+ * only: a code built from the page's own port handed the phone an address it
+ * could not open, and one that moved with the window. The server's port is
+ * fixed, so the code is too (`reachLink` in `shared/wire.ts`, which `bun run
+ * share` builds with as well). What the phone gets there is `web/dist`, which
+ * in dev may be a build behind the window; the note under the codes says so
+ * when the window is being served from somewhere else.
  *
  * It re-asks while it is open. Interfaces raise no event, and the thing people
  * will actually do when this says tailscale is down is turn tailscale on and
@@ -39,7 +38,7 @@
  */
 import { useEffect, useState } from "react";
 import type { Reach as ReachInfo, Sharing } from "../../../shared/wire";
-import { REACH_POLL_MS } from "../../../shared/wire";
+import { REACH_POLL_MS, reachLink, reachOrigin } from "../../../shared/wire";
 import { qrMatrix } from "../../../shared/qr";
 import type { NodeStatus, NodesView } from "../../../shared/nodes";
 import { nodeState } from "../nodes";
@@ -174,8 +173,10 @@ export function Reach({ onClose }: { onClose: () => void }) {
   const lan = reach?.lan ?? [];
   const address = chosen && lan.includes(chosen) ? chosen : lan[0];
   // The port the *window* came from, which in dev is vite and not the server.
+  // It is only ever compared, for the note; no link is built with it.
   const port = window.location.port;
-  const origin = (host: string) => `${window.location.protocol}//${host}${port ? `:${port}` : ""}`;
+  const serverPort = reach?.port ?? 0;
+  const origin = (host: string) => reachOrigin(host, serverPort);
   /**
    * The code carries the token and the line under it does not, which is a
    * deliberate split rather than an oversight. The code is the thing a phone
@@ -185,8 +186,7 @@ export function Reach({ onClose }: { onClose: () => void }) {
    * on the end of it would make impossible, as well as putting it on screen in
    * every screenshot of this dialog anybody ever takes.
    */
-  const url = (host: string) =>
-    reach?.shared ? `${origin(host)}/?k=${encodeURIComponent(reach.token)}` : origin(host);
+  const url = (host: string) => reachLink(host, serverPort, reach?.shared ? reach.token : null);
 
   return (
     <div className="scrim" onPointerDown={onClose}>
@@ -252,13 +252,12 @@ export function Reach({ onClose }: { onClose: () => void }) {
         {failed && !reach && (
           <p className="reach-note">Asking the server… it may be restarting.</p>
         )}
-        {/* In dev the window is vite's and the server is behind it. Both work,
-            and which one the phone gets decides whether it sees today's code. */}
+        {/* In dev the window is vite's and the server is behind it. The codes
+            are the server's, so the phone gets what was last built. */}
         {reach && port && port !== String(reach.port) && (
           <p className="reach-note">
-            Serving from <code>:{port}</code>, with the kururu server on{" "}
-            <code>:{reach.port}</code> behind it — so the phone gets this build, not the
-            last one written to <code>web/dist</code>.
+            This window is served from <code>:{port}</code>; the phone opens the kururu server
+            on <code>:{reach.port}</code>, which serves the last build in <code>web/dist</code>.
           </p>
         )}
 

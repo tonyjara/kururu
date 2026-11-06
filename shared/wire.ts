@@ -83,6 +83,30 @@ export interface Reach {
 export const REACH_POLL_MS = 3000;
 
 /**
+ * The address another device opens: this machine's LAN or tailnet address and
+ * the port the kururu server listens on, never the port the page drawing it
+ * came from.
+ *
+ * It was once the page's own port, so that a window loaded from vite in dev
+ * would hand the phone the same fresh build. But vite listens on loopback only,
+ * so the phone was handed `:5173`, an address nothing on it can open, and the
+ * port moved whenever the window did. The server's port is the one fixed thing:
+ * it is what `servers.json` names, what `bun run share` prints and what a node
+ * is paired at. A phone a build behind is the lesser fault, and `bun run
+ * build:web` mends it. Always `http:`, because that is what the server speaks;
+ * `tailscale serve` in front of it is the user's to set up and has an address
+ * of its own.
+ */
+export function reachOrigin(host: string, port: number): string {
+  return `http://${host.includes(":") ? `[${host}]` : host}:${port}`;
+}
+
+/** That address with the token on it as `?k=`, which is what the QR code holds; without a token, the bare address. */
+export function reachLink(host: string, port: number, token: string | null): string {
+  return `${reachOrigin(host, port)}/${token ? `?k=${encodeURIComponent(token)}` : ""}`;
+}
+
+/**
  * Whether this server can be reached from anywhere but the machine it is on, and
  * the secret that makes that safe — the rest of the answer to `GET /api/reach`.
  *

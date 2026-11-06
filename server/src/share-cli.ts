@@ -19,6 +19,7 @@
  *   bun run share --rotate  a new token first, which is "that phone is not mine any more"
  */
 import type { Reach, Sharing } from "../../shared/wire";
+import { reachLink } from "../../shared/wire";
 import { qrMatrix } from "../../shared/qr";
 import { tokenHeaders } from "../localtoken.mjs";
 
@@ -39,7 +40,7 @@ export function shareUrl(answer: ReachAnswer): string | null {
   const specific = bound && !["0.0.0.0", "::", "127.0.0.1", "::1", "localhost"].includes(bound) ? bound : null;
   const host = specific ?? answer.tailscale ?? answer.lan[0] ?? null;
   if (!host) return null;
-  return `http://${host}:${answer.port}/?k=${encodeURIComponent(answer.token)}`;
+  return reachLink(host, answer.port, answer.token);
 }
 
 /**

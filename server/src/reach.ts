@@ -32,10 +32,10 @@ import type { Reach } from "../../shared/wire";
  * Three notes on the shape, which lives in `shared/wire.ts` because the dialog
  * that draws it is in the browser.
  *
- * `port` is advisory. A client builds its URL from the port it is *itself*
- * loaded from, since in dev that is vite on 5173 and handing the phone 7717
- * would serve it a stale build of the app; this is here so the dialog can say
- * when the two differ.
+ * `port` is the port every link to this machine is built with (`reachLink` in
+ * `shared/wire.ts`), whatever port the page asking was itself loaded from — in
+ * dev that is vite on 5173, which listens on loopback only and so is no
+ * address for a phone.
  *
  * `lan` is a list because a machine on Wi-Fi and Ethernet at once has two, and
  * which of them the phone can see is a question only the phone can answer — so

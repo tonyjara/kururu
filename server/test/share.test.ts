@@ -5,6 +5,7 @@
 import { describe, expect, it } from "bun:test";
 import { qrLines, shareUrl, type ReachAnswer } from "../src/share-cli";
 import { qrMatrix } from "../../shared/qr";
+import { reachLink, reachOrigin } from "../../shared/wire";
 
 const base: ReachAnswer = { port: 7717, lan: ["192.168.1.20"], tailscale: "100.101.102.103", shared: true, wanted: true, token: "t0k/en", restartable: true };
 
@@ -45,5 +46,17 @@ describe("qrLines", () => {
     // Row 4 is the code's first row; its fifth cell is the top-left finder's corner.
     const cells = lines[2]!.match(/\x1b\[(\d+);(\d+)m▀/g)!;
     expect(cells[4]).toBe("\x1b[30;40m▀");
+  });
+});
+
+describe("reachLink", () => {
+  it("is the server's port and the token, whatever port a page was loaded from", () => {
+    expect(reachLink("100.101.102.103", 7717, "t0k/en")).toBe("http://100.101.102.103:7717/?k=t0k%2Fen");
+    expect(reachOrigin("192.168.1.20", 7717)).toBe("http://192.168.1.20:7717");
+  });
+
+  it("is the bare address with no token, and brackets an IPv6 one", () => {
+    expect(reachLink("192.168.1.20", 7717, null)).toBe("http://192.168.1.20:7717/");
+    expect(reachOrigin("fd7a:115c::1", 7717)).toBe("http://[fd7a:115c::1]:7717");
   });
 });

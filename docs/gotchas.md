@@ -36,12 +36,18 @@ Things that fail with an error naming something other than the cause.
   somewhere the window is not looking. `lsof -nP -iTCP:5173 -sTCP:LISTEN` shows
   every holder.
 - **A phone on vite reloaded every time Safari came back to the front.** In dev
-  the Share dialog points the phone at 5173, and vite's client reads a dropped
-  HMR socket as vite restarting: it polls, then `location.reload()`. iOS kills a
-  backgrounded page's sockets, so every return rebuilt the whole page.
+  the Share dialog used to point the phone at 5173, and vite's client reads a
+  dropped HMR socket as vite restarting: it polls, then `location.reload()`. iOS
+  kills a backgrounded page's sockets, so every return rebuilt the whole page.
   `web/src/main.tsx` holds that reload on any non-loopback page, and the phone
   keeps the code it loaded until it is reloaded by hand. The tell is a live
   connection from a `100.x` address in `lsof -nP -iTCP:5173 -sTCP:ESTABLISHED`.
+- **The Share dialog's code is the server's port, never the window's.** It was
+  built from `window.location`, so a dev window on vite handed the phone `:5173`,
+  which vite serves to loopback only, and the code moved with the window. It is
+  `reachLink` in `shared/wire.ts` now, with the server's own port, as `bun run
+  share` and a node's pairing already were. The phone gets `web/dist` there, so
+  in dev it is as new as the last `bun run build:web`.
 - **Any process that has loaded Kokoro aborts when it exits.** `onnxruntime-node`
   (1.21) fails in a static destructor on the way out (`libc++abi: terminating
   … mutex lock failed: Invalid argument`), so the exit becomes SIGABRT and a
