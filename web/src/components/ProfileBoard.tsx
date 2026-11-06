@@ -673,6 +673,18 @@ function ProfileCard({
           mark={card.column === NEEDS_COLUMN && card.needsBy && <NeedsByMark by={card.needsBy} />}
           when={card.dates && <CardWhen dates={card.dates} />}
         >
+          {/* The menu's "Pop out as a note" again, as a button of its own,
+              because it is the row pressed far more than any other on this
+              board. The menu keeps it, so the list stays the whole list. */}
+          <button
+            type="button"
+            className="board-icon-btn"
+            title="Pop out as a note, over the window"
+            aria-label="Pop out as a note"
+            onClick={() => popOutNote(card.id)}
+          >
+            <Icon name="pin" />
+          </button>
           <button
             className="board-icon-btn"
             title="Move, send to a workspace, edit or delete"

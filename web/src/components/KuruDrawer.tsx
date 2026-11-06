@@ -162,6 +162,7 @@ import { kuruLive, kuruWorking, setKuruSearchExit, takeKuruSearch, takeKuruWords
 import { firstLine, foldKeys, foldText, isFolded, isLong, readFolds, useFoldLong, withFold, withFolds, writeFolds, type Folds } from "../kurufold";
 import { foldInline, replyTree } from "../kurumd";
 import { useKuruSearch } from "../kurusearch";
+import { fingerPointer } from "../terminals";
 import { isLoopback } from "../preview";
 import * as api from "../session";
 import { useKururu } from "../session";
@@ -2298,6 +2299,30 @@ function Composer({
   // cursor still in the box must not leave the prefix believing a field has
   // the keyboard.
   useEffect(() => () => onEditing(false), [onEditing]);
+  /**
+   * The drawer opened, from shut: the keyboard goes to the box, at the caret
+   * it was left at, since the drawer is opened to say something far more
+   * often than only to read. The composer is mounted with the drawer and
+   * not again while it is up, so its first effect is the opening, whatever
+   * did it — the button, the key or a link into a reply. A frame later, so
+   * that a search opened with the drawer, or anything else in it that took
+   * a field first, keeps it. Not on a touch screen: a focused box there is a
+   * keyboard over half the conversation nobody asked to see.
+   */
+  useEffect(() => {
+    if (fingerPointer()) return;
+    const frame = requestAnimationFrame(() => {
+      const el = field.current;
+      if (!el || el.focused) return;
+      const now = document.activeElement;
+      if (now instanceof HTMLElement && now.closest(".kuru-drawer") && now.matches("input, textarea, select, [contenteditable]")) return;
+      el.focus();
+      const at = carets.get(profileId) ?? { from: el.value.length, to: el.value.length };
+      requestAnimationFrame(() => el.setSelectionRange(at.from, at.to));
+    });
+    return () => cancelAnimationFrame(frame);
+    // Only the opening, not a profile switch under an open drawer.
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   /**
    * Words put in from outside — a card's reference, off its menu — at the
    * cursor, unsent, with the keyboard back in the box to go on typing. Taken
