@@ -829,7 +829,7 @@ schemes stay refused.
 | 4 | to an agent, to a card; chips everywhere | S–M | server, `web/`, `shared/chips.ts` |
 | 5 | `/mcp/browser`: tabs, look, console, marks loop, act | M | server (launch flags, like `/mcp/web`); reaches agents started after it |
 | 6 | *(optional)* a CDP relay for Playwright MCP / chrome-devtools-mcp | M | `desktop/` |
-| 7 | *(optional)* a Chrome extension, marking only | M + S | a new `extension/` folder, server (pairing, one origin) |
+| 7 | ~~a Chrome extension, marking only~~ **dropped** 2026-11-06 for the screen pen ([screen-annotate](screen-annotate.md)) | — | — |
 
 The sizes are relative: S is a day of an agent's work with verification, L
 about a week. They are guesses from the research and the files they touch,
@@ -1029,7 +1029,11 @@ The endpoint goes to an agent through `browser_tabs`. Agents can't add an MCP
 server mid-session, so in practice this is for an agent started with that
 server configured. That is a real limit and the reason this is optional.
 
-### Phase 7 (optional): a Chrome extension, marking only
+### Phase 7 (dropped): a Chrome extension, marking only
+
+**Dropped on 2026-11-06** (KUR-241): the screen pen of
+[screen-annotate](screen-annotate.md) points at pages in the user's own
+Chrome, and the built-in browser keeps the DOM facts. Kept below for the record.
 
 Only when a Google sign-in, or another login, cannot be done in the built-in
 browser (decided). Until then, nothing of it is built beyond the design rule

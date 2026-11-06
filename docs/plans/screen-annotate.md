@@ -1,8 +1,9 @@
 # A pen on the whole screen, tied to what was said
 
 A plan, written 2026-11-06 from a read of the tree at `1074bd0` (browser
-phases 0 and 1 built), of `docs/voice.md`, and of the prior art below.
-**Nothing here is built.**
+phases 0 and 1 built), of `docs/voice.md`, and of the prior art below; the
+user's answers folded in the same day ([what they decided](#what-the-user-decided)).
+**Phase 1 is being built**; nothing after it is.
 It is written so that an agent can take one phase, read the files it names,
 and know what "done" is.
 
@@ -15,43 +16,31 @@ those words, so Kuru or an agent knows what was meant. No video of every
 frame, which is wasteful; optimised. Possibly a better road than the browser
 marks of [browser-annotate](browser-annotate.md).
 
-## Questions for the user
+## What the user decided
 
-Each has the plan's default, which the phases are written to; a different
-answer changes the phase that names it, and nothing else.
+Answered on card KUR-241, 2026-11-06, and approved with "start the plan now".
+Each answer below replaces the question that stood here; the phases are
+written to them.
 
-1. **When you finish, where does it go?** *Default:* straight to Kuru as the
-   turn, as the talk key's send does today, through the outbox, so nothing you
-   said is lost. *Other road:* into Kuru's box unsent, as browser marks go, so
-   you read the transcript first. (The box is also offered from the drawer —
-   [phase 4](#phase-4-the-same-send-as-the-browsers-marks).)
-2. **How is the pen held?** *Default for phase 1:* a shortcut that toggles it
-   (⌃⌥⌘D is proposed; it needs no permission and works when the talk-key hook
-   is denied), plus the pill's pen button. Pen off is clicks through to the app
-   under it, so you can switch a tab and pen on again. *Phase 2 adds:* hold a
-   key to draw (⌥ by default), let go and the mouse is the app's again. Do you
-   want hold-to-draw at all, and on which key?
-3. **Does the ink fade?** *Default:* a burst fades three seconds after the pen
-   last lifted, like a laser pointer, because its picture is already taken and
-   old ink over a screen that has moved on misleads. *Other road:* ink stays
-   until the session ends, as Slack's does until you clear it.
-4. **How much of the screen is kept?** *Default:* per burst, a crop around
-   the ink at full resolution and the whole display shrunk to 1568 px on its
-   long edge, both with the ink drawn in; Kuru reads the crop first and the
-   display only if it needs to. *Other road:* crops only, which keeps less of
-   whatever else was on that display (a chat, a mail) but loses "where on the
-   screen".
-5. **A pen with no voice?** *Default:* no, in phase 1: the pen is part of a
-   recording, and a session with ink and no words sends the marks with
-   "(nothing said)". Later, a typed comment per mark, as the browser's popover
-   does.
-6. **Other browsers' addresses.** Reading the URL of the tab you drew on in
-   Safari, Chrome or Arc needs macOS's Automation prompt, once per browser
-   ("Kururu wants to control Google Chrome"). *Default:* behind a switch, off,
-   in [phase 3](#phase-3-addresses-in-other-browsers). Without it, the window's
-   title is what Kuru gets, which for a browser is the page's title.
-7. **Browser-annotate's phase 7 (a Chrome extension, marking only)** is
-   dropped in favour of this — see [the fit](#fit-with-browser-annotate). Fine?
+1. **Where a session goes:** straight to Kuru as the user's turn, through the
+   outbox, with no stop in Kuru's box to review it.
+2. **How the pen is held:** ⌃⌥⌘D toggles it, and the pill has a pen button.
+   **And in phase 1, a pen with no voice:** a pencil beside the microphone in
+   the Kuru drawer's box, added the way that mic was. Tapping it turns the pen
+   on over the screen with no recording; the marks it makes go into the box as
+   chips (`[marks N on screen (…)]` and a `[mark n …]` line each), and the user
+   types about them and sends — for the times they cannot talk. So the pen is
+   not tied to a recording; a recording is one of the two ways to have it.
+   Hold-to-draw on a key is still phase 2's, and only if wanted.
+3. **The ink fades** about three seconds after the pen last lifted, like a
+   laser pointer — in phase 1, not phase 2.
+4. **What is kept of the screen:** the whole display shrunk to 1568 px on its
+   long edge, and the crop around the ink at full resolution, both inked.
+5. **Other browsers' addresses: off.** [Phase 3](#phase-3-addresses-in-other-browsers-dropped)
+   is not built. The window's title is what a mark on another browser carries.
+6. **Browser-annotate's phase 7 (the Chrome extension) is dropped.**
+7. **The built-in browser stays** for now (its removal is a card of its own).
+   The screen pen shares its marks folder, sweep, chips and Send, as below.
 
 ## Verdict
 
@@ -183,6 +172,19 @@ sent. Phase 1 keeps it to one clip:
   recording carries on without a pen; the pill says so. Several clips in one
   session is phase 2, and only if five minutes turns out short.
 - **One session at a time**, on this Mac, in the one voice client.
+- **A session with no voice** (question 2's pencil): started from the pencil
+  in the Kuru drawer's box, with no microphone. The same overlays, pen,
+  bursts and pictures; it ends on the pencil again, the overlay's Done, or the
+  shortcut's toolbar, and its set goes into *that window's* box as the header
+  line and a `[mark n …]` line per burst, for the user to type around and
+  send. ⌃⌥⌘D during it toggles the pen as in any session.
+- **The toolbar.** Every session draws a small bar of its own at the top of
+  the display it started on — the pen's state, Done, ✕ — in the overlay, so
+  there is always a way out that does not depend on the pill being up (the
+  pill is a panel only while the talk key is hooked; without it the voice
+  client is the main window, under the ink). With the pen off the overlay
+  ignores the mouse except over the bar (`setIgnoreMouseEvents(true,
+  { forward: true })`, the page saying when the pointer is on it).
 
 **Why not "hold the talk key and draw"?** It would be lovely and it fights
 itself: a hold is one hand on right Control and the other on the trackpad,
@@ -206,12 +208,18 @@ per display in `screen.getAllDisplays()`, at the display's `bounds` (not its
   ink. Back to `floating` after.
 - **Pen off:** `setIgnoreMouseEvents(true)`; **pen on:** `false`, and a pen
   cursor and a thin accent border on every display (Slack's "this is live").
-- **The page** is the web build in a one-thing mode, `?ink=<displayId>`, the way
-  a note loads `?note=`: a full-window `<canvas>` and pointer handlers, no
-  server connection. It draws locally for zero latency and sends each stroke to
-  main as it goes: `pointerdown` → `begin`, coalesced `pointermove`
+- **The page** is `desktop/ink.html`, a file the app ships, with a preload of
+  its own (`desktop/inkpreload.js`) — not the web build in a one-thing mode,
+  as this plan first said. It needs nothing from a server: a full-window
+  `<canvas>`, pointer handlers and the toolbar. A served page would be one
+  more thing a server restart under `bun run dev`, a stale `web/dist` or a hot
+  update could break mid-session, and a stuck overlay is the one failure here
+  that costs the whole Mac. It draws locally for zero latency and sends each
+  stroke to main as it goes: `pointerdown` → `begin`, coalesced `pointermove`
   (`getCoalescedEvents`, so a fast circle is round) → `points`, `pointerup` →
   `end`. `pointerType` and `pressure` are kept, for a Pencil on Sidecar later.
+- **Fading** (question 3): a burst's ink fades out over half a second, three
+  seconds after its last stroke lifted. Its picture is already taken.
 - **Displays changing** (`display-added`, `-removed`, `-metrics-changed`)
   closes and remakes the overlays; the ink is main's, so it is drawn again.
   `talkkey.js` `watchDisplays` is the precedent and its gotchas apply.
@@ -278,8 +286,12 @@ interface InkBurst { n: number; display: number; strokes: InkStroke[]; t0: numbe
 - **Clean, then inked by us.** The helper is asked for the display *excluding*
   kururu's overlays and the pill panel (their window numbers, from
   `getMediaSourceId()`'s `window:<id>:0`), so the still has no ink at all,
-  including earlier bursts' still on screen. The overlay page then draws the
-  burst's own strokes onto it on an `OffscreenCanvas` and hands back two PNGs:
+  including earlier bursts' still on screen. The helper keeps the still in
+  memory until the burst ends, then draws the burst's own strokes onto it
+  with Core Graphics and writes the two files itself (`ink`, below) — rather
+  than the overlay page compositing on an `OffscreenCanvas`, as first
+  planned, which would carry a 5K still across two process boundaries and
+  back as PNG bytes for every burst:
   - `mark-<n>.png`: the burst's box plus a margin (about 25% and at least 120
     points), at the display's **native pixels**. On a 5K display a crop is
     where text is still readable.
@@ -323,6 +335,8 @@ a still costs tens of milliseconds, not a cold start. JSON lines:
 | `{"op":"shot","id":…,"display":<CGDirectDisplayID>,"exclude":[<windowNumber>…],"path":…}` | `{"id":…,"ok":true,"width":…,"height":…,"scale":…}` — `SCScreenshotManager.captureImage` with an `SCContentFilter(display:excludingWindows:)`, written as a PNG at a path main chose under the set's temporary folder, at the display's native pixels |
 | `{"op":"under","x":…,"y":…}` (global points) | `{"app":"Safari","bundle":"com.apple.Safari","pid":…,"window":"Stripe — Payments","bounds":{…},"display":…}` — the topmost on-screen window at that point that is not ours, from `CGWindowListCopyWindowInfo` (its title needs Screen Recording, which we have) |
 | `{"op":"secure"}` | `{"secure":true}` — `IsSecureEventInputEnabled()`: something has a password field focused |
+| `{"op":"ink","id":…,"strokes":[[[x,y],…],…],"box":{…},"crop":…,"frame":…}` | the still `shot` kept under that id, with the strokes drawn on it, written as the crop PNG and the shrunk frame JPEG at the paths given; the still is then let go |
+| `{"op":"drop","id":…}` | a kept still let go unused (a cancelled session) |
 
 - **"Under the stroke", not "frontmost".** You can circle something on the
   second display while the app in front is on the first; the window under the
@@ -374,7 +388,7 @@ a still costs tens of milliseconds, not a cold start. JSON lines:
 | any app | app name, bundle id, window title, the window's box; the frontmost app | 1 |
 | a kururu window | the pane, its tab: an agent's title (never a bare id, per the harness's own rule), a reader's document and heading, a card's code and title, the Dashboard; asked of the page by main ("what is at this point"), answered by `elementFromPoint` → the nearest pane and tab | 2 |
 | a kururu browser tab | the page's URL **and the element under the burst's centre**, by the marking script (`desktop/markscript.js`) in its isolated world: the same label (`button "Pay now"`), selectors and, after browser phase 3, source line as a browser mark | 2 |
-| Safari, Chrome, Arc, Brave | the front tab's URL, by AppleScript, cleaned by `cleanUrl` | 3 |
+| Safari, Chrome, Arc, Brave | the front tab's URL, by AppleScript — **dropped** (question 5); the window title only | — |
 
 The kururu rows are where this and browser-annotate meet: a circle on a
 kururu browser tab is as good as a browser mark, with the words around it for
@@ -517,7 +531,7 @@ phases.** Not a replacement:
 |---|---|---|---|
 | 1 | the pen, the pictures, the words, to Kuru | L | `desktop/` (window relaunch), `web/` (repaint), server (reconnect), a new Swift helper; **no host change** |
 | 2 | kururu-aware marks, shapes, snap, fading, deny list, hold-to-draw | M | `desktop/`, `web/`, `desktop/talkkey/` (a second key) |
-| 3 | addresses in other browsers | S | `desktop/glance/` |
+| 3 | ~~addresses in other browsers~~ dropped (question 5) | — | — |
 | 4 | the same Send as the browser's marks | S (once browser phase 4 is built) | server, `web/` |
 | 5 | the Pencil on Sidecar | S, and the user's iPad | none, if it works |
 
@@ -540,13 +554,16 @@ it and can open each picture.
   resources and signed as `talkkey` is.
 - `desktop/ink.js` (listed in `electron-builder.yml`): the session, the
   overlays per display, the pen toggle, the shortcut through `globalShortcut`
-  (⌃⌥⌘D unless question 2 says otherwise), the levels, the watchdog, display
-  changes, bursts, stills at pen-down, `under`, the post to `/api/marks`.
-- The `?ink=` page: canvas, pointer capture with coalesced events, the pen
-  cursor and border, compositing the crop and the frame. **One tool, one
-  colour, no undo.** Ink stays until the session ends (fading is phase 2).
+  (⌃⌥⌘D), Escape while the pen is on, the levels, the watchdog, display
+  changes, bursts, stills at pen-down, `under`, the bundle the owning page
+  posts to `/api/marks`.
+- `desktop/ink.html` and `desktop/inkpreload.js` (both listed): canvas,
+  pointer capture with coalesced events, the pen cursor and border, the
+  toolbar, the fade. **One tool, one colour, no undo.**
 - The pill: a pen button while a session is on, **Send**, the permission line;
   the tray's **Annotate**.
+- The Kuru drawer: the pencil beside the mic, a session with no voice whose
+  set goes into the box as chips.
 - `web/src/voice.ts`: a session is a tap-grammar recording that tells main its
   start, carries the set id on the post, and finishes at the roll.
 - `shared/ink.ts`: bursts, thinning, `alignMarks`, the screen message;
@@ -584,6 +601,9 @@ a screen set, and `marks.json` version 1 still read.
   picture", and no still is on the disk.
 - Denied Screen Recording: the pen does not turn on, and the pill says why.
 - A set is swept at 30 days with the browser's sets, by the same rule.
+- The drawer's pencil: three bursts with no microphone open give the header
+  and three mark lines in the box as chips, and nothing is sent until the
+  user sends it.
 
 ### Phase 2: kururu-aware marks, and the pen made pleasant
 
@@ -593,8 +613,8 @@ a screen set, and `marks.json` version 1 still read.
   pane, tab, agent title, document, card, Dashboard; the marking script's
   element at a point on a browser tab, with its label and selectors
 - the shape word; the label's shape prefix
-- fading ink (question 3), undo (⌘Z with the pen on, the last burst, its
-  picture dropped), a highlighter, two colours
+- undo (⌘Z with the pen on, the last burst, its picture dropped), a
+  highlighter, two colours (fading moved to phase 1)
 - **snap**: a key that takes a still of the display under the pointer with no
   ink, as a mark at that moment in the words
 - the deny list, in Settings → Voice
@@ -607,7 +627,9 @@ kururu browser tab carries the same label and selectors a browser mark made
 on the same element would; a 1Password window is absent from a frame taken
 over it; an undone burst leaves no picture in the folder.
 
-### Phase 3: addresses in other browsers
+### Phase 3: addresses in other browsers (dropped)
+
+**Not built** — question 5's answer. What it would have been, for the record:
 
 **Build:** in the helper, `url <bundle>` by AppleScript for Safari, Chrome,
 Arc, Brave and Edge (the front window's current tab, the one under the burst
@@ -623,8 +645,8 @@ appears.
 
 Once browser phase 4 is built, a screen set goes the same three ways: Kuru
 (as now), an agent (the card's first, typed as `send_agent` types, the
-paste-size rule), or a card. The drawer offers **Send to box instead** on a
-session's pill for question 1's other road.
+paste-size rule), or a card. No "Send to box instead": question 1 chose
+straight to Kuru, and the drawer's pencil is the road through the box.
 
 **Done when:** a stand-in agent receives exactly the lines; a card shows the
 chips and opens a crop on the phone's web client.
