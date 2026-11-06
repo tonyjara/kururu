@@ -42,7 +42,11 @@ import { limitLabel, limitMarks, limitTitle, resetIn, staleTitle } from "../usag
  * recorded has reset since, which is what "signed in, not used lately" looks
  * like from a rollout.
  */
-export function UsageChips({ onDetails }: { onDetails: () => void }) {
+/**
+ * `claude`, `codex` and `agy` are Settings → Bottom bar's switches, one per
+ * provider: a chip switched off is not drawn, and its numbers still arrive.
+ */
+export function UsageChips({ onDetails, claude: showClaude, codex: showCodex, agy: showAgy }: { onDetails: () => void; claude: boolean; codex: boolean; agy: boolean }) {
   const { usage, codexUsage, agyUsage } = useKururu();
   /**
    * A tick, only so the countdowns move. The numbers arrive on their own push
@@ -56,8 +60,10 @@ export function UsageChips({ onDetails }: { onDetails: () => void }) {
     return () => clearInterval(timer);
   }, []);
 
-  const claude = usage && !usage.signedOut ? usage : null;
-  if (!claude && !codexUsage && !agyUsage) return null;
+  const claude = showClaude && usage && !usage.signedOut ? usage : null;
+  const codex = showCodex ? codexUsage : null;
+  const agy = showAgy ? agyUsage : null;
+  if (!claude && !codex && !agy) return null;
   return (
     <span className="sb-usages">
       {claude && (
@@ -71,31 +77,31 @@ export function UsageChips({ onDetails }: { onDetails: () => void }) {
           onDetails={onDetails}
         />
       )}
-      {codexUsage && (
+      {codex && (
         <UsageChip
           name="Codex"
           icon={<OpenAIMark />}
-          limits={codexUsage.limits}
+          limits={codex.limits}
           stale={null}
-          foot={[codexUsage.plan && `${capitalise(codexUsage.plan)} plan`, codexUsage.at !== null && `as Codex recorded it ${when(codexUsage.at)}`]
+          foot={[codex.plan && `${capitalise(codex.plan)} plan`, codex.at !== null && `as Codex recorded it ${when(codex.at)}`]
             .filter(Boolean)
             .join(" · ") || null}
           empty={
-            codexUsage.at === null
+            codex.at === null
               ? "No Codex session on this Mac has recorded its limits yet."
-              : `Every window it last recorded, ${when(codexUsage.at)}, has reset since. Codex writes its limits into each session, so the next Codex turn here brings them back.`
+              : `Every window it last recorded, ${when(codex.at)}, has reset since. Codex writes its limits into each session, so the next Codex turn here brings them back.`
           }
           onDetails={onDetails}
         />
       )}
-      {agyUsage && (
+      {agy && (
         <UsageChip
           name="Antigravity"
           icon={<AntigravityMark />}
-          limits={agyUsage.limits}
+          limits={agy.limits}
           stale={null}
-          foot={[agyUsage.plan, agyUsage.at !== null && `as Antigravity last said it ${when(agyUsage.at)}`].filter(Boolean).join(" · ") || null}
-          empty={`Every window it last reported${agyUsage.at !== null ? `, ${when(agyUsage.at)},` : ""} has reset since. The next agy started here brings them back.`}
+          foot={[agy.plan, agy.at !== null && `as Antigravity last said it ${when(agy.at)}`].filter(Boolean).join(" · ") || null}
+          empty={`Every window it last reported${agy.at !== null ? `, ${when(agy.at)},` : ""} has reset since. The next agy started here brings them back.`}
           onDetails={onDetails}
         />
       )}

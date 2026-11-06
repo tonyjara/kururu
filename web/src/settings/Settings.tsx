@@ -29,6 +29,7 @@ import type { StyleLibrary } from "../../../shared/styles";
 import type { Appearance } from "../../../shared/theme";
 import type { WorkspaceProject } from "../../../shared/wire";
 import { channelReady } from "../../../shared/channels";
+import { DEFAULT_BAR } from "../../../shared/statusbar";
 import type { VaultPage as KeyPage } from "../../../shared/vaultview";
 import { isLoopback } from "../preview";
 import { Icon } from "../components/Icon";
@@ -36,6 +37,7 @@ import { useKururu } from "../session";
 import { AboutPage } from "./About";
 import { AgentsPage } from "./Agents";
 import { BackupsPage } from "./Backups";
+import { BarPage } from "./Bar";
 import { ChannelsPage } from "./Channels";
 import { ExplorePage } from "./Explore";
 import { KeyboardPage } from "./Keyboard";
@@ -61,6 +63,7 @@ export type Tab =
   | "explore"
   | "studio"
   | "mascot"
+  | "bar"
   | "profiles"
   | "workspaces"
   | "agents"
@@ -93,6 +96,7 @@ const GROUPS: ReadonlyArray<{ label: string; pages: ReadonlyArray<readonly [Tab,
       ["explore", "Explore", "Themes, skins, mascots and sounds other people made."],
       ["studio", "Studio", "Make a skin, with the window as the preview."],
       ["mascot", "Mascot", "What moves in the sidebar while an agent works."],
+      ["bar", "Bottom bar", "Which chips the bar along the bottom shows."],
     ],
   },
   {
@@ -337,6 +341,9 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
       return <StudioPage styles={p.styles} appearance={p.appearance} />;
     case "mascot":
       return <MascotPage mascots={p.mascots} />;
+    case "bar":
+      // A server from before the bar had switches sends no `bar`; everything is shown.
+      return <BarPage bar={p.appearance.bar ?? DEFAULT_BAR} />;
     case "profiles":
       return <ProfilesPage profiles={p.profiles} logins={p.logins} activeProfileId={p.activeProfileId} launch={p.launch} host={p.host} />;
     case "workspaces":

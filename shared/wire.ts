@@ -56,6 +56,7 @@ import type { WorkspaceDatabase } from "./databases";
 import type { NotifyEvent, NotifySettings } from "./notify";
 import type { MergeResolution, ProjectSettings } from "./projects";
 import type { TerminalAppearance } from "./theme";
+import type { BarSettings } from "./statusbar";
 
 /**
  * How to reach this server from a device that is not this machine — the answer
@@ -1459,6 +1460,13 @@ export type ClientMessage =
    * SIGWINCH into a shape no box has, and `adoptAppearance` clamps it.
    */
   | { type: "set-terminal-appearance"; terminal: TerminalAppearance }
+  /**
+   * Which of the bottom bar's chips are drawn — the whole list of the hidden
+   * ones, on `set-terminal-appearance`'s reasoning: one page edits it, and the
+   * answer is the snapshot. Adopted on arrival (`adoptBar`). Nothing behind a
+   * chip changes with it — see `shared/statusbar.ts`.
+   */
+  | { type: "set-bar"; bar: BarSettings }
 
   /**
    * When kururu may interrupt you, and what it sounds like — all five fields at

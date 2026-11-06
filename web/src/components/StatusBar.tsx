@@ -42,6 +42,7 @@
  */
 import type { ReactNode } from "react";
 import { countsAsAgent, type AgentSnapshot } from "../../../shared/model";
+import { barShows, type BarSettings } from "../../../shared/statusbar";
 import { LoadChip } from "./Load";
 import { MachinesChip } from "./Machines";
 import { OpenRouterChip } from "./OpenRouter";
@@ -87,6 +88,12 @@ interface Props {
   onSettings: (page: "machines" | "specs" | "openrouter") => void;
   /** Settings → Usage, from an allowance's chip. */
   onUsage: () => void;
+  /**
+   * Which chips are switched off in Settings → Bottom bar. Only the drawing:
+   * the polls and the slot queue behind a hidden chip go on as before. See
+   * `shared/statusbar.ts`.
+   */
+  bar: BarSettings;
 }
 
 export function StatusBar({
@@ -102,6 +109,7 @@ export function StatusBar({
   chips,
   onSettings,
   onUsage,
+  bar,
 }: Props) {
   const running = agents.filter(countsAsAgent);
   const working = running.filter((agent) => agent.status === "working").length;
@@ -113,23 +121,27 @@ export function StatusBar({
           load and how many are connected, and the OpenRouter balance. Each
           opens its detail on a hover or a tap. See `Usage.tsx`,
           `Machines.tsx` and `OpenRouter.tsx`. */}
-      <UsageChips onDetails={onUsage} />
-      {/* This Mac's load and the slot queue it admits by. See `Load.tsx`. */}
-      <LoadChip />
-      <MachinesChip onSettings={onSettings} />
-      <OpenRouterChip onSettings={() => onSettings("openrouter")} />
+      <UsageChips onDetails={onUsage} claude={barShows(bar, "claude")} codex={barShows(bar, "codex")} agy={barShows(bar, "agy")} />
+      {/* This Mac's load and the slot queue it admits by. See `Load.tsx`.
+          Hidden, it is only not drawn: the queue admits by the load as it did. */}
+      {barShows(bar, "load") && <LoadChip />}
+      {barShows(bar, "machines") && <MachinesChip onSettings={onSettings} />}
+      {barShows(bar, "openrouter") && <OpenRouterChip onSettings={() => onSettings("openrouter")} />}
+      {/* Flexes whatever is on either side of it, so with every gauge off the
+          right end still stands at the right edge. */}
       <span className="sb-spacer" />
 
       {prefixArmed && <span className="sb-badge sb-prefix">PREFIX</span>}
       {resizeMode && <span className="sb-badge sb-resize">RESIZE hjkl · esc</span>}
       {!connected && <span className="sb-badge sb-off">reconnecting…</span>}
-      <WatchedBy />
+      {barShows(bar, "watched") && <WatchedBy />}
 
       {/* The count, the bar's one standing fact. Running is the number and
           working is the news: an agent at a prompt is still holding its
           context and its tokens, so it counts, and the working ones are said
           beside it — in their ink — only when there are any, since "0
           working" is a word for nothing. */}
+      {barShows(bar, "agents") && (
       <span
         className={`sb-agents ${working > 0 ? "sb-agents-working" : running.length === 0 ? "sb-agents-none" : ""}`}
         title={`${running.length} ${running.length === 1 ? "agent is" : "agents are"} running, across every profile${working > 0 ? ` — ${working} working` : ""}`}
@@ -139,6 +151,7 @@ export function StatusBar({
         <span className="sb-agents-word">{running.length === 1 ? "agent" : "agents"}</span>
         {working > 0 && <span className="sb-agents-busy">· {working} working</span>}
       </span>
+      )}
 
       {/* The other pane, in one press.
           A narrow window draws one pane at a time, and somebody watching two

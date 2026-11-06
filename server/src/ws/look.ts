@@ -13,6 +13,7 @@ import { adoptLaunch } from "../../../shared/launchers";
 import { adoptMascot } from "../../../shared/model";
 import { adoptNotify } from "../../../shared/notify";
 import { skinFor } from "../../../shared/skin";
+import { adoptBar } from "../../../shared/statusbar";
 import { adoptAppearance, themeFor } from "../../../shared/theme";
 import type { ClientMessage } from "../../../shared/wire";
 import { appearance, type ClientState, keys, mascots, provide, pushSnapshot, styles, workspaces } from "../context";
@@ -186,6 +187,11 @@ export function lookVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): b
      */
     case "set-terminal-appearance":
       saveAppearance(adoptAppearance({ ...appearance, terminal: msg.terminal }));
+      return true;
+
+    /** Only what the window draws: the slot queue, the polls and the counts go on whatever the bar shows. */
+    case "set-bar":
+      saveAppearance({ ...appearance, bar: adoptBar(msg.bar) });
       return true;
   }
   return false;

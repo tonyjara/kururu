@@ -34,6 +34,7 @@
  * Nobody picks Macchiato and means "and 14px".
  */
 import { DEFAULT_SKIN_ID, isStyleId } from "./skin";
+import { adoptBar, DEFAULT_BAR, type BarSettings } from "./statusbar";
 
 
 /**
@@ -663,6 +664,13 @@ export interface Appearance {
    */
   skinId: string;
   terminal: TerminalAppearance;
+  /**
+   * Which of the bottom bar's chips are drawn — see `shared/statusbar.ts`. In
+   * here rather than a file of its own because it is what the window looks
+   * like and nothing more, and every pack and theme change already spreads the
+   * rest of this object, so wearing a look never brings a hidden chip back.
+   */
+  bar: BarSettings;
 }
 
 export const DEFAULT_APPEARANCE: Appearance = {
@@ -674,6 +682,7 @@ export const DEFAULT_APPEARANCE: Appearance = {
     cursorStyle: "block",
     cursorBlink: true,
   },
+  bar: DEFAULT_BAR,
 };
 
 /**
@@ -702,7 +711,7 @@ export const DEFAULT_APPEARANCE: Appearance = {
  * moment of drawing, where the fallback is a frame long rather than permanent.
  */
 export function adoptAppearance(value: unknown): Appearance {
-  const raw = (value ?? {}) as { themeId?: unknown; skinId?: unknown; terminal?: unknown };
+  const raw = (value ?? {}) as { themeId?: unknown; skinId?: unknown; terminal?: unknown; bar?: unknown };
   const term = (raw.terminal ?? {}) as Partial<Record<keyof TerminalAppearance, unknown>>;
   const d = DEFAULT_APPEARANCE.terminal;
   return {
@@ -716,6 +725,7 @@ export function adoptAppearance(value: unknown): Appearance {
         : d.cursorStyle,
       cursorBlink: typeof term.cursorBlink === "boolean" ? term.cursorBlink : d.cursorBlink,
     },
+    bar: adoptBar(raw.bar),
   };
 }
 

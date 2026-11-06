@@ -60,6 +60,7 @@ in this folder.
 | `lazygit.ts` | LazyGit as a tab: the line here, the line typed on a machine, and the is-it-installed check ahead of both. A clean quit closes the tab |
 | `cursor.ts` | DECSCUSR + OSC 12 in both directions. One parser over one stream |
 | `theme.ts` | Every theme: the chrome's tokens and the emulator's ANSI palette |
+| `statusbar.ts` | Which of the bottom bar's chips are drawn — Settings → Bottom bar, kept in `appearance.json` as the list switched off |
 | `contrast.ts` | Whether a theme can be read: each token's floor as ink, the pairs read out of the stylesheet, and `CONTRAST_KNOWN`, which records the pairs already under it. See [styles](styles.md) |
 | `skin.ts` | The shape tokens, the icon glyphs, and the twelve paintable parts |
 | `styles.ts` | The registry's format, and every check on a stranger's manifest |
@@ -248,7 +249,7 @@ in this folder.
 **Components:**
 
 `Panes.tsx` (flat positioned boxes, tab strips, dividers) · `Terminal.tsx` (a box
-for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` (the window-wide bottom bar, and `WorkspaceToggle`) · `Usage.tsx` (the Claude and Codex allowances on that bar, and their bars on hover or tap) · `Load.tsx` (this Mac's load and free memory on that bar, in the slot queue's colours, and the queue on hover) · `BarChip.tsx` (a bar chip's hover-and-pin popover, which the allowances and the machines share) · `Machines.tsx` (the machines on that bar: a glyph in the worst load's colour, the connected count, each machine's rings, Shell and Specs in the popover) · `DrawerChips.tsx` ·
+for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` (the window-wide bottom bar, each information chip behind a switch in Settings → Bottom bar, and `WorkspaceToggle`) · `Usage.tsx` (the Claude and Codex allowances on that bar, and their bars on hover or tap) · `Load.tsx` (this Mac's load and free memory on that bar, in the slot queue's colours, and the queue on hover) · `BarChip.tsx` (a bar chip's hover-and-pin popover, which the allowances and the machines share) · `Machines.tsx` (the machines on that bar: a glyph in the worst load's colour, the connected count, each machine's rings, Shell and Specs in the popover) · `DrawerChips.tsx` ·
 `Status.tsx` (a dot, or the mascot) · `Icon.tsx` (a class name and an
 `aria-hidden` span) · `Dialog.tsx` (while one is up, no key reaches a pty) ·
 `Menu.tsx` (it and `Dialog.tsx` are drawn into `document.body`, so one opened in a pane is over everything; a row may open a list, one level deep, and the menu holds the keyboard while it is open) · `Reader.tsx` (**the thing kururu was built for**; one draggable tab per document) ·

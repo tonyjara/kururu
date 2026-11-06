@@ -61,6 +61,7 @@ import type { MoveCheck, MoveDone, MovePlan, NewWorkspaceMade } from "../../shar
 import { EMPTY_SECRETS, type Lendable, type LendAsk, type SecretsView } from "../../shared/secrets";
 import type { VaultView } from "../../shared/vaultview";
 import type { TerminalAppearance } from "../../shared/theme";
+import type { BarSettings } from "../../shared/statusbar";
 import type { ReloadAsk, ReloadHold, ReloadPage } from "../../shared/reload";
 import { applyDelta } from "../../shared/snapdelta";
 import type { Grid } from "./grid";
@@ -1266,6 +1267,11 @@ export function setSkin(skinId: string): void {
 /** The terminal's type and cursor, all four at once — they are edited together. */
 export function setTerminalAppearance(terminal: TerminalAppearance): void {
   send({ type: "set-terminal-appearance", terminal });
+}
+
+/** Which of the bottom bar's chips are drawn: the whole list of the hidden ones. */
+export function setBar(bar: BarSettings): void {
+  send({ type: "set-bar", bar });
 }
 
 /** When kururu may interrupt you, and what it sounds like. All five at once. */
