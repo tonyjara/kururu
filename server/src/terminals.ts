@@ -108,18 +108,23 @@ export function keepNow(): void {
   if (keepTimer) clearTimeout(keepTimer);
   keepTimer = null;
   if (!workspaces) return;
-  const blob = hostBlob(workspaces.all(), workspaces.active.id);
+  // `harness` is not there yet for the saves of startup, which carry no handover: nothing has been told.
+  const blob = hostBlob(workspaces.all(), workspaces.active.id, harness?.handover());
   if (blob === keptBlob) return;
   keptBlob = blob;
   host.keep(blob);
 }
 
+/** The host's blob is due again and the file is not: what changed is the harness's handover, which the file never holds. */
+export function queueKeep(): void {
+  if (keepTimer) return;
+  keepTimer = setTimeout(keepNow, KEEP_GAP_MS);
+  keepTimer.unref?.();
+}
+
 export let saveTimer: ReturnType<typeof setTimeout> | null = null;
 export function queueSave(): void {
-  if (!keepTimer) {
-    keepTimer = setTimeout(keepNow, KEEP_GAP_MS);
-    keepTimer.unref?.();
-  }
+  queueKeep();
   if (saveTimer) return;
   saveTimer = setTimeout(() => {
     saveTimer = null;

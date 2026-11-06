@@ -124,6 +124,37 @@ export interface Inbox {
 }
 
 /**
+ * What a server restart must not take from Kuru, handed to the next server in
+ * the host's blob: the inboxes, and the notices not yet in one.
+ *
+ * The inbox is the reason this exists. Claude Code gives its socket and token
+ * to its hooks and to nothing else, so a server learns them only when Kuru
+ * next takes a turn — and a server restarted while Kuru sat between turns,
+ * which under `bun run dev` is every save of `server/src`, used to drop every
+ * notice until the user spoke. On 2026-11-06 that was PLA-125's done, ten
+ * minutes after a restart, and a Dashboard agent's before it, with nothing
+ * said anywhere. The host's memory and not a file, because the inbox lives
+ * exactly as long as Kuru's pty, which is the host's: a file would outlive
+ * both and hand a token to a socket nobody is listening on, and a token
+ * in a file is a credential kururu would be storing.
+ */
+export interface HarnessHandover {
+  inboxes: Record<string, Inbox>;
+  /** Done notices still gathering, by profile: each agent's newest, in order. */
+  batches: Record<string, [agentId: string, notice: string][]>;
+  /** Messages with no inbox to go to yet, by the Kuru they are for, oldest first. See `Harness.keep`. */
+  unposted: Record<string, string[]>;
+}
+
+/** How many undelivered messages are kept for one Kuru; past it the oldest go. Each is already a whole batch. */
+const UNPOSTED_MAX = 20;
+
+/** A handover's record as pairs, or none for anything that is not one. */
+function entries(value: unknown): [string, unknown][] {
+  return value && typeof value === "object" && !Array.isArray(value) ? Object.entries(value) : [];
+}
+
+/**
  * What became of a line Kuru asked to `say`. Spoken; kept off the speaker
  * because the turn answers only a channel; or not said because the user has
  * "speak replies" off — which Kuru is told in so many words, so it puts the
@@ -251,6 +282,8 @@ export interface HarnessDeps {
   reloadWindow: (why: string, timeoutMs: number) => Promise<ReloadOutcome>;
   /** The links under an agent's row: what its last turn made. See `shared/made.ts`. */
   madeOf: (agentId: string) => readonly MadeFile[];
+  /** What `handover` returns changed: the blob the host keeps for the next server is due again. */
+  kept?: () => void;
   /**
    * `show_file`: a file found from the agent's directory (or the profile's
    * projects, with no agent), put on the agent's row and card, and opened on
@@ -381,6 +414,8 @@ export class Harness {
   private readonly told = new Map<string, { status: string; at: number }>();
   /** Done notices waiting to go to each profile's Kuru as one message, and the timer that sends them. See `NOTICE_BATCH_MS`. */
   private readonly batches = new Map<string, { notices: NoticeBatch; timer: NodeJS.Timeout | null }>();
+  /** Messages for a Claude Kuru whose inbox this server has not heard of, or whose inbox did not answer. See `keep`. */
+  private readonly unposted = new Map<string, string[]>();
   /**
    * Messages waiting to be typed, by agent id, in the order they were sent —
    * see `due` for until when. In memory only: a server restart forgets them,
@@ -425,7 +460,11 @@ export class Harness {
     if (typeof extras.transcript === "string" && extras.transcript.startsWith("/")) this.transcripts.set(agentId, extras.transcript);
     const inbox = extras.inbox as { socket?: unknown; token?: unknown } | undefined;
     if (inbox && typeof inbox.socket === "string" && inbox.socket.startsWith("/")) {
-      this.inboxes.set(agentId, { socket: inbox.socket, token: typeof inbox.token === "string" ? inbox.token : null });
+      const next = { socket: inbox.socket, token: typeof inbox.token === "string" ? inbox.token : null };
+      const was = this.inboxes.get(agentId);
+      this.inboxes.set(agentId, next);
+      if (was?.socket !== next.socket || was.token !== next.token) this.deps.kept?.();
+      this.postUnposted(agentId);
     }
     if (typeof extras.reply === "string" && extras.reply.trim()) this.replies.set(agentId, extras.reply.trim().slice(0, REPLY_MAX));
     this.reported.add(agentId);
@@ -454,7 +493,8 @@ export class Harness {
 
   forget(agentId: string): void {
     for (const message of this.held.get(agentId) ?? []) message.events?.dropped();
-    this.inboxes.delete(agentId);
+    const hadInbox = this.inboxes.delete(agentId);
+    if (this.unposted.delete(agentId) || hadInbox) this.deps.kept?.();
     this.transcripts.delete(agentId);
     this.replies.delete(agentId);
     this.told.delete(agentId);
@@ -720,9 +760,10 @@ export class Harness {
     const profile = profileId ? this.deps.workspaces.profile(profileId) : null;
     const self = profile?.harness?.agentId;
     if (!profileId || !profile?.harness || !self || self === agent.id || !this.deps.host.isLive(self)) return;
-    // OpenCode and Antigravity have no inbox: the notice is typed, at the end
-    // of Kuru's turn, on its own, and the role says it is kururu's and not the user's.
-    if (!noticesTyped(profile.harness) && !this.inboxes.has(self)) return;
+    // A Claude Kuru whose inbox is not known yet is told all the same: what
+    // cannot be posted is kept for the inbox its next report brings (`keep`).
+    // This used to return here, which is how a server restarted while Kuru
+    // was between turns dropped every notice until the user spoke.
     const last = this.told.get(agent.id);
     const now = Date.now();
     if (last && last.status === status && now - last.at < TELL_THROTTLE_MS) return;
@@ -739,13 +780,17 @@ export class Harness {
     const batch = this.batchOf(profileId);
     if (status === "done") {
       batch.notices.add(agent.id, notice);
-      if (!batch.timer) {
-        batch.timer = setTimeout(() => this.flush(profileId), NOTICE_BATCH_MS);
-        batch.timer.unref();
-      }
+      this.arm(profileId, batch);
+      this.deps.kept?.();
       return;
     }
     this.flush(profileId, notice);
+  }
+
+  private arm(profileId: string, batch: { notices: NoticeBatch; timer: NodeJS.Timeout | null }): void {
+    if (batch.timer) return;
+    batch.timer = setTimeout(() => this.flush(profileId), NOTICE_BATCH_MS);
+    batch.timer.unref();
   }
 
   private batchOf(profileId: string): { notices: NoticeBatch; timer: NodeJS.Timeout | null } {
@@ -763,6 +808,7 @@ export class Harness {
         clearTimeout(batch.timer ?? undefined);
         this.batches.delete(profileId);
       }
+      this.deps.kept?.();
     }
   }
 
@@ -777,18 +823,102 @@ export class Harness {
     if (batch) {
       clearTimeout(batch.timer ?? undefined);
       this.batches.delete(profileId);
+      this.deps.kept?.();
     }
     const message = batch ? batch.notices.take(last) : (last ?? null);
     const harness = this.deps.workspaces.profile(profileId)?.harness;
     const self = harness?.agentId;
     if (!message || !harness || !self || !this.deps.host.isLive(self)) return;
+    // OpenCode and Antigravity have no inbox: the notice is typed, at the end
+    // of Kuru's turn, on its own, and the role says it is kururu's and not the user's.
     if (noticesTyped(harness)) {
       this.hold(self, { text: message, when: "next", alone: true });
       void this.pump(self);
       return;
     }
+    this.deliver(self, message);
+  }
+
+  /** Post to a Claude Kuru's inbox, or keep the message for the inbox it reports next when there is none or it does not answer. */
+  private deliver(self: string, message: string): void {
     const inbox = this.inboxes.get(self);
-    if (inbox) void this.post(inbox, message, "next").catch(() => {});
+    if (!inbox) {
+      this.keep(self, message);
+      return;
+    }
+    void this.post(inbox, message, "next").catch(() => {
+      // An inbox that does not answer is one its session has left — a Kuru
+      // restarted in the same pty reports a new one. Forgotten, so the next
+      // notice waits for that report rather than knocking on this one too.
+      if (this.inboxes.get(self) === inbox) this.inboxes.delete(self);
+      this.keep(self, message);
+    });
+  }
+
+  /**
+   * A message for a Claude Kuru with nowhere to post it yet, kept until its
+   * next report brings an inbox (`postUnposted`), and handed across a
+   * restart with the rest. Never typed instead: Claude's role says a notice
+   * arrives as a peer's message, and typed it would arrive as the user's.
+   */
+  private keep(self: string, message: string): void {
+    const kept = [...(this.unposted.get(self) ?? []), message].slice(-UNPOSTED_MAX);
+    this.unposted.set(self, kept);
+    this.deps.kept?.();
+  }
+
+  /** The inbox is known again: everything kept for it, as one message, since each is already a batch of `[kururu]` lines. */
+  private postUnposted(self: string): void {
+    const kept = this.unposted.get(self);
+    if (!kept?.length || !this.deps.host.isLive(self)) return;
+    this.unposted.delete(self);
+    this.deps.kept?.();
+    this.deliver(self, kept.join("\n\n"));
+  }
+
+  /** What the next server needs from this one, for the host's blob. See `HarnessHandover`. */
+  handover(): HarnessHandover {
+    const live = (id: string) => this.deps.host.isLive(id);
+    return {
+      inboxes: Object.fromEntries([...this.inboxes].filter(([id]) => live(id))),
+      batches: Object.fromEntries([...this.batches].map(([profileId, batch]) => [profileId, batch.notices.entries()])),
+      unposted: Object.fromEntries([...this.unposted].filter(([id]) => live(id))),
+    };
+  }
+
+  /**
+   * The last server's handover, taken at startup before any report arrives.
+   * Read as untrusted — it is a string off the host's socket — so what is not
+   * the shape is skipped. A batch that was gathering starts its minute again:
+   * late by that much at worst, and never lost.
+   */
+  takeOver(handover: unknown): void {
+    if (!handover || typeof handover !== "object") return;
+    const { inboxes, batches, unposted } = handover as Record<string, unknown>;
+    const live = (id: string) => this.deps.host.isLive(id);
+    for (const [id, inbox] of entries(inboxes)) {
+      const { socket, token } = (inbox ?? {}) as Record<string, unknown>;
+      if (!live(id) || this.inboxes.has(id) || typeof socket !== "string" || !socket.startsWith("/")) continue;
+      this.inboxes.set(id, { socket, token: typeof token === "string" ? token : null });
+    }
+    for (const [profileId, held] of entries(batches)) {
+      if (!Array.isArray(held)) continue;
+      const batch = this.batchOf(profileId);
+      for (const pair of held) {
+        if (Array.isArray(pair) && typeof pair[0] === "string" && typeof pair[1] === "string") batch.notices.add(pair[0], pair[1]);
+      }
+      if (batch.notices.size) this.arm(profileId, batch);
+      else this.batches.delete(profileId);
+    }
+    for (const [id, messages] of entries(unposted)) {
+      if (!live(id) || !Array.isArray(messages)) continue;
+      const kept = messages.filter((m): m is string => typeof m === "string");
+      if (kept.length) this.unposted.set(id, [...kept, ...(this.unposted.get(id) ?? [])].slice(-UNPOSTED_MAX));
+    }
+    // An inbox and what was kept for it can arrive together, from a server
+    // that heard the report and died before posting.
+    for (const id of [...this.unposted.keys()]) if (this.inboxes.has(id)) this.postUnposted(id);
+    this.deps.kept?.();
   }
 
   // ---------------------------------------------------------------------------

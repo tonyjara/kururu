@@ -328,4 +328,12 @@ describe("the host's blob", () => {
     expect(again.active.workspaces[0]!.board).toBeNull();
     expect(again.active.board.cards).toEqual([]);
   });
+
+  it("carries Kuru's handover beside the tree, when there is one", () => {
+    const workspaces = new Workspaces();
+    const handover = { inboxes: { a7: { socket: "/tmp/inbox.sock", token: "tok" } }, batches: {}, unposted: { a7: ["[kururu] x"] } };
+    const kept = JSON.parse(hostBlob(workspaces.all(), workspaces.active.id, handover)) as { harness?: unknown };
+    expect(kept.harness).toEqual(handover);
+    expect(JSON.parse(hostBlob(workspaces.all(), workspaces.active.id))).not.toHaveProperty("harness");
+  });
 });

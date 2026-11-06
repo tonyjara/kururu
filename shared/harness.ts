@@ -830,6 +830,11 @@ export class NoticeBatch {
     return this.held.delete(agentId);
   }
 
+  /** What is held, in order, without taking it: for the handover to the next server. */
+  entries(): [agentId: string, notice: string][] {
+    return [...this.held];
+  }
+
   /** Everything held, then `last`, as one message — each notice its own paragraph, each starting `[kururu]`. Null for nothing. Empties the batch. */
   take(last?: string): string | null {
     const all = [...this.held.values(), ...(last ? [last] : [])];

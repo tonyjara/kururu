@@ -36,6 +36,7 @@ import { isStoreKey, mintProfileKey, mintWorkspaceKey } from "../../shared/store
 import { isDashboardTab } from "../../shared/dashboard";
 import { adoptDashboard, nextId } from "./workspaces";
 import { stateDir, writeAtomic } from "./fsutil";
+import type { HarnessHandover } from "./harness";
 
 /** Bumped when the shape below changes; an older file is ignored, not migrated. */
 const VERSION = 1;
@@ -368,14 +369,19 @@ function readerTabs(stored: { root: string; path: string; docs?: unknown }): { a
  * one socket and its parse on the host's one thread; `Workspaces` reads a
  * missing board the way it reads one from before boards existed, empty,
  * until the database fills it a moment later. See `queueSave` in `terminals.ts`.
+ *
+ * Beside the tree, Kuru's inboxes and the notices not yet sent to one
+ * (`HarnessHandover`), which are in this and never in the file: the blob is
+ * the host's memory, which ends with the ptys the inboxes belong to.
  */
-export function hostBlob(profiles: readonly Profile[], activeProfileId: string): string {
+export function hostBlob(profiles: readonly Profile[], activeProfileId: string, harness?: HarnessHandover): string {
   return JSON.stringify({
     profiles: profiles.map(({ board: _board, ...profile }) => ({
       ...profile,
       workspaces: profile.workspaces.map(({ board: _wsBoard, ...workspace }) => workspace),
     })),
     activeProfileId,
+    ...(harness ? { harness } : {}),
   });
 }
 

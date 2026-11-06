@@ -127,6 +127,7 @@ import {
   onOutput,
   openTerminalAt,
   ownedGrid,
+  queueKeep,
   queueSave,
   reapExited,
   saveTimer,
@@ -429,11 +430,13 @@ export async function attach(port: Port): Promise<void> {
 
   let profiles: Profile[] | undefined;
   let activeProfileId: string | undefined;
+  let handover: unknown;
   if (state.blob) {
     try {
-      const kept = JSON.parse(state.blob) as { profiles: Profile[]; activeProfileId: string };
+      const kept = JSON.parse(state.blob) as { profiles: Profile[]; activeProfileId: string; harness?: unknown };
       profiles = adoptReaders(kept.profiles);
       activeProfileId = kept.activeProfileId;
+      handover = kept.harness;
     } catch {
       // A blob we cannot read is no worse than not having one.
     }
@@ -572,6 +575,7 @@ export async function attach(port: Port): Promise<void> {
     moveWorkspace: (profileId, workspaceId, nodeId, folder) => mover.move(profileId, workspaceId, nodeId, folder, "harness"),
     lendOffer: (profileId, workspaceId, nodeId, folder) => lendOffer(profileId, workspaceId, nodeId, folder),
     lendSecrets: (profileId, workspaceId, nodeId, folder, ask) => lendSecrets(profileId, workspaceId, nodeId, folder, ask),
+    kept: queueKeep,
   }));
   // The reports a remote agent's hooks cannot send, read off its screen.
   provide("screens", new OnScreen({
@@ -857,6 +861,10 @@ export async function attach(port: Port): Promise<void> {
   // And which terminal each profile's harness is in, now that the dead tabs
   // are gone: a harness outlives a server restart, and its record must too.
   harness.adopt(live);
+  // Kuru's inbox and what was waiting to go into it, from the server this one
+  // replaced — without which a restart between Kuru's turns is a Kuru told
+  // nothing until the user speaks. See `HarnessHandover`.
+  harness.takeOver(handover);
   // Only now may words be handed to Kuru: before `adopt`, a harness that
   // outlived the last server looks like none, and handing over would start a
   // second one.

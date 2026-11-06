@@ -855,6 +855,17 @@ its first report. The whole of it is in [antigravity](antigravity.md#kuru-on-ant
   against the live set, falling back to the live agent named `harness` in the
   profile. Before this, every restart forgot which agent it was and the status
   feed and the voice went silent until it was reopened.
+- **So is its inbox, and what was not yet sent to it.** Claude Code gives
+  the inbox's socket and token to its hooks and nothing else, so a new
+  server learns them only on Kuru's next turn — and one restarted while Kuru
+  sat idle used to drop every notice until the user spoke (PLA-125's done,
+  2026-11-06, ten minutes after a `bun run dev` restart). The inboxes, the
+  dones still gathering and anything kept go to the next server in the
+  host's blob (`HarnessHandover`, `Harness.takeOver`), never the file: they
+  live as long as Kuru's pty, which is as long as the host. A notice with no
+  inbox to go to, or whose inbox did not answer, is kept and posted with the
+  next report that brings one; never typed instead, since typed it would
+  arrive as the user's words.
 - **No hooks, no turns.** `when` is kept off the `done` edge, and a Claude
   without kururu's hooks has only `status.ts`'s guess at one. `read_agent`
   then has only the screen, and the harness gets no notices at all, since

@@ -1298,3 +1298,137 @@ describe("say, and what Kuru is told", () => {
     expect(answer.text).toContain("written reply");
   });
 });
+
+/**
+ * A restart between Kuru's turns. Claude Code gives Kuru's inbox to its hooks
+ * and nothing else, so a server that was restarted while Kuru sat idle knew no
+ * inbox until the user spoke, and dropped every notice in between — PLA-125's
+ * done on 2026-11-06, ten minutes after one of `bun run dev`'s restarts.
+ */
+describe("Kuru's notices across a server restart", () => {
+  const dir = mkdtempSync(join(tmpdir(), "kururu-handover-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  /** An inbox that records what it is sent, and a way to make a server's harness: Kuru is `h` in profile `p`. */
+  async function rig(terminals: AgentSnapshot[]) {
+    const socket = join(dir, `inbox-${Math.random().toString(36).slice(2, 8)}.sock`);
+    const heard: string[] = [];
+    const server = createServer((conn) => {
+      let text = "";
+      conn.on("data", (chunk) => (text += chunk.toString("utf8")));
+      conn.on("end", () => heard.push(text));
+    });
+    await new Promise<void>((resolve) => server.listen(socket, resolve));
+    const all = new Map([terminal("h", "agent", "claude"), ...terminals].map((t) => [t.id, t]));
+    const profile = { id: "p", harness: { agentId: "h" }, workspaces: [] };
+    let kept = 0;
+    const make = () =>
+      new Harness({
+        workspaces: { profileOf: () => "p", profile: (id: string) => (id === "p" ? profile : undefined), agentsInWorkspace: () => [] },
+        host: { isLive: (id: string) => all.has(id), find: (id: string) => all.get(id) },
+        activity: new Map<string, string>(),
+        launch: () => ({ bypassClis: [] }),
+        madeOf: () => [],
+        kept: () => kept++,
+      } as unknown as HarnessDeps);
+    return {
+      make,
+      socket,
+      heard,
+      kept: () => kept,
+      close: () => new Promise((resolve) => server.close(resolve)),
+    };
+  }
+
+  async function until(check: () => boolean, ms = 2000): Promise<void> {
+    const end = Date.now() + ms;
+    while (!check() && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  /** The handover as it reaches the next server: through the host's blob, a string. */
+  const viaBlob = (harness: Harness) => JSON.parse(JSON.stringify(harness.handover())) as unknown;
+
+  it("hands the inbox to the next server, which posts a turn that ends after the restart", async () => {
+    const card = terminal("a286", "agent", "claude", "WhatsApp sender");
+    const { make, socket, heard, close } = await rig([card]);
+    const before = make();
+    before.report("h", { inbox: { socket, token: "tok" } });
+    const after = make();
+    after.takeOver(viaBlob(before));
+    // No report from Kuru between: it is idle, which is the whole case.
+    after.noticed({ ...card, status: "blocked" }, "blocked", false);
+    await until(() => heard.length >= 1);
+    await close();
+    expect(heard).toHaveLength(1);
+    expect(heard[0]).toContain('[kururu] \\"WhatsApp sender\\"');
+    expect(heard[0]).toContain("is blocked");
+  });
+
+  it("sends the dones the last server was gathering", async () => {
+    const card = terminal("a286", "agent", "claude", "WhatsApp sender");
+    const { make, socket, heard, close } = await rig([card]);
+    const before = make();
+    before.report("h", { inbox: { socket, token: "tok" } });
+    before.report("a286", { reply: "Scratch files are deleted." });
+    before.noticed(card, "done", false);
+    const handover = viaBlob(before);
+    const after = make();
+    jest.useFakeTimers();
+    try {
+      after.takeOver(handover);
+      jest.advanceTimersByTime(NOTICE_BATCH_MS);
+    } finally {
+      jest.useRealTimers();
+    }
+    await until(() => heard.length >= 1);
+    await close();
+    expect(heard).toHaveLength(1);
+    expect(heard[0]).toContain("finished its turn");
+    expect(heard[0]).toContain("Scratch files are deleted.");
+  });
+
+  it("keeps a notice for a Kuru whose inbox it has not heard of, and posts it with the inbox's report", async () => {
+    const card = terminal("a286", "agent", "claude", "WhatsApp sender");
+    const { make, socket, heard, kept, close } = await rig([card]);
+    // A server from before the handover: the blob brings no inbox.
+    const harness = make();
+    harness.takeOver(undefined);
+    harness.noticed({ ...card, status: "blocked" }, "blocked", false);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(heard).toHaveLength(0);
+    // Kept for the next server too, should one come before Kuru's turn.
+    const keptAt = kept();
+    expect(keptAt).toBeGreaterThan(0);
+    expect(JSON.stringify(viaBlob(harness))).toContain("is blocked");
+    harness.report("h", { inbox: { socket, token: "tok" }, status: "working" });
+    await until(() => heard.length >= 1);
+    await close();
+    expect(heard).toHaveLength(1);
+    expect(heard[0]).toContain("is blocked");
+    expect(JSON.stringify(viaBlob(harness))).not.toContain("is blocked");
+  });
+
+  it("keeps what an inbox that does not answer was sent, and forgets that inbox", async () => {
+    const card = terminal("a286", "agent", "claude", "WhatsApp sender");
+    const { make, socket, heard, close } = await rig([card]);
+    const harness = make();
+    harness.report("h", { inbox: { socket: join(dir, "gone.sock"), token: "old" } });
+    harness.noticed({ ...card, status: "blocked" }, "blocked", false);
+    await until(() => JSON.stringify(viaBlob(harness)).includes("is blocked"));
+    expect(Object.keys((viaBlob(harness) as { inboxes: object }).inboxes)).toHaveLength(0);
+    // Kuru's session came back with a new inbox.
+    harness.report("h", { inbox: { socket, token: "tok" } });
+    await until(() => heard.length >= 1);
+    await close();
+    expect(heard[0]).toContain("is blocked");
+  });
+
+  it("takes nothing for a terminal that is gone, and nothing from a blob that is not the shape", async () => {
+    const { make, close } = await rig([]);
+    const harness = make();
+    harness.takeOver({ inboxes: { a1: { socket: "/x.sock", token: "t" }, h: { socket: 4 } }, batches: { p: "no" }, unposted: { a1: ["x"], h: [1] } });
+    harness.takeOver("nonsense");
+    await close();
+    expect(viaBlob(harness)).toEqual({ inboxes: {}, batches: {}, unposted: {} });
+  });
+});
