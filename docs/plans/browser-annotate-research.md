@@ -17,6 +17,12 @@ The question had four parts:
 The phone was ruled out partway through. The iPad comes back as an optional
 section at the end.
 
+**Revised the same day.** After the user answered the plan's questions (live
+marking, agents acting with their logins, the iPad as a Sidecar screen, an
+extension weighed), a short second round of reading went into
+[§6](#6-after-the-users-answers-sidecar-the-extension-the-z-order). §5's
+web-client iPad is kept for the record; the plan no longer builds it.
+
 ## 1. The tools that already do this
 
 ### Orca (stablyai/orca), the one the user named
@@ -627,3 +633,131 @@ the result should be checked against the file on disk (the plan does this).
 - **A proxied iframe:** brings back everything dropped with the phone. Next's
   `allowedDevOrigins` and Vite's `allowedHosts` refuse it, HMR has to be
   proxied, and cookies, and with them logins, break. Cost: high.
+
+## 6. After the user's answers: Sidecar, the extension, the z-order
+
+A second, shorter round, read 2026-11-06 after the user chose live marking,
+agents acting with their logins, Sidecar for the iPad, and asked for an honest
+look at a browser extension. Web searches only; nothing was installed or
+tried. Several answers came from search summaries rather than the page
+itself, and are marked so.
+
+### Live marking and the z-order
+
+**Orca uses `<webview>`.** Its tabs are guests managed by a `BrowserManager`
+in main, and Design Mode injects a guest script that draws the hover box
+inside the page (per a DeepWiki summary of the repo, **unverified** beyond the
+file names read in §1). A `<webview>` paints in the renderer's DOM, so Orca's
+own UI can sit over it; that is the ease kururu gives up by choosing
+`WebContentsView`, whose moves do not reload.
+
+**A transparent view stacked on the page is possible.** A `View` has
+`setBackgroundColor`, and `#00000000` with a transparent `body` lets the view
+below show through; children added later are drawn above earlier ones
+([View](https://www.electronjs.org/docs/latest/api/view),
+[WebContentsView](https://www.electronjs.org/docs/latest/api/web-contents-view);
+the stacking order from a search summary, **unverified on 44**). A
+`WebContentsView` has no per-pixel click-through (`setIgnoreMouseEvents` is a
+window's), so it takes every event in its bounds. §4 already notes that the
+ordering of views on top changed between Electron 30 and 31.
+
+**The in-page layer.** What the plan uses, from the platform's own docs:
+
+- An element shown with the Popover API is in the **top layer**, above every
+  `z-index` in the document; a later top-layer element goes above it
+  ([Popover API](https://developer.mozilla.org/en-US/docs/Web/API/Popover_API)).
+- A **closed** shadow root is not reachable through `element.shadowRoot`;
+  constructed stylesheets (`adoptedStyleSheets`) style it without a `<style>`
+  element.
+- An isolated world shares the DOM and has its own JavaScript globals (§4).
+  Event listeners on one target run in the order they were added, whichever
+  world added them; a capture listener on `window` runs before listeners on
+  the page's elements.
+
+### Moving a view to another window
+
+Removing a `WebContentsView` from one window's `contentView` and adding it to
+another's keeps its `webContents`: no reload, its JavaScript state and its
+connections intact. Bounds must be set again for the new window, and adding a
+view can move keyboard focus to it (search summary citing Electron issues;
+**unverified on 44**, and phase 2's done tests it). The Electron docs already
+say a `webContents` is shown in one view at a time (§4).
+
+### Sidecar and the Pencil
+
+- With the iPad as a Sidecar display, **the Apple Pencil is the Mac's
+  pointer**: a tap clicks, a press and drag drags, and pro apps get pressure
+  and tilt because Sidecar sends macOS tablet events
+  ([Apple: Sidecar](https://support.apple.com/HT210380); the tablet-event
+  detail from search summaries, **unverified**).
+- **Fingers do not click;** they scroll with two fingers and do the system's
+  three-finger gestures (Apple's Sidecar article, as recalled and summarised;
+  **unverified** in this round).
+- **The sidebar** puts ⌘, ⌥, ⌃, ⇧ and undo on the iPad's edge; **double-tap**
+  on a Pencil 2 or Pro is passed to apps that support it, a setting under
+  Displays.
+- **Hover** on M2-and-later iPads with a hover-capable Pencil may move the
+  Mac's pointer before the tip touches; one summary says so, nothing
+  authoritative was found. **Unverified;** the plan does not rely on it.
+- **Chromium on macOS** turns tablet events into Pointer Events with
+  `pointerType "pen"` and real `pressure` for Wacom tablets (search summary;
+  the [pen tracker](https://patrickhlauke.github.io/pen-tracker/) is the test).
+  Whether Sidecar's events take the same road in Electron's Chromium is
+  **unverified**.
+- **Scribble** is an iPadOS text-input feature; nothing found says it writes
+  into a Mac's text fields under Sidecar. **Unverified;** assume not.
+
+### A browser extension
+
+**Chrome, MV3.**
+
+- **Content scripts** run in an isolated world; `scripting` can also register
+  a script in the page's own world (`world: "MAIN"`) at `document_start`
+  ([scripting](https://developer.chrome.com/docs/extensions/reference/api/scripting)).
+- **The side panel** is an extension page beside the tab
+  ([sidePanel](https://developer.chrome.com/docs/extensions/reference/api/sidePanel)).
+- **`tabs.captureVisibleTab`** screenshots the visible area of the active tab
+  only ([tabs](https://developer.chrome.com/docs/extensions/reference/api/tabs)).
+- **Talking to localhost.** A service worker with `host_permissions` for
+  loopback can `fetch` it without CORS getting in the way; the request's
+  `Origin` is `chrome-extension://<id>`. Whether Local Network Access asks
+  first is unclear: summaries disagree, one saying a worker cannot raise the
+  prompt and must be preceded by a request from a document
+  ([LNA](https://developer.chrome.com/docs/modern-web-guidance/guides/security/local-network-access)).
+  **Unverified.**
+- **`chrome.debugger`** gives full CDP on a tab, and Chrome shows a
+  "‹extension› started debugging this browser" infobar while attached, which
+  no API hides; only launching Chrome with `--silent-debugger-extension-api`
+  does
+  ([debugger](https://developer.chrome.com/docs/extensions/reference/api/debugger);
+  the flag from several summaries and forum posts).
+- **Prior art for pairing:** Browser MCP pairs its extension by a six-digit
+  code (§3); Playwright MCP's extension relay forwards to
+  `chrome.debugger.sendCommand` (§4).
+- **Agents in the user's real Chrome without an extension:**
+  chrome-devtools-mcp's `--autoConnect` (Chrome 144+, with a dialog), §3.
+
+**Safari.**
+
+- A Safari Web Extension ships only inside a containing Mac app, as an app
+  extension. Outside the App Store the app must be Developer ID signed and
+  notarized, and the user enables the extension in Safari's settings and
+  grants it sites
+  ([Safari web extensions](https://developer.apple.com/documentation/safariservices/safari-web-extensions);
+  the Developer ID detail from a summary, **unverified**).
+- **No debugger API.** Nothing in Safari's extension APIs drives a page the
+  way CDP does.
+- **`browser.runtime.sendNativeMessage`** from the extension's background
+  reaches the containing app's extension handler (`NSExtensionRequestHandling`);
+  the application id argument is ignored.
+
+### Google sign-in in an embedded browser
+
+Google refuses OAuth sign-in from embedded browsers and webviews ("This
+browser or app may not be secure", `disallowed_useragent`), and changing the
+user agent is reported not to get round it
+([Google, 2021](https://developers.googleblog.com/2021/06/upcoming-security-changes-to-googles-oauth-2.0-authorization-endpoint-in-embedded-webviews.html);
+Electron specifics from summaries and issue threads, **unverified for
+`WebContentsView` on 44**). For kururu this means a dev app whose login is
+"Sign in with Google" may not be usable logged-in in the built-in browser, and
+it is the strongest argument for the extension as a complement.
