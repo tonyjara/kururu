@@ -70,7 +70,6 @@ import { useLongPress } from "../longpress";
 import { asAgent, nodeState } from "../nodes";
 import { devServerUrl, metroAddress, previewLabel, type NamedRoot } from "../preview";
 import * as api from "../session";
-import { desktop } from "../desktop";
 import { useKururu } from "../session";
 import { Menu, Popover, type MenuItem } from "./Menu";
 import type { DialogState } from "./Dialog";
@@ -1991,19 +1990,6 @@ function DevServers({ workspaces }: { workspaces: readonly Workspace[] }) {
                     <span className="dev-name">{label(dev)}</span>
                     <span className="dev-port">:{dev.port}</span>
                   </span>
-                )}
-                {/* In kururu's own browser, as a tab of the focused pane —
-                    where a file from the tree lands. Only in the Mac's window,
-                    the one place a page can be drawn. */}
-                {url && desktop()?.browser && (
-                  <button
-                    className="dev-browse"
-                    onClick={() => void api.openBrowser(url).catch(() => {})}
-                    title={`Open ${url} in kururu's browser`}
-                    aria-label={`Open ${label(dev)} in kururu's browser`}
-                  >
-                    <Icon name="panel" />
-                  </button>
                 )}
                 <button
                   className={`dev-stop ${armed ? "dev-stop-ask" : ""} ${busy ? "dev-stop-busy" : ""}`}

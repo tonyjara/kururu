@@ -2443,8 +2443,8 @@ function Composer({
    * user cannot talk. Pressed, the pen goes down over every display; the
    * marks made with it come into this box as chips when it is pressed again
    * or the pill's Done is — the pill shows itself, draw-only, at its own
-   * spot for this — `ink.ts` puts them in through `insertInKuru`, the road a
-   * browser tab's marks take, and the user writes about them and sends. With
+   * spot for this — `ink.ts` puts them in through `insertInKuru`, and the
+   * user writes about them and sends. With
    * the pen down the overlay is over this window too, so the box's
    * placeholder and the pencil's tooltip say how to get back to it.
    */

@@ -107,46 +107,10 @@ left in the Dock is how a force quit reached a coalition on 2026-10-10.
 
 Kept short on purpose; the detail is in git history.
 
-- **Marking, browser phase 1** (2026-11-06), in an isolated instance on :7817
-  from a scratch copy, the real Electron app driven invisibly, the page's
-  input through CDP `Input.dispatchMouseEvent` (real input to the page): on a
-  throwaway app, marks of all four kinds — a button, a link inside a CSS-only
-  hover menu (the menu stayed open under the pointer), an area 2,300 px down
-  after wheel scrolling, an element the app replaces every 1.5 s (its pin
-  found again on the new node, at the same point), an arrow and a text
-  selection — with the button's click and mousedown counters at 0
-  throughout; each comment's popover over the page's still; Send putting a
-  header and six chips into Kuru's box and a 0700/0600 folder whose
-  `marks.md`, crops and view carried no planted password value, `?token=`,
-  `Bearer` attribute or form value, and no comment's words anywhere in the
-  page's DOM (pierced, closed shadow root included). Under a strict CSP the
-  pins and hover box drew above the page's own modal dialog and a max
-  z-index overlay. ⌘⇧M, ⌘⇧H (a hover menu held open after the pointer left)
-  and Esc (never seen by the page) through `before-input-event`. A set aged
-  40 days was swept at the next start with its `lifecycle.log` line while a
-  young set, a link named like a set and a stranger directory stayed, its
-  crop answered 404 "cleaned up", and after a reload the box's chips for it
-  said "cleaned up". A window at opacity 0 can lose its frames to macOS's
-  occlusion (`document.visibilityState` hidden, no rAF): `showInactive()`
-  again brings them back; a real window never has it.
-
-- **The browser, phase 0** (2026-11-06), in an isolated instance on :7817
-  from a scratch copy, the real Electron app driven invisibly (windows shown
-  inactive at opacity 0, every `WebContentsView` recorded): a static page, a
-  Vite app with HMR and example.com loaded in tabs; a tab moved between panes
-  and to another workspace as the same view, its load count and a typed
-  value unchanged; the + menu, the pane menu, Settings, the phone dialog,
-  the profiles menu, the profile's board and a drag each swapped the page
-  for its still, and the page came back when they closed, while the Needs
-  drawer docked beside it did not; ctrl+a in the page never reached it and
-  armed kururu's prefix (`?` then opened help); the page's fetches and
-  WebSocket to :7817, :7717, :7800, the checkout's vite and
-  `127.0.0.1.nip.io:7817` all refused, the same page in `defaultSession`
-  reaching every one; `file:` refused, a popup opened as a tab, mic,
-  location and notifications refused, a download saved and quarantined; a
-  window reload kept the pages; a cold start brought four tabs back by id
-  and loaded only the one shown. The focus hand-off itself could not be
-  measured in a window that cannot take focus.
+- **The built-in browser and its marking** (phases 0 and 1, 2026-11-06)
+  were verified end to end in an isolated instance and removed on
+  2026-11-07; what was checked is in this file on the `browser-annotate`
+  branch.
 
 - **Quoting to Kuru** (2026-11-02), in an isolated instance on :7817 from a
   scratch copy, driven in the real Electron app with hidden windows and real

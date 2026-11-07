@@ -6,15 +6,15 @@
  * goes into a message that can sit in the box, be read again in the drawer or
  * be quoted onto a card, so it must not be a temporary folder the system
  * empties when it likes. Unlike `drops/` it is swept, after about thirty days
- * (the user's call): a set is a page's text, markup and pictures, and a month
- * of them is a month of whatever was on the screen. The lines in a message or
+ * (the user's call): a set is pictures of the screen and the words around
+ * them, and a month of them is a month of whatever was on the screen. The lines in a message or
  * on a card carry each mark's label and comment, so they still read once the
  * set is gone; the chip says "cleaned up", and a crop asked for is a 404 that
  * says so.
  *
  * `0700` and `0600`, never backed up (`EXCLUDED` in `shared/backup.ts`), and
  * the server judges each picture by its bytes, as `judgeDrop` does, so a body
- * that says PNG about anything writes nothing. The page never names a path:
+ * that says PNG about anything writes nothing. The window never names a path:
  * the id is minted here, and a GET is answered only for a name a set may hold.
  *
  * **The sweep touches only what it would have made.** It lists `marks/`,
@@ -28,7 +28,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync,
 import { join } from "node:path";
 import { imageKindOf } from "../../shared/drops";
 import { adoptScreenSet, alignMarks, redactScreenSet, screenBoxLines, screenMarkdown, screenMessage, type ScreenSet, type TimedText } from "../../shared/ink";
-import { adoptMarkSet, isMarkFile, isMarkSetId, marksMarkdown, marksMessage, redactSet, sweepable, type MarkSet } from "../../shared/marks";
+import { isMarkFile, isMarkSetId, sweepable } from "../../shared/marks";
 import { record } from "./lifecycle";
 import { dataDir } from "./store";
 
@@ -63,39 +63,12 @@ export interface KeptMarks {
 
 /**
  * Write a posted set and say where, with the lines for the box. Throws
- * `MarksRefused` for a body that is not a set. The pictures are written under
- * names this module picks — a crop the bytes do not bear out is left out and
- * the mark is kept without it — and the record in `marks.json` names them.
+ * `MarksRefused` for a body that is not a screen set — the only kind made
+ * since the built-in browser went (2026-11-07); its sets already on disk
+ * are still read and swept, and never written again.
  */
 export function keepMarks(body: unknown): KeptMarks {
-  if (typeof body === "object" && body !== null && (body as { kind?: unknown }).kind === "screen") return keepScreenSet(body);
-  const adopted = adoptMarkSet(body);
-  if ("refused" in adopted) throw new MarksRefused(adopted.refused);
-  const set = redactSet(adopted);
-  const { id, dir, write } = newSetDir();
-
-  const crops: Record<number, string> = {};
-  const marks = set.marks.map((mark) => {
-    const picture = pictureOf(mark.crop);
-    if (!picture) return { ...mark, crop: "" };
-    // The extension the bytes earned; a GET asks only for `.png`, which is
-    // what main sends, so a JPEG is kept in the record and not served.
-    const name = `mark-${mark.n}.${picture.ext}`;
-    write(name, picture.bytes);
-    crops[mark.n] = name;
-    return { ...mark, crop: name };
-  });
-  const view = pictureOf(set.view);
-  let viewName = "";
-  if (view) {
-    viewName = `view.${view.ext}`;
-    write(viewName, view.bytes);
-  }
-  const kept: MarkSet = { ...set, marks, view: viewName, at: Date.now() };
-  const path = join(dir, "marks.md");
-  write("marks.json", `${JSON.stringify(kept, null, 2)}\n`);
-  write("marks.md", marksMarkdown(kept, { view: viewName ? join(dir, viewName) : "", crops: Object.fromEntries(Object.entries(crops).map(([n, name]) => [n, join(dir, name)])) }));
-  return { id, dir, path, lines: marksMessage(kept, path) };
+  return keepScreenSet(body);
 }
 
 /** A fresh set's folder, under an id minted here, and a way to write a file into it once. */

@@ -1,6 +1,6 @@
 /**
- * A set of marks on the screen through the server: written to the folder
- * the browser's sets share, finished once its clip is heard, and the clip
+ * A set of marks on the screen through the server: written to the marks
+ * folder, finished once its clip is heard, and the clip
  * carried through the outbox to one line for Kuru with the marks in the
  * words. The recogniser and Kuru are stubs; the folder and the outbox's
  * files are real, on a temporary directory.
@@ -58,7 +58,7 @@ afterAll(() => {
 });
 
 describe("a screen set's folder", () => {
-  test("is written beside the browser's sets, pictures judged by their bytes, titles redacted, words pending", () => {
+  test("is written to the marks folder, pictures judged by their bytes, titles redacted, words pending", () => {
     const kept = keepMarks(body());
     expect(kept.dir.startsWith(marksDir())).toBe(true);
     expect(readdirSync(kept.dir).sort()).toEqual(["frame-1.jpg", "mark-1.png", "marks.json", "marks.md"]);
@@ -111,7 +111,7 @@ describe("a screen set's folder", () => {
     expect(finishScreenSet("../etc", null)).toBeNull();
   });
 
-  test("is swept by the browser's rule", () => {
+  test("is swept by the folder's rule", () => {
     const kept = keepMarks(body());
     expect(sweepMarks(Date.now() + 31 * 24 * 60 * 60 * 1000)).toContain(kept.id);
     expect(existsSync(kept.dir)).toBe(false);

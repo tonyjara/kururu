@@ -48,7 +48,6 @@ import {
   BOARD_TAB,
   isBoardTab,
   isDashTab,
-  isWebTab,
   dividers,
   parseDocTab,
   showingDoc,
@@ -61,9 +60,7 @@ import {
   type LayoutNode,
   type PaneState,
   type Rect,
-  type WebTabState,
 } from "../../../shared/layout";
-import { browserLabel } from "../../../shared/browser";
 import { basename } from "../../../shared/labels";
 import { emptyBoard, type Board } from "../../../shared/board";
 import type { Launcher } from "../../../shared/launchers";
@@ -99,10 +96,7 @@ import { Status } from "./Status";
 import { TerminalView } from "./Terminal";
 import { copyTerminal, onTerminalMenu, pasteTerminal, terminalSelection } from "../terminals";
 import { NodeChip } from "./NodeChip";
-import { dropRefusal, parseRemote, sideOf } from "../../../shared/remote";
-import { BrowserView } from "./BrowserView";
-import { desktop } from "../desktop";
-import { useBrowserState } from "../browser";
+import { dropRefusal, sideOf } from "../../../shared/remote";
 
 /** Whose workspace these panes are, when it is another node's: its id for the hue, its name for the words. */
 export interface RemotePanes {
@@ -455,7 +449,7 @@ export function Panes({
               : menu.of === "doc"
               ? docMenu(menu.paneId, menu.root, menu.path, menu.line)
               : menu.of === "new"
-              ? newTabMenu(menu.paneId, launchers, keymap, runsOn, Boolean(desktop()?.browser) && !remote)
+              ? newTabMenu(menu.paneId, launchers, keymap, runsOn)
               : paneMenu({
                   paneId: menu.paneId,
                   all,
@@ -700,7 +694,7 @@ function docMenu(paneId: string, root: string, path: string, line: number | null
   ];
 }
 
-function newTabMenu(paneId: string, launchers: Launcher[], keymap: Record<string, Action>, runsOn: string | null, browser: boolean): MenuItem[] {
+function newTabMenu(paneId: string, launchers: Launcher[], keymap: Record<string, Action>, runsOn: string | null): MenuItem[] {
   const first = keysByAction(keymap)["new-tab"]?.[0];
   const boardKey = keysByAction(keymap)["open-board"]?.[0];
   return [
@@ -716,10 +710,6 @@ function newTabMenu(paneId: string, launchers: Launcher[], keymap: Record<string
        there is one board per workspace, so "a board in this pane" means this
        one. */
     { label: "Board", hint: boardKey ? `${PREFIX_LABEL} ${keyLabel(boardKey)}` : undefined, run: () => api.openBoard(paneId, true) },
-    /* A page, in this pane, with its address field to type into. Only in the
-       Mac's window, which is the only place a page can be drawn, and only in
-       this Mac's workspaces: another node's localhost is not this one's. */
-    ...(browser ? [{ label: "Browser", run: () => void api.openBrowser("about:blank", { paneId }).catch(() => {}) }] : []),
     ...launchers.map((launcher, index) => ({
       label: launcher.label,
       hint: launcher.model ? undefined : "default model",
@@ -743,8 +733,6 @@ function paneLabel(pane: PaneState, agents: AgentSnapshot[]): string {
   if (isBoardTab(activeAgent(pane))) return "board";
   const shown = activeAgent(pane);
   if (isDashTab(shown)) return dashTabFace(shown).label;
-  const shownPage = webPageOf(pane, activeAgent(pane));
-  if (shownPage) return browserLabel(shownPage);
   const doc = showingDoc(pane);
   if (doc) return basename(doc.path);
   if (showsDoc(pane)) return "reader";
@@ -1067,26 +1055,6 @@ function Pane({
               </Fragment>
             );
           }
-          const page = webPageOf(pane, agentId);
-          if (page) {
-            return (
-              <Fragment key={agentId}>
-                {dropAt === index && <span className="tab-insert" aria-hidden="true" />}
-                <WebTab
-                  tabId={agentId}
-                  page={page}
-                  on={index === pane.activeIdx}
-                  onSelect={() => {
-                    if (swallowed()) return;
-                    api.selectTab(pane.id, index);
-                  }}
-                  onDragOver={(event) => overTab(event, index)}
-                  onDrop={dropOnStrip}
-                  onDragEnd={() => setDropAt(null)}
-                />
-              </Fragment>
-            );
-          }
           const doc = parseDocTab(agentId);
           if (doc) {
             return (
@@ -1251,11 +1219,6 @@ function Pane({
             launchers={launchers}
             focusedAgentId={focusedAgentId}
           />
-        ) : showing && webPageOf(pane, showing) ? (
-          /* Keyed by the tab, which is only a box and a chrome: the page is
-             the main process's, pooled by this id, and a key here rebuilds
-             nothing of it — only the address field's half-typed text. */
-          <BrowserView key={showing} tabId={showing} page={webPageOf(pane, showing)!} remoteName={remote ? remote.name : null} />
         ) : showingDoc(pane) || (!showing && pane.reader) ? (
           /* A document tab, or a reader with no tabs yet — which is its picker.
              One view for both and unkeyed, so moving between two documents in
@@ -1385,16 +1348,10 @@ function PaneMenuButton({ solo, onOpen }: { solo: SoloAt | null; onOpen: (at: Me
  * you are trying to use.
  */
 /**
- * A browser tab's page as the layout holds it, for an id that is one — this
- * node's (`web:…`) or, in another node's workspace, qualified as that node's.
- * Null for anything else, and for a tab whose page the pane has lost, which is
- * then drawn as nothing rather than as a terminal that is not there.
- */
-/**
  * What a pane shows, as the screen pen's mark on it says it (`whatat.ts`):
  * an agent by its title — never a bare id — a document by its path, the
- * board, the Dashboard's page, a browser tab's title. Attributes, so the
- * page can answer from the element under the ink without knowing the tree.
+ * board, the Dashboard's page. Attributes, so the page can answer from the
+ * element under the ink without knowing the tree.
  */
 function paneInk(pane: PaneState, showing: string | null, agents: readonly AgentSnapshot[], workspace: string): Record<string, string> {
   let what = "empty pane";
@@ -1403,10 +1360,7 @@ function paneInk(pane: PaneState, showing: string | null, agents: readonly Agent
     what = "Dashboard";
     name = dashTabFace(showing!).label;
   } else if (isBoardTab(showing)) what = "board";
-  else if (showing && webPageOf(pane, showing)) {
-    what = "browser tab";
-    name = webPageOf(pane, showing)!.title;
-  } else if (showingDoc(pane)) {
+  else if (showingDoc(pane)) {
     what = "document";
     name = showingDoc(pane)!.path;
   } else if (!showing && pane.reader) what = "reader";
@@ -1416,71 +1370,6 @@ function paneInk(pane: PaneState, showing: string | null, agents: readonly Agent
     name = agent ? tabLabel(agent) : "";
   }
   return { "data-ink-what": what, "data-ink-name": name, "data-ink-workspace": workspace };
-}
-
-function webPageOf(pane: PaneState, id: string | null): WebTabState | null {
-  if (!id) return null;
-  if (!isWebTab(id) && !isWebTab(parseRemote(id)?.id)) return null;
-  return pane.web?.[id] ?? null;
-}
-
-/**
- * A browser tab. A tab like the board's — it drags, reorders, splits off and
- * closes with the same payload, because the layout holds it as one more id —
- * labelled by its page's title, else its host. Closing it ends the page and
- * nothing else, which the tooltip says beside a ✕ that ends a terminal
- * everywhere else in the strip.
- */
-function WebTab({
-  tabId,
-  page,
-  on,
-  onSelect,
-  onDragOver,
-  onDrop,
-  onDragEnd,
-}: {
-  tabId: string;
-  page: WebTabState;
-  on: boolean;
-  onSelect: () => void;
-  onDragOver: (event: React.DragEvent) => void;
-  onDrop: (event: React.DragEvent) => void;
-  onDragEnd: () => void;
-}) {
-  const live = useBrowserState(tabId);
-  const label = browserLabel({ url: live?.url || page.url, title: live?.title || page.title });
-  return (
-    <button
-      className={`tab tab-web ${on ? "tab-on" : ""} ${live?.loading ? "tab-web-loading" : ""}`}
-      onClick={onSelect}
-      title={[label, live?.url || page.url].join("\n")}
-      draggable
-      onDragStart={(event) => beginDrag(event, "agent", tabId)}
-      onDragEnd={() => {
-        endDrag();
-        onDragEnd();
-      }}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-    >
-      <Icon name="external" />
-      <span className="tab-label">{label}</span>
-      <span
-        className="tab-close"
-        role="button"
-        tabIndex={-1}
-        aria-label="Close tab"
-        title="Close this page — it ends nothing else"
-        onClick={(event) => {
-          event.stopPropagation();
-          api.closeTab(tabId);
-        }}
-      >
-        <Icon name="close" />
-      </span>
-    </button>
-  );
 }
 
 /**

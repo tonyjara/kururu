@@ -72,14 +72,6 @@ export interface DesktopBridge {
    */
   notes?: DesktopNotes;
   /**
-   * kururu's browser: the pages of browser tabs, held by the main process
-   * and drawn over each tab's box (`desktop/browser.js`). Optional — a window
-   * from before it, a browser and the phone draw a browser tab as its title
-   * and address and "Open on the Mac", which is all `BrowserView` asks of
-   * them.
-   */
-  browser?: DesktopBrowser;
-  /**
    * The screen pen (`desktop/ink.js`): ink over every display, with one
    * picture per burst. Optional — the phone, a browser and a window from
    * before it have no pen, and draw no pencil.
@@ -166,113 +158,6 @@ export interface InkBundle {
   audioAt: number | null;
   displays: unknown[];
   marks: unknown[];
-}
-
-/** A box of the window's page, in CSS pixels. */
-export interface BrowserBox {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-/** A download a page started, as its tab's line draws it. */
-export interface BrowserDownload {
-  id: number;
-  name: string;
-  received: number;
-  total: number;
-  state: "progressing" | "completed" | "cancelled" | "interrupted";
-}
-
-/** A page as the main process sees it, for its tab's chrome. */
-export interface BrowserPageState {
-  tabId: string;
-  gone?: true;
-  url?: string;
-  title?: string;
-  loading?: boolean;
-  canBack?: boolean;
-  canForward?: boolean;
-  zoom?: number;
-  error?: string | null;
-  downloads?: BrowserDownload[];
-  /** The tab's marks, as main holds them; absent from an app before marking. */
-  marking?: BrowserMarking | null;
-}
-
-/** A mark as the tab's tray draws it: what its label is made of, and its comment — never its pictures. */
-export interface BrowserMarkSummary {
-  n: number;
-  kind: "element" | "region" | "pen" | "text";
-  comment: string;
-  lost: boolean;
-  box: { x: number; y: number; width: number; height: number };
-  text: string;
-  near: string;
-  shape: "" | "free" | "arrow" | "ellipse";
-  hasCrop: boolean;
-  elements: { tag: string; classes: string[]; name: string; text: string; role: string }[];
-}
-
-/** A tab's marking, for its chrome and tray (`desktop/marks.js`). */
-export interface BrowserMarking {
-  on: boolean;
-  tool: "element" | "region" | "pen";
-  shape: "free" | "arrow" | "ellipse";
-  holding: boolean;
-  /** The page's debugger is attached; marking needs it. */
-  ready: boolean;
-  note: string | null;
-  max: number;
-  marks: BrowserMarkSummary[];
-}
-
-export type BrowserMarkVerb = "mode" | "tool" | "selection" | "hold" | "comment" | "drop" | "clear" | "crop" | "bundle" | "focus";
-
-export type BrowserButton =
-  | "back"
-  | "forward"
-  | "reload"
-  | "stop"
-  | "zoom-in"
-  | "zoom-out"
-  | "zoom-reset"
-  | "devtools"
-  | "external"
-  | "focus"
-  | "reveal"
-  | "dismiss";
-
-export interface DesktopBrowser {
-  /** Show a tab's page at a box; made and loaded the first time. `nav` is the tab's, and a higher one loads `url`. */
-  show(tabId: string, url: string, nav: number, box: BrowserBox): Promise<BrowserPageState | null>;
-  place(tabId: string, box: BrowserBox): void;
-  hide(tabId: string): void;
-  /** The page ended: only for a tab that has left the layout. */
-  close(tabId: string): void;
-  go(tabId: string, what: BrowserButton, arg?: number): void;
-  /** A JPEG of the page as it is, as a data URL, or null. */
-  still(tabId: string): Promise<string | null>;
-  /** The tabs whose pages are up. */
-  ids(): Promise<string[]>;
-  onState(listener: (state: BrowserPageState) => void): () => void;
-  /** The prefix, pressed in a page: the keyboard is the window's again and the prefix is to be armed. */
-  onPrefix(listener: (tabId: string) => void): () => void;
-  /** ⌘L in a page: the tab's address field wants the keyboard. */
-  onAddress(listener: (tabId: string) => void): () => void;
-  /** A popup, or "Open Link in New Tab": a new tab beside the one that asked. */
-  onOpen(listener: (tabId: string, url: string) => void): () => void;
-  /** A page took the keyboard: its pane is the focused one now. */
-  onFocused(listener: (tabId: string) => void): () => void;
-  /**
-   * A verb of the tab's marks (`desktop/marks.js`): `bundle` answers with the
-   * set to post, `crop` with a mark's picture as a data URL, the rest with
-   * whether it took. Optional: an app from before marking has none.
-   */
-  mark?(tabId: string, verb: BrowserMarkVerb, a?: boolean | number | string, b?: boolean | number | string): Promise<unknown>;
-  /** A mark just made on the page: its number, and its pin's place in the tab's box, in the window's CSS pixels. */
-  onMarkMade?(listener: (tabId: string, n: number, at: { x: number; y: number }) => void): () => void;
 }
 
 /** What the window asks for when it pops a card out as a window. */

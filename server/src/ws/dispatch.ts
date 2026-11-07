@@ -16,7 +16,6 @@ import { serviceVerbs } from "./services";
 import { dbViewerVerbs } from "./dbviewer";
 import { boardVerbs } from "./board";
 import { readerVerbs } from "./reader";
-import { browserVerbs } from "./browser";
 
 /**
  * One frame off a client's socket. Everything past the gate is trusted to be
@@ -80,5 +79,4 @@ const VERBS: ReadonlyArray<(ws: WebSocket, st: ClientState, msg: ClientMessage) 
   profileVerbs,
   boardVerbs,
   readerVerbs,
-  browserVerbs,
 ];

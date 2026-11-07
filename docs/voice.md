@@ -434,8 +434,7 @@ go; tapped, until it is pressed again (the user, 2026-11-06 — it was held
 only), told apart as the drawer's is (`web/src/micpress.ts`). The popover
 stays where it is while it listens, the mic red as the drawer's; Escape drops
 what is being said and leaves the quote up as it was (`dictateToggled("drop")`,
-where the drawer's keeps its words). A browser mark's comment (`MarkTray.tsx`)
-is the same button and works the same way. Stopped, the clip goes
+where the drawer's keeps its words). Stopped, the clip goes
 to `POST /api/voice/dictate` instead of the outbox: `Voice.transcribe`, every
 language the user speaks, with the words handed back on the request and the
 clip deleted once it is answered. The words go after anything typed and the
@@ -534,8 +533,7 @@ its reasons are [the plan](plans/screen-annotate.md); this is how it works.
   under it (`web/src/whatat.ts`): `kururu: agent "…"`, a card's code and
   title, a document and its heading, `kururu: Kuru's drawer, button
   "Search the conversation"` or a line of the conversation by whose, when
-  and its first words, the pill and its control; on a kururu browser tab, the element
-  under it as a browser mark would (`TabMarks.elementAt`). A recording that
+  and its first words, the pill and its control. A recording that
   rolls at five minutes takes the marks so far with its clip and keeps the
   pen for the next.
 - **Shift while recording.** While the pill is listening, Shift is the pen's

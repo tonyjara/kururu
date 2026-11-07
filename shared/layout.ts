@@ -11,9 +11,9 @@
  * is a *pane*, and a pane holds a stack of tabs with one showing. Tabs are what
  * let a pane be a place you work rather than a slot one process occupies: four
  * agents in one project belong in one pane, not four. A tab is a terminal, the
- * board, a document or a page in the browser, in any mix — see `BOARD_TAB`,
- * `docTab` and `webTab` — or, in the profile's Dashboard and nowhere else,
- * one of its fixed tabs (`isDashTab`).
+ * board or a document, in any mix — see `BOARD_TAB` and `docTab` — or, in
+ * the profile's Dashboard and nowhere else, one of its fixed tabs
+ * (`isDashTab`).
  *
  * Everything here is pure and immutable. An operation returns a new tree, which
  * is what lets the server diff nothing and broadcast whole, and what lets React
@@ -74,35 +74,12 @@ export interface ReaderDoc {
   path: string;
 }
 
-/**
- * A browser tab's page, as the layout remembers it: where it is and what it
- * is called, and nothing it holds.
- *
- * The page itself is the Mac window's — a `WebContentsView` in Electron's
- * main, pooled by tab id (`desktop/browser.js`) — so what the server keeps is
- * what a restart needs to put the tab back and what a client with no page
- * draws in its place: the address and the title. `url` is the last place the
- * page reported being at, or the one asked for; `nav` goes up only when
- * somebody *asks* the tab to go somewhere (`browser-navigate`), which is how
- * the window tells "load this" from "this is where you already are" — the
- * page's own reports move `url` and leave `nav` alone, so a page that
- * navigated itself is never sent back to where it was.
- */
-export interface WebTabState {
-  /** `http:`, `https:` or `about:blank`, as `browserUrl` let it through. */
-  url: string;
-  /** What the page calls itself, or "" before it has said. */
-  title: string;
-  /** Bumped by each navigation asked for; a cache key the window compares, never a count of anything. */
-  nav: number;
-}
-
 /** A leaf: tabs in strip order, one of them showing. */
 export interface PaneState {
   id: string;
   /**
-   * The tabs, in strip order: terminals by agent id, the board (`BOARD_TAB`),
-   * documents (`docTab`) and browser tabs (`webTab`). Named for what it held first, and kept that way
+   * The tabs, in strip order: terminals by agent id, the board (`BOARD_TAB`)
+   * and documents (`docTab`). Named for what it held first, and kept that way
    * because the wire, the host's blob and `session.json` all spell it so.
    * Empty is a real state — a pane with nothing in it.
    */
@@ -137,17 +114,6 @@ export interface PaneState {
    * pane *is*, and a split leaves it on the half that kept the tabs.
    */
   forAgents?: true;
-  /**
-   * Its browser tabs' pages, by tab id — one entry for each `webTab` in
-   * `agentIds`, and none for anything else. On the pane rather than beside the
-   * tree, the way `reader` is, so that it goes wherever the layout goes
-   * without a road of its own: the snapshot, the pty host's blob across a
-   * server restart, another node's screen. The price is that the operations
-   * here that take a tab from one pane to another must carry its entry —
-   * `moveTabTo`, `mergePanes` — and the ones that take a tab out must drop it,
-   * which `removeAt` does for all of them. Absent on a pane with none.
-   */
-  web?: Record<string, WebTabState>;
 }
 
 export type LayoutNode = PaneNode | SplitNode;
@@ -312,44 +278,8 @@ export function parseDocTab(id: unknown): ReaderDoc | null {
 }
 
 /**
- * A page in kururu's browser, as a tab.
- *
- * The board's trick a third time — an id no pty can have, in the same list as
- * the terminals, so every gesture a tab has works on a page for free — with
- * one difference from a document: the id is *not* the address. A page's URL
- * changes with every click in it, and the id is what the window's pool keys
- * the live page by (`desktop/browser.js`), so an id that changed with the URL
- * would be a page torn down and loaded again on every link followed. So it is
- * random, minted once by the server, and the address lives beside it in
- * `PaneState.web`.
- *
- * Random rather than a counter like the panes' ids, because it outlives the
- * process that minted it: `persist.ts` keeps it across a cold start, and a
- * window still holding a page for `web:3` must never be handed somebody
- * else's tab under the same name by a server that started counting again.
- *
- * Like a terminal and unlike a document, a page is in one pane at a time, so
- * the operations that find a tab by id (`moveTabTo`, `removeTab`,
- * `splitWith`) are right for it as they stand.
- */
-const WEB_PREFIX = "web:";
-/** What follows the prefix: what `mintWebTab` makes, and nothing a path or a qualified id could be. */
-const WEB_ID = /^web:[a-z0-9]{8,32}$/;
-
-export function isWebTab(id: unknown): id is string {
-  return typeof id === "string" && WEB_ID.test(id);
-}
-
-/** A fresh browser tab's id. `random` is injectable so the tests can say which. */
-export function mintWebTab(random: () => number = Math.random): string {
-  let out = "";
-  for (let i = 0; i < 12; i++) out += Math.floor(random() * 36).toString(36);
-  return WEB_PREFIX + out;
-}
-
-/**
  * A fixed tab of the profile's Dashboard, as a tab: the board's trick a
- * fourth time, an id no pty can have in the same list as everything else, so
+ * third time, an id no pty can have in the same list as everything else, so
  * the Dashboard's panes are drawn, split and rearranged by the code every
  * workspace's are. Which ones exist, and the rule that keeps them where they
  * are, is `shared/dashboard.ts`; all this file needs is to know one is not a
@@ -363,55 +293,7 @@ export function isDashTab(id: unknown): id is string {
 
 /** Only the terminals of a list of tabs — what may be killed, watched or typed into. */
 export function terminalsOf(ids: readonly string[]): string[] {
-  return ids.filter((id) => id !== BOARD_TAB && !isDocTab(id) && !isWebTab(id) && !isDashTab(id));
-}
-
-/** A browser tab's page, wherever in the tree it is, or null. */
-export function webTabOf(node: LayoutNode, id: string): WebTabState | null {
-  if (!isWebTab(id)) return null;
-  return paneWithAgent(node, id)?.web?.[id] ?? null;
-}
-
-/** The browser tab showing in a pane, with its page, or null when the active tab is not one. */
-export function showingWeb(pane: PaneState): { id: string; page: WebTabState } | null {
-  const id = activeAgent(pane);
-  if (!isWebTab(id)) return null;
-  const page = pane.web?.[id];
-  return page ? { id, page } : null;
-}
-
-/** A pane with one browser tab's page set, or taken off with null. Nothing else about the pane changes. */
-function withWebEntry(pane: PaneState, id: string, page: WebTabState | null): PaneState {
-  const { [id]: _gone, ...rest } = pane.web ?? {};
-  const web = page ? { ...rest, [id]: page } : rest;
-  const { web: _old, ...bare } = pane;
-  return Object.keys(web).length > 0 ? { ...bare, web } : bare;
-}
-
-/**
- * Put a new browser tab in a pane, after the one showing, and show it — the
- * place a document opened from the tree takes (`withDoc`), since it is the
- * same gesture: something to look at, next to what you were looking at. An id
- * already in the tree is refused, since a page is in one pane at a time.
- */
-export function addWebTab(node: LayoutNode, paneId: string, id: string, page: WebTabState): LayoutNode {
-  if (!isWebTab(id) || paneWithAgent(node, id)) return node;
-  return updatePane(node, paneId, (pane) => {
-    const place = pane.agentIds.length === 0 ? 0 : pane.activeIdx + 1;
-    const agentIds = [...pane.agentIds];
-    agentIds.splice(place, 0, id);
-    return withWebEntry({ ...pane, agentIds, activeIdx: place }, id, page);
-  });
-}
-
-/** Change a browser tab's page wherever it is. The same tree when there is no such tab or nothing changed. */
-export function setWebTab(node: LayoutNode, id: string, fn: (page: WebTabState) => WebTabState): LayoutNode {
-  const pane = paneWithAgent(node, id);
-  const page = pane?.web?.[id];
-  if (!pane || !page) return node;
-  const next = fn(page);
-  if (next.url === page.url && next.title === page.title && next.nav === page.nav) return node;
-  return updatePane(node, pane.id, (p) => withWebEntry(p, id, next));
+  return ids.filter((id) => id !== BOARD_TAB && !isDocTab(id) && !isDashTab(id));
 }
 
 /** A pane's documents, in strip order. */
@@ -424,10 +306,10 @@ export function activeAgent(pane: PaneState): string | null {
   return pane.agentIds[pane.activeIdx] ?? null;
 }
 
-/** The terminal showing in a pane, or null when it is empty or showing the board, a document, a page or a Dashboard tab. */
+/** The terminal showing in a pane, or null when it is empty or showing the board, a document or a Dashboard tab. */
 export function activeTerminal(pane: PaneState): string | null {
   const id = activeAgent(pane);
-  return id === BOARD_TAB || isDocTab(id) || isWebTab(id) || isDashTab(id) ? null : id;
+  return id === BOARD_TAB || isDocTab(id) || isDashTab(id) ? null : id;
 }
 
 /** The document showing in a pane, or null when the active tab is not one. */
@@ -475,21 +357,14 @@ export function updatePane(
   return mapPanes(node, (pane) => (pane.id === paneId ? fn(pane) : pane));
 }
 
-/**
- * Add a tab, at the end of the strip, and show it. `page` is a browser tab's
- * address, for one arriving from another workspace with it (`webTabOf` read
- * it there before it was taken out).
- */
-export function addTab(node: LayoutNode, paneId: string, agentId: string, cwd?: string, page?: WebTabState | null): LayoutNode {
-  return updatePane(node, paneId, (pane) => {
-    const added = {
-      ...pane,
-      agentIds: [...pane.agentIds, agentId],
-      activeIdx: pane.agentIds.length,
-      cwd: cwd ?? pane.cwd,
-    };
-    return page && isWebTab(agentId) ? withWebEntry(added, agentId, page) : added;
-  });
+/** Add a tab, at the end of the strip, and show it. */
+export function addTab(node: LayoutNode, paneId: string, agentId: string, cwd?: string): LayoutNode {
+  return updatePane(node, paneId, (pane) => ({
+    ...pane,
+    agentIds: [...pane.agentIds, agentId],
+    activeIdx: pane.agentIds.length,
+    cwd: cwd ?? pane.cwd,
+  }));
 }
 
 /**
@@ -502,15 +377,10 @@ export function addTab(node: LayoutNode, paneId: string, agentId: string, cwd?: 
  */
 export function removeAt(pane: PaneState, at: number): PaneState {
   if (!isIndex(at) || at >= pane.agentIds.length) return pane;
-  const gone = pane.agentIds[at]!;
   const agentIds = pane.agentIds.filter((_, i) => i !== at);
   const active =
     at < pane.activeIdx ? pane.activeIdx - 1 : at === pane.activeIdx ? (at > 0 ? at - 1 : 0) : pane.activeIdx;
-  const left = { ...pane, agentIds, activeIdx: Math.max(0, Math.min(active, agentIds.length - 1)) };
-  // A page taken out takes its address with it: an entry with no tab would be
-  // an address the next snapshot carries for nothing, and `moveTabTo` puts it
-  // back on the pane the tab lands in.
-  return isWebTab(gone) && pane.web?.[gone] ? withWebEntry(left, gone, null) : left;
+  return { ...pane, agentIds, activeIdx: Math.max(0, Math.min(active, agentIds.length - 1)) };
 }
 
 /**
@@ -569,14 +439,11 @@ export function moveTabTo(
   // Remove first, so an index within the same strip means what it looks like:
   // the position the tab will occupy once it is gone from where it was.
   const without = removeTab(node, agentId);
-  // A page's address travels with its tab; `removeAt` took it off the pane it left.
-  const page = webTabOf(node, agentId);
   return updatePane(without, toPaneId, (pane) => {
     const at = Math.max(0, Math.min(wanted ?? pane.agentIds.length, pane.agentIds.length));
     const agentIds = [...pane.agentIds];
     agentIds.splice(at, 0, agentId);
-    const moved = { ...pane, agentIds, activeIdx: at };
-    return page ? withWebEntry(moved, agentId, page) : moved;
+    return { ...pane, agentIds, activeIdx: at };
   });
 }
 
@@ -745,15 +612,12 @@ export function mergePanes(node: LayoutNode, fromId: string, intoId: string): La
   const into = findPane(node, intoId);
   if (!from || !into) return node;
   const arriving = from.agentIds.filter((id) => !(isDocTab(id) && into.agentIds.includes(id)));
-  // Pages' addresses come with their tabs, as a reader's state does below.
-  const web = { ...into.web, ...from.web };
   const merged = updatePane(node, intoId, (pane) => ({
     ...pane,
     agentIds: [...pane.agentIds, ...arriving],
     // Show the first of what arrived, the way a single dropped tab shows.
     activeIdx: arriving.length > 0 ? pane.agentIds.length : pane.activeIdx,
     reader: pane.reader ?? from.reader,
-    ...(Object.keys(web).length > 0 ? { web } : {}),
   }));
   return closePane(merged, fromId) ?? merged;
 }

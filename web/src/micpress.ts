@@ -1,8 +1,7 @@
 /**
  * The comment mics' press, kept apart from the components so it can be
- * tested without a page: the quote popover's and a browser mark's both
- * dictate a held press until it is let go and a tapped one until the next
- * press, as Kuru's box does.
+ * tested without a page: the quote popover's dictates a held press until
+ * it is let go and a tapped one until the next press, as Kuru's box does.
  *
  * A tap is told from a hold by the two pointer events' own `timeStamp`s,
  * never by the clock when each is handled: opening the microphone can hold

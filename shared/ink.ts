@@ -7,9 +7,9 @@
  * is a *screen set*: one mark per burst of ink, each with the strokes, the
  * window that was under them, and two pictures the helper made (a crop around
  * the ink at the display's own pixels, and the whole display shrunk). It is
- * kept in the same folder as a browser tab's marks (`shared/marks.ts`,
- * `server/src/marks.ts`), swept by the same rule and drawn by the same chips,
- * so this file is only what is different about it: the body held to its
+ * kept in the marks folder (`shared/marks.ts`, `server/src/marks.ts`), swept
+ * by its rule and drawn by the marks chips, so this file is only what is
+ * particular to the pen: the body held to its
  * shape, the strokes thinned, and — the part that is new — where each mark
  * goes in the words that were said while it was drawn.
  *
@@ -23,7 +23,7 @@
  *
  * Pure, so all of it is tested as text.
  */
-import { LABEL_WORDS_MAX, MARKS_MAX, adoptElement, cleanUrl, elementLabel, labelWords, pageLabel, redact, redactElement, type MarkBox, type MarkElement } from "./marks";
+import { LABEL_WORDS_MAX, MARKS_MAX, labelWords, redact, type MarkBox } from "./marks";
 
 /** Strokes on one display less than this far apart, pen-up to the next pen-down, are one burst — one mark. */
 export const BURST_GAP_MS = 1200;
@@ -79,16 +79,6 @@ export interface KururuAt {
   element: string;
 }
 
-/**
- * A mark on one of kururu's browser tabs: the element under the ink's centre
- * as the marking script reads it for a browser mark, and the page's address.
- * The browser is going; this is the one field that leaves with it.
- */
-export interface PageAt {
-  url: string;
-  element: MarkElement;
-}
-
 /** What was under a burst of ink, as the helper read it off the window list. */
 export interface InkUnder {
   app: string;
@@ -129,8 +119,6 @@ export interface ScreenMark {
   tip: InkXY | null;
   /** On kururu's own window: what the page said was there. */
   kururu: KururuAt | null;
-  /** On a kururu browser tab: the element under it. */
-  page: PageAt | null;
   /** The crop around the ink: base64 PNG on the way in, a file name once written. */
   crop: string;
   /** The whole display, shrunk: base64 JPEG on the way in, a file name once written. */
@@ -224,13 +212,6 @@ function adoptKururu(value: unknown): KururuAt | null {
   return what ? { what, name: flat(r.name, 300), detail: flat(r.detail, 200), workspace: flat(r.workspace, 120), element: flat(r.element, 200) } : null;
 }
 
-function adoptPage(value: unknown): PageAt | null {
-  if (value === null || typeof value !== "object") return null;
-  const r = rec(value);
-  const url = str(r.url, 4000);
-  return url && r.element && typeof r.element === "object" ? { url, element: adoptElement(r.element) } : null;
-}
-
 /**
  * Strokes and their styles off the wire, kept together: a stroke dropped for
  * having no point takes its style with it, so the two stay one for one.
@@ -261,7 +242,7 @@ function adoptStrokes(value: unknown): InkXY[][] {
 /**
  * A posted body as a screen set, or why it is not one: every number through
  * `Number.isFinite`, every string cut, the marks renumbered in the order
- * sent, the strokes thinned, and the cap kept as a page's set keeps it.
+ * sent, the strokes thinned, and the cap (`MARKS_MAX`) kept: refused past it, never cut.
  */
 export function adoptScreenSet(value: unknown): ScreenSet | { refused: string } {
   const b = rec(value);
@@ -298,7 +279,6 @@ export function adoptScreenSet(value: unknown): ScreenSet | { refused: string } 
         shape: shape.shape,
         tip: shape.tip,
         kururu: adoptKururu(r.kururu),
-        page: adoptPage(r.page),
         crop: str(r.crop, 24 * 1024 * 1024),
         frame: str(r.frame, 16 * 1024 * 1024),
       };
@@ -312,8 +292,7 @@ export function adoptScreenSet(value: unknown): ScreenSet | { refused: string } 
 export function redactScreenSet(set: ScreenSet): ScreenSet {
   const under = (u: InkUnder | null): InkUnder | null => (u ? { ...u, app: redact(u.app), window: redact(u.window), front: u.front ? { ...u.front, app: redact(u.front.app) } : null } : null);
   const kururu = (k: KururuAt | null): KururuAt | null => (k ? { what: redact(k.what), name: redact(k.name), detail: redact(k.detail), workspace: redact(k.workspace), element: redact(k.element) } : null);
-  const page = (p: PageAt | null): PageAt | null => (p ? { url: cleanUrl(p.url), element: redactElement(p.element) } : null);
-  return { ...set, marks: set.marks.map((m) => ({ ...m, under: under(m.under), kururu: kururu(m.kururu ?? null), page: page(m.page ?? null) })) };
+  return { ...set, marks: set.marks.map((m) => ({ ...m, under: under(m.under), kururu: kururu(m.kururu ?? null) })) };
 }
 
 // ---------------------------------------------------------------------------
@@ -749,28 +728,23 @@ export function inlineMarks(text: string, places: readonly MarkPlace[], labelOf:
 // ---------------------------------------------------------------------------
 
 /** The fields a label is made of. Every one past the first two is from phase 2, and a set written before it has none of them. */
-export type LabelledMark = Pick<ScreenMark, "under" | "secure"> & Partial<Pick<ScreenMark, "snap" | "shape" | "kururu" | "page">>;
+export type LabelledMark = Pick<ScreenMark, "under" | "secure"> & Partial<Pick<ScreenMark, "snap" | "shape" | "kururu">>;
 
 /**
  * What a mark is, as its line says it: the shape the ink makes, and what it
- * was drawn on — the element on a kururu browser tab, the pane on kururu's
- * window, or another application's window by its title.
+ * was drawn on — the pane on kururu's window, or another application's
+ * window by its title.
  */
 export function screenMarkLabel(mark: LabelledMark): string {
-  const shape = mark.snap ? "snapshot of " : !mark.shape ? "" : mark.page ? (mark.shape === "arrow" ? "arrow to " : `${mark.shape} `) : `${mark.shape} in `;
+  const shape = mark.snap ? "snapshot of " : !mark.shape ? "" : `${mark.shape} in `;
   const room = LABEL_WORDS_MAX - shape.length;
   let where: string;
-  if (mark.page) {
-    const on = labelWords(pageLabel(mark.page.url), 28);
-    const e = mark.page.element;
-    const words = labelWords(e.name || e.text, Math.max(16, room - on.length - e.tag.length - 7));
-    where = `${words ? `${e.tag} "${words}"` : elementLabel(e)} on ${on}`;
-  } else if (mark.kururu) {
+  if (mark.kururu) {
     const what = labelWords(mark.kururu.what, 24);
     const name = mark.kururu.name ? labelWords(mark.kururu.name, Math.max(28, room - 8 - what.length - 3)) : "";
     // A place with no name of its own — Kuru's drawer, the pill, the sidebar —
-    // says the part of it the ink was on: the control, as a page's element is
-    // said, or else the part ("its header", a line of the conversation).
+    // says the part of it the ink was on: the control, by its role and
+    // words, or else the part ("its header", a line of the conversation).
     // Given more room than the line's budget leaves, as a name is: "button
     // 'Search…'" names nothing, and the part is what the mark was about.
     const left = Math.max(44, room - 8 - what.length - 2);
@@ -822,8 +796,7 @@ export function saidWithMarks(set: Pick<ScreenSet, "marks" | "said" | "places">)
 
 /**
  * What goes into Kuru's box for a session with no voice — the drawer's
- * pencil: the header, and a line per mark for the user to write after, as a
- * browser tab's marks go in.
+ * pencil: the header, and a line per mark for the user to write after.
  */
 export function screenBoxLines(set: Pick<ScreenSet, "marks">, mdPath: string): string[] {
   return [screenHeader(set.marks.length, mdPath), ...set.marks.map((m) => `[mark ${m.n} ${screenMarkLabel(m)}]`)];
@@ -885,16 +858,6 @@ export function screenMarkdown(set: ScreenSet, files: { crops: Record<number, st
       const k = mark.kururu;
       out.push(`- On kururu's own window: ${labelWords(k.what, 80)}${k.name ? ` "${labelWords(k.name, 200)}"` : ""}${k.detail ? `, ${labelWords(k.detail, 160)}` : ""}${k.workspace ? `, in the workspace "${labelWords(k.workspace, 80)}"` : ""}`);
       if (mark.kururu.element) out.push(`- Under the ink's centre: ${labelWords(mark.kururu.element, 160)}`);
-    }
-    if (mark.page) {
-      const e = mark.page.element;
-      out.push(`- On a page in kururu's browser: ${mark.page.url}`);
-      out.push(`- The element under the ink's centre: ${elementLabel(e)}${e.role ? ` (role ${e.role})` : ""}`);
-      const best = e.selectors.find((sel) => sel.unique) ?? e.selectors[0];
-      if (best) out.push(`- Selector to find it: \`${best.value.replace(/`/g, "")}\`${best.unique ? "" : " (not unique on the page)"}`);
-      const rest = e.selectors.filter((sel) => sel !== best).slice(0, 3);
-      if (rest.length) out.push(`- Other selectors: ${rest.map((sel) => `\`${sel.value.replace(/`/g, "")}\``).join(", ")}`);
-      if (e.text) out.push("- Its text (the page's words):", "", fenced(e.text), "");
     }
     if (mark.snap) out.push("- A snapshot: the display under the pointer at this moment in the words, with no ink on it.");
     else if (mark.shape) out.push(`- Drawn as: ${mark.shape}${mark.shape === "arrow" && mark.tip ? `, pointing at (${Math.round(mark.tip[0])}, ${Math.round(mark.tip[1])})` : ""}`);

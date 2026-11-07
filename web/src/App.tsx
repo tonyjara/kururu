@@ -26,7 +26,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   activeAgent,
   activeTerminal,
-  paneWithAgent,
   terminalsOf,
   isBoardTab,
   isDashTab,
@@ -82,9 +81,6 @@ import { showCardNext } from "./components/Board";
 import { useVoiceUi } from "./voice";
 import { actionFor, isModifier, isPrefix, keyName, workspaceDigit, PREFIX_BYTE, PREFIX_TIMEOUT_MS, type Action } from "./keys";
 import { desktop } from "./desktop";
-import { letGoOfClosed, startBrowser } from "./browser";
-import { FOCUS_ADDRESS } from "./components/BrowserView";
-import { browserLabel } from "../../shared/browser";
 import { agentLabel, basename, tabLabel } from "./labels";
 import { skinFor } from "../../shared/skin";
 import * as api from "./session";
@@ -1136,41 +1132,6 @@ export function App() {
     disarmTimer.current = setTimeout(() => setPrefixArmed(false), PREFIX_TIMEOUT_MS);
   }, []);
 
-  /**
-   * kururu's browser, from the main process (`desktop/browser.js`): a page
-   * holds the keyboard while it is clicked in, so what main hears there and
-   * hands back is acted on here. The prefix, pressed in a page, arms the
-   * prefix — main has already given the keyboard back to this page, so the
-   * next key is ours. ⌘L wants the tab's address field. A popup, or "Open
-   * Link in New Tab", is a tab beside the one that asked. A click into a
-   * page makes its pane the focused one, as a click on a terminal does.
-   * And a page whose tab has gone is let go of (`letGoOfClosed`).
-   */
-  const localLayout = useRef<LayoutNode | null>(null);
-  localLayout.current = remote ? null : workspace?.layout ?? null;
-  useEffect(() => {
-    const bridge = desktop()?.browser;
-    if (!bridge) return;
-    startBrowser();
-    const paneOf = (tabId: string) => (localLayout.current ? paneWithAgent(localLayout.current, tabId) : null);
-    const stops = [
-      bridge.onPrefix(() => arm()),
-      bridge.onAddress((tabId) => window.dispatchEvent(new CustomEvent(FOCUS_ADDRESS, { detail: tabId }))),
-      bridge.onOpen((tabId, url) => {
-        const pane = paneOf(tabId);
-        void api.openBrowser(url, pane ? { paneId: pane.id } : {}).catch(() => {});
-      }),
-      bridge.onFocused((tabId) => {
-        const pane = paneOf(tabId);
-        if (pane) api.focusPane(pane.id);
-      }),
-    ];
-    return () => stops.forEach((stop) => stop());
-  }, [arm]);
-  useEffect(() => {
-    if (profile) letGoOfClosed(profile.id, profile.workspaces.map((w) => w.layout));
-  }, [profile]);
-
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const take = () => {
@@ -2067,11 +2028,6 @@ function tabsOf(layout: LayoutNode, agents: AgentSnapshot[]): TabEntry[] {
       if (doc) {
         const folder = doc.path.includes("/") ? doc.path.slice(0, doc.path.lastIndexOf("/")) : "";
         out.push({ ...at, label: basename(doc.path), hint: folder, terminal: false });
-        return;
-      }
-      const page = pane.web?.[id];
-      if (page) {
-        out.push({ ...at, label: browserLabel(page), hint: page.url, terminal: false });
         return;
       }
       // A pane can name a terminal the snapshot has not caught up with; the

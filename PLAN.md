@@ -314,10 +314,11 @@ looks like it worked.
    of a terminal, and it is the larger half of giving the phone its own width.
 5. **Push notifications.** Ghosttown's `notifyGate` already decides what is
    worth interrupting you for; the phone is another sink for it.
-6. **The element picker.** Overtaken by marking in kururu's own browser tab
-   (`docs/plans/browser-annotate.md`, phase 1 built 2026-11-06): the page is a
-   real browser view on the desktop, so no proxy injects anything, and the
-   phone is out of it.
+6. **The element picker.** Overtaken twice: by marking in a built-in browser
+   tab (`docs/plans/browser-annotate.md`, built 2026-11-06, removed
+   2026-11-07 and kept on the `browser-annotate` branch), then by the screen
+   pen (`docs/plans/screen-annotate.md`), which circles anything on the
+   screen rather than picking an element in one page.
 
 ## The terminal lifecycle rework
 

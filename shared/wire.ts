@@ -1119,35 +1119,6 @@ export type ClientMessage =
    */
   | { type: "open-doc"; paneId: string; root: string; path: string; at?: number; focus?: boolean }
 
-  // --- the browser -------------------------------------------------------
-  /**
-   * Open a page in kururu's browser, as a new tab: in `paneId` when the + menu
-   * was opened on one, in the agents' pane with `place: "agents"` (a card's
-   * dev server, where its agent is), and otherwise in the focused pane — a
-   * dev-server row is a click in the sidebar, which lands where a file from
-   * the tree does. `url` is checked by `browserUrl` and refused when it is not
-   * one; "about:blank" is an empty tab, with its address field to type in.
-   *
-   * The tab is the layout's and the page is the Mac window's
-   * (`desktop/browser.js`), so this is all a phone can do with a browser: put
-   * a tab there for the Mac to show. In another node's workspace it is
-   * refused — that node's localhost is not this Mac's. With an `id`, the
-   * reply is the new tab's `{ tabId }`, or the sentence for an address refused.
-   */
-  | { type: "open-browser"; id?: number; url: string; paneId?: string; place?: "agents" }
-  /**
-   * Send a browser tab somewhere: the address field's Enter. Bumps the tab's
-   * `nav`, which is what tells the window to load it — see `WebTabState`.
-   */
-  | { type: "browser-navigate"; tabId: string; url: string }
-  /**
-   * Where a browser tab's page is now and what it is called, from the window
-   * that shows it, as it navigates on its own. Moves `url` and `title` and
-   * never `nav`, so it is never mistaken for an ask to go somewhere. A report
-   * for a tab that is not there is dropped.
-   */
-  | { type: "browser-report"; tabId: string; url: string; title: string }
-
   /**
    * Stop following an editor and sit on the file it is showing now.
    *

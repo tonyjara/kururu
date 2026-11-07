@@ -1,7 +1,7 @@
 /**
  * The screen pen's phase 2, the pure part: what a burst of ink is drawn as
  * (`shapeOf`), and what a mark's label says once it knows kururu's own
- * window, a browser tab's element, a snapshot, and its pens. The shapes are
+ * window, a snapshot, and its pens. The shapes are
  * drawn here the way a hand draws them — a circle that does not quite close,
  * a box with a lean, an arrow as one stroke and as three — since a classifier
  * tested on perfect geometry would say nothing about a trackpad.
@@ -83,15 +83,13 @@ describe("the shape word", () => {
 const under = { app: "Safari", bundle: "com.apple.Safari", window: "Stripe — Payments", bounds: null, front: null };
 
 describe("the label", () => {
-  it("leads with the shape, and says where in kururu or on which page", () => {
+  it("leads with the shape, and says where in kururu or in which window", () => {
     expect(screenMarkLabel({ under, secure: false, shape: "circled" })).toBe('circled in Safari "Stripe — Payments"');
     expect(screenMarkLabel({ under, secure: false, shape: "" })).toBe('Safari "Stripe — Payments"');
     expect(screenMarkLabel({ under, secure: false, snap: true, shape: "" })).toBe('snapshot of Safari "Stripe — Payments"');
     const kururu = { what: "agent", name: "Fastermenu migration", detail: "", workspace: "fastermenu", element: "" };
     expect(screenMarkLabel({ under: { ...under, app: "Kururu" }, secure: false, shape: "underlined", kururu })).toBe('underlined in kururu: agent "Fastermenu migration"');
     expect(screenMarkLabel({ under, secure: false, kururu: { ...kururu, what: "the sidebar", name: "" } })).toBe("kururu: the sidebar");
-    const element = { tag: "button", id: "", classes: [], attrs: {}, text: "Pay now", role: "button", name: "Pay now", selectors: [], box: { x: 0, y: 0, width: 1, height: 1 }, styles: {}, html: "", frame: "" };
-    expect(screenMarkLabel({ under, secure: false, shape: "arrow", page: { url: "http://localhost:3000/checkout?token=abc", element } })).toBe('arrow to button "Pay now" on localhost:3000/checkout');
   });
 
   it("names the part of a place with no name of its own: the control first, else the part", () => {
@@ -132,26 +130,22 @@ describe("the body", () => {
     expect(set.marks[0]?.shape).toBe("circled");
   });
 
-  it("a snapshot has no shape; kururu's and the page's facts are kept, cut and redacted", () => {
+  it("a snapshot has no shape; kururu's facts are kept, cut and redacted", () => {
     const set = adoptScreenSet(
       body({
         snap: true,
         strokes: [],
         kururu: { what: "card KUR-12", name: "  ship \n it ", element: "button \"Send\" sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789" },
-        page: { url: "http://localhost:3000/pay?token=secret123", element: { tag: "BUTTON", name: "Pay", selectors: [{ kind: "testid", value: '[data-testid="pay"]', unique: true }] } },
       }),
     ) as ScreenSet;
     const mark = set.marks[0]!;
     expect(mark.snap).toBe(true);
     expect(mark.shape).toBe("");
     expect(mark.kururu?.name).toBe("ship it");
-    expect(mark.page?.element.tag).toBe("button");
     const clean = redactScreenSet(set).marks[0]!;
     expect(clean.kururu?.element).not.toContain("sk-ant-api03-abcdefghijklmnopqrstuvwxyz");
-    expect(clean.page?.url).not.toContain("secret123");
     const md = screenMarkdown(redactScreenSet(set), { crops: {}, frames: { 1: "/x/frame-1.jpg" } });
     expect(md).toContain("A snapshot");
-    expect(md).toContain('[data-testid="pay"]');
     expect(md).not.toContain("- Ink:");
   });
 

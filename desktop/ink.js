@@ -949,7 +949,6 @@ class Ink extends EventEmitter {
         under,
         secure,
         kururu: facts && typeof facts.kururu === "object" ? facts.kururu : null,
-        page: facts && typeof facts.page === "object" ? facts.page : null,
         crop: read(files.crop),
         frame: read(files.frame),
       });

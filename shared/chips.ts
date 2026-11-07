@@ -93,9 +93,10 @@ const FILE = String.raw`\[file (?<fpath>[^\n[\]]+?)(?::(?<fline>\d+(?:-\d+)?))?(
 /** A quote with nothing in front of it — pasted, or its reference deleted — is still a quote. */
 const LONE = String.raw`\[quote(?<lpart> title)? "(?<lquote>[^"\n]*)"\]`;
 /**
- * A set of marks on a page, as `marksMessage` in `shared/marks.ts` writes its
- * header — how many, on which page, and the `marks.md` that says everything
- * — and one mark's line, whose comment follows it as words.
+ * A set of marks, as `screenHeader` in `shared/ink.ts` writes its header —
+ * how many, on what (`screen`, or a page for a set from the built-in browser
+ * that is gone), and the `marks.md` that says everything — and one mark's
+ * line, whose words follow it.
  */
 const MARKS = String.raw`\[marks (?<mcount>\d{1,2}) on (?<mpage>[^\s()[\]]+) \((?<mpath>[^()\n[\]]*?\/(?<mset>m[0-9a-f]{12})\/marks\.md)\)\]`;
 const MARK = String.raw`\[mark (?<mn>\d{1,2}) (?<mlabel>[^[\]\n]{1,240})\]`;

@@ -1,5 +1,17 @@
 # A browser in kururu, and marks on a page for the agents
 
+> **Dropped, 2026-11-07.** The user did not like the built-in browser with
+> marking: it was clunky, some parts of a page could not be selected, and
+> they would rather just circle things. Drawing on the screen from the voice
+> pill ([screen-annotate](screen-annotate.md)) does that, over any window,
+> and replaced it. Phases 0 and 1 (`2f2ee07`, `1074bd0`) were removed from
+> `main`; the code as it stood is kept on the **`browser-annotate`** branch,
+> at `b48d376`, so it can come back. What stayed on `main` is what the
+> screen pen shares: the marks folder and its sweep (`shared/marks.ts`,
+> `server/src/marks.ts`, `POST /api/marks`), the marks chips in Kuru's box
+> and the drawer, and the redaction. Everything below is the plan as it was
+> written, kept for the record.
+
 A plan, first written 2026-11-06 from a read of the tree at `0ce67bd` and of
 the research in [browser-annotate-research.md](browser-annotate-research.md),
 then **revised the same day around the user's answers** to both rounds of

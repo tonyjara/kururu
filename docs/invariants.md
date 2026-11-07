@@ -401,41 +401,25 @@ Space, loading `/?note=` — `NotePage.tsx`, which draws the same
 only a note's own page may move, fold or close it. A browser and the
 phone keep the in-page note. → [layout](layout.md#notes)
 
-## The browser
+## Marks
 
-**A browser tab's page is the Mac window's, and the tab is the layout's.**
-A `web:<random>` id in `agentIds` beside the terminals, with its address on
-the pane (`PaneState.web`), carried by every operation that moves a tab and
-dropped by every one that takes one out; `terminalsOf` and `activeTerminal`
-skip it, so nothing kills, watches or types into a page. The page is a
-`WebContentsView` in `desktop/browser.js`, made when its tab is first shown,
-moved — never rebuilt — between panes and workspaces, and ended only when
-its tab closes or the window goes; `persist.ts` keeps the id, address, title
-and `nav`, and loads nothing. **Its session, `persist:kururu-browser`, cannot
-reach kururu**: every request to the server's port, 7717, the preview
-proxies' 7800–7999 or the checkout's vite while it serves is cancelled when
-its host is this Mac by name, by address or by what the name resolves to.
-`originOk` is left as it is, by the user's decision (2026-11-06). No
-preload in a page, `http:`/`https:`/`about:blank` at the top, permissions
-refused, downloads to `~/Downloads` quarantined and never opened. A phone or
-another node's window draws the tab as a placeholder. → [the
-plan](plans/browser-annotate.md)
+**Marks are written by the server, and a set leaves the window whole.** The
+screen pen ([plan](plans/screen-annotate.md)) hands the window a set — the
+marks, a crop and a whole display per mark, the window under each — and the
+window posts it to the server it is connected to (`POST /api/marks`), which
+holds it to its shape (`shared/ink.ts`), redacts what is somebody else's
+words (`shared/marks.ts`: anything shaped like a secret in a title or a
+label) and judges each picture by its bytes before writing
+`data/marks/<id>/`, 0700 and 0600, never backed up, and **swept after 30
+days** — only a real directory named as a set id, read with `lstat`, a line
+per set in `lifecycle.log`. The lines in Kuru's box carry each mark's label
+and words, so they still read once the set is gone.
 
-**Marks are made in the page and written by the server; a comment never
-enters the page.** The marking script (`desktop/markscript.js`) runs in an
-isolated world over the page's debugger (`desktop/marks.js`), draws in a
-closed shadow root in the top layer, and takes the clicks before the page
-does — never the pointer's movement or the wheel, so hover menus and
-scrolling stay live. It holds no Electron, so a content script could run it.
-The comments live in main and the window's popover; the page learns a pin's
-number and nothing more. A set goes to the server the window is connected to
-(`POST /api/marks`), which holds it to its shape and redacts it
-(`shared/marks.ts`: query strings, form values, attributes off the list,
-anything shaped like a secret) before writing `data/marks/<id>/`, 0700 and
-0600, never backed up, and **swept after 30 days** — only a real directory
-named as a set id, read with `lstat`, a line per set in `lifecycle.log`. The
-lines in Kuru's box carry each mark's label and comment, so they still read
-once the set is gone.
+The built-in browser, whose marks on a page were the first sets, was removed
+on 2026-11-07 and is kept on the `browser-annotate` branch
+([plan](plans/browser-annotate.md)). Its sets still on disk are served and
+swept like any other, and their lines still draw as chips; nothing writes
+one any more.
 
 ## What an agent made
 

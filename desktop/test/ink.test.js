@@ -561,7 +561,6 @@ describe("phase 2: the pen made pleasant", () => {
     expect(asked[0].global).toEqual({ x: 1440 + 120, y: 110 });
     expect(asked[0].under.app).toBe("Safari");
     expect(bundle.marks[0].kururu.name).toBe("Fastermenu migration");
-    expect(bundle.marks[0].page).toBeNull();
     answer = "never";
     await ink.start({ voice: true });
     draw(ink, live()[0], [[10, 10], [20, 20]], ink.session.at + 50);

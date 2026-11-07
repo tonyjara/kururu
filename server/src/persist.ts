@@ -25,8 +25,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Profile, Workspace } from "../../shared/model";
 import { groupName, isLoginKey, mintLoginKey } from "../../shared/model";
-import { BOARD_TAB, docTab, isDocTab, isWebTab, parseDocTab, type LayoutNode, type ReaderDoc, type WebTabState } from "../../shared/layout";
-import { browserTitle, browserUrl } from "../../shared/browser";
+import { BOARD_TAB, docTab, isDocTab, parseDocTab, type LayoutNode, type ReaderDoc } from "../../shared/layout";
 import { adoptBoard, adoptProfileBoard, type Board } from "../../shared/board";
 import { adoptHarness } from "../../shared/harness";
 import { adoptPin, type MachinePin } from "../../shared/machines";
@@ -52,8 +51,12 @@ interface StoredPane {
    * is a process, and this file has no business remembering one — so a
    * restored document comes back pinned, which is the honest answer, because
    * the nvim that was driving it is gone.
+   *
+   * A file from before 2026-11-07 may hold a browser tab, `{ web: … }`; the
+   * browser is gone (docs/plans/browser-annotate.md) and it is skipped as
+   * any shape this does not know is.
    */
-  tabs?: ("board" | ReaderDoc | StoredWeb | DashboardTabId)[];
+  tabs?: ("board" | ReaderDoc | DashboardTabId)[];
   showing?: number;
   /**
    * The shape before documents were tabs of any pane: a reader pane's
@@ -68,18 +71,6 @@ interface StoredPane {
    * picking afresh.
    */
   forAgents?: true;
-}
-/**
- * A browser tab, kept as structure: its id, the address it was at and its
- * title, and `nav` so the window's "is this a new ask" stays a number that
- * only goes up (`WebTabState`). Nothing the page held — no history, no
- * cookies, which are the browser session's own on disk — and the page is not
- * loaded by being brought back: the window loads it when its tab is first
- * shown. Kept under its id rather than a fresh one, because a window that
- * outlived the server may still hold that tab's page.
- */
-interface StoredWeb {
-  web: { id: string; url: string; title?: string; nav?: number };
 }
 /** A fixed tab of the Dashboard, by its id — only ever read back into the Dashboard. */
 type DashboardTabId = string;
@@ -180,12 +171,10 @@ export function snapshotPath(): string {
 
 function strip(node: LayoutNode): StoredNode {
   if (node.type === "pane") {
-    const { cwd, agentIds, activeIdx, forAgents, web } = node.pane;
-    const kept = agentIds.flatMap((id, at): { at: number; tab: "board" | ReaderDoc | StoredWeb | DashboardTabId }[] => {
+    const { cwd, agentIds, activeIdx, forAgents } = node.pane;
+    const kept = agentIds.flatMap((id, at): { at: number; tab: "board" | ReaderDoc | DashboardTabId }[] => {
       if (id === BOARD_TAB) return [{ at, tab: "board" }];
       if (isDashboardTab(id)) return [{ at, tab: id }];
-      const page = isWebTab(id) ? web?.[id] : undefined;
-      if (page) return [{ at, tab: { web: { id, url: page.url, title: page.title, nav: page.nav } } }];
       const doc = parseDocTab(id);
       return doc ? [{ at, tab: doc }] : [];
     });
@@ -272,10 +261,9 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
 function revive(node: StoredNode, dash = false): LayoutNode {
   if (node.type === "pane") {
     const cwd = typeof node.pane?.cwd === "string" ? node.pane.cwd : undefined;
-    const { agentIds, activeIdx, web } = storedTabs(node.pane ?? {}, dash);
+    const { agentIds, activeIdx } = storedTabs(node.pane ?? {}, dash);
     const forAgents = node.pane?.forAgents === true ? { forAgents: true as const } : {};
-    const pages = Object.keys(web).length > 0 ? { web } : {};
-    return { type: "pane", pane: { id: nextId("n"), agentIds, activeIdx, cwd, ...forAgents, ...pages } };
+    return { type: "pane", pane: { id: nextId("n"), agentIds, activeIdx, cwd, ...forAgents } };
   }
   const ratio = typeof node.ratio === "number" && node.ratio > 0 && node.ratio < 1 ? node.ratio : 0.5;
   return {
@@ -289,57 +277,29 @@ function revive(node: StoredNode, dash = false): LayoutNode {
 }
 
 /** A pane's view tabs off the disk, in either shape it has been written in. */
-function storedTabs(pane: StoredPane, dash = false): { agentIds: string[]; activeIdx: number; web: Record<string, WebTabState> } {
-  const web: Record<string, WebTabState> = {};
+function storedTabs(pane: StoredPane, dash = false): { agentIds: string[]; activeIdx: number } {
   if (Array.isArray(pane.tabs)) {
     const agentIds: string[] = [];
     for (const tab of pane.tabs as unknown[]) {
-      const page = storedWeb(tab);
       if (isDashboardTab(tab)) {
         if (dash && !agentIds.includes(tab)) agentIds.push(tab);
       } else if (tab === "board") {
         if (!agentIds.includes(BOARD_TAB)) agentIds.push(BOARD_TAB);
-      } else if (page) {
-        // A page once per file: its id is the window's key, and two tabs
-        // under one would be one page drawn in two places.
-        if (!seenWeb.has(page.id)) {
-          seenWeb.add(page.id);
-          agentIds.push(page.id);
-          web[page.id] = page.state;
-        }
       } else if (isStoredDoc(tab)) {
         const id = docTab(tab.root, tab.path);
         if (!agentIds.includes(id)) agentIds.push(id);
       }
     }
     const showing = typeof pane.showing === "number" && Number.isInteger(pane.showing) ? pane.showing : 0;
-    return { agentIds, activeIdx: showing >= 0 && showing < agentIds.length ? showing : 0, web };
+    return { agentIds, activeIdx: showing >= 0 && showing < agentIds.length ? showing : 0 };
   }
   // The older shape. A pane that says it is a board and a reader is a
   // hand-edited file; the reader, which carries more, wins.
   const stored = pane.reader;
   if (stored && typeof stored.root === "string" && typeof stored.path === "string" && stored.path) {
-    return { ...readerTabs(stored), web };
+    return readerTabs(stored);
   }
-  return { agentIds: pane.board === true ? [BOARD_TAB] : [], activeIdx: 0, web };
-}
-
-/** The page ids already brought back by this read — see `readSnapshot`, which clears it. */
-const seenWeb = new Set<string>();
-
-/**
- * A stored browser tab, checked as anything off the disk is: an id that is a
- * page's, an address `browserUrl` still lets through (a file edited by hand,
- * or written by a build with a looser rule, does not get a `file:` tab), a
- * title cut, and a `nav` that is a whole number.
- */
-function storedWeb(value: unknown): { id: string; state: WebTabState } | null {
-  const web = (value as { web?: unknown } | null)?.web as { id?: unknown; url?: unknown; title?: unknown; nav?: unknown } | undefined;
-  if (!web || typeof web !== "object" || !isWebTab(web.id)) return null;
-  const url = browserUrl(web.url);
-  if (!url) return null;
-  const nav = typeof web.nav === "number" && Number.isSafeInteger(web.nav) && web.nav >= 0 ? web.nav : 0;
-  return { id: web.id, state: { url, title: browserTitle(web.title), nav } };
+  return { agentIds: pane.board === true ? [BOARD_TAB] : [], activeIdx: 0 };
 }
 
 function isStoredDoc(value: unknown): value is ReaderDoc {
@@ -440,7 +400,6 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
   }
   if (session?.version !== VERSION || !Array.isArray(session.profiles)) return null;
 
-  seenWeb.clear();
   const profiles: Profile[] = [];
   for (const stored of session.profiles) {
     if (!stored || typeof stored.name !== "string" || !Array.isArray(stored.workspaces)) continue;

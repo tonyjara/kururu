@@ -62,7 +62,6 @@ import { isLoopback, previewUrl, serverIn } from "../preview";
 import { revealCard } from "../reveal";
 import { sameJson } from "../same";
 import * as api from "../session";
-import { desktop } from "../desktop";
 import { datesLabel, datesTense } from "../when";
 import { ColumnResizeHandle } from "./ColumnResize";
 import { Dialog } from "./Dialog";
@@ -1080,17 +1079,6 @@ function DevLine({
           <a className="board-seg-btn" href={url} target="_blank" rel="noreferrer noopener" title={`Open ${url}`}>
             open <Icon name="external" />
           </a>
-        )}
-        {/* In kururu's browser, in the agents' pane beside the card's agent —
-            only in the Mac's window, where a page can be drawn. */}
-        {url && desktop()?.browser && (
-          <button
-            className="board-seg-btn"
-            onClick={() => void api.openBrowser(url, { place: "agents" }).catch(() => {})}
-            title={`Open ${url} in kururu's browser, beside the card's agent`}
-          >
-            browse
-          </button>
         )}
         <button className="board-seg-btn" onClick={() => onReveal(terminal.id)} title="Go to the dev server's terminal">
           log

@@ -573,7 +573,7 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
  * brings up the callout, or moves a phone's selection — the words being
  * quoted — onto the button.
  */
-export function SayMark({ phase, toggled, level, onPress }: { phase: "idle" | "listening" | "hearing"; toggled: boolean; level: number; onPress: (pressed: number) => void }) {
+function SayMark({ phase, toggled, level, onPress }: { phase: "idle" | "listening" | "hearing"; toggled: boolean; level: number; onPress: (pressed: number) => void }) {
   const button = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const el = button.current;
@@ -619,7 +619,7 @@ function QuoteMark() {
 }
 
 /** The arrow that puts it in: into the box, not sent, so an arrow in rather than a paper plane away. */
-export function GoMark() {
+function GoMark() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M5 12h14" />

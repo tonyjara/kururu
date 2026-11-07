@@ -1,13 +1,13 @@
 /**
- * Marks over HTTP: a set posted by the window — a browser tab's marks, or
- * the screen pen's (`kind: "screen"`, `shared/ink.ts`) — and a set's files
- * read back for a chip.
+ * Marks over HTTP: a set posted by the window — the screen pen's
+ * (`kind: "screen"`, `shared/ink.ts`) — and a set's files read back for a
+ * chip.
  *
  * The body is JSON with the pictures in it as base64, because a set is one
- * thing — twenty crops and a view and the record that names them — and two
+ * thing — twenty crops and displays and the record that names them — and two
  * dozen requests that each might fail would leave half a set. Behind the gate
  * like `/api/drop`, and nothing in it is Electron's, so any client of the gate
- * can post the same body. `shared/marks.ts` holds the body to its shape;
+ * can post the same body. `shared/ink.ts` holds the body to its shape;
  * `server/src/marks.ts` writes it.
  */
 import { createReadStream } from "node:fs";

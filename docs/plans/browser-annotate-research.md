@@ -1,5 +1,9 @@
 # Research notes: a browser in kururu, and marking a page up for an agent
 
+> The plan these notes were for, [browser-annotate](browser-annotate.md), was
+> dropped on 2026-11-07; the built-in browser is kept on the
+> `browser-annotate` branch.
+
 Read 2026-11-06 for [browser-annotate.md](browser-annotate.md). **No code was
 changed and nothing was installed.** Three researchers read docs, READMEs and
 source, using WebSearch and WebFetch; nothing needed `kururu_web`. Each claim

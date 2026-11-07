@@ -43,6 +43,9 @@ written to them.
    is not built. The window's title is what a mark on another browser carries.
 6. **Browser-annotate's phase 7 (the Chrome extension) is dropped.**
 7. **The built-in browser stays** for now (its removal is a card of its own).
+   *Removed 2026-11-07, kept on the `browser-annotate` branch; the folder,
+   sweep, chips and Send it shared with the pen stayed, and a mark on a
+   browser tab (`PageAt`, phase 2's `elementAt`) went with it.*
    The screen pen shares its marks folder, sweep, chips and Send, as below.
 
 ## Verdict

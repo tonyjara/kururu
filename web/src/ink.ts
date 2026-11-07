@@ -10,7 +10,7 @@
  * without the voice, started from the Kuru drawer's pencil: when it is told
  * to send, it asks for the ink, posts it, and puts the lines the server
  * answers with into the Kuru box as chips — for the user to write after and
- * send, as a browser tab's marks go in.
+ * send.
  *
  * Every page is told the session's state, so the pencil and the pill's pen
  * can say whether one is on; only the owner is told to send or drop.
