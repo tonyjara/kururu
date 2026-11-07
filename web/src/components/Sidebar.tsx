@@ -68,7 +68,7 @@ import type { Action } from "../keys";
 import { agentLabel, agentSummary, remoteHost, remoteNote, shortenPath } from "../labels";
 import { useLongPress } from "../longpress";
 import { asAgent, nodeState } from "../nodes";
-import { previewLabel, previewUrl } from "../preview";
+import { previewLabel, previewUrl, type NamedRoot } from "../preview";
 import * as api from "../session";
 import { desktop } from "../desktop";
 import { useKururu } from "../session";
@@ -1360,7 +1360,7 @@ export function Sidebar({
           bottom bar's since 2026-10-18 (`Usage.tsx`, `Machines.tsx`,
           `OpenRouter.tsx`). */}
       <Nodes mascots={mascots} remoteOn={remoteOn} onNavigated={navigated} onPrompt={onPrompt} />
-      <DevServers />
+      <DevServers workspaces={profile.workspaces} />
 
       {/* The foot: Settings and the phone's QR code, at the bottom left. They
           were down here until 2026-10-12, went up into the header, and came
@@ -1890,8 +1890,10 @@ const STOP_ASK_MS = 4000;
  *
  * The list is machine-wide rather than this workspace's, which is the scan's
  * shape and is the right one here — a server you started by hand in another
- * terminal is one you still want to reach from your phone, and kururu cannot
- * currently attribute a listening port to a workspace anyway.
+ * terminal is one you still want to reach from your phone. Each row is named
+ * by the workspace whose folder it runs in, worked out from the folder and its
+ * repository rather than from who started it (`previewLabel`), so it is a
+ * name and not an owner: the list stays the machine's.
  *
  * Its own subscription rather than a prop from `App`: this is the only thing in
  * the window that draws dev servers, and threading a list through two
@@ -1907,8 +1909,16 @@ const STOP_ASK_MS = 4000;
  * blur to wait for — an armed button left lying there is the accident it was
  * meant to prevent, a little later.
  */
-function DevServers() {
-  const { devServers } = useKururu();
+function DevServers({ workspaces }: { workspaces: readonly Workspace[] }) {
+  const { devServers, projects } = useKururu();
+  /* Each workspace's project folder with its name, for the label: a row says
+     which workspace the server came from (`previewLabel`). */
+  const names = new Map(workspaces.map((w) => [w.id, w.name] as const));
+  const roots: NamedRoot[] = projects.flatMap((p) => {
+    const name = names.get(p.workspaceId);
+    return name ? [{ name, root: p.root }] : [];
+  });
+  const label = (dev: DevServer) => previewLabel(dev, roots);
   /* Shut by default. The list is the phone's way in and is a thing you go and
      get, not a thing you watch — so the count is what the heading carries, and
      the rows are one press away. */
@@ -1958,11 +1968,11 @@ function DevServers() {
                     href={url}
                     target="_blank"
                     rel="noreferrer noopener"
-                    title={[previewLabel(dev), dev.command, dev.cwd, `→ ${url}`]
+                    title={[label(dev), dev.command, dev.cwd, `→ ${url}`]
                       .filter(Boolean)
                       .join("\n")}
                   >
-                    <span className="dev-name">{previewLabel(dev)}</span>
+                    <span className="dev-name">{label(dev)}</span>
                     <span className="dev-port">:{dev.port}</span>
                     <Icon name="external" />
                   </a>
@@ -1973,7 +1983,7 @@ function DevServers() {
                      reachable from here yet" is worth more than a gap, and the
                      next scan is a second away. */
                   <span className="dev-row dev-row-off" title={`${dev.command}\nNo preview yet`}>
-                    <span className="dev-name">{previewLabel(dev)}</span>
+                    <span className="dev-name">{label(dev)}</span>
                     <span className="dev-port">:{dev.port}</span>
                   </span>
                 )}
@@ -1985,7 +1995,7 @@ function DevServers() {
                     className="dev-browse"
                     onClick={() => void api.openBrowser(url).catch(() => {})}
                     title={`Open ${url} in kururu's browser`}
-                    aria-label={`Open ${previewLabel(dev)} in kururu's browser`}
+                    aria-label={`Open ${label(dev)} in kururu's browser`}
                   >
                     <Icon name="panel" />
                   </button>
@@ -1996,7 +2006,7 @@ function DevServers() {
                   onClick={() => (armed ? stop(dev) : setAsking(dev.port))}
                   onBlur={() => setAsking((port) => (port === dev.port ? null : port))}
                   title={busy ? "Stopping…" : armed ? `Stop ${dev.command}` : `Stop this dev server\n${dev.command}`}
-                  aria-label={armed ? `Confirm: stop ${previewLabel(dev)}` : `Stop ${previewLabel(dev)}`}
+                  aria-label={armed ? `Confirm: stop ${label(dev)}` : `Stop ${label(dev)}`}
                 >
                   {armed ? "Stop?" : <Icon name="stop" />}
                 </button>

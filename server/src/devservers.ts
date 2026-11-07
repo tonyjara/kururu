@@ -18,9 +18,11 @@
  * up there, and so does one an agent started.
  */
 import { execFile } from "node:child_process";
+import { dirname } from "node:path";
 import type { DevServer } from "../../shared/wire";
 import { parseSsTcp } from "../sockowner.mjs";
 import { processCwd } from "./cwd";
+import { git } from "./gitcmd";
 
 /**
  * Programs whose name means a server is running. Mirrors ghosttown's
@@ -407,10 +409,54 @@ export async function scanDevServers(self: Self, procs?: ReadonlyMap<number, Pro
   await Promise.all(
     found.map(async (server) => {
       server.cwd = await processCwd(server.pid);
+      const repo = server.cwd ? await repoOf(server.cwd) : null;
+      if (repo) server.repo = repo;
     }),
   );
 
   return found.filter((server) => !isKururu(server, self)).sort((a, b) => a.port - b.port);
+}
+
+/**
+ * The main checkout of the repository a directory is in, by directory, kept.
+ *
+ * Kept because the scan runs every few seconds over the same handful of
+ * folders and a directory does not change repository under a running server;
+ * a `git` per server per scan would be the scan's most expensive part. Null is
+ * kept too — a folder outside any repository stays outside it — and the whole
+ * map is dropped past a size nobody's machine reaches, rather than tracking
+ * which folders have gone.
+ */
+const repos = new Map<string, Promise<string | null>>();
+const REPOS_KEPT = 256;
+
+/**
+ * Asked of git's common dir rather than `--show-toplevel`, because the
+ * question is which repository and not which checkout: a worktree's top level
+ * is the worktree, while its common dir is the main checkout's `.git`. Not
+ * `worktree.ts`'s `mainRoot`, which answers its own argument for a folder git
+ * knows nothing about — here that has to be no answer, so the label falls back
+ * to the folder rather than claiming it is a repository. A common dir that is
+ * not a `.git` folder (a bare repository) is no answer either.
+ */
+function repoOf(cwd: string): Promise<string | null> {
+  const kept = repos.get(cwd);
+  if (kept) return kept;
+  if (repos.size >= REPOS_KEPT) repos.clear();
+  const asked = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd, { timeout: 5000 }).then(
+    (out) => {
+      const common = out.trim();
+      return common.endsWith("/.git") ? dirname(common) : null;
+    },
+    (err: unknown) => {
+      // Outside a repository is an answer and is kept; anything else — a
+      // timeout under load, a folder gone mid-ask — is asked again next scan.
+      if (!(err instanceof Error && /not a git repository/i.test(err.message))) repos.delete(cwd);
+      return null;
+    },
+  );
+  repos.set(cwd, asked);
+  return asked;
 }
 
 /** How long a dev server is given to shut itself down before it is made to. */

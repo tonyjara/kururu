@@ -46,9 +46,35 @@ describe("previewUrl", () => {
 });
 
 describe("previewLabel", () => {
-  test("names the project when the cwd was readable, the program when it was not", () => {
-    expect(previewLabel(dev({ cwd: "/Users/n/code/kururu" }))).toBe("kururu · vite");
-    expect(previewLabel(dev({ cwd: "/Users/n/code/kururu/" }))).toBe("kururu · vite");
+  const places = [
+    { name: "Holapy", root: "/n/holapy" },
+    { name: "Pasapy", root: "/n/pasapy" },
+    { name: "Rogapy", root: "/n/rogapy/" },
+  ];
+
+  test("is the workspace's name alone, from the folder the server runs in", () => {
+    expect(previewLabel(dev({ cwd: "/n/holapy" }), places)).toBe("Holapy");
+    expect(previewLabel(dev({ cwd: "/n/rogapy/apps/web", repo: "/n/rogapy" }), places)).toBe("Rogapy");
+  });
+
+  test("a worktree kept outside the project is its main repository's", () => {
+    const wt = dev({ cwd: "/n/pasapy-wt/simulacro/apps/web", repo: "/n/pasapy" });
+    expect(previewLabel(wt, places)).toBe("Pasapy");
+  });
+
+  test("a sibling with a longer name is not inside", () => {
+    expect(previewLabel(dev({ cwd: "/n/holapy-old" }), places)).toBe("holapy-old");
+  });
+
+  test("the deepest workspace wins", () => {
+    const nested = [{ name: "Code", root: "/n" }, ...places];
+    expect(previewLabel(dev({ cwd: "/n/holapy/web" }), nested)).toBe("Holapy");
+    expect(previewLabel(dev({ cwd: "/n/other" }), nested)).toBe("Code");
+  });
+
+  test("with no workspace, the project folder's name, then the program", () => {
+    expect(previewLabel(dev({ cwd: "/x/pasapy-wt/s/apps/web", repo: "/x/pasapy" }), places)).toBe("pasapy");
+    expect(previewLabel(dev({ cwd: "/Users/n/code/kururu/" }))).toBe("kururu");
     expect(previewLabel(dev())).toBe("vite");
   });
 });

@@ -69,10 +69,48 @@ export function previewUrl(origin: Origin, dev: DevServer): string | null {
   return `${origin.protocol}//${origin.hostname}:${dev.proxyPort}/`;
 }
 
-/** What to call a dev server in a list: the project it is in, then the program. */
-export function previewLabel(dev: DevServer): string {
-  const project = dev.cwd ? dev.cwd.split("/").filter(Boolean).pop() : undefined;
-  return project ? `${project} · ${dev.program}` : dev.program;
+/** A workspace as a dev server is named after it: its name and its project folder. */
+export interface NamedRoot {
+  name: string;
+  root: string;
+}
+
+function trimmed(path: string): string {
+  return path.length > 1 ? path.replace(/\/+$/, "") : path;
+}
+
+function within(path: string, root: string): boolean {
+  const r = trimmed(root);
+  const p = trimmed(path);
+  return p === r || p.startsWith(r === "/" ? "/" : `${r}/`);
+}
+
+/**
+ * What to call a dev server in a list: the workspace it came from, and nothing
+ * else (the user, 2026-11-07). It was the folder's name and the program —
+ * `web · next dev`, `holapy · vite` — and in a monorepo the folder is `web` in
+ * every project, which says nothing; the program is in the hover with the
+ * command. Two servers of one workspace read the same, and the port beside
+ * the name is what tells them apart.
+ *
+ * The workspace whose project folder holds the server's, or failing that holds
+ * the main checkout of the server's repository — which is how a worktree kept
+ * outside the project (`pasapy-wt/simulacro/apps/web`) is still Pasapy's. The
+ * deepest root wins, so a workspace on `~/code` does not take a server from
+ * one on `~/code/app`. With no workspace, the project folder's own name: the
+ * repository's, then the folder's, then the program when not even the folder
+ * could be read.
+ */
+export function previewLabel(dev: DevServer, workspaces: readonly NamedRoot[] = []): string {
+  let best: NamedRoot | null = null;
+  for (const place of workspaces) {
+    if (!place.root) continue;
+    const holds = (dev.cwd && within(dev.cwd, place.root)) || (dev.repo && within(dev.repo, place.root));
+    if (holds && (!best || trimmed(place.root).length > trimmed(best.root).length)) best = place;
+  }
+  if (best) return best.name;
+  const folder = dev.repo ?? dev.cwd;
+  return folder?.split("/").filter(Boolean).pop() ?? dev.program;
 }
 
 /**

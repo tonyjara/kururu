@@ -193,6 +193,15 @@ export interface DevServer {
   /** Working directory of the process, when it could be read. */
   cwd?: string;
   /**
+   * The main checkout of the repository `cwd` is in, from git's common dir —
+   * the repository's own top level for an ordinary checkout, and the checkout
+   * it was linked from for a worktree kept somewhere else (`pasapy-wt/…` →
+   * `pasapy`). It is what lets the sidebar name a server by the workspace it
+   * came from when the folder it runs in is outside that workspace's. Absent
+   * outside a repository, or when git could not be asked.
+   */
+  repo?: string;
+  /**
    * Port the kururu proxy is exposing this on, once one has been opened. The
    * desktop window does not need it (localhost is the same machine); the phone
    * cannot reach the dev server any other way.
