@@ -37,9 +37,8 @@ describe("when a page may reload", () => {
     expect(reloadHolds({ ...still, hushed: true })).toEqual(["talking"]);
   });
 
-  it("holds while Kuru speaks, and while the pill still shows what it heard", () => {
+  it("holds while Kuru speaks, and while the pill still shows why something did not get through", () => {
     expect(reloadHolds({ ...still, voice: "speaking" })).toEqual(["speaking"]);
-    expect(reloadHolds({ ...still, voice: "heard" })).toEqual(["showing"]);
     expect(reloadHolds({ ...still, voice: "error" })).toEqual(["showing"]);
   });
 

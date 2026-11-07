@@ -4755,9 +4755,6 @@ html.pill-page #root {
 .voice-pill-sending .voice-bar {
   background: var(--blocked);
 }
-.voice-pill-heard .voice-bar {
-  background: var(--done);
-}
 .voice-pill-error .voice-bar {
   background: var(--dimmer);
 }

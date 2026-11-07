@@ -9,11 +9,14 @@
  * once. The words beside it say which gesture ends the recording, since a tap
  * and a hold end differently and the person may not remember which this was.
  *
- * It stays up a few seconds after the clip is heard, to show what was heard
- * and where it went, and while Kuru speaks, to show what is being said — a
- * synthesiser mispronounces an id, and the text under it is how you tell.
- * Over the panes rather than in the status bar, because the status bar is
- * hidden in zen and this must not be.
+ * It goes the moment the clip is written down. It used to stay a few
+ * seconds to read back what was heard and say "Kuru has it", and the user
+ * read that in the drawer anyway (2026-11-06), so a message that gets
+ * through says nothing here; one that does not brings the pill back with
+ * why. While Kuru speaks it shows what is being said — a synthesiser
+ * mispronounces an id, and the text under it is how you tell — and goes
+ * when the last sentence ends. Over the panes rather than in the status
+ * bar, because the status bar is hidden in zen and this must not be.
  *
  * **It can be moved and it can be shut.** Over the panes means over
  * something, and the middle of the bottom edge is where a terminal's prompt
@@ -41,11 +44,9 @@
  * voice, and the pill in the window leaves the pen to it rather than
  * drawing a second set under the ink, where the pen would take its clicks.
  *
- * **The pill is the live indicator and not the record.** Listening, hearing,
- * heard and speaking are its; what became of every message and every reply
- * is the drawer's — the pill no longer tracks your last message under
- * Kuru's words, since a message that gets through does not need saying
- * twice and one that does not is the drawer's job, with Resend.
+ * **The pill is the live indicator and not the record.** Listening and
+ * speaking are its, and the failures nobody should miss; what became of
+ * every message and every reply is the drawer's, with Resend.
  */
 import { useEffect, useRef, useState } from "react";
 import type { OutboxEntry } from "../../../shared/voice";
@@ -54,7 +55,7 @@ import { hasPen, pillPen, useInk } from "../ink";
 import { toggleKuru } from "../kuru";
 import { adoptPlace, placeAt, type Place } from "../place";
 import { useKururu } from "../session";
-import { dismissVoice, finishTalk, useMine, useOutgoing, useVoiceUi, voiceIsRemote, whereItWent, type Outgoing } from "../voice";
+import { dismissVoice, finishTalk, useMine, useOutgoing, useVoiceUi, voiceIsRemote, type Outgoing } from "../voice";
 import { Icon } from "./Icon";
 import { PenIcon, SnapIcon, UndoIcon } from "./VoiceIcons";
 
@@ -154,9 +155,7 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
         ? sendingLabel(mine)
         : ui.phase === "speaking"
           ? "Kuru"
-          : ui.phase === "heard"
-            ? ui.detail
-            : ui.text;
+          : ui.text;
   // No ✕ while the clip is on its way, which is a moment — except when the
   // server is not taking it, which can be as long as the server is down: then
   // the ✕ puts the pill away and the clip goes on being sent without it.
@@ -266,7 +265,7 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
       </span>
       <span className="voice-words">
         <span className="voice-label">{label}</span>
-        {(ui.phase === "speaking" || ui.phase === "heard" || (ui.phase === "error" && ui.detail)) && (
+        {(ui.phase === "speaking" || (ui.phase === "error" && ui.detail)) && (
           <span className="voice-text">{ui.phase === "error" ? ui.detail : ui.text}</span>
         )}
       </span>
@@ -392,11 +391,9 @@ function PenTools() {
   );
 }
 
-/** What the pill says between the key coming up and the words being made. */
+/** What the pill says between the key coming up and the clip being written down, or while the server will not take it. */
 function sendingLabel(mine: OutboxEntry | Outgoing | null): string {
-  if (!mine) return "Saving…";
-  if (!("state" in mine)) return mine.error ? "Not with the server yet — kept here, retrying" : "Saving…";
-  return mine.state === "transcribing" ? (mine.note ?? "Hearing…") : whereItWent(mine);
+  return mine && !("state" in mine) && mine.error ? "Not with the server yet — kept here, retrying" : "Saving…";
 }
 
 /** Where this device left it, or its own spot. Storage that will not answer is the latter. */

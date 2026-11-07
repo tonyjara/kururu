@@ -42,7 +42,7 @@ export function isReloadPage(value: unknown): value is ReloadPage {
  * - `talking`: the microphone is open, the talk key is down, a clip is on its
  *   way to Kuru, or the server's hush says somebody somewhere is talking.
  * - `speaking`: Kuru is mid-reply.
- * - `showing`: the pill is still showing what Kuru heard, or why it did not.
+ * - `showing`: the pill is still showing why something did not get through.
  * - `hands`: a key, a click or a scroll in this page within `RELOAD_QUIET_MS`,
  *   or a button still held down — a drag.
  * - `dialog`: a dialog, a sheet or a menu is open over it.
@@ -98,7 +98,7 @@ export interface HoldInputs {
    * while the pill is the voice client — the window cannot reload under a
    * reply the pill is reading out any more than the pill can.
    */
-  voice: "idle" | "listening" | "sending" | "heard" | "speaking" | "error";
+  voice: "idle" | "listening" | "sending" | "speaking" | "error";
   /** The server's hush: some client is talking, or a clip's words are still on their way. */
   hushed: boolean;
   /** When this page last saw a key, a press or a wheel. */
@@ -119,7 +119,7 @@ export function reloadHolds(h: HoldInputs): ReloadHold[] {
   const holds: ReloadHold[] = [];
   if (h.voice === "listening" || h.voice === "sending" || h.hushed) holds.push("talking");
   if (h.voice === "speaking") holds.push("speaking");
-  if (h.voice === "heard" || h.voice === "error") holds.push("showing");
+  if (h.voice === "error") holds.push("showing");
   if (h.pressing || h.now - h.lastInputAt < RELOAD_QUIET_MS) holds.push("hands");
   if (h.dialog) holds.push("dialog");
   if (h.draft) holds.push("draft");
@@ -134,7 +134,7 @@ export function holdWords(hold: ReloadHold): string {
     case "speaking":
       return "Kuru was speaking";
     case "showing":
-      return "the pill was showing what Kuru heard";
+      return "the pill was showing why something did not get through";
     case "hands":
       return "the user was typing or clicking in it";
     case "dialog":

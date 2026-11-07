@@ -55,9 +55,16 @@
  * page reloaded in the meantime finds its clips and sends them on start. The
  * id makes sending twice harmless. Past that point the clip is the outbox's
  * (`server/src/outbox.ts`), and what this page knows of it comes back on the
- * socket — which is also how the pill says whether the words got through
- * while Kuru talks over the top of it, rather than losing that line to the
- * first sentence of a reply.
+ * socket — which is how the pill comes back to say a message did not get
+ * through, and the only thing it says about one after the key comes up.
+ *
+ * **The pill does not say what became of a message that got through.** It
+ * goes away the moment the clip is written down: no "Kuru has it", no words
+ * read back, no reply lingering after it was said. The drawer is where a
+ * message and its answer are read (the user, 2026-11-06), and a pill that
+ * repeats them is one more thing on the screen to look past. What it still
+ * says is what would otherwise go unnoticed: a clip the server is not
+ * taking, words that could not be heard, a drawing that was lost.
  *
  * **Dictation is the same microphone with the words handed back.** A quote's
  * comment can be spoken (`Quote.tsx`): the recording is this one — `open`,
@@ -102,15 +109,15 @@ import { audioOutput } from "./notify";
 import * as api from "./session";
 import { dropClip, keepClip, keptClips, type StoredClip } from "./unsent";
 
-export type VoicePhase = "idle" | "listening" | "sending" | "heard" | "speaking" | "error";
+export type VoicePhase = "idle" | "listening" | "sending" | "speaking" | "error";
 
 export interface VoiceUi {
   phase: VoicePhase;
   /** 0–1, the microphone's level while listening. */
   level: number;
-  /** What was heard, or what is being said, or what went wrong. */
+  /** What is being said, or what went wrong. */
   text: string;
-  /** A second line: where the words went, or which key releases. */
+  /** A second line: why it went wrong. */
   detail: string;
   /** Recording was toggled on by a tap, so the pill can say which gesture ends it. */
   toggled: boolean;
@@ -232,7 +239,7 @@ export function applyTalkGesture(gesture: TalkGesture): void {
   }
 }
 
-/** How long a heard sentence or an error stays on screen once nothing else is happening. */
+/** How long an error stays on screen once nothing else is happening. */
 const LINGER_MS = 4000;
 /** …and a message of yours that did not get through, which is worth more than four seconds of anybody's attention. */
 const FAILED_LINGER_MS = 15_000;
@@ -242,7 +249,7 @@ function settle(ms = LINGER_MS): void {
   if (linger) clearTimeout(linger);
   linger = setTimeout(() => {
     linger = null;
-    if (ui.phase === "heard" || ui.phase === "error") set({ ...IDLE });
+    if (ui.phase === "error") set({ ...IDLE });
   }, ms);
 }
 
@@ -450,9 +457,14 @@ async function post(pcm: Float32Array, audioAt: number, rolled = false): Promise
   }
   const clip: StoredClip = { id: clipId(), profileId: profileOf(), at: Date.now(), ms, wav: encodeWav(pcm, CLIP_RATE), ...(marks ? { marks } : {}) };
   setMine(clip.id);
-  // A clip rolled over mid-recording leaves the pill listening.
+  // A clip rolled over mid-recording leaves the pill listening. Otherwise it
+  // says "Saving…" only until the clip is on this side's disk, which is what
+  // a reload must not land before, and is gone then: a clip the server will
+  // not take brings it back (`follow`), and one that gets through says nothing.
   if (!isListening()) set({ phase: "sending", level: 0, text: "", detail: "", toggled: false });
-  await hold(clip);
+  await hold(clip, () => {
+    if (mine === clip.id && ui.phase === "sending") set({ ...IDLE });
+  });
   // Said once the words are safe, so nothing after it covers it up.
   if (ink && "lost" in ink) voiceError("Your drawing did not reach the server; what you said went without it.", ink.lost);
 }
@@ -621,12 +633,17 @@ export function useOutgoing(): readonly Outgoing[] {
   );
 }
 
-/** Written down, then sent. A clip already held is not held twice: two pages of one origin both find it on start. */
-async function hold(clip: StoredClip): Promise<void> {
+/**
+ * Written down, then sent. A clip already held is not held twice: two pages
+ * of one origin both find it on start. `kept` is told once it is written
+ * down, before the first try, which is when the pill may go.
+ */
+async function hold(clip: StoredClip, kept?: () => void): Promise<void> {
   if (sending.has(clip.id)) return;
   sending.set(clip.id, { clip, error: null, tries: 0, busy: false, timer: null });
   told();
   await keepClip(clip);
+  kept?.();
   await ship(clip.id);
 }
 
@@ -661,7 +678,7 @@ function clipId(): string {
 // The last thing you said, as the pill tells it
 // ---------------------------------------------------------------------------
 
-/** This page's latest message, until the pill has said what became of it or is dismissed. */
+/** This page's latest message, followed until it is in the outbox or is dismissed, in case it does not get through. */
 let mine: string | null = null;
 const mineListeners = new Set<() => void>();
 /** What the pill last said about it, so a broadcast that changes nothing about it says nothing again. */
@@ -675,7 +692,7 @@ function setMine(id: string | null): void {
   for (const listener of mineListeners) listener();
 }
 
-/** Which message is this page's latest, for the pill's line under Kuru's. */
+/** Which message is this page's latest, for the pill's line while the server is not taking it. */
 export function useMine(): string | null {
   return useSyncExternalStore(
     (listener) => {
@@ -687,29 +704,25 @@ export function useMine(): string | null {
 }
 
 /**
- * The outbox moved: if this page's latest message did, the pill says so. Not
- * over the microphone or over Kuru — the pill draws a line of its own for it
- * then, from the same list — and only on a change, so every broadcast is not
- * a fresh four seconds on screen. Getting through is said once; not getting
- * through stays up longer, and brings the pill back if it had gone.
+ * The outbox moved: if this page's latest message did not get through, the
+ * pill says so, and brings itself back if it had gone. Not over the
+ * microphone or over Kuru, and only on a change, so every broadcast is not a
+ * fresh fifteen seconds on screen. A message that got through, or is on its
+ * way through, says nothing: the drawer has it. The one thing short of a
+ * failure that keeps the pill up is a clip the server is not taking yet,
+ * which is the pill's "kept here, retrying" with a ✕ to hide it — said until
+ * the server has it, and gone then.
  */
 function follow(): void {
   if (!mine) return;
   const entry = lastOutbox.find((e) => e.id === mine);
   const unsent = sending.get(mine);
-  const said = entry ? `${entry.state}:${entry.typedAt ?? ""}:${entry.note ?? ""}` : unsent ? `unsent:${unsent.error ?? ""}` : "";
+  const said = entry ? `${entry.state}:${entry.note ?? ""}` : unsent ? `unsent:${unsent.error ?? ""}` : "";
   if (!said || said === mineSaid) return;
   mineSaid = said;
   if (ui.phase === "listening" || ui.phase === "speaking") return;
   if (!entry) {
-    if (unsent?.error && ui.phase === "sending") {
-      set({ phase: "sending", text: "", detail: "" });
-    }
-    return;
-  }
-  if (entry.state === "transcribing") {
-    // Redrawn, since the pill's label reads the entry's note: "trying again".
-    if (ui.phase === "sending") set({ phase: "sending", text: "", detail: "" });
+    if (unsent?.error && (ui.phase === "sending" || ui.phase === "idle")) set({ phase: "sending", text: "", detail: "" });
     return;
   }
   if (entry.state === "failed") {
@@ -717,18 +730,8 @@ function follow(): void {
     settle(FAILED_LINGER_MS);
     return;
   }
-  // Queued or delivered: said once, as the words and where they went.
-  if (ui.phase !== "sending" && ui.phase !== "heard") return;
-  set({ phase: "heard", text: `“${entry.text ?? ""}”`, detail: whereItWent(entry) });
-  settle();
-}
-
-/** Where a message is, in the pill's words. */
-export function whereItWent(entry: OutboxEntry): string {
-  if (entry.state === "delivered") return "Kuru has it.";
-  if (entry.state === "failed") return entry.note ?? "Did not get through.";
-  if (entry.state === "transcribing") return entry.note ?? "Hearing…";
-  return entry.typedAt !== null ? "Sent to Kuru." : (entry.note ?? "Waiting for Kuru.");
+  // With the server now, whatever comes of it: the pill that waited on that goes.
+  if (ui.phase === "sending") set({ ...IDLE });
 }
 
 /** Start following the outbox, and send whatever an earlier page left unsent. Called once, with `installSpeech`. */
@@ -1165,8 +1168,7 @@ async function pump(): Promise<void> {
       }, GAP_MS);
       return;
     }
-    set({ phase: "heard", level: 0 });
-    settle();
+    set({ ...IDLE });
     return;
   }
   awaitNoMore();
@@ -1280,11 +1282,9 @@ function trim(ids: Set<string>): void {
  * While Kuru speaks that is `stopSpeaking` — the talk key's own cut-off,
  * without the microphone the key opens after it. What it stops is not lost:
  * the server puts it on the missed list. While the microphone is open
- * it is Escape, which a phone has no key for. Otherwise it is words lingering,
- * and the ✕ takes them down early — and still cuts Kuru off, because the pill
- * says "heard" in the gap between two sentences when the next is still being
- * made, and a ✕ pressed in that gap means the rest of the reply as surely as
- * one pressed a moment before it.
+ * it is Escape, which a phone has no key for. Otherwise it is an error
+ * lingering, or a clip the server is not taking yet, and the ✕ takes it down
+ * early — the clip goes on being sent, and the drawer keeps the failure.
  */
 export function dismissVoice(): void {
   if (remote) {
@@ -1303,7 +1303,7 @@ export function dismissVoice(): void {
   // What became of your last message has been seen, or is waiting on a
   // server that is not there and keeps trying without the pill; the list
   // keeps it either way.
-  if (ui.phase === "heard" || ui.phase === "error" || ui.phase === "sending") {
+  if (ui.phase === "error" || ui.phase === "sending") {
     setMine(null);
     set({ ...IDLE });
   }

@@ -225,7 +225,7 @@ window reloads itself as soon as that is safe.
   |---|---|
   | `talking` | the microphone is open, the talk key is down, a clip is still on its way, or the server's `hush` says anybody anywhere is talking |
   | `speaking` | Kuru is mid-reply — on this page, or on the pill while the pill is the voice client (`voiceNow`) |
-  | `showing` | the pill still shows what Kuru heard, or why it did not (4 s, 15 s for a failure) |
+  | `showing` | the pill still shows why something did not get through (4 s, 15 s for a message that failed) |
   | `hands` | a key, a click or a wheel in this page in the last 5 s (`RELOAD_QUIET_MS`, twice Auto Swap's), or a button still down |
   | `dialog` | a `.scrim`, a `.menu-backdrop`, an `alertdialog` or an `aria-modal` on the page — read off the DOM, so a new dialog is covered without being listed |
   | `draft` | a text field outside the terminals has focus and words in it |

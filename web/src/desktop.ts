@@ -386,7 +386,7 @@ export interface VoiceGlobalState {
   on: boolean;
   live: boolean;
   status: "off" | "starting" | "live" | "denied" | "missing" | "unsupported" | "crashed";
-  phase: "idle" | "listening" | "sending" | "heard" | "speaking" | "error";
+  phase: "idle" | "listening" | "sending" | "speaking" | "error";
   altSpace: boolean;
 }
 
