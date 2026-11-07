@@ -18,6 +18,16 @@
  * hook and the window fire once. The grammar of the key (hold, tap, Escape)
  * stays in `voice.ts`, written once; this file routes.
  *
+ * **The screen pen borrows the pill** (`forPen`). Its tools are only ever
+ * in the pill, so a pen session with none of the voice — the drawer's
+ * pencil, or a recording in the window — shows the pill in a draw-only form
+ * at its own spot. With the hook or ⌥Space the panel is there already and
+ * its page draws that form while the pen is on; with neither, a panel is
+ * made for the session alone and loads the page with `draw`, which opens no
+ * microphone and plays nothing, so it is never a second voice client. It is
+ * the full pill again the moment the hook or ⌥Space is turned on, and goes
+ * with the session otherwise.
+ *
  * The helper's events never reach the main window. They are sent to the
  * panel's webContents and nowhere else, and the panel's reports are accepted
  * from that webContents and no other, so a served page in the window cannot
@@ -210,6 +220,12 @@ class TalkKey extends EventEmitter {
     this.loaded = null;
     /** A reload asked for while the pill was busy, done when it is idle. */
     this.reloadOwed = false;
+    /** A screen pen session wants the pill for its tools (`forPen`). */
+    this.penWanted = false;
+    /** The panel exists for the pen alone, and its page draws only the pen's tools. */
+    this.penOnly = false;
+    /** The page is showing the pen's tools, which keeps the panel up while the voice is idle. */
+    this.drawing = false;
     this.moveTimer = null;
     this.placing = false;
     /**
@@ -267,11 +283,11 @@ class TalkKey extends EventEmitter {
     this.enabled = on;
     this.save({ talkKeyEverywhere: on });
     if (on) {
-      this.ensurePanel();
+      this.fullPanel();
       this.startHelper();
     } else {
       this.stopHelper();
-      this.destroyPanel();
+      this.releasePanel();
       this.status = "off";
       this.phase = "idle";
     }
@@ -290,14 +306,63 @@ class TalkKey extends EventEmitter {
     this.altSpace = on;
     this.save({ altSpace: on });
     if (on) {
-      this.ensurePanel();
+      this.fullPanel();
       const registered = globalShortcut.register("Alt+Space", () => this.toPanel("toggle"));
       if (!registered) console.error("kururu: ⌥Space is taken by something else");
     } else {
       globalShortcut.unregister("Alt+Space");
-      if (!this.enabled) this.destroyPanel();
+      this.releasePanel();
     }
     this.changed();
+  }
+
+  /**
+   * The panel for the voice: made, or a pen's draw-only one loaded again as
+   * the whole pill — a page that installs the microphone and the speech
+   * only when it is loaded as the pill.
+   */
+  fullPanel() {
+    if (this.panel && this.penOnly) {
+      this.penOnly = false;
+      this.load();
+      return;
+    }
+    this.ensurePanel();
+  }
+
+  /**
+   * The voice let the panel go: gone, unless a pen session still has its
+   * tools in it — then it stays where it is, loaded again draw-only, so
+   * the page left holds no microphone.
+   */
+  releasePanel() {
+    if (this.enabled || this.altSpace) return;
+    if (!this.penWanted) {
+      this.destroyPanel();
+      return;
+    }
+    if (this.panel && !this.penOnly) {
+      this.penOnly = true;
+      this.load();
+    }
+  }
+
+  /**
+   * A screen pen session wants the pill for its tools, or is over (`Ink`'s
+   * `penPanel`). With the hook or ⌥Space the panel is there and its page
+   * draws them while the pen is on; with neither, one is made for the
+   * session, draw-only, and goes with it.
+   */
+  forPen(on) {
+    on = on === true;
+    if (on === this.penWanted) return;
+    this.penWanted = on;
+    if (on) {
+      if (!this.panel) {
+        this.penOnly = true;
+        this.ensurePanel();
+      }
+    } else if (this.penOnly) this.destroyPanel();
   }
 
   /** The window's Settings page is capturing a new key; a press meant for it is not a word for Kuru. */
@@ -449,7 +514,8 @@ class TalkKey extends EventEmitter {
     if (!this.panel || !this.page) return;
     this.loaded = this.page;
     this.reloadOwed = false;
-    void this.panel.loadURL(`${this.page}/?pill`).catch(() => {});
+    this.drawing = false;
+    void this.panel.loadURL(`${this.page}/?pill${this.penOnly ? "&draw" : ""}`).catch(() => {});
   }
 
   /**
@@ -459,7 +525,7 @@ class TalkKey extends EventEmitter {
    */
   reloadPanel() {
     if (!this.panel || !this.loaded) return;
-    if (this.phase !== "idle") {
+    if (this.phase !== "idle" || this.drawing) {
       this.reloadOwed = true;
       return;
     }
@@ -485,6 +551,10 @@ class TalkKey extends EventEmitter {
       // Never focusable, so a key pressed over another application moves no
       // focus and the reply is read over whatever was being typed into.
       focusable: false,
+      // And a press on it presses, with another application in front: the
+      // pen's tools are pressed between strokes on other apps' windows, and
+      // a click that only woke the panel would be a dead button.
+      acceptFirstMouse: true,
       alwaysOnTop: true,
       // A non-activating panel on macOS, which is what lets it sit over a
       // full-screen application without taking the app out of the way.
@@ -564,6 +634,8 @@ class TalkKey extends EventEmitter {
     this.shown = false;
     this.locating = false;
     this.locateOwed = false;
+    this.penOnly = false;
+    this.drawing = false;
     clearTimeout(this.locateTimer);
     clearTimeout(this.keyAnswerTimer);
     clearTimeout(this.deafTimer);
@@ -814,7 +886,10 @@ class TalkKey extends EventEmitter {
     // Escape for the pill's and keep it from the terminal.
     this.locating = state.locating === true;
     if (this.locating) clearTimeout(this.locateTimer);
-    if (phase === "idle" && !this.locating) {
+    // The pen's tools keep it up as a reset does, and are no phase either:
+    // a window told the pill was busy would keep Escape from its terminal.
+    this.drawing = state.drawing === true;
+    if (phase === "idle" && !this.locating && !this.drawing) {
       this.conceal();
       if (this.reloadOwed) this.load();
     } else {
@@ -830,7 +905,7 @@ class TalkKey extends EventEmitter {
       }
       // Shown afresh whenever this file did not leave it up, and never on the
       // word of `isVisible()` alone — see `shown`.
-      if (!this.shown || !this.panel.isVisible()) this.reveal(phase === "idle" ? "shown for a reset" : `shown: ${phase}`);
+      if (!this.shown || !this.panel.isVisible()) this.reveal(phase !== "idle" ? `shown: ${phase}` : this.drawing ? "shown for the pen" : "shown for a reset");
       // Grown from the left edge in place rather than re-centred, so a pill
       // that gets longer with each sentence does not walk.
       else if (resized) this.place(`resized: ${phase}`);

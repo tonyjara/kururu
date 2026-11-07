@@ -4691,6 +4691,15 @@ html.pill-page #root {
   display: inline-block;
   padding: 8px;
 }
+/* The voice's pill and the pen's draw-only one (`DrawPill`), one over the
+   other while a recording is made during a pen session that is not its own;
+   the panel is sized to the stack. */
+.pill-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
 .voice-pill.voice-pill-floating {
   position: static;
   transform: none;

@@ -484,22 +484,25 @@ its reasons are [the plan](plans/screen-annotate.md); this is how it works.
   session at a time.
 - **During.** An overlay over every display (`desktop/ink.js`,
   `desktop/ink.html`) and a red edge while the pen is down. **The tools are
-  in the pill** when the floating pill owns the session — pen on and off,
-  red, blue, the highlighter, Undo, Snap, Send, ✕ — and otherwise (the
-  pencil, or a recording in the window with the talk key not hooked) in a
-  toolbar window of its own (`desktop/inkbar.html`), dragged by its
-  background and put back where it was left (`inkBar` in `desktop.json`).
+  only ever in the floating pill** — pen on and off, red, blue, the
+  highlighter, Undo, Snap, Send or Done, ✕ — kept a level above the ink:
+  beside the meter when the pill owns the session, and otherwise (the
+  pencil, or a recording in the window) in the pill's draw-only form
+  (`DrawPill`) at the pill's own spot, with nothing of the voice. With the
+  talk key and ⌥Space both off, main makes a panel for the session alone
+  and loads the pill page with `draw`, which installs no microphone and no
+  speech (`TalkKey.forPen`).
   ⌃⌥⌘D, Escape or the pen button lift the pen, and then clicks go to the
   apps again. Strokes less
   than 1.2 s apart on one display are one mark; at its first pen-down the
   helper (`desktop/glance/`) takes that display without kururu's windows, and
   when it is over draws the ink on it and writes a crop and the whole display
   shrunk. Ink fades three seconds after its pen lifted.
-- **Ending.** With the voice: the talk key's release or tap, the pill's Send
-  or the toolbar's — the clip's page asks main for the ink, posts it to
+- **Ending.** With the voice: the talk key's release or tap, or the pill's
+  Send — the clip's page asks main for the ink, posts it to
   `/api/marks` (`kind: "screen"`), then posts the clip naming the set, and the
   outbox hears it with word times and sends Kuru one line with each mark in
-  the words (`shared/ink.ts`'s `alignMarks`). Without: Done or the pencil
+  the words (`shared/ink.ts`'s `alignMarks`). Without: the pill's Done or the pencil
   puts the header and a line per mark into the box as chips. ✕, Escape with
   the pen up, the owner's page going, or the helper dying end it with
   nothing kept.

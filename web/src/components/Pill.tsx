@@ -17,6 +17,15 @@
  * how big it is, because the window around it is sized to it and shown and
  * hidden as it is. The talk key it names is the server's setting, which is
  * how the hook learns which key to listen for.
+ *
+ * **It is also where the screen pen's tools are** (`DrawPill`): a session
+ * whose tools are not beside the meter has the pill drawn in a draw-only
+ * form, at the same spot, while it lasts. The main process makes a panel
+ * for that alone when neither the hook nor ⌥Space keeps one, and loads
+ * this page with `draw` (`TalkKey.forPen`): then nothing of the voice is
+ * installed — no microphone, no speech, no keys — since the pill's page is
+ * the one voice client on this Mac while it is one, and a page made for a
+ * pen must never be a second.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { DEFAULT_VOICE } from "../../../shared/voice";
@@ -25,7 +34,7 @@ import { useKururu } from "../session";
 import { applyTalkGesture, installSpeech, setSpeechVolume, setVoiceProfile, useVoiceUi, voiceNow } from "../voice";
 import { installInk, useInk } from "../ink";
 import { installReload } from "../reload";
-import { VoicePill } from "./VoicePill";
+import { DrawPill, VoicePill } from "./VoicePill";
 
 /**
  * How long the tray's Reset shows a pill that has nothing to say. The pill
@@ -36,6 +45,8 @@ import { VoicePill } from "./VoicePill";
 const HERE_MS = 5000;
 /** How often a pill holding an update looks for a quiet moment to reload in. */
 const IDLE_POLL_MS = 500;
+/** A panel made for the screen pen alone (`TalkKey.forPen`): its tools, and nothing of the voice. */
+const DRAW_ONLY = typeof location !== "undefined" && new URLSearchParams(location.search).has("draw");
 
 /**
  * **The pill page is never hot-updated; it reloads instead, once it is idle.**
@@ -95,6 +106,16 @@ export function Pill() {
 
   useEffect(() => {
     document.documentElement.classList.add("pill-page");
+    if (DRAW_ONLY) {
+      // The pen's state, and the reload an agent asks for; no voice at all.
+      const stopInk = installInk();
+      const stopReload = installReload("pill");
+      return () => {
+        stopInk();
+        stopReload();
+        document.documentElement.classList.remove("pill-page");
+      };
+    }
     setVoiceProfile(() => profileRef.current);
     setSpeechVolume(() => voiceRef.current?.settings.volume ?? DEFAULT_VOICE.volume);
     const stopSpeech = installSpeech();
@@ -131,18 +152,25 @@ export function Pill() {
    * and changes nothing about the pill's size.
    */
   const key = voice?.settings.talkKey ?? DEFAULT_VOICE.talkKey;
+  // The pen's tools, drawn here for a session whose tools are not beside the meter.
+  const drawing = ink.state.on && ink.state.tools === "draw";
+  const phase = DRAW_ONLY ? "idle" : ui.phase;
   useLayoutEffect(() => {
     const bridge = desktop()?.voice;
     if (!bridge) return;
-    const pill = root.current?.querySelector(".voice-pill");
-    const box = pill?.getBoundingClientRect();
-    bridge.report({ phase: ui.phase, width: box?.width ?? 0, height: box?.height ?? 0, key, locating: here });
+    // The stack, which is the voice's pill, the pen's, or both while a
+    // recording is made during a pen session that is not its own.
+    const box = root.current?.querySelector(".pill-stack")?.getBoundingClientRect();
+    bridge.report({ phase, width: box?.width ?? 0, height: box?.height ?? 0, key, locating: here, drawing });
     // The pen's tools come and go with its session, its label counts the marks, and the panel is sized to them.
-  }, [ui.phase, ui.text, ui.detail, ui.toggled, key, here, ink.state.on, ink.state.pen, ink.state.marks]);
+  }, [phase, ui.text, ui.detail, ui.toggled, key, here, drawing, ink.state.on, ink.state.pen, ink.state.marks, ink.state.ending, ink.state.voice]);
 
   return (
     <div className="pill-page-root" ref={root}>
-      {ui.phase === "idle" && here ? <PillHere /> : <VoicePill floating />}
+      <div className="pill-stack">
+        {drawing && <DrawPill />}
+        {DRAW_ONLY ? null : ui.phase === "idle" && here ? <PillHere /> : <VoicePill floating />}
+      </div>
     </div>
   );
 }

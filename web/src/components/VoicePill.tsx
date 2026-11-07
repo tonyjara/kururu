@@ -31,12 +31,15 @@
  * the system-wide panel, which raises the main window with the drawer open
  * rather than itself.
  *
- * **While a recording has the screen pen, the pen's tools are here** — on
- * and off, the two pens and the highlighter, Undo, Snap, Send, and the ✕
- * that drops the clip and its ink — in the floating pill, which can be
- * dragged anywhere and owns the session (`desktop/ink.js`). A pen the pill
- * does not own has a toolbar of its own, and the pill in the window then
- * leaves the pen to it rather than drawing a second set under the ink.
+ * **The screen pen's tools are only ever in the floating pill** — on and
+ * off, the two pens and the highlighter, Undo, Snap, Send or Done, and the
+ * ✕ — so they are always in one place, the pill's, which can be dragged
+ * anywhere and is kept a level above the ink (`desktop/ink.js`). While the
+ * pill's own recording has the pen they are beside its meter; any other
+ * session — the Kuru drawer's pencil, or a recording in the window — has
+ * the pill shown in its draw-only form (`DrawPill`), with nothing of the
+ * voice, and the pill in the window leaves the pen to it rather than
+ * drawing a second set under the ink, where the pen would take its clicks.
  *
  * **The pill is the live indicator and not the record.** Listening, hearing,
  * heard and speaking are its; what became of every message and every reply
@@ -134,9 +137,9 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
   const penHere = ui.phase === "listening" && hasPen() && (floating || !voiceIsRemote());
   const inked = penHere && ink.state.on && ink.state.voice;
   // The whole set here when this is the pill the session's tools are in; none
-  // in the window's pill when a toolbar of its own has them.
+  // in the window's pill when the floating one's draw-only form has them.
   const tools = inked && floating;
-  const elsewhere = inked && !floating && ink.state.tools === "bar";
+  const elsewhere = inked && !floating && ink.state.tools === "draw";
   const marks = ink.state.marks;
   const label =
     ui.phase === "listening"
@@ -294,8 +297,63 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
 }
 
 /**
- * The pen's tools beside its on-and-off, as the toolbar has them: the two
- * pens and the highlighter, Undo and Snap. What is picked is main's (`tool`,
+ * The pill in its draw-only form: the screen pen's tools and nothing of the
+ * voice, for a session whose tools are not beside the meter (`tools:
+ * "draw"`) — the Kuru drawer's pencil, or a recording the window owns. The
+ * floating panel draws it at the pill's own spot, and dragging it moves
+ * that spot, so the tools are always in one place. Nothing here touches
+ * `voice.ts`: it opens no microphone and says nothing, and in a panel made
+ * for the pen alone (`?pill&draw`) the voice is not even installed.
+ *
+ * Done is the drawer's pencil pressed again, which puts the marks in Kuru's
+ * box; for a recording it is Send, which ends the clip with its marks. The
+ * ✕ drops the marks, and the clip with them.
+ */
+export function DrawPill() {
+  const { state } = useInk();
+  const ink = desktop()?.ink;
+  if (!ink || !state.on) return null;
+  const marks = state.marks ? ` — ${state.marks} mark${state.marks === 1 ? "" : "s"}` : "";
+  const label = state.ending ? "Keeping the marks…" : state.pen ? `Drawing${marks}` : `Pen up${marks}`;
+  const done = state.voice ? "Send" : "Done";
+  const drop = state.voice ? "Drop the clip and the marks" : "Drop the marks and put the pen away";
+  return (
+    <div
+      className="voice-pill voice-pill-floating voice-pill-drawing"
+      role="status"
+      aria-live="polite"
+      title={state.pen ? "Drawing on the screen: Esc or ⌃⌥⌘D lifts the pen" : "The pen is up: clicks go to the apps"}
+      onMouseDown={(event) => event.preventDefault()}
+    >
+      <button
+        className={`voice-act ${state.pen ? "voice-act-on" : ""}`}
+        onClick={() => ink.pen()}
+        title={state.pen ? "Lift the pen: clicks go to the apps (⌃⌥⌘D, Esc)" : "Put the pen down again (⌃⌥⌘D)"}
+        aria-label="Pen on or off"
+        aria-pressed={state.pen}
+      >
+        <PenIcon />
+      </button>
+      <span className="voice-label">{label}</span>
+      <PenTools />
+      <button
+        className="voice-act voice-act-send"
+        onClick={() => ink.done()}
+        disabled={state.ending}
+        title={state.voice ? "Send what you said and drew to Kuru" : "Put the marks in Kuru's box"}
+      >
+        {done}
+      </button>
+      <button className="voice-close" onClick={() => ink.drop()} title={drop} aria-label={drop}>
+        <Icon name="close" />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The pen's tools beside its on-and-off: the two pens and the highlighter,
+ * Undo and Snap. What is picked is main's (`tool`,
  * `color`), so the pill and a stroke never disagree about the next one.
  */
 function PenTools() {

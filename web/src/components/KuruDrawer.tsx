@@ -2431,17 +2431,18 @@ function Composer({
    * The pencil beside the mic: the screen pen with no voice, for when the
    * user cannot talk. Pressed, the pen goes down over every display; the
    * marks made with it come into this box as chips when it is pressed again
-   * or the overlay's Done is — `ink.ts` puts them in through
-   * `insertInKuru`, the road a browser tab's marks take — and the user
-   * writes about them and sends. With the pen down the overlay is over this
-   * window too, so the line says how to get back to it.
+   * or the pill's Done is — the pill shows itself, draw-only, at its own
+   * spot for this — `ink.ts` puts them in through `insertInKuru`, the road a
+   * browser tab's marks take, and the user writes about them and sends. With
+   * the pen down the overlay is over this window too, so the line says how
+   * to get back to it.
    */
   const ink = useInk();
   const penOn = ink.state.on && !ink.state.voice;
   const penSaid = penOn
     ? ink.state.pen
-      ? `Drawing on the screen${ink.state.marks ? ` — ${ink.state.marks} mark${ink.state.marks === 1 ? "" : "s"}` : ""}. Done on the screen puts them here; Esc or ⌃⌥⌘D lifts the pen.`
-      : "The pen is up. Press the pencil, or Done on the screen, to put the marks here."
+      ? `Drawing on the screen${ink.state.marks ? ` — ${ink.state.marks} mark${ink.state.marks === 1 ? "" : "s"}` : ""}. Done on the pill puts them here; Esc or ⌃⌥⌘D lifts the pen.`
+      : "The pen is up. Press the pencil, or Done on the pill, to put the marks here."
     : ink.keeping
       ? "Keeping the marks…"
       : ink.note;

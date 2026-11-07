@@ -102,11 +102,12 @@ export interface InkState {
   /** The hook's hold-to-draw key has the pen down. */
   held?: boolean;
   /**
-   * Where the session's tools are: the floating pill, which owns it, or the
-   * toolbar's own window. Missing from a window from before the tools moved,
-   * whose toolbar is inside an overlay.
+   * Where the session's tools are: beside the floating pill's meter, since
+   * it owns the session (`pill`), or in the pill's draw-only form at the
+   * same spot (`draw`, `DrawPill`). Missing from a window from before the
+   * tools moved, whose toolbar is inside an overlay.
    */
-  tools?: "pill" | "bar";
+  tools?: "pill" | "draw";
   /** Every recording starts with the pen down (Settings → Voice → Screen pen). Missing from a window from before the setting. */
   withVoice?: boolean;
 }
@@ -409,6 +410,11 @@ export interface PillReport {
    * every window is told and reads Escape by.
    */
   locating?: boolean;
+  /**
+   * Showing the screen pen's tools in the draw-only form (`DrawPill`): up
+   * for that as for a reset, and no phase either.
+   */
+  drawing?: boolean;
 }
 
 export interface DesktopVoice {

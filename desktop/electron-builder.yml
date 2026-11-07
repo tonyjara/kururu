@@ -54,7 +54,6 @@ files:
   - ink.js
   - inkshape.js
   - ink.html
-  - inkbar.html
   - inkpreload.js
   - quit.js
   - icon/icon-1024.png

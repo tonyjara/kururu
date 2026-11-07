@@ -5,7 +5,9 @@
  * since an overlay left behind is a Mac where nothing can be clicked; a
  * burst is one still and one inked pair of pictures; Escape lifts the pen
  * and is the pen's once; and a refused Screen Recording puts nothing on the
- * screen. The real helper and real windows are the user's to try
+ * screen; and the pill, where the tools are, is above the ink and is shown
+ * draw-only for a session that is not its own (`TalkKey.forPen`). The real
+ * helper and real windows are the user's to try
  * (docs/plans/screen-annotate.md); this is everything around them.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, mock } from "bun:test";
@@ -33,6 +35,7 @@ class FakeContents extends EventEmitter {
     return this.destroyed;
   }
   setWindowOpenHandler() {}
+  invalidate() {}
 }
 
 class FakeWindow {
@@ -64,8 +67,23 @@ class FakeWindow {
     queueMicrotask(() => this.webContents.emit("did-finish-load"));
     return Promise.resolve();
   }
+  loadURL(url) {
+    this.url = url;
+    return Promise.resolve();
+  }
   showInactive() {
     this.shown = true;
+  }
+  hide() {
+    this.shown = false;
+  }
+  isVisible() {
+    return this.shown;
+  }
+  getBounds() {
+    const [x, y] = this.getPosition();
+    const [width, height] = this.getSize();
+    return { x, y, width, height };
   }
   moveTop() {
     this.raised = (this.raised ?? 0) + 1;
@@ -125,7 +143,11 @@ mock.module("electron", () => ({
   shell: { openExternal: (url) => opened.push(url) },
 }));
 
+// The pill's log goes somewhere of the test's own, never the user's `pill.log`.
+const stateDir = mkdtempSync(join(tmpdir(), "kururu-ink-state-"));
+process.env.KURURU_STATE_DIR = stateDir;
 const { Ink } = await import("../ink.js");
+const { TalkKey } = await import("../talkkey.js");
 
 /**
  * The helper, stood in for by a script: Screen Recording as `ACCESS` says,
@@ -164,7 +186,10 @@ beforeAll(() => {
   writeFileSync(helperPath, HELPER);
   chmodSync(helperPath, 0o755);
 });
-afterAll(() => rmSync(dir, { recursive: true, force: true }));
+afterAll(() => {
+  rmSync(dir, { recursive: true, force: true });
+  rmSync(stateDir, { recursive: true, force: true });
+});
 
 function setup(extra = {}) {
   windows.length = 0;
@@ -179,7 +204,6 @@ function setup(extra = {}) {
     helperPath,
     pagePath: "/app/ink.html",
     preloadPath: "/app/inkpreload.js",
-    barPath: "/app/inkbar.html",
     voiceClient: () => owner,
     mainWindow: () => main,
     pill: () => null,
@@ -189,7 +213,6 @@ function setup(extra = {}) {
 }
 
 const overlays = () => windows.filter((w) => !w.destroyed && w.file === "/app/ink.html");
-const barOf = () => windows.find((w) => !w.destroyed && w.file === "/app/inkbar.html") ?? null;
 
 const live = () => overlays();
 const anyWindow = () => windows.filter((w) => !w.destroyed);
@@ -415,7 +438,7 @@ describe("refused", () => {
 });
 
 describe("phase 2: the pen made pleasant", () => {
-  it("keeps what each stroke was drawn with, and the toolbar's choice is the next stroke's", async () => {
+  it("keeps what each stroke was drawn with, and the pill's choice is the next stroke's", async () => {
     const { ink, owner } = setup();
     const { at } = await ink.start({ voice: true }).then(() => ink.session);
     const [one] = live();
@@ -569,72 +592,93 @@ describe("phase 2: the pen made pleasant", () => {
 });
 
 describe("the tools", () => {
-  it("are in a toolbar of its own when the pill does not own the session: sized by its page, put at the top of the display, over the overlays", async () => {
-    const { ink } = setup();
+  /** A floating pill as main has it: its page, its level, whether it is up, and how often it was ordered to the front. */
+  function fakePill(visible = true) {
+    const contents = new FakeContents();
+    return {
+      webContents: contents,
+      visible,
+      level: null,
+      relative: null,
+      raised: 0,
+      isDestroyed: () => false,
+      isVisible() {
+        return this.visible;
+      },
+      setAlwaysOnTop(_on, level, relative = 0) {
+        this.level = level;
+        this.relative = relative;
+      },
+      moveTop() {
+        this.raised += 1;
+      },
+      getMediaSourceId: () => `window:${contents.id}:0`,
+    };
+  }
+
+  it("are in the pill's draw-only form when the pill does not own the session: asked for at the start, let go at the end, and no window of their own", async () => {
+    const asked = [];
+    const { ink, owner } = setup({ penPanel: (on) => asked.push(on) });
+    await ink.start({ voice: false, asker: owner });
+    expect(asked).toEqual([true]);
+    expect(ink.state().tools).toBe("draw");
+    // Nothing on the screen but the overlays: the tools are the pill's.
+    expect(anyWindow()).toHaveLength(DISPLAYS.length);
+    ink.send(owner);
+    await ink.finish(owner, ink.session.id);
+    expect(asked).toEqual([true, false]);
+    // And let go however the session ends.
     await ink.start({ voice: true });
-    const bar = barOf();
-    expect(bar).not.toBeNull();
-    expect(bar.query).toEqual({ voice: "1" });
-    expect(bar.options.focusable).toBe(false);
-    expect(bar.level).toBe("screen-saver");
-    expect(ink.state().tools).toBe("bar");
-    expect(bar.shown).toBe(false);
-    ink.barSize(bar.webContents, { width: 400, height: 50 });
-    expect(bar.size).toEqual([400, 50]);
-    // Display 1's work area, in the middle, below the menu bar.
-    expect(bar.position).toEqual([520, 37]);
-    expect(bar.shown).toBe(true);
-    // A page that is not the bar's is not listened to.
-    ink.barSize(live()[0].webContents, { width: 10_000, height: 10 });
-    expect(bar.size).toEqual([400, 50]);
-    // Its presses are the overlay's were; another page's are not.
-    ink.press(new FakeContents(), "pen");
-    expect(ink.session.pen).toBe(true);
-    ink.press(bar.webContents, "pen");
-    expect(ink.session.pen).toBe(false);
-    // It hears the session on the pen's own channel.
-    expect(bar.webContents.sent.some(([channel, state]) => channel === "ink:state" && state.pen === false)).toBe(true);
-    // It is left out of every still.
-    expect(ink.ours()).toContain(bar.webContents.id);
-    ink.press(bar.webContents, "drop");
+    ink.cancel(ink.session.id, "gone");
+    expect(asked).toEqual([true, false, true, false]);
+    ink.dispose();
+  });
+
+  it("are pressed from the pill in its draw-only form: Done and ✕ from it end the window's session", async () => {
+    const pill = fakePill();
+    const { ink, owner } = setup({ pill: () => pill });
+    await ink.start({ voice: false, asker: owner });
+    expect(ink.state().tools).toBe("draw");
+    // Another page may not end it; the pill may.
+    ink.send(new FakeContents());
+    expect(told(owner, "send")).toHaveLength(0);
+    ink.send(pill.webContents);
+    expect(told(owner, "send")).toHaveLength(1);
+    await ink.finish(owner, ink.session.id);
+    await ink.start({ voice: false, asker: owner });
+    ink.drop(pill.webContents);
+    expect(told(owner, "cancel")).toHaveLength(1);
     expect(anyWindow()).toHaveLength(0);
     ink.dispose();
   });
 
-  it("goes back where it was dragged, while that is still on a display, and remembers a drag", async () => {
-    let saved = { x: 1600, y: 100 };
-    const { ink } = setup({ barAt: () => saved, saveBarAt: (at) => (saved = at) });
-    await ink.start({ voice: false, asker: new FakeContents() });
-    const bar = barOf();
-    ink.barSize(bar.webContents, { width: 400, height: 50 });
-    expect(bar.position).toEqual([1600, 100]);
-    ink.dispose();
-    // Its own placing is not a drag; one later is, once it has settled.
-    ink.barPlacedAt = 0;
-    saved = { x: 5000, y: 100 };
-    await ink.start({ voice: false, asker: new FakeContents() });
-    const again = barOf();
-    ink.barSize(again.webContents, { width: 400, height: 50 });
-    // Off every display: the top of the one the session began on.
-    expect(again.position).toEqual([520, 37]);
-    ink.barPlacedAt = 0;
-    again.position = [300, 600];
-    again.handlers.moved();
-    await settle(350);
-    expect(saved).toEqual({ x: 300, y: 600 });
-    ink.dispose();
-  });
-
-  it("are in the pill when the pill owns the session, and then there is no toolbar", async () => {
-    const pillContents = new FakeContents();
-    const pill = { webContents: pillContents, isDestroyed: () => false, setAlwaysOnTop() {}, moveTop() {}, getMediaSourceId: () => `window:${pillContents.id}:0` };
-    const { ink } = setup({ voiceClient: () => pillContents, pill: () => pill });
+  it("are beside the meter when the pill owns the session, and the pill is a level above the ink until it ends", async () => {
+    const pill = fakePill();
+    const { ink } = setup({ voiceClient: () => pill.webContents, pill: () => pill });
     await ink.start({ voice: true });
-    expect(barOf()).toBeNull();
+    await settle();
     expect(ink.state().tools).toBe("pill");
+    // Above the overlays' level, not only ordered last within it.
+    expect(live().every((w) => w.level === "screen-saver")).toBe(true);
+    expect(pill.level).toBe("screen-saver");
+    expect(pill.relative).toBe(1);
+    expect(pill.raised).toBeGreaterThan(0);
     // The pill may press them.
     ink.setStyle({ tool: "pen", color: "blue" });
     expect(ink.state().color).toBe("blue");
+    ink.cancel(ink.session.id, null);
+    expect(pill.level).toBe("floating");
+    expect(pill.relative).toBe(0);
+    ink.dispose();
+  });
+
+  it("never orders a hidden pill to the front, which would show an empty window", async () => {
+    const pill = fakePill(false);
+    const { ink, owner } = setup({ pill: () => pill });
+    await ink.start({ voice: false, asker: owner });
+    await settle();
+    expect(pill.level).toBe("screen-saver");
+    expect(pill.raised).toBe(0);
     ink.dispose();
   });
 
@@ -686,5 +730,88 @@ describe("what a mark was drawn on", () => {
     expect(asked).toHaveLength(1);
     expect(asked[0].global).toEqual({ x: 500, y: 100 });
     ink.dispose();
+  });
+});
+
+describe("the pill for the pen (TalkKey.forPen)", () => {
+  const PAGE = "http://127.0.0.1:7717";
+  function talkKey(saved = {}) {
+    windows.length = 0;
+    const talk = new TalkKey({ helperPath: join(dir, "no-hook"), preloadPath: "/app/preload.js", saved, save: () => {} });
+    talk.setPage(PAGE);
+    return talk;
+  }
+  const panels = () => windows.filter((w) => !w.destroyed);
+  const report = (talk, drawing) => talk.report({ phase: "idle", width: 300, height: 40, key: "ControlRight", drawing });
+
+  it("makes a draw-only panel when nothing keeps one, shows it while its page draws, and lets it go with the session", () => {
+    const talk = talkKey();
+    talk.forPen(true);
+    expect(panels()).toHaveLength(1);
+    const [panel] = panels();
+    expect(panel.url).toBe(`${PAGE}/?pill&draw`);
+    // Pressed between strokes on another app's window: the first click presses.
+    expect(panel.options.acceptFirstMouse).toBe(true);
+    expect(panel.options.focusable).toBe(false);
+    expect(panel.shown).toBe(false);
+    report(talk, true);
+    expect(panel.shown).toBe(true);
+    // Up for the pen, and still no phase for the window to read Escape by.
+    expect(talk.state().phase).toBe("idle");
+    report(talk, false);
+    expect(panel.shown).toBe(false);
+    talk.forPen(false);
+    expect(panels()).toHaveLength(0);
+  });
+
+  it("is the whole pill again when the talk key is turned on mid-session, and kept after", () => {
+    const talk = talkKey();
+    talk.forPen(true);
+    const [panel] = panels();
+    talk.setEnabled(true);
+    expect(panels()).toEqual([panel]);
+    expect(panel.url).toBe(`${PAGE}/?pill`);
+    talk.forPen(false);
+    expect(panels()).toEqual([panel]);
+    talk.stopHelper();
+    talk.destroyPanel();
+  });
+
+  it("borrows the panel the talk key keeps, as it is, and leaves it there", () => {
+    const talk = talkKey({ talkKeyEverywhere: true });
+    talk.ensurePanel();
+    const [panel] = panels();
+    expect(panel.url).toBe(`${PAGE}/?pill`);
+    talk.forPen(true);
+    expect(panels()).toEqual([panel]);
+    expect(panel.url).toBe(`${PAGE}/?pill`);
+    talk.forPen(false);
+    expect(panels()).toEqual([panel]);
+    talk.destroyPanel();
+  });
+
+  it("goes draw-only, not away, when the talk key is turned off while a pen has its tools there", () => {
+    const talk = talkKey({ talkKeyEverywhere: true });
+    talk.ensurePanel();
+    const [panel] = panels();
+    talk.forPen(true);
+    talk.setEnabled(false);
+    expect(panels()).toEqual([panel]);
+    expect(panel.url).toBe(`${PAGE}/?pill&draw`);
+    talk.forPen(false);
+    expect(panels()).toHaveLength(0);
+  });
+
+  it("waits for the pen to be put away before a reload, as it waits for the voice", () => {
+    const talk = talkKey();
+    talk.forPen(true);
+    const [panel] = panels();
+    report(talk, true);
+    panel.url = null;
+    talk.reloadPanel();
+    expect(panel.url).toBeNull();
+    report(talk, false);
+    expect(panel.url).toBe(`${PAGE}/?pill&draw`);
+    talk.forPen(false);
   });
 });

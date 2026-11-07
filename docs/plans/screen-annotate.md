@@ -703,6 +703,28 @@ real app; it worked, and four things changed:
   line; the pill what it is saying. A place with no name of its own puts its
   control, or else its part, in the label.
 
+**After the second press (2026-11-06).** Tried after a window reload but on
+the 0.6.0 app, so the old overlay still drew its bar at the top beside the
+pill's new tools — two sets. And the pill's buttons were dead: the press on
+its Undo landed on the overlay under it and drew a dot (the set's second
+stroke sits on the Undo button), so the pill was not over the ink then. Two
+changes:
+
+- *One set of tools, in the pill.* The drawer's pencil, and a recording the
+  window owns, show the pill in a draw-only form (`DrawPill`): the pen, the
+  pens and highlighter, Undo, Snap, Done or Send, ✕, and nothing of the
+  voice, at the pill's own spot. With the talk key or ⌥Space the panel is
+  there and draws it; with neither, main makes a panel for the session
+  alone and loads the pill page with `draw`, which installs no microphone
+  and no speech (`TalkKey.forPen`) — the reason KUR-245 gave for a toolbar
+  window instead. `inkbar.html`, `inkBar` and the overlay's `ink:bar`
+  channel are gone.
+- *The pill is a level above the ink* (screen-saver and one) for the life of
+  a session, rather than raised within the overlays' level, and takes the
+  first click with another app in front (`acceptFirstMouse`). Ordering in a
+  replay of the start was right; what put an overlay over it in the session
+  was not found, so nothing depends on ordering now.
+
 ### Phase 3: addresses in other browsers (dropped)
 
 **Not built** — question 5's answer. What it would have been, for the record:

@@ -187,7 +187,6 @@ const ink = new Ink({
     process.env.KURURU_GLANCE || (PACKAGED ? path.join(process.resourcesPath, "server", "glance") : path.join(__dirname, "dist", "glance")),
   pagePath: path.join(__dirname, "ink.html"),
   preloadPath: path.join(__dirname, "inkpreload.js"),
-  barPath: path.join(__dirname, "inkbar.html"),
   // The pill's page while it is the voice client — the hook live, or ⌥Space — as `wiring.ts` decides it for the window.
   voiceClient: () => ((talk.status === "live" || talk.altSpace) && talk.panelContents()) || (win && !win.isDestroyed() ? win.webContents : null),
   mainWindow: () => (win && !win.isDestroyed() ? win.webContents : null),
@@ -195,8 +194,7 @@ const ink = new Ink({
   denyList: () => readDesktop().inkDeny ?? DENY_DEFAULT,
   whatAt: (global, under) => inkWhatAt(global, under),
   withVoice: () => readDesktop().inkWithVoice,
-  barAt: () => readDesktop().inkBar,
-  saveBarAt: (at) => writeDesktop({ inkBar: at }),
+  penPanel: (on) => talk.forPen(on),
   debug: !PACKAGED,
 });
 
@@ -1056,10 +1054,10 @@ talk.on("change", (state) => {
  * The screen pen, across the bridge. A session with the voice may be asked
  * for by the window or the pill (its pen button gives a recording a pen);
  * one without only by the window, whose box it fills. Only the session's
- * owner takes the bundle or drops it; the window, the pill, the overlays and
- * the toolbar may press the pen, Done and ✕. The pen's own windows' channel
- * (`ink:*`) is checked in `ink.js` against the overlays and the toolbar of
- * the session that is on.
+ * owner takes the bundle or drops it; the window and the pill — in either
+ * of its forms — may press the pen, its tools, Done and ✕. The overlays'
+ * own channel (`ink:*`) carries strokes only, checked in `ink.js` against
+ * the overlays of the session that is on.
  */
 ipcMain.handle("kururu:ink-start", (event, voice) => {
   if (voice === true) return ink.isOurs(event.sender) ? ink.start({ voice: true }) : ink.state();
@@ -1104,11 +1102,6 @@ ipcMain.on("kururu:ink-cancel", (event, id) => {
 ipcMain.on("ink:begin", (event, raw) => ink.begin(event.sender, raw));
 ipcMain.on("ink:points", (event, raw) => ink.points(event.sender, raw));
 ipcMain.on("ink:end", (event, raw) => ink.lift(event.sender, raw));
-ipcMain.on("ink:bar", (event, what) => ink.press(event.sender, String(what)));
-ipcMain.on("ink:bar-size", (event, size) => ink.barSize(event.sender, size));
-ipcMain.on("ink:style", (event, style) => {
-  if (ink.overlayOf(event.sender) || ink.isBar(event.sender)) ink.setStyle(style);
-});
 
 /**
  * The notes, across the bridge. Only the main window pops a card out, and
