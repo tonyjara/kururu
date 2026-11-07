@@ -23,6 +23,7 @@
 //   talkkey ControlRight --check  say which keycode that is and exit
 //   talkkey ControlRight --draw MetaRight
 //                                 and the screen pen's hold-to-draw key too
+//   talkkey ControlRight --shift  and Shift, for the pen while recording
 //
 // Lines out: {"ev":"ready"} once the tap is up; {"ev":"denied"} when Input
 // Monitoring is refused (and it keeps asking every few seconds, and says
@@ -35,6 +36,18 @@
 // while it is held and false when it is let go, or when another key is
 // pressed with it — then it was a shortcut, not a pen. The app decides what
 // a hold means (`desktop/ink.js`: the pen down, during a session only).
+//
+// With --shift, either Shift key pressed alone: {"ev":"shift","down":true}
+// and false, each with `at`, the event's own time in milliseconds, and
+// {"ev":"shift","chord":"key"} or "mouse" for the first key, other modifier
+// or click while it is held. Shift is half of typing, so a press that began
+// with another modifier already down is not reported at all, and whether a
+// press was a tap, a hold or a capital letter is the pill page's to say
+// (`web/src/shiftpen.ts`), with the talk key's threshold. The talk key's
+// own modifier is not "another": Shift during a held talk key is still
+// Shift alone. Clicks are reported because Shift-click is a selection in
+// the application in front — and because, once the pen is down, a click is
+// a stroke, which only the page can tell apart.
 
 import Foundation
 import CoreGraphics
@@ -102,6 +115,11 @@ let drawKey: Key? = {
     return key?.code == modifiers[name]?.code ? nil : key
 }()
 
+/// Shift, either one, for the pen while recording — unless Shift is the talk key itself.
+let watchShift = arguments.contains("--shift") && name != "ShiftLeft" && name != "ShiftRight"
+let shiftCodes: Set<Int64> = [0x38, 0x3C]
+let shiftMask: UInt64 = 0x0002 | 0x0004
+
 let target: Key
 if let modifier = modifiers[name] {
     target = modifier
@@ -131,7 +149,35 @@ Thread.detachNewThread {
 var held = false
 var chorded = false
 var drawing = false
+/// Shift is down, and its press was reported (it began with no other modifier down).
+var shifted = false
+/// …and something has been pressed with it, which was reported once.
+var shiftChorded = false
 var tap: CFMachPort?
+
+/// Every modifier's device bit but Shift's and the talk key's own: one of
+/// these down makes a Shift press a shortcut's, not a Shift alone.
+let otherModifiers: UInt64 = modifiers.values.reduce(UInt64(0)) { all, key in
+    guard let bit = key.deviceMask, bit & shiftMask == 0, bit != target.deviceMask else { return all }
+    return all | bit
+}
+
+func shiftChord(_ by: String) {
+    if shifted && !shiftChorded {
+        shiftChorded = true
+        emit("shift", ["chord": by])
+    }
+}
+
+/// When the event came, in milliseconds of uptime: a tap is told from a
+/// hold by these, never by when the page got round to them, since opening
+/// the microphone can hold that page. The clock here rather than the
+/// event's own `timestamp`, whose unit is nanoseconds on one Mac and the
+/// machine's ticks on another; this callback is never slow, so its "now"
+/// is the key's.
+func stamp() -> Double {
+    return ProcessInfo.processInfo.systemUptime * 1000
+}
 
 let callback: CGEventTapCallBack = { _, type, event, _ in
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
@@ -140,6 +186,35 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
         // switched back on rather than left dead with no sign of it.
         if let tap = tap { CGEvent.tapEnable(tap: tap, enable: true) }
         return Unmanaged.passUnretained(event)
+    }
+    if watchShift {
+        switch type {
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            shiftChord("mouse")
+            return Unmanaged.passUnretained(event)
+        case .flagsChanged:
+            let code = event.getIntegerValueField(.keyboardEventKeycode)
+            if shiftCodes.contains(code) {
+                let down = (event.flags.rawValue & shiftMask) != 0
+                if down && !shifted {
+                    // Only a press that starts alone; ⌘⇧ is a shortcut from its first key.
+                    if (event.flags.rawValue & otherModifiers) == 0 {
+                        shifted = true
+                        shiftChorded = false
+                        emit("shift", ["down": true, "at": stamp()])
+                    }
+                } else if !down && shifted {
+                    shifted = false
+                    emit("shift", ["down": false, "at": stamp()])
+                }
+            } else if code != target.code {
+                shiftChord("key")
+            }
+        case .keyDown:
+            shiftChord("key")
+        default:
+            break
+        }
     }
     let code = event.getIntegerValueField(.keyboardEventKeycode)
     let repeating = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
@@ -196,7 +271,10 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
 let mask: CGEventMask =
     (1 << CGEventType.keyDown.rawValue) |
     (1 << CGEventType.keyUp.rawValue) |
-    (1 << CGEventType.flagsChanged.rawValue)
+    (1 << CGEventType.flagsChanged.rawValue) |
+    (watchShift
+        ? (1 << CGEventType.leftMouseDown.rawValue) | (1 << CGEventType.rightMouseDown.rawValue) | (1 << CGEventType.otherMouseDown.rawValue)
+        : 0)
 
 /// Try to open the tap. Nil is Input Monitoring refused — or not yet granted,
 /// since the first attempt is what makes macOS put the app on the list.

@@ -227,6 +227,7 @@ in this folder.
 | `src/notify.ts` | Making the noise and drawing the card. No policy |
 | `src/voice.ts` | The talk key (hold or tap), the microphone as PCM off a worklet, and the player for what the harness says. Module state, like `session.ts` |
 | `src/ink.ts` · `src/whatat.ts` | The screen pen as a page sees it: owning a session and ending it, with the clip or into the Kuru box; and what is at a point of the page, which main asks so a mark on kururu's own window names the pane, agent, card or document (read off the `data-ink-*` the panes and cards carry) |
+| `src/shiftpen.ts` | Shift as the pen's key while the pill records: tap toggles, hold holds, with the mics' `TAP_MS` and `pressWasTap`; a press with another key or a click in it is nobody's. The talk-key hook hears Shift (`--shift`) and `talkkey.js` hands the pill a press only while it is listening |
 | `src/reload.ts` | When this page may reload for an agent — the voice, the hands, what is open over it — and the notice carried across the reload |
 | `src/kuru.ts` | Whether the Kuru drawer is open and at which reply, for every door that opens it; what Kuru is doing in one word, for the chip and the drawer |
 | `src/kurusearch.ts` | The server's half of a search as a keystroke reaches it: a pause, and the request before it aborted |

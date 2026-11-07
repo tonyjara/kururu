@@ -538,6 +538,18 @@ its reasons are [the plan](plans/screen-annotate.md); this is how it works.
   under it as a browser mark would (`TabMarks.elementAt`). A recording that
   rolls at five minutes takes the marks so far with its clip and keeps the
   pen for the next.
+- **Shift while recording.** While the pill is listening, Shift is the pen's
+  key as the talk key is the mic's: tapped, the pen goes on or off; held, it
+  is down while held and up on release — the same `TAP_MS` and
+  `pressWasTap` the mics use (`web/src/shiftpen.ts`). With no session (Draw
+  with every recording off) a press starts one for the clip. Shift is half
+  of typing, so nothing happens on the press itself: a release inside
+  `TAP_MS` is the tap, still held at `TAP_MS` is the hold. Another key,
+  modifier or click before then makes it a shortcut's and nothing at all, so
+  a capital letter or a Shift-click is the application's; once a hold has
+  the pen down a click is a stroke, and a key puts the pen back up. Heard by
+  the talk-key hook (`--shift`), handed to the pill only for a press that
+  began while it was listening, so only while "talk key in every app" is on.
 - **Never in a picture:** the applications on Settings → Voice → Screen pen
   (password managers, the keychain and Messages to begin with) are left out
   of every still by the helper's filter, and their window titles are not

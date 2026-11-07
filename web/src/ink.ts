@@ -16,10 +16,12 @@
  * can say whether one is on; only the owner is told to send or drop.
  */
 import { useSyncExternalStore } from "react";
-import { desktop, type InkEvent, type InkState } from "./desktop";
+import { desktop, type InkEvent, type InkState, type ShiftKeyEvent } from "./desktop";
 import { insertInKuru } from "./kuru";
 import * as api from "./session";
-import { cancelTalk, finishTalk, penRefused, penTalk, setPenWithVoice, voiceError } from "./voice";
+import { shiftChord, shiftDown, shiftHeld, shiftUp, type ShiftPress } from "./shiftpen";
+import { cancelTalk, finishTalk, isListening, penRefused, penTalk, setPenWithVoice, voiceError } from "./voice";
+import { TAP_MS } from "../../shared/voice";
 
 const OFF: InkState = { on: false, id: null, voice: false, pen: false, marks: 0, ending: false };
 
@@ -74,6 +76,70 @@ export function pillPen(): void {
   if (!ink) return;
   if (ui.state.on) ink.pen();
   else void ink.start(true);
+}
+
+/**
+ * The pen on or off for the recording under way, from Shift: the pen of
+ * the session that is on, or a session started for the recording when
+ * there is none ("Draw with every recording" off) — the pill's own pen
+ * button, with a side chosen. A session still starting when the press
+ * that asked for it is let go is put back up as it arrives.
+ */
+let shiftWants: boolean | null = null;
+
+function shiftPen(on: boolean): void {
+  const ink = desktop()?.ink;
+  if (!ink) return;
+  shiftWants = on;
+  if (ui.state.on) {
+    if (ui.state.pen !== on) ink.pen(on);
+    return;
+  }
+  if (!on) return;
+  void ink.start(true).then((state) => {
+    if (state.on && state.pen && shiftWants === false) ink.pen(false);
+  });
+}
+
+/**
+ * Shift while recording, in the pill page that holds the microphone
+ * (`shiftpen.ts` says what a press is). The hook's release time decides a
+ * tap; the hold is a timer from when the press arrived here, and a release
+ * the timer did not see is read by its stamps all the same.
+ */
+export function installShiftPen(): () => void {
+  const voice = desktop()?.voice;
+  if (!voice?.onShift || !desktop()?.ink) return () => {};
+  let press: ShiftPress | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const apply = (pen: boolean | null) => {
+    if (pen !== null) shiftPen(pen);
+  };
+  const stop = voice.onShift((event: ShiftKeyEvent) => {
+    if (event.ev === "down") {
+      clearTimeout(timer);
+      press = shiftDown(isListening(), ui.state.on && ui.state.pen, event.at);
+      if (!press) return;
+      timer = setTimeout(() => {
+        if (!press) return;
+        const held = shiftHeld(press, isListening());
+        press = held.press;
+        apply(held.pen);
+      }, TAP_MS);
+    } else if (event.ev === "up") {
+      clearTimeout(timer);
+      if (press) apply(shiftUp(press, event.at));
+      press = null;
+    } else if (event.ev === "chord" && press) {
+      const chorded = shiftChord(press, event.by === "mouse" ? "mouse" : "key");
+      press = chorded.press;
+      apply(chorded.pen);
+    }
+  });
+  return () => {
+    clearTimeout(timer);
+    stop();
+  };
 }
 
 /**

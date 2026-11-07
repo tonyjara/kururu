@@ -32,7 +32,7 @@ import { DEFAULT_VOICE } from "../../../shared/voice";
 import { desktop } from "../desktop";
 import { useKururu } from "../session";
 import { applyTalkGesture, installSpeech, setSpeechVolume, setVoiceProfile, useVoiceUi, voiceNow } from "../voice";
-import { installInk, useInk } from "../ink";
+import { installInk, installShiftPen, useInk } from "../ink";
 import { installReload } from "../reload";
 import { DrawPill, VoicePill } from "./VoicePill";
 
@@ -126,6 +126,8 @@ export function Pill() {
     // it left behind by a hot update is the one that kept the microphone.
     const stopReload = installReload("pill");
     const stopKeys = desktop()?.voice?.onKey(applyTalkGesture) ?? (() => {});
+    // Shift while recording: the pen, tapped on and off or held down.
+    const stopShift = installShiftPen();
     let hereTimer: ReturnType<typeof setTimeout> | undefined;
     const stopLocate =
       desktop()?.voice?.onLocate?.(() => {
@@ -140,6 +142,7 @@ export function Pill() {
       stopInk();
       stopReload();
       stopKeys();
+      stopShift();
       stopLocate();
       clearTimeout(hereTimer);
       document.documentElement.classList.remove("pill-page");

@@ -265,6 +265,8 @@ class TalkKey extends EventEmitter {
      * @type {((down: boolean) => void) | null}
      */
     this.onDraw = null;
+    /** A Shift press handed to the pill, whose release and chords follow it there whatever the phase is by then. */
+    this.shiftSent = false;
   }
 
   state() {
@@ -383,11 +385,12 @@ class TalkKey extends EventEmitter {
       return;
     }
     this.status = "starting";
-    // The screen pen's hold-to-draw key rides on the same hook; a hook from
-    // before it reads the key it was given and leaves the rest.
-    const child = spawn(this.helperPath, [this.key, "--draw", DRAW_KEY], { stdio: ["pipe", "pipe", "pipe"] });
+    // The screen pen's hold-to-draw key and Shift ride on the same hook; a
+    // hook from before them reads the key it was given and leaves the rest.
+    const child = spawn(this.helperPath, [this.key, "--draw", DRAW_KEY, "--shift"], { stdio: ["pipe", "pipe", "pipe"] });
     this.helper = child;
     this.helperHeld = false;
+    this.shiftSent = false;
     child.on("error", (err) => {
       console.error("kururu: the talk-key hook could not start —", err.message);
       if (this.helper === child) {
@@ -409,6 +412,10 @@ class TalkKey extends EventEmitter {
         this.onDraw?.(event.down === true);
         return;
       }
+      if (event.ev === "shift") {
+        this.fromShift(event);
+        return;
+      }
       this.fromHelper(event.ev);
     });
     child.stderr.on("data", (chunk) => console.error(`kururu talkkey: ${String(chunk).trim()}`));
@@ -422,8 +429,13 @@ class TalkKey extends EventEmitter {
         this.helperHeld = false;
         this.toPanel("up");
       }
-      // And a hold-to-draw it was in the middle of puts the pen back.
+      // And a hold-to-draw it was in the middle of puts the pen back, as
+      // does a Shift held for the pen: its release will never come.
       this.onDraw?.(false);
+      if (this.shiftSent) {
+        this.shiftSent = false;
+        this.panelContents()?.send("kururu:shift", { ev: "chord", by: "key" });
+      }
       if (this.stoppingHelper || this.status === "unsupported") return;
       console.error(`kururu: the talk-key hook ${signal ? `was killed by ${signal}` : `exited with ${code}`}`);
       this.status = "crashed";
@@ -482,6 +494,31 @@ class TalkKey extends EventEmitter {
     }
     if (this.paused) return;
     this.toPanel(ev);
+  }
+
+  /**
+   * Shift, from the hook, for the pen while recording (`web/src/shiftpen.ts`
+   * decides what a press was). Every Shift in every application reaches
+   * here, and only a press that went down while the pill was recording is
+   * handed on: the rest of the time Shift is the applications', and the
+   * page is not woken for every capital letter. A press handed on is
+   * followed to its release, recording or not by then.
+   */
+  fromShift(event) {
+    const contents = this.panelContents();
+    if (!contents || this.paused) {
+      this.shiftSent = false;
+      return;
+    }
+    if (event.down === true) {
+      this.shiftSent = this.phase === "listening" && Number.isFinite(event.at);
+      if (this.shiftSent) contents.send("kururu:shift", { ev: "down", at: event.at });
+    } else if (event.down === false) {
+      if (this.shiftSent) contents.send("kururu:shift", { ev: "up", at: Number(event.at) });
+      this.shiftSent = false;
+    } else if (this.shiftSent && (event.chord === "key" || event.chord === "mouse")) {
+      contents.send("kururu:shift", { ev: "chord", by: event.chord });
+    }
   }
 
   /** The talk key the server's settings name, as the panel last reported it. A change restarts the hook on the new key. */

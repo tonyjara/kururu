@@ -214,6 +214,7 @@ if (isPicker) {
         return () => ipcRenderer.removeListener("kururu:talk", relay);
       },
       report: (state) => ipcRenderer.send("kururu:pill", state),
+      onShift: (listener) => relayOn("kururu:shift", (event) => listener(event && typeof event === "object" ? event : {})),
       onLocate: (listener) => {
         const relay = () => listener();
         ipcRenderer.on("kururu:pill-locate", relay);

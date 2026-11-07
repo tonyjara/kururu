@@ -438,7 +438,16 @@ export interface DesktopVoice {
    * an app from before Reset showed anything never asks.
    */
   onLocate?(listener: () => void): () => void;
+  /**
+   * The pill page only: Shift as the hook hears it, while a recording is
+   * under way (`web/src/shiftpen.ts`). Optional: an app from before it
+   * never sends one.
+   */
+  onShift?(listener: (event: ShiftKeyEvent) => void): () => void;
 }
+
+/** Shift going down or up at its own time, or something pressed with it. */
+export type ShiftKeyEvent = { ev: "down" | "up"; at: number } | { ev: "chord"; by: "key" | "mouse" };
 
 /**
  * Where the desktop app has got to in replacing itself.
