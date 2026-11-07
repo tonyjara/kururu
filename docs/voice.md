@@ -452,8 +452,11 @@ or Escape, and neither throws the words away — nothing is sent by them, and a
 minute of speech lost to a reflex is the worse mistake. A tapped one is not
 ended by the window losing the focus, as a held one is. The words go in at the
 cursor (`putIn`, as a card's reference does), after whatever is already in the
-box, and the user presses send. A line over the box says it is listening and
-how to stop, then "Hearing…", then why if nothing came.
+box, and the user presses send. Nothing is written over the box while it
+listens or is heard — the mic is red, then waits in the accent, and that is
+all; a line there saying "Listening…" and how to stop was taken out on
+2026-11-06 at the user's word. Why nothing came, when nothing did, is the
+box's placeholder and the mic's tooltip until the next press or keystroke.
 
 A tap is told from a hold by the pointer events' own `timeStamp`s, not by the
 clock when each is handled: opening the microphone can hold the page for a

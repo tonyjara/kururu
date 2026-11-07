@@ -2389,7 +2389,16 @@ function Composer({
    */
   const dictation = useDictation();
   const dictatingFor = useRef<string | null>(null);
-  /** Why the last dictation put nothing in, said over the box until the next press or keystroke. */
+  /**
+   * Why the last dictation put nothing in — a microphone that would not open,
+   * words that were not heard — until the next press or keystroke. It is the
+   * box's placeholder and the mic's tooltip, never a line over the box: the
+   * user took the "Listening…" line that was there out on 2026-11-06, since
+   * the red mic already says it is listening, and wants nothing written in
+   * that strip. A placeholder is the lightest place that is still seen where
+   * the eye already is; a draft with words in it hides it, and the tooltip
+   * still has it.
+   */
   const [unheard, setUnheard] = useState<string | null>(null);
   const putInNow = useRef(putIn);
   putInNow.current = putIn;
@@ -2489,15 +2498,6 @@ function Composer({
           {handing.waiting > 0 ? `Keeping ${handing.waiting === 1 ? "a file" : `${handing.waiting} files`} for Kuru…` : handing.refused}
         </p>
       )}
-      {(said !== "idle" || unheard) && (
-        <p className={`kuru-handing ${said === "idle" ? "kuru-handing-refused" : "kuru-dictating"}`} role="status" onClick={() => setUnheard(null)}>
-          {said === "listening"
-            ? "Listening… press the mic again, or Esc, to put it in the box."
-            : said === "hearing"
-              ? "Hearing…"
-              : `${unheard} Hold or tap the mic to try again.`}
-        </p>
-      )}
       {penSaid && (
         <p className={`kuru-handing ${penOn || ink.keeping ? "kuru-dictating" : "kuru-handing-refused"}`} role="status" onClick={clearInkNote}>
           {penSaid}
@@ -2560,7 +2560,7 @@ function Composer({
             value={text}
             files={files}
             bold={address ? { from: address.from, to: address.to } : null}
-            placeholder={peers.length ? `Say something to Kuru, or @${peers[0]!.node.name} …` : "Say something to Kuru"}
+            placeholder={unheard ? `${unheard} Hold or tap the mic to try again.` : peers.length ? `Say something to Kuru, or @${peers[0]!.node.name} …` : "Say something to Kuru"}
             ariaLabel="A message for Kuru"
             ariaExpanded={open}
             ariaControls={open ? `kuru-suggest-${profileId}` : undefined}
@@ -2630,7 +2630,7 @@ function Composer({
           }}
           onMouseDown={(event) => event.preventDefault()}
           onContextMenu={(event) => event.preventDefault()}
-          title={said === "listening" ? "Put what you said in the box (Esc)" : "Dictate into the box — hold, or tap to start and again to stop. Nothing is sent"}
+          title={said === "listening" ? "Put what you said in the box (Esc)" : unheard ? `${unheard} Hold or tap to try again` : "Dictate into the box — hold, or tap to start and again to stop. Nothing is sent"}
           aria-label={said === "listening" ? "Stop dictating" : "Dictate into the box"}
           aria-pressed={said === "listening"}
         >

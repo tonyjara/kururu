@@ -6677,8 +6677,9 @@ button.kc {
 }
 /* The mic is a pen into the box: in the danger colour while it listens, with
    the microphone's level as a ring that swells around it (`--mic-level`, 0–1),
-   as the quote's mic does, and waiting in the accent while it is heard. What
-   it is doing is said over the box (`.kuru-dictating`). */
+   as the quote's mic does, and waiting in the accent while it is heard. The
+   button is the whole of it: nothing is written over the box while it
+   listens (2026-11-06), and a failure is the box's placeholder. */
 .kuru-mic-listening,
 .kuru-mic-listening:hover {
   color: var(--on-danger);
@@ -6689,6 +6690,7 @@ button.kc {
   color: var(--accent);
   animation: st-key-wait 1.2s ease-in-out infinite;
 }
+/* The pencil's line over the box while the pen is down or its marks are kept. */
 .kuru-dictating {
   color: var(--danger);
 }
