@@ -23,7 +23,7 @@
  *
  * Pure, so all of it is tested as text.
  */
-import { LABEL_WORDS_MAX, MARKS_MAX, labelWords, redact, type MarkBox } from "./marks";
+import { LABEL_WORDS_MAX, MARKS_MAX, adoptElement, cleanUrl, elementLabel, labelWords, pageLabel, redact, redactElement, type MarkBox, type MarkElement } from "./marks";
 
 /** Strokes on one display less than this far apart, pen-up to the next pen-down, are one burst — one mark. */
 export const BURST_GAP_MS = 1200;
@@ -38,6 +38,56 @@ export const THIN_EPSILON = 0.5;
 
 /** A point of a stroke, in points from its display's top-left corner. */
 export type InkXY = [number, number];
+
+/**
+ * What a stroke was drawn with. The pen is for pointing and comes in two
+ * colours, so two things can be told apart in one picture; the highlighter is
+ * wide and see-through, for a line of text. Three is all: the pen is for
+ * pointing, and a palette would make it a drawing program.
+ */
+export type InkTool = "pen" | "highlighter";
+export type InkColor = "red" | "blue" | "yellow";
+export interface InkStyle {
+  tool: InkTool;
+  color: InkColor;
+}
+export const INK_DEFAULT_STYLE: InkStyle = { tool: "pen", color: "red" };
+
+/**
+ * What a mark is drawn as, said in its label: a hint for whoever reads it,
+ * never load-bearing — the picture is the truth. Empty for a snapshot, and
+ * for ink that is none of these ("drawn" is not worth the words).
+ */
+export type InkShape = "" | "circled" | "boxed" | "arrow" | "underlined" | "highlighted";
+
+/**
+ * Where on kururu's own window a mark landed, as the page under it said
+ * (`web/src/whatat.ts`): the pane and what it shows — an agent by its title,
+ * never a bare id; a document and the heading over the ink; a card by its
+ * code and title — and the control under the ink's centre.
+ */
+export interface KururuAt {
+  /** What it is: "agent", "document", "card KUR-12", "board", "Dashboard", "the sidebar", "Kuru's drawer". */
+  what: string;
+  /** Its name, when it has one: an agent's title, a document's path, a card's title. */
+  name: string;
+  /** The heading over the ink in a document, or the column a card is in. */
+  detail: string;
+  /** The workspace it is in, when it is in one. */
+  workspace: string;
+  /** The control under the ink's centre, by its words: `button "Send"`. Empty when it said nothing. */
+  element: string;
+}
+
+/**
+ * A mark on one of kururu's browser tabs: the element under the ink's centre
+ * as the marking script reads it for a browser mark, and the page's address.
+ * The browser is going; this is the one field that leaves with it.
+ */
+export interface PageAt {
+  url: string;
+  element: MarkElement;
+}
 
 /** What was under a burst of ink, as the helper read it off the window list. */
 export interface InkUnder {
@@ -69,6 +119,18 @@ export interface ScreenMark {
   under: InkUnder | null;
   /** A password field had the keyboard, so no picture was taken. */
   secure: boolean;
+  /** What each stroke was drawn with, one per stroke; missing ones are the red pen. */
+  styles: InkStyle[];
+  /** A snapshot: the display under the pointer at that moment, no ink, no crop. */
+  snap: boolean;
+  /** What the ink is drawn as, read off the strokes by the server (`shapeOf`). */
+  shape: InkShape;
+  /** For an arrow, the point it points at, in points on its display. */
+  tip: InkXY | null;
+  /** On kururu's own window: what the page said was there. */
+  kururu: KururuAt | null;
+  /** On a kururu browser tab: the element under it. */
+  page: PageAt | null;
   /** The crop around the ink: base64 PNG on the way in, a file name once written. */
   crop: string;
   /** The whole display, shrunk: base64 JPEG on the way in, a file name once written. */
@@ -144,6 +206,47 @@ function adoptUnder(value: unknown): InkUnder | null {
   };
 }
 
+const TOOLS: readonly InkTool[] = ["pen", "highlighter"];
+const COLORS: readonly InkColor[] = ["red", "blue", "yellow"];
+
+function adoptStyle(value: unknown): InkStyle {
+  const r = rec(value);
+  const tool = TOOLS.includes(r.tool as InkTool) ? (r.tool as InkTool) : "pen";
+  const color = COLORS.includes(r.color as InkColor) ? (r.color as InkColor) : tool === "highlighter" ? "yellow" : "red";
+  return { tool, color };
+}
+
+function adoptKururu(value: unknown): KururuAt | null {
+  if (value === null || typeof value !== "object") return null;
+  const r = rec(value);
+  const flat = (v: unknown, max: number) => str(v, max).replace(/\s+/g, " ").trim();
+  const what = flat(r.what, 80);
+  return what ? { what, name: flat(r.name, 300), detail: flat(r.detail, 200), workspace: flat(r.workspace, 120), element: flat(r.element, 200) } : null;
+}
+
+function adoptPage(value: unknown): PageAt | null {
+  if (value === null || typeof value !== "object") return null;
+  const r = rec(value);
+  const url = str(r.url, 4000);
+  return url && r.element && typeof r.element === "object" ? { url, element: adoptElement(r.element) } : null;
+}
+
+/**
+ * Strokes and their styles off the wire, kept together: a stroke dropped for
+ * having no point takes its style with it, so the two stay one for one.
+ */
+function adoptInk(strokes: unknown, styles: unknown): { strokes: InkXY[][]; styles: InkStyle[] } {
+  const rawStyles = arr(styles, 400);
+  const out: { strokes: InkXY[][]; styles: InkStyle[] } = { strokes: [], styles: [] };
+  arr(strokes, 400).forEach((stroke, i) => {
+    const kept = adoptStrokes([stroke]);
+    if (!kept[0]) return;
+    out.strokes.push(kept[0]);
+    out.styles.push(adoptStyle(rawStyles[i]));
+  });
+  return out;
+}
+
 function adoptStrokes(value: unknown): InkXY[][] {
   return arr(value, 400)
     .map((stroke) =>
@@ -178,15 +281,24 @@ export function adoptScreenSet(value: unknown): ScreenSet | { refused: string } 
     marks: b.marks.map((m, i) => {
       const r = rec(m);
       const t0 = Math.max(0, num(r.t0));
+      const ink = adoptInk(r.strokes, r.styles);
+      const snap = r.snap === true;
+      const shape = snap ? { shape: "" as InkShape, tip: null } : shapeOf(ink.strokes, ink.styles);
       return {
         n: i + 1,
         display: Math.trunc(num(r.display)),
         t0,
         t1: Math.max(t0, num(r.t1, t0)),
         box: adoptBox(r.box),
-        strokes: adoptStrokes(r.strokes),
+        strokes: ink.strokes,
         under: adoptUnder(r.under),
         secure: r.secure === true,
+        styles: ink.styles,
+        snap,
+        shape: shape.shape,
+        tip: shape.tip,
+        kururu: adoptKururu(r.kururu),
+        page: adoptPage(r.page),
         crop: str(r.crop, 24 * 1024 * 1024),
         frame: str(r.frame, 16 * 1024 * 1024),
       };
@@ -199,7 +311,9 @@ export function adoptScreenSet(value: unknown): ScreenSet | { refused: string } 
 /** The window titles and app names with anything shaped like a secret taken out: a title is somebody else's string. */
 export function redactScreenSet(set: ScreenSet): ScreenSet {
   const under = (u: InkUnder | null): InkUnder | null => (u ? { ...u, app: redact(u.app), window: redact(u.window), front: u.front ? { ...u.front, app: redact(u.front.app) } : null } : null);
-  return { ...set, marks: set.marks.map((m) => ({ ...m, under: under(m.under) })) };
+  const kururu = (k: KururuAt | null): KururuAt | null => (k ? { what: redact(k.what), name: redact(k.name), detail: redact(k.detail), workspace: redact(k.workspace), element: redact(k.element) } : null);
+  const page = (p: PageAt | null): PageAt | null => (p ? { url: cleanUrl(p.url), element: redactElement(p.element) } : null);
+  return { ...set, marks: set.marks.map((m) => ({ ...m, under: under(m.under), kururu: kururu(m.kururu ?? null), page: page(m.page ?? null) })) };
 }
 
 // ---------------------------------------------------------------------------
@@ -277,6 +391,122 @@ export function cropRect(box: MarkBox, display: { width: number; height: number 
   const right = Math.min(display.width, Math.ceil(box.x + box.width + mx));
   const bottom = Math.min(display.height, Math.ceil(box.y + box.height + my));
   return { x, y, width: Math.max(1, right - x), height: Math.max(1, bottom - y) };
+}
+
+// ---------------------------------------------------------------------------
+// The shape word
+// ---------------------------------------------------------------------------
+
+const pathLength = (points: readonly InkXY[]): number => {
+  let length = 0;
+  for (let i = 1; i < points.length; i++) length += Math.hypot(points[i]![0] - points[i - 1]![0], points[i]![1] - points[i - 1]![1]);
+  return length;
+};
+
+/** The area a closed stroke goes round, by the shoelace formula, closing it from its last point to its first. */
+const enclosed = (points: readonly InkXY[]): number => {
+  let twice = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i]!;
+    const b = points[(i + 1) % points.length]!;
+    twice += a[0] * b[1] - b[0] * a[1];
+  }
+  return Math.abs(twice) / 2;
+};
+
+/** The turn at `b` on the way from `a` to `c`, in degrees: 0 straight on, 180 straight back. */
+const turn = (a: InkXY, b: InkXY, c: InkXY): number => {
+  const u = Math.atan2(b[1] - a[1], b[0] - a[0]);
+  const v = Math.atan2(c[1] - b[1], c[0] - b[0]);
+  let d = Math.abs(u - v) * (180 / Math.PI);
+  if (d > 180) d = 360 - d;
+  return d;
+};
+
+/**
+ * An arrow drawn in one stroke: a shaft, then a head — out to the tip and
+ * back along a barb, perhaps back again for the other. Read off the stroke
+ * thinned hard, to its corners: the longest segment is the shaft, and what
+ * comes after it is short and turns sharply back. Also the other way round,
+ * for a head drawn first. The tip is where the shaft meets the head.
+ */
+function oneStrokeArrow(points: readonly InkXY[], size: number): InkXY | null {
+  const corners = thin(points, Math.max(2, size * 0.06));
+  if (corners.length < 3) return null;
+  let longest = -1;
+  let at = -1;
+  for (let i = 0; i + 1 < corners.length; i++) {
+    const length = Math.hypot(corners[i + 1]![0] - corners[i]![0], corners[i + 1]![1] - corners[i]![1]);
+    if (length > longest) {
+      longest = length;
+      at = i;
+    }
+  }
+  const after = pathLength(corners.slice(at + 1));
+  const before = pathLength(corners.slice(0, at + 1));
+  if (at + 2 < corners.length && before < longest * 0.25 && after > longest * 0.08 && after < longest * 0.9 && turn(corners[at]!, corners[at + 1]!, corners[at + 2]!) > 100) return corners[at + 1]!;
+  if (at > 0 && after < longest * 0.25 && before > longest * 0.08 && before < longest * 0.9 && turn(corners[at - 1]!, corners[at]!, corners[at + 1]!) > 100) return corners[at]!;
+  return null;
+}
+
+/**
+ * What a burst of ink is drawn as — the plan's rule, as a hint for the
+ * label and never load-bearing:
+ *
+ * - all highlighter → highlighted;
+ * - one main stroke that comes back to where it began and goes round
+ *   something → circled, or boxed when it fills most of its bounds as a
+ *   rectangle does (a circle fills π/4 of its square);
+ * - a straight shaft with short strokes at one end, or one stroke that is a
+ *   shaft and a head → arrow, with its tip;
+ * - flat and wide → underlined;
+ * - otherwise nothing: "drawn" says no more than the picture does.
+ */
+export function shapeOf(strokes: readonly (readonly InkXY[])[], styles: readonly InkStyle[] = []): { shape: InkShape; tip: InkXY | null } {
+  const none = { shape: "" as InkShape, tip: null };
+  if (!strokes.length) return none;
+  if (strokes.every((_, i) => styles[i]?.tool === "highlighter")) return { shape: "highlighted", tip: null };
+  const lengths = strokes.map((stroke) => pathLength(stroke));
+  let main = 0;
+  lengths.forEach((length, i) => {
+    if (length > lengths[main]!) main = i;
+  });
+  const stroke = strokes[main]!;
+  const length = lengths[main]!;
+  const box = strokesBox([stroke]);
+  const size = Math.max(box.width, box.height);
+  if (size < 4 || length < 6) return none;
+  const first = stroke[0]!;
+  const last = stroke[stroke.length - 1]!;
+  const gap = Math.hypot(last[0] - first[0], last[1] - first[1]);
+  const others = strokes.filter((_, i) => i !== main);
+
+  // Round something and back.
+  if (gap <= size * 0.3 && length >= size * 1.8 && Math.min(box.width, box.height) >= size * 0.2) {
+    const fill = enclosed(stroke) / Math.max(1, box.width * box.height);
+    return { shape: fill >= 0.86 ? "boxed" : "circled", tip: null };
+  }
+
+  const straight = gap / length;
+  // A shaft and a head of separate strokes, all of them short and at one end.
+  if (others.length >= 1 && others.length <= 3 && straight > 0.85) {
+    const near = (end: InkXY) =>
+      others.every((other) => {
+        const b = strokesBox([other]);
+        const reach = Math.hypot(b.width, b.height);
+        const centre: InkXY = [b.x + b.width / 2, b.y + b.height / 2];
+        return reach < gap * 0.6 && Math.hypot(centre[0] - end[0], centre[1] - end[1]) < gap * 0.35;
+      });
+    if (near(last)) return { shape: "arrow", tip: [last[0], last[1]] };
+    if (near(first)) return { shape: "arrow", tip: [first[0], first[1]] };
+  }
+  if (others.length === 0) {
+    const tip = oneStrokeArrow(stroke, size);
+    if (tip) return { shape: "arrow", tip: [tip[0], tip[1]] };
+  }
+  // A line under something: wide, flat, and more or less level.
+  if (straight > 0.8 && box.height <= Math.max(14, box.width * 0.2) && box.width >= 24) return { shape: "underlined", tip: null };
+  return none;
 }
 
 // ---------------------------------------------------------------------------
@@ -467,13 +697,35 @@ export function inlineMarks(text: string, places: readonly MarkPlace[], labelOf:
 // The lines Kuru reads
 // ---------------------------------------------------------------------------
 
-/** What a mark is, as its line says it: the window it was drawn on. */
-export function screenMarkLabel(mark: Pick<ScreenMark, "under" | "secure">): string {
-  const u = mark.under;
-  const app = u?.app ? labelWords(u.app, 24) : "";
-  const title = u?.window ? labelWords(u.window, LABEL_WORDS_MAX - Math.min(app.length, 24) - 3) : "";
-  const where = app && title && title !== app ? `${app} "${title}"` : app || (title ? `"${title}"` : "the screen");
-  return mark.secure ? `${where}, no picture: a password field was focused` : where;
+/** The fields a label is made of. Every one past the first two is from phase 2, and a set written before it has none of them. */
+export type LabelledMark = Pick<ScreenMark, "under" | "secure"> & Partial<Pick<ScreenMark, "snap" | "shape" | "kururu" | "page">>;
+
+/**
+ * What a mark is, as its line says it: the shape the ink makes, and what it
+ * was drawn on — the element on a kururu browser tab, the pane on kururu's
+ * window, or another application's window by its title.
+ */
+export function screenMarkLabel(mark: LabelledMark): string {
+  const shape = mark.snap ? "snapshot of " : !mark.shape ? "" : mark.page ? (mark.shape === "arrow" ? "arrow to " : `${mark.shape} `) : `${mark.shape} in `;
+  const room = LABEL_WORDS_MAX - shape.length;
+  let where: string;
+  if (mark.page) {
+    const on = labelWords(pageLabel(mark.page.url), 28);
+    const e = mark.page.element;
+    const words = labelWords(e.name || e.text, Math.max(16, room - on.length - e.tag.length - 7));
+    where = `${words ? `${e.tag} "${words}"` : elementLabel(e)} on ${on}`;
+  } else if (mark.kururu) {
+    const what = labelWords(mark.kururu.what, 24);
+    const name = mark.kururu.name ? labelWords(mark.kururu.name, Math.max(28, room - 8 - what.length - 3)) : "";
+    where = `kururu: ${what}${name ? ` "${name}"` : ""}`;
+  } else {
+    const u = mark.under;
+    const app = u?.app ? labelWords(u.app, 24) : "";
+    const title = u?.window ? labelWords(u.window, Math.max(12, room - Math.min(app.length, 24) - 3)) : "";
+    where = app && title && title !== app ? `${app} "${title}"` : app || (title ? `"${title}"` : "the screen");
+  }
+  const label = `${shape}${where}`;
+  return mark.secure ? `${label}, no picture: a password field was focused` : label;
 }
 
 /** The header Kuru's line starts with: how many, and the file that says everything. */
@@ -566,7 +818,26 @@ export function screenMarkdown(set: ScreenSet, files: { crops: Record<number, st
       if (mark.under.window) out.push("- Its window's title (the screen's words):", "", fenced(mark.under.window), "");
     }
     if (mark.under?.front && mark.under.front.app && mark.under.front.app !== mark.under.app) out.push(`- The keyboard was with: ${labelWords(mark.under.front.app, 80)}`);
-    out.push(`- Ink: ${Math.round(mark.box.width)}×${Math.round(mark.box.height)} points at (${Math.round(mark.box.x)}, ${Math.round(mark.box.y)}) on a ${display ? `${Math.round(display.width)}×${Math.round(display.height)}-point display at ${display.scale}×` : "display"}, ${mark.strokes.length} stroke${mark.strokes.length === 1 ? "" : "s"}`);
+    if (mark.kururu) {
+      const k = mark.kururu;
+      out.push(`- On kururu's own window: ${labelWords(k.what, 80)}${k.name ? ` "${labelWords(k.name, 200)}"` : ""}${k.detail ? `, ${labelWords(k.detail, 160)}` : ""}${k.workspace ? `, in the workspace "${labelWords(k.workspace, 80)}"` : ""}`);
+      if (mark.kururu.element) out.push(`- Under the ink's centre: ${labelWords(mark.kururu.element, 160)}`);
+    }
+    if (mark.page) {
+      const e = mark.page.element;
+      out.push(`- On a page in kururu's browser: ${mark.page.url}`);
+      out.push(`- The element under the ink's centre: ${elementLabel(e)}${e.role ? ` (role ${e.role})` : ""}`);
+      const best = e.selectors.find((sel) => sel.unique) ?? e.selectors[0];
+      if (best) out.push(`- Selector to find it: \`${best.value.replace(/`/g, "")}\`${best.unique ? "" : " (not unique on the page)"}`);
+      const rest = e.selectors.filter((sel) => sel !== best).slice(0, 3);
+      if (rest.length) out.push(`- Other selectors: ${rest.map((sel) => `\`${sel.value.replace(/`/g, "")}\``).join(", ")}`);
+      if (e.text) out.push("- Its text (the page's words):", "", fenced(e.text), "");
+    }
+    if (mark.snap) out.push("- A snapshot: the display under the pointer at this moment in the words, with no ink on it.");
+    else if (mark.shape) out.push(`- Drawn as: ${mark.shape}${mark.shape === "arrow" && mark.tip ? `, pointing at (${Math.round(mark.tip[0])}, ${Math.round(mark.tip[1])})` : ""}`);
+    const colours = [...new Set((mark.styles ?? []).map((st) => (st.tool === "highlighter" ? "the highlighter" : `the ${st.color} pen`)))];
+    if (colours.length > 1 || (colours.length === 1 && colours[0] !== "the red pen")) out.push(`- With ${colours.join(" and ")}`);
+    if (!mark.snap) out.push(`- Ink: ${Math.round(mark.box.width)}×${Math.round(mark.box.height)} points at (${Math.round(mark.box.x)}, ${Math.round(mark.box.y)}) on a ${display ? `${Math.round(display.width)}×${Math.round(display.height)}-point display at ${display.scale}×` : "display"}, ${mark.strokes.length} stroke${mark.strokes.length === 1 ? "" : "s"}`);
     if (mark.secure) out.push("- No picture: a password field had the keyboard when this was drawn, so the screen was not taken.");
     if (files.crops[mark.n]) out.push(`- Crop: \`${files.crops[mark.n]}\``);
     if (files.frames[mark.n]) out.push(`- Whole display: \`${files.frames[mark.n]}\``);

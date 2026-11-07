@@ -163,7 +163,8 @@ function allowedAttr(name: string): boolean {
 
 const SELECTOR_KINDS: readonly MarkSelector["kind"][] = ["testid", "id", "role", "attr", "class", "path"];
 
-function adoptElement(value: unknown): MarkElement {
+/** One element off the wire, held to its shape: a page's mark's, and the one under a screen pen's mark on a browser tab (`shared/ink.ts`). */
+export function adoptElement(value: unknown): MarkElement {
   const e = rec(value);
   const attrs: Record<string, string> = {};
   for (const [key, v] of Object.entries(rec(e.attrs)).slice(0, 40)) {
@@ -328,30 +329,33 @@ export function redactHtml(html: string): string {
  * button says once that they go to the model.
  */
 export function redactSet(set: MarkSet): MarkSet {
-  const element = (e: MarkElement): MarkElement => {
-    const attrs: Record<string, string> = {};
-    for (const [name, value] of Object.entries(e.attrs)) {
-      if (!allowedAttr(name)) continue;
-      attrs[name] = redact(name === "href" || name === "src" ? cleanUrl(value) : value);
-    }
-    if (e.tag === "input" && /^password$/i.test(attrs.type ?? "")) delete attrs.placeholder;
-    return {
-      ...e,
-      id: redact(e.id),
-      attrs,
-      text: redact(e.text),
-      name: redact(e.name),
-      selectors: e.selectors.map((s) => ({ ...s, value: redact(s.value) })),
-      html: redactHtml(e.html),
-      frame: e.frame ? cleanUrl(e.frame) : "",
-    };
-  };
+  const element = redactElement;
   return {
     ...set,
     url: cleanUrl(set.url),
     title: redact(set.title),
     marks: set.marks.map((m) => ({ ...m, comment: redact(m.comment), text: redact(m.text), near: redact(m.near), elements: m.elements.map(element) })),
     console: set.console.map((c) => ({ ...c, text: redact(c.text.replace(/https?:\/\/[^\s"')]+/g, (u) => cleanUrl(u))), url: c.url ? cleanUrl(c.url) : "" })),
+  };
+}
+
+/** One element's words with anything shaped like a secret taken out, its addresses cleaned. */
+export function redactElement(e: MarkElement): MarkElement {
+  const attrs: Record<string, string> = {};
+  for (const [name, value] of Object.entries(e.attrs)) {
+    if (!allowedAttr(name)) continue;
+    attrs[name] = redact(name === "href" || name === "src" ? cleanUrl(value) : value);
+  }
+  if (e.tag === "input" && /^password$/i.test(attrs.type ?? "")) delete attrs.placeholder;
+  return {
+    ...e,
+    id: redact(e.id),
+    attrs,
+    text: redact(e.text),
+    name: redact(e.name),
+    selectors: e.selectors.map((s) => ({ ...s, value: redact(s.value) })),
+    html: redactHtml(e.html),
+    frame: e.frame ? cleanUrl(e.frame) : "",
   };
 }
 
