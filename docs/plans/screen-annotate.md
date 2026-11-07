@@ -5,7 +5,8 @@ phases 0 and 1 built), of `docs/voice.md`, and of the prior art below; the
 user's answers folded in the same day ([what they decided](#what-the-user-decided)).
 **Phase 1 is built** (9833330 server, d404743 desktop and web) and not yet
 pressed in the real app: it needs a rebuilt app and Screen Recording granted.
-Nothing after it is built.
+**Phase 2 is built** too (2026-11-06, [below](#phase-2-kururu-aware-marks-and-the-pen-made-pleasant)),
+and is as unpressed. Phases 4 and 5 are not.
 It is written so that an agent can take one phase, read the files it names,
 and know what "done" is.
 
@@ -170,9 +171,10 @@ sent. Phase 1 keeps it to one clip:
   pen off is today's Escape, which throws the clip away, and with it the ink.
   (Escape is seen, not swallowed — `docs/voice.md#escape` — so it also reaches
   the app in front; that is today's edge, unchanged.)
-- **The roll.** At `CLIP_ROLL_MS` a session finishes as if sent, and the
-  recording carries on without a pen; the pill says so. Several clips in one
-  session is phase 2, and only if five minutes turns out short.
+- **The roll.** At `CLIP_ROLL_MS` the clip that ends takes the marks drawn
+  so far as a set of its own, and the session carries on with the pen, the
+  next clip's marks numbered from one (phase 2; phase 1 ended the session
+  there).
 - **One session at a time**, on this Mac, in the one voice client.
 - **A session with no voice** (question 2's pencil): started from the pencil
   in the Kuru drawer's box, with no microphone. The same overlays, pen,
@@ -628,6 +630,49 @@ a screen set, and `marks.json` version 1 still read.
 kururu browser tab carries the same label and selectors a browser mark made
 on the same element would; a 1Password window is absent from a frame taken
 over it; an undone burst leaves no picture in the folder.
+
+**Built, 2026-11-06, not yet pressed** (it needs the same rebuilt app and
+Screen Recording as phase 1, and the talk-key hook rebuilt for hold-to-draw):
+
+- *Kururu-aware marks.* At a burst's end main asks the window the helper
+  found under the pen (by its window number, which `under` now returns, or
+  by this process's pid and the bounds) what is at the ink's centre. The
+  page answers from `data-ink-what`/`-name`/`-detail`/`-workspace`, which
+  `Panes.tsx`, the boards' cards and a note window carry, and names the
+  sidebar, the drawers, the file tree and Settings by class
+  (`web/src/whatat.ts`). On a shown browser tab the marking script's
+  `factsAt` reads the element as a mark does (`BrowserPool.elementAt` →
+  `TabMarks.elementAt`, one isolated-world look, no script left on new
+  documents) — three methods, so the browser's removal cuts them out whole.
+  A page that does not answer in 1.5 s costs the mark its facts, never the
+  mark.
+- *The shape word* is the server's (`shapeOf` in `shared/ink.ts`), never the
+  body's: highlighter-only → highlighted; a main stroke that closes on
+  itself → circled, or boxed when it fills ≥ 86% of its bounds; a straight
+  shaft with up to three short strokes at one end, or one stroke whose
+  longest corner-to-corner run ends in a sharp turn back → arrow, with its
+  tip; flat and level → underlined; otherwise no word.
+- *Undo, a highlighter, two colours:* red and blue pens and a yellow
+  highlighter, per stroke to the helper, which draws the highlighter under
+  the pens with multiply. ⌘Z is registered only while the pen is down, as
+  Escape is. An undone burst's still is dropped and its files removed; files
+  are named by burst id, never by number, so a new mark 3 never meets an old
+  one's pictures.
+- *Snap* is ⌃⌥⌘S, registered only while a session is on, and the toolbar's
+  Snap: the display under the pointer, no ink, the frame only (no crop), with
+  the window under the pointer; the overlay flashes.
+- *The never-capture list* defaults to 1Password (both ids), Keychain
+  Access, Passwords, Bitwarden and Messages, is kept in `desktop.json`
+  (`inkDeny`, null for the default) and edited in Settings → Voice → Screen
+  pen. The helper leaves those applications out with
+  `excludingApplications`, letting kururu's own windows that are not the
+  overlays or the pill back in by `exceptingWindows`, and does not read a
+  denied application's window title.
+- *Hold-to-draw:* the right ⌘, held alone, through the talk-key hook's new
+  `--draw` argument (a hook from before ignores it); the pen goes down while
+  held and back as it was, only during a session; another key pressed with
+  it lets go.
+- *Several clips:* at the roll, as above.
 
 ### Phase 3: addresses in other browsers (dropped)
 

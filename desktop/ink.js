@@ -35,6 +35,15 @@
  * still is inked and written only once it is over, so nothing of the screen
  * is on the disk until there is ink to go with it. A password field with the
  * keyboard (`secure`) skips the still: the mark keeps its place and says so.
+ *
+ * **Phase 2 made it pleasant** (docs/plans/screen-annotate.md): two pens
+ * and a highlighter, each stroke keeping what it was drawn with; ⌘Z while the
+ * pen is down takes the last mark back, picture and all; a snapshot key
+ * (⌃⌥⌘S, while a session is on) takes the display under the pointer as a
+ * mark with no ink; applications on the never-capture list are left out of
+ * every still and their titles unread; a mark on kururu's own window asks
+ * the page under it what is there (`whatAt`); and a recording that rolls at
+ * five minutes takes the marks so far with its clip and keeps the pen.
  */
 const { BrowserWindow, globalShortcut, screen, shell } = require("electron");
 const { spawn } = require("node:child_process");
@@ -48,6 +57,20 @@ const { BURST_GAP_MS, FRAME_LONG_EDGE, MARKS_MAX, cropRect, pointOf, strokesBox,
 
 /** The shortcut that starts a session with the voice, and toggles the pen in one. Needs no permission. */
 const SHORTCUT = "Control+Alt+Command+D";
+/** The snapshot key: the display under the pointer, now, as a mark. Only while a session is on. */
+const SNAP_SHORTCUT = "Control+Alt+Command+S";
+/** Undo, taken system-wide only while the pen is down, as Escape is. */
+const UNDO_SHORTCUT = "Command+Z";
+/** How long the page under a mark has to say what is there before the mark goes without it. */
+const WHAT_AT_MS = 1500;
+/** The pens and the highlighter, as `shared/ink.ts` spells them. */
+const TOOLS = ["pen", "highlighter"];
+const COLORS = ["red", "blue", "yellow"];
+/**
+ * Applications whose windows never go into a still, until Settings → Voice
+ * says otherwise: password managers, the keychain, and messages.
+ */
+const DENY_DEFAULT = ["com.1password.1password", "com.agilebits.onepassword7", "com.apple.keychainaccess", "com.apple.Passwords", "com.bitwarden.desktop", "com.apple.MobileSMS"];
 /** How long an owner told to send has to ask for the bundle before the overlays are taken down anyway. */
 const SEND_ANSWER_MS = 15_000;
 /** How long the helper has to answer one request. A still is tens of milliseconds; a 5K one inked, a few hundred. */
@@ -73,9 +96,11 @@ class Ink extends EventEmitter {
    * @param {() => import("electron").WebContents | null} options.voiceClient  the page that holds the microphone now
    * @param {() => import("electron").WebContents | null} options.mainWindow  the main window's page, whose box a session with no voice fills
    * @param {() => import("electron").BrowserWindow | null} options.pill  the floating pill's panel, kept over the ink and out of the pictures
+   * @param {() => string[]} [options.denyList]  bundle ids whose windows are left out of every still
+   * @param {((global: {x: number, y: number}, under: any) => Promise<any>) | null} [options.whatAt]  what kururu's own window says is at a point, or null
    * @param {boolean} options.debug
    */
-  constructor({ helperPath, pagePath, preloadPath, voiceClient, mainWindow, pill, debug = false }) {
+  constructor({ helperPath, pagePath, preloadPath, voiceClient, mainWindow, pill, denyList = () => DENY_DEFAULT, whatAt = null, debug = false }) {
     super();
     this.helperPath = helperPath;
     this.pagePath = pagePath;
@@ -83,6 +108,8 @@ class Ink extends EventEmitter {
     this.voiceClient = voiceClient;
     this.mainWindow = mainWindow;
     this.pill = pill;
+    this.denyList = denyList;
+    this.whatAt = whatAt;
     this.debug = debug;
     /** @type {any} */
     this.session = null;
@@ -101,7 +128,9 @@ class Ink extends EventEmitter {
 
   state() {
     const s = this.session;
-    return s ? { on: true, id: s.id, voice: s.voice, pen: s.pen, marks: s.bursts.length, ending: s.ending } : { on: false, id: null, voice: false, pen: false, marks: 0, ending: false };
+    return s
+      ? { on: true, id: s.id, voice: s.voice, pen: s.pen, marks: s.bursts.length, ending: s.ending, tool: s.tool, color: s.color, held: s.held !== null }
+      : { on: false, id: null, voice: false, pen: false, marks: 0, ending: false, tool: "pen", color: "red", held: false };
   }
 
   /** The owner, every overlay and every other window hear what the session is now: the drawer's pencil and the pill's pen draw from it. */
@@ -274,12 +303,19 @@ class Ink extends EventEmitter {
         ending: false,
         hoveringBar: new Set(),
         watch: null,
+        tool: "pen",
+        color: "red",
+        /** Every burst ever begun in the session, for ids no undo or roll reuses. */
+        made: 0,
+        /** The pen as it was before hold-to-draw put it down, while the key is held; null otherwise. */
+        held: null,
       };
       this.watchOwner(owner);
       this.watchDisplays();
       this.makeOverlays();
       this.raisePill(true);
       this.registerEscape(true);
+      this.registerSnap(true);
       this.tellOwner(owner, { ev: "start", id: this.session.id, voice });
       this.changed();
       return this.state();
@@ -416,7 +452,15 @@ class Ink extends EventEmitter {
   setPen(on) {
     const session = this.session;
     if (!session || session.ending) return;
-    session.pen = on === true;
+    // Pressed by hand while a hold has it: the hand wins, and the release leaves it be.
+    session.held = null;
+    this.penTo(on === true);
+  }
+
+  penTo(on) {
+    const session = this.session;
+    if (!session || session.ending) return;
+    session.pen = on;
     for (const win of session.overlays.values()) {
       if (!win.isDestroyed()) win.setIgnoreMouseEvents(!session.pen && !session.hoveringBar.has(win.webContents.id), { forward: true });
     }
@@ -434,7 +478,47 @@ class Ink extends EventEmitter {
   registerEscape(on) {
     if (on) {
       if (!globalShortcut.isRegistered("Escape")) globalShortcut.register("Escape", () => this.takeEscape());
-    } else if (globalShortcut.isRegistered("Escape")) globalShortcut.unregister("Escape");
+      if (!globalShortcut.isRegistered(UNDO_SHORTCUT)) globalShortcut.register(UNDO_SHORTCUT, () => this.undo());
+    } else {
+      if (globalShortcut.isRegistered("Escape")) globalShortcut.unregister("Escape");
+      if (globalShortcut.isRegistered(UNDO_SHORTCUT)) globalShortcut.unregister(UNDO_SHORTCUT);
+    }
+  }
+
+  /** ⌃⌥⌘S for the life of a session, pen up or down: "and now look at this" needs no ink. */
+  registerSnap(on) {
+    if (on) {
+      if (!globalShortcut.isRegistered(SNAP_SHORTCUT)) globalShortcut.register(SNAP_SHORTCUT, () => this.snap());
+    } else if (globalShortcut.isRegistered(SNAP_SHORTCUT)) globalShortcut.unregister(SNAP_SHORTCUT);
+  }
+
+  /**
+   * Hold-to-draw: the talk-key hook's second key held puts the pen down,
+   * and letting go puts it back as it was. Only in a session — the key is
+   * a modifier, and outside one it is the apps'.
+   */
+  hold(down) {
+    const session = this.session;
+    if (!session || session.ending) return;
+    if (down) {
+      if (session.held !== null) return;
+      const was = session.pen;
+      this.penTo(true);
+      session.held = was;
+    } else if (session.held !== null) {
+      const was = session.held;
+      session.held = null;
+      this.penTo(was);
+    }
+  }
+
+  /** The pen's colour or the highlighter, from the toolbar: what the next stroke is drawn with. */
+  setStyle(raw) {
+    const session = this.session;
+    if (!session || session.ending || !raw || typeof raw !== "object") return;
+    if (TOOLS.includes(raw.tool)) session.tool = raw.tool;
+    if (COLORS.includes(raw.color) && raw.color !== "yellow") session.color = raw.color;
+    this.changed();
   }
 
   /** Whether an Escape was the pen's: it lifts a pen that is down, and the same press seen twice — the shortcut and the hook — is the pen's both times. */
@@ -473,34 +557,58 @@ class Ink extends EventEmitter {
         at.win.webContents.send("ink:full", MARKS_MAX);
         return;
       }
-      const display = at.display;
-      const id = `${session.id}-${session.bursts.length + 1}`;
-      const global = { x: display.bounds.x + p[0], y: display.bounds.y + p[1] };
-      const exclude = this.ours();
-      burst = {
-        n: session.bursts.length + 1,
-        id,
-        display: display.id,
-        size: { width: display.bounds.width, height: display.bounds.height, scale: display.scaleFactor },
-        t0: Math.max(0, now),
-        t1: Math.max(0, now),
-        strokes: [],
-        closer: null,
-        done: null,
-      };
-      // In order, one after another, in the helper: whether the screen may be
-      // taken, then the still, then what was under the pen.
-      burst.secure = this.ask({ op: "secure" }).then((a) => a.secure === true);
-      burst.shot = burst.secure.then((secure) => (secure ? { ok: false, error: "secure" } : this.ask({ op: "shot", id, display: display.id, bounds: display.bounds, exclude })));
-      burst.under = this.ask({ op: "under", x: global.x, y: global.y, exclude }).then((a) => (a && typeof a.app === "string" ? a : null));
-      session.bursts.push(burst);
+      burst = this.newBurst(at.display, { x: at.display.bounds.x + p[0], y: at.display.bounds.y + p[1] }, now, false);
       session.open = burst;
       this.changed();
     }
     clearTimeout(burst.closer);
     burst.closer = null;
     burst.strokes.push([p]);
+    burst.styles.push(session.tool === "highlighter" ? { tool: "highlighter", color: "yellow" } : { tool: "pen", color: session.color });
     burst.t1 = Math.max(burst.t1, now);
+  }
+
+  /**
+   * A burst begun: its still asked for now, before any ink is on it, with
+   * what was under the pen and whether a password field has the keyboard —
+   * in that order, in the helper. Its id is the session's count of bursts
+   * ever made, so an undone or rolled one's is never reused.
+   */
+  newBurst(display, global, now, snap) {
+    const session = this.session;
+    const id = `${session.id}-${++session.made}`;
+    const exclude = this.ours();
+    const deny = this.deny();
+    const burst = {
+      n: session.bursts.length + 1,
+      id,
+      display: display.id,
+      size: { width: display.bounds.width, height: display.bounds.height, scale: display.scaleFactor },
+      bounds: display.bounds,
+      t0: Math.max(0, now),
+      t1: Math.max(0, now),
+      strokes: [],
+      styles: [],
+      snap,
+      closer: null,
+      done: null,
+      facts: null,
+      undone: false,
+    };
+    burst.secure = this.ask({ op: "secure" }).then((a) => a.secure === true);
+    burst.shot = burst.secure.then((secure) => (secure ? { ok: false, error: "secure" } : this.ask({ op: "shot", id, display: display.id, bounds: display.bounds, exclude, deny })));
+    burst.under = this.ask({ op: "under", x: global.x, y: global.y, exclude, deny }).then((a) => (a && typeof a.app === "string" ? a : null));
+    session.bursts.push(burst);
+    return burst;
+  }
+
+  deny() {
+    try {
+      const list = this.denyList();
+      return Array.isArray(list) ? list.filter((b) => typeof b === "string" && b).slice(0, 200) : [];
+    } catch {
+      return [];
+    }
   }
 
   points(sender, raw) {
@@ -537,21 +645,106 @@ class Ink extends EventEmitter {
     session.open = null;
     clearTimeout(burst.closer);
     burst.closer = null;
-    const box = strokesBox(burst.strokes);
+    this.inkBurst(burst);
+    this.changed();
+  }
+
+  /**
+   * A burst over: its still inked by the helper and written as the crop and
+   * the whole display — a snapshot as the display alone — under names of
+   * its own id, so an undone burst's files are never another's. `done`
+   * settles once the files are there, or are not going to be. And the
+   * page under it, when that is kururu's, asked what is there.
+   */
+  inkBurst(burst) {
+    const session = this.session;
+    const box = burst.snap ? { x: 0, y: 0, width: burst.size.width, height: burst.size.height } : strokesBox(burst.strokes);
     burst.box = box;
-    const crop = path.join(session.dir, `mark-${burst.n}.png`);
-    const frame = path.join(session.dir, `frame-${burst.n}.jpg`);
+    const crop = path.join(session.dir, `${burst.id}-crop.png`);
+    const frame = path.join(session.dir, `${burst.id}-frame.jpg`);
+    burst.files = [crop, frame];
     burst.done = burst.shot.then(async (shot) => {
-      if (!shot || shot.ok !== true) return { crop: null, frame: null };
+      if (!shot || shot.ok !== true || burst.undone) return { crop: null, frame: null };
       const answer = await this.ask({
         op: "ink",
         id: burst.id,
         strokes: burst.strokes,
-        crop: { path: crop, rect: cropRect(box, burst.size) },
+        styles: burst.styles,
+        ...(burst.snap ? {} : { crop: { path: crop, rect: cropRect(box, burst.size) } }),
         frame: { path: frame, long: FRAME_LONG_EDGE },
       });
       return { crop: answer.crop ? crop : null, frame: answer.frame ? frame : null };
     });
+    const centre = burst.snap ? burst.at : { x: burst.bounds.x + box.x + box.width / 2, y: burst.bounds.y + box.y + box.height / 2 };
+    burst.facts = this.whatAt ? burst.under.then((under) => this.factsAt(centre, under)) : Promise.resolve(null);
+  }
+
+  /** What kururu's page under a point says is there, or nothing — never later than `WHAT_AT_MS`. */
+  factsAt(global, under) {
+    const ask = this.whatAt;
+    if (!ask || !under) return Promise.resolve(null);
+    let timer;
+    return Promise.race([
+      Promise.resolve()
+        .then(() => ask(global, under))
+        .catch(() => null),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(null), WHAT_AT_MS);
+      }),
+    ]).finally(() => clearTimeout(timer));
+  }
+
+  /**
+   * ⌘Z, or the toolbar's Undo: the last mark taken back — its still let go,
+   * its pictures removed once written, its ink off the overlay. Marks before
+   * it keep their numbers.
+   */
+  undo() {
+    const session = this.session;
+    if (!session || session.ending || !session.bursts.length) return;
+    const burst = session.bursts.pop();
+    burst.undone = true;
+    if (session.open === burst) {
+      session.open = null;
+      clearTimeout(burst.closer);
+      burst.closer = null;
+    }
+    void this.ask({ op: "drop", id: burst.id });
+    void Promise.resolve(burst.done).finally(() => {
+      for (const file of burst.files ?? []) rmSync(file, { force: true });
+    });
+    const overlay = session.overlays.get(burst.display);
+    if (overlay && !overlay.isDestroyed() && !burst.snap) overlay.webContents.send("ink:undo");
+    this.changed();
+  }
+
+  /**
+   * ⌃⌥⌘S, or the toolbar's Snap: the display under the pointer as it is
+   * now, with no ink — "and now look at this" — as a mark at this moment in
+   * the words. The pen's state is not touched.
+   */
+  snap() {
+    const session = this.session;
+    if (!session || session.ending) return;
+    this.closeBurst();
+    let display;
+    let point;
+    try {
+      point = screen.getCursorScreenPoint();
+      display = screen.getDisplayNearestPoint(point);
+    } catch {
+      display = screen.getPrimaryDisplay();
+      point = { x: display.bounds.x + display.bounds.width / 2, y: display.bounds.y + display.bounds.height / 2 };
+    }
+    const overlay = session.overlays.get(display.id);
+    if (session.bursts.length >= MARKS_MAX) {
+      if (overlay && !overlay.isDestroyed()) overlay.webContents.send("ink:full", MARKS_MAX);
+      return;
+    }
+    const burst = this.newBurst(display, point, Date.now() - session.at, true);
+    burst.at = point;
+    this.inkBurst(burst);
+    if (overlay && !overlay.isDestroyed()) overlay.webContents.send("ink:flash");
     this.changed();
   }
 
@@ -591,18 +784,40 @@ class Ink extends EventEmitter {
    * pictures read in, the overlays gone and the folder removed. Null when
    * there was no ink — a clip with no marks is an ordinary clip.
    */
-  async finish(sender, id) {
+  async finish(sender, id, roll = false) {
     const session = this.session;
     if (!session || session.id !== id || sender.id !== session.owner.id || session.ending) return null;
+    if (roll === true) return this.roll(session);
     session.ending = true;
     clearTimeout(session.sendTimer);
     this.closeBurst();
     this.takeDown();
     this.changed();
+    const bundle = await this.bundle(session, session.bursts);
+    this.end(session);
+    return bundle;
+  }
+
+  /**
+   * The recording rolled at five minutes: the marks so far go with the clip
+   * that ends, as a set of their own, and the session carries on — the pen,
+   * the overlays, the ink still fading — numbering the next clip's from one.
+   */
+  async roll(session) {
+    this.closeBurst();
+    const bursts = session.bursts.splice(0);
+    this.changed();
+    const bundle = await this.bundle(session, bursts);
+    for (const burst of bursts) for (const file of burst.files ?? []) rmSync(file, { force: true });
+    return bundle;
+  }
+
+  /** Some bursts as the set the owner posts: each closed, inked and read in. Null for none. */
+  async bundle(session, bursts) {
     const displays = new Map();
     const marks = [];
-    for (const burst of session.bursts) {
-      const [files, under, secure] = await Promise.all([burst.done ?? Promise.resolve({ crop: null, frame: null }), burst.under, burst.secure]);
+    for (const burst of bursts) {
+      const [files, under, secure, facts] = await Promise.all([burst.done ?? Promise.resolve({ crop: null, frame: null }), burst.under, burst.secure, burst.facts ?? Promise.resolve(null)]);
       displays.set(burst.display, { id: burst.display, ...burst.size });
       const read = (file) => {
         try {
@@ -611,9 +826,22 @@ class Ink extends EventEmitter {
           return "";
         }
       };
-      marks.push({ display: burst.display, t0: burst.t0, t1: burst.t1, box: burst.box ?? strokesBox(burst.strokes), strokes: burst.strokes, under, secure, crop: read(files.crop), frame: read(files.frame) });
+      marks.push({
+        display: burst.display,
+        t0: burst.t0,
+        t1: burst.t1,
+        box: burst.box ?? strokesBox(burst.strokes),
+        strokes: burst.strokes,
+        styles: burst.styles,
+        snap: burst.snap === true,
+        under,
+        secure,
+        kururu: facts && typeof facts.kururu === "object" ? facts.kururu : null,
+        page: facts && typeof facts.page === "object" ? facts.page : null,
+        crop: read(files.crop),
+        frame: read(files.frame),
+      });
     }
-    this.end(session);
     if (!marks.length) return null;
     return { kind: "screen", at: session.at, audioAt: null, displays: [...displays.values()], marks };
   }
@@ -636,6 +864,7 @@ class Ink extends EventEmitter {
     for (const win of session.overlays.values()) if (!win.isDestroyed()) win.destroy();
     session.overlays.clear();
     this.registerEscape(false);
+    this.registerSnap(false);
     this.raisePill(false);
   }
 
@@ -683,4 +912,4 @@ class Ink extends EventEmitter {
   }
 }
 
-module.exports = { Ink, SHORTCUT };
+module.exports = { Ink, SHORTCUT, SNAP_SHORTCUT, DENY_DEFAULT };

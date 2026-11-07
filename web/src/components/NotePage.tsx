@@ -128,6 +128,8 @@ export function NotePage() {
         .join(" ")}
       style={(tag ? { "--tag": tag } : {}) as React.CSSProperties}
       aria-label={seen.card ? `Note: ${seen.card.title}` : "Note"}
+      data-ink-what={code ? `note of card ${code}` : "note"}
+      data-ink-name={title}
     >
       <NoteInside
         cardId={self.cardId}

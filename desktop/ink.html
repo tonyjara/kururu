@@ -11,8 +11,9 @@
       each stroke (`ink.js` keeps them and takes the pictures); it fades a
       burst three seconds after its pen last lifted, since its picture is
       taken and old ink over a screen that moved on misleads. The display the
-      session began on also carries the toolbar — the pen, Done, ✕ — which is
-      the way out that does not depend on the pill being up.
+      session began on also carries the toolbar — the pen, its two colours
+      and the highlighter, Undo, Snap, Done, ✕ — which is the way out that
+      does not depend on the pill being up.
 
       A file the app ships and not a page of the web build: nothing here may
       depend on a server that `bun run dev` restarts on a save, because a
@@ -106,6 +107,52 @@
       .toast[hidden] {
         display: none;
       }
+      .sep {
+        width: 1px;
+        align-self: stretch;
+        margin: 4px 2px;
+        background: rgba(255, 255, 255, 0.18);
+      }
+      button.swatch {
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      button.swatch::before {
+        content: "";
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--swatch);
+      }
+      button.swatch.highlighter::before {
+        width: 14px;
+        height: 8px;
+        border-radius: 2px;
+      }
+      button.swatch.picked {
+        box-shadow: inset 0 0 0 2px #f2f2f7;
+        background: rgba(255, 255, 255, 0.12);
+      }
+      button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .flash {
+        position: fixed;
+        inset: 0;
+        background: rgba(255, 255, 255, 0.35);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.35s ease-out;
+      }
+      .flash.on {
+        opacity: 1;
+        transition: none;
+      }
     </style>
   </head>
   <body>
@@ -113,19 +160,30 @@
     <div class="bar" id="bar" hidden>
       <span class="hint" id="hint"></span>
       <span class="count" id="count"></span>
+      <button id="red" class="swatch" style="--swatch: rgb(255, 46, 84)" title="The red pen" aria-label="Red pen"></button>
+      <button id="blue" class="swatch" style="--swatch: rgb(10, 132, 255)" title="The blue pen" aria-label="Blue pen"></button>
+      <button id="highlighter" class="swatch highlighter" style="--swatch: rgb(255, 214, 0)" title="The highlighter, for a line of text" aria-label="Highlighter"></button>
+      <span class="sep"></span>
+      <button id="undo" title="Take the last mark back (⌘Z with the pen down)">Undo</button>
+      <button id="snap" title="A picture of the display under the pointer, now, as a mark with no ink (⌃⌥⌘S)">Snap</button>
       <button id="pen" title="The pen on or off: off, clicks go to the app under the ink (⌃⌥⌘D, or Esc to lift it)">Pen</button>
       <button id="done" class="done"></button>
       <button id="drop" title="Drop the marks and close the pen" aria-label="Drop">✕</button>
     </div>
     <div class="toast" id="toast" hidden></div>
+    <div class="flash" id="flash"></div>
     <script>
       "use strict";
       /** `BURST_GAP_MS` and `FADE_AFTER_MS` in `shared/ink.ts`. */
       const BURST_GAP_MS = 1200;
       const FADE_AFTER_MS = 3000;
       const FADE_MS = 500;
-      const INK = "rgba(255, 46, 84, 0.85)";
-      const WIDTH = 3;
+      /** The pens and the highlighter, as the helper draws them on the pictures (`glance.swift`). */
+      const LOOKS = {
+        red: { color: "rgba(255, 46, 84, 0.85)", width: 3 },
+        blue: { color: "rgba(10, 132, 255, 0.85)", width: 3 },
+        highlighter: { color: "rgba(255, 214, 0, 0.4)", width: 16 },
+      };
 
       const query = new URLSearchParams(location.search);
       const home = query.get("home") === "1";
@@ -138,6 +196,8 @@
       const now = () => performance.timeOrigin + performance.now();
 
       let pen = true;
+      let tool = "pen";
+      let color = "red";
       /** Bursts as drawn here, for the fade: each a list of strokes and when it fades. */
       const bursts = [];
       let drawing = null;
@@ -158,8 +218,6 @@
         ctx.clearRect(0, 0, innerWidth, innerHeight);
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
-        ctx.lineWidth = WIDTH;
-        ctx.strokeStyle = INK;
         const t = now();
         let fading = false;
         for (let i = bursts.length - 1; i >= 0; i--) {
@@ -171,7 +229,11 @@
           }
           if (burst.fadeAt !== null) fading = true;
           ctx.globalAlpha = alpha;
-          for (const stroke of burst.strokes) {
+          // The highlighter under the pens, as on the pictures.
+          const strokes = [...burst.strokes].sort((a, b) => (a.look === LOOKS.highlighter ? 0 : 1) - (b.look === LOOKS.highlighter ? 0 : 1));
+          for (const stroke of strokes) {
+            ctx.lineWidth = stroke.look.width;
+            ctx.strokeStyle = stroke.look.color;
             ctx.beginPath();
             ctx.moveTo(stroke[0][0], stroke[0][1]);
             if (stroke.length === 1) ctx.lineTo(stroke[0][0] + 0.1, stroke[0][1]);
@@ -205,14 +267,16 @@
         const t = now();
         let burst = bursts[bursts.length - 1];
         // A stroke soon after the last one is more of the same mark, and fades with it.
-        if (burst && burst.fadeAt !== null && t - lastUp > BURST_GAP_MS) burst = null;
+        if (burst && (burst.closed || (burst.fadeAt !== null && t - lastUp > BURST_GAP_MS))) burst = null;
         if (!burst) {
           burst = { strokes: [], fadeAt: null };
           bursts.push(burst);
         }
         burst.fadeAt = null;
-        drawing = { pointerId: event.pointerId, stroke: [point], burst };
-        burst.strokes.push(drawing.stroke);
+        const stroke = [point];
+        stroke.look = tool === "highlighter" ? LOOKS.highlighter : LOOKS[color] || LOOKS.red;
+        drawing = { pointerId: event.pointerId, stroke, burst };
+        burst.strokes.push(stroke);
         bridge.begin(point, t);
         schedule();
       });
@@ -257,15 +321,41 @@
       document.getElementById("pen").addEventListener("click", () => bridge.bar("pen"));
       document.getElementById("done").addEventListener("click", () => bridge.bar("done"));
       document.getElementById("drop").addEventListener("click", () => bridge.bar("drop"));
+      document.getElementById("undo").addEventListener("click", () => bridge.bar("undo"));
+      document.getElementById("snap").addEventListener("click", () => bridge.bar("snap"));
+      document.getElementById("red").addEventListener("click", () => bridge.style("pen", "red"));
+      document.getElementById("blue").addEventListener("click", () => bridge.style("pen", "blue"));
+      document.getElementById("highlighter").addEventListener("click", () => bridge.style("highlighter", color));
+
+      // Main took the last mark on this display back: its ink comes off now rather than fading.
+      bridge.onUndo(() => {
+        if (drawing) return;
+        bursts.pop();
+        schedule();
+      });
+
+      const flash = document.getElementById("flash");
+      bridge.onFlash(() => {
+        flash.classList.add("on");
+        requestAnimationFrame(() => requestAnimationFrame(() => flash.classList.remove("on")));
+      });
 
       bridge.onState((state) => {
+        // The pen lifted or put down again starts a new mark in main, so here too.
+        if ((state.pen === true) !== pen && bursts.length) bursts[bursts.length - 1].closed = true;
         pen = state.pen === true;
+        tool = state.tool === "highlighter" ? "highlighter" : "pen";
+        color = state.color === "blue" ? "blue" : "red";
         document.body.classList.toggle("pen", pen);
         if (!home) return;
         bar.hidden = state.on !== true;
         document.getElementById("hint").textContent = voice ? "Talk and draw on anything" : "Draw on anything — the marks go in Kuru's box";
         const marks = Number(state.marks) || 0;
         document.getElementById("count").textContent = marks ? `${marks} mark${marks === 1 ? "" : "s"}` : "";
+        document.getElementById("red").classList.toggle("picked", tool === "pen" && color === "red");
+        document.getElementById("blue").classList.toggle("picked", tool === "pen" && color === "blue");
+        document.getElementById("highlighter").classList.toggle("picked", tool === "highlighter");
+        document.getElementById("undo").disabled = !marks;
         const penButton = document.getElementById("pen");
         penButton.textContent = pen ? "Pen on" : "Pen off";
         penButton.classList.toggle("on", pen);

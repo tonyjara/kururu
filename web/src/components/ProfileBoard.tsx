@@ -647,6 +647,8 @@ function ProfileCard({
       <article
         className={`board-card ${shown ? "board-card-shown" : ""} ${opening.open ? "board-card-open" : ""}`}
         data-card={card.id}
+        data-ink-what={`card ${code}`}
+        data-ink-name={card.title}
         draggable
         onPointerDown={selectNotDrag}
         onDragStart={(event) => {

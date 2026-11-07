@@ -22,12 +22,13 @@
 //
 //   {"seq":1,"op":"access"}                         → {"seq":1,"screen":"granted"|"denied"}
 //   {"seq":2,"op":"ask"}                            → the system prompt, once per app; then as access
-//   {"seq":3,"op":"shot","id":"b1","display":1,"bounds":{…},"exclude":[123]}
+//   {"seq":3,"op":"shot","id":"b1","display":1,"bounds":{…},"exclude":[123],"deny":["com.1password.1password"]}
 //                                                   → {"seq":3,"ok":true,"width":…,"height":…,"scale":2}
-//   {"seq":4,"op":"ink","id":"b1","strokes":[[[x,y],…]],"crop":{"path":…,"rect":{…}},"frame":{"path":…,"long":1568}}
+//   {"seq":4,"op":"ink","id":"b1","strokes":[[[x,y],…]],"styles":[{"tool":"pen","color":"red"}],"crop":{"path":…,"rect":{…}},"frame":{"path":…,"long":1568}}
 //                                                   → {"seq":4,"ok":true,"crop":{…},"frame":{…}}
 //   {"seq":5,"op":"drop","id":"b1"}                 → {"seq":5,"ok":true}
-//   {"seq":6,"op":"under","x":…,"y":…,"exclude":[…]} → {"seq":6,"app":…,"bundle":…,"window":…,"bounds":{…},"front":{…}}
+//   {"seq":6,"op":"under","x":…,"y":…,"exclude":[…],"deny":[…]}
+//                                                   → {"seq":6,"app":…,"bundle":…,"window":…,"number":…,"bounds":{…},"front":{…}}
 //   {"seq":7,"op":"secure"}                         → {"seq":7,"secure":false}
 //   {"seq":8,"op":"load","id":"b1","path":…,"scale":2} → a picture from the disk kept as if it were a still;
 //                                                   for the tests, which cannot be granted Screen Recording
@@ -55,9 +56,38 @@ func emit(_ line: [String: Any]) {
     }
 }
 
-/// The ink's colour: a red that reads on a light page and a dark one, a
-/// little transparent so the words under a stroke can still be made out.
-let inkColor = CGColor(red: 1.0, green: 0.18, blue: 0.33, alpha: 0.85)
+/// The pens' colours: a red and a blue that read on a light page and a dark
+/// one, a little transparent so the words under a stroke can still be made
+/// out; and the highlighter's yellow, wide and mostly see-through. The same
+/// three as the overlay's (`ink.html`).
+let inkColors: [String: CGColor] = [
+    "red": CGColor(red: 1.0, green: 0.18, blue: 0.33, alpha: 0.85),
+    "blue": CGColor(red: 0.04, green: 0.52, blue: 1.0, alpha: 0.85),
+    "yellow": CGColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 0.4),
+]
+
+/// What a stroke was drawn with: the tool sets its width, in points.
+struct Style {
+    let color: CGColor
+    let highlighter: Bool
+    var points: CGFloat { highlighter ? 16 : 3 }
+}
+
+func styles(_ value: Any?, count: Int) -> [Style] {
+    let list = value as? [Any] ?? []
+    return (0..<count).map { i in
+        let r = i < list.count ? list[i] as? [String: Any] ?? [:] : [:]
+        let highlighter = r["tool"] as? String == "highlighter"
+        let name = r["color"] as? String ?? (highlighter ? "yellow" : "red")
+        return Style(color: inkColors[name] ?? inkColors[highlighter ? "yellow" : "red"]!, highlighter: highlighter)
+    }
+}
+
+/// Bundle ids whose windows never go into a still, and whose titles are not read.
+func denied(_ value: Any?) -> Set<String> {
+    guard let list = value as? [Any] else { return [] }
+    return Set(list.prefix(200).compactMap { $0 as? String }.filter { !$0.isEmpty })
+}
 
 struct Kept {
     let image: CGImage
@@ -123,7 +153,24 @@ func shot(_ req: [String: Any]) async -> [String: Any] {
         }
         let exclude = windowNumbers(req["exclude"])
         let windows = content.windows.filter { exclude.contains($0.windowID) }
-        let filter = SCContentFilter(display: target, excludingWindows: windows)
+        let deny = denied(req["deny"])
+        let apps = content.applications.filter { deny.contains($0.bundleIdentifier) }
+        let filter: SCContentFilter
+        if apps.isEmpty {
+            filter = SCContentFilter(display: target, excludingWindows: windows)
+        } else {
+            // Applications and windows cannot both be left out by one filter,
+            // so kururu's own application is left out with the denied ones and
+            // its windows that are not ours to hide — the main window, a note —
+            // are let back in by name.
+            let ours = Set(windows.compactMap { $0.owningApplication?.processID })
+            let own = content.applications.filter { ours.contains($0.processID) }
+            let back = content.windows.filter { w in
+                guard let pid = w.owningApplication?.processID, ours.contains(pid) else { return false }
+                return !exclude.contains(w.windowID)
+            }
+            filter = SCContentFilter(display: target, excludingApplications: apps + own, exceptingWindows: back)
+        }
         let scale = CGFloat(filter.pointPixelScale)
         let config = SCStreamConfiguration()
         config.width = Int((target.frame.width * scale).rounded())
@@ -154,7 +201,7 @@ func strokes(_ value: Any?) -> [[CGPoint]] {
 /// Part of a still, at `k` output pixels per still pixel, with the strokes on
 /// it `width` output pixels wide. `source` is in the still's pixels,
 /// top-left; the strokes are in points and `scale` turns them into pixels.
-func render(_ still: Kept, source: CGRect, k: CGFloat, strokes: [[CGPoint]], width: CGFloat) -> CGImage? {
+func render(_ still: Kept, source: CGRect, k: CGFloat, strokes: [[CGPoint]], styles: [Style], width: (Style) -> CGFloat) -> CGImage? {
     let outW = max(1, Int((source.width * k).rounded()))
     let outH = max(1, Int((source.height * k).rounded()))
     guard let ctx = CGContext(data: nil, width: outW, height: outH, bitsPerComponent: 8, bytesPerRow: 0,
@@ -167,11 +214,16 @@ func render(_ still: Kept, source: CGRect, k: CGFloat, strokes: [[CGPoint]], wid
     ctx.draw(still.image, in: CGRect(x: -source.minX * k, y: -(imgH - source.maxY) * k, width: imgW * k, height: imgH * k))
     ctx.translateBy(x: 0, y: CGFloat(outH))
     ctx.scaleBy(x: 1, y: -1)
-    ctx.setStrokeColor(inkColor)
-    ctx.setLineWidth(width)
     ctx.setLineCap(.round)
     ctx.setLineJoin(.round)
-    for stroke in strokes {
+    // The highlighter first, so a pen's line drawn over it stays sharp.
+    let order = strokes.indices.sorted { (styles[$0].highlighter ? 0 : 1) < (styles[$1].highlighter ? 0 : 1) }
+    for i in order {
+        let stroke = strokes[i]
+        let style = styles[i]
+        ctx.setStrokeColor(style.color)
+        ctx.setLineWidth(width(style))
+        ctx.setBlendMode(style.highlighter ? .multiply : .normal)
         let pts = stroke.map { CGPoint(x: ($0.x * still.scale - source.minX) * k, y: ($0.y * still.scale - source.minY) * k) }
         guard let first = pts.first else { continue }
         ctx.beginPath()
@@ -199,6 +251,7 @@ func write(_ image: CGImage, to path: String, jpeg: Bool) -> Bool {
 func ink(_ req: [String: Any]) async -> [String: Any] {
     guard let id = req["id"] as? String, let still = await stills.take(id) else { return ["ok": false, "error": "no such still"] }
     let lines = strokes(req["strokes"])
+    let looks = styles(req["styles"], count: lines.count)
     var answer: [String: Any] = ["ok": true]
     let imgW = CGFloat(still.image.width)
     let imgH = CGFloat(still.image.height)
@@ -206,7 +259,7 @@ func ink(_ req: [String: Any]) async -> [String: Any] {
         // The rect is in points; held inside the still, at its own pixels.
         let px = CGRect(x: r.minX * still.scale, y: r.minY * still.scale, width: r.width * still.scale, height: r.height * still.scale)
             .intersection(CGRect(x: 0, y: 0, width: imgW, height: imgH)).integral
-        if !px.isEmpty, let image = render(still, source: px, k: 1, strokes: lines, width: 3 * still.scale), write(image, to: path, jpeg: false) {
+        if !px.isEmpty, let image = render(still, source: px, k: 1, strokes: lines, styles: looks, width: { $0.points * still.scale }), write(image, to: path, jpeg: false) {
             answer["crop"] = ["width": image.width, "height": image.height]
         } else {
             answer["ok"] = false
@@ -216,8 +269,9 @@ func ink(_ req: [String: Any]) async -> [String: Any] {
     if let frame = req["frame"] as? [String: Any], let path = frame["path"] as? String {
         let long = CGFloat(number(frame["long"]) ?? 1568)
         let k = min(1, long / max(imgW, imgH))
-        // Three pixels at the frame's size, whatever it was shrunk by.
-        if let image = render(still, source: CGRect(x: 0, y: 0, width: imgW, height: imgH), k: k, strokes: lines, width: 3), write(image, to: path, jpeg: true) {
+        // A pen is three pixels at the frame's size, whatever it was shrunk
+        // by, so it still shows; the highlighter keeps its width over the text.
+        if let image = render(still, source: CGRect(x: 0, y: 0, width: imgW, height: imgH), k: k, strokes: lines, styles: looks, width: { $0.highlighter ? max(6, $0.points * still.scale * k) : 3 }), write(image, to: path, jpeg: true) {
             answer["frame"] = ["width": image.width, "height": image.height]
         } else {
             answer["ok"] = false
@@ -240,6 +294,7 @@ func under(_ req: [String: Any]) -> [String: Any] {
     guard let x = number(req["x"]), let y = number(req["y"]) else { return ["error": "no point"] }
     let point = CGPoint(x: x, y: y)
     let exclude = windowNumbers(req["exclude"])
+    let deny = denied(req["deny"])
     let info = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
     let candidates = info.filter { w in
         guard let n = number(w[kCGWindowNumber as String]), !exclude.contains(CGWindowID(n)),
@@ -256,7 +311,9 @@ func under(_ req: [String: Any]) -> [String: Any] {
         answer["app"] = app.name.isEmpty ? (hit[kCGWindowOwnerName as String] as? String ?? "") : app.name
         answer["bundle"] = app.bundle
         answer["pid"] = Int(pid)
-        answer["window"] = hit[kCGWindowName as String] as? String ?? ""
+        // A denied application's title is not read: Messages' says who.
+        answer["window"] = deny.contains(app.bundle) ? "" : hit[kCGWindowName as String] as? String ?? ""
+        answer["number"] = number(hit[kCGWindowNumber as String]) ?? 0
         answer["layer"] = number(hit[kCGWindowLayer as String]) ?? 0
         if let b = hit[kCGWindowBounds as String] as? [String: Any], let r = CGRect(dictionaryRepresentation: b as CFDictionary) {
             answer["bounds"] = box(r)

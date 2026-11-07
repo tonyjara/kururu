@@ -388,3 +388,157 @@ describe("refused", () => {
     expect(ink.session).toBeNull();
   });
 });
+
+describe("phase 2: the pen made pleasant", () => {
+  it("keeps what each stroke was drawn with, and the toolbar's choice is the next stroke's", async () => {
+    const { ink, owner } = setup();
+    const { at } = await ink.start({ voice: true }).then(() => ink.session);
+    const [one] = live();
+    draw(ink, one, [[100, 100], [140, 120]], at + 100);
+    ink.setStyle({ tool: "pen", color: "blue" });
+    draw(ink, one, [[100, 200], [140, 220]], at + 400);
+    ink.setStyle({ tool: "highlighter", color: "nonsense" });
+    draw(ink, one, [[100, 300], [140, 300]], at + 700);
+    expect(ink.state().tool).toBe("highlighter");
+    expect(ink.state().color).toBe("blue");
+    const bundle = await ink.finish(owner, ink.session.id);
+    expect(bundle.marks[0].styles).toEqual([
+      { tool: "pen", color: "red" },
+      { tool: "pen", color: "blue" },
+      { tool: "highlighter", color: "yellow" },
+    ]);
+    ink.dispose();
+  });
+
+  it("undo takes the last mark back, its ink off its overlay, and the next mark never reuses its pictures", async () => {
+    const { ink, owner } = setup();
+    const { at } = await ink.start({ voice: true }).then(() => ink.session);
+    const [one, two] = live();
+    draw(ink, one, [[100, 100], [140, 120]], at + 100);
+    draw(ink, two, [[10, 10], [40, 40]], at + 2000);
+    ink.closeBurst();
+    const undone = ink.session.bursts[1];
+    ink.undo();
+    expect(ink.session.bursts).toHaveLength(1);
+    expect(two.webContents.sent.some(([channel]) => channel === "ink:undo")).toBe(true);
+    expect(one.webContents.sent.some(([channel]) => channel === "ink:undo")).toBe(false);
+    draw(ink, two, [[20, 20], [60, 60]], at + 4000);
+    const again = ink.session.bursts[1];
+    expect(again.n).toBe(2);
+    expect(again.id).not.toBe(undone.id);
+    const bundle = await ink.finish(owner, ink.session.id);
+    expect(bundle.marks).toHaveLength(2);
+    expect(bundle.marks[1].strokes[0][0]).toEqual([20, 20]);
+    ink.dispose();
+  });
+
+  it("⌘Z is the pen's only while the pen is down, as Escape is", async () => {
+    const { ink } = setup();
+    await ink.start({ voice: true });
+    expect(shortcuts.has("Command+Z")).toBe(true);
+    ink.setPen(false);
+    expect(shortcuts.has("Command+Z")).toBe(false);
+    ink.setPen(true);
+    ink.dispose();
+    expect(shortcuts.has("Command+Z")).toBe(false);
+  });
+
+  it("a snapshot is a mark with no ink and only the whole display, and its key is the session's", async () => {
+    const { ink, owner } = setup();
+    const log = join(dir, "snap.log");
+    process.env.INK_LOG = log;
+    await ink.start({ voice: true });
+    expect(shortcuts.has("Control+Alt+Command+S")).toBe(true);
+    ink.setPen(false);
+    shortcuts.get("Control+Alt+Command+S")();
+    expect(live()[0].webContents.sent.some(([channel]) => channel === "ink:flash")).toBe(true);
+    const bundle = await ink.finish(owner, ink.session.id);
+    delete process.env.INK_LOG;
+    expect(bundle.marks).toHaveLength(1);
+    expect(bundle.marks[0].snap).toBe(true);
+    expect(bundle.marks[0].strokes).toEqual([]);
+    expect(bundle.marks[0].crop).toBe("");
+    expect(Buffer.from(bundle.marks[0].frame, "base64")[0]).toBe(0xff);
+    const sent = require("node:fs").readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const inked = sent.find((r) => r.op === "ink");
+    expect(inked.crop).toBeUndefined();
+    // The never-capture list goes with every still and every look under the pen.
+    expect(sent.find((r) => r.op === "shot").deny).toContain("com.1password.1password");
+    expect(sent.find((r) => r.op === "under").deny).toContain("com.apple.MobileSMS");
+    expect(shortcuts.has("Control+Alt+Command+S")).toBe(false);
+    ink.dispose();
+  });
+
+  it("hold-to-draw puts the pen down while held and back as it was after", async () => {
+    const { ink } = setup();
+    await ink.start({ voice: true });
+    ink.setPen(false);
+    ink.hold(true);
+    expect(ink.session.pen).toBe(true);
+    expect(ink.state().held).toBe(true);
+    ink.hold(false);
+    expect(ink.session.pen).toBe(false);
+    // Pressed by hand mid-hold, the hand wins.
+    ink.hold(true);
+    ink.setPen(false);
+    ink.hold(false);
+    expect(ink.session.pen).toBe(false);
+    ink.dispose();
+    // No session, nothing to hold.
+    ink.hold(true);
+    expect(ink.session).toBeNull();
+  });
+
+  it("asks kururu's page what is under a mark, and does not wait on one that never says", async () => {
+    const owner = new FakeContents();
+    const asked = [];
+    let answer = { kururu: { what: "agent", name: "Fastermenu migration", detail: "", workspace: "fastermenu", element: "" } };
+    const ink = new Ink({
+      helperPath,
+      pagePath: "/app/ink.html",
+      preloadPath: "/app/inkpreload.js",
+      voiceClient: () => owner,
+      mainWindow: () => null,
+      pill: () => null,
+      whatAt: (global, under) => {
+        asked.push({ global, under });
+        return answer === "never" ? new Promise(() => {}) : Promise.resolve(answer);
+      },
+    });
+    windows.length = 0;
+    await ink.start({ voice: true });
+    const at = ink.session.at;
+    draw(ink, live()[1], [[100, 100], [140, 120]], at + 100);
+    const bundle = await ink.finish(owner, ink.session.id);
+    expect(asked[0].global).toEqual({ x: 1440 + 120, y: 110 });
+    expect(asked[0].under.app).toBe("Safari");
+    expect(bundle.marks[0].kururu.name).toBe("Fastermenu migration");
+    expect(bundle.marks[0].page).toBeNull();
+    answer = "never";
+    await ink.start({ voice: true });
+    draw(ink, live()[0], [[10, 10], [20, 20]], ink.session.at + 50);
+    const started = Date.now();
+    const slow = await ink.finish(owner, ink.session.id);
+    expect(Date.now() - started).toBeLessThan(3000);
+    expect(slow.marks[0].kururu).toBeNull();
+    ink.dispose();
+  });
+
+  it("a roll takes the marks so far with the clip and keeps the session, its pen and its overlays", async () => {
+    const { ink, owner } = setup();
+    const { at, id } = await ink.start({ voice: true }).then(() => ink.session);
+    draw(ink, live()[0], [[100, 100], [140, 120]], at + 100);
+    const first = await ink.finish(owner, id, true);
+    expect(first.marks).toHaveLength(1);
+    expect(ink.session.id).toBe(id);
+    expect(live()).toHaveLength(2);
+    expect(ink.state().marks).toBe(0);
+    draw(ink, live()[0], [[200, 200], [240, 220]], at + 5000);
+    expect(ink.session.bursts[0].n).toBe(1);
+    const second = await ink.finish(owner, id);
+    expect(second.marks).toHaveLength(1);
+    expect(second.marks[0].t0).toBe(5000);
+    expect(live()).toHaveLength(0);
+    ink.dispose();
+  });
+});

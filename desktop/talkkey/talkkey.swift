@@ -21,6 +21,8 @@
 //
 //   talkkey ControlRight          hook the right Control key
 //   talkkey ControlRight --check  say which keycode that is and exit
+//   talkkey ControlRight --draw MetaRight
+//                                 and the screen pen's hold-to-draw key too
 //
 // Lines out: {"ev":"ready"} once the tap is up; {"ev":"denied"} when Input
 // Monitoring is refused (and it keeps asking every few seconds, and says
@@ -28,6 +30,11 @@
 // keycode here; then {"ev":"down"}, {"ev":"up"}, {"ev":"escape"} and
 // {"ev":"chord"} — another key pressed while the talk key is held, which is
 // a shortcut for the application in front and not a word for Kuru.
+//
+// With --draw, a second key, a modifier only: {"ev":"draw","down":true}
+// while it is held and false when it is let go, or when another key is
+// pressed with it — then it was a shortcut, not a pen. The app decides what
+// a hold means (`desktop/ink.js`: the pen down, during a session only).
 
 import Foundation
 import CoreGraphics
@@ -87,6 +94,13 @@ guard arguments.count >= 2 else {
 }
 let name = arguments[1]
 let checkOnly = arguments.contains("--check")
+/// The screen pen's hold-to-draw key, when one is named: a modifier, so a
+/// hold of it types nothing in the application in front.
+let drawKey: Key? = {
+    guard let at = arguments.firstIndex(of: "--draw"), at + 1 < arguments.count else { return nil }
+    let key = modifiers[arguments[at + 1]]
+    return key?.code == modifiers[name]?.code ? nil : key
+}()
 
 let target: Key
 if let modifier = modifiers[name] {
@@ -116,6 +130,7 @@ Thread.detachNewThread {
 
 var held = false
 var chorded = false
+var drawing = false
 var tap: CFMachPort?
 
 let callback: CGEventTapCallBack = { _, type, event, _ in
@@ -128,6 +143,19 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
     }
     let code = event.getIntegerValueField(.keyboardEventKeycode)
     let repeating = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+    if let draw = drawKey, let mask = draw.deviceMask {
+        if type == .flagsChanged && code == draw.code {
+            let down = (event.flags.rawValue & mask) != 0
+            if down != drawing {
+                drawing = down
+                emit("draw", ["down": down])
+            }
+        } else if type == .keyDown && drawing && !repeating {
+            // A shortcut with the key, not a hold of it.
+            drawing = false
+            emit("draw", ["down": false])
+        }
+    }
     switch type {
     case .flagsChanged:
         if let mask = target.deviceMask, code == target.code {

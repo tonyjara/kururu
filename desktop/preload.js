@@ -283,7 +283,12 @@ if (isPicker) {
       pen: (on) => ipcRenderer.send("kururu:ink-pen", typeof on === "boolean" ? on : null),
       done: () => ipcRenderer.send("kururu:ink-done"),
       drop: () => ipcRenderer.send("kururu:ink-drop"),
-      finish: (id) => ipcRenderer.invoke("kururu:ink-finish", String(id)),
+      finish: (id, roll) => ipcRenderer.invoke("kururu:ink-finish", String(id), roll === true),
+      undo: () => ipcRenderer.send("kururu:ink-undo"),
+      snap: () => ipcRenderer.send("kururu:ink-snap"),
+      style: (style) => ipcRenderer.send("kururu:ink-style", style && typeof style === "object" ? { tool: String(style.tool), color: String(style.color) } : null),
+      /** The never-capture list: read with no argument, saved with a list, back to the pen's own with null. */
+      deny: (list) => ipcRenderer.invoke("kururu:ink-deny", Array.isArray(list) ? list.map(String) : list === null ? null : undefined),
       cancel: (id) => ipcRenderer.send("kururu:ink-cancel", String(id)),
       onEvent: (listener) => relayOn("kururu:ink", (event) => listener(event && typeof event === "object" ? event : {})),
     },

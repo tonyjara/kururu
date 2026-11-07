@@ -96,6 +96,11 @@ export interface InkState {
   pen: boolean;
   marks: number;
   ending: boolean;
+  /** What the next stroke is drawn with. Missing from a window older than phase 2. */
+  tool?: "pen" | "highlighter";
+  color?: "red" | "blue";
+  /** The hook's hold-to-draw key has the pen down. */
+  held?: boolean;
 }
 
 /**
@@ -120,8 +125,24 @@ export interface DesktopInk {
   done(): void;
   /** ✕: the marks dropped, and the owner told to drop its clip. */
   drop(): void;
-  /** The owner's: the set to post, with every picture in it, and the overlays gone. Null when there was no ink. */
-  finish(id: string): Promise<InkBundle | null>;
+  /**
+   * The owner's: the set to post, with every picture in it, and the overlays
+   * gone. Null when there was no ink. With `roll`, the marks so far only, and
+   * the session carries on — a recording that rolled over at five minutes.
+   */
+  finish(id: string, roll?: boolean): Promise<InkBundle | null>;
+  /** Take the last mark back. Optional, as the rest of phase 2 is: a window from before it has none. */
+  undo?(): void;
+  /** A picture of the display under the pointer, now, as a mark. */
+  snap?(): void;
+  /** The next stroke's pen. */
+  style?(style: { tool: "pen" | "highlighter"; color: "red" | "blue" }): void;
+  /**
+   * The never-capture list: bundle ids whose windows are left out of every
+   * still. Read with no argument, saved with a list, back to the pen's own
+   * with null; `custom` says whether it is the user's.
+   */
+  deny?(list?: string[] | null): Promise<{ list: string[]; custom: boolean }>;
   /** The owner's: let the session go with nothing kept. */
   cancel(id: string): void;
   onEvent(listener: (event: InkEvent) => void): () => void;

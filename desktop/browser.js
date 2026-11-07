@@ -261,6 +261,22 @@ class BrowserPool extends EventEmitter {
     tab.view.setBounds({ x, y, width, height });
   }
 
+  /**
+   * The element under a point of the main window's content, on whichever
+   * shown tab is there, for the screen pen (`ink.js`). Points are the
+   * window's; the view's page may be zoomed. Null where no tab is.
+   */
+  async elementAt(x, y) {
+    for (const tab of this.tabs.values()) {
+      if (!tab.shown || !tab.marks || tab.view.webContents.isDestroyed()) continue;
+      const b = tab.view.getBounds();
+      if (x < b.x || y < b.y || x >= b.x + b.width || y >= b.y + b.height) continue;
+      const zoom = tab.view.webContents.getZoomFactor() || 1;
+      return tab.marks.elementAt((x - b.x) / zoom, (y - b.y) / zoom);
+    }
+    return null;
+  }
+
   hide(tabId) {
     const tab = this.tabs.get(tabId);
     if (!tab) return;

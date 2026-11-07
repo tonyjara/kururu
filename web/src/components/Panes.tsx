@@ -1003,6 +1003,8 @@ function Pane({
   return (
     <section
       className={`pane ${focused ? "pane-on" : ""} ${lifted ? "pane-lifted" : ""}`}
+      // What the screen pen's mark on this pane says it was drawn on (`whatat.ts`).
+      {...paneInk(pane, showing, agents, dashboard ? "" : workspaceName)}
       // Pointer-down rather than click: focus should land before the terminal
       // starts a selection drag, not after it.
       onPointerDown={() => api.focusPane(pane.id)}
@@ -1388,6 +1390,34 @@ function PaneMenuButton({ solo, onOpen }: { solo: SoloAt | null; onOpen: (at: Me
  * Null for anything else, and for a tab whose page the pane has lost, which is
  * then drawn as nothing rather than as a terminal that is not there.
  */
+/**
+ * What a pane shows, as the screen pen's mark on it says it (`whatat.ts`):
+ * an agent by its title — never a bare id — a document by its path, the
+ * board, the Dashboard's page, a browser tab's title. Attributes, so the
+ * page can answer from the element under the ink without knowing the tree.
+ */
+function paneInk(pane: PaneState, showing: string | null, agents: readonly AgentSnapshot[], workspace: string): Record<string, string> {
+  let what = "empty pane";
+  let name = "";
+  if (isDashTab(showing)) {
+    what = "Dashboard";
+    name = dashTabFace(showing!).label;
+  } else if (isBoardTab(showing)) what = "board";
+  else if (showing && webPageOf(pane, showing)) {
+    what = "browser tab";
+    name = webPageOf(pane, showing)!.title;
+  } else if (showingDoc(pane)) {
+    what = "document";
+    name = showingDoc(pane)!.path;
+  } else if (!showing && pane.reader) what = "reader";
+  else if (showing) {
+    const agent = agents.find((a) => a.id === showing);
+    what = "agent";
+    name = agent ? tabLabel(agent) : "";
+  }
+  return { "data-ink-what": what, "data-ink-name": name, "data-ink-workspace": workspace };
+}
+
 function webPageOf(pane: PaneState, id: string | null): WebTabState | null {
   if (!id) return null;
   if (!isWebTab(id) && !isWebTab(parseRemote(id)?.id)) return null;

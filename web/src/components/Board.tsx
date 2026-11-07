@@ -819,6 +819,9 @@ const CardView = memo(function CardView({
           .filter(Boolean)
           .join(" ")}
         data-card={card.id}
+        data-ink-what={`card ${code}`}
+        data-ink-name={card.title}
+        data-ink-detail={`in ${column}`}
         draggable
         onPointerDown={selectNotDrag}
         onDragStart={(event) => {

@@ -279,6 +279,29 @@ class TabMarks {
     return result?.result?.value;
   }
 
+  /**
+   * The element at a point of the view, for the screen pen: its ink on this
+   * tab says what it was drawn over, as a mark would. The script is put in
+   * the page's world for one look and not on every document after, since
+   * this is not marking. Null for a page that cannot be asked.
+   */
+  async elementAt(x, y) {
+    if (!this.attached || !this.mainFrame || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+    try {
+      if (this.ctx === null) {
+        const made = await this.send("Page.createIsolatedWorld", { frameId: this.mainFrame, worldName: WORLD, grantUniveralAccess: false });
+        this.ctx = made?.executionContextId ?? null;
+      }
+      if (this.ctx === null) return null;
+      await this.send("Runtime.evaluate", { expression: MARK_SOURCE, contextId: this.ctx });
+      const facts = await this.call(`factsAt(${x}, ${y})`);
+      return facts && typeof facts === "object" ? facts : null;
+    } catch (err) {
+      this.hooks.log(`reading the element under the pen: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
+  }
+
   /** What the page draws: the mode, the tool, and a pin per mark. */
   async sync() {
     if (this.ctx === null) return;

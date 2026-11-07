@@ -492,6 +492,24 @@ its reasons are [the plan](plans/screen-annotate.md); this is how it works.
   puts the header and a line per mark into the box as chips. ✕, Escape with
   the pen up, the owner's page going, or the helper dying end it with
   nothing kept.
+- **Phase 2's pen.** Two pens (red, blue) and a highlighter on the
+  toolbar, each stroke keeping what it was drawn with; **Undo** and ⌘Z with
+  the pen down take the last mark back, its pictures with it; **Snap** and
+  ⌃⌥⌘S (only while a session is on) take the display under the pointer as a
+  mark with no ink, at that moment in the words; the right ⌘ held alone puts
+  the pen down while held (through the talk-key hook, so only while that is
+  on). The server reads each mark's shape off its strokes — circled, boxed,
+  an arrow and its tip, underlined, highlighted — and the label leads with
+  it. A mark on kururu's own window says what it was on, asked of the page
+  under it (`web/src/whatat.ts`): `kururu: agent "…"`, a card's code and
+  title, a document and its heading; on a kururu browser tab, the element
+  under it as a browser mark would (`TabMarks.elementAt`). A recording that
+  rolls at five minutes takes the marks so far with its clip and keeps the
+  pen for the next.
+- **Never in a picture:** the applications on Settings → Voice → Screen pen
+  (password managers, the keychain and Messages to begin with) are left out
+  of every still by the helper's filter, and their window titles are not
+  read.
 - **Screen Recording** is asked for on the first pen, with the system's
   prompt; refused, nothing goes on the screen and the pill or the drawer
   says why, with System Settings opened at the switch. It is granted to the

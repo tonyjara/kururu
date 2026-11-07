@@ -37,6 +37,12 @@ const DEFAULTS = {
   /** The talk key the pill last reported, so the hook starts on it before a server has said. */
   talkKey: "ControlRight",
   /**
+   * The screen pen's never-capture list: bundle ids whose windows are left
+   * out of every still (`ink.js`). Null is the pen's own list, so a list
+   * nobody edited follows the app's as it grows.
+   */
+  inkDeny: null,
+  /**
    * The cards popped out as windows of their own (`notes.js`), each with its
    * box on the screen and whether it is up, put away or closed. This Mac's
    * and not the server's, for the reason the window's notes are a browser's:
@@ -80,6 +86,7 @@ function adopt(raw) {
     pill,
     talkKey: typeof r.talkKey === "string" && /^[A-Za-z0-9]{1,32}$/.test(r.talkKey) ? r.talkKey : DEFAULTS.talkKey,
     notes: adoptNotes(r.notes),
+    inkDeny: Array.isArray(r.inkDeny) ? [...new Set(r.inkDeny.filter((b) => typeof b === "string" && /^[A-Za-z0-9.-]{1,200}$/.test(b)))].slice(0, 200) : null,
   };
 }
 

@@ -166,6 +166,15 @@ function share(at, free) {
   return Math.min(1, Math.max(0, at / free));
 }
 
+/**
+ * The screen pen's hold-to-draw key: the right Command key, held alone,
+ * puts the pen down for as long as it is held (docs/plans/screen-annotate.md).
+ * A modifier, so holding it types nothing; the right one, since the left is
+ * half of every shortcut; not the right Option, which types accents on a
+ * Spanish keyboard. Pressed with another key it is a shortcut and lets go.
+ */
+const DRAW_KEY = "MetaRight";
+
 class TalkKey extends EventEmitter {
   /**
    * @param {object} options
@@ -234,6 +243,12 @@ class TalkKey extends EventEmitter {
      * @type {(() => boolean) | null}
      */
     this.escapeFilter = null;
+    /**
+     * The screen pen's hold-to-draw key (`DRAW_KEY`), held or let go — the
+     * hook hears it beside the talk key. `Ink.hold` decides what it means.
+     * @type {((down: boolean) => void) | null}
+     */
+    this.onDraw = null;
   }
 
   state() {
@@ -303,7 +318,9 @@ class TalkKey extends EventEmitter {
       return;
     }
     this.status = "starting";
-    const child = spawn(this.helperPath, [this.key], { stdio: ["pipe", "pipe", "pipe"] });
+    // The screen pen's hold-to-draw key rides on the same hook; a hook from
+    // before it reads the key it was given and leaves the rest.
+    const child = spawn(this.helperPath, [this.key, "--draw", DRAW_KEY], { stdio: ["pipe", "pipe", "pipe"] });
     this.helper = child;
     this.helperHeld = false;
     child.on("error", (err) => {
@@ -323,6 +340,10 @@ class TalkKey extends EventEmitter {
         return;
       }
       if (this.helper !== child || !event || typeof event.ev !== "string") return;
+      if (event.ev === "draw") {
+        this.onDraw?.(event.down === true);
+        return;
+      }
       this.fromHelper(event.ev);
     });
     child.stderr.on("data", (chunk) => console.error(`kururu talkkey: ${String(chunk).trim()}`));
@@ -336,6 +357,8 @@ class TalkKey extends EventEmitter {
         this.helperHeld = false;
         this.toPanel("up");
       }
+      // And a hold-to-draw it was in the middle of puts the pen back.
+      this.onDraw?.(false);
       if (this.stoppingHelper || this.status === "unsupported") return;
       console.error(`kururu: the talk-key hook ${signal ? `was killed by ${signal}` : `exited with ${code}`}`);
       this.status = "crashed";

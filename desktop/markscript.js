@@ -1205,6 +1205,17 @@ function markingMain(binding) {
     },
     /** Two frames, for main to wait on before a picture. */
     frame: twoFrames,
+    /**
+     * The element at a point of the view, read as a mark reads one, with the
+     * page's address: for the screen pen, whose ink on a browser tab says
+     * what it was drawn over (docs/plans/screen-annotate.md). Null over
+     * nothing but the page.
+     */
+    factsAt(x, y) {
+      const el = elementAt(Number(x), Number(y));
+      if (!el || el === document.body) return null;
+      return { url: location.href, element: read(el) };
+    },
   };
 
   function parent0(el) {

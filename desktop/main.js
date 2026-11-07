@@ -44,7 +44,8 @@ const { NoteWindows } = require("./notes");
 const { BrowserPool } = require("./browser");
 const { fetchNodes, nodeChoices, whyNot } = require("./nodes");
 const { TalkKey } = require("./talkkey");
-const { Ink } = require("./ink");
+const { Ink, DENY_DEFAULT } = require("./ink");
+const { windowNumberOf } = require("./inkshape");
 const { createTray } = require("./tray");
 const { editMenuTemplate } = require("./editmenu");
 const { QuitGate, listenForSignals } = require("./quit");
@@ -190,10 +191,46 @@ const ink = new Ink({
   voiceClient: () => ((talk.status === "live" || talk.altSpace) && talk.panelContents()) || (win && !win.isDestroyed() ? win.webContents : null),
   mainWindow: () => (win && !win.isDestroyed() ? win.webContents : null),
   pill: () => (talk.panel && !talk.panel.isDestroyed() ? talk.panel : null),
+  denyList: () => readDesktop().inkDeny ?? DENY_DEFAULT,
+  whatAt: (global, under) => inkWhatAt(global, under),
   debug: !PACKAGED,
 });
+
+/**
+ * What kururu's own window says is at a point a mark was drawn on: the
+ * pane and its tab, a card, a document's heading (`web/src/whatat.ts`, asked
+ * in the page), or on a browser tab the element under it, read by the
+ * marking script as a browser mark reads one. The window is the one the
+ * helper found under the pen — by its number, or by its owner being this
+ * process and its bounds holding the point, for a helper from before the
+ * number. Null for anything that is not ours, or a page that cannot say.
+ */
+async function inkWhatAt(global, under) {
+  const ours = new Set(ink.ours());
+  const candidates = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed() && w.isVisible() && !ours.has(windowNumberOf(w.getMediaSourceId())));
+  const inside = (w) => {
+    const b = w.getContentBounds();
+    return global.x >= b.x && global.y >= b.y && global.x < b.x + b.width && global.y < b.y + b.height;
+  };
+  let target = null;
+  if (Number.isFinite(under.number) && under.number > 0) target = candidates.find((w) => windowNumberOf(w.getMediaSourceId()) === under.number) ?? null;
+  else if (under.pid === process.pid) target = candidates.find(inside) ?? null;
+  if (!target || !inside(target)) return null;
+  const content = target.getContentBounds();
+  const x = global.x - content.x;
+  const y = global.y - content.y;
+  if (browser && target === win) {
+    const page = await browser.elementAt(x, y);
+    if (page) return { page };
+  }
+  const zoom = target.webContents.getZoomFactor() || 1;
+  const kururu = await target.webContents.executeJavaScript(`typeof window.__kururuWhatAt === "function" ? window.__kururuWhatAt(${x / zoom}, ${y / zoom}) : null`);
+  return kururu && typeof kururu === "object" ? { kururu } : null;
+}
 // The hook hears every Escape, and one that lifted the pen is not the pill's to drop a clip with.
 talk.escapeFilter = () => ink.takeEscape();
+// The hook's second key: held during a session, the pen is down.
+talk.onDraw = (down) => ink.hold(down);
 
 /**
  * The cards popped out as windows over every application. Their pages come
@@ -1017,7 +1054,24 @@ ipcMain.on("kururu:ink-pen", (event, on) => {
 });
 ipcMain.on("kururu:ink-done", (event) => ink.send(event.sender));
 ipcMain.on("kururu:ink-drop", (event) => ink.drop(event.sender));
-ipcMain.handle("kururu:ink-finish", (event, id) => ink.finish(event.sender, String(id)));
+ipcMain.handle("kururu:ink-finish", (event, id, roll) => ink.finish(event.sender, String(id), roll === true));
+ipcMain.on("kururu:ink-undo", (event) => {
+  if (ink.isOurs(event.sender)) ink.undo();
+});
+ipcMain.on("kururu:ink-snap", (event) => {
+  if (ink.isOurs(event.sender)) ink.snap();
+});
+ipcMain.on("kururu:ink-style", (event, style) => {
+  if (ink.isOurs(event.sender)) ink.setStyle(style);
+});
+/** The never-capture list, for Settings → Voice: the window's alone, and what it says is saved as it is. */
+ipcMain.handle("kururu:ink-deny", (event, list) => {
+  if (!win || win.isDestroyed() || event.sender.id !== win.webContents.id) return { list: [], custom: false };
+  if (list === null) writeDesktop({ inkDeny: null });
+  else if (Array.isArray(list)) writeDesktop({ inkDeny: list });
+  const saved = readDesktop().inkDeny;
+  return { list: saved ?? DENY_DEFAULT, custom: saved !== null };
+});
 ipcMain.on("kururu:ink-cancel", (event, id) => {
   if (ink.session && event.sender.id === ink.session.owner.id) ink.cancel(String(id), null);
 });
@@ -1030,6 +1084,11 @@ ipcMain.on("ink:bar", (event, what) => {
   if (what === "pen") ink.setPen(!ink.session.pen);
   else if (what === "done") ink.send(event.sender);
   else if (what === "drop") ink.drop(event.sender);
+  else if (what === "undo") ink.undo();
+  else if (what === "snap") ink.snap();
+});
+ipcMain.on("ink:style", (event, style) => {
+  if (ink.overlayOf(event.sender)) ink.setStyle(style);
 });
 
 /**

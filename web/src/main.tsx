@@ -6,6 +6,10 @@ import { NotePage } from "./components/NotePage";
 import { Pill } from "./components/Pill";
 import { isLoopback } from "./preview";
 import "./styles.css";
+import { installWhatAt } from "./whatat";
+
+// The screen pen asks any page of ours what a mark was drawn on (`whatat.ts`).
+installWhatAt();
 
 /**
  * The floating pill is this same build with a different root: the desktop

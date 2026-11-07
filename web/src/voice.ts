@@ -82,7 +82,9 @@
  * The clip and its ink end together: whatever ends the clip asks main for
  * the ink (`finish`) before the clip is posted, posts it to `/api/marks`
  * first, and the clip then names the set, so the outbox only ever points at
- * a folder that exists. Dropping the clip drops the ink.
+ * a folder that exists. Dropping the clip drops the ink. A clip that rolls
+ * over at five minutes takes the marks so far and leaves the pen on the
+ * recording, which carries on.
  */
 import { useSyncExternalStore } from "react";
 import { CLIP_MIN_MS, CLIP_RATE, CLIP_ROLL_MS, TAP_MS, downsample, encodeWav, type OutboxEntry, type SpeechChunk } from "../../shared/voice";
@@ -340,7 +342,7 @@ async function open(purpose: Purpose = "kuru"): Promise<void> {
           else {
             const at = clip.at;
             clip.at = performance.timeOrigin + performance.now();
-            void post(pcmOf(chunks.splice(0), ctx.sampleRate), at);
+            void post(pcmOf(chunks.splice(0), ctx.sampleRate), at, true);
           }
         }
         // The worklet posts a block every few milliseconds; the meter wants
@@ -426,12 +428,12 @@ function pcmOf(chunks: readonly Float32Array[], rate: number): Float32Array {
  * server has it or the first try has failed — which is when the talk may end,
  * the clip being safe either way.
  */
-async function post(pcm: Float32Array, audioAt: number): Promise<void> {
+async function post(pcm: Float32Array, audioAt: number, rolled = false): Promise<void> {
   const ms = (pcm.length / CLIP_RATE) * 1000;
   // The ink first: it ends with this clip, and the clip names its set. The
   // pill says "sending" meanwhile, since the microphone is already shut.
   if (inkId && !isListening()) set({ phase: "sending", level: 0, text: "", detail: "", toggled: false });
-  const ink = await keepInk(audioAt);
+  const ink = await keepInk(audioAt, rolled);
   const marks = ink && "id" in ink ? ink.id : null;
   if (ms < CLIP_MIN_MS && !marks) {
     if (ui.phase === "listening" || ui.phase === "sending") set({ ...IDLE });
@@ -500,12 +502,15 @@ function dropInk(): void {
  * a few tries is `lost`, with why, and the clip goes without it — the words
  * are the part that must not be lost.
  */
-async function keepInk(audioAt: number): Promise<{ id: string } | { lost: string } | null> {
+async function keepInk(audioAt: number, rolled = false): Promise<{ id: string } | { lost: string } | null> {
   const id = inkId;
-  inkId = null;
+  // A clip that rolled over at five minutes takes the marks so far and
+  // leaves the pen with the recording, which carries on; any other end is
+  // the session's too.
+  if (!rolled) inkId = null;
   const ink = desktop()?.ink;
   if (!id || !ink) return null;
-  const bundle = await ink.finish(id).catch(() => null);
+  const bundle = await ink.finish(id, rolled).catch(() => null);
   if (!bundle) return null;
   bundle.audioAt = audioAt;
   let why = "";

@@ -18,8 +18,18 @@ contextBridge.exposeInMainWorld("ink", {
   end: (t) => ipcRenderer.send("ink:end", { t: Number(t) }),
   /** The pointer is on the toolbar, so the window should take the mouse while the pen is up. */
   hoverBar: (on) => ipcRenderer.send("ink:hover-bar", on === true),
-  /** A toolbar button: `pen`, `done` or `drop`. */
+  /** A toolbar button: `pen`, `done`, `drop`, `undo` or `snap`. */
   bar: (what) => ipcRenderer.send("ink:bar", String(what)),
+  /** The next stroke's pen: `{ tool: "pen" | "highlighter", color: "red" | "blue" }`. */
+  style: (tool, color) => ipcRenderer.send("ink:style", { tool: String(tool), color: String(color) }),
+  /** The last mark on this display was taken back: its ink comes off. */
+  onUndo: (listener) => {
+    ipcRenderer.on("ink:undo", () => listener());
+  },
+  /** A snapshot was taken of this display. */
+  onFlash: (listener) => {
+    ipcRenderer.on("ink:flash", () => listener());
+  },
   onState: (listener) => {
     ipcRenderer.on("ink:state", (_event, state) => listener(state && typeof state === "object" ? state : {}));
   },

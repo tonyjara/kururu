@@ -20,6 +20,11 @@
  * Kuru group's page for this conversation as you take it in, and a page of
  * its own for one switch would be a door nobody looks behind. It is this
  * device's, as the folds it starts are (`kurufold.ts`), so it says so.
+ *
+ * **The screen pen's never-capture list** is here too, in the desktop app
+ * only: the applications whose windows are left out of every picture the pen
+ * takes (`desktop/ink.js`). The pen is the voice's — it draws while you talk
+ * — and this is the one thing about it there is to set.
  */
 import { useEffect, useState } from "react";
 import { KOKORO_SIZE_MB, LANG_NAMES, LOCALES, VOICE_LANGS, keyCodeLabel, type VoiceChoice, type VoiceLang, type VoiceSettings } from "../../../shared/voice";
@@ -28,7 +33,68 @@ import { setFoldLong, useFoldLong } from "../kurufold";
 import { audioOutput } from "../notify";
 import * as api from "../session";
 import { useKururu } from "../session";
-import { Action, Banner, Btn, Empty, Group, Mono, Readout, Select, Slider, Toggle, useEditing, type Tone } from "./ui";
+import { Action, AddRow, Banner, Btn, Empty, Group, IconBtn, Item, Mono, Readout, Select, Slider, Toggle, useEditing, type Tone } from "./ui";
+
+/** The names of the applications the pen's own list holds, for a row that says more than a bundle id. */
+const KNOWN_APPS: Record<string, string> = {
+  "com.1password.1password": "1Password",
+  "com.agilebits.onepassword7": "1Password 7",
+  "com.apple.keychainaccess": "Keychain Access",
+  "com.apple.Passwords": "Passwords",
+  "com.bitwarden.desktop": "Bitwarden",
+  "com.apple.MobileSMS": "Messages",
+  "com.apple.mail": "Mail",
+  "net.whatsapp.WhatsApp": "WhatsApp",
+  "com.tinyspeck.slackmacgap": "Slack",
+  "org.whispersystems.signal-desktop": "Signal",
+};
+
+/**
+ * The applications the screen pen never takes a picture of. Their windows
+ * are left out of every still by the helper's filter and their titles are
+ * not read, so their pixels never reach the disk. Saved on this Mac.
+ */
+function NeverCapture() {
+  const ink = desktop()?.ink;
+  const [state, setState] = useState<{ list: string[]; custom: boolean } | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  useEffect(() => {
+    void ink?.deny?.().then(setState, () => setState(null));
+  }, [ink]);
+  if (!ink?.deny || !state) return null;
+  const save = (list: string[] | null) => {
+    setProblem(null);
+    void ink.deny!(list).then(setState, (err: unknown) => setProblem(err instanceof Error ? err.message : String(err)));
+  };
+  const add = (value: string) => {
+    const id = value.trim();
+    if (!/^[A-Za-z0-9.-]{1,200}$/.test(id)) {
+      setProblem("That is not a bundle id: letters, digits, dots and dashes, such as com.apple.MobileSMS.");
+      return;
+    }
+    if (!state.list.includes(id)) save([...state.list, id]);
+  };
+  return (
+    <Group
+      title="Screen pen"
+      foot={
+        <>
+          ⌃⌥⌘D draws on the screen while you talk; ⌃⌥⌘S takes a picture of the display under the pointer; ⌘Z with the pen down takes the last mark back. The applications below are never in a picture: their windows are left out and their titles are not read. A bundle id is in <Mono>osascript -e 'id of app "Name"'</Mono>.
+        </>
+      }
+    >
+      {problem && <Banner tone="bad">{problem}</Banner>}
+      {state.list.length === 0 && <Empty>Every application can be in a picture.</Empty>}
+      {state.list.map((id) => (
+        <Item key={id} name={KNOWN_APPS[id] ?? id} sub={KNOWN_APPS[id] ? <Mono>{id}</Mono> : undefined}>
+          <IconBtn icon="close" label={`Let ${KNOWN_APPS[id] ?? id} be in pictures`} onClick={() => save(state.list.filter((x) => x !== id))} />
+        </Item>
+      ))}
+      <AddRow placeholder="com.example.app" ariaLabel="A bundle id never to take a picture of" mono onAdd={add} />
+      {state.custom && <Action label="The pen's own list" hint="Password managers, the keychain and Messages." button="Put it back" onClick={() => save(null)} />}
+    </Group>
+  );
+}
 
 /** What the hook is doing, in a line under its switch. */
 function globalLine(state: VoiceGlobalState): string {
@@ -223,6 +289,8 @@ export function VoicePage() {
           </Group>
         );
       })}
+
+      <NeverCapture />
 
       <Group title="Reading" foot="On this device only, as the folds themselves are: the phone and the Mac each keep their own.">
         <Toggle label="Fold long messages" hint="A message longer than about fifteen lines starts as one row in Kuru's drawer. Unfolding one keeps it open." on={foldLong} onChange={setFoldLong} />
