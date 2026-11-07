@@ -639,8 +639,9 @@ card lit on the profile's board, **Done** beside it whenever the board still
 has a Done, and the card's own menu (its moves, Send to, Reference in Kuru)
 on a right-click or a held touch — below the workspaces because an agent
 asking holds a turn up and a to-do waits; then the working
-workspaces with what is running in them, and the quiet rest folded to a line
-of names (per device, the sidebar disclosures' reason). A row goes to the
+workspaces with what is running in them. The quiet rest is not drawn: the
+sidebar already lists every workspace (a fold of their names went
+2026-11-07). A row goes to the
 terminal, or to the card on its board for one with no terminal; a card's row
 has the board as a button too, and **Done** only where the move is nothing but
 a move (`Need.plainDone`: in Review, no worktree, no terminal left open) —

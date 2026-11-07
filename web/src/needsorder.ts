@@ -36,8 +36,7 @@
  * on the server, and the drawer only keeps where the group goes among the
  * workspaces' (`BOARD_GROUP`).
  *
- * Per device, on the fold's argument (`NeedsDrawer.tsx`'s Quiet band, the
- * sidebar's disclosures): this is the way a list is arranged to be read, and
+ * Per device, on the fold's argument (the sidebar's disclosures): this is the way a list is arranged to be read, and
  * a phone sorting its drawer must not rearrange the desktop's. Kept per
  * profile, since the groups are a profile's workspaces.
  */
@@ -145,8 +144,8 @@ export function arrangeNeeds(needs: readonly Need[], saved: readonly string[] | 
 /**
  * The profile's needs as the drawer draws them, and so as Next walks them:
  * the waiting workspaces in the saved order, each with its cards arranged.
- * Only the `needs` band moves, into the places it held, so the Working and
- * Quiet bands keep the sidebar's order — sorting is a thing done to the
+ * Only the `needs` band moves, into the places it held, so the Working
+ * band keeps the sidebar's order — sorting is a thing done to the
  * queue. The counts are untouched; they are the same things in another order.
  */
 export function arrangedNeeds(needs: ProfileNeeds, order: NeedsOrder): ProfileNeeds {

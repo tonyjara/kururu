@@ -33,8 +33,9 @@
  * agent asking holds a turn up and a to-do waits as long as you let it.
  * **Working**
  * is what is on its way to you, so a busy workspace is never mistaken for
- * a quiet one. **Quiet** is the rest, folded to a line of names — out of
- * the way, and still each a door. Nothing here is dismissed by hand: a
+ * a quiet one. The quiet rest is not drawn at all: the sidebar already
+ * lists every workspace, and a fold of names here was one more line to
+ * read past (the user, 2026-11-07). Nothing here is dismissed by hand: a
  * row leaves when its state does, which is the only way a list of needs
  * stays honest.
  *
@@ -82,21 +83,6 @@ import {
   withCards,
   withGroups,
 } from "../needsorder";
-
-/**
- * Whether the quiet band is open, per device, on the sidebar disclosures'
- * argument: a fold is a thing you do with your eyes, and a phone opening one
- * must not unfold the desktop's.
- */
-const QUIET_KEY = "kururu.needs.quiet";
-
-function readQuiet(): boolean {
-  try {
-    return localStorage.getItem(QUIET_KEY) === "open";
-  } catch {
-    return false;
-  }
-}
 
 export function NeedsDrawer({
   needs,
@@ -174,16 +160,6 @@ export function NeedsDrawer({
     document.addEventListener("pointerdown", away, true);
     return () => document.removeEventListener("pointerdown", away, true);
   }, [sheet, onClose]);
-  const [quietOpen, setQuietOpen] = useState(readQuiet);
-  const toggleQuiet = () => {
-    const next = !quietOpen;
-    setQuietOpen(next);
-    try {
-      localStorage.setItem(QUIET_KEY, next ? "open" : "shut");
-    } catch {
-      // Not remembered; still opened.
-    }
-  };
   /**
    * A card's row menu — right-click, or a touch held still — see `NeedRow`.
    * Separate from the inline "Done" button beside it, which only ever shows
@@ -198,7 +174,6 @@ export function NeedsDrawer({
 
   const waiting = needs.workspaces.filter((w) => w.band === "needs");
   const working = needs.workspaces.filter((w) => w.band === "working");
-  const quiet = needs.workspaces.filter((w) => w.band === "quiet");
   /* The waiting workspaces come already in the person's order, so that Next
      walks what is drawn (`arrangedNeeds`, in `App`); this places Your board
      among them, which is no workspace and so not in that walk. */
@@ -452,37 +427,6 @@ export function NeedsDrawer({
           </>
         )}
 
-        {quiet.length > 0 && (
-          <li className="needs-quiet">
-            <button
-              className="needs-band needs-quiet-head"
-              onClick={toggleQuiet}
-              onMouseDown={(event) => event.preventDefault()}
-              aria-expanded={quietOpen}
-              title={quietOpen ? "Fold the quiet workspaces away" : "Show the quiet workspaces"}
-            >
-              <Icon name="caret" className={quietOpen ? "" : "drawer-caret-shut"} />
-              <span>Quiet</span>
-              <span className="needs-ws-n">{quiet.length}</span>
-            </button>
-            {quietOpen && (
-              <ul className="needs-chips">
-                {quiet.map((w) => (
-                  <li key={w.workspace.id}>
-                    <button
-                      className="needs-chip"
-                      onClick={() => onWorkspace(w.workspace.id)}
-                      onMouseDown={(event) => event.preventDefault()}
-                      title={`Go to ${w.workspace.name}`}
-                    >
-                      {w.workspace.name}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </li>
-        )}
       </ol>
 
       {/* The edge you drag, `KuruDrawer.tsx`'s to the line, so the two behave

@@ -6707,8 +6707,8 @@ button.kc {
 
    A drawer like Kuru's — the same box, the same header — with three bands in
    its list: the workspaces waiting on you, each a block with a rule down
-   the side and a row per thing; the ones working; and the quiet rest, folded
-   to a line of names. See `NeedsDrawer.tsx`.
+   the side and a row per thing; Your board; and the ones working. See
+   `NeedsDrawer.tsx`.
    -------------------------------------------------------------------------- */
 .needs-next-caret {
   transform: rotate(-90deg);
@@ -6721,8 +6721,7 @@ button.kc {
   color: var(--dim);
   font-size: var(--fs-base);
 }
-/* A band's heading, in the session mark's small capitals; the quiet one is
-   the button that folds the band. */
+/* A band's heading, in the session mark's small capitals. */
 .needs-band {
   display: flex;
   align-items: center;
@@ -6736,17 +6735,6 @@ button.kc {
 }
 .needs-band .icon {
   flex: none;
-}
-.needs-quiet-head {
-  width: 100%;
-  margin: 0;
-  padding: 4px 2px;
-  border-radius: var(--radius-md);
-  text-align: left;
-}
-.needs-quiet-head:hover {
-  color: var(--dim);
-  background: var(--chrome-high);
 }
 /* A workspace's block: a rule down its left, so where one workspace's needs
    end and the next one's begin is drawn rather than left to the spacing. */
@@ -6961,32 +6949,6 @@ a.needs-go {
   flex-basis: 100%;
   padding: 0 6px 4px 30px;
 }
-/* The quiet workspaces as chips, each a door. */
-.needs-chips {
-  margin: 8px 0 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.needs-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  padding: 3px 10px;
-  border-radius: var(--radius-md);
-  border: var(--border) var(--border-style) var(--line);
-  color: var(--dim);
-  font-size: var(--fs-sm);
-  white-space: nowrap;
-}
-.needs-chip:hover {
-  color: var(--text);
-  border-color: var(--line-high);
-  background: var(--chrome-high);
-}
 /* Sorting with a mouse (`useSort`): the thing carried fades where it was,
    and a rule in the accent is drawn where it would land — between two
    groups, in the middle of the gap the list leaves, and between two rows on
@@ -7034,10 +6996,6 @@ a.needs-go {
 }
 :root[data-narrow] .needs-ws-head {
   min-height: 36px;
-}
-:root[data-narrow] .needs-chip {
-  min-height: 36px;
-  font-size: var(--fs-md);
 }
 
 /* --------------------------------------------------------------------------
