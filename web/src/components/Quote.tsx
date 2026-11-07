@@ -45,16 +45,19 @@
  * arrives as a space. The popover is placed again whenever it changes size,
  * so a field that grows stays inside the window.
  *
- * **Or the comment is said.** A mic sits by the mark and by the field: held,
- * it is Kuru's own microphone (`dictate` in `voice.ts` — the same recorder,
- * and the same recogniser on the server) with the words handed back here
- * rather than sent to Kuru. Let go, they go after whatever was typed, and
- * the quote goes into the box with them exactly as Enter would put it,
- * unsent. Words that do not come — refused, too short, nothing heard, a
- * recogniser that would not run — leave the quote where it was, in the
- * field, with why under it. While it listens and while it is heard, a press
- * elsewhere and the selection going do not close the popover, since what is
- * on its way is this popover's.
+ * **Or the comment is said.** A mic sits by the mark and by the field: it is
+ * Kuru's own microphone (`dictate` in `voice.ts` — the same recorder, and the
+ * same recogniser on the server) with the words handed back here rather than
+ * sent to Kuru. Held, it listens until it is let go; tapped, until it is
+ * pressed again, as Kuru's box's mic does (the user, 2026-11-06 — it was held
+ * only). Stopped either way, the words go after whatever was typed, and the
+ * quote goes into the box with them exactly as Enter would put it, unsent.
+ * Escape drops what is being said and leaves the quote as it was. Words that
+ * do not come — refused, too short, nothing heard, a recogniser that would
+ * not run — leave the quote where it was, in the field, with why under it.
+ * While it listens and while it is heard, a press elsewhere and the selection
+ * going do not close the popover, since what is on its way is this
+ * popover's.
  *
  * **A board card selects only while it is open.** A card is `draggable`,
  * and a press on a draggable is the start of a drag, never of a selection
@@ -68,7 +71,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CardQuote, QuotePart } from "../../../shared/kuru";
 import { fileReference, placeIn, type FileRef } from "../filequote";
-import { dictate, dictateCancel, dictateStop, useDictation } from "../voice";
+import { micPress, micTitle, pressWasTap, sayLine } from "../micpress";
+import { dictate, dictateCancel, dictateStop, dictateToggled, useDictation } from "../voice";
 import { zoomStore } from "../zoom";
 import { ChipField, type ChipFieldHandle } from "./ChipField";
 import { MicIcon } from "./VoiceIcons";
@@ -243,6 +247,9 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
   onQuoteNow.current = onQuote;
   /** This popover's dictation is under way: from the mic's press until its words, or why there are none, are back. */
   const speaking = useRef(false);
+  /** That dictation was started by a tap, and listens until the mic is pressed again. */
+  const [toggled, setToggled] = useState(false);
+  const toggledNow = useRef(false);
   /** The field takes the keys as it opens — after the mark's press, and not after the mic's, whose press a phone's keyboard would only get in the way of. */
   const focusOnOpen = useRef(false);
   const dictation = useDictation();
@@ -262,6 +269,8 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
       speaking.current = false;
       dictateCancel();
     }
+    toggledNow.current = false;
+    setToggled(false);
     before.current = null;
     markRange(null);
     setAt(null);
@@ -313,6 +322,13 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
       if (!open.current || event.key !== "Escape") return;
       event.preventDefault();
       event.stopImmediatePropagation();
+      // Mid-comment, Escape drops what is being said and nothing else: the
+      // quote stays up as it was, to type into or say again. `voice.ts`'s
+      // own Escape may have dropped it already, whichever heard the key first.
+      if (speaking.current) {
+        dictateCancel();
+        return;
+      }
       const back = before.current;
       closeRef.current();
       if (back instanceof HTMLElement && back.isConnected && box.current?.contains(document.activeElement)) back.focus();
@@ -399,12 +415,16 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
   /**
    * The mic went down. Its release is listened for on the window rather than
    * on the button, because a finger slides off a button it is holding and
-   * the button may not be the same one by then; the words, when they are
-   * back, go after whatever was typed and the quote goes in with them. With
-   * no words the quote stays, in the field, with what went wrong under it.
+   * the button may not be the same one by then; a release within `TAP_MS`
+   * of the press was a tap, and the dictation listens on until the next
+   * press. The words, when they are back, go after whatever was typed and
+   * the quote goes in with them. With no words the quote stays, in the
+   * field, with what went wrong under it.
    */
-  const speak = () => {
-    if (speaking.current) return;
+  const speak = (pressed: number) => {
+    const press = micPress(speaking.current ? dictation.phase : "idle", toggledNow.current);
+    if (press === "stop") dictateStop();
+    if (press !== "start") return;
     if (!writingNow.current) {
       // From the mark, the selection is read as the mark's own press reads
       // it, and marked: a phone may let go of it while the button is held.
@@ -417,17 +437,27 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
     }
     setNote(null);
     speaking.current = true;
-    const stop = () => {
-      window.removeEventListener("pointerup", stop, true);
-      window.removeEventListener("pointercancel", stop, true);
-      dictateStop();
+    toggledNow.current = false;
+    setToggled(false);
+    const unlisten = () => {
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("pointercancel", up, true);
     };
-    window.addEventListener("pointerup", stop, true);
-    window.addEventListener("pointercancel", stop, true);
+    const up = (event: PointerEvent) => {
+      unlisten();
+      if (pressWasTap(pressed, event.timeStamp) && dictateToggled("drop")) {
+        toggledNow.current = true;
+        setToggled(true);
+      } else dictateStop();
+    };
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("pointercancel", up, true);
     void dictate().then((outcome) => {
+      unlisten();
+      toggledNow.current = false;
+      setToggled(false);
       if (!speaking.current) return;
       speaking.current = false;
-      stop();
       if (outcome.ok) {
         put([commentNow.current.trim(), outcome.text].filter(Boolean).join(" "));
         return;
@@ -442,7 +472,7 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
     });
   };
   const said = speaking.current ? dictation.phase : "idle";
-  const mic = <SayMark phase={said} level={dictation.level} onPress={speak} />;
+  const mic = <SayMark phase={said} toggled={toggled} level={dictation.level} onPress={speak} />;
 
   if (!at) return null;
   const go = () => put(comment);
@@ -474,7 +504,7 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
         {mic}
         {said !== "idle" && (
           <span className="quote-pop-say" role="status">
-            {said === "listening" ? "Listening…" : "Hearing…"}
+            {sayLine(said, toggled, null, false)}
           </span>
         )}
       </div>,
@@ -523,7 +553,7 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
       </button>
       {(said !== "idle" || note) && (
         <p className={`quote-pop-say quote-pop-say-line ${note && said === "idle" ? "quote-pop-say-failed" : ""}`} role="status">
-          {said === "listening" ? "Listening… let go when you are done." : said === "hearing" ? "Hearing…" : `${note} The quote is kept: type your comment, or hold the mic again.`}
+          {sayLine(said, toggled, note, true)}
         </p>
       )}
     </div>,
@@ -532,17 +562,17 @@ export function QuoteToKuru({ onQuote }: { onQuote: (reference: string, quote: C
 }
 
 /**
- * The mic, held to say the comment: Kuru's own mic glyph, and its colour
- * while it listens, with the level as a ring around it. Held only — a tap is
- * too short to hear, and says so — since the quote goes in when the words
- * come back, and a toggled recording would leave nothing to let go of.
+ * The mic that says the comment: Kuru's own mic glyph, and its colour while
+ * it listens — the drawer's red — with the level as a ring around it. Held
+ * or tapped; which it was, and what the next press does, is the caller's
+ * (`micPress`), so the press hands on its event's own stamp.
  *
  * A finger's press is kept from the page by a `touchstart` that is not
  * passive (React's own are): without it a long press scrolls the page,
  * brings up the callout, or moves a phone's selection — the words being
  * quoted — onto the button.
  */
-export function SayMark({ phase, level, onPress }: { phase: "idle" | "listening" | "hearing"; level: number; onPress: () => void }) {
+export function SayMark({ phase, toggled, level, onPress }: { phase: "idle" | "listening" | "hearing"; toggled: boolean; level: number; onPress: (pressed: number) => void }) {
   const button = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const el = button.current;
@@ -561,12 +591,12 @@ export function SayMark({ phase, level, onPress }: { phase: "idle" | "listening"
         if (event.button !== 0) return;
         // As the mark's: the selection and the field's keys stay where they are.
         event.preventDefault();
-        onPress();
+        onPress(event.timeStamp);
       }}
       onMouseDown={(event) => event.preventDefault()}
       onContextMenu={(event) => event.preventDefault()}
-      title="Hold to say your comment"
-      aria-label="Hold to say your comment"
+      title={micTitle(phase, toggled)}
+      aria-label={micTitle(phase, toggled)}
       aria-pressed={phase === "listening"}
     >
       <MicIcon />

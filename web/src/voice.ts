@@ -961,6 +961,7 @@ export function dictate(): Promise<Dictated> {
       },
     };
     mode = "hold";
+    escapeKeeps = true;
     void open("dictation");
   });
 }
@@ -968,19 +969,31 @@ export function dictate(): Promise<Dictated> {
 /**
  * The press that started a dictation was a tap: it listens until
  * `dictateStop`, through the window losing the focus, as a toggled clip to
- * Kuru does. Only Kuru's box asks for this; a quote's mic is held.
+ * Kuru does. Returns whether it took — a microphone that never opened has
+ * nothing to keep listening.
+ *
+ * `escape` is what Escape does to it. Kuru's box keeps the words, since
+ * nothing is sent by them and a minute of speech lost to a reflex is the worse
+ * mistake; a quote's or a mark's comment drops them (the user, 2026-11-06),
+ * because there the words would put the quote in, and Escape is that
+ * popover's way out of what it was about to do.
  */
-export function dictateToggled(): void {
-  if (dictating && dictation.phase === "listening") mode = "toggle";
+export function dictateToggled(escape: "keep" | "drop" = "keep"): boolean {
+  if (!dictating || dictation.phase !== "listening") return false;
+  mode = "toggle";
+  escapeKeeps = escape === "keep";
+  return true;
 }
+/** Whether Escape stops the toggled dictation under way and keeps its words (`dictateToggled`). */
+let escapeKeeps = true;
 
 /**
- * Escape, while a toggled dictation listens: it stops, and its words go in.
- * A held one is left to `voiceEscape`, which drops it, as a quote's always
- * has been — its Escape closes the popover the words were for.
+ * Escape, while a toggled dictation for Kuru's box listens: it stops, and its
+ * words go in. Any other — held, or a comment's — is left to `voiceEscape`,
+ * which drops it.
  */
 function dictationEscape(): boolean {
-  if (!dictating || dictation.phase !== "listening" || mode !== "toggle") return false;
+  if (!dictating || dictation.phase !== "listening" || mode !== "toggle" || !escapeKeeps) return false;
   dictateStop();
   return true;
 }

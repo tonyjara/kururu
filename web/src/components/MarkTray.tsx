@@ -19,7 +19,8 @@ import { markLabel } from "../../../shared/marks";
 import type { BrowserMarkSummary, BrowserMarking, DesktopBrowser } from "../desktop";
 import { insertInKuru } from "../kuru";
 import * as api from "../session";
-import { dictate, dictateCancel, dictateStop, useDictation } from "../voice";
+import { micPress, pressWasTap } from "../micpress";
+import { dictate, dictateCancel, dictateStop, dictateToggled, useDictation } from "../voice";
 import { ChipField, type ChipFieldHandle } from "./ChipField";
 import { Icon } from "./Icon";
 import { GoMark, SayMark } from "./Quote";
@@ -199,7 +200,7 @@ export function MarkTray({
 
 /**
  * The comment on one mark: what it is, its crop, and the field — the box's
- * own `ChipField` with the quote popover's hold-to-dictate mic. Enter keeps
+ * own `ChipField` with the quote popover's mic, held or tapped. Enter keeps
  * it; Esc drops a mark just made (it was a pick the user did not mean) and
  * only closes one opened from the tray.
  */
@@ -227,6 +228,9 @@ function MarkComment({
   const box = useRef<HTMLDivElement>(null);
   const field = useRef<ChipFieldHandle>(null);
   const speaking = useRef(false);
+  /** The dictation under way was started by a tap, and listens until the mic is pressed again. */
+  const [toggled, setToggled] = useState(false);
+  const toggledNow = useRef(false);
   const commentNow = useRef(comment);
   commentNow.current = comment;
   const dictation = useDictation();
@@ -291,21 +295,35 @@ function MarkComment({
     [],
   );
 
-  const speak = () => {
-    if (speaking.current) return;
+  // Held, it listens until let go; tapped, until the next press — as the
+  // quote popover's does (`Quote.tsx`), whose button this is.
+  const speak = (pressed: number) => {
+    const press = micPress(speaking.current ? dictation.phase : "idle", toggledNow.current);
+    if (press === "stop") dictateStop();
+    if (press !== "start") return;
     setSaid(null);
     speaking.current = true;
-    const stop = () => {
-      window.removeEventListener("pointerup", stop, true);
-      window.removeEventListener("pointercancel", stop, true);
-      dictateStop();
+    toggledNow.current = false;
+    setToggled(false);
+    const unlisten = () => {
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("pointercancel", up, true);
     };
-    window.addEventListener("pointerup", stop, true);
-    window.addEventListener("pointercancel", stop, true);
+    const up = (event: PointerEvent) => {
+      unlisten();
+      if (pressWasTap(pressed, event.timeStamp) && dictateToggled("drop")) {
+        toggledNow.current = true;
+        setToggled(true);
+      } else dictateStop();
+    };
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("pointercancel", up, true);
     void dictate().then((outcome) => {
+      unlisten();
+      toggledNow.current = false;
+      setToggled(false);
       if (!speaking.current) return;
       speaking.current = false;
-      stop();
       if (outcome.ok) {
         onKeep([commentNow.current.trim(), outcome.text].filter(Boolean).join(" "));
         return;
@@ -354,14 +372,14 @@ function MarkComment({
             if (!speaking.current) onKeep(comment);
           }}
         />
-        <SayMark phase={phase} level={dictation.level} onPress={speak} />
+        <SayMark phase={phase} toggled={toggled} level={dictation.level} onPress={speak} />
         <button type="button" className="quote-pop-go" onMouseDown={(event) => event.preventDefault()} onClick={() => !speaking.current && onKeep(comment)} title="Keep this comment (Enter)" aria-label="Keep the comment">
           <GoMark />
         </button>
       </div>
       {(phase !== "idle" || said) && (
         <p className="mark-pop-say" role="status">
-          {phase === "listening" ? "Listening… let go when you are done." : phase === "hearing" ? "Hearing…" : said}
+          {phase === "listening" ? (toggled ? "Listening… press the mic again when you are done." : "Listening… let go when you are done.") : phase === "hearing" ? "Hearing…" : said}
         </p>
       )}
       <p className="mark-pop-hint">{place.fresh ? "Esc drops this mark." : "Esc closes; the comment stays as it was."}</p>

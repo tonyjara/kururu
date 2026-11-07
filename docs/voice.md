@@ -428,8 +428,14 @@ window was already in front with the drawer already open, closes it
 ## Saying a quote's comment
 
 A quote's popover (`Quote.tsx`) has a mic beside the mark and beside the
-field. Held, it is this same microphone — `dictate` in `voice.ts`, through
-`open` and `close` with a purpose of `dictation` — and on release the clip goes
+field. It is this same microphone — `dictate` in `voice.ts`, through `open`
+and `close` with a purpose of `dictation`. Held, it listens until it is let
+go; tapped, until it is pressed again (the user, 2026-11-06 — it was held
+only), told apart as the drawer's is (`web/src/micpress.ts`). The popover
+stays where it is while it listens, the mic red as the drawer's; Escape drops
+what is being said and leaves the quote up as it was (`dictateToggled("drop")`,
+where the drawer's keeps its words). A browser mark's comment (`MarkTray.tsx`)
+is the same button and works the same way. Stopped, the clip goes
 to `POST /api/voice/dictate` instead of the outbox: `Voice.transcribe`, every
 language the user speaks, with the words handed back on the request and the
 clip deleted once it is answered. The words go after anything typed and the
