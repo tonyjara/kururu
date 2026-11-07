@@ -454,9 +454,17 @@ ended by the window losing the focus, as a held one is. The words go in at the
 cursor (`putIn`, as a card's reference does), after whatever is already in the
 box, and the user presses send. Nothing is written over the box while it
 listens or is heard — the mic is red, then waits in the accent, and that is
-all; a line there saying "Listening…" and how to stop was taken out on
-2026-11-06 at the user's word. Why nothing came, when nothing did, is the
-box's placeholder and the mic's tooltip until the next press or keystroke.
+all. Why nothing came, when nothing did, is the box's placeholder and the
+mic's tooltip until the next press or keystroke.
+
+**Nothing is written in the strip over the box** (the user, 2026-11-06): the
+dictation's "Listening…" line, the pencil's "Drawing on the screen…", a
+dropped file's "Keeping a file…" and its refusal, and "To the Kuru on …" all
+went. What still needs saying is `boxSays` in `Composer` — the box's
+placeholder and its tooltip, a failure before anything under way — and the
+pencil's own tooltip while the pen is down. What stays over the box are the
+live line with Stop and the reply being written with its ✕: controls, not
+notes.
 
 A tap is told from a hold by the pointer events' own `timeStamp`s, not by the
 clock when each is handled: opening the microphone can hold the page for a

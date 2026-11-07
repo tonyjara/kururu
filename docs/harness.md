@@ -313,8 +313,9 @@ in a draft or on a card for a week, and the folder is yours to empty.
 
 `shared/drops.ts` is the judging and the name, `server/src/drops.ts` the
 write, `handover` in `web/src/drop.ts` the choice of path or upload, and
-`Composer` in `KuruDrawer.tsx` the drop, the paste and the line over the box
-while a copy is on its way. A message addressed to another node's Kuru
+`Composer` in `KuruDrawer.tsx` the drop, the paste, and the placeholder that
+says a copy is on its way or why one was refused — never a line over the box,
+which the user wants nothing written in (2026-11-06). A message addressed to another node's Kuru
 (`@omarchy …`) carries the path of this computer's file, which that Kuru
 cannot open.
 

@@ -25,7 +25,7 @@ const OFF: InkState = { on: false, id: null, voice: false, pen: false, marks: 0,
 
 export interface InkUi {
   state: InkState;
-  /** Why the last pen with no voice put nothing in the box, said over it until the next press. */
+  /** Why the last pen with no voice put nothing in the box, the box's placeholder until the next press or keystroke. */
   note: string | null;
   /** A session with no voice is being posted, between Done and its lines landing in the box. */
   keeping: boolean;

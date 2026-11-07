@@ -5693,11 +5693,6 @@ html.pill-page #root {
 .kuru-pins-btn .kuru-pins-count {
   font-variant-numeric: tabular-nums;
 }
-.kuru-to {
-  margin: 0 0 4px;
-  font-size: var(--fs-sm);
-  color: var(--accent);
-}
 .kuru-close {
   margin-left: 0;
   width: 28px;
@@ -6495,17 +6490,6 @@ button.kuru-quote:hover {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 var(--border) color-mix(in srgb, var(--accent) 60%, transparent);
 }
-/* A dropped or pasted file on its way to the server, and why one was not taken.
-   A tap dismisses the refusal; the next keystroke does too. */
-.kuru-handing {
-  margin: 0 0 4px;
-  font-size: var(--fs-sm);
-  color: var(--dimmer);
-}
-.kuru-handing-refused {
-  color: var(--danger);
-  cursor: pointer;
-}
 /* A `ChipField`: a contenteditable that draws chips among the words, wraps
    them, and grows with them up to its max-height, then scrolls inside. Kuru's
    box and the quote's comment are both one, so they grow alike. */
@@ -6689,10 +6673,6 @@ button.kc {
 .kuru-mic-hearing {
   color: var(--accent);
   animation: st-key-wait 1.2s ease-in-out infinite;
-}
-/* The pencil's line over the box while the pen is down or its marks are kept. */
-.kuru-dictating {
-  color: var(--danger);
 }
 /* A thumb's size on a phone, still inside the box. */
 :root[data-narrow] .kuru-mic {

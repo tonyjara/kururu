@@ -2329,7 +2329,7 @@ function Composer({
    * What a drop or a paste handed over, into the draft in the order given:
    * the paths at once, and a file to be sent once its copy is kept, at the
    * cursor as it is by then — the hands went on typing meanwhile. A refusal
-   * is said over the box, the first one with a count of the rest. A copy
+   * is the box's placeholder, the first one with a count of the rest. A copy
    * kept after the drawer moved to another profile goes on the end of the
    * draft it was dropped into.
    */
@@ -2391,13 +2391,9 @@ function Composer({
   const dictatingFor = useRef<string | null>(null);
   /**
    * Why the last dictation put nothing in — a microphone that would not open,
-   * words that were not heard — until the next press or keystroke. It is the
-   * box's placeholder and the mic's tooltip, never a line over the box: the
-   * user took the "Listening…" line that was there out on 2026-11-06, since
-   * the red mic already says it is listening, and wants nothing written in
-   * that strip. A placeholder is the lightest place that is still seen where
-   * the eye already is; a draft with words in it hides it, and the tooltip
-   * still has it.
+   * words that were not heard — until the next press or keystroke, said in
+   * the box's placeholder (`boxSays`) and the mic's tooltip. While it
+   * listens, the red mic says so alone.
    */
   const [unheard, setUnheard] = useState<string | null>(null);
   const putInNow = useRef(putIn);
@@ -2443,8 +2439,8 @@ function Composer({
    * or the pill's Done is — the pill shows itself, draw-only, at its own
    * spot for this — `ink.ts` puts them in through `insertInKuru`, the road a
    * browser tab's marks take, and the user writes about them and sends. With
-   * the pen down the overlay is over this window too, so the line says how
-   * to get back to it.
+   * the pen down the overlay is over this window too, so the box's
+   * placeholder and the pencil's tooltip say how to get back to it.
    */
   const ink = useInk();
   const penOn = ink.state.on && !ink.state.voice;
@@ -2454,7 +2450,27 @@ function Composer({
       : "The pen is up. Press the pencil, or Done on the pill, to put the marks here."
     : ink.keeping
       ? "Keeping the marks…"
-      : ink.note;
+      : null;
+  /**
+   * What the composer has to say, which is never a line over the box: the
+   * user (2026-11-06) wants no text in the strip between the conversation
+   * and the box, so the dictation's, the pencil's, a dropped file's and the
+   * address's lines all went. It is the box's placeholder, seen where the
+   * eye already is while the box is empty, and the box's tooltip, which
+   * still has it once there are words in the way. A failure comes before
+   * anything under way, and each is cleared as it was — by the next press
+   * or keystroke. The reply being written stays over the box: it is the
+   * reply's chip with its ✕, not a status line.
+   */
+  const boxSays =
+    (unheard ? `${unheard} Hold or tap the mic to try again.` : null) ??
+    handing.refused ??
+    ink.note ??
+    (handing.waiting > 0 ? `Keeping ${handing.waiting === 1 ? "a file" : `${handing.waiting} files`} for Kuru…` : null) ??
+    penSaid;
+  const peerSays = toPeer
+    ? `To the Kuru on ${toPeer.node.name}${toPeer.state !== "up" ? " — away; it goes when it is back" : !toPeer.talks ? " — its kururu is too old to take it" : ""}`
+    : null;
   // The drawer closed while it listened: what was said is still heard, and
   // kept in the draft, rather than a microphone left open with nothing to stop it.
   useEffect(
@@ -2489,26 +2505,6 @@ function Composer({
         take(handoverFrom(event.dataTransfer, isLoopback(window.location.hostname)));
       }}
     >
-      {(handing.waiting > 0 || handing.refused) && (
-        <p
-          className={`kuru-handing ${handing.waiting > 0 ? "" : "kuru-handing-refused"}`}
-          role="status"
-          onClick={() => setHanding((was) => ({ ...was, refused: null }))}
-        >
-          {handing.waiting > 0 ? `Keeping ${handing.waiting === 1 ? "a file" : `${handing.waiting} files`} for Kuru…` : handing.refused}
-        </p>
-      )}
-      {penSaid && (
-        <p className={`kuru-handing ${penOn || ink.keeping ? "kuru-dictating" : "kuru-handing-refused"}`} role="status" onClick={clearInkNote}>
-          {penSaid}
-        </p>
-      )}
-      {toPeer && (
-        <p className="kuru-to" role="status">
-          To the Kuru on {toPeer.node.name}
-          {toPeer.state !== "up" ? " — away; it goes when it is back" : !toPeer.talks ? " — its kururu is too old to take it" : ""}
-        </p>
-      )}
       {quoting && (
         <div className={`kuru-quoting ${quoteGoes ? "" : "kuru-quoting-off"}`} role="status">
           <ReplyIcon />
@@ -2552,7 +2548,7 @@ function Composer({
           })}
         </ul>
       )}
-      <div className={`kuru-box ${over ? "kuru-box-drop" : ""}`}>
+      <div className={`kuru-box ${over ? "kuru-box-drop" : ""}`} title={boxSays ?? peerSays ?? undefined}>
         <div className="kuru-write">
           <ChipField
             ref={field}
@@ -2560,7 +2556,7 @@ function Composer({
             value={text}
             files={files}
             bold={address ? { from: address.from, to: address.to } : null}
-            placeholder={unheard ? `${unheard} Hold or tap the mic to try again.` : peers.length ? `Say something to Kuru, or @${peers[0]!.node.name} …` : "Say something to Kuru"}
+            placeholder={boxSays ?? (peers.length ? `Say something to Kuru, or @${peers[0]!.node.name} …` : "Say something to Kuru")}
             ariaLabel="A message for Kuru"
             ariaExpanded={open}
             ariaControls={open ? `kuru-suggest-${profileId}` : undefined}
@@ -2571,6 +2567,7 @@ function Composer({
               setChosen(0);
               if (handing.refused) setHanding((was) => ({ ...was, refused: null }));
               if (unheard) setUnheard(null);
+              clearInkNote();
             }}
             onPaste={(event) => {
               if (event.clipboardData.files.length === 0) return;
@@ -2645,7 +2642,7 @@ function Composer({
             disabled={ink.state.on && ink.state.voice}
             title={
               penOn
-                ? "Put the marks in the box"
+                ? `${penSaid} Press to put the marks in the box`
                 : ink.state.on
                   ? "The pen is with a recording; send it first"
                   : "Draw on the screen, without talking — the marks come into this box for you to write about"
