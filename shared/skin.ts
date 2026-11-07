@@ -151,7 +151,8 @@ export type IconName =
   | "terminal"
   | "more"
   | "doc"
-  | "code";
+  | "code"
+  | "phone";
 
 export type IconSet = Record<IconName, string>;
 
@@ -211,6 +212,8 @@ export const ICON_NAMES: readonly IconName[] = [
   "doc",
   /** A link to code an agent made, which opens in nvim. */
   "code",
+  /** A dev server that is Metro: an app's, for a phone, rather than a site's. */
+  "phone",
 ];
 
 /**
@@ -776,6 +779,8 @@ export const BASE_ICONS: IconSet = {
   doc: "¶",
   /** Code: a pair of angle brackets is the one drawing of source every face has. */
   code: "‹›",
+  /** An app's dev server. The one phone-shaped box every monospace face has. */
+  phone: "▯",
 };
 
 /**

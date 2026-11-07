@@ -31,7 +31,7 @@ import { git } from "./gitcmd";
 const DEV_COMMANDS = [
   "next dev", "vite", "astro dev", "nuxt dev", "remix dev", "ng serve",
   "webpack serve", "webpack-dev-server", "parcel", "gatsby develop",
-  "react-scripts start", "expo start", "storybook dev", "turbo dev", "nodemon",
+  "react-scripts start", "expo start", "react-native start", "storybook dev", "turbo dev", "nodemon",
   "tsx watch", "wrangler dev", "netlify dev", "vercel dev", "serve",
   "http-server", "live-server", "rails server", "swift run",
   "manage.py runserver", "flask run", "fastapi dev", "uvicorn",
@@ -44,8 +44,12 @@ const DEV_SCRIPTS = ["dev", "start", "serve", "watch"];
 /** Heads that run a *script*, where the script name decides. */
 const PACKAGE_MANAGERS = new Set(["npm", "pnpm", "yarn", "bun", "deno", "make", "just", "task"]);
 
-/** Filler between a package manager and the script it was asked for. */
-const PM_SUBCOMMANDS = new Set(["run", "run-script", "task", "exec"]);
+/**
+ * Filler between a package manager and the script it was asked for. `exec`,
+ * `x` and `dlx` run a program rather than a script, and what follows them is
+ * matched as one when it is not a dev script by name (see `matchDevCommand`).
+ */
+const PM_SUBCOMMANDS = new Set(["run", "run-script", "task", "exec", "x", "dlx"]);
 
 /**
  * Package-manager flags that eat the word *after* them.
@@ -64,11 +68,11 @@ const PM_VALUE_FLAGS = new Set([
 ]);
 
 /**
- * The script a package manager was asked to run, from the tokens after its
- * name — past the subcommand, past the flags, and past whatever a flag was
- * carrying. Null when there is nothing left, which is `npm` on its own.
+ * Where the script a package manager was asked to run is, in the tokens after
+ * its name — past the subcommand, past the flags, and past whatever a flag was
+ * carrying. -1 when there is nothing left, which is `npm` on its own.
  */
-function scriptAfter(tokens: string[]): string | null {
+function scriptAt(tokens: string[]): number {
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!;
     if (PM_VALUE_FLAGS.has(token)) {
@@ -76,9 +80,9 @@ function scriptAfter(tokens: string[]): string | null {
       continue;
     }
     if (isPreamble(token) || PM_SUBCOMMANDS.has(token)) continue;
-    return token;
+    return i;
   }
-  return null;
+  return -1;
 }
 
 /** Interpreters worth looking past: the server is the script they were given. */
@@ -96,9 +100,26 @@ function basename(path: string): string {
   return cut === -1 ? path : path.slice(cut + 1);
 }
 
-/** Executable name: no directory, no script extension, no shell quoting. */
+/** File names a package gives its own entry point, which say nothing about which package. */
+const ENTRY_NAMES = new Set(["cli", "bin", "index", "main"]);
+/** Folders a package keeps that entry point in, between it and the package's own folder. */
+const ENTRY_DIRS = new Set(["bin", "build", "dist", "lib"]);
+
+/**
+ * Executable name: no directory, no script extension, no shell quoting — and
+ * for a package's own entry point, the package. Expo's server is `node
+ * …/node_modules/.bin/../expo/bin/cli start`, and React Native's `node
+ * …/react-native/cli.js start`: the file is `cli` in both, and the one word
+ * that names the program is the folder it was installed in. Reading the file
+ * name alone is how every Metro on the machine went unlisted.
+ */
 function programName(token: string): string {
-  return basename(token).replace(/^['"]+/, "").replace(/\.(js|mjs|cjs|ts|py|rb|sh)$/, "").toLowerCase();
+  const name = basename(token).replace(/^['"]+/, "").replace(/\.(js|mjs|cjs|ts|py|rb|sh)$/, "").toLowerCase();
+  if (!ENTRY_NAMES.has(name)) return name;
+  const dirs = token.replace(/^['"]+/, "").split("/").slice(0, -1);
+  while (dirs.length > 0 && ENTRY_DIRS.has(dirs[dirs.length - 1]!)) dirs.pop();
+  const pkg = dirs[dirs.length - 1];
+  return pkg && pkg !== "." && pkg !== ".." ? pkg.toLowerCase() : name;
 }
 
 /** A `-flag` or a `VAR=value` prefix — neither one names the program. */
@@ -123,10 +144,18 @@ export function matchDevCommand(args: string): string | null {
 
     // `npm run dev`, `bun dev`, `pnpm dev:web` — the script name decides.
     if (PACKAGE_MANAGERS.has(name)) {
-      const script = scriptAfter(tokens.slice(i + 1));
-      if (!script) return null;
+      const rest = tokens.slice(i + 1);
+      const at = scriptAt(rest);
+      if (at === -1) return null;
+      const script = rest[at]!;
       const head = script.split(":")[0]!;
-      return DEV_SCRIPTS.includes(head) ? `${name} ${script}` : null;
+      if (DEV_SCRIPTS.includes(head)) return `${name} ${script}`;
+      /* Not a script by that name, and perhaps not a script at all: `npm exec
+         expo start`, `bun x vite` and `yarn expo start` hand the package
+         manager a program, which is matched as if it had been typed alone. A
+         word with a dot or a slash in it is a file the package manager runs
+         (`bun run serve.ts`), whose name is nobody's program. */
+      return /[./]/.test(script) ? null : matchDevCommand(rest.slice(at).join(" "));
     }
 
     // Otherwise the program's own name, optionally plus the word after it.
@@ -139,6 +168,16 @@ export function matchDevCommand(args: string): string | null {
     return null;
   }
   return null;
+}
+
+/**
+ * Whether a dev server is Metro, React Native's bundler, which an app on a
+ * phone or a simulator loads its JavaScript from. Its row says so, because a
+ * workspace with a site and an app has two servers under one name, and the
+ * app's is the one a dev build's launcher is asking for.
+ */
+export function isMetro(program: string): boolean {
+  return program === "expo start" || program === "react-native start";
 }
 
 /** `lsof -F` field output: `p<pid>` starts a record, `n<addr:port>` names a socket. */
@@ -398,7 +437,9 @@ export async function scanDevServers(self: Self, procs?: ReadonlyMap<number, Pro
     const match = resolveDevCommand(pid, table);
     if (!match) continue;
     for (const port of ports) {
-      found.push({ port, pid, command: match.command.slice(0, 200), program: match.program });
+      const server: DevServer = { port, pid, command: match.command.slice(0, 200), program: match.program };
+      if (isMetro(match.program)) server.metro = true;
+      found.push(server);
     }
   }
 

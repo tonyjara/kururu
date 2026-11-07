@@ -68,7 +68,7 @@ import type { Action } from "../keys";
 import { agentLabel, agentSummary, remoteHost, remoteNote, shortenPath } from "../labels";
 import { useLongPress } from "../longpress";
 import { asAgent, nodeState } from "../nodes";
-import { previewLabel, previewUrl, type NamedRoot } from "../preview";
+import { devServerUrl, metroAddress, previewLabel, type NamedRoot } from "../preview";
 import * as api from "../session";
 import { desktop } from "../desktop";
 import { useKururu } from "../session";
@@ -1957,7 +1957,10 @@ function DevServers({ workspaces }: { workspaces: readonly Workspace[] }) {
       {open && (
         <ul className="dev-list">
           {devServers.map((dev) => {
-            const url = previewUrl(window.location, dev);
+            const url = devServerUrl(window.location, dev);
+            /* Metro's row says it is the app's server, with a phone, and its
+               hover gives the address a dev build's launcher takes. */
+            const metro = dev.metro ? `Metro — in the dev build, enter ${metroAddress(window.location, dev)}` : null;
             const armed = asking === dev.port;
             const busy = stopping.includes(dev.port);
             return (
@@ -1968,10 +1971,11 @@ function DevServers({ workspaces }: { workspaces: readonly Workspace[] }) {
                     href={url}
                     target="_blank"
                     rel="noreferrer noopener"
-                    title={[label(dev), dev.command, dev.cwd, `→ ${url}`]
+                    title={[label(dev), metro, dev.command, dev.cwd, `→ ${url}`]
                       .filter(Boolean)
                       .join("\n")}
                   >
+                    {dev.metro && <Icon name="phone" className="dev-metro" />}
                     <span className="dev-name">{label(dev)}</span>
                     <span className="dev-port">:{dev.port}</span>
                     <Icon name="external" />
@@ -1982,7 +1986,8 @@ function DevServers({ workspaces }: { workspaces: readonly Workspace[] }) {
                      work. Drawn as a row anyway, because "it is running and not
                      reachable from here yet" is worth more than a gap, and the
                      next scan is a second away. */
-                  <span className="dev-row dev-row-off" title={`${dev.command}\nNo preview yet`}>
+                  <span className="dev-row dev-row-off" title={[metro, dev.command, "No preview yet"].filter(Boolean).join("\n")}>
+                    {dev.metro && <Icon name="phone" className="dev-metro" />}
                     <span className="dev-name">{label(dev)}</span>
                     <span className="dev-port">:{dev.port}</span>
                   </span>

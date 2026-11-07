@@ -228,13 +228,14 @@
   --icon-more: "⋯";
   --icon-doc: "¶";
   --icon-code: "‹›";
+  --icon-phone: "▯";
 
   /* The icon strip a skin may bring instead of glyphs — every icon as one
      picture of `--icon-n` cells. `none` is the drawing. `--icon-n` is a
      constant the stylesheet needs for the arithmetic and is not a skin's to
      move: it is `ICON_NAMES.length`, and the test holds the two together. */
   --icon-sheet: none;
-  --icon-n: 29;
+  --icon-n: 30;
 
   /* ----------------------------------------------------------------------
      The parts: what a skin *paints*, three properties per region.
@@ -372,6 +373,7 @@
 .icon-more { --icon-svg: var(--icon-more-svg); --icon-glyph: var(--icon-more); --icon-i: 26; }
 .icon-doc { --icon-svg: var(--icon-doc-svg); --icon-glyph: var(--icon-doc); --icon-i: 27; }
 .icon-code { --icon-svg: var(--icon-code-svg); --icon-glyph: var(--icon-code); --icon-i: 28; }
+.icon-phone { --icon-svg: var(--icon-phone-svg); --icon-glyph: var(--icon-phone); --icon-i: 29; }
 /* An icon strip, when a skin brought one: every icon is one cell of a single
    picture, `--icon-n` cells across, and `--icon-i` on each class says which.
    The strip is scaled so one cell is exactly the icon's box — which is what
@@ -418,7 +420,8 @@
 :root[data-glyphs~="terminal"] .icon-terminal::before,
 :root[data-glyphs~="more"] .icon-more::before,
 :root[data-glyphs~="doc"] .icon-doc::before,
-:root[data-glyphs~="code"] .icon-code::before {
+:root[data-glyphs~="code"] .icon-code::before,
+:root[data-glyphs~="phone"] .icon-phone::before {
   content: var(--icon-glyph);
   width: auto;
   height: auto;
@@ -2180,6 +2183,13 @@ a.machine-name:hover {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Metro, an app's server rather than a site's: a phone before the name, dimmer
+   than it, so a workspace's two rows tell apart at a glance. */
+.dev-metro {
+  flex: none;
+  color: var(--dimmer);
 }
 
 /* The dev server's own port, not the proxy's. It is the number the person

@@ -202,6 +202,11 @@ export interface DevServer {
    */
   repo?: string;
   /**
+   * Metro, React Native's bundler (`expo start`, `react-native start`): the
+   * server an app's dev build loads from, rather than a site. Absent otherwise.
+   */
+  metro?: boolean;
+  /**
    * Port the kururu proxy is exposing this on, once one has been opened. The
    * desktop window does not need it (localhost is the same machine); the phone
    * cannot reach the dev server any other way.

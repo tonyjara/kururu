@@ -6,6 +6,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   isKururu,
+  isMetro,
   matchDevCommand,
   parseListeners,
   parseProcTable,
@@ -15,6 +16,31 @@ import {
 } from "../src/devservers";
 
 describe("matchDevCommand", () => {
+  /** Metro, as Expo and React Native start it (the user, 2026-11-07: none of these were listed). */
+  it("finds Metro behind a package's own cli entry point", () => {
+    expect(matchDevCommand("node /p/apps/native/node_modules/.bin/../expo/bin/cli start --dev-client --port 8297")).toBe("expo start");
+    expect(matchDevCommand("node /p/node_modules/react-native/cli.js start --port 8081")).toBe("react-native start");
+    expect(matchDevCommand("npx expo start")).toBe("expo start");
+    expect(matchDevCommand("npx react-native start")).toBe("react-native start");
+  });
+
+  it("a package manager handed a program rather than a script", () => {
+    expect(matchDevCommand("npm exec expo start --dev-client --port 8297 --max-workers 2 --clear")).toBe("expo start");
+    expect(matchDevCommand("yarn expo start")).toBe("expo start");
+    expect(matchDevCommand("bun x vite")).toBe("vite");
+    expect(matchDevCommand("pnpm dlx vite")).toBe("vite");
+    expect(matchDevCommand("npm exec tsc")).toBeNull();
+    expect(matchDevCommand("node dist/index.js")).toBeNull();
+    expect(matchDevCommand("node /x/node_modules/expo/bin/cli export")).toBeNull();
+    expect(matchDevCommand("bun run serve.ts")).toBeNull();
+  });
+
+  it("Metro is told from the rest", () => {
+    expect(isMetro("expo start")).toBe(true);
+    expect(isMetro("react-native start")).toBe(true);
+    expect(isMetro("next dev")).toBe(false);
+  });
+
   it("matches a dev server by its own name", () => {
     expect(matchDevCommand("vite")).toBe("vite");
     expect(matchDevCommand("next dev")).toBe("next dev");

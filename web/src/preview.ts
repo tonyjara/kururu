@@ -69,6 +69,30 @@ export function previewUrl(origin: Origin, dev: DevServer): string | null {
   return `${origin.protocol}//${origin.hostname}:${dev.proxyPort}/`;
 }
 
+/**
+ * Where a dev server's row in the sidebar goes: the server's page, or for
+ * Metro its `/status`. Metro's own root is the app's web build, which a native
+ * app's project need not have and which takes a bundle to say anything at all;
+ * `/status` answers `packager-status:running` at once, which is the question
+ * the row is asked — is the app's server up, and on which port. The address a
+ * dev build's launcher wants (this host and that port) is in the row's hover.
+ * Only the sidebar's row: a card's preview is `previewUrl` as it was.
+ */
+export function devServerUrl(origin: Origin, dev: DevServer): string | null {
+  const url = previewUrl(origin, dev);
+  return url && dev.metro ? `${url}status` : url;
+}
+
+/**
+ * The address to type into a dev build's launcher for a Metro server: this
+ * host, Metro's own port. Not through the proxy, which says `localhost` to
+ * Metro and gets bundle addresses back that only work on the Mac; Metro
+ * listens on every interface, so the host this page came by reaches it.
+ */
+export function metroAddress(origin: Origin, dev: DevServer): string {
+  return `http://${origin.hostname}:${dev.port}`;
+}
+
 /** A workspace as a dev server is named after it: its name and its project folder. */
 export interface NamedRoot {
   name: string;
@@ -83,6 +107,35 @@ function within(path: string, root: string): boolean {
   const r = trimmed(root);
   const p = trimmed(path);
   return p === r || p.startsWith(r === "/" ? "/" : `${r}/`);
+}
+
+/** A name or a folder reduced to what both spell alike: "Tile Bandit" and `tile-bandit`. */
+function spelled(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+/** Whether a workspace is named after its own project folder: Pasapy on `…/pasapy`. */
+function namedFor(place: NamedRoot): boolean {
+  const folder = trimmed(place.root).split("/").pop() ?? "";
+  return folder !== "" && spelled(folder) === spelled(place.name);
+}
+
+/**
+ * Whether `place` is the better name than `best` for a server both hold: the
+ * deeper root, and between two on the same root, the one named after it.
+ *
+ * Two workspaces on one root is ordinary, because a workspace's root is
+ * wherever its focused pane is, and a pane goes wherever a document is opened
+ * from. Tile Bandit with Pasapy's `docs/simulate-event.md` open in it is on
+ * `~/…/pasapy` exactly as Pasapy is, and the first in the list used to win,
+ * so a Pasapy server read "Tile Bandit" (the user, 2026-11-07). The name is
+ * the one thing that says which of them the folder belongs to; with neither
+ * named for it, the first still wins, so the label holds still.
+ */
+function outranks(place: NamedRoot, best: NamedRoot): boolean {
+  const depth = trimmed(place.root).length - trimmed(best.root).length;
+  if (depth !== 0) return depth > 0;
+  return namedFor(place) && !namedFor(best);
 }
 
 /**
@@ -106,7 +159,7 @@ export function previewLabel(dev: DevServer, workspaces: readonly NamedRoot[] = 
   for (const place of workspaces) {
     if (!place.root) continue;
     const holds = (dev.cwd && within(dev.cwd, place.root)) || (dev.repo && within(dev.repo, place.root));
-    if (holds && (!best || trimmed(place.root).length > trimmed(best.root).length)) best = place;
+    if (holds && (!best || outranks(place, best))) best = place;
   }
   if (best) return best.name;
   const folder = dev.repo ?? dev.cwd;
